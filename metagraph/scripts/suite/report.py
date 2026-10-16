@@ -828,9 +828,13 @@ def agreement_depth(comp, rows, is_property, manifest=None):
     (checks.is_property; the generic ones, e.g. budget_respected which the MCP never sees, do not count) on each MCP
     repeat against the reference arm's same repeat (else its first; an item compare took from the other direct arm,
     reference_fallbacks, from that arm's: compare.reference_checks): {scenario: {class (DEPTH_CLASSES), not_compared
-    (the property checks no repeat compared), reference_fails_hidden (property checks the reference fails or finds
-    where the MCP does not expose them)}}. An MCP item a property-level mark of |manifest|'s scenario sets aside
-    (suite_common.checks_marked_aside) is neither compared nor skipped: the mark states it, and the report lists it."""
+    (the property checks no repeat compared), partly_compared ({check: {compared: [repeats], skipped: [repeats]}}:
+    the property checks some repeat compared and another skipped; the readability review's verification of
+    2026-10-16: a check one repeat left undecided while the other repeat decided it on both arms is compared on
+    that repeat, so it is not among `not_compared`), reference_fails_hidden (property checks the reference fails or
+    finds where the MCP does not expose them)}}. The class reads every repeat (a skip on any repeat makes the pair
+    partial). An MCP item a property-level mark of |manifest|'s scenario sets aside (suite_common.checks_marked_aside)
+    is neither compared nor skipped: the mark states it, and the report lists it."""
     scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
     by = {}
     for r in rows:
@@ -849,6 +853,7 @@ def agreement_depth(comp, rows, is_property, manifest=None):
         alt = ((by.get(sid) or {}).get(ma.get("reference_alternative")) or {}) if ma.get("reference_fallbacks") else {}
         alt0 = alt[min(alt)] if alt else None
         has_prop, compared, skipped, hidden = False, set(), set(), set()
+        by_rep = {}  # check -> {"compared": {repeats}, "skipped": {repeats}}
         marks = sc.mcp_check_marks(scen.get(sid))
         for rep in sorted(mcp, key=lambda k: k if isinstance(k, int) else -1):
             mine = mcp[rep].get("checks") or []
@@ -867,11 +872,13 @@ def agreement_depth(comp, rows, is_property, manifest=None):
                 for k, (oa, ob) in enumerate(zip(ca[name], cb[name])):
                     if oa in JUDGED and ob in JUDGED:
                         compared.add(name)
+                        by_rep.setdefault(name, {"compared": set(), "skipped": set()})["compared"].add(rep)
                     elif (name, k) in aside:
                         if ob in ("fail", "finding"):
                             hidden.add(name)   # the reference's failure stays named: a mark hides no result
                     else:
                         skipped.add(name)
+                        by_rep.setdefault(name, {"compared": set(), "skipped": set()})["skipped"].add(rep)
                         if oa == "not_exposed" and ob in ("fail", "finding"):
                             hidden.add(name)
         agg_ok = ma.get("mcp_outcome") == "pass" and ma.get("reference_outcome") == "pass"
@@ -887,7 +894,12 @@ def agreement_depth(comp, rows, is_property, manifest=None):
             cls = "on_failure"
         else:
             cls = "full"
-        out[sid] = {"class": cls, "not_compared": sorted(skipped), "reference_fails_hidden": sorted(hidden)}
+        def _reps(items):
+            return sorted(items, key=lambda k: (not isinstance(k, int), str(k)))
+        partly = dict((name, {"compared": _reps(by_rep[name]["compared"]), "skipped": _reps(by_rep[name]["skipped"])})
+                      for name in sorted(skipped & compared))
+        out[sid] = {"class": cls, "not_compared": sorted(skipped - compared), "partly_compared": partly,
+                    "reference_fails_hidden": sorted(hidden)}
     return out
 
 
@@ -1021,11 +1033,14 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
             if key == "full":
                 shown = "-"
             else:
-                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(depth[x]["not_compared"])))
-                                            if depth[x]["not_compared"] and key.startswith("partial") else "")
+                shown = ", ".join("%s%s" % (md(x), (" (%s)" % md(", ".join(
+                    list(depth[x]["not_compared"]) + ["%s on r%s" % (n, ", r".join(str(r) for r in v["skipped"]))
+                                                      for n, v in (depth[x].get("partly_compared") or {}).items()])))
+                                            if (depth[x]["not_compared"] or depth[x].get("partly_compared"))
+                                            and key.startswith("partial") else "")
                                   for x in sids[:60]) + (" ..." if len(sids) > 60 else "")
             rows.append([md(label), str(len(sids)), shown or "-"])
-        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared)"], rows,
+        out.append(table(["agree, by depth", "n", "scenarios (property checks not compared; on some repeat only where repeats are named)"], rows,
                          align=["l", "r", "l"]))
         hidden = [(sid, depth[sid]["reference_fails_hidden"]) for sid in comp["order"]
                   if (depth.get(sid) or {}).get("reference_fails_hidden")]

@@ -506,8 +506,9 @@ TIMING_LEGEND = {
                   "first host-warm execution, else its only one), never cold / warm; n counts the group's tests; "
                   "[ ] the median server time",
     "refusals": "no times in the rows: the maximum wall per access path is in the summary line",
-    "summary": "a / b in a summary line is p50 / p90: the median and the 90th percentile over every execution "
-               "with a wall time, whatever its outcome",
+    "summary": "a / b in a summary line is p50 / p90: the median and the 90th percentile over the host-cold or "
+               "host-warm executions with a wall time, whatever their outcome (an execution not reached, aged or warm "
+               "after an interrupted one is left out)",
 }
 # the reader-facing key beside a unit's heading (READ-105): what the two numbers of a time cell mean in this layout
 LAYOUT_KEY = {

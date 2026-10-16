@@ -463,6 +463,12 @@ def scenario_facts(ctx, sid):
     for arm in ARMS:
         f[ARM_KEY[arm]] = arm_facts(ctx, sid, arm)
     f["phrase"] = "; ".join("%s %s" % (arm, f[ARM_KEY[arm]]["phrase"]) for arm in ARMS if f[ARM_KEY[arm]]["present"])
+    # whether the deploy gate's policy selects the scenario, and on which access paths (READ-318: a chapter note
+    # states the gate relation from the policy, never as a condition left to the reader)
+    pol = ctx.run.policy if isinstance(ctx.run.policy, dict) else {}
+    sel = pol.get("selection") if isinstance(pol.get("selection"), dict) else {}
+    f["gate_selected"] = sid in set(str(x) for x in (sel.get("scenarios") or []))
+    f["gate_arms"] = _join(str(a) for a in (pol.get("arms") or [])) or "no access path"
     return f
 
 
@@ -1226,19 +1232,21 @@ def chapter_facts(ctx, ch):
     v["claims_unsupported"] = "; ".join(unsupported)
     v["n_claims_held"], v["n_claims_unsupported"] = len(held), len(unsupported)
     v["claims_items"] = items
-    # the MCP agreements that are no verification of the requested property: agree on the checks both access paths
-    # evaluated, but not fully checked (READ-110); the first such pair in run order named with the checks it left
-    # uncompared, for the chapter summary's reading line
+    # the MCP agreements short of fully checked (READ-110), split by what they compared (the readability review's
+    # verification of 2026-10-16, chapters issue 2): on the generic checks or a refusal alone (no property check
+    # compared: the agreement verifies no property), or with some property check compared and agreeing on both
+    # access paths and another not compared on some repeat (the detail block names which); the first such pair in
+    # run order named with what it left uncompared, for the chapter summary's reading line
     v["n_mcp_agree_partial"] = max(0, v["n_mcp_agree"] - v["n_mcp_full"])
+    v.update(_mcp_agree_short(run, sids))
     v["mcp_agree_partial_example"] = ""
     for sid in sids:
         e = run.comp_entry(sid)
         d = (run.depth or {}).get(sid)
         if (e.get("mcp_agreement") or {}).get("class") == "agree" and d and d.get("class") != "full":
-            nc = ", ".join(str(c) for c in (d.get("not_compared") or []))
+            nct = blocks.not_compared_text(d)
             v["mcp_agree_partial_example"] = "%s (%s%s)" % (
-                sid, blocks.DEPTH_WORD.get(str(d.get("class")), str(d.get("class"))),
-                ("; not compared: " + nc) if nc else "")
+                sid, blocks.DEPTH_WORD.get(str(d.get("class")), str(d.get("class"))), ("; " + nct) if nct else "")
             break
     footnoted = [sid for sid in sids if x[sid]["footnoted"]]
     v["n_footnoted"] = len(footnoted)
@@ -1257,6 +1265,42 @@ def chapter_facts(ctx, ch):
     v["gate_judged"] = isinstance(run.gate, dict)
     v["logan_caveat"] = logan_caveat(run)
     return v
+
+
+AGREE_SHORT_GENERIC = ("generic_only", "refusal")
+AGREE_SHORT_PARTIAL = ("partial", "partial_non_pass")
+AGREE_SHORT_ON_FAILURE = ("on_failure",)
+
+
+def _mcp_agree_short(run, sids):
+    """The agreeing MCP pairs short of fully checked, by depth class (report.DEPTH_CLASSES): {n_mcp_agree_generic
+    (generic checks only or a refusal: no property check compared), n_mcp_agree_partial_checked (partial or
+    partial_non_pass: some property check compared and agreeing on both, another not compared on some repeat),
+    n_mcp_agree_on_failure (every property check compared, on a failing answer), mcp_agree_short_text (the three in
+    words, the empty ones left out; '' when none)}."""
+    counts = {"generic": 0, "partial": 0, "on_failure": 0}
+    for sid in sids:
+        e = run.comp_entry(sid)
+        d = (run.depth or {}).get(sid)
+        if (e.get("mcp_agreement") or {}).get("class") != "agree" or not d or d.get("class") == "full":
+            continue
+        cls = str(d.get("class"))
+        if cls in AGREE_SHORT_GENERIC:
+            counts["generic"] += 1
+        elif cls in AGREE_SHORT_PARTIAL:
+            counts["partial"] += 1
+        elif cls in AGREE_SHORT_ON_FAILURE:
+            counts["on_failure"] += 1
+    parts = []
+    if counts["generic"]:
+        parts.append("%d on the generic checks or a refusal alone, which verifies no property" % counts["generic"])
+    if counts["partial"]:
+        parts.append("%d with some property check compared and agreeing on both access paths and another not "
+                     "compared on some repeat (the detail block names which)" % counts["partial"])
+    if counts["on_failure"]:
+        parts.append("%d with every property check compared on a failing answer" % counts["on_failure"])
+    return {"n_mcp_agree_generic": counts["generic"], "n_mcp_agree_partial_checked": counts["partial"],
+            "n_mcp_agree_on_failure": counts["on_failure"], "mcp_agree_short_text": _join(parts)}
 
 
 def logan_caveat(run):

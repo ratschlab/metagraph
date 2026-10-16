@@ -6,7 +6,9 @@
   "1": "the pairs within 1 s (sections.closing_values); repeat 1 (the harness)",
   "2": "the sampler's 2 s interval (sampler.py)",
   "100": "a container peak above 100 % CPU (docker stats); 100 % of docker stats' CPU is one logical CPU",
-  "503": "http 503 deadline (SPEC)"
+  "503": "http 503 deadline (SPEC)",
+  "0.75": "the lower end of the cold-warm closeness band, 1 - sections.COLD_WARM_CLOSE (the generator's constant)",
+  "1.25": "the upper end of that band, 1 + sections.COLD_WARM_CLOSE (the generator's constant)"
  },
  "placeholders": {
   "mcp_over_local_p50 / _p90 / _max / _n": "compare.json summary.mcp_overhead.minus_local_ms (warm MCP wall minus direct-local's first warm wall), signed",
@@ -42,7 +44,7 @@
   "paired_dl_wall_p50 / paired_mcp_wall_p50": "the medians of the two sides of the paired population (the direct-local walls, the warm MCP walls of the same scenarios)",
   "paired_seconds_to_milliseconds": "flag: the paired medians print in seconds (mcp) and in milliseconds (direct-local), as cells.fmt_t prints them",
   "mcp_over_local_positive / backend_share_small": "flags: the median MCP overhead against direct-local is positive; the median backend overhead against direct-local is below half of it (sections.BACKEND_SHARE_SMALL)",
-  "cold_warm_mcp_close": "flag: the MCP cold-warm median ratio is within a quarter of one (sections.COLD_WARM_CLOSE)",
+  "cold_warm_mcp_close": "flag: the MCP cold-warm median paired ratio lies between 0.75 and 1.25 (sections.COLD_WARM_CLOSE, a quarter off one)",
   "cold_warm_mcp_ratio_pct": "the median paired ratio warm over cold on mcp as a signed percentage off one ('−4 %': the median of the per-scenario ratios, not a ratio of two medians); likewise cold_warm_dl_ratio_pct, cold_warm_dr_ratio_pct",
   "cold_mcp_untimed_text": "the same calls split by what ended them, computed from the record (sections.cold_mcp_untimed_split: the outcome and the recorded time limitation, e.g. 'the host's /pattern 503 deadline relayed by the service', else the error code in words), largest group first: '23 by design (...), 3 inconclusive (the host's /resolve 503 deadline relayed by the service) and 1 inconclusive (the service's own deadline, `resolve_timeout`)'"
  },
@@ -73,7 +75,7 @@
   },
   {
    "id": "cold-warm",
-   "template": "Warm minus cold per scenario is {cold_warm_mcp_delta_p50} at the median via MCP (the median paired ratio warm over cold {cold_warm_mcp_ratio_p50}, that is {cold_warm_mcp_ratio_pct} off one; n {cold_warm_mcp_n}) and {cold_warm_dl_delta_p50} on direct-local (n {cold_warm_dl_n})[[cold_warm_mcp_close ?: via MCP the median paired ratio is within a quarter of one, so the recorded cold and warm executions differ little in this run, whatever the cause |: via MCP the median paired ratio is more than a quarter off one in this run, whatever the cause]]."
+   "template": "Warm minus cold per scenario is {cold_warm_mcp_delta_p50} at the median via MCP (the median paired ratio warm over cold {cold_warm_mcp_ratio_p50}, that is {cold_warm_mcp_ratio_pct} off one; n {cold_warm_mcp_n}) and {cold_warm_dl_delta_p50} on direct-local (n {cold_warm_dl_n})[[cold_warm_mcp_close ?: via MCP that median paired ratio lies between 0.75 and 1.25, so the recorded cold and warm executions differ little in this run, whatever the cause |: via MCP that median paired ratio lies outside 0.75 to 1.25 in this run, whatever the cause]]."
   },
   {
    "id": "load",
@@ -116,9 +118,9 @@
   "C6": {
    "title": "Load telemetry",
    "paragraphs": [
-    "*Method.* docker stats of the staging container (CPU, memory) and of the `sra_all` container (the Logan indexing load: concurrent work on the same host) and the host load average, sampled every 2 s on mex and joined to each execution's window; per chapter and access path the table gives the container's peak CPU and memory, the `sra_all` CPU mean and the load1 mean over the executions. Units: a container CPU of 100 % is one logical CPU fully busy, as docker stats reports it; the memory is the container's resident set; load1 is the host's one-minute load average (runnable processes).",
+    "*Method.* docker stats of the staging container (CPU, memory) and of the `sra_all` container (the Logan indexing load: concurrent work on the same host) and the host load average, sampled every 2 s on mex and joined to each execution's window; per chapter and access path the table gives the container's peak CPU and memory, the `sra_all` CPU mean and the load1 mean over the executions. Units: a container CPU of 100 % is one logical CPU fully busy, as docker stats reports it; the memory is the container's memory usage as docker stats reports it (the cgroup's usage less its inactive cache, not a resident set); load1 is the host's one-minute load average (runnable processes).",
     "*Observation.* {load_samples} samples; `sra_all` CPU mean {load_sra_mean} % (max {load_sra_max} %), load1 mean {load_load1_mean} (max {load_load1_max}), so the Logan caveat {load_caveat} (the thresholds: {load_caveat_sra_cpu_pct} % `sra_all` CPU or a load1 of {load_caveat_load1}, half of mex's cores).",
-    "*Limits.* The figures are sampled container and host telemetry during each chapter, the shared host's context, not any request's own cost: a container peak above 100 % says that more than one logical CPU was busy in the container during the chapter, whatever ran in it; the memory peak is the container's resident set at its highest sample (the loaded index and everything else the container held), which neither measures one query's memory nor shows that the whole index was resident; the `sra_all` and load1 columns say how busy the host was while each chapter ran. Nothing here attributes a slow execution to the load; it says only under which load it ran."
+    "*Limits.* The figures are sampled container and host telemetry during each chapter, the shared host's context, not any request's own cost: a container peak above 100 % says that more than one logical CPU was busy in the container during the chapter, whatever ran in it; the memory peak is the container's memory usage as docker stats reports it, at its highest sample (the loaded index and everything else the container held), which neither measures one query's memory nor shows that the whole index was resident; the `sra_all` and load1 columns say how busy the host was while each chapter ran. Nothing here attributes a slow execution to the load; it says only under which load it ran."
    ]
   },
   "C7": {

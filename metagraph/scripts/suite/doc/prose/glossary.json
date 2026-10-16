@@ -228,7 +228,7 @@
   },
   {
    "term": "load telemetry, the Logan caveat",
-   "definition": "docker stats of the staging and `sra_all` (Logan indexing, concurrent work on the same host) containers and the host load average, sampled every 2 s on mex and joined to each execution: the shared host's context, not any request's cost (a container CPU of 100 % is one logical CPU busy; its memory is the container's resident set, not one query's use). The caveat is stated when the `sra_all` CPU mean exceeds {load_caveat_sra_cpu_pct} % or the load1 mean {load_caveat_load1}: such timings are not the baseline.",
+   "definition": "docker stats of the staging and `sra_all` (Logan indexing, concurrent work on the same host) containers and the host load average, sampled every 2 s on mex and joined to each execution: the shared host's context, not any request's cost (a container CPU of 100 % is one logical CPU busy; its memory is the container's memory usage as docker stats reports it, not one query's use). The caveat is stated when the `sra_all` CPU mean exceeds {load_caveat_sra_cpu_pct} % or the load1 mean {load_caveat_load1}: such timings are not the baseline.",
    "see": []
   },
   {

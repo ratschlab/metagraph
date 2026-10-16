@@ -59,9 +59,13 @@ GATE_GROUP_ACTION = {
                  "not be evaluated. What clears it is a rerun on which the property is shown (a 200 within its budget, "
                  "a walk reaching its minimum) or an owner-declared exemption with its reason; nothing here says the "
                  "behaviour is wrong."),
-    "violation": ("the host or the service broke a stated rule in this run (a finding past a budget, a failed check, a "
-                  "disagreement between access paths, a failed relation, an answer the manifest does not predict): a "
-                  "fix or a SPEC decision, then a rerun; the detail block of each test holds the evidence."),
+    "violation": ("a rule the suite applies was broken in this run: a finding (a stated bound broken on the clock the "
+                  "check reads; for a 503 deadline delivered late, the suite's tolerance on the client's clock, where "
+                  "the time went not isolated), a failed check, a disagreement between access paths, a failed "
+                  "relation, an answer the manifest does not predict. What clears it: for a late 503, a rerun within "
+                  "the tolerance, or a fix or a SPEC decision once the delay is located; for a failure or a "
+                  "disagreement, a fix or a SPEC decision, then a rerun; the detail block of each test holds the "
+                  "evidence."),
 }
 README_PATH = "metagraph/scripts/suite/README.md"
 README_SECTION = "Glossary"
@@ -160,8 +164,10 @@ class Context(object):
                 "load_caveat_load1": fmt_n(LOAD_CAVEAT_LOAD1, 0),
                 "load_caveat_line": load_caveat_line(run),
                 "verdict_word": (run.verdict or "–").split(" ")[0],
-                "verdict_text": run.verdict or "–",
-                "verdict_headline": run.verdict_headline or "–",
+                "verdict_text": doc_verdict_text(run),
+                "verdict_headline": report.verdict_headline(doc_verdict_text(run), run.gated, "beside") if run.verdict
+                else (run.verdict_headline or "–"),
+                "finding_kinds_text": finding_kinds_text(run),
                 "n_reruns_for_resume": len(run.reruns),
                 "n_resolve_stops": stops["n_resolve_stops"], "resolve_stop_observed": stops["resolve_stop_observed"],
                 "resolve_stop_ids": stops["resolve_stop_ids"],
@@ -180,6 +186,8 @@ class Context(object):
                 "n_manifest_not_implemented": limits["manifest_not_implemented"],
                 "declared_file": declared["file"], "declared_version": declared["version"],
                 "n_declared_exclusions": declared["exclusions"],
+                "n_declared_exclusion_pairs": declared["exclusion_pairs"],
+                "declared_exclusions_clause": declared["exclusions_clause"],
                 "n_declared_not_required": declared["not_required"],
                 "n_declared_relations": declared["relations_excluded"],
                 "gate_word": gate_word if gate else "not evaluated",
@@ -482,10 +490,28 @@ def mcp_limit_counts(run):
 def declared_counts(run):
     dec = run.declared
     if not isinstance(dec, dict):
-        return {"file": "none", "version": "–", "exclusions": 0, "not_required": 0, "relations_excluded": 0}
+        return {"file": "none", "version": "–", "exclusions": 0, "not_required": 0, "relations_excluded": 0,
+                "exclusion_pairs": 0, "exclusion_repeat_only_pairs": 0, "exclusions_clause": "no exclusion"}
     out = {"file": dec.get("_file") or "declared", "version": dec.get("declared_version") or "–"}
     for k in ("exclusions", "not_required", "relations_excluded"):
         out[k] = len([e for e in (dec.get(k) or []) if isinstance(e, dict)])
+    # an exclusion entry names one scenario on one or several access paths, whole or for some repeats: the
+    # scenario-arm pairs it covers are the gate's unit (READ-006; the verification of 2026-10-16, shared M6)
+    pairs, repeat_only = 0, []
+    for e in dec.get("exclusions") or []:
+        if not isinstance(e, dict):
+            continue
+        n = len(e.get("arms") or []) or 1
+        pairs += n
+        if e.get("repeats"):
+            repeat_only.append((n, ", ".join(str(r) for r in e["repeats"])))
+    out["exclusion_pairs"] = pairs
+    out["exclusion_repeat_only_pairs"] = sum(n for n, _ in repeat_only)
+    reps = sorted(set(r for _, r in repeat_only))
+    out["exclusions_clause"] = "%d exclusion%s (%d scenario-arm pair%s%s)" % (
+        out["exclusions"], "" if out["exclusions"] == 1 else "s", pairs, "" if pairs == 1 else "s",
+        (", %d of them for repeat%s %s only" % (out["exclusion_repeat_only_pairs"], "" if len(reps) == 1 and "," not in reps[0]
+                                                 else "s", " / ".join(reps))) if repeat_only else "")
     return out
 
 
@@ -500,10 +526,28 @@ def gate_text(word, how, counts_text, problems_text, run=None):
     if passed:
         return "%s: nothing blocks (%s); %s; the gate covers %s; %s" % (word, problems_text, counts_text, scope, how)
     groups = gate_groups_text(run) if run is not None else "–"
+    head, kinds = _problems_head_and_kinds(problems_text)
     return ("%s: the run does not authorise a deploy. %s, by what would clear them: %s (by the gate's kinds: %s); the "
             "count is not a count of service defects; %s; the gate covers %s; %s" % (
-                word, problems_text[:1].upper() + problems_text[1:], groups, problems_text.split(" (", 1)[1].rstrip(")")
-                if " (" in problems_text else "–", counts_text, scope, how))
+                word, head[:1].upper() + head[1:], groups, kinds, counts_text, scope,
+                _without_access_paths(how, run) if run is not None else how))
+
+
+def _problems_head_and_kinds(problems_text):
+    """('50 problems', '5 identity; 13 configuration; ...') of gate_summary's problems text, so that a line prints the
+    kinds once (the readability review's verification of 2026-10-16, shared L5)."""
+    if " (" in problems_text:
+        head, _, rest = problems_text.partition(" (")
+        return head, rest.rstrip(")")
+    return problems_text, "–"
+
+
+def _without_access_paths(how, run):
+    """gate_summary's `how` without its trailing access-paths clause where the line names the gate's scope with the
+    access paths already (gate_scope: a policy pins the run); unchanged when the scope cannot name them."""
+    if gate_scope(run)["arms"] == "–":
+        return how
+    return re.sub(r", access paths [^;]+$", "", how)
 
 
 def gate_outcome_counts(run):
@@ -693,20 +737,41 @@ def standing_example_text(ctx):
         case = st.agreement.get("case") or "its case"
         dl = ctx.state(sid)["direct-local"]
         dl_word = facts.STANDING_WORD.get(dl.glyph_key, "no execution") if dl.present else "no execution"
-        return ("%s: via MCP the service decided the call in the host's place (%s, case %s), the recorded outcome is "
-                "service_by_design and the cell shows the by-design glyph without a footnote; direct-local stands %s "
-                "and matched the case's host side, so the pair is verified. The cell establishes the documented "
-                "service behaviour, not the property: nothing of the claim was tested through the tools" % (
-                    sid, status, case, dl_word))
+        return ("%s: via MCP %s (%s, case %s), the recorded outcome is service_by_design and the cell shows the "
+                "by-design glyph without a footnote; direct-local stands %s and matched the case's host side, so the "
+                "pair is verified. The cell establishes the documented service behaviour, not the property: nothing "
+                "of the claim was tested through the tools" % (sid, service_decision_words(run, st), status, case, dl_word))
     return "no by-design pair in this run"
 
 
-def standing_vs_outcome_example_text(ctx):
+SERVICE_DECISION_WORDS = {
+    "refused_at_submit": "the service refused the call at submit, in the host's place",
+    "relayed": "the service relayed the host's refusal under its own code",
+    "answered": "the service answered in the host's place",
+    "not_expressible": "the service could not express the call",
+}
+
+
+def service_decision_words(run, st):
+    """How the service decided an MCP call, in words from the case's `service_answer.outcome` as the comparison
+    recorded it (mcp_agreement.service_outcome, else the table's case; the same evidence blocks.mcp_class reads:
+    refused at submit, relayed, answered, not expressible), never a fixed phrase (the readability review's
+    verification of 2026-10-16, shared M4: R-edge-0002's 502 is the host's 400 relayed)."""
+    outcome = st.agreement.get("service_outcome")
+    if not outcome:
+        case_id = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
+                                                     if l.get("service_by_design_case")), None)
+        case = (getattr(run, "cases", None) or {}).get(case_id) or (getattr(run, "table", None) or {}).get(case_id) or {}
+        outcome = (case.get("service_answer") or {}).get("outcome")
+    return SERVICE_DECISION_WORDS.get(str(outcome or ""), "the service decided the call in the host's place")
+
+
+def standing_vs_outcome_example_text(ctx, sids=None):
     """A scenario whose MCP standing and recorded outcome differ (READ-102): the glyph not exercised while the
-    line records service_by_design (a refusal the table files under not implemented), plain text; 'none in this
-    run' when none."""
+    line records service_by_design (a refusal the table files under not implemented), plain text; of the given
+    scenarios (a chapter's) or of the run; 'none in this run' / 'none in this chapter' when none."""
     run = ctx.run
-    for sid in run.order:
+    for sid in (run.order if sids is None else sids):
         st = ctx.state(sid)["mcp"]
         if st.present and st.glyph_key == "not_implemented_mcp" and any(
                 l.get("outcome") == "service_by_design" for l in st.lines):
@@ -715,7 +780,7 @@ def standing_vs_outcome_example_text(ctx):
             return ("%s: the MCP line records service_by_design (the service refused at submit) while the table files "
                     "the case%s under not implemented via MCP, so the cell and the standing count read not exercised" % (
                         sid, (" %s" % case) if case else ""))
-    return "none in this run"
+    return "none in this run" if sids is None else "none in this chapter"
 
 
 SERVICE_VERSION_KEYS = ("service_version", "service_commit", "service_git_head", "service_revision", "deployed_version")
@@ -773,11 +838,66 @@ def front_matter(ctx):
     return _kv_table(rows)
 
 
+FINDING_KIND_WORDS = {
+    "late_503": ("late 503 deadline (no results carried; beyond the suite's tolerance on the client's clock)",
+                 "late 503 deadlines (no results carried; beyond the suite's tolerance on the client's clock)"),
+    "over_200": ("200 past its budget (the host's own elapsed time)", "200s past their budget (the host's own elapsed time)"),
+    "other": ("other stated bound broken (the detail block names it)", "other stated bounds broken (the detail blocks name them)"),
+}
+
+
+def finding_kinds(run):
+    """The run's finding executions by what the check read: {late_503: a 503 deadline delivered late (the client's
+    clock), over_200: a 200 whose budget_respected item is a finding (the host's own elapsed time), other: any other
+    stated bound (a walk stop outside its rule)}."""
+    counts = {"late_503": 0, "over_200": 0, "other": 0}
+    for sid in run.order:
+        for arm in ARMS:
+            for l in run.arm_lines(sid, arm):
+                if l.get("outcome") != "finding":
+                    continue
+                fc = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "finding"]
+                if l.get("http") == 503:
+                    counts["late_503"] += 1
+                elif l.get("http") == 200 and any(c.get("check") == "budget_respected" for c in fc):
+                    counts["over_200"] += 1
+                else:
+                    counts["other"] += 1
+    return counts
+
+
+def finding_kinds_text(run):
+    """The run's findings by kind in words, plain text: '4 late 503 deadlines (no results carried; beyond the suite's
+    tolerance on the client's clock)'; 'none' without a finding."""
+    counts = finding_kinds(run)
+    parts = ["%d %s" % (counts[k], FINDING_KIND_WORDS[k][0 if counts[k] == 1 else 1])
+             for k in ("late_503", "over_200", "other") if counts[k]]
+    return ", ".join(parts) or "none"
+
+
+_FINDINGS_VERDICT = re.compile(r"^FINDINGS \((\d+) execution\(s\) where the host broke a stated bound without failing "
+                               r"the request; (no failure, no disagreement)\)(.*)$", re.S)
+
+
+def doc_verdict_text(run):
+    """The run verdict as this document prints it: report.verdict_text's word and figures, the reason of a FINDINGS
+    verdict in the document's vocabulary (READ-003; the readability review's verification of 2026-10-16, shared
+    M1): the findings by what the check read (finding_kinds_text), never 'without failing the request', since a
+    late 503 deadline carried no results. Every other verdict is report.py's line as it stands."""
+    v = run.verdict or "–"
+    m = _FINDINGS_VERDICT.match(v)
+    if not m:
+        return v
+    return "FINDINGS (%s execution(s) with a finding, a stated bound broken on the clock the check reads: %s; %s)%s" % (
+        m.group(1), finding_kinds_text(run), m.group(2), m.group(3))
+
+
 def verdict_line(ctx):
-    """The run verdict on the cover and in I.1: the verdict word large, its reason, and for a run with a deploy
-    gate's verdict (recorded, or judged offline for this document) the label report.py gives the ordinary verdict
-    beside a gate (report.verdict_headline: the gate is the decision, this verdict is exploratory)."""
-    v = ctx.run.verdict or "–"
+    """The run verdict on the cover and in I.1: the verdict word large, its reason in the document's vocabulary
+    (doc_verdict_text), and for a run with a deploy gate's verdict (recorded, or judged offline for this document)
+    the label report.py gives the ordinary verdict beside a gate (report.verdict_headline: the gate is the
+    decision, this verdict is exploratory)."""
+    v = doc_verdict_text(ctx.run)
     word, _, rest = v.partition(" ")
     out = "\\textbf{\\large %s}\\ %s" % (esc(word), esc(rest, 400))
     if ctx.run.gated:
@@ -845,11 +965,11 @@ def gate_line(ctx):
     if passed:
         return "\\textbf{\\large %s}: nothing blocks (%s); %s; the gate covers %s; %s" % (
             esc(word), esc(problems_text), esc(counts_text), esc(gate_scope(run)["text"]), esc(how))
-    kinds = problems_text.split(" (", 1)[1].rstrip(")") if " (" in problems_text else "–"
+    head, kinds = _problems_head_and_kinds(problems_text)
     return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s, by what would clear them: %s (by the "
             "gate's kinds: %s); the count is not a count of service defects; %s; the gate covers %s; %s" % (
-                esc(word), esc(problems_text[:1].upper() + problems_text[1:]), esc(gate_groups_text(run)), esc(kinds),
-                esc(counts_text), esc(gate_scope(run)["text"]), esc(how)))
+                esc(word), esc(head[:1].upper() + head[1:]), esc(gate_groups_text(run)), esc(kinds),
+                esc(counts_text), esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run))))
 
 
 def sample_note(ctx):
@@ -935,8 +1055,9 @@ def _arm_reason(lines, st, name=None, run=None, sid=None):
     for l in lines:
         if is_mcp and cells.by_design_line(st, l):
             # the case's own repeat; the other repeat outside the case reads its recorded outcome below
-            # (VERIFY-QCND H2)
-            w = "decided by the service (by design)"
+            # (VERIFY-QCND H2); whether the host was reached, as the chapters' grouped cells say it (READ-208)
+            w = ("by design: the host reached, the pair decided by the service" if cells.host_reached(l)
+                 else "by design: decided by the service before the host")
             if w not in words:
                 words.append(w)
             continue
@@ -1105,9 +1226,10 @@ def counting_units_table(ctx):
             ["scenario-arm pair", "one scenario on one access path, whatever its repeats: the unit of the gate's "
                                   "outcome problems and of the owner's exclusions",
              ("%s with an outcome problem" % gp["pairs"]) if gp["judged"] else "no gate judged"],
-            ["gate problem", "one finding of the deploy gate's policy against the run's records: an evidence "
+            ["gate problem", "one problem the deploy gate's policy raises against the run's records: an evidence "
                              "problem, a required behaviour not shown or an observed violation; never a count of "
-                             "tests or of defects", esc(str(values["n_gate_problems"]))]]
+                             "tests or of defects (and not a finding, which is an execution outcome)",
+             esc(str(values["n_gate_problems"]))]]
     return latex.plain_table(latex.spec_p([24, 112, 38]), ["unit", "what one is", "this run"], rows,
                              "the counting units: the totals of this document count different things and are not "
                              "added to one another; the limitation counts below overlap too (a scenario may carry a "
@@ -1747,10 +1869,14 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
                                                      ("service_by_design", "by design"), ("other", "other"))
                      if o.get(k)]
             otext.append("%s %s" % (esc(arm), esc(", ".join(items)) if items else "–"))
-        out += "\\bline{outcomes}{executions · %s (the recorded execution outcomes, as the report counts them)}\n" % " · ".join(otext)
+        # compare's per_area: one entry per test and access path, the recorded outcome over the test's repeats
+        # (compare.aggregate_outcome: the common one, else the worst; mixed where the repeats differ otherwise), so the
+        # row counts tests, as the standing row does, never executions (the verification of 2026-10-16, H1)
+        out += "\\bline{outcomes}{tests · %s (each test's outcome over its repeats, as the comparison records it: the " \
+               "common one, else the worst; mixed: its repeats differ otherwise; I.3)}\n" % " · ".join(otext)
     dtext, mtext = _agreement_counts(ctx, sids)
     out += "\\bline{agreement}{test pairs · direct: %s · mcp: %s}\n" % (dtext, mtext)
-    out += "\\bline{reading}{%s}\n" % esc(summary_reading_text(ctx, chapter))
+    out += "\\bline{reading}{%s}\n" % esc(summary_reading_text(ctx, chapter, sids))
     timing = (run.summary().get("timing") or {}).get(chapter) or {}
     cold, warm, server = [], [], []
     for arm in ARMS:
@@ -1789,33 +1915,35 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
     return out
 
 
-def summary_reading_text(ctx, chapter):
-    """One line under the chapter's summary rows (READ-102): what the standing row classifies, what the outcomes
-    row classifies, why an MCP case can sit in different categories of the two, and what the property list below
-    counts; plain text with the run's own example where it has one."""
-    example = standing_vs_outcome_example_text(ctx)
-    text = ("standing counts tests, one glyph each per access path (the worst repeat; via MCP the agreement class "
-            "where the service decided the call); outcomes count executions as recorded (a test with two MCP "
-            "repeats counts twice, and a refusal the table files under not implemented is recorded service_by_design "
-            "but stands not exercised%s); agreement counts one comparison per test%s; the property list below counts "
-            "property claims, one per check and test, over every access path" % (
-                (": " + example) if example != "none in this run" else "", agreement_levels_text(ctx, chapter)))
+def summary_reading_text(ctx, chapter, sids=None):
+    """One line under the chapter's summary rows (READ-102): both rows count tests, where they differ (the MCP
+    agreement class in the standing, the recorded outcome in the outcomes row) with this chapter's own case or
+    'none in this chapter', the pointer to I.3's full reading (defined once, not repeated per chapter: the
+    verification of 2026-10-16, shared L5), the agreement count with the chapter's pairs short of fully checked
+    (agreement_levels_text) and what the property list below counts; plain text."""
+    if sids is None:
+        sids = ctx.units.chapter_scenarios(chapter)
+    example = standing_vs_outcome_example_text(ctx, sids)
+    text = ("standing and outcomes both count tests, one per access path; they differ only via MCP where the "
+            "service decided the call, the standing showing the agreement class and the outcomes row the recorded "
+            "outcome (in this chapter: %s); the full reading is I.3's. Agreement counts one comparison per test%s; "
+            "the property list below counts property claims, one per check and test, over every access path" % (
+                example, agreement_levels_text(ctx, chapter)))
     return text
 
 
 def agreement_levels_text(ctx, chapter):
-    """The three levels an agreement can mean (READ-110), as a clause of the reading line: identical answers (the
-    direct pair's digests), the same outcomes of the checks both access paths evaluated (an MCP 'agree'), and the
-    requested property evaluated on both (fully checked); an agreement of the checks that ran alone verifies no
-    property. The chapter's own first such pair is named from the record (facts: mcp_agree_partial_example)."""
+    """The agreement clause of the reading line (READ-110): the three levels an agreement can mean are I.3's; here
+    the chapter's agreeing pairs short of fully checked, by what they compared (facts._mcp_agree_short: on the
+    generic checks or a refusal alone, which verifies no property; with some property check compared and another
+    not compared on some repeat), the first such pair named from the record (mcp_agree_partial_example)."""
     v = ctx.chapter_values(chapter)
-    text = (" at three levels: identical answers (the direct pair's digests), the same outcomes of the checks both "
-            "access paths evaluated (mcp: agree), and every property check evaluated on both (fully checked); an "
-            "agreement of the checks that ran alone is no verification of the requested property")
+    text = " (its three levels, identical answers, the same check outcomes, every property check compared on both: I.3)"
     if v.get("n_mcp_agree_partial"):
-        text += " (%d such pair%s in this chapter%s)" % (
+        text += "; %d agreeing pair%s short of fully checked: %s%s" % (
             v["n_mcp_agree_partial"], "" if v["n_mcp_agree_partial"] == 1 else "s",
-            (", e.g. " + v["mcp_agree_partial_example"]) if v.get("mcp_agree_partial_example") else "")
+            v.get("mcp_agree_short_text") or "see the detail blocks",
+            ("; e.g. " + v["mcp_agree_partial_example"]) if v.get("mcp_agree_partial_example") else "")
     return text
 
 
@@ -1844,9 +1972,11 @@ def claims_map(ctx, chapter):
         rows.append(["\\hyperref[fam:%s]{\\texttt{%s}}" % (esc(it["family"]), esc(it["family"])),
                      inline(it["claim"]), "%s: %s" % (shown, esc(CLAIM_STATUS_WORD[it["status"]] % it))])
     return latex.plain_table(latex.spec_p([22, 108, 36]), ["family", "the claim (the property in words)",
-                                                           "on both direct access paths"], rows,
-                             "the evidence map: what each family claims and how many of its tests passed on both direct "
-                             "access paths (the MCP access path, the exceptions and the properties no path showed follow)")
+                                                           "of the tests that carry the claim, those passing on both "
+                                                           "direct access paths"], rows,
+                             "the evidence map: what each family claims and how many of the tests that carry the claim "
+                             "passed on both direct access paths (a family's other tests are not counted; the MCP access "
+                             "path, the exceptions and the properties no path showed follow)")
 
 
 EXCEPTION_GROUPS = (
@@ -1854,12 +1984,14 @@ EXCEPTION_GROUPS = (
      "a check failed, no HTTP answer came, or two access paths disagree: a defect of the host, the service or the "
      "suite, listed in I.1 and quoted in the detail block"),
     ("finding", "a measured operational finding",
-     "a stated timing bound or SPEC promise was broken while the request was answered; the FINDING line of the "
-     "detail block quotes the rule and the overrun"),
+     "a stated bound was broken on the clock the check reads: a 200 past its budget (the host's own elapsed time), "
+     "or a 503 deadline delivered more than max(1 s, the budget) late on the client's clock, which carried no "
+     "answer; the FINDING line of the detail block quotes the rule and the overrun"),
     ("unverified", "the property not shown on some access path",
-     "an execution could not show the property there (an allowed 503 deadline without results, a walk a stated "
-     "limit stopped, a host state, a check that could not decide); the detail block names the check and the stated "
-     "limit, and the property table below says whether another access path or repeat showed it"),
+     "an execution could not show the property there (an allowed 503 deadline without results, a late 503 deadline "
+     "that is a finding, a walk a stated limit stopped, a host state, a check that could not decide); the detail "
+     "block names the check and the stated limit, and the property table below says whether another access path or "
+     "repeat showed it"),
     ("mcp_limit", "not comparable through the MCP tools",
      "no check was evaluated on both access paths (the MCP answer exposes none of the fields the checks read), so "
      "nothing is known about the property through the tools"),
@@ -1874,8 +2006,17 @@ EXCEPTION_GROUPS = (
 )
 
 
-def exception_groups_of(states):
-    """The exception groups (EXCEPTION_GROUPS keys) a footnoted test belongs to, from its arm states."""
+def _finding_without_property(line, is_property):
+    """Whether a finding execution evaluated its property checks without a pass (a late 503 deadline carried no
+    answer: the property is not shown there either; the verification of 2026-10-16, chapters issue 4)."""
+    props = [c for c in (line.get("checks") or []) if isinstance(c, dict) and is_property(c.get("check"))]
+    return bool(props) and not any(c.get("outcome") == "pass" for c in props)
+
+
+def exception_groups_of(states, is_property=None):
+    """The exception groups (EXCEPTION_GROUPS keys) a footnoted test belongs to, from its arm states; with
+    `is_property` (the run's), a finding execution whose property checks passed nothing counts under the property
+    not shown too."""
     groups = []
 
     def add(key):
@@ -1891,6 +2032,9 @@ def exception_groups_of(states):
             add("failure")
         if any(l.get("outcome") == "finding" for l in st.lines):
             add("finding")
+            if is_property is not None and any(_finding_without_property(l, is_property) for l in st.lines
+                                               if l.get("outcome") == "finding"):
+                add("unverified")
         if any(l.get("outcome") == "inconclusive" for l in st.lines):
             add("unverified")
         if arm == "mcp" and "n" in st.glyph_marks:
@@ -1912,7 +2056,7 @@ def exception_index(ctx, chapter):
         return ""
     by_group = {}
     for sid in ids:
-        for g in exception_groups_of(ctx.state(sid)):
+        for g in exception_groups_of(ctx.state(sid), ctx.run.is_property):
             by_group.setdefault(g, []).append(sid)
     blocking = set(facts._gate_blocking(ctx, ids))
     gated = isinstance(ctx.run.gate, dict)
@@ -2116,7 +2260,9 @@ def unit_section(ctx, chapter, uid):
     prop, note = _unit_prose(ctx, chapter, uid)
     prop_tex = inline(ctx.fill(prop)) if prop else latex.placeholder("(unit property: to be written)")
     if note:
-        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note))
+        # the note is filled on the unit's own values too (facts.unit_facts: its members under `x`), so that it
+        # can state a member's gate relation from the policy (READ-318: N-usecase-defect)
+        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note, facts.unit_facts(ctx, uid)))
     layout = u["unit_type"]
     key = cells.LAYOUT_KEY.get(layout)
     legend = cells.TIMING_LEGEND.get(layout)
@@ -2844,7 +2990,7 @@ def closing(ctx):
     out += latex.plain_table("@{}l l r r r r r r@{}", ["chapter", "access path", "executions", "with samples", "peak CPU \\%",
                                                         "peak memory", "sra\\_all mean \\%", "load1 mean"], rows,
                              "sampled telemetry over each chapter's executions: the container's peak CPU (100\\,\\% is one "
-                             "logical CPU) and peak memory (its resident set), the host's sra\\_all CPU mean and load1 "
+                             "logical CPU) and peak memory (the container's memory usage as docker stats reports it), the host's sra\\_all CPU mean and load1 "
                              "mean; context of the shared host, not any request's own cost")
     out += latex.section("%s 7\\qd Per-chapter timing" % CLOSING_PREFIX, "sec:C7")
     out += closing_section_prose(ctx, "C7", "")
@@ -3483,15 +3629,16 @@ def mcp_limits(ctx):
             for e in dec.get(kind) or []:
                 if isinstance(e, dict):
                     rows.append([esc(kind.replace("_", " ")), latex.breakable_id(e.get("scenario") or e.get("relation") or "–"),
-                                 esc(", ".join(e.get("arms") or [])), esc(exemption_consequence(kind, e)),
+                                 esc(", ".join(e.get("arms") or [])), esc(exemption_consequence(kind, e, run)),
                                  esc_wrap(e.get("reason"))])
         out += latex.plain_table(latex.spec_p([18, 26, 18, 44, 68]),
                                  ["kind", "scenario or relation", "access paths", "what it changes for this gate",
                                   "the owner's reason"], rows)
         out += ("\\noindent{\\small An exemption changes what the gate requires, not what the run observed: the test's "
-                "recorded outcome stands as printed in its chapter, and the exempted property or relation remains "
-                "unproven on that access path by this run. A reason that names a later manifest version describes "
-                "a plan for that version, not evidence from this run.}\\par\n")
+                "recorded outcome stands as printed in its chapter; what its exempted executions showed stays shown, "
+                "and what they did not show stays unproven there by this run (the fourth column, read from the "
+                "record). A reason that names a later manifest version describes a plan for that version, not "
+                "evidence from this run.}\\par\n")
     else:
         out += "None given for this manifest.\n\n"
     return out
@@ -3505,14 +3652,66 @@ def exemption_kinds_default():
             "relation on those paths. None of them changes a recorded outcome or shows the omitted behaviour.\n\n")
 
 
-def exemption_consequence(kind, entry):
-    """The coverage consequence of one declared entry in plain words (READ-025)."""
+def exempted_evidence(run, entry):
+    """What the executions an exclusion exempts showed, from the record: (outcomes, shown, not_shown, partly) over
+    the scenario's lines on the entry's access paths (and repeats, when it names some): the recorded outcome words
+    per access path and repeat; the property checks every item of which passed on some exempted execution; those
+    no item of which passed there; and {check: (passed items, items)} where some items passed and others did not
+    (the readability review's verification of 2026-10-16, shared M2: an exemption shows nothing, so what passed
+    stays passed and only what did not pass stays unproven)."""
+    sid = entry.get("scenario")
+    reps = entry.get("repeats")
+    lines = []
+    for arm in (entry.get("arms") or list(ARMS)):
+        for l in run.arm_lines(sid, arm):
+            if reps is None or l.get("repeat") in reps:
+                lines.append((arm, l))
+    outcomes = ["%s r%s %s" % (cells.ARM_SHORT.get(arm, arm), l.get("repeat"),
+                               cells.WORD.get(l.get("outcome"), str(l.get("outcome")))) for arm, l in lines]
+    tally = {}
+    for _, l in lines:
+        for c in l.get("checks") or []:
+            if isinstance(c, dict) and run.is_property(c.get("check")):
+                t = tally.setdefault(str(c.get("check")), [0, 0])
+                t[1] += 1
+                if c.get("outcome") == "pass":
+                    t[0] += 1
+    shown = sorted(n for n, (p, m) in tally.items() if p == m)
+    not_shown = sorted(n for n, (p, m) in tally.items() if p == 0)
+    partly = dict((n, (p, m)) for n, (p, m) in tally.items() if 0 < p < m)
+    return outcomes, shown, not_shown, partly
+
+
+def exemption_consequence(kind, entry, run=None):
+    """The coverage consequence of one declared entry in plain words (READ-025): for an exclusion, read from the
+    record when the run is given (exempted_evidence), so that a property the exempted executions passed is not
+    called unproven."""
     arms_ = ", ".join(entry.get("arms") or []) or "every access path"
     if kind == "exclusions":
         reps = entry.get("repeats")
-        where = (" (repeat%s %s)" % ("" if len(reps) == 1 else "s", ", ".join(str(r) for r in reps))) if reps else ""
-        return ("not required on %s%s; its recorded outcome stands, and its properties stay unproven there by this "
-                "run" % (arms_, where))
+        where = (" (repeat%s %s; the other repeats stay required)" % (
+            "" if len(reps) == 1 else "s", ", ".join(str(r) for r in reps))) if reps else ""
+        if run is None or not entry.get("scenario"):
+            return ("not required on %s%s; the exemption shows nothing: the recorded outcomes there stand, what the "
+                    "exempted executions showed stays shown, and what they did not show stays unproven there by this "
+                    "run" % (arms_, where))
+        outcomes, shown, not_shown, partly = exempted_evidence(run, entry)
+        head = "not required on %s%s; the exemption shows nothing: the recorded outcome%s there stand%s" % (
+            arms_, where, "" if len(outcomes) == 1 else "s", "s" if len(outcomes) == 1 else "")
+        if not outcomes:
+            return head + " (no execution recorded there)"
+        text = head + " (%s)" % "; ".join(outcomes)
+        if not shown and not not_shown and not partly:
+            return text + "; no property check there: the status, code and text are the claim"
+        parts = []
+        if shown:
+            parts.append("%s passed there and stay%s shown" % (", ".join(shown), "s" if len(shown) == 1 else ""))
+        for name, (p, m) in sorted(partly.items()):
+            parts.append("%s passed %d of its %d items there, the other%s not shown there by this run" % (
+                name, p, m, "" if m - p == 1 else "s"))
+        if not_shown:
+            parts.append("%s %s not shown there by this run" % (", ".join(not_shown), "was" if len(not_shown) == 1 else "were"))
+        return text + "; " + "; ".join(parts)
     if kind == "not_required":
         return ("the check %s is not required on %s; the scenario's other checks stay required there, and this "
                 "check stays required on the other access paths" % (entry.get("check") or "?", arms_))

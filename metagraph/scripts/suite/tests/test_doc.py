@@ -1997,7 +1997,7 @@ class OwnerReviewTwoTest(unittest.TestCase):
                       "appendix B)", conc_b)
         # the agreement's levels (READ-110): fully checked apart from the checks that ran alone
         self.assertIn("Via MCP 1 pair agrees on the checks both access paths evaluated (0 fully checked, every property "
-                      "check evaluated on both; 1 on the checks that ran alone, which verifies no property)", conc_a)
+                      "check evaluated on both; 1 on the generic checks or a refusal alone, which verifies no property)", conc_a)
         self.assertIn("Via MCP 1 pair agrees on the checks both access paths evaluated, every one fully checked (every "
                       "property check evaluated on both);", conc_b)
         self.assertIn("(2 identical pairs)", conc_b)
@@ -2080,17 +2080,18 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertNotIn("seconds against milliseconds", obs_b)
         self.assertFalse(v_b["cold_warm_mcp_close"])
         self.assertIn("(the median paired ratio warm over cold 2.50, that is +150~\\% off one; n 3)", obs_b)
-        self.assertIn("is more than a quarter off one in this run, whatever the cause", obs_b)
+        self.assertIn("lies outside 0.75 to 1.25 in this run, whatever the cause", obs_b)
         self.assertNotIn("differ little", obs_b)
         # the ratio close to one
         comp["summary"]["cold_warm"]["mcp"]["ratio"]["p50"] = 1.05
         sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
         _, obs_c, v_c = render(d)
         self.assertTrue(v_c["cold_warm_mcp_close"])
-        self.assertIn("is within a quarter of one, so the recorded cold and warm executions differ little in this run, "
+        self.assertIn("lies between 0.75 and 1.25, so the recorded cold and warm executions differ little in this run, "
                       "whatever the cause", obs_c)
+        self.assertNotIn("quarter of one", obs_c)
         self.assertIn("that is +5~\\% off one", obs_c)
-        self.assertNotIn("more than a quarter off", obs_c)
+        self.assertNotIn("lies outside 0.75 to 1.25", obs_c)
         # a negative MCP overhead prints neither backend clause
         mo["minus_local_ms"]["p50"] = -5.0
         sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
@@ -2585,6 +2586,15 @@ class RebasedFieldsTest(unittest.TestCase):
         self.assertIn("\\textbf{\\large %s}" % word, gate_box)
         self.assertIn(latex.esc(how), gate_box)
         self.assertIn("recorded in the run", gate_box)
+        # the kinds and the access paths once each on the cover and in I.1's gate line
+        self.assertEqual(gate_box.count("by the gate's kinds"), 1)
+        self.assertEqual(gate_box.count("access paths"), 1, gate_box)
+        word2, how2, counts2, problems2 = sections.gate_summary(_Stub(run=run2))
+        line = sections.gate_text(word2, how2, counts2, problems2, run2)
+        self.assertEqual(line.count("access paths"), 1, line)
+        kinds = line.split("by the gate's kinds: ", 1)[1].split(")", 1)[0]
+        self.assertEqual(line.count(kinds), 1, line)
+        self.assertNotIn("problems (", line)
         # the report's headline uses the same parts
         text = report.build_report(gated)
         self.assertIn("**%s** (%s): %s." % (report.md(word), report.md(how), report.md(summary)), text)
@@ -3651,9 +3661,29 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertNotIn("legend", self.overview["sections"]["reading"])  # the glyph legend is the vocabulary's
         # the error outcome names the raised-check difference between the layers, as the code has it
         err = vocabulary.execution_outcome("error")["meaning"]
-        self.assertIn("raised on a direct access path", err)
+        self.assertIn("the evaluation itself (checks.evaluate) raised on a direct access path", err)
         self.assertIn("via MCP the same line reads fail", err)
+        self.assertIn("a single check that raises inside the evaluation is a failing item, so that execution reads fail "
+                      "on every access path", err)
+        self.assertIn("the evaluation itself (checks.evaluate) raised", vocabulary.execution_outcome("error")["legend"])
+        self.assertNotIn("a check that raised on a direct access path", vocabulary.execution_outcome("error")["legend"])
         self.assertIn("a check that raised is recorded as a failing item", vocabulary.CHECK_OUTCOMES[1][1])
+        # the finding names the clock the check reads, never 'without failing the request' (READ-003)
+        for text in (vocabulary.execution_outcome("finding")["legend"], vocabulary.execution_outcome("finding")["meaning"],
+                     dict(vocabulary.CHECK_OUTCOMES)["finding"]):
+            self.assertIn("on the clock the check reads", text)
+            self.assertIn("client's clock", text)
+            self.assertNotIn("without failing the request", text)
+            self.assertNotIn("while the request was answered", text)
+        # the standing text says what each count counts: the chapter's outcomes row counts tests (READ-102)
+        self.assertIn("a chapter's outcomes row counts tests too", vocabulary.STANDING)
+        self.assertIn("I.4's outcome table counts executions", vocabulary.STANDING)
+        self.assertIn("mixed where the repeats differ otherwise", vocabulary.STANDING)
+        # a joined consequence starts its sentence with a capital (READ-020)
+        texts = vocabulary.glossary_texts()
+        self.assertTrue(texts["error"].endswith(". Counted with the failures."), texts["error"])
+        self.assertIn(". The verdict reads FINDINGS", texts["finding"])
+        self.assertIn(". Never a pass and never a failure", texts["inconclusive"])
         # the glossary reads the same texts through the vocab placeholders and renders them
         terms = dict((e["term"], e["definition"]) for e in self.glossary["entries"])
         for term, key in (("execution outcome", "execution_outcome"), ("check outcome", "check_outcome"),
@@ -3778,16 +3808,81 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertRegex(example, r"^[A-Z]-\d{3} is one scenario; it was executed \d+ times \(")
         self.assertIn("property claim", example)
         standing = values["standing_example"]
-        self.assertTrue(standing.startswith("P-004: via MCP the service decided the call in the host's place"), standing)
+        self.assertTrue(standing.startswith("P-004: via MCP the service refused the call at submit, in the host's place"), standing)
         self.assertIn("nothing of the claim was tested through the tools", standing)
+        self.assertNotIn("decided the call in the host's place", standing)
+        # the words follow the case's service_answer.outcome (READ-007: R-edge-0002's 502 is the host's 400 relayed)
+        relayed = _Stub(cases={"c.relay": {"service_answer": {"outcome": "relayed"}}}, table={})
+        st = cells.ArmState("mcp")
+        st.agreement = {"case": "c.relay"}
+        self.assertEqual(sections.service_decision_words(relayed, st), "the service relayed the host's refusal under its own code")
+        st.agreement = {"case": "nowhere"}
+        self.assertEqual(sections.service_decision_words(relayed, st), "the service decided the call in the host's place")
+        answered = _Stub(cases={"c": {"service_answer": {"outcome": "answered"}}}, table={})
+        st.agreement = {"case": "c"}
+        self.assertEqual(sections.service_decision_words(answered, st), "the service answered in the host's place")
         self.assertIn(values["standing_vs_outcome_example"], ("none in this run",) if not any(
             self.runobj.arm_lines(sid, "mcp") and cells.scenario_states(self.runobj, sid)["mcp"].glyph_key == "not_implemented_mcp"
             and any(l.get("outcome") == "service_by_design" for l in self.runobj.arm_lines(sid, "mcp"))
             for sid in self.runobj.order) else (values["standing_vs_outcome_example"],))
         reading = sections.summary_reading_text(ctx, "P")
-        self.assertIn("standing counts tests", reading)
-        self.assertIn("outcomes count executions", reading)
-        self.assertIn("agreement counts one comparison per test", reading)
+        self.assertIn("standing and outcomes both count tests, one per access path", reading)
+        self.assertNotIn("count executions", reading)
+        self.assertNotIn("counts twice", reading)
+        self.assertIn("(in this chapter: none in this chapter)", reading)
+        self.assertIn("the full reading is I.3's", reading)
+        self.assertIn("Agreement counts one comparison per test (its three levels, identical answers, the same check "
+                      "outcomes, every property check compared on both: I.3)", reading)
+        self.assertEqual(sections.standing_vs_outcome_example_text(ctx, ["P-001"]), "none in this chapter")
+        # the outcomes row of every chapter counts tests: per access path it sums to the chapter's tests with an
+        # execution there (compare's per_area, one entry per test), and is labelled so (READ-102)
+        per_area = self.runobj.summary()["per_area"]
+        for ch in self.units.chapters:
+            sids = self.units.chapter_scenarios(ch)
+            text = sections.chapter_summary(ctx, ch, sids, 1, 1)
+            self.assertIn("\\bline{outcomes}{tests ·", text)
+            self.assertIn("each test's outcome over its repeats, as the comparison records it", text)
+            for arm in cells.ARMS:
+                o = (per_area.get(ch) or {}).get(arm) or {}
+                if not o:
+                    continue
+                n_tests = sum(1 for sid in sids if self.runobj.arm_lines(sid, arm))
+                self.assertEqual(sum(v for k, v in o.items() if k != "total"), n_tests, (ch, arm, o))
+                self.assertEqual(o["total"], n_tests, (ch, arm))
+        # the declared exclusions in both units (READ-006)
+        self.assertEqual(values["declared_exclusions_clause"], "no exclusion")
+        dec = _Stub(declared={"_file": "d.json", "declared_version": 1,
+                              "exclusions": [{"scenario": "A", "arms": ["mcp"]}, {"scenario": "B", "arms": ["mcp", "direct-local"]},
+                                             {"scenario": "C", "arms": ["direct-local"], "repeats": [1]}],
+                              "not_required": [], "relations_excluded": []})
+        counts = sections.declared_counts(dec)
+        self.assertEqual((counts["exclusions"], counts["exclusion_pairs"], counts["exclusion_repeat_only_pairs"]), (3, 4, 1))
+        self.assertEqual(counts["exclusions_clause"], "3 exclusions (4 scenario-arm pairs, 1 of them for repeat 1 only)")
+        self.assertIn("{declared_exclusions_clause}", " ".join(self.overview["sections"]["provenance"]["exemptions"]))
+        self.assertNotIn("{n_declared_exclusions} scenario-arm pairs", " ".join(self.overview["sections"]["provenance"]["exemptions"]))
+        # the findings by what the check read, and the verdict's reason in the document's words (READ-003)
+        self.assertEqual(values["finding_kinds_text"], "none")
+        self.assertEqual(values["verdict_text"], self.runobj.verdict)  # no FINDINGS verdict here: report.py's line
+        perturbed = reader.Run(self.budget_dirs["perturbed"])
+        self.assertEqual(sections.finding_kinds(perturbed), {"late_503": 1, "over_200": 0, "other": 0})
+        self.assertEqual(sections.finding_kinds_text(perturbed),
+                         "1 late 503 deadline (no results carried; beyond the suite's tolerance on the client's clock)")
+        # the perturbed fixture's own verdict is INCOMPLETE (an interrupted access path): report.py's line as it is
+        self.assertEqual(sections.doc_verdict_text(perturbed), perturbed.verdict)
+        findings_run = _Stub(verdict="FINDINGS (1 execution(s) where the host broke a stated bound without failing the "
+                                     "request; no failure, no disagreement); 2 inconclusive execution(s) (not counted as pass)",
+                             order=perturbed.order, arm_lines=perturbed.arm_lines)
+        doc_verdict = sections.doc_verdict_text(findings_run)
+        self.assertEqual(doc_verdict, "FINDINGS (1 execution(s) with a finding, a stated bound broken on the clock the "
+                                      "check reads: 1 late 503 deadline (no results carried; beyond the suite's tolerance "
+                                      "on the client's clock); no failure, no disagreement); 2 inconclusive execution(s) "
+                                      "(not counted as pass)")
+        self.assertNotIn("without failing the request", doc_verdict)
+        pctx = self.ctx(run=perturbed, units=units_mod.resolve(perturbed.manifest, self.budget_mappings["perturbed"]))
+        self.assertIn(latex.esc(perturbed.verdict.split(" ", 1)[1], 400), sections.verdict_line(pctx))
+        self.assertEqual(pctx.placeholders()["verdict_text"], perturbed.verdict)
+        self.assertEqual(pctx.placeholders()["finding_kinds_text"], sections.finding_kinds_text(perturbed))
+        self.assertNotIn("without failing the request", json.dumps(self.overview) + json.dumps(self.glossary) + json.dumps(self.closing))
         self.assertEqual(sections.relation_example_text(self.runobj, "subset"), "none in this run")
         rel_run = _Stub(relations=[{"id": "REL-subset-0001", "type": "subset", "a": "A", "b": "B", "title": "every A among B."}])
         self.assertEqual(sections.relation_example_text(rel_run, "subset"), "REL-subset-0001 (A ⊆ B: every A among B)")
@@ -3820,9 +3915,9 @@ class ReadabilityReviewTest(unittest.TestCase):
             self.assertIn("passed it on some access path", table)
             self.assertIn("no access path showed", table)
         self.assertIn("\\bline{standing}{tests ·", text)
-        self.assertIn("\\bline{outcomes}{executions ·", text)
+        self.assertIn("\\bline{outcomes}{tests ·", text)
         self.assertIn("\\bline{agreement}{test pairs ·", text)
-        self.assertIn("\\bline{reading}{standing counts tests", text)
+        self.assertIn("\\bline{reading}{standing and outcomes both count tests", text)
         index = sections.exception_index(ctx, "R")
         self.assertIn("by what each exception means", index)
         self.assertIn("\\textbf{a measured operational finding}", index)
@@ -3836,6 +3931,22 @@ class ReadabilityReviewTest(unittest.TestCase):
         st2 = cells.scenario_states(run, "R-002")
         self.assertIn("finding", sections.exception_groups_of(st2))
         self.assertIn("unverified", sections.exception_groups_of(st2))
+        # a finding execution alone: under the property not shown too when its property checks passed nothing
+        # (READ-111: a late 503 carried no answer), with the run's is_property; not without it, not when one passed
+        only = dict((arm, cells.ArmState(arm)) for arm in cells.ARMS)
+        only["direct-local"].present = True
+        only["direct-local"].worst = "finding"
+        only["direct-local"].lines = [{"outcome": "finding", "checks": [{"check": "budget_respected", "outcome": "finding"},
+                                                                      {"check": "resolve_runs", "outcome": "inconclusive"}]}]
+        is_prop = lambda name: name == "resolve_runs"
+        self.assertEqual(sections.exception_groups_of(only), ["finding"])
+        self.assertEqual(sections.exception_groups_of(only, is_prop), ["finding", "unverified"])
+        only["direct-local"].lines[0]["checks"][1]["outcome"] = "pass"
+        self.assertEqual(sections.exception_groups_of(only, is_prop), ["finding"])
+        finding_gap = dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["finding"]
+        self.assertIn("which carried no answer", finding_gap)
+        self.assertNotIn("while the request was answered", finding_gap)
+        self.assertIn("a late 503 deadline that is a finding", dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["unverified"])
         # the detail block: requested, observed, unverified first, then the technical record; the artifacts keyed once
         block = blocks.detail_block(self.runobj, "R-001", st, 1, self.units, property_text="the claim in words")
         self.assertIn("\\bline{requested}{the claim in words}", block)
@@ -3843,6 +3954,7 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("DISAGREES with the reference access path", block)
         self.assertIn("\\bline{unverified}{", block)
         self.assertLess(block.find("\\bline{unverified}"), block.find("the technical record"))
+        self.assertIn("\n\\par\\noindent{\\color{black!60}\\small\\itshape the technical record", block)
         self.assertLess(block.find("the technical record"), block.find("\\bline{expected}"))
         self.assertIn("path / repeat & final outcome", block)
         self.assertIn("arms/\\allowbreak{}<access path>/\\allowbreak{}raw/\\allowbreak{}R-\\allowbreak{}001.\\allowbreak{}<access path>.\\allowbreak{}<repeat>.\\allowbreak{}json.\\allowbreak{}gz", block)
@@ -3877,10 +3989,19 @@ class ReadabilityReviewTest(unittest.TestCase):
         table = entry["decision_table"]
         self.assertEqual(table["columns"], ["the answer", "the clock read", "the threshold", "the outcome"])
         outcomes = " ".join(r[3] for r in table["rows"])
-        for word in ("pass when within it; finding when past it", "fail: the one failure of this check",
+        for word in ("pass when within it; finding when past it", "fail: the one failure of the check's own rule",
                      "inconclusive (allowed", "finding: a late deadline answer", "a seed phase longer than the budget is a performance fact"):
             self.assertIn(word, outcomes)
         self.assertIn("not a proof that the delay was the server's computation", entry["asserts"])
+        self.assertIn("the one failure of the check's own rule (a missing `timing.elapsed_ms` or `limits` field on a direct "
+                      "access path fails by the common rule", entry["fails"])
+        self.assertNotIn("the one failure the check can give", entry["fails"])
+        # the budget-scope table states the clock's start and keeps outside the clock apart from on it (READ-015)
+        self.assertIn("which starts when the seed's work starts (its seed phase counts against the budget)", rows[2]["clock"])
+        self.assertTrue(rows[2]["not_covered"].startswith("outside its clock: "), rows[2]["not_covered"])
+        self.assertIn("On the clock but never stopped by it: the seed phase", rows[2]["not_covered"])
+        self.assertTrue(rows[0]["not_covered"].startswith("outside its clock: "), rows[0]["not_covered"])
+        self.assertIn("On the clock but never interrupted by it", rows[0]["not_covered"])
         rendered = sections._catalogue_entry(ctx, "budget_respected", entry, "chapters R", True)
         self.assertIn("the answer & the clock read & the threshold & the outcome", rendered)
         self.assertIn("the ruling, case by case", rendered)
@@ -3952,9 +4073,35 @@ class ReadabilityReviewTest(unittest.TestCase):
         """READ-019, READ-024, READ-025: the exemption kinds and each entry's consequence, the later-version note, and
         appendix C's lead with the relation examples."""
         import sections
-        self.assertIn("not required on mcp; its recorded outcome stands", sections.exemption_consequence(
-            "exclusions", {"scenario": "A", "arms": ["mcp"]}))
-        self.assertIn("(repeat 1)", sections.exemption_consequence("exclusions", {"scenario": "A", "arms": ["direct-local"], "repeats": [1]}))
+        self.assertIn("not required on mcp; the exemption shows nothing: the recorded outcomes there stand",
+                      sections.exemption_consequence("exclusions", {"scenario": "A", "arms": ["mcp"]}))
+        self.assertIn("(repeat 1; the other repeats stay required)", sections.exemption_consequence(
+            "exclusions", {"scenario": "A", "arms": ["direct-local"], "repeats": [1]}))
+        # read from the record (READ-025): what the exempted executions passed stays shown, what they did not stays
+        # unproven; a refusal has no property check; the perturbed fixture's R-002 (a late 503 on direct-local)
+        run = reader.Run(self.budget_dirs["perturbed"])
+        text = sections.exemption_consequence("exclusions", {"scenario": "R-002", "arms": ["direct-local"]}, run)
+        self.assertTrue(text.startswith("not required on direct-local; the exemption shows nothing: the recorded outcome "
+                                        "there stands (dl r0 finding); "), text)
+        self.assertIn("not shown there by this run", text)
+        self.assertNotIn("passed there", text)
+        props = [c["check"] for l in run.arm_lines("R-002", "direct-local") for c in l["checks"] if run.is_property(c["check"])]
+        self.assertTrue(props)
+        for name in props:
+            self.assertIn(name, text)
+        passed = sections.exemption_consequence("exclusions", {"scenario": "P-001", "arms": ["mcp"]}, self.runobj)
+        self.assertIn("passed there and stay", passed)
+        self.assertNotIn("not shown there", passed)
+        outcomes, shown, not_shown, partly = sections.exempted_evidence(self.runobj, {"scenario": "P-001", "arms": ["mcp"]})
+        self.assertEqual(len(outcomes), len(self.runobj.arm_lines("P-001", "mcp")))
+        self.assertTrue(shown and not not_shown and not partly, (shown, not_shown, partly))
+        status_only = _Stub(arm_lines=lambda sid, arm: [{"repeat": 0, "outcome": "pass",
+                                                         "checks": [{"check": "status", "outcome": "pass"}]}],
+                            is_property=lambda name: name != "status")
+        refusal = sections.exemption_consequence("exclusions", {"scenario": "E-1", "arms": ["direct-local"]}, status_only)
+        self.assertIn("(dl r0 pass); no property check there: the status, code and text are the claim", refusal)
+        self.assertIn("(no execution recorded there)", sections.exemption_consequence(
+            "exclusions", {"scenario": "P-002", "arms": ["nowhere"]}, self.runobj))
         self.assertIn("the check walk_in_record is not required on mcp; the scenario's other checks stay required there",
                       sections.exemption_consequence("not_required", {"scenario": "A", "arms": ["mcp"], "check": "walk_in_record"}))
         self.assertIn("the relation is not required on direct-local", sections.exemption_consequence(
@@ -3971,6 +4118,8 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("kind & scenario or relation & access paths & what it changes for this gate & the owner's reason", text)
         self.assertIn("The declared file holds three kinds of entry", text)
         self.assertIn("An exemption changes what the gate requires, not what the run observed", text)
+        self.assertIn("what its exempted executions showed stays shown", text)
+        self.assertNotIn("remains unproven on that access path by this run", text)
         self.assertIn("A reason that names a later manifest version describes a plan", text)
         self.assertIn("exclusions & \\texttt{P-\\allowbreak{}001} & mcp & not required on mcp", text)
         lead = sections.appendix_lead(ctx, "appendix_C")
@@ -4141,9 +4290,34 @@ class ChapterRTReadabilityTest(unittest.TestCase):
                                    "not_compared": ["walk_in_record"]}})
         classes = blocks._classes_text(run, "T-1", {})
         self.assertEqual(classes[1], "mcp: the two access paths agree on the checks both evaluated, but walk\\_in\\_record "
-                                     "was not compared (not a pass on both): the agreement does not establish that property "
-                                     "(class agree, 8 check(s) compared; partially checked, not a pass on both access paths "
-                                     "on r0 and r1 (not compared: walk\\_in\\_record))")
+                                     "was not compared on any repeat (not decided on both access paths): the agreement does "
+                                     "not establish that property (class agree, 8 check(s) compared; partially checked, not a "
+                                     "pass on both access paths on r0 and r1 (not compared: walk\\_in\\_record))")
+        # a check one repeat left undecided while the other decided it on both: established on that repeat alone
+        # (the verification of 2026-10-16, chapters issue 3: T-walk-0004's MCP r1 passed walk_in_record)
+        run.depth = {"T-1": {"class": "partial_non_pass", "repeats_compared": [0, 1], "not_compared": [],
+                             "partly_compared": {"walk_in_record": {"compared": [1], "skipped": [0]}}}}
+        self.assertEqual(blocks.agreement_gap_text(run.depth["T-1"]),
+                         "the two access paths agree on the checks both evaluated, but walk_in_record was not compared on r0 "
+                         "(left undecided there) and decided alike on both access paths on r1: the agreement establishes "
+                         "that property on r1 alone")
+        self.assertEqual(blocks.depth_text(run.depth["T-1"]), "partially checked, not a pass on both access paths on r0 and "
+                                                              "r1 (not compared on r0: walk_in_record (compared on r1))")
+        self.assertIn("establishes that property on r1 alone", blocks._classes_text(run, "T-1", {})[1])
+        # report.agreement_depth tells the two apart: no repeat compared against some repeat compared
+        is_prop = lambda name: name == "walk_in_record"
+        comp = {"scenarios": {"T-1": {"mcp_agreement": {"class": "agree", "reference": "direct-local",
+                                                        "mcp_outcome": "inconclusive", "reference_outcome": "pass"}}}}
+        rows = [{"scenario": "T-1", "arm": "direct-local", "repeat": 0, "checks": [{"check": "walk_in_record", "outcome": "pass"}]},
+                {"scenario": "T-1", "arm": "mcp", "repeat": 0, "checks": [{"check": "walk_in_record", "outcome": "inconclusive"}]},
+                {"scenario": "T-1", "arm": "mcp", "repeat": 1, "checks": [{"check": "walk_in_record", "outcome": "pass"}]}]
+        depth = report.agreement_depth(comp, rows, is_prop)["T-1"]
+        self.assertEqual(depth["class"], "partial_non_pass")
+        self.assertEqual(depth["not_compared"], [])
+        self.assertEqual(depth["partly_compared"], {"walk_in_record": {"compared": [1], "skipped": [0]}})
+        rows[2]["checks"][0]["outcome"] = "inconclusive"
+        depth = report.agreement_depth(comp, rows, is_prop)["T-1"]
+        self.assertEqual((depth["class"], depth["not_compared"], depth["partly_compared"]), ("generic_only", ["walk_in_record"], {}))
         run.depth = {"T-1": {"class": "full", "repeats_compared": [0, 1]}}
         self.assertEqual(blocks._classes_text(run, "T-1", {})[1], "mcp: agree; 8 check(s) compared; fully checked on r0 and r1")
         self.assertEqual(blocks.agreement_gap_text({"class": "generic_only"}),
@@ -4163,11 +4337,29 @@ class ChapterRTReadabilityTest(unittest.TestCase):
                               "families": {"P-pos": {"title": "t", "prose": "p", "claim": "c"},
                                            "P-edge": {"title": "t", "prose": "p", "claim": "c"}}, "units": {}}})
         levels = sections.agreement_levels_text(ctx, "P")
-        self.assertIn("at three levels: identical answers (the direct pair's digests), the same outcomes of the checks "
-                      "both access paths evaluated (mcp: agree), and every property check evaluated on both (fully "
-                      "checked); an agreement of the checks that ran alone is no verification of the requested property",
-                      levels)
-        self.assertIn("at three levels", sections.summary_reading_text(ctx, "P"))
+        self.assertIn("(its three levels, identical answers, the same check outcomes, every property check compared on "
+                      "both: I.3)", levels)
+        self.assertNotIn("which verifies no property", levels)  # the clause is the count's, printed only with a count
+        self.assertIn("its three levels", sections.summary_reading_text(ctx, "P"))
+        # I.3 carries the one explanation of the three levels and of what an agreement short of fully checked means
+        overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json"))
+        depth_par = overview["sections"]["reading"]["paragraphs"][3]
+        self.assertIn("an agreement on the generic checks or a refusal alone verifies no property", depth_par)
+        self.assertIn("establishes that check on the repeats where both access paths decided it alike", depth_par)
+        self.assertIn("one of three things: identical answers (the direct pair's digests)", depth_par)
+        # the chapter's agreements short of fully checked by what they compared (facts._mcp_agree_short)
+        short = facts._mcp_agree_short(_Stub(comp_entry=lambda sid: {"mcp_agreement": {"class": "agree"}},
+                                             depth={"a": {"class": "generic_only"}, "b": {"class": "refusal"},
+                                                    "c": {"class": "partial"}, "d": {"class": "partial_non_pass"},
+                                                    "e": {"class": "full"}, "f": {"class": "on_failure"}}),
+                                       ["a", "b", "c", "d", "e", "f"])
+        self.assertEqual((short["n_mcp_agree_generic"], short["n_mcp_agree_partial_checked"], short["n_mcp_agree_on_failure"]), (2, 2, 1))
+        self.assertEqual(short["mcp_agree_short_text"],
+                         "2 on the generic checks or a refusal alone, which verifies no property, 2 with some property check "
+                         "compared and agreeing on both access paths and another not compared on some repeat (the detail "
+                         "block names which) and 1 with every property check compared on a failing answer")
+        self.assertEqual(facts._mcp_agree_short(_Stub(comp_entry=lambda sid: {"mcp_agreement": {"class": "agree"}},
+                                                      depth={"e": {"class": "full"}}), ["e"])["mcp_agree_short_text"], "")
         for name, data in (("R.json", self.R), ("T.json", self.T)):
             for path, text in prose_strings(data):
                 for m in re.finditer(r"\\barms?\\b", text):
@@ -4367,9 +4559,35 @@ class ChapterPLXTest(unittest.TestCase):
             data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))
             summary = " ".join(_prose_texts(data.get("summary")))
             self.assertIn("on the checks both access paths evaluated[[mcp_all_full ?", summary, ch)
-            self.assertIn("{n_mcp_agree_partial} on the checks that ran alone, which verifies no property", summary, ch)
+            self.assertIn("{mcp_agree_short_text}", summary, ch)
+            self.assertNotIn("which verifies no property", summary, ch)
+            self.assertNotIn("for instance a walk its budget stopped on both sides", summary, ch)
         self.assertIn("(SPEC-pattern-search section 23.2)", " ".join(_prose_texts(sc.read_json(
             os.path.join(PROSE_DIR, "C.json"))["intro"])))
+        # the second round's local corrections (READ-212, READ-106, READ-206): synonymous codons, the junction
+        # oracle's qualifier at the chapter's opening, the 0-based N positions said so
+        X = sc.read_json(os.path.join(PROSE_DIR, "X.json"))
+        self.assertIn("differ only by synonymous codons match the same peptide", X["intro"][0])
+        self.assertNotIn("third codon positions", X["intro"][0])
+        R = sc.read_json(os.path.join(PROSE_DIR, "R.json"))
+        self.assertIn("junctions must end where the reference records say (under the one stated assumption about the "
+                      "column's other records", " ".join(R["purpose"]))
+        P = sc.read_json(os.path.join(PROSE_DIR, "P.json"))
+        self.assertIn("positions 10 to 12 (counted from 0", P["families"]["P-iupac"]["prose"])
+        # appendix A's traversal checks write the direction as traversal arm (READ-008): a bare arm is the request's
+        # own field in a code span, or the SPEC's section title quoted
+        checks = sc.read_json(os.path.join(PROSE_DIR, "checks.json"))
+        allowed_before = ("traversal ", "access-path ", "access ", "`")
+        for path, text in prose_strings(checks):
+            for m in re.finditer(r"\b[Aa]n? arms?\b|\barms?\b", text):
+                before = text[max(0, m.start() - 12):m.start()]
+                word = m.group(0)
+                ok = (any(before.endswith(a) for a in allowed_before) or word.startswith(("a ", "an ", "A ", "An ")) and False
+                      or text[m.start():m.end() + 10].startswith("arms and steps") or text[m.start() - 1:m.start()] == "`")
+                if word in ("arm", "arms", "An arm", "A arm", "an arm", "a arm") and not ok:
+                    # a bare direction word: only the SPEC's title "(arms and steps" may stay
+                    self.assertTrue(text[m.start():].startswith("arms and steps"), "checks.json%s: a bare arm in %r" % (
+                        path, text[max(0, m.start() - 50):m.end() + 30]))
 
 
 
@@ -4596,6 +4814,23 @@ class ChapterMQCNDTest(unittest.TestCase):
         self.assertIn("test no amplicon", N["families"]["N-usecase"]["prose"])
         self.assertTrue(N["units"]["N-usecase-defect"]["property"].startswith("Diagnostic pin of a known index defect"))
         self.assertIn("a failure signals the repair, not a regression", N["units"]["N-usecase-defect"]["note"])
+        # the gate relation stated from the policy, never left as a condition for the reader (READ-318)
+        note = N["units"]["N-usecase-defect"]["note"]
+        self.assertNotIn("Where the gate's selection includes this scenario", note)
+        selected = facts.fill(note, {"gate_judged": True, "x": {"N-usecase-0014": {"gate_selected": True}}})
+        self.assertIn("The gate's policy selects this scenario", selected)
+        self.assertIn("would count as an observed violation until the expectation is revised", selected)
+        self.assertIn("The gate's policy does not select this scenario", facts.fill(note, {"gate_judged": True, "x": {"N-usecase-0014": {"gate_selected": False}}}))
+        self.assertIn("The deploy gate was not judged for this run", facts.fill(note, {"gate_judged": False, "x": {"N-usecase-0014": {"gate_selected": False}}}))
+        # N's version note pointer reads right on either manifest (READ-313)
+        self.assertIn("says how this version differs from version 4", facts.fill(N["intro"][0], {"manifest_version": 5}))
+        self.assertIn("says what a later version changes in this chapter", facts.fill(N["intro"][0], {"manifest_version": 4}))
+        self.assertNotIn("later version", facts.fill(N["intro"][0], {"manifest_version": 5}))
+        # M cites the SPEC's step counts without a causal paraphrase (READ-301)
+        self.assertNotIn("where the budget binds first", M["summary"][0])
+        self.assertIn("section 21.10 states the work per allowance (about 700, 14,000 and 200,000 steps at 1, 2 and 3 "
+                      "substitutions on refseq33m", M["summary"][0])
+        self.assertIn("does not isolate the allowance's share", M["summary"][0])
         self.assertIn("The evidence gaps.", N["summary"][0])
         self.assertNotIn("{time_limited_text}", N["summary"][0])  # counts, not the id lists (READ-312)
         self.assertNotIn("{late503_text}", N["summary"][0])

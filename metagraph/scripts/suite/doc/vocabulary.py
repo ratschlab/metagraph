@@ -3,8 +3,10 @@ READ-007, READ-008): the three layers an outcome has, each with its words, defin
 the reading guide's legend (I.3), appendix F's tables and the glossary's entries (appendix D, through the `vocab`
 placeholders), so that the three cannot drift. The definitions follow checks.evaluate (the check items),
 suite_common.outcome_from_checks, the runners and reevaluate._outcome_of (the execution outcome), cells.arm_state
-(the displayed standing) and compare.py (the classes); where the layers differ (a raised check: a check item `fail`,
-an execution `error` on a direct access path and `fail` via MCP), the difference is stated, not smoothed over.
+(the displayed standing) and compare.py (the classes); where the layers differ, the difference is stated, not
+smoothed over: a check that raises inside the evaluation is a failing item (checks.evaluate catches it), so the
+execution reads `fail` on every access path; only where the evaluation itself raised is the execution recorded
+`error` on a direct access path and `fail` via MCP (run_direct.py, reevaluate.py).
 
 Every text is plain prose (escaped by the renderer); `code` marks a code span for latex.inline.
 """
@@ -24,7 +26,9 @@ CHECK_OUTCOMES = (
              "that raised is recorded as a failing item stating why, never a silent pass"),
     ("inconclusive", "the check could not test its claim on this answer (an allowed 503 deadline, a list a stated "
                      "hiding shortened, a walk a stated limit stopped first, nothing to compare)"),
-    ("finding", "a stated timing bound or SPEC promise was broken although the request was answered"),
+    ("finding", "a stated bound was broken on the clock the check reads: a 200 past its budget (the host's own "
+                "elapsed time), a 503 deadline more than max(1 s, the budget) late (the client's clock: the suite's "
+                "tolerance), a walk stopped early or run past its pieces; whatever the HTTP status"),
     ("not_exposed", "the MCP answer lacks the field the check reads: recorded, neither passed nor failed, and not "
                     "compared (on a direct access path a missing field is a failure, the field being part of the "
                     "contract)"),
@@ -44,19 +48,22 @@ EXECUTION_OUTCOMES = (
      "meaning": "a check failed (its claim did not hold, a required field was missing on a direct access path, a "
                 "stated stop or hiding could not have happened, or a check could not run as a check)",
      "consequence": "a functional failure: the verdict is FAIL and the gate fails"},
-    {"key": "error", "legend": 'no HTTP answer (a transport failure, a client time-out, an undecodable body); a check that raised on a direct access path; a recorded outcome outside the vocabulary',
+    {"key": "error", "legend": 'no HTTP answer (a transport failure, a client time-out, an undecodable body); the evaluation itself (checks.evaluate) raised on a direct access path; a recorded outcome outside the vocabulary',
      "glyph": "\\gerr", "word": "error", "decided": "by the runner, without the checks",
-     "meaning": "no HTTP answer to check: a transport failure, a client time-out or an undecodable body; a check "
-                "function that raised on a direct access path is recorded as an error of that execution too (via "
-                "MCP the same line reads fail); an outcome a runner recorded outside this vocabulary is read as an "
-                "error with the recorded word kept",
+     "meaning": "no HTTP answer to check: a transport failure, a client time-out or an undecodable body; where the "
+                "evaluation itself (checks.evaluate) raised on a direct access path the execution is recorded as an "
+                "error too (via MCP the same line reads fail), while a single check that raises inside the evaluation "
+                "is a failing item, so that execution reads fail on every access path; an outcome a runner recorded "
+                "outside this vocabulary is read as an error with the recorded word kept",
      "consequence": "counted with the failures"},
-    {"key": "finding", "legend": 'a stated timing bound or SPEC promise broken while the request was answered (a 200 past its budget, an allowed 503 deadline more than max(1 s, the budget) late, a walk stopped early or run past its pieces): apart from fail, whatever the HTTP status',
+    {"key": "finding", "legend": "a stated bound broken on the clock the check reads (a 200 past its budget by the host's own elapsed time; an allowed 503 deadline more than max(1 s, the budget) late on the client's clock, the suite's tolerance; a walk stopped early or run past its pieces): apart from fail, whatever the HTTP status",
      "glyph": "\\gfind", "word": "finding", "decided": "by the checks",
-     "meaning": "a stated timing bound or SPEC promise was broken while the request was answered: a 200 past its "
-                "budget, an allowed 503 deadline more than max(1 s, the budget) late, a walk stopped before its budget "
-                "or run past it beyond its pieces. The HTTP status may be a 503 that carried no results: finding is "
-                "the suite's category for a resource-budget breach, apart from the functional-check failures",
+     "meaning": "a stated bound was broken on the clock the check reads: a 200 past its budget (the host's own "
+                "elapsed time), an allowed 503 deadline more than max(1 s, the budget) late (the client's clock: the "
+                "suite's tolerance for a deadline answer, not a proof of where the time went), a walk stopped before "
+                "its budget or run past it beyond its pieces. The HTTP status may be a 503 that carried no results: "
+                "finding is the suite's category for a resource-budget breach, apart from the functional-check "
+                "failures",
      "consequence": "the verdict reads FINDINGS; on a gated access path it fails the gate"},
     {"key": "inconclusive", "legend": 'the answer could not show the property (an allowed 503 deadline without results, a shortened list, a walk a stated limit stopped, a stop that did not happen, nothing to compare, no field exposed via MCP, a host state): never a pass, never a failure',
      "glyph": "\\ginc", "word": "inconclusive", "decided": "by the checks",
@@ -88,7 +95,9 @@ EXECUTION_OUTCOMES = (
 STANDING = ("The glyph of a cell is the test's standing on that access path: the worst execution outcome over its "
             "repeats (repeats that differ carry the mark m), except that on the MCP path the agreement class takes "
             "the outcome's place where the service decided the call (not exercised via MCP, service-side by design). "
-            "A standing count counts tests; an outcome count counts executions.")
+            "A standing count counts tests. I.4's outcome table counts executions; a chapter's outcomes row counts "
+            "tests too, each test's outcome over its repeats as the comparison records it (the common outcome, else "
+            "the worst of error, fail, finding and inconclusive; mixed where the repeats differ otherwise).")
 
 DIRECT_CLASSES = (
     ("identical", "equal answers (the same digest)"),
@@ -136,6 +145,11 @@ def outcome_table_rows():
     return [(e["key"], e["decided"], e["meaning"], e["consequence"]) for e in EXECUTION_OUTCOMES]
 
 
+def _sentence(text):
+    """A clause as a sentence: its first letter capitalised (the glossary joins a meaning and a consequence)."""
+    return text[:1].upper() + text[1:] if text else text
+
+
 def glossary_texts():
     """The glossary's shared definitions (appendix D), plain text, filled through the `vocab` placeholders."""
     outcomes = "; ".join("%s (%s)" % (e["word"], e["decided"]) for e in EXECUTION_OUTCOMES)
@@ -146,10 +160,10 @@ def glossary_texts():
         "execution_outcome": "From the check items by precedence fail, finding, inconclusive, pass; inconclusive also "
                              "when no check could test anything. Decided without the checks: error, not implemented "
                              "via MCP, service-side by design. The seven outcomes: " + outcomes + ".",
-        "error": execution_outcome("error")["meaning"] + ". " + execution_outcome("error")["consequence"] + ".",
-        "finding": execution_outcome("finding")["meaning"] + ". " + execution_outcome("finding")["consequence"] + ".",
+        "error": execution_outcome("error")["meaning"] + ". " + _sentence(execution_outcome("error")["consequence"]) + ".",
+        "finding": execution_outcome("finding")["meaning"] + ". " + _sentence(execution_outcome("finding")["consequence"]) + ".",
         "inconclusive": execution_outcome("inconclusive")["meaning"] + ". "
-                        + execution_outcome("inconclusive")["consequence"] + ".",
+                        + _sentence(execution_outcome("inconclusive")["consequence"]) + ".",
         "pass": execution_outcome("pass")["meaning"] + ".",
         "standing": STANDING,
         "classifications": CLASSIFICATIONS,

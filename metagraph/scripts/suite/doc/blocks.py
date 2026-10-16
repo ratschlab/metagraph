@@ -809,18 +809,43 @@ def facts_join(items):
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def partly_compared_items(depth):
+    """[(check, skipped repeats, compared repeats)] of an agreement's property checks one repeat compared and
+    another skipped (report.agreement_depth `partly_compared`), in check order."""
+    out = []
+    for name, v in sorted((depth.get("partly_compared") or {}).items()):
+        if isinstance(v, dict):
+            out.append((str(name), list(v.get("skipped") or []), list(v.get("compared") or [])))
+    return out
+
+
+def not_compared_text(depth):
+    """'not compared: a, b; not compared on r0: c (compared on r1)' for the depth's checks no repeat compared and
+    those a repeat skipped; '' when neither. Plain text."""
+    parts = []
+    nc = [str(c) for c in (depth.get("not_compared") or [])]
+    if nc:
+        parts.append("not compared: %s" % latex.cut_text(", ".join(nc), 120))
+    for name, skipped, compared in partly_compared_items(depth):
+        parts.append("not compared on %s: %s (compared on %s)" % (
+            _repeats_text(skipped), name, _repeats_text(compared) if compared else "no other repeat"))
+    return "; ".join(parts)
+
+
 def depth_text(depth):
     """An agreement's depth in words over the MCP repeats compare compared, the excluded repeats named with their
     reason (the owner's second review, point 2; reader.depth_over_compared_repeats): 'fully checked on r1; r0 was
     an inconclusive host-state outcome', 'fully checked on r0 and r1', 'partially checked on r0 (not compared:
-    resolve_runs)'. Plain text."""
+    resolve_runs)', 'partially checked, not a pass on both access paths on r0 and r1 (not compared on r0:
+    walk_in_record (compared on r1))'. Plain text."""
     cls = str(depth.get("class") or "")
     text = DEPTH_WORD.get(cls, cls.replace("_", " "))
     reps = depth.get("repeats_compared") or []
     if reps:
         text += " on " + _repeats_text(reps)
-    if depth.get("not_compared"):
-        text += " (not compared: %s)" % latex.cut_text(", ".join(str(c) for c in depth["not_compared"]), 120)
+    nct = not_compared_text(depth)
+    if nct:
+        text += " (%s)" % nct
     for e in depth.get("repeats_excluded") or []:
         if isinstance(e, dict):
             text += "; r%s was %s" % (e.get("repeat"), e.get("reason") or "left out of the comparison")
@@ -829,21 +854,31 @@ def depth_text(depth):
 
 def agreement_gap_text(depth):
     """What an MCP agreement short of fully checked leaves out, in the reader's terms (READ-110): the property
-    checks it did not compare (not a pass on both access paths, or evaluated on one side only), or that only the
-    generic checks were compared, or that both sides refused; plain text."""
+    checks no repeat compared (not decided on both access paths on any repeat: the agreement does not establish
+    them), the checks one repeat left undecided while another repeat decided them on both (the agreement
+    establishes them on that repeat alone; the readability review's verification of 2026-10-16, chapters issue 3),
+    or that only the generic checks were compared, or that both sides refused; plain text."""
     cls = str(depth.get("class") or "")
     nc = [str(c) for c in (depth.get("not_compared") or [])]
+    partly = partly_compared_items(depth)
     if cls == "refusal":
         return "the two access paths agree on a refusal (the status and the text are the claim; no property check)"
     if cls == "generic_only":
         return ("the two access paths agree on the generic checks alone; no property check was compared, so the "
                 "agreement establishes no property")
     head = "the two access paths agree on the checks both evaluated"
+    clauses = []
     if nc:
-        head += ", but %s %s not compared" % (latex.cut_text(", ".join(nc), 120), "was" if len(nc) == 1 else "were")
-        if cls == "partial_non_pass":
-            head += " (not a pass on both)"
-        head += ": the agreement does not establish %s" % ("that property" if len(nc) == 1 else "those properties")
+        clauses.append("%s %s not compared on any repeat (not decided on both access paths): the agreement does not "
+                       "establish %s" % (latex.cut_text(", ".join(nc), 120), "was" if len(nc) == 1 else "were",
+                                         "that property" if len(nc) == 1 else "those properties"))
+    for name, skipped, compared in partly:
+        clauses.append("%s was not compared on %s (left undecided there) and decided alike on both access paths on "
+                       "%s: the agreement establishes that property on %s alone" % (
+                           name, _repeats_text(skipped), _repeats_text(compared) if compared else "no repeat",
+                           _repeats_text(compared) if compared else "no repeat"))
+    if clauses:
+        head += ", but " + "; ".join(clauses)
     elif cls == "on_failure":
         head += ", on a failure"
     return head
@@ -1049,8 +1084,10 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     body.extend(interpretation(run, sid, states, property_text))
     if note:
         body.append(latex.bline("reading", inline(note)))
-    body.append("{\\color{black!60}\\small\\itshape the technical record (the wire-level expectation, the rows, the "
-                "checks and the artifacts):}")
+    # its own paragraph, so that the label does not run on at the end of the unverified line (READ-114; the
+    # readability review's verification of 2026-10-16, shared L10)
+    body.append("\\par\\noindent{\\color{black!60}\\small\\itshape the technical record (the wire-level expectation, "
+                "the rows, the checks and the artifacts):}")
     body.append(latex.bline("expected", expected_text(sc_, run.is_property)))
     adj = []
     for arm in cells.ARMS:
