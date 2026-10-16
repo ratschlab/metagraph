@@ -519,6 +519,26 @@ LAYOUT_KEY = {
 }
 
 
+def repeats_texts(n, mcp_cold_first=True):
+    """(the heading key, the legend) of a pairs table whose tests are repeated `n` times (chapter D; READ-321):
+    every repeat's wall is printed in execution order, so the key and the legend name the repeats r0 / r1 / ...,
+    say which MCP call was host-cold as the record has it (`mcp_cold_first`: repeat 0 cold, the later ones warm),
+    define the bracketed server time and the `be` line per execution, and tie = / ≠ to the normalised answer
+    digests of the repeats on that access path."""
+    reps = " / ".join("r%d" % i for i in range(n))
+    later = "r1" if n == 2 else ("r1 and r2" if n == 3 else "r1 to r%d" % (n - 1))
+    mcp = ("via MCP r0 is the host-cold call, %s the warm ones" % later) if mcp_cold_first else \
+        "via MCP the detail blocks state each call's host state"
+    key = "pairs · times: wall per repeat, %s (mcp: %s)" % (reps, ("r0 cold, %s warm" % later) if mcp_cold_first
+                                                             else "see the detail blocks")
+    legend = ("times: the wall time of each execution in execution order, %s (%s); [ ] the host's own server time "
+              "per execution, in the same order; be the host call as the service timed it, per execution (MCP "
+              "only); c a i on a direct time: host-cold, aged, warm after an interrupted execution; = and ≠: the "
+              "normalised answer digests of the repeats on that access path are equal / differ (the first repeat "
+              "is the baseline, a repeat a time budget limited is left out)" % (reps, mcp))
+    return key, legend
+
+
 def glyph_counts(states_list, arm):
     """`27 ● 1 ◐` for the states of several scenarios on an arm (LaTeX): each number bound to its glyph with a
     thin non-breaking space, a wider gap between the pairs; the glyph macro closed with {} so that the space

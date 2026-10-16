@@ -1020,7 +1020,8 @@ def interpretation(run, sid, states, property_text=None):
             latex.bline("unverified", unverified))
 
 
-def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=False, property_text=None):
+def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=False, property_text=None,
+                 title=None, note=None):
     """The LaTeX of one test's detail block (the owner's review, point 1 and the first of the four further
     changes; the readability review, READ-114): the interpretation first (requested, observed, unverified), then
     the technical part: the expected line; the adjudication where the rows do not carry it (a failure, an error, a
@@ -1030,9 +1031,12 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     host-state rule and the intermediate evaluation of an overridden execution; the non-passing checks grouped by
     reason; the texts once; the classes; the relations; the supporting artifacts, keyed once. `unit_note`: the
     unit's table carries the MCP reason, so the block only points at it; `property_text`: the unit's property line
-    (prose), the requested behaviour in the reader's words."""
+    (prose), the requested behaviour in the reader's words; `title`: a reader-facing title from the chapter prose
+    in place of the manifest's, where the manifest's promises more than the run's checks assert (READ-317);
+    `note`: a `reading` line after the interpretation, the chapter prose's explanation of this block (READ-319,
+    READ-320: what a budget governs beside a longer wall, repeatability apart from an unexposed property)."""
     sc_ = run.scenario(sid)
-    title = esc(sc_.get("title"), 200)
+    title = inline(title) if title else esc(sc_.get("title"), 200)
     meta = [esc(sc_.get("route") or "")]
     if sc_.get("timing_class"):
         meta.append(esc(sc_["timing_class"]))
@@ -1043,6 +1047,8 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
         meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
     body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
     body.extend(interpretation(run, sid, states, property_text))
+    if note:
+        body.append(latex.bline("reading", inline(note)))
     body.append("{\\color{black!60}\\small\\itshape the technical record (the wire-level expectation, the rows, the "
                 "checks and the artifacts):}")
     body.append(latex.bline("expected", expected_text(sc_, run.is_property)))
