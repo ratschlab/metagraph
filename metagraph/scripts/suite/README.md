@@ -3829,8 +3829,8 @@ answer):
 1. **The /pattern budget is 110,000 ms, not 120,000** (manifest_lib.PATTERN_TIME_BUDGET_MS): the public ingress at
    https://metagraph.ethz.ch:8080 cuts a request at ~120 s, and the staging service reaches the host through it (its
    own traversal cut setting is 110 s), so a 120 s search would end in the ingress's 504 on the MCP arm, which the
-   service retries past the runner's deadline (VERIFY-V6-2 H1). 449 /pattern requests and 429 MCP arguments name it;
-   the fast class's client timeout for them is 140 s. checks.ingress_cut_allowed keeps its constants: the cut
+   service retries past the runner's deadline (VERIFY-V6-2 H1). 449 /pattern requests and 427 MCP argument sets name
+   it (P-scope-0004 / -0006, marked at scenario level, send none); the fast class's client timeout for them is 140 s. checks.ingress_cut_allowed keeps its constants: the cut
    120,000 ms less the tolerance 10,000 ms covers the 110,000 ms budget inclusively, and the late-503 window (up to
    max(1 s, the budget) past it) reaches past the cut measured a tolerance late (test_builder_v6). On direct-remote
    only (the arm behind the ingress), its 504 is a time limitation where the checks and the comparison look for one
@@ -3840,22 +3840,30 @@ answer):
    gate/policy_v6_rtp_mcp.json, generated with the rt policy's inputs and the routes plus POST /pattern
    (`gate_policy.py manifest/suite_v6.json --name v6-rtp-mcp --arms mcp,direct-local --declared
    gate/declared_v6_rt.json --routes "POST /resolve,POST /traverse,GET /traverse/capabilities,POST /pattern" --out
-   gate/policy_v6_rtp_mcp.json`): 719 selected (478 /pattern), 92 excluded (budget_stress 33, manifest_not_implemented
+   gate/policy_v6_rtp_mcp.json`): 721 selected (480 /pattern), 94 excluded (budget_stress 35, manifest_not_implemented
    50, table_not_expressible 47, advanced_path 1, marks_cover_repeat 1), required on mcp 628 scenarios / 1,275
    executions, on direct-local 686 / 793, 19 relations. Its resolve / traverse part is gate/policy_v6_rt_mcp.json's,
    which still equals policy_v5_rt_mcp.json but for its pins (the deploy gate of today, unchanged).
-3. **Heavy /pattern scenarios.** Warm-ups (areas.PATTERN_WARM_UPS, P-warm-0001..0023, by the suite's mechanism:
-   `warms`, place_warm_ups, as R-warm for the walks) right before the 23 /pattern scenarios whose MCP cold call
+3. **Heavy /pattern scenarios.** Warm-ups (areas.PATTERN_WARM_UPS, P-warm-0001..0025, by the suite's mechanism:
+   `warms`, place_warm_ups, as R-warm for the walks) right before the 25 /pattern scenarios whose MCP cold call
    (repeat 0, which the paired loop runs first) ended in the host's 503 deadline relayed by the service or
-   time-limited in the v5 baseline while their warm MCP repeat or a direct arm completed (M-planted-0007/8/9/13..18,
-   M-protein-0001/3/4/5/6/7, N-nearmiss-0006/13/20/27/29/30/32, N-usecase-0008): each is its target's request,
-   timing_class long (direct-local only: it warms the host for the MCP's first call), with the generic checks, its
-   target's v5 figures in its truth, and tagged budget_stress (its cold run is by design). A selection that takes a
-   target takes its warm-up (an rtp gate run runs 19 of them). The warm repeat is by manifest index, so the 23
-   warm-ups would shift the deploy gate's warm repeats: build_manifest.keep_gate_warm_repeats moves free /pattern
-   scenarios of area N so that every scenario on the gate's routes keeps its v5 warm-repeat status, and
-   gate_warm_problems refuses a build that changes one (the 237 gate scenarios, their order and their required
-   executions are v5's). budget_stress (outside the gate, still run and reported; areas.PATTERN_BUDGET_STRESS with
+   time-limited in the v5 baseline (M-planted-0007/8/9/13..18, M-protein-0001..0007, N-nearmiss-0006/13/20/27/29/30/32,
+   N-usecase-0008, P-heavy-0001): each is its target's request, timing_class long (direct-local only: it warms the
+   host for the MCP's first call), with the generic checks, its target's v5 figures in its truth, and tagged
+   budget_stress (its cold run is by design). In 23 of them a later execution (the warm MCP repeat or a direct arm)
+   completed; M-protein-0002 and P-heavy-0001 completed none, warm runs included, and are budget_stress themselves
+   (P-warm-0024 / -0025, added by round 2's verification, L4: the owner's rule names every timed-out cold call; the
+   warm runs of P-heavy-0001 hit the budget too, so its warm-up may change nothing). A selection that takes a target
+   takes its warm-up (an rtp gate run runs 19 of them, 22 direct-local executions; the budget_stress targets' are not
+   selected). After a resume between a warm-up and its target, the warm-up runs again on direct-local right before
+   the target's first MCP step left (the resume rule's before_mcp, above). The warm repeat is by manifest index, so
+   the 25 warm-ups would shift the deploy gate's warm repeats: build_manifest.keep_gate_warm_repeats moves free
+   /pattern scenarios of area N, and P-twin-0001 (right after the R-twin block, which no free scenario of area R
+   precedes: R-twin-0005 would gain a warm repeat), so that every scenario on the gate's routes keeps its v5
+   warm-repeat status, and gate_warm_problems refuses a build that changes one (the 237 gate scenarios, their order
+   and their required executions are v5's). Outside the gates, against v5, the shift moves the direct warm repeat of
+   61 /pattern scenarios and of C-caps-0003 (GET /capabilities), and P-scope-0004 / -0006 lose their MCP warm repeat
+   by their scenario-level mark. budget_stress (outside the gate, still run and reported; areas.PATTERN_BUDGET_STRESS with
    each one's reason from the baseline): M-protein-0001, -0002, -0003, -0007, P-heavy-0001 and N-nearmiss-0030.
 4. **What the MCP cannot show is labelled by its true class at the narrowest scope.** Verified against the
    service's pattern_search answer, the runner's normaliser (scripts/bench/suite_mcp_normalise.py at 9d76035e) and
@@ -3866,29 +3874,42 @@ answer):
    (by_database[].predicate / .load_ms): the checks read them there on the MCP arm (checks.MCP_PATTERN_ENTRY_FIELDS;
    Q-pred-0011 / -0012, P-edge-0009), so no MCP runner change is needed. D-P-scope-0004's repeat 0 tests nothing via
    MCP (its other property check, deterministic, has no result on a first repeat): gate_policy's rule
-   marks_cover_repeat excludes that MCP repeat alone. A deliberate service behaviour is service-side by design:
-   REL-subset-0007 is set aside on mcp by a declared entry naming the table's case pattern.max_contexts_above_10000
-   (the service refuses P-modes-0004's max_contexts 10,001 at submit where the host clamps); it stays required on
-   direct-local.
+   marks_cover_repeat excludes that MCP repeat alone. entry_fields compares every field the answer carries before it
+   reports a missing one (round 2's verification, L3): P-scope-0001 / -0002's entries carry `scope` but not the
+   host's absence_scope, so `scope` is held on the MCP arm too, and a wrong carried field fails (a mark sets aside only
+   a check that reads not_exposed). The scenario-level marks keep the MCP arm from running P-scope-0004 / -0006, so
+   REL-subset-0002 / -0003 (suffix scope's contexts among any_offset's; via MCP in the v5 baseline they passed, 60 of
+   640 and 4 of 55) are required on direct-local only: keeping them on the MCP arm needs the MCP to run a fully marked
+   scenario whose executions the policy excludes, which the S8i rule refuses today (the owner's decision; L2 of the
+   verification). A deliberate service behaviour is service-side by design: REL-subset-0007 is set aside on mcp by a
+   declared entry naming the table's case pattern.max_contexts_above_10000 (the service refuses P-modes-0004's
+   max_contexts 10,001 at submit where the host clamps); it stays required on direct-local.
 5. **The report** marks "not implemented yet via MCP" red like times above 55 s (red means needs attention) wherever
    it counts or lists it with something in it, and the verdict gets a red attention line counting the TESTS per kind,
-   only the nonzero ones: failures, errors and findings first, then the time-budget issues (an execution hit its
-   budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; or took more than 55 s), then
-   what is not implemented via MCP (whole executions and property marks). Times quoted in a check's text and in the
-   gate's problems (whose table also gains each execution's wall) are marked too; every mark follows the printed
-   value.
+   only the nonzero ones: failures, errors and findings first, with the disagreements between the arms and the failed
+   relations (round 2's verification, L3 of the checks: they fail a run whose executions all pass, as the exact-count
+   rule can), then the time-budget issues (an execution hit its budget: a 503 deadline, a time-limited answer, a stop
+   by time, the ingress's cut; or took more than 55 s), then what is not implemented via MCP (whole executions and
+   property marks). Times quoted in a check's text and in the gate's problems (whose table also gains each
+   execution's wall) are marked too; every mark follows the printed value. The time-budget kind counts tests that
+   stop at their budget by design as well: the warm-ups' cold runs and the heavy budget_stress scenarios (the line
+   states how many of its tests are tagged budget_stress, still counting them) and the budget tests (P-caps-0004's
+   300 ms, R-budget-0001 / -0002, T-budget-0001), so it is not 0 on a healthy run; counting them apart or leaving them
+   out is the owner's decision (L5 of the manifest's verification, L4 of the checks').
 
 The checks fixes the readiness study asked for, each with a test that fails on the code before it: on the MCP arm a
 /pattern time stop is held to the work time by the entries' own timing (their elapsed_ms and the reads beside the
 search, never the parts of a search), an answer without any timing reads inconclusive, never pass (MCP-T); a stop
 codon never substitutes a residue, and X and * hold none (SD-012, SPEC §21.3); after a sticky budget stop every later
 pattern states the same stop, unknown counts and zero work (SD-013's class, SPEC §7.6); an exact /pattern count that
-differs between two access paths is a disagreement (compare.exact_count_differences; GPT's "doubled count"); the
-ingress's 504 as above; and a direct pair that both state a time limitation (P-heavy-0001) differs by timing, not as
+differs between two access paths is a disagreement (compare.exact_count_differences; GPT's "doubled count"), stated
+with its paths and values in both Agreement tables, and blamed on the odd arm (compare.exact_count_side: the MCP only
+when its count is one no other arm states while two others agree, a direct arm when the MCP states another direct
+arm's value, undetermined with two arms alone; round 2's verification, M1 and L2); the ingress's 504 as above; and a direct pair that both state a time limitation (P-heavy-0001) differs by timing, not as
 a disagreement.
 
-The manifests: manifest/suite_v6.json 723 scenarios (v5's 700 + the 23 warm-ups), 765 executions per arm, content
-935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85, relations 39660cfa... (v5's); suite_smoke_v6.json
+The manifests: manifest/suite_v6.json 725 scenarios (v5's 700 + the 25 warm-ups), 767 executions per arm, content
+49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1, relations 39660cfa... (v5's); suite_smoke_v6.json
 content ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd. The frozen v5 files are untouched.
 
 #### Validation (offline; no host was contacted; the run directory was only read)
@@ -3906,3 +3927,11 @@ content ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd. The fr
   attempt with two failing; the new ones: the per-entry fields, the warm-ups and keep_gate_warm_repeats, the rtp
   policy, marks_cover_repeat, the report's attention marks and the gate table's wall). Each checks fix's test fails
   on afb46ec11's code. The v6 build is deterministic (test_frozen_v6_is_what_the_builder_makes).
+- Round 2's verification fixes (2026-10-16; the Opus verifiers' round2/verify-checks and round2/verify-manifest;
+  evidence in round2/fix): the v5 baseline re-evaluated with this tree's code changes no check outcome or detail of
+  its 2,989 executions and no comparison entry against the verified b90cfa738 (the rt gate passes, 689 / 635); the
+  dry /pattern gate gives the same 31 problems; a probe with doubled exact counts (P-exact-0003 MCP, -0005
+  direct-remote, -0006 direct-local) adds exactly three MCP disagreements, side mcp for -0003 and side direct for the
+  others, with their counts in both Agreement tables and the attention line; two v6 builds are byte-identical; the
+  rt gate's 729 executions and policy_v6_rt_mcp.json (v5's but for its pins) do not move. 745 tests pass, none
+  skipped; each new or changed test fails on b90cfa738's code.
