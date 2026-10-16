@@ -1797,10 +1797,56 @@ def summary_reading_text(ctx, chapter):
     text = ("standing counts tests, one glyph each per access path (the worst repeat; via MCP the agreement class "
             "where the service decided the call); outcomes count executions as recorded (a test with two MCP "
             "repeats counts twice, and a refusal the table files under not implemented is recorded service_by_design "
-            "but stands not exercised%s); agreement counts one comparison per test; the property list below counts "
+            "but stands not exercised%s); agreement counts one comparison per test%s; the property list below counts "
             "property claims, one per check and test, over every access path" % (
-                (": " + example) if example != "none in this run" else ""))
+                (": " + example) if example != "none in this run" else "", agreement_levels_text(ctx, chapter)))
     return text
+
+
+def agreement_levels_text(ctx, chapter):
+    """The three levels an agreement can mean (READ-110), as a clause of the reading line: identical answers (the
+    direct pair's digests), the same outcomes of the checks both access paths evaluated (an MCP 'agree'), and the
+    requested property evaluated on both (fully checked); an agreement of the checks that ran alone verifies no
+    property. The chapter's own first such pair is named from the record (facts: mcp_agree_partial_example)."""
+    v = ctx.chapter_values(chapter)
+    text = (" at three levels: identical answers (the direct pair's digests), the same outcomes of the checks both "
+            "access paths evaluated (mcp: agree), and every property check evaluated on both (fully checked); an "
+            "agreement of the checks that ran alone is no verification of the requested property")
+    if v.get("n_mcp_agree_partial"):
+        text += " (%d such pair%s in this chapter%s)" % (
+            v["n_mcp_agree_partial"], "" if v["n_mcp_agree_partial"] == 1 else "s",
+            (", e.g. " + v["mcp_agree_partial_example"]) if v.get("mcp_agree_partial_example") else "")
+    return text
+
+
+CLAIM_STATUS_WORD = {"held": "every test", "part": "%(n)d of %(m)d tests",
+                     "none": "no test passed on both (%(words)s there)",
+                     "failed": "%(n)d of %(m)d tests, with a failure or a disagreement (I.1)"}
+
+
+def claims_map(ctx, chapter):
+    """The chapter's evidence map (READ-101): the families' claims as a compact table after the conclusion's
+    headline, each claim with its family linked and what the direct access paths showed of it (the tests passing
+    on both), the claims shown first; rendered when the chapter prose sets `evidence_map` true, else nothing (the
+    prose then carries the claims inline, as before). The rows are the same records the conclusion's `claims_held`
+    and `claims_unsupported` strings are built from (facts._claims)."""
+    prose = ctx.prose.get(chapter) or {}
+    if not prose.get("evidence_map"):
+        return ""
+    items = list((ctx.chapter_values(chapter).get("claims_items") or []))
+    if not items:
+        return ""
+    order = {"held": 0, "part": 1, "none": 2, "failed": 3}
+    items.sort(key=lambda it: order.get(it["status"], 9))
+    rows = []
+    for it in items:
+        shown = "shown" if it["status"] in ("held", "part") else "not shown"
+        rows.append(["\\hyperref[fam:%s]{\\texttt{%s}}" % (esc(it["family"]), esc(it["family"])),
+                     inline(it["claim"]), "%s: %s" % (shown, esc(CLAIM_STATUS_WORD[it["status"]] % it))])
+    return latex.plain_table(latex.spec_p([22, 108, 36]), ["family", "the claim (the property in words)",
+                                                           "on both direct access paths"], rows,
+                             "the evidence map: what each family claims and how many of its tests passed on both direct "
+                             "access paths (the MCP access path, the exceptions and the properties no path showed follow)")
 
 
 EXCEPTION_GROUPS = (
@@ -2226,6 +2272,7 @@ def chapter(ctx, ch):
     summary = prose.get("summary")
     out += paragraphs([ctx.fill(p, values) for p in ([summary] if isinstance(summary, str) else (summary or []))]) \
         if summary else latex.placeholder("(chapter summary: to be written)") + "\n\n"
+    out += claims_map(ctx, ch)
     out += chapter_summary(ctx, ch, sids, n_units, len(fams))
     out += "\\parhead{What this chapter leaves untested}\n"
     gap = prose.get("coverage_gap")
