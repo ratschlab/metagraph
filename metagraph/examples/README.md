@@ -112,8 +112,8 @@ rejected. The complete request is validated before seed decoding. Each nonempty
 input line produces one result or an `error` string; later lines are still processed
 after an error, and the process exits nonzero if any line failed.
 
-To run the native example tests, configure the subdirectory example with
-`-DMETAGRAPH_BUILD_EXECUTABLE=ON`, then build `run_context_example`. It requires
-Python 3 with only the standard library, creates temporary coordinate indexes,
-and checks successful and invalid requests with heap/mmap loading. When enabled,
-these checks also run as part of `run_example`, including in DNA example CI jobs.
+To run the native example tests, build `run_context_example` in a DNA
+subdirectory-example build. It requires Python 3 with only the standard library,
+creates temporary coordinate indexes, and checks successful and invalid requests
+with heap/mmap loading. These checks also run as part of `run_example`, including
+in DNA example CI jobs.
