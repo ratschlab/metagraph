@@ -498,18 +498,20 @@ class PolicyTest(GateCase):
                          pat("P-003", repeat=1)], [])
         pol = policy_of(m, routes=("POST /pattern",), arms=("mcp", "direct-local"))
         ex = dict((e["scenario"], e) for e in pol["exclusions"])
-        self.assertEqual(sorted(ex), ["D-P-001", "P-003"])
+        self.assertEqual(sorted(ex), ["D-P-001"])
         self.assertEqual((ex["D-P-001"]["arms"], ex["D-P-001"]["repeats"], ex["D-P-001"]["rules"]),
                          (["mcp"], [0], ["marks_cover_repeat"]))
         self.assertIn("entry_fields not implemented yet via MCP (the MCP's /pattern answer does not carry the "
                       "entry's absence_scope)", ex["D-P-001"]["reason"])
         self.assertIn("deterministic needs an earlier repeat", ex["D-P-001"]["reason"])
-        self.assertEqual(ex["P-003"]["repeats"], [0, 1])   # no unmarked property on any repeat: every one
         req = dict(((i["scenario"], i["arm"]), i["repeats"]) for i in pol["required"])
         self.assertEqual(req[("D-P-001", "mcp")], [1, 2])
         self.assertEqual(req[("D-P-001", "direct-local")], [0, 1, 2])
         self.assertEqual(req[("P-002", "mcp")], [0, 1, 2])   # contains_source_context is tested on repeat 0
-        self.assertNotIn(("P-003", "mcp"), req)
+        # marks that cover every property check outright are a scenario-level mark the manifest states
+        # (scenario_level_marks); without it the gate blocks every repeat (test_marks_covering_every_property_check_
+        # are_a_scenario_level_mark): the rule leaves them required
+        self.assertEqual(req[("P-003", "mcp")], [0, 1])
         self.assertIn("marks_cover_repeat: D-P-001 r0 excluded on mcp", gate_policy.describe(pol))
         # gate.py: the excluded repeat is not judged, the later ones are
         self.assertIsNotNone(gate.excluded(pol, "D-P-001", "mcp", 0))

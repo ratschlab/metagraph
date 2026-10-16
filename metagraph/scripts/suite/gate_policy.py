@@ -25,12 +25,12 @@ The manifest's property-level marks (mcp.not_implemented_checks [{check, reason}
 case}]; the owner, 2026-10-15) derive nothing here: gate.py applies them itself (suite_common.checks_marked_aside),
 setting aside only a marked check the MCP reads not_exposed, so a marked check's missing result, failure or
 inconclusive still blocks; an exemption here would hide those. Both stay required on the direct arms.
-On the MCP arm, the repeats of a scenario on which the manifest's property-level marks cover every property check
-that repeat can test (marks_cover_repeat: a first repeat has no result of `deterministic`, so a scenario whose only
-other property check is marked tests nothing of its claim there via MCP, suite_common.every_property_marked; e.g.
-D-P-scope-0004 r0 of v6) are excluded at repeat level by the rule marks_cover_repeat, with the marks' reasons: the
-narrowest scope of a missing MCP feature (the owner, 2026-10-15), where a scenario-level mark would also drop the
-later repeats that still test `deterministic`.
+On the MCP arm, repeat 0 of a scenario whose property-level marks cover every property check it expects but
+`deterministic` (which has no result on a first repeat) is excluded at repeat level by the rule marks_cover_repeat,
+with the marks' reasons: that execution tests nothing of the claim via MCP (suite_common.every_property_marked; e.g.
+D-P-scope-0004 r0 of v6), and it is the narrowest scope of a missing MCP feature (the owner, 2026-10-15), where a
+scenario-level mark would also drop the later repeats that still test `deterministic`. Marks that cover every
+property check outright are a scenario-level mark the manifest states; the rule leaves them alone.
 On every arm, a scenario the manifest tags budget_stress (a property that depends on the host's load, which no
 budget makes decisive; truth.budget_stress.reason states why) is excluded by the rule budget_stress, derived from the
 tag, with that reason (lane V5: v5's long column walks, owner-approved on 2026-10-15; they run in the full suite).
@@ -183,23 +183,20 @@ MARK_WORDS = {"not_implemented": "not implemented yet via MCP", "by_design": "se
 
 def marks_repeat_exclusion(scenario, repeats):
     """The MCP arm's repeat-level exclusion of a scenario ({scenario, arms ["mcp"], repeats, rules
-    ["marks_cover_repeat"], reason}) or None: the repeats among |repeats| (its MCP repeats) on which the manifest's
-    property-level marks (suite_common.mcp_check_marks) cover every property check the scenario expects that the
-    repeat can test (suite_common.LATER_REPEATS_ONLY have no result on repeat 0). Such an execution tests nothing of
-    the claim via MCP (suite_common.every_property_marked: it reads inconclusive whatever the host answered), so the
-    strict gate would block on it by construction; a repeat that still tests an unmarked property check stays
-    required."""
+    ["marks_cover_repeat"], reason}) or None: repeat 0, when the manifest's property-level marks
+    (suite_common.mcp_check_marks) cover every property check the scenario expects but those of
+    suite_common.LATER_REPEATS_ONLY (deterministic), which have no result on repeat 0. That execution tests nothing
+    of the claim via MCP (suite_common.every_property_marked: it reads inconclusive whatever the host answered), so
+    the strict gate would block on it by construction, while the later repeats still test the unmarked check and stay
+    required. Marks that cover every property check outright are a scenario-level mark, which the manifest states
+    (mcp.not_implemented: build_manifest.scenario_level_marks); without it the gate blocks on every repeat, as
+    before (gate.py), so this rule leaves them alone."""
     marks = sc.mcp_check_marks(scenario)
     props = sc.expected_property_checks(scenario)
-    if not marks or not props:
+    unmarked = [p for p in props if p not in marks]
+    if not marks or not unmarked or any(p not in sc.LATER_REPEATS_ONLY for p in unmarked) or 0 not in repeats:
         return None
-    covered = []
-    for r in repeats:
-        testable = [p for p in props if not (r == 0 and p in sc.LATER_REPEATS_ONLY)]
-        if testable and all(p in marks for p in testable):
-            covered.append(r)
-    if not covered:
-        return None
+    covered = [0]
     why = "; ".join("%s %s (%s)" % (name, MARK_WORDS.get(m.get("mark"), m.get("mark")),
                                      m.get("reason") or "case %s" % m.get("case"))
                     for name, m in sorted(marks.items()))
