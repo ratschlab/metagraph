@@ -45,11 +45,12 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
 - `timing_class` long is not run on direct-remote (the front proxy cuts at ~120 s): no execution line, the
   scenario is listed under `skipped` in the arm's run.json. Client timeouts: fast 120 s, slow 600 s, long
   1800 s, or the request's stated time budget + 30 s where that is more (suite_common.client_timeout_s; v6's
-  /pattern budget of 120 s gets 150 s); direct-remote at most 125 s. A request whose stated budget reaches the
-  proxy's cut (v6's 120,000 ms /pattern budget) and gets the proxy's own 504 at the cut (no host body) reads
-  inconclusive on its status, as an allowed 503 deadline does (checks.ingress_cut_allowed: the host's answer comes
-  at the budget or later, so the 504 shows nothing of the host); a 504 on a budget that ends before the cut stays a
-  status fail.
+  /pattern budget of 110 s gets 140 s); direct-remote at most 125 s. A request whose stated budget reaches the
+  proxy's cut less its tolerance (v6's 110,000 ms /pattern budget) and gets the proxy's own 504 at the cut (no host
+  body) on direct-remote reads inconclusive on its status, as an allowed 503 deadline does, and is time-limited
+  where the checks and the comparison look for one (checks.ingress_cut_allowed, checks.time_limited: the host's
+  answer may still come within the window a late 503 reads inconclusive, so the 504 shows nothing of the host); a
+  504 on a budget that ends before that, or on another arm, stays a status fail.
 - Execution outcome (review of lane S1; the MCP runner applies the same rule): checks may report `pass`,
   `fail`, `not_exposed`, `inconclusive` (the scenario could not test its property: an allowed 503, a withheld
   answer hiding the source, a stated resource stop) or `finding` (the host broke a stated bound or SPEC
@@ -3685,7 +3686,12 @@ outside any git tree (the provenance tests build a git tree of their own); the f
 files are byte-equal to a76e13b1's; the v3 / v4 re-evaluations equal the previous head's line for line, the v4 gate
 the same 46 problems. No server was contacted; the oracle's evidence runs against 81c620ef are in its lane directory.
 
-## Manifest v6: the /pattern budgets at 120,000 ms (2026-10-15)
+## Manifest v6: the /pattern budgets at 110,000 ms, and gating POST /pattern (2026-10-15 / -16)
+
+Round 1 (2026-10-15, this section up to "Round 2") set the budgets at 120,000 ms; the owner's round 2 (2026-10-16,
+"Round 2: gating POST /pattern" below) set them at 110,000 ms and readied the gate for POST /pattern. Where the two
+differ (the budget, the client timeouts, the ingress, the manifests' and policies' contents and shas), round 2's
+figures are the current ones.
 
 The owner's decisions (2026-10-15), after the accepted baseline run of the frozen v5 (20261015T161813Z_refseq97-81c620ef,
 the deploy gate's baseline under gate/policy_v5_rt_mcp.json): every inconclusive execution of that run was a /pattern
@@ -3795,7 +3801,8 @@ to_pdf) turns the class into a `\colorbox` of the tint with `\fboxsep` 1pt (the 
 before a comma after the box), the colours defined in header-includes (xcolor, loaded by pandoc's template). The
 text stays black and legible on both tints. One legend sentence follows the front matter. table() sizes and aligns
 columns by a cell's visible text. Times inside a check's free-text detail (a finding's or failure's detail line)
-are not marked; the baseline run's report has none.
+were not marked in round 1; round 2 marks them, and the gate's problems, by the printed value
+(report.mark_quoted_times; below).
 
 ### Validation (offline; no host was contacted)
 - 720 tests pass, none skipped (with SUITE_TRUTH_CACHE, the record cache v4 was built from): 702 at 07dfa4875 + 18
@@ -3805,3 +3812,89 @@ are not marked; the baseline run's report has none.
   test_common and test_runner; the v6 policy in test_gate). The v6 build is deterministic (two builds, one content);
   the field-by-field diff v5 -> v6 and the identity proof are in the lane's notes (V6-DIFF.md, v6_diff.py). The
   frozen v5 manifests and both v5 gate files are untouched (their shas as above), run_suite.sh's default is v5.
+
+### Round 2: gating POST /pattern (2026-10-16)
+The owner's decisions of 2026-10-16, after the readiness study for gating /pattern (the v5 baseline judged offline
+under a dry /pattern policy: GATE FAIL, 103 problems, none an engine or service defect: 44 time at the 60 s budget,
+58 fields the MCP's /pattern answer does not carry, REL-subset-0007; and four checks gaps that could pass a wrong
+answer):
+1. **The /pattern budget is 110,000 ms, not 120,000** (manifest_lib.PATTERN_TIME_BUDGET_MS): the public ingress at
+   https://metagraph.ethz.ch:8080 cuts a request at ~120 s, and the staging service reaches the host through it (its
+   own traversal cut setting is 110 s), so a 120 s search would end in the ingress's 504 on the MCP arm, which the
+   service retries past the runner's deadline (VERIFY-V6-2 H1). 449 /pattern requests and 429 MCP arguments name it;
+   the fast class's client timeout for them is 140 s. checks.ingress_cut_allowed keeps its constants: the cut
+   120,000 ms less the tolerance 10,000 ms covers the 110,000 ms budget inclusively, and the late-503 window (up to
+   max(1 s, the budget) past it) reaches past the cut measured a tolerance late (test_builder_v6). On direct-remote
+   only (the arm behind the ingress), its 504 is a time limitation where the checks and the comparison look for one
+   (checks.time_limited with the scenario, client and arm; run_direct and reevaluate record it so; compare's timing
+   rule reads it; VERIFY-V6-2 L1).
+2. **The v6 gate also covers POST /pattern** (arms mcp and direct-local) if the v6 baseline shows it decisive:
+   gate/policy_v6_rtp_mcp.json, generated with the rt policy's inputs and the routes plus POST /pattern
+   (`gate_policy.py manifest/suite_v6.json --name v6-rtp-mcp --arms mcp,direct-local --declared
+   gate/declared_v6_rt.json --routes "POST /resolve,POST /traverse,GET /traverse/capabilities,POST /pattern" --out
+   gate/policy_v6_rtp_mcp.json`): 719 selected (478 /pattern), 92 excluded (budget_stress 33, manifest_not_implemented
+   50, table_not_expressible 47, advanced_path 1, marks_cover_repeat 1), required on mcp 628 scenarios / 1,275
+   executions, on direct-local 686 / 793, 19 relations. Its resolve / traverse part is gate/policy_v6_rt_mcp.json's,
+   which still equals policy_v5_rt_mcp.json but for its pins (the deploy gate of today, unchanged).
+3. **Heavy /pattern scenarios.** Warm-ups (areas.PATTERN_WARM_UPS, P-warm-0001..0023, by the suite's mechanism:
+   `warms`, place_warm_ups, as R-warm for the walks) right before the 23 /pattern scenarios whose MCP cold call
+   (repeat 0, which the paired loop runs first) ended in the host's 503 deadline relayed by the service or
+   time-limited in the v5 baseline while their warm MCP repeat or a direct arm completed (M-planted-0007/8/9/13..18,
+   M-protein-0001/3/4/5/6/7, N-nearmiss-0006/13/20/27/29/30/32, N-usecase-0008): each is its target's request,
+   timing_class long (direct-local only: it warms the host for the MCP's first call), with the generic checks, its
+   target's v5 figures in its truth, and tagged budget_stress (its cold run is by design). A selection that takes a
+   target takes its warm-up (an rtp gate run runs 19 of them). The warm repeat is by manifest index, so the 23
+   warm-ups would shift the deploy gate's warm repeats: build_manifest.keep_gate_warm_repeats moves free /pattern
+   scenarios of area N so that every scenario on the gate's routes keeps its v5 warm-repeat status, and
+   gate_warm_problems refuses a build that changes one (the 237 gate scenarios, their order and their required
+   executions are v5's). budget_stress (outside the gate, still run and reported; areas.PATTERN_BUDGET_STRESS with
+   each one's reason from the baseline): M-protein-0001, -0002, -0003, -0007, P-heavy-0001 and N-nearmiss-0030.
+4. **What the MCP cannot show is labelled by its true class at the narrowest scope.** Verified against the
+   service's pattern_search answer, the runner's normaliser (scripts/bench/suite_mcp_normalise.py at 9d76035e) and
+   the baseline's recorded MCP answers: the entry's absence_scope (the service states its own scope), strands and
+   pattern text are not carried, so the entry_fields checks that read them are marked not implemented yet via MCP
+   (mcp.not_implemented_checks, 22 scenarios), scenario-level where that is the only property check (P-scope-0004,
+   -0006: mcp.not_implemented). The host's top-level predicate block and timing.load_ms ARE carried, on every entry
+   (by_database[].predicate / .load_ms): the checks read them there on the MCP arm (checks.MCP_PATTERN_ENTRY_FIELDS;
+   Q-pred-0011 / -0012, P-edge-0009), so no MCP runner change is needed. D-P-scope-0004's repeat 0 tests nothing via
+   MCP (its other property check, deterministic, has no result on a first repeat): gate_policy's rule
+   marks_cover_repeat excludes that MCP repeat alone. A deliberate service behaviour is service-side by design:
+   REL-subset-0007 is set aside on mcp by a declared entry naming the table's case pattern.max_contexts_above_10000
+   (the service refuses P-modes-0004's max_contexts 10,001 at submit where the host clamps); it stays required on
+   direct-local.
+5. **The report** marks "not implemented yet via MCP" red like times above 55 s (red means needs attention) wherever
+   it counts or lists it with something in it, and the verdict gets a red attention line counting the TESTS per kind,
+   only the nonzero ones: failures, errors and findings first, then the time-budget issues (an execution hit its
+   budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; or took more than 55 s), then
+   what is not implemented via MCP (whole executions and property marks). Times quoted in a check's text and in the
+   gate's problems (whose table also gains each execution's wall) are marked too; every mark follows the printed
+   value.
+
+The checks fixes the readiness study asked for, each with a test that fails on the code before it: on the MCP arm a
+/pattern time stop is held to the work time by the entries' own timing (their elapsed_ms and the reads beside the
+search, never the parts of a search), an answer without any timing reads inconclusive, never pass (MCP-T); a stop
+codon never substitutes a residue, and X and * hold none (SD-012, SPEC §21.3); after a sticky budget stop every later
+pattern states the same stop, unknown counts and zero work (SD-013's class, SPEC §7.6); an exact /pattern count that
+differs between two access paths is a disagreement (compare.exact_count_differences; GPT's "doubled count"); the
+ingress's 504 as above; and a direct pair that both state a time limitation (P-heavy-0001) differs by timing, not as
+a disagreement.
+
+The manifests: manifest/suite_v6.json 723 scenarios (v5's 700 + the 23 warm-ups), 765 executions per arm, content
+935eec18a7612404871d345938df1dfbf415bb6d959991c4f1cb254d43bf1e85, relations 39660cfa... (v5's); suite_smoke_v6.json
+content ee731e491d7e1168665acb439de6a705b66c0bf3c3cbacae7007d2611277f7dd. The frozen v5 files are untouched.
+
+#### Validation (offline; no host was contacted; the run directory was only read)
+- The v5 baseline re-evaluated with this tree's checks (a copy, round2/r5/reeval) against the copy judged with
+  07dfa4875's: 0 of the 237 rt gate scenarios' executions change verdict or any check, and the rt gate with
+  policy_v5_rt_mcp.json passes as before (689 judged, 635 passed). Of /pattern, no execution's verdict changes; 6 MCP
+  checks go from not_exposed to pass (answer_fields of P-edge-0009, Q-pred-0011, Q-pred-0012, r0 and r1), and
+  P-heavy-0001's direct pair reads timing instead of disagree. No exact count differs across arms (0 false alarms).
+- The dry /pattern gate on the v5 baseline (round2/r5/rtp: v5's requests with v6's marks and tags, the dry policy
+  generated as the rtp one): 31 problems, 1 the emulation's identity and 30 time at the 60 s budget, all on warm-up
+  targets (10 relayed MCP deadlines, their 10 unverified by-design pairs, 9 time-limited MCP cold calls, 1 direct-local
+  time-limited cold run of M-protein-0006); no other problem. The readiness study's 58 not-exposed problems,
+  REL-subset-0007 and D-P-scope-0004 are gone.
+- 740 tests pass, none skipped, with SUITE_TRUTH_CACHE (722 after round 1, 734 at the start of round 2's last
+  attempt with two failing; the new ones: the per-entry fields, the warm-ups and keep_gate_warm_repeats, the rtp
+  policy, marks_cover_repeat, the report's attention marks and the gate table's wall). Each checks fix's test fails
+  on afb46ec11's code. The v6 build is deterministic (test_frozen_v6_is_what_the_builder_makes).
