@@ -616,6 +616,47 @@ class PatternChecks(unittest.TestCase):
         minus = "CAGATACAAAGGGCTGCTGAAAAACGATAAC"
         self.assertEqual(checks.expected_substitutions("dna", P, minus, "-"), subs)
 
+    def test_a_stop_codon_never_substitutes_a_residue(self):
+        """SD-012 (the semantic-dedup review; SPEC-pattern-search §21.3, sense substitutes, decision M1 of
+        2026-10-11): a residue's substitute is a sense codon of the table that codes another residue, so a stop codon
+        never substitutes one, and X and * hold no substitution; such an instance is no instance at any level. The
+        checks recomputed any codon outside the residue's set as a substitution, so a context with TAA in place of V
+        at level 1 passed the invariants (the readiness probe on M-protein-0005)."""
+        def answer(codon, found):
+            inst = "ATGAAA" + codon + "CTG"   # MKVL, residue 2 (V) substituted
+            kmer = inst + "ACGTACGTACGTACGTACG"
+            entry = {"id": "p", "kind": "protein", "length": 12, "scope": "any_offset", "mode": "all_or_count",
+                     "counts": {"contexts": {
+                         "relation": "exact", "value": 1,
+                         "by_offset": dict((str(o), {"relation": "exact", "value": int(o == 0)}) for o in range(20)),
+                         "by_strand": {"+": {"relation": "exact", "value": 1}, "-": {"relation": "exact", "value": 0}},
+                         "by_mismatches": {"0": {"relation": "exact", "value": 0},
+                                           "1": {"relation": "exact", "value": 1}}}},
+                     "results": [{"kmer": kmer, "offset": 0, "strand": "+", "instance": inst, "node": 7,
+                                  "mismatches": 1, "substitutions": [{"residue": 2, "expected": "V", "found": found,
+                                                                      "codon": codon}]}],
+                     "returned": 1, "retrieval_complete": True, "stop": None, "determinism": "full", "notes": [],
+                     "work": {"steps": 10, "steps_by_mismatches": {"0": 4, "1": 6}}}
+            return ok_answer({"mode": "all_or_count", "patterns": [entry], "timing": {"elapsed_ms": 5.0},
+                              "limits": {"time_budget_ms": 110000, "finalize_reserve_ms": 250, "max_contexts": 10000}})
+        sc = {"route": "POST /pattern", "truth": {},
+              "request": {"patterns": [{"protein": "MKVL", "id": "p"}], "genetic_code": 11, "max_mismatches": 1,
+                          "mode": "all_or_count", "scope": "any_offset", "time_budget_ms": 110000,
+                          "max_contexts": 10000}}
+        self.assertEqual(outcome(sc, answer("GCT", "A"), "invariants")[0], "pass")   # a sense substitute (A)
+        out, detail = outcome(sc, answer("TAA", "*"), "invariants")                   # a stop codon in V's place
+        self.assertEqual(out, "fail")
+        self.assertIn("p0 r0: instance ATGAAATAACTG is no instance at any level", detail)
+        self.assertIsNone(checks.expected_substitutions("protein", "MKVL", "ATGAAATAACTG", "+", 11))
+        self.assertIsNone(checks.expected_substitutions("protein", "MX", "ATGTAA", "+", 11))   # a stop under X
+        self.assertIsNone(checks.expected_substitutions("protein", "M*", "ATGAAA", "+", 11))   # a sense codon under *
+        self.assertEqual(checks.expected_substitutions("protein", "M*", "ATGTAA", "+", 11), [])
+        # tables 27, 28 and 31: the context stops code their residue and substitute like any sense codon there
+        self.assertEqual(checks.expected_substitutions("protein", "MK", "ATGTGA", "+", 27),
+                         [{"residue": 1, "expected": "K", "found": "W", "codon": "TGA"}])
+        self.assertEqual(checks.expected_substitutions("protein", "MKVL", "ATGAAAGCTCTG", "+", 11),
+                         [{"residue": 2, "expected": "V", "found": "A", "codon": "GCT"}])
+
     def test_slots_withheld_cut_stop_notes(self):
         req, ans = fixture("information_floor")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}

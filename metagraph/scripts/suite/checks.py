@@ -242,9 +242,11 @@ def _translate(dna: str, table: int) -> str:
     return "".join(m.get(dna[i:i + 3], "?") for i in range(0, len(dna) - 2, 3))
 
 
-def expected_substitutions(kind: str, pattern: str, instance: str, strand: str, table: int = 1) -> List[dict]:
+def expected_substitutions(kind: str, pattern: str, instance: str, strand: str, table: int = 1) -> Optional[List[dict]]:
     """The substitutions the host must state for |instance| against |pattern| (SPEC-pattern-search.md §21.8):
-    positions (residues) in the coordinates of P; for '-' the instance is read in P's orientation."""
+    positions (residues) in the coordinates of P; for '-' the instance is read in P's orientation. None when the
+    instance is no instance of P at any level (§21.3, sense substitutes: a residue's substitute is a sense codon of the
+    table coding another residue, so a stop codon never substitutes one, and X and * hold no substitution)."""
     if strand in ("-", "reverse"):
         read = revcomp(instance)
     else:
@@ -255,6 +257,8 @@ def expected_substitutions(kind: str, pattern: str, instance: str, strand: str, 
             codon = read[3 * r:3 * r + 3]
             if codon not in _codon_sets(aa, table):
                 found = dict(zip(_CODONS, _NCBIEAA[table])).get(codon, "?")
+                if aa in ("X", "*") or found == "*":
+                    return None
                 out.append({"residue": r, "expected": aa, "found": found, "codon": codon})
         return out
     for i, code in enumerate(pattern):
@@ -2318,8 +2322,11 @@ def _pattern_entry_problems(sc: dict, i: int, e: dict, limits: dict, sticky: Opt
             inst = r["instance"]
             lev = r.get("mismatches", 0)
             if m_max > 0 or "substitutions" in r:
-                subs = expected_substitutions(kind, pat, inst, strand, table) if strand != "=" else None
-                if subs is not None:
+                subs = expected_substitutions(kind, pat, inst, strand, table) if strand != "=" else []
+                if subs is None:
+                    probs.append("p%d r%d: instance %s is no instance at any level (SPEC-pattern-search §21.3: a stop "
+                                 "codon never substitutes a residue, and X and * hold no substitution)" % (i, j, inst))
+                elif strand != "=":
                     if len(subs) != lev:
                         probs.append("p%d r%d: level %d but %d substitutions recomputed" % (i, j, lev, len(subs)))
                     elif r.get("substitutions") != subs:
