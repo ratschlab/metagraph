@@ -2422,6 +2422,53 @@ def _counts_consistent_problems(sc: dict, i: int, e: dict, limits: dict) -> List
     return probs
 
 
+# the counts a sticky stop leaves as they are (no population count: §19.7 `tested`, the decisions a selection pass
+# made; `estimate`, no bound), as compare.NOT_POPULATION
+_STICKY_NOT_POPULATION = ("tested", "estimate")
+
+
+def _known_counts(counts: Any, path: str = "") -> List[str]:
+    """Every count object of an entry's |counts| (each part: suffix, by_offset, by_strand / by_orientation,
+    by_mismatches) whose relation is not unknown, as "path relation value"."""
+    out: List[str] = []
+    if isinstance(counts, dict):
+        if "relation" in counts and counts.get("relation") != "unknown":
+            out.append("%s %s %s" % (path or "count", counts.get("relation"), counts.get("value")))
+        for k, v in counts.items():
+            if str(k) not in _STICKY_NOT_POPULATION and isinstance(v, dict):
+                out += _known_counts(v, (path + "." if path else "") + str(k))
+    return out
+
+
+def _sticky_problems(sc: dict, i: int, e: dict, first: dict) -> List[str]:
+    """What entry i, a later pattern after |first|, an earlier pattern's budget stop of the search, states otherwise
+    than SPEC-pattern-search §7.6 has it (one budget per request, the stop sticky): the same stop in phase discovery
+    (with max_mismatches above 0 at level 0, §21.7), every count unknown (by_mismatches included, §21.6), work zero
+    (steps_by_mismatches included); as the oracle's sticky_stop / stop.sticky_unknown (SD-013)."""
+    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
+    m = req.get("max_mismatches")
+    want = {"phase": "discovery", "reason": first.get("reason")}
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        want["mismatch_level"] = 0
+    s = e.get("stop")
+    out = []
+    if s != want:
+        out.append("p%d: after a %s stop of an earlier pattern, stop %r (the sticky stop is %r: "
+                   "SPEC-pattern-search §7.6)" % (i, first.get("reason"), s, want))
+    known = _known_counts(e.get("counts"))
+    if known:
+        out.append("p%d: after a %s stop of an earlier pattern, %d count(s) not unknown (%s; every count is unknown: "
+                   "§7.6)" % (i, first.get("reason"), len(known), known[0]))
+    work = e.get("work") if isinstance(e.get("work"), dict) else {}
+    busy = ["%s %s" % (k, v) for k, v in work.items() if isinstance(v, (int, float)) and not isinstance(v, bool) and v]
+    busy += ["steps_by_mismatches.%s %s" % (k, v) for k, v in (work.get("steps_by_mismatches") or {}).items()
+             if isinstance(v, (int, float)) and v]
+    if busy:
+        out.append("p%d: after a %s stop of an earlier pattern, work %s (zero: §7.6)" % (
+            i, first.get("reason"), ", ".join(busy[:3])))
+    return out
+
+
 def check_counts_consistent(sc, ans, a, arm):
     body = _body(ans)
     pats = _get(body, "patterns")
@@ -2430,13 +2477,13 @@ def check_counts_consistent(sc, ans, a, arm):
     probs: List[str] = []
     for i in which:
         probs += _counts_consistent_problems(sc, i, pats[i], limits)
-    # one budget per request: a budget stop is sticky for the later patterns (SPEC §7.6)
+    # one budget per request: a budget stop is sticky for the later patterns (SPEC §7.6; _sticky_problems); a refused
+    # slot and a peptide answered without a search (note no_stop_codon, §12.2) are no later search
     first = None
     for i, e in enumerate(pats):
         s = e.get("stop")
         if first is not None and "counts" in e and "no_stop_codon" not in (e.get("notes") or []):
-            if not s or s.get("reason") != first.get("reason"):
-                probs.append("p%d: after a %s stop of an earlier pattern, stop %r" % (i, first.get("reason"), s))
+            probs += _sticky_problems(sc, i, e, first)
         if first is None and s and s.get("reason") in _BUDGET_STOP_REASONS and s.get("phase") in (
                 "discovery", "mask_scan", "extraction", "extension"):
             first = s

@@ -657,6 +657,60 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(checks.expected_substitutions("protein", "MKVL", "ATGAAAGCTCTG", "+", 11),
                          [{"residue": 2, "expected": "V", "found": "A", "codon": "GCT"}])
 
+    def test_a_sticky_stop_leaves_the_later_patterns_unknown_and_idle(self):
+        """SD-013's class in checks.py (the readiness study): a budget stop is sticky (SPEC-pattern-search §7.6):
+        every later pattern answers the same stop in phase discovery (with max_mismatches at level 0, §21.7), every
+        count unknown (by_mismatches included) and zero work (steps_by_mismatches included), as the oracle's
+        sticky_stop / stop.sticky_unknown. counts_consistent compared the later pattern's stop reason only, so a later
+        pattern that stated counts and work passed (the probe on P-caps-0004)."""
+        unk = {"relation": "unknown", "value": None}
+
+        def answer(later, m=0):
+            first = {"id": "a", "mode": "count", "counts": {"contexts": {"relation": "at_least", "value": 3}},
+                     "stop": {"phase": "discovery", "reason": "max_steps"}, "retrieval_complete": False,
+                     "determinism": "full", "notes": [], "work": {"steps": 100, "ranges_visited": 4}}
+            second = {"id": "b", "mode": "count", "retrieval_complete": False, "determinism": "full", "notes": [],
+                      "counts": {"contexts": dict(unk, suffix=dict(unk), by_offset={"0": dict(unk)},
+                                                  by_strand={"+": dict(unk), "-": dict(unk)})},
+                      "stop": {"phase": "discovery", "reason": "max_steps"},
+                      "work": {"steps": 0, "ranges_visited": 0, "mask_scans": 0}}
+            if m:
+                first["stop"]["mismatch_level"] = 1
+                second["stop"]["mismatch_level"] = 0
+                second["counts"]["contexts"]["by_mismatches"] = dict((str(t), dict(unk)) for t in range(m + 1))
+                second["work"]["steps_by_mismatches"] = dict((str(t), 0) for t in range(m + 1))
+            later(second)
+            return ok_answer({"mode": "count", "patterns": [first, second], "limits": {"max_steps": 100}})
+
+        def sc(m=0):
+            req = {"patterns": [{"dna": "A" * 25, "id": "a"}, {"dna": "C" * 25, "id": "b"}], "mode": "count",
+                   "max_steps": 100, "time_budget_ms": 110000}
+            if m:
+                req["max_mismatches"] = m
+            return {"route": "POST /pattern", "request": req, "truth": {}}
+
+        self.assertEqual(outcome(sc(), answer(lambda e: None), "counts_consistent")[0], "pass")
+        self.assertEqual(outcome(sc(2), answer(lambda e: None, 2), "counts_consistent")[0], "pass")
+        cases = (
+            (0, lambda e: e["counts"]["contexts"].update(relation="at_least", value=1), "count(s) not unknown"),
+            (0, lambda e: e["work"].update(steps=50), "work steps 50"),
+            (0, lambda e: e["counts"]["contexts"]["by_offset"]["0"].update(relation="exact", value=0),
+             "contexts.by_offset.0 exact 0"),
+            (0, lambda e: e.update(stop={"phase": "mask_scan", "reason": "max_steps"}), "the sticky stop is"),
+            (2, lambda e: e["stop"].pop("mismatch_level"), "the sticky stop is"),
+            (2, lambda e: e["counts"]["contexts"]["by_mismatches"]["0"].update(relation="exact", value=2),
+             "contexts.by_mismatches.0 exact 2"),
+            (2, lambda e: e["work"]["steps_by_mismatches"].update({"0": 7}), "steps_by_mismatches.0 7"),
+        )
+        for m, change, text in cases:
+            out, detail = outcome(sc(m), answer(change, m), "counts_consistent")
+            self.assertEqual(out, "fail", text)
+            self.assertIn(text, detail)
+        # the exceptions: a refused slot, and a peptide answered without a search (note no_stop_codon)
+        self.assertEqual(outcome(sc(), answer(lambda e: e.update(counts={"contexts": {"relation": "exact", "value": 0}},
+                                                                 stop=None, notes=["no_stop_codon"])),
+                                 "counts_consistent")[0], "pass")
+
     def test_slots_withheld_cut_stop_notes(self):
         req, ans = fixture("information_floor")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}
