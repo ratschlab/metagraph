@@ -11,6 +11,7 @@
 #include "cli/merge.hpp"
 #include "cli/align.hpp"
 #include "cli/query.hpp"
+#include "cli/resolve.hpp"
 #include "cli/assemble.hpp"
 #include "cli/server.hpp"
 #include "cli/transform_graph.hpp"
@@ -46,6 +47,9 @@ int main(int argc, char *argv[]) {
 
         case Config::MERGE_ANNOTATIONS:
             return cli::merge_annotation(config.get());
+
+        case Config::TRAVERSE:
+            return cli::resolve_graph(config.get());
 
         case Config::QUERY:
             return cli::query_graph(config.get());

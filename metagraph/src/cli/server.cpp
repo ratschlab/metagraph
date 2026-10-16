@@ -15,6 +15,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "query.hpp"
+#include "resolve.hpp"
 #include "align.hpp"
 #include "server_utils.hpp"
 #include "cli/load/load_annotation.hpp"
@@ -497,6 +498,19 @@ int run_server(Config *config) {
                 }
             }
             return result;
+        });
+    };
+
+    // The resolver uses the same loaded index as ordinary search. Multi-index
+    // routing is deferred until its selection contract can be extracted too.
+    server.resource["^/resolve$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                                shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, num_requests++, [&](const std::string &content) {
+            if (!config->fnames.empty())
+                throw std::invalid_argument("Resolve currently requires a single-index server");
+            if (anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();
+            return process_resolve_request(parse_json_string(content), *anno_graph.get());
         });
     };
 

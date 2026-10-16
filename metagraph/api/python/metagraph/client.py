@@ -97,6 +97,22 @@ class GraphClientJson:
 
         return search_results
 
+    def resolve(self, sequence: str, *, labels=None, discover=None, select=None,
+                support="kmer", min_block_kmers=1, run_format="intervals", bounds=None):
+        """Resolve column support and optionally select seeds on a single-index server.
+
+        Supply exactly one of labels or discover (e.g. {"max_labels": 100}).
+        Support is k-mer membership, not consecutive occurrence in a record.
+        Returns the server JSON profile, candidates and optional selection.
+        """
+        payload = {"sequence": sequence, "support": support,
+                   "min_block_kmers": min_block_kmers, "run_format": run_format}
+        for name, value in (("labels", labels), ("discover", discover),
+                            ("select", select), ("bounds", bounds)):
+            if value is not None:
+                payload[name] = value
+        return self._do_request("resolve", payload)
+
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
@@ -173,6 +189,10 @@ class GraphClient:
     def __init__(self, host: str, port: int, name: str = None, api_path: str = None):
         self._json_client = GraphClientJson(host, port, name, api_path=api_path)
         self.name = self._json_client.name
+
+    def resolve(self, sequence: str, **options):
+        """Return the resolve/select JSON profile; see GraphClientJson.resolve."""
+        return self._json_client.resolve(sequence, **options)
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,
