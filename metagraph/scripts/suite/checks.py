@@ -321,6 +321,10 @@ pattern_deadline_allowed = deadline_allowed
 # answered by the host before the cut, so its 504 stays the status failure it was.
 FRONT_INGRESS_CUT_MS = 120000.0
 FRONT_INGRESS_CUT_TOLERANCE_MS = 10000.0
+# the arm behind that ingress
+INGRESS_ARM = "direct-remote"
+# what time_limited names the ingress's cut (compare._own_time_limitation reads the line's recorded time_limited)
+INGRESS_CUT_LIMITATION = "the front ingress's 504 at its cut, past the time budget"
 
 
 def _stated_budget(sc: dict) -> Optional[float]:
@@ -335,7 +339,7 @@ def _stated_budget(sc: dict) -> Optional[float]:
     return None
 
 
-def ingress_cut_allowed(sc: dict, ans: dict, client: Optional[dict] = None) -> bool:
+def ingress_cut_allowed(sc: dict, ans: dict, client: Optional[dict] = None, arm: Optional[str] = None) -> bool:
     """Whether |ans| is the front ingress's 504 in place of the host's answer, which the scenario's status
     expectation allows implicitly: an http 504 without a host body (no error code), on a POST /pattern or
     POST /resolve whose request states a time budget that reaches the ingress's cut (budget >= FRONT_INGRESS_CUT_MS
@@ -344,8 +348,12 @@ def ingress_cut_allowed(sc: dict, ans: dict, client: Optional[dict] = None) -> b
     answer to such a request comes at its budget (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core §4.5) or,
     a 503 deadline, later within the window the checks read inconclusive (_budget_503: max(1 s, the budget) past
     it), and the cut falls in that window, so the 504 shows nothing of the host (as an allowed 503 deadline shows
-    nothing: inconclusive). A request whose budget ends before the cut, or a 504 well before it, is not covered."""
+    nothing: inconclusive). A request whose budget ends before the cut, or a 504 well before it, is not covered, nor
+    an arm the ingress does not sit in front of (|arm| given and not direct-remote: direct-local reaches the
+    container's port, the MCP's answers are the service's own)."""
     if ans.get("http") != 504 or (ans.get("error") or {}).get("code") is not None:
+        return False
+    if arm is not None and arm != INGRESS_ARM:
         return False
     budget = _stated_budget(sc)
     if budget is None or budget < FRONT_INGRESS_CUT_MS - FRONT_INGRESS_CUT_TOLERANCE_MS:
@@ -383,7 +391,7 @@ def check_status(sc, ans, a, arm, client=None):
                                  "time budget, which %s allows on any host (%s)" % (
                                      want, "SPEC-pattern-search §6/§7.6" if sc.get("route") == "POST /pattern"
                                      else "SPEC-labeled-traversal-core §4.5", (err.get("text") or "")[:200])
-        if ingress_cut_allowed(sc, ans, client):
+        if ingress_cut_allowed(sc, ans, client, arm):
             wall = _number((client or {}).get("wall_ms"))
             return INCONCLUSIVE, "http 504 from the front ingress in place of %s%s: the ingress cuts a request at " \
                                  "~%.0f s, inside the window in which the host's answer to the %.0f ms budget may " \
@@ -506,7 +514,7 @@ def check_deterministic(sc, ans, a, arm, previous=None, client=None):
         return INCONCLUSIVE, "first repeat: nothing to compare yet (digest %s)" % d[:16]
     prev = [{"digest": p.get("digest"), "time_limited": p.get("time_limited") or ""} if isinstance(p, dict)
             else {"digest": p, "time_limited": ""} for p in previous]
-    own = _time_limited(ans)
+    own = time_limited(ans, sc, client, arm)
     clean = [p for p in prev if not p["time_limited"]]
     diff = [p for p in clean if p["digest"] != d]
     if own:
@@ -1289,11 +1297,17 @@ def _traverse_reason_problems(sc: dict, ans: dict) -> List[str]:
     return probs
 
 
-def time_limited(ans: dict) -> str:
+def time_limited(ans: dict, sc: Optional[dict] = None, client: Optional[dict] = None, arm: Optional[str] = None) -> str:
     """What makes an answer time-limited (SPEC-labeled-traversal-core §6.8: determinism holds provided no time
-    budget tripped; SPEC-pattern-search §7.9: determinism "time_limited"); '' when nothing did. The runners record
-    it beside an execution's digest and pass {digest, time_limited} for the earlier repeats (`previous`)."""
-    return _time_limited(ans)
+    budget tripped; SPEC-pattern-search §7.9: determinism "time_limited"); '' when nothing did. With the scenario
+    |sc| (and the runner's |client| and |arm|), also the front ingress's 504 at its cut (ingress_cut_allowed): the
+    budget ran out before the host's answer could be seen, a time limitation as the 503 deadline is (VERIFY-V6-2
+    L1). The runners record it beside an execution's digest and pass {digest, time_limited} for the earlier repeats
+    (`previous`)."""
+    own = _time_limited(ans)
+    if not own and sc is not None and ingress_cut_allowed(sc, ans, client, arm):
+        return INGRESS_CUT_LIMITATION
+    return own
 
 
 def _time_limitation_problem(sc: dict, ans: dict, arm: Optional[str] = None,
@@ -5001,7 +5015,7 @@ def evaluate(scenario: dict, answer: dict, arm: str, previous: Optional[Sequence
             allowed = w if isinstance(w, list) else [w]
     if deadline_allowed(scenario, answer):
         allowed = list(allowed) + [503]   # a 503 deadline: the other checks cannot test their property
-    if ingress_cut_allowed(scenario, answer, client):
+    if ingress_cut_allowed(scenario, answer, client, arm):
         allowed = list(allowed) + [504]   # the front ingress's cut at the budget: nothing of the host to test
     # the seeds the attempt's duration bound stopped (_attempt_stops): their own checks are inconclusive (or fail
     # when the stated bound cannot have been reached), the other seeds keep theirs

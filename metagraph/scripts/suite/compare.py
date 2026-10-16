@@ -1348,14 +1348,25 @@ def arm_view(lines):
     }
 
 
-def _own_time_limitation(line):
+def _own_time_limitation(line, scenario=None, checks_mod=None):
     """What made a direct execution's own answer time-limited: its recorded time_limited (checks.time_limited: a
-    stated time stop, a 503 deadline and its relays), else a 503 deadline of a line recorded before that; ''."""
+    stated time stop, a 503 deadline and its relays, the front ingress's 504 at its cut), else a 503 deadline of a
+    line recorded before that, else (with the |scenario| and a |checks_mod| that has the rule) the front ingress's 504
+    at its cut (checks.ingress_cut_allowed, the line's client wall and arm: VERIFY-V6-2 L1); ''."""
     if line.get("time_limited"):
         return str(line["time_limited"])
     err = line.get("error") if isinstance(line.get("error"), dict) else {}
     if line.get("http") == 503 and err.get("code") == "deadline":
         return "a 503 deadline"
+    rule = getattr(checks_mod, "ingress_cut_allowed", None) if checks_mod is not None else None
+    if rule is not None and scenario is not None and line.get("http") == 504:
+        wall = _num(line.get("wall_ms"))
+        try:
+            if rule(scenario, {"http": 504, "body": None, "error": err or None},
+                    {"wall_ms": wall} if wall is not None else None, line.get("arm")):
+                return getattr(checks_mod, "INGRESS_CUT_LIMITATION", "the front ingress's 504 at its cut")
+        except TypeError:   # a checks module whose rule takes no arm
+            return ""
     return ""
 
 
@@ -1557,8 +1568,8 @@ def content_consistent(stopped_line, complete_line, route, run_dir, checks_mod=N
     states retrieval_complete, every released result among its results (_released_problems); /traverse: every
     stopped route a prefix of a complete route, any parent at a merge (_walk_prefix_problems); None where the content
     cannot be read or the route has no rule (a /resolve stop)."""
-    if stopped_line.get("http") == 503:
-        return True, "a 503 carries no content"
+    if stopped_line.get("http") in (503, 504):
+        return True, "a %d carries no content" % stopped_line.get("http")
     a, b = load_answer(stopped_line, run_dir), load_answer(complete_line, run_dir)
     if a is None or b is None or a.get("http") != 200 or b.get("http") != 200:
         return None, "no pair of answers to compare"
@@ -1586,7 +1597,7 @@ def _determinism_only(line):
         for c in rest)
 
 
-def timing_repeat(a, b, route, run_dir, checks_mod=None):
+def timing_repeat(a, b, route, run_dir, checks_mod=None, scenario=None):
     """(True, detail) when two direct executions of one repeat whose outcomes differ differ by timing alone
     (VERIFY-2 item 5, under all its conditions): exactly one side's own answer states a time limitation, that side
     reads inconclusive (never fail or finding), the other pass or inconclusive, no check both evaluated differs, and
@@ -1595,7 +1606,7 @@ def timing_repeat(a, b, route, run_dir, checks_mod=None):
     the two answers are the same (digest). Else (False, why)."""
     if compare_checks(a.get("checks"), b.get("checks"))[0]:
         return False, "a check differs"
-    ta, tb = _own_time_limitation(a), _own_time_limitation(b)
+    ta, tb = _own_time_limitation(a, scenario, checks_mod), _own_time_limitation(b, scenario, checks_mod)
     if bool(ta) != bool(tb):
         stopped, complete, why = (a, b, ta) if ta else (b, a, tb)
         if stopped.get("outcome") != "inconclusive" or complete.get("outcome") not in ("pass", "inconclusive"):
@@ -1765,7 +1776,7 @@ def direct_agreement(local, remote, route=None, run_dir=None, checks_mod=None, s
             if dup and not d:
                 planned.append({"repeat": r, "detail": dup})
                 continue
-            ok, why = timing_repeat(local[r], remote[r], route, run_dir, checks_mod)
+            ok, why = timing_repeat(local[r], remote[r], route, run_dir, checks_mod, scenario)
             (timing if ok else untimed).append({"repeat": r, "detail": why})
     outcome_equal = all(local[r].get("outcome") == remote[r].get("outcome") for r in common)
     if differing or untimed:

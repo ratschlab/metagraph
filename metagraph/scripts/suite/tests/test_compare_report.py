@@ -2404,6 +2404,29 @@ class PatternGateFixesTest(unittest.TestCase):
             merge_run.merge(d)
             return cmp.compare(d, ({}, None))["scenarios"]["P-010"]
 
+    def test_the_ingress_504_tells_the_direct_outcomes_apart_by_timing(self):
+        """VERIFY-V6-2 L1: a direct-local complete pass against direct-remote's front-ingress 504 at its cut (read
+        inconclusive) differs by timing, as against the host's 503 deadline; it read "no time limitation tells the
+        outcomes apart", a disagreement. A line that records the cut (the runners do, checks.time_limited with the
+        scenario) and a line recorded before it (the judging checks' rule) alike."""
+        import checks
+        s = {"id": "P-011", "route": "POST /pattern", "request": {"patterns": [{"dna": "A" * 25}],
+                                                                  "time_budget_ms": 110000},
+             "expect": [{"check": "status", "args": {"http": 200}}]}
+        ok = line("P-011", "direct-local", 0, T0, 900.0, checks=[{"check": "status", "outcome": "pass", "detail": ""}])
+        for recorded in (checks.INGRESS_CUT_LIMITATION, None):
+            cut = line("P-011", "direct-remote", 0, T0 + 1, 120100.0, outcome="inconclusive", http=504,
+                       digest="e", error={"code": None, "text": "<html>504 Gateway Time-out</html>"},
+                       checks=[{"check": "status", "outcome": "inconclusive", "detail": "http 504 from the front"}])
+            cut["time_limited"] = recorded
+            ok_, why = cmp.timing_repeat(ok, cut, "POST /pattern", None, checks, s)
+            self.assertTrue(ok_, why)
+            self.assertIn("504", why)
+            self.assertEqual(cmp.direct_agreement({0: ok}, {0: cut}, "POST /pattern", None, checks, s)["class"],
+                             "timing")
+        # without the scenario (or the rule) an unrecorded 504 shows no time limitation, as before
+        self.assertFalse(cmp.timing_repeat(ok, cut, "POST /pattern", None, checks)[0])
+
     def test_an_exact_count_that_differs_between_access_paths_is_a_disagreement(self):
         """GPT's "doubled count" (the readiness study's DBL probe): a count inflated with all its partitions passes
         the checks on any arm, which judge one answer at a time; an exact count is the population's size on one

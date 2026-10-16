@@ -300,6 +300,42 @@ class Generic(unittest.TestCase):
         # a 503 deadline keeps its own rule, a 504 never reads as one
         self.assertFalse(checks.deadline_allowed(sc, a504))
 
+    def test_the_ingress_504_is_a_time_limitation_on_direct_remote_only(self):
+        """VERIFY-V6-2 L1: the front ingress's 504 at its cut is the budget running out before the host's answer
+        could be seen, a time limitation as a 503 deadline is: a deterministic repeat beside it reads inconclusive
+        (it failed: the 504's digest differed from a complete repeat's, in either order), and checks.time_limited
+        names it given the scenario (the runners record it so); the rule holds on direct-remote only (direct-local
+        reaches the container's port, where a 504 is no ingress's)."""
+        import run_direct
+        a504 = checks.normalise_direct(504, b"<html><head><title>504 Gateway Time-out</title></head></html>")
+        sc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A" * 25, "id": "w"}], "mode": "count",
+                                                    "time_budget_ms": 110000},
+              "truth": {}, "expect": [{"check": "status", "args": {"http": 200}},
+                                      {"check": "deterministic", "args": {}}]}
+        cut = {"wall_ms": 120100.0}
+        done = ok_answer({"mode": "count", "patterns": [{"id": "w", "counts": {"contexts": {"relation": "exact",
+                                                                                           "value": 3}}}]})
+        clean = {"digest": checks.answer_digest(done, sc["route"]), "time_limited": ""}
+        # the 504 after a complete repeat: its own time limitation, inconclusive (it failed on the digest)
+        res = checks.evaluate(sc, a504, "direct-remote", previous=[clean], client=cut)
+        self.assertEqual([r["outcome"] for r in res], ["inconclusive", "inconclusive"], res)
+        self.assertIn(checks.INGRESS_CUT_LIMITATION, res[1]["detail"])
+        # the runner records the 504's time limitation (with the scenario), so a complete repeat after it compares
+        # with nothing time-limited
+        tl = run_direct.time_limited_of(checks, a504, sc, cut, "direct-remote")
+        self.assertEqual(tl, checks.INGRESS_CUT_LIMITATION)
+        self.assertEqual(checks.time_limited(a504), "")   # without the scenario: the answer alone shows no budget
+        after = checks.evaluate(sc, done, "direct-remote", previous=[
+            {"digest": checks.answer_digest(a504, sc["route"]), "time_limited": tl}], client={"wall_ms": 900.0})
+        self.assertEqual(after[1]["outcome"], "inconclusive")
+        self.assertIn("no earlier repeat without a time limitation", after[1]["detail"])
+        # not on direct-local or the MCP arm: no ingress there, the 504 stays the status failure
+        for arm in ("direct-local", "mcp"):
+            self.assertFalse(checks.ingress_cut_allowed(sc, a504, cut, arm))
+            self.assertEqual(checks.time_limited(a504, sc, cut, arm), "")
+            self.assertEqual(checks.evaluate(sc, a504, arm, previous=[clean], client=cut)[0]["outcome"], "fail")
+        self.assertTrue(checks.ingress_cut_allowed(sc, a504, cut, "direct-remote"))
+
     def test_resolve_deadline_is_opt_in(self):
         # A2-01 (review of lane S5b, VERIFY-REVIEW: SPEC-labeled-traversal-core §4.5 l.224, capabilities
         # resolve.time_budget.default null): a /resolve without bounds.time_budget_ms has no deadline, so v4's

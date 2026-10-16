@@ -177,13 +177,16 @@ def accepts_keyword(fn, name):
     return name in params or any(x.kind is inspect.Parameter.VAR_KEYWORD for x in params.values())
 
 
-def time_limited_of(checks, answer):
-    """What made an answer time-limited (checks.time_limited), '' when nothing did, None when the checks module
+def time_limited_of(checks, answer, scenario=None, client=None, arm=None):
+    """What made an answer time-limited (checks.time_limited; with the scenario, its client wall and the arm where
+    the checks take them: the front ingress's 504 at its cut too), '' when nothing did, None when the checks module
     cannot tell (the stub)."""
     fn = getattr(checks, "time_limited", None)
     if fn is None:
         return None
     try:
+        if scenario is not None and accepts_keyword(fn, "arm"):
+            return fn(answer, scenario, client, arm) or ""
         return fn(answer) or ""
     except Exception:  # never take the run down over a note
         return None
@@ -615,7 +618,8 @@ class Runner(object):
             "http": answer["http"], "outcome": outcome, "checks": checks,
             "server": sc.extract_server(answer["body"]), "mcp_phases": None,
             "answer_digest": sc.answer_digest(answer, route), "raw": raw_rel, "job": None,
-            "time_limited": time_limited_of(self.checks, answer),
+            "time_limited": time_limited_of(self.checks, answer, scenario, {"wall_ms": res["wall_ms"]},
+                                            self.args.arm),
             "error": answer["error"],
             "client": {"connect_ms": res["connect_ms"], "reused": res["reused"], "attempts": res["attempts"],
                        "ttfb_ms": res["ttfb_ms"], "bytes_wire": res["bytes_wire"],
@@ -633,8 +637,12 @@ class Runner(object):
         """{digest, time_limited} of a recorded execution, for checks.evaluate's `previous`."""
         tl = line.get("time_limited")
         if tl is None and line.get("raw"):
+            scenario = next((s for s in self.manifest.get("scenarios", []) if s.get("id") == line.get("scenario")),
+                            None)
+            wall = line.get("wall_ms")
             try:
-                tl = time_limited_of(self.checks, (sc.read_gz_json(os.path.join(self.out, line["raw"])) or {}).get("answer"))
+                tl = time_limited_of(self.checks, (sc.read_gz_json(os.path.join(self.out, line["raw"])) or {}).get(
+                    "answer"), scenario, {"wall_ms": wall} if isinstance(wall, (int, float)) else None, line.get("arm"))
             except (OSError, ValueError):
                 tl = None
         return {"digest": line.get("answer_digest"), "time_limited": tl or ""}

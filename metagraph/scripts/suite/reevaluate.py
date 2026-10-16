@@ -394,6 +394,10 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
     ident = checks_identity(checks_dir)
     takes = inspect.signature(checks_mod.evaluate).parameters
     takes_prev, takes_client = "previous" in takes, "client" in takes
+    # a checks module whose time_limited reads the scenario, the client and the arm (the front ingress's 504 at its
+    # cut, VERIFY-V6-2 L1) gets them, as run_direct.time_limited_of passes them
+    tl_takes_arm = hasattr(checks_mod, "time_limited") and \
+        "arm" in inspect.signature(checks_mod.time_limited).parameters
     short = (ident["checks_sha256"] or "")[:16]
     mark = {"run_dir": os.path.abspath(run_dir), "reevaluated_utc": sc.iso_utc(time.time()), "checks": ident,
             "client_passed": {"direct-local": "wall_ms", "direct-remote": "wall_ms", "mcp": "mcp_phases.backend_ms"},
@@ -435,7 +439,9 @@ def reevaluate(run_dir, checks_dir=None, log=None, by_design=None, mcp_auth=None
             try:
                 if answer is not None:
                     entries[key] = {"digest": checks_mod.answer_digest(answer, route),
-                                    "time_limited": checks_mod.time_limited(answer)
+                                    "time_limited": (checks_mod.time_limited(
+                                        answer, scen.get(line.get("scenario")), client_of(name, line), name)
+                                        if tl_takes_arm else checks_mod.time_limited(answer))
                                     if hasattr(checks_mod, "time_limited") else ""}
             except Exception as exc:  # the recorded values, never fatal to the re-evaluation
                 mark["warnings"].append("arms/%s %s r%s: digest or time limitation raised %s: %s" % (
