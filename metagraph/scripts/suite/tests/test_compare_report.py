@@ -1333,9 +1333,15 @@ class ReviewFixesTest(unittest.TestCase):
                                                                              "outcome": "finding", "detail": ""}])
         self.assertEqual(cmp.direct_agreement({2: finding}, {2: complete2}, "POST /pattern", self.dir)["class"],
                          "disagree")
-        # both stopped, or neither: no timing
+        # both stopped (P-heavy-0001's pair: a 503 deadline against a time-limited 200 that passed): neither answer
+        # is complete, so neither shows the other wrong, timing (0605227da); a failing side stays a disagreement
         both = dict(complete2, time_limited="pattern 0 time-limited")   # outcome pass: both state a stop
-        self.assertEqual(cmp.direct_agreement({2: dead}, {2: both}, "POST /pattern", self.dir)["class"], "disagree")
+        res = cmp.direct_agreement({2: dead}, {2: both}, "POST /pattern", self.dir)
+        self.assertEqual(res["class"], "timing", res)
+        self.assertIn("both time-limited", res["timing_repeats"][0]["detail"])
+        both_fail = dict(both, outcome="fail", checks=[st("pass"), rel("fail")])
+        self.assertEqual(cmp.direct_agreement({2: dead}, {2: both_fail}, "POST /pattern", self.dir)["class"],
+                         "disagree")
         # the extension for G27: r1 inconclusive only by its determinism check after a time-limited r0, same answer
         det = {"check": "deterministic", "outcome": "inconclusive",
                "detail": "no earlier repeat without a time limitation (a 503 deadline): nothing to compare"}
