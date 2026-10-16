@@ -99,8 +99,8 @@ def tint_of(printed):
 
 def time_tint(ms):
     """The tint of the duration `ms` as fmt_t prints it, decided by the printed value (the owner's decision of
-    2026-10-16, what the reader sees; gr/suite-v6's report.py marks the same way, this branch's report.py has no
-    time marks): 10,400 ms prints '10 s' and has none, 10,600 ms
+    2026-10-16, what the reader sees; report.py marks its own printed times the same way, report.fmt_time, since
+    the merge with gr/suite-v6): 10,400 ms prints '10 s' and has none, 10,600 ms
     prints '11 s' and is yellow, 55,400 ms prints '55 s' and is yellow; None for no value."""
     if _num(ms) is None:
         return None
