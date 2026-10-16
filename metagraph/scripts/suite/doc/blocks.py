@@ -653,9 +653,21 @@ def _finding_items(st, arm):
     return out
 
 
+# the mechanism clause of a late-503 finding as checks.py records it names an unpolled piece "of about that
+# length"; the document keeps the observation apart from that hypothesis (READ-108)
+LATE_503_NOTE = "the deadline is read where the work and the delivery poll it"
+LATE_503_READING = ("the document's reading: what is established is a 503 deadline answer delivered late on the "
+                    "client's clock; an unpolled piece of the work (SPEC-labeled-traversal-core section 4.5 names "
+                    "them) is one explanation the contract permits, not a measured cause, since the client's wall "
+                    "also holds the network, the front and any wait for a request thread, so this measurement "
+                    "isolates neither the piece nor its length")
+
+
 def finding_text(items, rule):
-    """The FINDING line: the evidence per execution; the mechanism once when every execution shares it (else
-    with each); the rule once (VERIFY-R2 M2: never the mechanism twice)."""
+    """The FINDING line: the evidence per execution; the check's mechanism note once when every execution shares
+    it (else with each), labelled as the check's note; for a late 503 the document's reading of that note, which
+    keeps the observation apart from the hypothesis (READ-108); the rule once (VERIFY-R2 M2: never the mechanism
+    twice)."""
     whys = []
     for _, _, _, _, why in items:
         if why and why not in whys:
@@ -669,7 +681,9 @@ def finding_text(items, rule):
         parts.append(text)
     text = "; ".join(parts)
     if shared:
-        text += " — %s" % esc(whys[0], 400)
+        text += " — the check's note: %s" % esc(whys[0], 400)
+    if any(LATE_503_NOTE in w for w in whys):
+        text += "; " + esc(LATE_503_READING)
     if rule:
         text += " · rule: " + esc(rule, 400)
     return text
@@ -779,7 +793,8 @@ def _artifacts_line(run, states):
 
 
 DEPTH_WORD = {"full": "fully checked", "partial": "partially checked", "generic_only": "generic checks only",
-              "refusal": "a refusal on both arms", "partial_non_pass": "partially checked, not a pass on both arms",
+              "refusal": "a refusal on both access paths",
+              "partial_non_pass": "partially checked, not a pass on both access paths",
               "on_failure": "checked on a failure"}
 
 
@@ -812,6 +827,28 @@ def depth_text(depth):
     return text
 
 
+def agreement_gap_text(depth):
+    """What an MCP agreement short of fully checked leaves out, in the reader's terms (READ-110): the property
+    checks it did not compare (not a pass on both access paths, or evaluated on one side only), or that only the
+    generic checks were compared, or that both sides refused; plain text."""
+    cls = str(depth.get("class") or "")
+    nc = [str(c) for c in (depth.get("not_compared") or [])]
+    if cls == "refusal":
+        return "the two access paths agree on a refusal (the status and the text are the claim; no property check)"
+    if cls == "generic_only":
+        return ("the two access paths agree on the generic checks alone; no property check was compared, so the "
+                "agreement establishes no property")
+    head = "the two access paths agree on the checks both evaluated"
+    if nc:
+        head += ", but %s %s not compared" % (latex.cut_text(", ".join(nc), 120), "was" if len(nc) == 1 else "were")
+        if cls == "partial_non_pass":
+            head += " (not a pass on both)"
+        head += ": the agreement does not establish %s" % ("that property" if len(nc) == 1 else "those properties")
+    elif cls == "on_failure":
+        head += ", on a failure"
+    return head
+
+
 def _classes_text(run, sid, states):
     """The agreement classes in one line: the direct class with its detail where the arms differ, the MCP class
     with its depth; the by-design verification note only when the pair is unverified (else appendix B)."""
@@ -839,14 +876,22 @@ def _classes_text(run, sid, states):
         parts.append(text)
     mcls = ma.get("class")
     if mcls:
-        text = "mcp: %s" % esc(mcls.replace("_", " ") if mcls != "not_implemented_mcp" else "not implemented via MCP")
-        if ma.get("case"):
-            text += ", case %s" % tt(ma["case"])
-        if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
-            text += "; %s check(s) compared" % esc(ma["checks_compared"])
         depth = (run.depth or {}).get(sid)
-        if depth:
-            text += "; " + esc(depth_text(depth))
+        if mcls == "agree" and depth and depth.get("class") != "full":
+            # the agreement establishes less than the property: say what it leaves out first, the internal class
+            # and the depth after it (READ-110)
+            text = "mcp: " + esc(agreement_gap_text(depth)) + " (class agree"
+            if ma.get("checks_compared") is not None:
+                text += ", %s check(s) compared" % esc(ma["checks_compared"])
+            text += "; %s)" % esc(depth_text(depth))
+        else:
+            text = "mcp: %s" % esc(mcls.replace("_", " ") if mcls != "not_implemented_mcp" else "not implemented via MCP")
+            if ma.get("case"):
+                text += ", case %s" % tt(ma["case"])
+            if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
+                text += "; %s check(s) compared" % esc(ma["checks_compared"])
+            if depth:
+                text += "; " + esc(depth_text(depth))
         if ma.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 160)
         if mcls == "service_by_design" and ma.get("verified") is False:
