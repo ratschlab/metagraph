@@ -25,6 +25,7 @@
 
 \definecolor{okgreen}{HTML}{2E7D32}
 \definecolor{failred}{HTML}{C62828}
+\definecolor{fnink}{HTML}{37474F}  % footnote digits: neutral, red means needs attention (owner 2026-10-16)
 \definecolor{findorange}{HTML}{EF6C00}
 \definecolor{incgrey}{HTML}{607D8B}
 % red means "needs attention" (the owner's decision of 2026-10-16): a test not implemented via MCP (the glyph, its
@@ -51,7 +52,7 @@
 % 2026-10-16: red wherever printed)
 \newcommand\gnip{\textsuperscript{\mdseries\upshape\glyphfont\scriptsize\color{attnred}\symbol{"25CB}}}
 % marks: a footnote digit, a small letter after a glyph or a time
-\newcommand\fn[1]{\textsuperscript{\scriptsize\color{failred}\textbf{#1}}}
+\newcommand\fn[1]{\textsuperscript{\scriptsize\color{fnink}\textbf{#1}}}
 \newcommand\tmark[1]{\textsuperscript{\scriptsize #1}}
 % the tint behind a printed execution time above a threshold (cells.tinted): a box of the figure's own width
 % (no padding; it reaches 0.4 pt into the neighbouring side bearings), the height of a line of the current size,

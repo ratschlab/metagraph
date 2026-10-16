@@ -5575,7 +5575,7 @@ class ColourRoundTwoTest(unittest.TestCase):
         self.assertIn("the \\gni\\ glyph of a test not implemented via MCP is red wherever printed", legend)
         self.assertIn("(a count of 0 stays black)", legend)
         self.assertIn("headings, legends, definitions, quoted texts", legend)
-        self.assertIn("a footnote digit is red too", legend)
+        self.assertIn("a footnote digit is dark grey, not red", legend)
         self.assertNotIn("counts, marks and class words are red wherever printed", legend)
 
     def test_stop_figures_round_half_up(self):

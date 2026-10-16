@@ -4073,8 +4073,8 @@ the glyph (doc.sty's `\gnip`), counted after its glyph pair in the standing, fam
 implemented via MCP (3 by a property-level mark: T-labels-0003, -0005 and -0006)"), and listed in appendix G
 (`sections.property_marks_table`). I.3's legend now states the rule as applied: the glyph, its counts (a count of 0
 black), the class words of what stands not implemented, the property-level mark; headings, legends, definitions,
-quoted texts and the by-design table's own statements name the class in black; a footnote digit is red as an
-exception to read, whether or not an attention kind counts the test. A walk's stop figures round half up, as every
+quoted texts and the by-design table's own statements name the class in black; a footnote digit is dark grey,
+not red (owner, 2026-10-16: red means only "needs attention"); it numbers the test's detail block. A walk's stop figures round half up, as every
 time does. I.1's finding sentence names the seed's clock for a /traverse walk.
 
 ## Glossary

@@ -1560,8 +1560,8 @@ def attention_legend_sentence():
             "\\gni\\ raised after the glyph of an MCP cell, \\gpass\\gnip: a property check set aside by the "
             "manifest's mark, the test counted under not implemented via MCP); headings, legends, definitions, quoted "
             "texts (a check's text, the policy's reasons) and the by-design table's own statements name the class in "
-            "black; a footnote digit is red too: it numbers the test's detail block, an exception to read, whether "
-            "or not a kind above counts the test" % "; ".join(defs))
+            "black; a footnote digit is dark grey, not red: it numbers the test's detail block, an exception to "
+            "read, and marks no attention by itself" % "; ".join(defs))
 
 
 def grammar_lines(ctx):
