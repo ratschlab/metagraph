@@ -2373,5 +2373,66 @@ class ReportTest(unittest.TestCase):
             self.assertEqual(fh.read(4), b"%PDF")
 
 
+class PatternGateFixesTest(unittest.TestCase):
+    """The /pattern gate's comparison rules (the readiness study of 2026-10-15, round 2 of v6)."""
+
+    @staticmethod
+    def body(n, time_limited=False):
+        e = {"id": "w", "counts": {"contexts": {"relation": "exact", "value": n, "by_offset": {
+            "19": {"relation": "exact", "value": n}}, "by_strand": {"+": {"relation": "exact", "value": n - 1},
+                                                                   "-": {"relation": "exact", "value": 1}}},
+            "labels": {"relation": "unknown", "value": None}}, "stop": None, "determinism": "full"}
+        if time_limited:
+            e.update(stop={"phase": "discovery", "reason": "time"}, determinism="time_limited")
+        return {"mode": "count", "patterns": [e]}
+
+    def compared(self, local, remote, mcp):
+        """compare's entry of one /pattern scenario whose arms answered the bodies given ({repeat: body})."""
+        s = dict(scen("P-010", "P"), expect=[{"check": "status", "args": {"http": 200}},
+                                             {"check": "count_relation", "args": {"min": 1}}])
+        manifest = {"manifest_version": 1, "content_sha256": sc.scenarios_sha256([s]), "scenarios": [s]}
+        checks = [{"check": "status", "outcome": "pass", "detail": "http 200"},
+                  {"check": "count_relation", "outcome": "pass", "detail": "contexts exact"}]
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "arms", "direct-local"))
+            sc.write_json_atomic(os.path.join(d, "arms", "direct-local", "manifest.json"), manifest)
+            for k, (arm, bodies) in enumerate((("direct-local", local), ("direct-remote", remote), ("mcp", mcp))):
+                write_arm(d, arm, [line("P-010", arm, r, T0 + 10 * k + r, 50.0, checks=checks,
+                                        digest="d%s" % bodies[r]["patterns"][0]["counts"]["contexts"]["value"])
+                                   for r in sorted(bodies)],
+                          raw_bodies=dict((("P-010", r), b) for r, b in bodies.items()))
+            merge_run.merge(d)
+            return cmp.compare(d, ({}, None))["scenarios"]["P-010"]
+
+    def test_an_exact_count_that_differs_between_access_paths_is_a_disagreement(self):
+        """GPT's "doubled count" (the readiness study's DBL probe): a count inflated with all its partitions passes
+        the checks on any arm, which judge one answer at a time; an exact count is the population's size on one
+        index whichever arm asked, so one that differs between the access paths is a disagreement (0 false alarms
+        over the v5 baseline's 3,047 pairs)."""
+        same = self.compared({0: self.body(22158)}, {0: self.body(22158)}, {0: self.body(22158), 1: self.body(22158)})
+        self.assertEqual(same["mcp_agreement"]["class"], "agree")
+        self.assertEqual(same["direct_agreement"]["class"], "identical")
+        doubled = self.compared({0: self.body(22158)}, {0: self.body(22158)},
+                                {0: self.body(22158), 1: self.body(44316)})
+        ma = doubled["mcp_agreement"]
+        self.assertEqual((ma["class"], ma["side"], ma["by"]), ("disagree", "mcp", "exact_counts"))
+        self.assertEqual(sorted(d["path"] for d in ma["exact_counts_differ"]
+                                if d["a"] == ["direct-local", 0] and d["b"] == ["mcp", 1]),
+                         ["p0.contexts", "p0.contexts.by_offset.19", "p0.contexts.by_strand.+"])
+        self.assertIn("p0.contexts exact 22158 on direct-local r0, exact 44316 on mcp r1", ma["detail"])
+        self.assertEqual(doubled["direct_agreement"]["class"], "identical")
+        remote = self.compared({0: self.body(22158)}, {0: self.body(22159)}, {0: self.body(22158), 1: self.body(22158)})
+        self.assertEqual(remote["direct_agreement"]["class"], "disagree")
+        self.assertEqual(remote["direct_agreement"]["exact_counts_differ"][0]["path"], "p0.contexts")
+        self.assertEqual(remote["mcp_agreement"]["class"], "disagree")   # it differs from direct-remote's
+        # an answer a time budget limited is no population count to compare
+        limited = self.compared({0: self.body(22158)}, {0: self.body(22158)},
+                                {0: self.body(5, time_limited=True), 1: self.body(22158)})
+        self.assertEqual(limited["mcp_agreement"]["class"], "agree")
+        self.assertEqual(cmp.exact_counts({"body": self.body(3)}),
+                         {"p0.contexts": 3, "p0.contexts.by_offset.19": 3, "p0.contexts.by_strand.+": 2,
+                          "p0.contexts.by_strand.-": 1})
+
+
 if __name__ == "__main__":
     unittest.main()

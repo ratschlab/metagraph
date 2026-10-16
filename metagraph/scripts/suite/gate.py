@@ -750,6 +750,8 @@ def judge(run_dir, policy, reevaluated=False):
         if all(a in arms for a in sc.DIRECT_ARMS) and da:
             if da.get("class") == "disagree":
                 problems.append(_problem("disagreement", "direct-local and direct-remote disagree: %s" % (
+                    ("exact counts differ: %s" % cmp.exact_count_text(da["exact_counts_differ"]))
+                    if da.get("exact_counts_differ") else
                     da.get("outcome_differs") or "; ".join("%s %s vs %s" % (d.get("check"), d.get("a"), d.get("b"))
                                                            for d in da.get("differing_checks") or [])[:300]), sid))
             elif policy.get("require_agreement") and da.get("class") not in ("identical", "same_checks"):
