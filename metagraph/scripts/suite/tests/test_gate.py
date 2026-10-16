@@ -359,7 +359,7 @@ class PolicyTest(GateCase):
                          ["REL-same_answer-0003"] + ["REL-prefix_equals-%04d" % i for i in range(1, 5)])
 
     def test_shipped_v6_policy_is_regenerated_exactly_and_is_v5s(self):
-        # v6 (the owner, 2026-10-15): v5 with every default-budget /pattern request at 120,000 ms; its policy is
+        # v6 (the owner, 2026-10-15 / -16): v5 with every default-budget /pattern request at 110,000 ms; its policy is
         # generated as v5's was (0 declared entries, 0 property exemptions, the same by-design table) and must equal
         # v5's but for the pins (the manifest's file, content and version, the name, the declared file and its sha256,
         # generated_utc), so that the v5 acceptance carries over: the same selection, required executions, relations,
@@ -367,10 +367,10 @@ class PolicyTest(GateCase):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
         self.assertEqual((m["manifest_version"], m["content_sha256"], m["relations_sha256"]),
-                         (6, "e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e",
+                         (6, "2c53f809e63de83bdd568ee59e0cf75fa345110cabce398b1b2ac2188e8d33cf",
                           "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
         smoke = sc.read_json(os.path.join(SUITE, "manifest", "suite_smoke_v6.json"))
-        self.assertEqual(smoke["content_sha256"], "183295a285c6da48aa44e3a47b580d574ab8678376a5242ff36eff7be085587e")
+        self.assertEqual(smoke["content_sha256"], "5f3b128984e60941dfeb8494889a907577e3fc13ff530c39eb5181ffb612dd5b")
         declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
         self.assertEqual(declared["manifest"], {"file": "manifest/suite_v6.json", "content_sha256": m["content_sha256"]})
         self.assertEqual((declared["exclusions"], declared["not_required"], declared["relations_excluded"]), ([], [], []))

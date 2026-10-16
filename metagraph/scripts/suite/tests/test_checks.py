@@ -239,13 +239,14 @@ class Generic(unittest.TestCase):
     def test_front_ingress_504_at_the_budget_is_inconclusive(self):
         """v6: the front ingress of the public URL cuts a request at ~120 s (checks.FRONT_INGRESS_CUT_MS) and
         answers its own 504 with no host body; a /pattern or /resolve request whose stated budget reaches the cut
-        is answered by the host at its budget or later, so the 504 shows nothing of the host: the status is
-        inconclusive (an allowed deadline's case) and the other checks cannot test their property. A budget that
-        ends before the cut, a 504 well before it, a host body behind the 504, a scenario naming the 504, or a
-        request without a budget: judged as before."""
+        less the tolerance (v6's 110,000 ms) is answered by the host at its budget or, a 503 deadline, within the
+        late window the checks read inconclusive, which holds the cut, so the 504 shows nothing of the host: the
+        status is inconclusive (an allowed deadline's case) and the other checks cannot test their property. A
+        budget that ends before that, a 504 well before the cut, a host body behind the 504, a scenario naming the
+        504, or a request without a budget: judged as before."""
         html = b"<html><head><title>504 Gateway Time-out</title></head><body>nginx</body></html>"
         a504 = checks.normalise_direct(504, html)
-        sc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A"}], "time_budget_ms": 120000},
+        sc = {"route": "POST /pattern", "request": {"patterns": [{"dna": "A"}], "time_budget_ms": 110000},
               "truth": {}, "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
                                       {"check": "budget_respected", "args": {}}]}
         self.assertEqual((checks.FRONT_INGRESS_CUT_MS, checks.FRONT_INGRESS_CUT_TOLERANCE_MS), (120000.0, 10000.0))
@@ -255,7 +256,7 @@ class Generic(unittest.TestCase):
             self.assertEqual(checks.scenario_outcome(res), "inconclusive")
             self.assertIn("http 504 from the front ingress in place of 200 at a client wall time of %.0f ms" % wall,
                           res[0]["detail"])
-            self.assertIn("120000 ms budget", res[0]["detail"])
+            self.assertIn("110000 ms budget", res[0]["detail"])
             self.assertIn("not testable: http 504, an answer the scenario allows", res[1]["detail"])
         # without the client's wall time (a runner that gives none) the budget alone decides
         self.assertEqual([r["outcome"] for r in checks.evaluate(sc, a504, "direct-remote")], ["inconclusive"] * 3)
@@ -270,9 +271,15 @@ class Generic(unittest.TestCase):
             self.assertEqual([r["outcome"] for r in checks.evaluate(sc_b, a504, "direct-remote",
                                                                      client={"wall_ms": 120000.0})], ["fail"] * 3)
             self.assertFalse(checks.ingress_cut_allowed(sc_b, a504, {"wall_ms": 120000.0}))
-        # a budget at the tolerance's edge reaches the cut
-        sc_e = dict(sc, request=dict(sc["request"], time_budget_ms=110000))
-        self.assertTrue(checks.ingress_cut_allowed(sc_e, a504, {"wall_ms": 110000.0}))
+        # v6's budget sits at the tolerance's edge, inclusively; the v6 draft's 120,000 ms is covered too
+        self.assertTrue(checks.ingress_cut_allowed(sc, a504, {"wall_ms": 110000.0}))
+        sc_e = dict(sc, request=dict(sc["request"], time_budget_ms=120000))
+        self.assertTrue(checks.ingress_cut_allowed(sc_e, a504, {"wall_ms": 120000.0}))
+        # the late window of a 110,000 ms budget (a 503 up to max(1 s, the budget) past it reads inconclusive)
+        # reaches past the cut even when the cut is measured a tolerance late
+        self.assertEqual(checks._budget_503(sc, checks.normalise_direct(503, b'{"error": "d", "code": "deadline"}'),
+                                            {"wall_ms": checks.FRONT_INGRESS_CUT_MS +
+                                             checks.FRONT_INGRESS_CUT_TOLERANCE_MS})[0], "inconclusive")
         # no budget stated (the host's default applies, below the cut); a host body behind a 504; another route
         self.assertFalse(checks.ingress_cut_allowed(dict(sc, request={"patterns": []}), a504, {"wall_ms": 120000.0}))
         self.assertFalse(checks.ingress_cut_allowed(sc, checks.normalise_direct(504, b'{"error": "x", "code": "c"}'),

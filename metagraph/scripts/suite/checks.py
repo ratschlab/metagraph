@@ -296,12 +296,19 @@ def deadline_allowed(sc: dict, ans: dict) -> bool:
 pattern_deadline_allowed = deadline_allowed
 
 # The front ingress of the public URL (nginx at https://metagraph.ethz.ch:8080, the direct-remote arm; README) cuts a
-# request at about FRONT_INGRESS_CUT_MS and answers its own 504, with no host body. Since v6 the /pattern budget of
-# 120,000 ms reaches that cut, so a search that runs to its deadline meets the 504 before the host's answer (its 503
-# deadline at ~budget + 250 ms, or a time-limited 200 at the budget) can arrive: nothing the host did is observed,
-# the 503 deadline's case (inconclusive), never a host defect. The cut is measured (~120 s), not stated: the
-# tolerance admits a 504 a little before it. A request whose budget ends before the cut must be answered by the
-# host within it, so its 504 stays the status failure it was.
+# request at about FRONT_INGRESS_CUT_MS and answers its own 504, with no host body. The rule (ingress_cut_allowed)
+# covers a request whose stated budget B is at least FRONT_INGRESS_CUT_MS - FRONT_INGRESS_CUT_TOLERANCE_MS
+# (110,000 ms) and whose 504 came no earlier than that: v6's /pattern budget of 110,000 ms (the owner, 2026-10-16;
+# 120,000 ms before, where the cut came before the host's answer could). At B = 110,000 ms the host answers at the
+# budget (a 200 limited by it, or its 503 deadline at ~B + 250 ms), about 10 s before the cut, so a 504 at the cut
+# says the host had not answered 10 s past B: within the window in which a late 503 still reads inconclusive
+# (_budget_503: up to max(1 s, B) past B, here to 220 s), and the 504 hides whether its answer would have come in it
+# (inconclusive) or after it (a finding). Nothing the host did is observed: the 503 deadline's case (inconclusive),
+# never a host defect and never a pass. The tolerance is the cut's measurement error (~120 s, not stated) and keeps
+# v6's budget covered inclusively at B = 110,000 ms; the late window must reach past the cut with it, B + max(1 s, B)
+# >= FRONT_INGRESS_CUT_MS + FRONT_INGRESS_CUT_TOLERANCE_MS (test_builder_v6). A request whose budget ends earlier
+# (every /resolve and /traverse budget, 60,000 ms, and v5's /pattern ones: the late window ends at the cut) must be
+# answered by the host before the cut, so its 504 stays the status failure it was.
 FRONT_INGRESS_CUT_MS = 120000.0
 FRONT_INGRESS_CUT_TOLERANCE_MS = 10000.0
 
@@ -324,9 +331,10 @@ def ingress_cut_allowed(sc: dict, ans: dict, client: Optional[dict] = None) -> b
     POST /resolve whose request states a time budget that reaches the ingress's cut (budget >= FRONT_INGRESS_CUT_MS
     - FRONT_INGRESS_CUT_TOLERANCE_MS), delivered at the cut (the client's wall time, when the runner gives it, at
     least that far too), where the status expectation asks for a 200 and does not itself name a 504. The host's
-    answer to such a request comes at its budget or later (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core
-    §4.5), i.e. after the cut, so the 504 shows nothing of the host (as an allowed 503 deadline shows nothing:
-    inconclusive). A request whose budget ends before the cut, or a 504 well before it, is not covered."""
+    answer to such a request comes at its budget (SPEC-pattern-search §7.6, SPEC-labeled-traversal-core §4.5) or,
+    a 503 deadline, later within the window the checks read inconclusive (_budget_503: max(1 s, the budget) past
+    it), and the cut falls in that window, so the 504 shows nothing of the host (as an allowed 503 deadline shows
+    nothing: inconclusive). A request whose budget ends before the cut, or a 504 well before it, is not covered."""
     if ans.get("http") != 504 or (ans.get("error") or {}).get("code") is not None:
         return False
     budget = _stated_budget(sc)
@@ -368,9 +376,10 @@ def check_status(sc, ans, a, arm, client=None):
         if ingress_cut_allowed(sc, ans, client):
             wall = _number((client or {}).get("wall_ms"))
             return INCONCLUSIVE, "http 504 from the front ingress in place of %s%s: the ingress cuts a request at " \
-                                 "~%.0f s, before the host's answer to the %.0f ms budget (its 503 deadline at the " \
-                                 "budget, or a 200 limited by it) could arrive, so nothing the host did is " \
-                                 "observed (an allowed deadline's case; the README's direct-remote)" % (
+                                 "~%.0f s, inside the window in which the host's answer to the %.0f ms budget may " \
+                                 "still come (its 503 deadline up to max(1 s, the budget) past it reads " \
+                                 "inconclusive), so nothing the host did is observed (an allowed deadline's case; " \
+                                 "the README's direct-remote)" % (
                                      want, (" at a client wall time of %.0f ms" % wall) if wall is not None else "",
                                      FRONT_INGRESS_CUT_MS / 1000.0, _stated_budget(sc))
         if sc.get("route") == "POST /resolve" and http == 503 and err.get("code") == "deadline" and \

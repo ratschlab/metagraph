@@ -1,5 +1,6 @@
-"""Offline tests of manifest v6 (the owner, 2026-10-15): v5 with every default-budget /pattern request at 120,000 ms
-instead of 60,000, on both arms, and nothing else; the deploy gate's scenarios and relations byte-identical to v5's;
+"""Offline tests of manifest v6 (the owner, 2026-10-15 / -16): v5 with every default-budget /pattern request at
+110,000 ms instead of 60,000, on both arms, and nothing else; the deploy gate's scenarios and relations byte-identical
+to v5's;
 the MCP exposure baseline rebased to the budget-free request digest, its lists unchanged. The test that rebuilds v6
 skips without the record cache (SUITE_TRUTH_CACHE or truth/cache)."""
 import collections
@@ -19,9 +20,11 @@ import suite_common as sc  # noqa: E402
 from test_builder_v5 import built, have_cache  # noqa: E402
 
 V5_CONTENT = "72181c4a275e6bb94a905e6d43eaad4e179a6b436dd5e00175e3936ea3aa1875"
-V6_CONTENT = "e416fdc53241fd6e8da5114a0bba97c9a12253d949390495b60d232c14f8ec4e"
+V6_CONTENT = "2c53f809e63de83bdd568ee59e0cf75fa345110cabce398b1b2ac2188e8d33cf"
 RELATIONS = "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"
-V6_SMOKE_CONTENT = "183295a285c6da48aa44e3a47b580d574ab8678376a5242ff36eff7be085587e"
+V6_SMOKE_CONTENT = "5f3b128984e60941dfeb8494889a907577e3fc13ff530c39eb5181ffb612dd5b"
+# manifest_lib.PATTERN_TIME_BUDGET_MS of v6 (the owner, 2026-10-16: 110,000, not 120,000)
+V6_BUDGET = 110000
 # the /pattern scenarios of v5 whose request names another budget than the default, or no JSON object at all
 DELIBERATE = {"P-caps-0004": 300, "M-protein-0010": 30000}
 NO_OBJECT = {"P-edge-0012", "C-protocol-0004", "C-protocol-0005", "C-protocol-0006"}
@@ -79,8 +82,9 @@ class ManifestV6(unittest.TestCase):
             for path, old, new in diffs:
                 kinds[(path, old, new)] += 1
         self.assertEqual(changed_routes, {"POST /pattern"})
-        self.assertEqual(kinds, {(".request.time_budget_ms", 60000, 120000): 449,
-                                 (".mcp.arguments.time_budget_ms", 60000, 120000): 429})
+        self.assertEqual(ml.PATTERN_TIME_BUDGET_MS, V6_BUDGET)
+        self.assertEqual(kinds, {(".request.time_budget_ms", 60000, V6_BUDGET): 449,
+                                 (".mcp.arguments.time_budget_ms", 60000, V6_BUDGET): 429})
         for sid, s in self.s6.items():
             if s["route"] != "POST /pattern":
                 continue
@@ -88,7 +92,7 @@ class ManifestV6(unittest.TestCase):
             if sid in NO_OBJECT:
                 self.assertFalse(isinstance(req, dict), sid)
                 continue
-            self.assertEqual(req["time_budget_ms"], DELIBERATE.get(sid, 120000), sid)
+            self.assertEqual(req["time_budget_ms"], DELIBERATE.get(sid, V6_BUDGET), sid)
             args = (s.get("mcp") or {}).get("arguments")
             if isinstance(args, dict) and "time_budget_ms" in args:
                 self.assertEqual(args["time_budget_ms"], req["time_budget_ms"], sid)   # one question on every arm
@@ -114,10 +118,14 @@ class ManifestV6(unittest.TestCase):
 
     def test_no_gate_scenario_reaches_the_front_ingress_cut(self):
         """checks.ingress_cut_allowed (the front ingress's 504 at the cut reads inconclusive) covers a request whose
-        stated budget reaches FRONT_INGRESS_CUT_MS - the tolerance: v6's 120,000 ms /pattern budget and nothing the
-        deploy gate selects (every gated budget is at most 70,000 ms), so a gate run is judged as under v5."""
+        stated budget reaches FRONT_INGRESS_CUT_MS - the tolerance: v6's 110,000 ms /pattern budget (inclusively, and
+        its late window reaches past the cut measured a tolerance late) and nothing the deploy gate selects (every
+        gated budget is at most 70,000 ms), so a gate run is judged as under v5."""
         import checks
         edge = checks.FRONT_INGRESS_CUT_MS - checks.FRONT_INGRESS_CUT_TOLERANCE_MS
+        self.assertGreaterEqual(V6_BUDGET, edge)
+        self.assertGreaterEqual(V6_BUDGET + max(checks._LATE_503_MIN_MS, V6_BUDGET),
+                                checks.FRONT_INGRESS_CUT_MS + checks.FRONT_INGRESS_CUT_TOLERANCE_MS)
         a504 = checks.normalise_direct(504, b"<html>504 Gateway Time-out</html>")
         for name in ("policy_v5_rt_mcp.json", "policy_v6_rt_mcp.json"):
             policy = sc.read_json(os.path.join(SUITE, "gate", name))
@@ -127,12 +135,12 @@ class ManifestV6(unittest.TestCase):
                 self.assertTrue(bound is None or bound * 1000.0 < edge, (name, sid, bound))
                 self.assertFalse(checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0}), (name, sid))
         covered = [s["id"] for s in self.v6["scenarios"] if checks.ingress_cut_allowed(s, a504, {"wall_ms": 120000.0})]
-        # the 449 scenarios at the 120,000 ms budget less the 22 that expect a refusal (a 400, answered at once)
+        # the 449 scenarios at the 110,000 ms budget less the 22 that expect a refusal (a 400, answered at once)
         self.assertEqual(len(covered), 427)
         self.assertTrue(all(self.s6[sid]["route"] == "POST /pattern" and
-                            self.s6[sid]["request"]["time_budget_ms"] == 120000 for sid in covered))
+                            self.s6[sid]["request"]["time_budget_ms"] == V6_BUDGET for sid in covered))
         refused = [s["id"] for s in self.v6["scenarios"] if s["route"] == "POST /pattern" and isinstance(
-            s.get("request"), dict) and s["request"].get("time_budget_ms") == 120000 and s["id"] not in covered]
+            s.get("request"), dict) and s["request"].get("time_budget_ms") == V6_BUDGET and s["id"] not in covered]
         self.assertEqual(len(refused), 22)
         for sid in refused:
             st = [e for e in self.s6[sid]["expect"] if e["check"] == "status"]
@@ -195,8 +203,8 @@ class ManifestV6(unittest.TestCase):
                 remote = run_direct.timeout_for(s, "direct-remote", sc.TIMING_CLASS_TIMEOUT_S)
                 self.assertGreater(remote, bound + 1.0, s["id"])
             over[(s["route"], bound, local)] += 1
-        self.assertEqual(over[("POST /pattern", 120.0, 150.0)], 397)   # the fast ones; the 52 slow ones keep 600
-        self.assertEqual(over[("POST /pattern", 120.0, 600.0)], 52)
+        self.assertEqual(over[("POST /pattern", 110.0, 140.0)], 397)   # the fast ones; the 52 slow ones keep 600
+        self.assertEqual(over[("POST /pattern", 110.0, 600.0)], 52)
         self.assertEqual(over[("POST /resolve", 60.0, 120.0)] + over[("POST /resolve", 60.0, 600.0)],
                          sum(1 for s in self.v6["scenarios"] if s["route"] == "POST /resolve"
                              and sc.stated_request_bound_s(s) == 60.0))

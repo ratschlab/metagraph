@@ -1084,7 +1084,7 @@ def gen_P(ctx: Ctx) -> List[dict]:
     nid = _ids("P-exact")
     i = 0
     # short patterns in suffix scope: one range, cheap; in any_offset scope a 12-mer's flank discovery ran past its
-    # 60 s budget on the loaded staging host (503 deadline in the smoke run; the budget is 120,000 ms since v6,
+    # 60 s budget on the loaded staging host (503 deadline in the smoke run; the budget is 110,000 ms since v6,
     # PATTERN_TIME_BUDGET_MS): two such benchmark scenarios only, tagged machine-dependent
     for L, n in ((12, 4), (16, 4)):
         for j in range(n):
@@ -1377,7 +1377,7 @@ def gen_P(ctx: Ctx) -> List[dict]:
                         tags=["modes"]))
     # P-heavy: short patterns in any_offset scope. A 12-mer's flank discovery ran past its 60 s budget on the
     # loaded staging host (503 deadline, three times, in the smoke run; at ~60.2 s again in the v5 baseline run,
-    # hence v6's 120,000 ms, PATTERN_TIME_BUDGET_MS): kept as benchmark scenarios, a 200 with its counts or the
+    # hence v6's 110,000 ms, PATTERN_TIME_BUDGET_MS): kept as benchmark scenarios, a 200 with its counts or the
     # stated 503 (an own random stream, after the others, so that their windows stay as built)
     nid = _ids("P-heavy")
     rh = ctx.rng("P", "heavy")
@@ -2017,7 +2017,7 @@ def _gen_M(ctx: Ctx) -> List[dict]:
     from truth import load_proteins
     # machine-dependent: the smoke validation of lane S1b saw a table-4 decapeptide at max_mismatches 1 stopped by its
     # 60 s budget in discovery on the loaded host (withheld deadline): the scenario is then inconclusive (v6 gives
-    # every default-budget /pattern request 120,000 ms, PATTERN_TIME_BUDGET_MS; M-protein-0010 keeps its own 30,000)
+    # every default-budget /pattern request 110,000 ms, PATTERN_TIME_BUDGET_MS; M-protein-0010 keeps its own 30,000)
     nid = _ids("M-protein")
     prots = [p for p in load_proteins() if p["genome"] in ctx.by_key and p["transl_table"] in (1, 11)]
     n = 0

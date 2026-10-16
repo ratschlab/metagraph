@@ -15,9 +15,10 @@ import manifest_lib as ml  # noqa: E402
 class Builders(unittest.TestCase):
     def test_pattern_request_names_the_defaults(self):
         r = ml.pattern_request([{"dna": "ACGT" * 6}])
-        # the budget is 120,000 ms since v6 (the owner, 2026-10-15; 60,000 before)
-        self.assertEqual((r["mode"], r["max_contexts"], r["time_budget_ms"]), ("all_or_count", 10000, 120000))
-        self.assertEqual(ml.PATTERN_TIME_BUDGET_MS, 120000)
+        # the budget is 110,000 ms since v6 (the owner, 2026-10-16: not 120,000, the public ingress's ~120 s cut;
+        # 60,000 before)
+        self.assertEqual((r["mode"], r["max_contexts"], r["time_budget_ms"]), ("all_or_count", 10000, 110000))
+        self.assertEqual(ml.PATTERN_TIME_BUDGET_MS, 110000)
         r = ml.pattern_request([{"dna": "A" * 25}], mode="partial", output={"labels": "all"})
         self.assertEqual(r["max_labels"], 1000)
         r = ml.pattern_request([{"dna": "A" * 25}], predicate={"any": ["562"]})

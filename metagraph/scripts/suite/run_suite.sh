@@ -574,7 +574,7 @@ interrupted() {
     # The runner of the step in flight (paired) or of the arm (sequential) stops after its request.
     mex "pkill -INT -u \$(id -u) -f '$RUNNER_PATTERN .*--run-id $RUN_ID'" || true
     local wrc=0
-    # the fast class's longest request (v6: a /pattern budget of 120 s, its client timeout 150 s) ends within it
+    # the fast class's longest request (v6: a /pattern budget of 110 s, its client timeout 140 s) ends within it
     wait_no_runner "$WAIT_RUNNER_S" || wrc=$?
     case $wrc in
       1) if [[ $MODE == sequential ]]; then

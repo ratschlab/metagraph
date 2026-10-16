@@ -13,10 +13,10 @@ smoke SELECTION, v5's, which v6 keeps, so that the scenarios of v6 the deploy ga
 v5's): few enough for a paired three-arm smoke run within 60 host requests, the MCP arm's included. The `smoke` tag
 keeps marking the scenarios a smoke validation exercised (the earlier selections).
 
-v6 (the owner, 2026-10-15) is v5 with one change: every /pattern request that named the default budget of 60,000 ms
-names 120,000 ms (manifest_lib.PATTERN_TIME_BUDGET_MS), on both arms; nothing else of any scenario, and no relation,
-changed (the gate's 237 resolve / traverse / capabilities scenarios are byte-identical, so the v5 acceptance carries
-over). The MCP exposure baseline it reads is v4's with its request digests rebased (--exposure-rebase, below).
+v6 (the owner, 2026-10-15 / -16) is v5 with every /pattern request that named the default budget of 60,000 ms
+naming 110,000 ms (manifest_lib.PATTERN_TIME_BUDGET_MS), on both arms; no relation changed, and the gate's 237
+resolve / traverse / capabilities scenarios are byte-identical, so the v5 acceptance carries over. The MCP exposure
+baseline it reads is v4's with its request digests rebased (--exposure-rebase, below).
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -199,11 +199,11 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
 
 
 # the tools whose time_budget_ms the request digest leaves out (EXPOSURE_RULE): traverse_resolve's since v5,
-# pattern_search's since v6 (the budget 60,000 -> 120,000 ms would otherwise drop every /pattern scenario's list).
+# pattern_search's since v6 (the budget 60,000 -> 110,000 ms would otherwise drop every /pattern scenario's list).
 # EXPOSURE_RULE's "a budget shapes no field of the answer" is the short form, embedded in the frozen manifests: a
 # pattern_search budget decides how far the answer gets (complete, or limited by time: SPEC-pattern-search §7.9),
 # never which fields it carries, and a larger budget lets no fewer checks decide, so a list recorded under one budget
-# is a lower bound under a larger one (v6's 120,000 ms against v4's 60,000 ms)
+# is a lower bound under a larger one (v6's 110,000 ms against v4's 60,000 ms)
 BUDGET_FREE_DIGEST_TOOLS = ("traverse_resolve", "pattern_search")
 
 

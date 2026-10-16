@@ -363,9 +363,9 @@ def paired_plan(manifest, run_dir, areas=None, limit=None, warm_every=10, arms=(
 # How long a request of a timing class may take (the direct runner's client timeouts); a request that states a time
 # budget above it gets the budget plus CLIENT_BUDGET_MARGIN_S instead (client_timeout_s).
 TIMING_CLASS_TIMEOUT_S = {"fast": 120.0, "slow": 600.0, "long": 1800.0}
-# The margin a client timeout keeps above a request's stated time budget (v6: the /pattern budget of 120,000 ms is
-# the fast class's 120 s, so the class alone would turn the host's 503 deadline, answered at ~budget + 250 ms, into a
-# client timeout): the host's finalisation reserve, the answer's transfer and the clocks. Narrower than the window
+# The margin a client timeout keeps above a request's stated time budget (v6: the /pattern budget of 110,000 ms
+# leaves the fast class's 120 s only 10 s above the host's 503 deadline, answered at ~budget + 250 ms): the host's
+# finalisation reserve, the answer's transfer and the clocks. Narrower than the window
 # in which checks._budget_503 still reads a late 503 as inconclusive (max(1 s, the budget) past it): a 503 later
 # than this margin is a client timeout, an error; the lateness seen so far is at most 0.3 s.
 CLIENT_BUDGET_MARGIN_S = 30.0

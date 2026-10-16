@@ -404,7 +404,8 @@ def build_request(scenario, run_id=None, arm=None):
 def timeout_for(scenario, arm, timeouts):
     """The client timeout of a scenario's request on |arm|: the timing class's, or the request's stated time budget
     plus suite_common.CLIENT_BUDGET_MARGIN_S where that is more (suite_common.client_timeout_s: v6's /pattern budget
-    of 120 s equals the fast class), capped on direct-remote at REMOTE_TIMEOUT_CAP_S (the front proxy answers first)."""
+    of 110 s gets 140 s on the fast class), capped on direct-remote at REMOTE_TIMEOUT_CAP_S (the front proxy answers
+    first)."""
     t = sc.client_timeout_s(scenario, timeouts)
     if arm == "direct-remote":
         t = min(t, REMOTE_TIMEOUT_CAP_S)
