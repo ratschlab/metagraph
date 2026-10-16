@@ -2,10 +2,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <stdexcept>
-#include <unordered_map>
+#include <tsl/hopscotch_map.h>
 #include <unordered_set>
 
 #include "graph/annotated_dbg.hpp"
@@ -31,6 +32,106 @@ std::string hex64(uint64_t x) {
         x >>= 4;
     }
     return s;
+}
+
+
+// The column-membership subset of the prototype's LabelSupport accumulator.
+// Keep the open run beside the count, and decode names only for returned columns.
+struct LabelSupport {
+    uint64_t column;
+    uint64_t kmers = 0;
+    KmerInterval open;
+    std::vector<KmerInterval> runs;
+
+    void add(uint64_t i) {
+        ++kmers;
+        if (open.end == i) {
+            open.end = i + 1;
+        } else {
+            if (open.size())
+                runs.push_back(open);
+            open = {i, i + 1};
+        }
+    }
+    std::vector<KmerInterval> take_runs() {
+        if (open.size())
+            runs.push_back(open);
+        return std::move(runs);
+    }
+};
+
+// Extracted from the prototype's for_each_row: grow batches according to row
+// width and keep repeated rows until their last use. Only membership rows are
+// needed here; the prototype's trace/deadline hooks remain outside this slice.
+template <class Use>
+void for_each_row(const std::vector<AnnotatedDBG::node_index> &keys,
+                  const annot::matrix::BinaryMatrix &matrix, const Use &use) {
+    using Node = AnnotatedDBG::node_index;
+    using Row = annot::matrix::BinaryMatrix::SetBitPositions;
+    constexpr size_t never = std::numeric_limits<size_t>::max();
+    constexpr uint64_t batch_bytes = uint64_t(64) << 20;
+    constexpr uint64_t kept_max = uint64_t(256) << 20;
+    auto bytes = [](const Row &row) { return sizeof(row) + row.capacity() * sizeof(row[0]); };
+    std::vector<size_t> next_use(keys.size(), never);
+    {
+        tsl::hopscotch_map<Node, size_t> later;
+        for (size_t j = keys.size(); j-- > 0; ) {
+            if (!keys[j])
+                continue;
+            auto [it, inserted] = later.try_emplace(keys[j], j);
+            if (!inserted) {
+                next_use[j] = it->second;
+                it.value() = j;
+            }
+        }
+    }
+    tsl::hopscotch_map<Node, std::pair<Row, uint64_t>> kept;
+    uint64_t kept_bytes = 0;
+    size_t next_batch = 64;
+    tsl::hopscotch_map<Node, size_t> in_batch;
+    std::vector<annot::matrix::BinaryMatrix::Row> rows;
+    for (size_t begin = 0; begin < keys.size(); ) {
+        in_batch.clear();
+        rows.clear();
+        size_t end = begin;
+        for (; end < keys.size(); ++end) {
+            if (!keys[end] || kept.count(keys[end]) || in_batch.count(keys[end]))
+                continue;
+            if (rows.size() == next_batch)
+                break;
+            in_batch.emplace(keys[end], rows.size());
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(keys[end]));
+        }
+        auto batch = matrix.get_rows(rows);
+        uint64_t widest = 1;
+        for (const auto &row : batch)
+            widest = std::max<uint64_t>(widest, bytes(row));
+        next_batch = std::max<uint64_t>(1, std::min<uint64_t>({
+            batch_bytes / widest, 2 * batch.size(), 4096 }));
+        for (size_t j = begin; j < end; ++j) {
+            if (!keys[j])
+                continue;
+            auto kit = kept.find(keys[j]);
+            if (kit != kept.end()) {
+                use(j, kit->second.first);
+                if (next_use[j] == never) {
+                    kept_bytes -= kit->second.second;
+                    kept.erase(kit);
+                }
+                continue;
+            }
+            Row &row = batch[in_batch.at(keys[j])];
+            use(j, row);
+            if (next_use[j] != never && next_use[j] >= end) {
+                const uint64_t size = bytes(row);
+                if (kept_bytes + size <= kept_max) {
+                    kept_bytes += size;
+                    kept.emplace(keys[j], std::make_pair(std::move(row), size));
+                }
+            }
+        }
+        begin = end;
+    }
 }
 
 } // namespace
@@ -90,16 +191,17 @@ SupportProfile resolve_support(const AnnotatedDBG &graph, std::string_view query
         throw std::invalid_argument("Query shorter than k");
     profile.num_kmers = query.size() - profile.k + 1;
     const auto &encoder = graph.get_annotator().get_label_encoder();
-    std::unordered_map<uint64_t, LabelId> slots;
-    auto add_column = [&](uint64_t column) -> LabelProfile& {
-        auto [it, added] = slots.try_emplace(column, profile.labels.size());
+    tsl::hopscotch_map<uint64_t, size_t> slots;
+    std::vector<LabelSupport> found;
+    auto add_column = [&](uint64_t column) -> LabelSupport& {
+        auto [it, added] = slots.try_emplace(column, found.size());
         if (added)
-            profile.labels.push_back({{column, encoder.decode(column)}, 0, {}});
-        return profile.labels[it->second];
+            found.push_back({column, 0, {}, {}});
+        return found[it->second];
     };
     for (const auto &label : options.labels) {
         auto column = encoder.encode(label);
-        if (slots.contains(column))
+        if (slots.count(column))
             throw std::invalid_argument("Duplicate resolve label: " + label);
         add_column(column);
     }
@@ -107,57 +209,35 @@ SupportProfile resolve_support(const AnnotatedDBG &graph, std::string_view query
     std::vector<Node> keys;
     graph.get_graph().map_to_nodes(query, [&](Node node) { keys.push_back(node); });
     profile.graph_runs = runs_of(keys.size(), [&](size_t i) { return keys[i] != 0; });
-    const auto &matrix = graph.get_annotator().get_matrix();
-    // The prototype's column-membership path accumulates runs in query order.
-    // Use the existing binary matrix interface, without LabelOracle's traversal,
-    // coordinate, deadline and cache dependencies. Repeated rows share a decode
-    // within each batch of at most 64 distinct rows.
-    for (size_t begin = 0; begin < keys.size(); ) {
-        std::vector<annot::matrix::BinaryMatrix::Row> rows;
-        std::unordered_map<Node, size_t> positions;
-        size_t end = begin;
-        for (; end < keys.size(); ++end) {
-            if (!keys[end] || positions.contains(keys[end]))
-                continue;
-            if (rows.size() == 64)
-                break;
-            positions.emplace(keys[end], rows.size());
-            rows.push_back(AnnotatedDBG::graph_to_anno_index(keys[end]));
-        }
-        const auto decoded = matrix.get_rows(rows);
-        for (size_t i = begin; i < end; ++i) {
-            if (!keys[i])
-                continue;
-            for (uint64_t column : decoded[positions.at(keys[i])]) {
-                if (!options.discover && !slots.contains(column))
-                    continue;
-                auto &label = add_column(column);
-                ++label.kmers_supported;
-                if (label.runs.empty() || label.runs.back().end != i)
-                    label.runs.push_back({i, i + 1});
-                else
-                    label.runs.back().end = i + 1;
+    for_each_row(keys, graph.get_annotator().get_matrix(), [&](size_t i, const auto &row) {
+        for (uint64_t column : row) {
+            if (options.discover) {
+                add_column(column).add(i);
+            } else if (auto it = slots.find(column); it != slots.end()) {
+                found[it->second].add(i);
             }
         }
-        begin = end;
-    }
+    });
     if (options.discover) {
-        std::sort(profile.labels.begin(), profile.labels.end(), [](const auto &a, const auto &b) {
-            return a.kmers_supported != b.kmers_supported
-                ? a.kmers_supported > b.kmers_supported : a.label.column < b.label.column;
+        std::sort(found.begin(), found.end(), [](const auto &a, const auto &b) {
+            return a.kmers != b.kmers ? a.kmers > b.kmers : a.column < b.column;
         });
-        if (profile.labels.size() > options.discover_max_labels) {
+        if (found.size() > options.discover_max_labels) {
             const auto kept = options.discover_max_labels;
             uint64_t present = 0;
             for (const auto &run : profile.graph_runs) present += run.size();
             size_t full = 0;
-            for (size_t i = kept; i < profile.labels.size(); ++i)
-                full += profile.labels[i].kmers_supported == present;
-            profile.labels_truncated = LabelTruncation{kept, profile.labels.size(),
-                profile.labels[kept - 1].kmers_supported, profile.labels[kept].kmers_supported, full};
-            profile.labels.resize(kept);
+            for (size_t i = kept; i < found.size(); ++i)
+                full += found[i].kmers == present;
+            profile.labels_truncated = LabelTruncation{kept, found.size(),
+                found[kept - 1].kmers, found[kept].kmers, full};
+            found.resize(kept);
         }
     }
+    profile.labels.reserve(found.size());
+    for (auto &label : found)
+        profile.labels.push_back({{label.column, encoder.decode(label.column)},
+                                  label.kmers, label.take_runs()});
     // The prototype's identical maximal-run grouping and deterministic ordering.
     std::map<KmerInterval, std::vector<LabelId>> groups;
     for (LabelId l = 0; l < profile.labels.size(); ++l)

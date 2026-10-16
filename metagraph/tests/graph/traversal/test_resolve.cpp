@@ -181,6 +181,35 @@ TEST(Resolve, DiscoveryLimitsAndExplicitLabels) {
     o.labels={"A","A"};EXPECT_THROW(resolve_support(*graph,"ACGTTGCA",o),std::invalid_argument);
 }
 
+TEST(Resolve, RepeatedSequenceAndGapsAcrossRowBatches) {
+    std::mt19937 rng(67017);
+    std::string sequence(1200, 'A');
+    for (char &c : sequence) c = "ACGT"[rng() % 4];
+    const std::string query = sequence + "NNNNNNNNN" + sequence + sequence.substr(500, 500);
+    const std::vector<mtg::test::CoordinateRecord> records{
+        {sequence.substr(0, 700), "A", "a"}, {sequence.substr(500), "B", "b"}};
+    for (bool diff : {false, true}) for (bool brwt : {false, true}) {
+        auto graph = coordinate_test_graph(7, records, diff, brwt);
+        for (bool discover : {false, true}) {
+            ResolveOptions options;
+            options.discover = discover;
+            if (!discover) options.labels = {"B", "A"};
+            const auto profile = resolve_support(*graph, query, options);
+            ASSERT_EQ(profile.labels.size(), records.size());
+            for (const auto &label : profile.labels) {
+                const auto &record = *std::find_if(records.begin(), records.end(), [&](const auto &r) {
+                    return r.column == label.label.name;
+                });
+                std::vector<bool> expected(query.size() - 6);
+                for (size_t i = 0; i < expected.size(); ++i)
+                    expected[i] = record.sequence.find(query.substr(i, 7)) != std::string::npos;
+                EXPECT_EQ(label.kmers_supported, std::count(expected.begin(), expected.end(), true));
+                EXPECT_EQ(label.runs, runs_of(expected.size(), [&](size_t i) { return expected[i]; }));
+            }
+        }
+    }
+}
+
 TEST(Resolve, RequestRejectsUnsupportedSemantics) {
     auto graph=coordinate_test_graph(3,{{"ACGTTGCA","A","a"}});
     Json::Value request;request["sequence"]="ACGTTGCA";request["discover"]=Json::objectValue;

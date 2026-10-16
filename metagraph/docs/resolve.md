@@ -89,7 +89,12 @@ budgets: discovering top labels still reads all relevant rows and accumulates
 support for the columns encountered.
 
 The selection algorithm, seed IDs and response fields come from the prototype.
-The annotation adapter uses the current matrix API with batches of 64 distinct
-rows; it avoids importing the walker's label oracle, decoding-budget extensions
-and service lifecycle. The PR comparison evidence covers this adapter separately.
+The annotation adapter uses the current matrix API and the prototype's adaptive
+row batches and bounded reuse of repeated rows. It starts with 64 distinct rows,
+grows to at most 4096 while targeting 64 MiB of decoded rows, and retains up to
+256 MiB of row payload for later occurrences. These targets exclude other request
+state and matrix decoding scratch space. Sparse column lookup avoids allocating
+a slot for every column of the index; names are decoded only for returned labels.
+This avoids importing the walker's label oracle, decoding-budget extensions and
+service lifecycle. The PR comparison evidence covers this adapter separately.
 No topology sidecar, graph format change or dependency update is required.
