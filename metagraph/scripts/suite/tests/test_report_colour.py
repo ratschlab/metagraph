@@ -118,8 +118,8 @@ class AttentionTest(unittest.TestCase):
                 line("P-mark", "mcp", "pass"), line("P-mark", "direct-local", "pass")]
         c = report.attention_counts(rows, manifest)
         self.assertEqual(dict((k, sorted(v)) for k, v in c.items()),
-                         {"failed": ["A"], "errored": ["B"], "finding": ["C"], "time_budget": ["D", "E", "F", "G"],
-                          "nim_whole": ["I"], "nim_marks": ["P-mark"]})
+                         {"failed": ["A"], "errored": ["B"], "finding": ["C"], "disagree": [], "relation_failed": [],
+                          "time_budget": ["D", "E", "F", "G"], "nim_whole": ["I"], "nim_marks": ["P-mark"]})
         self.assertEqual(report.attention_line(rows, manifest), RED % (
             "Needs attention, in tests (scenarios): 1 failed; 1 errored; 1 with a finding; 4 with a time-budget issue "
             "(an execution hit its budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; "
@@ -131,6 +131,22 @@ class AttentionTest(unittest.TestCase):
         # the comparison's not_implemented_mcp class counts as a whole too
         comp = {"scenarios": {"J": {"mcp_agreement": {"class": "not_implemented_mcp"}}}}
         self.assertEqual(sorted(report.attention_counts([], manifest, comp)["nim_whole"]), ["J"])
+        # round 2's verification (checks L3): a disagreement between the arms and a failed relation fail a run whose
+        # executions all pass (an exact count that differs); they lead with the failures
+        comp = {"scenarios": {"K": {"direct_agreement": {"class": "disagree"}, "mcp_agreement": {"class": "agree"}},
+                              "L": {"mcp_agreement": {"class": "disagree", "by": "exact_counts"}},
+                              "M": {"direct_agreement": {"class": "timing"}}},
+                "relations": [{"id": "REL-1", "arms": {"direct-local": {"outcome": "pass"}, "mcp": {"outcome": "fail"}}},
+                              {"id": "REL-2", "arms": {"mcp": {"outcome": "inconclusive"}}}]}
+        c = report.attention_counts([line("K", "mcp", "pass")], manifest, comp)
+        self.assertEqual((sorted(c["disagree"]), sorted(c["relation_failed"])), (["K", "L"], ["REL-1"]))
+        self.assertEqual(report.attention_line([line("C", "direct-local", "finding"), line("G", "mcp", "pass",
+                                                                                        wall_ms=61000.0)],
+                                               manifest, comp),
+                         RED % ("Needs attention, in tests (scenarios): 1 with a finding; 2 with a disagreement between "
+                                "the arms; 1 relation(s) failed; 1 with a time-budget issue (an execution hit its "
+                                "budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; or "
+                                "took more than 55 s)."))
 
 
 class ReportTest(unittest.TestCase):
@@ -182,9 +198,11 @@ class ReportTest(unittest.TestCase):
         self.assertIn("| P | direct-remote | warm | 4 | 104 | 108 | 110 | 4 | 52.2 | 54.2 | 55.0 |", timing)
         # round 2: the red attention line right after the verdict, the red counts of what is not implemented yet via
         # MCP (the verdict, the area table, the agreement), plain at 0
+        # (the disagreements: P-002 and M-001 on the MCP side, R-001 between the direct arms)
         verdict = self.text.split("# Verdict", 1)[1].split("\n# ", 1)[0]
         self.assertEqual(verdict.split("\n\n")[2], RED % (
-            "Needs attention, in tests (scenarios): 3 failed; 2 with a time-budget issue (an execution hit its "
+            "Needs attention, in tests (scenarios): 3 failed; 3 with a disagreement between the arms; 2 with a "
+            "time-budget issue (an execution hit its "
             "budget: a 503 deadline, a time-limited answer, a stop by time, the ingress's cut; or took more than "
             "55 s); 2 not implemented yet via MCP (2 as a whole, 0 by a property-level mark)."))
         self.assertIn("1 inconclusive, %s, 2 service-side by design." % (RED % "1 not implemented yet via MCP"),

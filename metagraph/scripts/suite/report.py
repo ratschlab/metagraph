@@ -489,13 +489,16 @@ def time_budget_issue(line):
 
 def attention_counts(rows, manifest, comp=None):
     """{kind: the TESTS (scenario ids) of that kind} over the run's executions, for the attention line: failed (a
-    fail, or an outcome outside the vocabulary), errored, with a finding, with a time-budget issue
+    fail, or an outcome outside the vocabulary), errored, with a finding, with a disagreement between the arms (the
+    comparison of |comp|: the direct pair's or the MCP's class disagree, e.g. an exact count that differs while every
+    execution passes), the relations that failed (their ids, on any arm), with a time-budget issue
     (time_budget_issue on any execution), not implemented yet via MCP as a whole (an MCP execution
     not_implemented_mcp, or the comparison's MCP class of |comp|, as the agreement line counts them) or by a
     property-level mark (a scenario the MCP arm ran whose manifest marks a check not implemented yet via MCP). A test
     may be of several kinds."""
     scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
-    out = dict((k, set()) for k in ("failed", "errored", "finding", "time_budget", "nim_whole", "nim_marks"))
+    out = dict((k, set()) for k in ("failed", "errored", "finding", "disagree", "relation_failed", "time_budget",
+                                    "nim_whole", "nim_marks"))
     for r in rows or []:
         sid, o = r.get("scenario"), r.get("outcome")
         if o == "fail" or not sc.outcome_known(sc.recorded_outcome(r)):
@@ -514,17 +517,24 @@ def attention_counts(rows, manifest, comp=None):
     for sid, entry in ((comp or {}).get("scenarios") or {}).items():
         if ((entry or {}).get("mcp_agreement") or {}).get("class") == "not_implemented_mcp":
             out["nim_whole"].add(sid)
+        if any(((entry or {}).get(k) or {}).get("class") == "disagree" for k in ("direct_agreement", "mcp_agreement")):
+            out["disagree"].add(sid)
+    for rel in (comp or {}).get("relations") or []:
+        if any((v or {}).get("outcome") == "fail" for v in ((rel or {}).get("arms") or {}).values()):
+            out["relation_failed"].add(rel.get("id"))
     return out
 
 
 def attention_line(rows, manifest, comp=None):
     """The verdict's attention line, red (the owner, 2026-10-16: red means needs attention): the TESTS per kind, only
-    the kinds with any, failures, errors and findings first, then the time-budget issues, then what is not
+    the kinds with any, failures, errors and findings first (with the disagreements between the arms and the failed
+    relations, which fail a run whose executions all pass), then the time-budget issues, then what is not
     implemented yet via MCP (whole executions and property-level marks); '' when nothing needs attention."""
     c = attention_counts(rows, manifest, comp)
     nim_ = c["nim_whole"] | c["nim_marks"]
     parts = [what % len(c[key]) for key, what in (
         ("failed", "%d failed"), ("errored", "%d errored"), ("finding", "%d with a finding"),
+        ("disagree", "%d with a disagreement between the arms"), ("relation_failed", "%d relation(s) failed"),
         ("time_budget", "%%d with a time-budget issue (an execution hit its budget: a 503 deadline, a time-limited "
                         "answer, a stop by time, the ingress's cut; or took more than %d s)" % (
                             TIME_MARK_RED_MS / 1000.0))) if c[key]]
