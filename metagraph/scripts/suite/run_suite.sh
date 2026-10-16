@@ -993,8 +993,8 @@ local_failed() {  # local_failed SID RC
 }
 # The resume rule's step before a target's first MCP step left (paired_plan before_mcp): the warm-ups WB again on
 # direct-local, alone (run_direct.py --rewarm-only). 0 to go on, 3 at the request cap, 1 when the loop must stop. A
-# run whose snapshot's run_direct.py predates --rewarm-only keeps the old rule (the re-run in the target's
-# direct-local step) and says so.
+# run whose snapshot's run_direct.py predates --rewarm-only does not run the warm-up again (the live plan has moved it
+# out of the target's direct-local step) and says so; no v6 run has such a snapshot.
 rewarm_before_mcp() {  # rewarm_before_mcp WB SID
   local rc=0
   if ! grep -q -- '--rewarm-only' "$SNAP/run_direct.py" 2>/dev/null; then

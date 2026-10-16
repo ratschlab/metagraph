@@ -3068,7 +3068,8 @@ default, the gate policy). What changed, by finding:
   runs the re-run alone, whatever the target has left there), and not a second time in the target's direct-local
   step; where that step comes before the first MCP step left (a warm repeat), its own re-run serves (round 2's
   verification, L1: the re-run inside the target's direct-local step came after its MCP cold call). A run whose
-  snapshot's run_direct.py predates `--rewarm-only` keeps the earlier rule and the log says so. The re-run is timing
+  snapshot's run_direct.py predates `--rewarm-only` does not run the warm-up again, and the log says so (no v6 run has
+  such a snapshot; round 2's re-verification, L-a). The re-run is timing
   evidence of the target's next direct-local execution, if any.
 - **T-budget-0003** (G18): T-attempts-0002's eco seed, whose seed phase took 148,723 work units in v4
   (usage.per_seed[0].work_seed), under 300,000: partial walks only. **T-labels-0004** (V02): 4,096 MB for its 6,181
