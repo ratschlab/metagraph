@@ -2427,6 +2427,47 @@ class PatternGateFixesTest(unittest.TestCase):
         # without the scenario (or the rule) an unrecorded 504 shows no time limitation, as before
         self.assertFalse(cmp.timing_repeat(ok, cut, "POST /pattern", None, checks)[0])
 
+    def test_two_time_limited_direct_executions_differ_by_timing(self):
+        """compare's timing rule when BOTH direct arms state a time limitation (P-heavy-0001 in the v5 baseline: a
+        time-limited 200 at_least that passed on direct-local, the host's 503 deadline on direct-remote): neither
+        answer is complete, so the pair is timing, not "no time limitation tells the outcomes apart" (a
+        disagreement); two time-limited 200s whose counts contradict, or a failing side, stay a disagreement."""
+        st = [{"check": "status", "outcome": "pass", "detail": "http 200"},
+              {"check": "count_relation", "outcome": "pass", "detail": "contexts at_least 25"}]
+        dl = [{"check": "status", "outcome": "inconclusive", "detail": "http 503 deadline"},
+              {"check": "count_relation", "outcome": "inconclusive", "detail": "not testable: http 503"}]
+
+        def limited(n, rel="at_least"):
+            return {"mode": "count", "patterns": [{"id": "w", "counts": {"contexts": {"relation": rel, "value": n}},
+                                                   "stop": {"phase": "discovery", "reason": "time"},
+                                                   "determinism": "time_limited"}]}
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "raw"))
+
+            def put(ln, body):
+                sc.write_gz_json(os.path.join(d, ln["raw"]), {"answer": {"http": ln["http"], "body": body,
+                                                                         "error": ln.get("error")}})
+                return ln
+            local = put(dict(line("P-012", "direct-local", 0, T0, 59900.0, checks=st),
+                             time_limited="pattern 0 time-limited"), limited(25))
+            remote = put(dict(line("P-012", "direct-remote", 0, T0 + 61, 60200.0, outcome="inconclusive", http=503,
+                                   digest="e", error={"code": "deadline", "text": "deadline"}, checks=dl),
+                              time_limited="a 503 deadline: nothing written within the time budget"), None)
+            ok, why = cmp.timing_repeat(local, remote, "POST /pattern", d)
+            self.assertTrue(ok, why)
+            self.assertIn("both time-limited", why)
+            self.assertEqual(cmp.direct_agreement({0: local}, {0: remote}, "POST /pattern", d)["class"], "timing")
+            # two time-limited 200s: their counts must not contradict (at_least 25 against exact 5)
+            remote2 = put(dict(line("P-012", "direct-remote", 1, T0 + 62, 59800.0, outcome="inconclusive",
+                                    checks=[st[0], dict(st[1], outcome="inconclusive")]),
+                               time_limited="pattern 0 time-limited"), limited(5, "exact"))
+            ok, why = cmp.timing_repeat(local, remote2, "POST /pattern", d)
+            self.assertFalse(ok)
+            self.assertIn("no common value", why)
+            # a failing side is no timing
+            bad = dict(local, outcome="fail", checks=[st[0], dict(st[1], outcome="fail")])
+            self.assertFalse(cmp.timing_repeat(bad, remote, "POST /pattern", d)[0])
+
     def test_an_exact_count_that_differs_between_access_paths_is_a_disagreement(self):
         """GPT's "doubled count" (the readiness study's DBL probe): a count inflated with all its partitions passes
         the checks on any arm, which judge one answer at a time; an exact count is the population's size on one

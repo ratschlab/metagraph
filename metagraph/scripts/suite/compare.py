@@ -1601,9 +1601,13 @@ def timing_repeat(a, b, route, run_dir, checks_mod=None, scenario=None):
     """(True, detail) when two direct executions of one repeat whose outcomes differ differ by timing alone
     (VERIFY-2 item 5, under all its conditions): exactly one side's own answer states a time limitation, that side
     reads inconclusive (never fail or finding), the other pass or inconclusive, no check both evaluated differs, and
-    the stopped answer is consistent with the complete one (content_consistent); or (the extension for G27) one side
-    is inconclusive only by its determinism check, an earlier repeat having been time-limited, the other passes, and
-    the two answers are the same (digest). Else (False, why)."""
+    the stopped answer is consistent with the complete one (content_consistent); or both sides' own answers state
+    one (P-heavy-0001: a time-limited 200 against a 503 deadline; neither answer is complete, so neither shows the
+    other wrong), each reads pass or inconclusive, no check both evaluated differs, and their contents do not
+    contradict (content_consistent with the side that carries none, a 503 or 504, as the stopped one; two 200s: their
+    counts' ranges overlap); or (the extension for G27) one side is inconclusive only by its determinism check, an
+    earlier repeat having been time-limited, the other passes, and the two answers are the same (digest). Else
+    (False, why)."""
     if compare_checks(a.get("checks"), b.get("checks"))[0]:
         return False, "a check differs"
     ta, tb = _own_time_limitation(a, scenario, checks_mod), _own_time_limitation(b, scenario, checks_mod)
@@ -1615,6 +1619,15 @@ def timing_repeat(a, b, route, run_dir, checks_mod=None, scenario=None):
         if ok is not True:
             return False, "the time-limited answer's content: %s" % detail
         return True, "%s on %s only (%s); %s" % (why, stopped.get("arm"), stopped.get("outcome"), detail)
+    if ta and tb:
+        if any(x.get("outcome") not in ("pass", "inconclusive") for x in (a, b)):
+            return False, "outcomes %s and %s (both time-limited)" % (a.get("outcome"), b.get("outcome"))
+        x, y = (b, a) if b.get("http") in (503, 504) else (a, b)
+        ok, detail = content_consistent(x, y, route, run_dir, checks_mod)
+        if ok is not True:
+            return False, "the two time-limited answers' content: %s" % detail
+        return True, "both time-limited: %s on %s (%s), %s on %s (%s); %s" % (
+            ta, a.get("arm"), a.get("outcome"), tb, b.get("arm"), b.get("outcome"), detail)
     if not ta and not tb:
         for x, y in ((a, b), (b, a)):
             if x.get("outcome") == "inconclusive" and y.get("outcome") == "pass" and _determinism_only(x) and \
