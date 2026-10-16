@@ -532,12 +532,17 @@ def attention_line(rows, manifest, comp=None):
     implemented yet via MCP (whole executions and property-level marks); '' when nothing needs attention."""
     c = attention_counts(rows, manifest, comp)
     nim_ = c["nim_whole"] | c["nim_marks"]
+    # the time-budget kind counts every test the owner's definition names; those the manifest tags budget_stress (a
+    # warm-up's cold run, a heavy scenario: outside the gate, slow by design) are stated beside it, never left out
+    scen = dict((x.get("id"), x) for x in (manifest or {}).get("scenarios", []) if isinstance(x, dict))
+    stressed = sum(1 for sid in c["time_budget"] if "budget_stress" in ((scen.get(sid) or {}).get("tags") or []))
     parts = [what % len(c[key]) for key, what in (
         ("failed", "%d failed"), ("errored", "%d errored"), ("finding", "%d with a finding"),
         ("disagree", "%d with a disagreement between the arms"), ("relation_failed", "%d relation(s) failed"),
         ("time_budget", "%%d with a time-budget issue (an execution hit its budget: a 503 deadline, a time-limited "
-                        "answer, a stop by time, the ingress's cut; or took more than %d s)" % (
-                            TIME_MARK_RED_MS / 1000.0))) if c[key]]
+                        "answer, a stop by time, the ingress's cut; or took more than %d s%s)" % (
+                            TIME_MARK_RED_MS / 1000.0, ("; %d of them tagged budget_stress, slow by design" % stressed)
+                            if stressed else ""))) if c[key]]
     if nim_:
         parts.append("%d %s (%d as a whole, %d by a property-level mark)" % (
             len(nim_), NIM_WORDS, len(c["nim_whole"]), len(nim_ - c["nim_whole"])))

@@ -128,6 +128,11 @@ class AttentionTest(unittest.TestCase):
         self.assertEqual(report.attention_line([line("C", "direct-local", "finding")], manifest),
                          RED % "Needs attention, in tests (scenarios): 1 with a finding.")
         self.assertEqual(report.attention_line([line("Z", "mcp", "pass")], manifest), "")
+        # the tests the manifest tags budget_stress (a warm-up's cold run, a heavy scenario) stay counted, stated beside
+        stress = {"scenarios": manifest["scenarios"] + [{"id": "D", "tags": ["budget_stress", "warm-up"]},
+                                                        {"id": "E", "tags": ["budget_stress"]}]}
+        self.assertIn("or took more than 55 s; 2 of them tagged budget\\_stress, slow by design); 2 not implemented",
+                      report.attention_line(rows, stress))
         # the comparison's not_implemented_mcp class counts as a whole too
         comp = {"scenarios": {"J": {"mcp_agreement": {"class": "not_implemented_mcp"}}}}
         self.assertEqual(sorted(report.attention_counts([], manifest, comp)["nim_whole"]), ["J"])
