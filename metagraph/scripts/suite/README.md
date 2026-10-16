@@ -4000,7 +4000,7 @@ outcomes ("the outcomes differ, repeat 0: no time limitation tells the outcomes 
 instead of "a check differs"; a walk a stated resource other than time stopped (a /traverse answer's
 `resource_stop`: the work or memory budget) is read from the run's raw record (`reader.Run.raw_answer`,
 `blocks.resource_stops`), the detail block's adjudication names the resource, its knob and its figures (`seed 0: the
-work budget (bounds.max_work_units, 100,000,000 units; used 100,000,275) at 3,618 bp (left), ...`), and chapter T's
+work budget (bounds.max_work_units, 100,000,000 units; used 100,000,275 units) at 3,618 bp (left), ...`), and chapter T's
 prose reads `n_cap_stop_tests` / `cap_stop_ids` / `cap_stop_text` and, with the time cuts, `n_budget_stop_tests` /
 `budget_stop_text` (`facts._budget_stops`), so "no walk was stopped by its budget" holds for every budget and the
 "depends on the load" clause names the work cap where it stopped a walk; the reading guide's column note names the
@@ -4010,8 +4010,48 @@ clean rule of I.3 says what the cells do (an unverified by-design pair carries t
 prose and appendix B, no detail block); the coverage gaps of R, M, N and P print "Outside <the family> every test
 passed" only when that family has a footnoted test (`n_footnoted_in_gap`), else "Every test passed"; R's coverage
 gap has the comma of p. 14 ("Of the four relations, ..."); M's residue claim counts the direct-remote passes beside
-direct-local's; appendix F's MCP runner row names the run's manifest version; the cover's policy sha is labelled as
+direct-local's; appendix F's MCP runner row states that the run did not record the service's deployed revision
+(the readability review's READ-021 wording, which names no manifest version); the cover's policy sha is labelled as
 the canonical JSON's, with the file's sha beside it (`reader.Run.policy_file_sha256`).
+
+### The readability review merged, red means needs attention, the tints by the printed value (2026-10-16)
+
+gr/suite-doc-read (the owner-requested readability review of the full v4 report, 75 comments; its record is
+`~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4-readability-review/`) is merged into gr/suite-doc; every fix
+of both branches is kept (the integration notes: `.../doc/integration/MERGE.md`).
+
+The owner's decisions of 2026-10-16. **Red means "needs attention".** (1) A test not implemented via MCP (the MCP-only
+class: the tools cannot express the request) is red wherever it is printed: the ○ glyph (doc.sty's `\gni`, colour
+`attnred` C62828), its counts in the standing, outcomes and agreement rows, the coverage and grouped cells, the
+detail blocks' rows, adjudication, classes and observed lines, the property-level marks (`blocks.MARK_GROUP`), the
+untested table's reasons, the unit notes, I.4's tables, appendix B's class tag, and the prose's "could not be
+exercised through the tools" counts (`cells.attn` for LaTeX, `cells.attn_marked` for a phrase the prose quotes,
+`!!...!!` as the prose files' inline markup; a conditional compares a value without the markers). (2) The table of
+contents carries each chapter's attention tag in red under the chapter's line (`sections.toc_attention`, doc.sty's
+`\tocattention`, linked to the chapter), e.g. "2 time-budget issues, 9 not implemented via MCP", and I.1 an attention
+table per chapter with the totals (`sections.attention_table`). Both count TESTS per kind, the nonzero kinds only, in
+`facts.ATTENTION_KINDS`' order: failures, errors, findings, disagreements, time-budget issues (a test with an
+execution that hit its time budget, `facts.time_budget_issue`: a 503 deadline, a recorded `time_limited`, the
+service's own deadline, or a wall printed above 55 s), not implemented via MCP (the ○ standing, or an MCP execution a
+property-level not-implemented mark set aside). A test counts once per kind and may count under several. The counts
+are facts (`facts.attention_facts`: `n_attention_<kind>`, `attention_text`, `n_attention_tests`, on every chapter's
+values); the reading guide's legend defines each kind once (`sections.attention_legend_sentence`, from
+`facts.ATTENTION_DEFINITION`). (3) Every printed execution time is tinted by its **printed** value (`cells.time_tint`
+reads `fmt_t`'s figure back, `printed_ms`; a figure quoted from a text is its own printed value): a time printed
+"10 s" carries no tint whatever its raw value, "56 s" is red, as report.py marks. The time a walk's stop used
+(`blocks.resource_stop_phrase`) is printed with its unit and tint ("used 15,593 ms" on yellow; the attempt deadline's
+"requested 25,000 ms; used 22,085 ms"), the work and memory figures with theirs; the quoted texts' `client wall time
+of N ms` and `elapsed N ms` are tinted like `client wall N ms`.
+
+The readability re-verification (`.../readability/verify2/VERIFY.md`): a chapter's reading line names the tests whose
+MCP standing differs from their outcome in the outcomes row, both kinds (a refusal filed under not implemented that
+records service_by_design; a by-design repeat beside a host-answered one, counted mixed or inconclusive), and prints
+"none in this chapter" exactly when there is none (`sections.standing_outcome_differences`); I.3 states both kinds
+and defines the two rows once; the /traverse budget scope says that a label derivation reads the budget after every
+k-mer and stops at it (SPEC D3); I.2's percentiles name I.3's population; the gate's pass line prints its access
+paths once; a partially checked class judged over the repeats says so; a /traverse 200 finding is "a walk stopped
+outside its stated rule (the seed's clock)" (`sections.finding_kinds`); the document's FINDINGS regex is pinned to
+`report.verdict_text`'s own words by a test (report.py's verdict still says "without failing the request").
 
 ## Glossary
 
@@ -4028,7 +4068,7 @@ Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d
 - **basic graph** — The index's graph mode: it holds the forward strand of every indexed sequence only (no canonical k-mers), so the reverse complement of a window is another set of k-mers, which the record's labels do not support. *See:* k-mer.
 - **by-design table** — The search service's `service_by_design.json` (131 cases at service commit 22d034ba): for each case the request it is about (`scenario_match`), the host's expected answer, the service's answer (outcome `refused_at_submit`, relayed, answered, clamped or `not_expressible`; code, text, stage) and the checks an answered case explains. Scenarios name their cases; an answer may also match a case (answer-triggered). Appendix B lists the cases of this run. *See:* service-side by design, answer-triggered case.
 - **check** — A pure function of a scenario and a normalised answer, in checks.py, shared by every arm; it answers pass, fail, inconclusive, finding or not exposed with a detail. Appendix A describes every kind this run uses. *See:* generic check, property check, check outcome.
-- **check outcome** — pass; fail; inconclusive (the check could not test its property on this answer); finding (the host broke a stated bound or SPEC promise without failing the request); not exposed (the MCP answer lacks the field the check reads: recorded, not compared). Neither inconclusive nor finding counts as pass. *See:* execution outcome.
+- **check outcome** — pass; fail; inconclusive (the check could not test its property on this answer); finding (a stated bound was broken on the clock the check reads: a 200 past its budget by the host's own elapsed time, a walk stopped outside its stated rule on the seed's clock, an allowed 503 deadline more than max(1 s, the budget) late on the client's clock, which carried no results); not exposed (the MCP answer lacks the field the check reads: recorded, not compared). Neither inconclusive nor finding counts as pass. *See:* execution outcome.
 - **clamped** — The host lowered a request bound to its cap and stated it in limits.clamped (or strategy.clamped) with the requested and the effective value; the check of the same name reads that entry. *See:* time budget.
 - **clean** — Of a test: every arm is a pass, not implemented via MCP, a verified by-design pair, or had no execution because the plan had none. A clean test costs one cell or one line; anything else carries a footnote mark and a detail block. *See:* detail block.
 - **code-derived** — A tag on an expectation read from the C++ source or the fixtures that no smoke run had exercised at build time (an exact refusal text): a first failure there may be a suite error rather than the host's. *See:* expectation.
@@ -4050,7 +4090,7 @@ Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d
 - **family** — The scenarios that share an id prefix (R-pos, T-walk, N-hard), built by one part of the builder around one question; a family has a title and one paragraph of prose and holds one or more units. Chapter D's families are all D. *See:* unit, area, chapter.
 - **feature level** — What the server offers beyond the base contract, monotonic (SPEC-labeled-traversal-core section 10.3); stated in every /resolve and /traverse answer and recorded with the run's environment. *See:* release.
 - **finalisation reserve** — The 250 ms a /resolve keeps of its budget to build and write the answer: the work stops at the budget less the reserve; a budget not above the reserve is refused. *See:* time budget, stated stop.
-- **finding** — A stated bound or SPEC promise the host broke without failing the request: a 200 past its time budget, an allowed 503 deadline more than max(1 s, the budget) late, a walk stopped before its budget or run past it beyond its pieces. Counted apart from failures; a run with findings and no failure reads FINDINGS. *See:* check outcome, verdict.
+- **finding** — A stated bound broken on the clock the check reads: a 200 past its time budget (the host's own elapsed time), an allowed 503 deadline more than max(1 s, the budget) late (the client's clock: the suite's tolerance for a deadline answer, which carried no results and does not show where the time went), a walk stopped before its budget or run past it beyond its pieces (the seed's clock). Counted apart from failures; a run with findings and no failure reads FINDINGS. *See:* check outcome, verdict.
 - **footnote mark** — The superscript digit on a cell that points at the test's detail block after the table; numbering restarts in every chapter and a test's cells share one mark. *See:* detail block.
 - **the front** — The nginx reverse proxy on dnaloc-new that the public URL reaches; every arm but direct-local goes through it (the service too). The front cost is direct-remote minus direct-local on pairs of host-warm executions, the connection set-up apart. *See:* direct-remote, connect time.
 - **generic check** — A check that holds on any answer of its route whatever the scenario asks: status, invariants, `counts_consistent` (/pattern) and `budget_respected`. The builder adds `budget_respected` to every scenario that names a time budget and allows a 200. *See:* property check.

@@ -197,7 +197,7 @@ MCP_CLASS_WORD = {"not_expressible": "not expressible through MCP",
 
 # how a detail block names a check item a property-level mark of the manifest sets aside, or one the by-design
 # table explains (suite_common.MCP_CHECK_MARKS; compare's explained_items): (glyph, words)
-MARK_GROUP = {"not_implemented": ("\\gni", "not implemented via MCP (the manifest's property-level mark)"),
+MARK_GROUP = {"not_implemented": ("\\gni", "\\attn{not implemented via MCP} (the manifest's property-level mark)"),
               "by_design": ("\\gbd", "service-side by design (the manifest's property-level mark)"),
               "explained": ("\\gbd", "explained by the by-design table's case (set aside by the comparison and "
                                      "the gate)")}
@@ -433,7 +433,7 @@ def adjudication(line, run, sid, is_mcp, state=None):
     if outcome == "error":
         return "\\textbf{ERROR}: no HTTP answer%s" % ((": " + cells.esc_times(text, 160)) if text else "")
     if outcome == "not_implemented_mcp":
-        return "not exercised via MCP"
+        return cells.attn("not exercised via MCP")
     if outcome == "service_by_design":
         return "service-side by design"
     return esc(cells.WORD.get(outcome, str(outcome)))
@@ -555,7 +555,7 @@ def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
     case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
                                              if l.get("service_by_design_case")), None)
     glyph = "\\gni" if st.glyph_key == "not_implemented_mcp" else "\\gbd"
-    head = "not exercised via MCP" if st.glyph_key == "not_implemented_mcp" else "service-side by design"
+    head = cells.attn("not exercised via MCP") if st.glyph_key == "not_implemented_mcp" else "service-side by design"
     parts = []
     if not unit_note:
         parts.append(short_reason(run, sid, case, short_reasons))
@@ -601,7 +601,7 @@ def short_reason(run, sid, case, short_reasons=None):
 
 
 OUTCOME_WORD = {"pass": "pass", "finding": "\\textbf{FINDING}", "inconclusive": "inconclusive", "fail": "\\textbf{FAIL}",
-                "error": "\\textbf{ERROR}", "not_implemented_mcp": "not exercised", "service_by_design": "by design"}
+                "error": "\\textbf{ERROR}", "not_implemented_mcp": "\\attn{not exercised}", "service_by_design": "by design"}
 
 
 def _outcome_why(line, is_mcp):
@@ -658,7 +658,11 @@ def _execution_rows(st, run, sid, arm, is_property):
 # A /traverse resource stop (SPEC-labeled-traversal-core §6.10: results[i].resource_stop {resource, requested,
 # effective, used, phase}): the knob of each resource, its unit and its name in words.
 RESOURCE_KNOB = {"time": "bounds.time_budget_ms", "memory": "bounds.max_memory_mb", "work": "bounds.max_work_units"}
-RESOURCE_UNIT = {"time": "ms", "memory": "MB", "work": "units"}
+RESOURCE_UNIT = {"time": "ms", "memory": "MB", "work": "units", "attempt_deadline": "ms"}
+# the resources whose `used` figure is an execution time (the time budget's, and the MCP runner's attempt deadline:
+# the milliseconds after the request was received), printed with its unit and on its tint by the printed value
+# (the owner's rule: any printed execution time; VERIFY-V6-2 M1); the requested figure is a bound and stays plain
+TIME_RESOURCES = ("time", "attempt_deadline")
 RESOURCE_WORD = {"time": "time budget", "memory": "memory budget", "work": "work budget"}
 
 
@@ -693,8 +697,11 @@ def resource_stops(run, line):
 
 
 def resource_stop_phrase(run, line):
-    """The stops of an execution in words, from the answer: 'seed 0: the work budget (bounds.max_work_units,
-    100,000,000 units; used 100,000,275) at 3,618 bp (left), 3,617 bp (right)'; '' when the answer names none."""
+    """The stops of an execution in words, from the answer, plain text: 'seed 0: the work budget
+    (bounds.max_work_units, 100,000,000 units; used 100,000,275 units) at 3,618 bp (left), 3,617 bp (right)'; every
+    figure with its unit, a time used carrying its tint as a marker by its printed value ('seed 0: the time budget
+    (bounds.time_budget_ms, 15,000 ms; used 15,593 ms) at 83 bp (left), 82 bp (right)', the 15,593 ms on yellow:
+    the owner's rule, any printed execution time; VERIFY-V6-2 M1); '' when the answer names none."""
     parts = []
     for st in resource_stops(run, line):
         res = st["resource"]
@@ -703,7 +710,10 @@ def resource_stop_phrase(run, line):
         if cells._num(st["requested"]) is not None:
             figures.append("{:,} {}".format(int(st["requested"]), unit).strip())
         if cells._num(st["used"]) is not None:
-            figures.append("used {:,}".format(int(st["used"])))
+            used = "{:,} {}".format(int(st["used"]), unit).strip()
+            if res in TIME_RESOURCES:
+                used = cells.tint_marked(used, float(int(st["used"])))
+            figures.append("used " + used)
         if res in RESOURCE_WORD:
             text = "seed %d: the %s (%s%s)" % (st["seed"], RESOURCE_WORD[res], st["knob"],
                                                ("; ".join([""] + figures)) if figures else "")
@@ -872,7 +882,7 @@ def _artifacts_line(run, states):
 
 DEPTH_WORD = {"full": "fully checked", "partial": "partially checked", "generic_only": "generic checks only",
               "refusal": "a refusal on both access paths",
-              "partial_non_pass": "partially checked, not a pass on both access paths",
+              "partial_non_pass": "partially checked (the aggregate over the repeats not a pass on both access paths)",
               "on_failure": "checked on a failure"}
 
 
@@ -910,18 +920,26 @@ def not_compared_text(depth):
     return "; ".join(parts)
 
 
-def depth_text(depth):
+def depth_text(depth, gap_said=False):
     """An agreement's depth in words over the MCP repeats compare compared, the excluded repeats named with their
     reason (the owner's second review, point 2; reader.depth_over_compared_repeats): 'fully checked on r1; r0 was
     an inconclusive host-state outcome', 'fully checked on r0 and r1', 'partially checked on r0 (not compared:
-    resolve_runs)', 'partially checked, not a pass on both access paths on r0 and r1 (not compared on r0:
-    walk_in_record (compared on r1))'. Plain text."""
+    resolve_runs)'; a class judged over the repeats together says so: 'partially checked over r0 and r1 (the
+    aggregate not a pass on both access paths)' (the re-verification L-f: 'not a pass on both access paths on r0
+    and r1' read as a claim per repeat). `gap_said`: the line already said which checks were not compared
+    (agreement_gap_text), so the clause is not repeated. Plain text."""
     cls = str(depth.get("class") or "")
-    text = DEPTH_WORD.get(cls, cls.replace("_", " "))
     reps = depth.get("repeats_compared") or []
-    if reps:
-        text += " on " + _repeats_text(reps)
-    nct = not_compared_text(depth)
+    if cls == "partial_non_pass":
+        text = "partially checked"
+        if reps:
+            text += " over " + _repeats_text(reps)
+        text += " (the aggregate not a pass on both access paths)"
+    else:
+        text = DEPTH_WORD.get(cls, cls.replace("_", " "))
+        if reps:
+            text += " on " + _repeats_text(reps)
+    nct = "" if gap_said else not_compared_text(depth)
     if nct:
         text += " (%s)" % nct
     for e in depth.get("repeats_excluded") or []:
@@ -996,9 +1014,12 @@ def _classes_text(run, sid, states):
             text = "mcp: " + esc(agreement_gap_text(depth)) + " (class agree"
             if ma.get("checks_compared") is not None:
                 text += ", %s check(s) compared" % esc(ma["checks_compared"])
-            text += "; %s)" % esc(depth_text(depth))
+            # the gap sentence names the checks not compared except for a generic-only or refusal agreement, whose
+            # depth keeps its own clause (the re-verification L-f: the clause said once)
+            text += "; %s)" % esc(depth_text(depth, gap_said=depth.get("class") not in ("generic_only", "refusal")))
         else:
-            text = "mcp: %s" % esc(mcls.replace("_", " ") if mcls != "not_implemented_mcp" else "not implemented via MCP")
+            text = "mcp: %s" % (esc(mcls.replace("_", " ")) if mcls != "not_implemented_mcp"
+                                else cells.attn("not implemented via MCP"))
             if ma.get("case"):
                 text += ", case %s" % tt(ma["case"])
             if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
@@ -1060,7 +1081,7 @@ def _relations_text(run, sid, units):
     return out
 
 
-_TINT_RE = re.compile(r"\\t(?:yellow|red)\{([^}]*)\}")
+_TINT_RE = re.compile(r"\\(?:tyellow|tred|attn)\{([^}]*)\}")
 
 
 def estimate_lines(body_lines, chars_per_line=150):
@@ -1096,7 +1117,8 @@ def interpretation(run, sid, states, property_text=None):
             # the status and code), and that the property was not evaluated there (READ-208: a host search that
             # timed out and was relayed is told apart from a request never sent)
             cls, evidence = mcp_class(class_lines(st), sc_, st.agreement, run.cases)
-            word = "not exercised via MCP" if st.glyph_key == "not_implemented_mcp" else "service-side by design"
+            word = cells.attn("not exercised via MCP") if st.glyph_key == "not_implemented_mcp" else \
+                "service-side by design"
             observed.append("%s: %s, %s (%s)%s; the property not evaluated there" % (
                 esc(arm), word, MCP_CLASS_WORD.get(cls, cls), evidence,
                 " (pair unverified)" if "u" in st.glyph_marks else ""))

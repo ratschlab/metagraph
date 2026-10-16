@@ -247,7 +247,7 @@
   },
   {
    "term": "clean, footnote, detail block",
-   "definition": "A test is clean when every access path is a pass, not exercised via MCP, a verified by-design pair, or had no planned execution: it carries no detail block. Clean means no exception to explain, not that every property was shown through every path. Any other test carries a footnote digit on its offending cells and a detail block after its table (numbering restarts per chapter), which opens with what was requested, observed and left unverified.",
+   "definition": "A test is clean when every access path is a pass, not exercised via MCP, a by-design pair (verified, or unverified with the mark u, whose cause the chapter's prose and appendix B state), or had no planned execution: it carries no detail block. Clean means no exception to explain, not that every property was shown through every path. Any other test carries a footnote digit on its offending cells and a detail block after its table (numbering restarts per chapter), which opens with what was requested, observed and left unverified.",
    "see": [
     "standing (the glyph)"
    ]

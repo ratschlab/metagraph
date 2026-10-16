@@ -20,8 +20,11 @@ _SPECIALS = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#":
 # other text and tinted last (set_tints).
 TINT_OPEN = {"yellow": "\ue000", "red": "\ue001"}
 TINT_CLOSE = "\ue002"
-_TINT_MACRO = {"\ue000": "\\tyellow{", "\ue001": "\\tred{"}
-_TINT_RE = re.compile("[\ue000\ue001\ue002]")
+# the needs-attention marker (cells.attn_marked: a not-implemented-via-MCP phrase or count quoted in prose), set as
+# doc.sty's \attn{...} the same way and closed by TINT_CLOSE
+ATTN_OPEN = "\ue003"
+_TINT_MACRO = {"\ue000": "\\tyellow{", "\ue001": "\\tred{", "\ue003": "\\attn{"}
+_TINT_RE = re.compile("[\ue000\ue001\ue002\ue003]")
 _SPECIAL_RE = re.compile(r"[\\&%$#_{}~^]")
 _SEQ_RE = re.compile(r"[ACGTNacgtnRYSWKMBDHVU]{41,}")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -67,8 +70,9 @@ def esc(text, limit=None):
 
 
 def set_tints(text):
-    """The tint markers of `text` (escaped) as doc.sty's macros: `\ue001`61 s`\ue002` -> `\\tred{61 s}`; a tint a
-    cut left open is closed at the end, a close without an open is dropped."""
+    """The tint markers of `text` (escaped) as doc.sty's macros: `\ue001`61 s`\ue002` -> `\\tred{61 s}`, the
+    attention marker `\ue003`…`\ue002` -> `\\attn{…}`; a tint a cut left open is closed at the end, a close without
+    an open is dropped."""
     if not _TINT_RE.search(text):
         return text
     out, depth = [], 0
@@ -176,10 +180,15 @@ def join_units(text):
     return _UNIT_RE.sub(lambda m: "%s~%s" % (m.group(1), m.group(2)), text)
 
 
+_ATTN_MARKUP_RE = re.compile(r"!!(.+?)!!", re.S)
+
+
 def inline(text):
-    """Prose with the tiny inline markup of the prose files: `code` and *emphasis*; everything else escaped, a
-    number joined to its unit by a non-breaking space (join_units)."""
-    parts = re.split(r"(`[^`]*`|\*[^*]+\*)", str(text or ""))
+    """Prose with the tiny inline markup of the prose files: `code`, *emphasis* and !!needs attention!! (set in
+    the attention red: a count of tests not implemented via MCP; the owner's decision of 2026-10-16); everything
+    else escaped, a number joined to its unit by a non-breaking space (join_units)."""
+    text = _ATTN_MARKUP_RE.sub(lambda m: ATTN_OPEN + m.group(1) + TINT_CLOSE, str(text or ""))
+    parts = re.split(r"(`[^`]*`|\*[^*]+\*)", text)
     out = []
     for p in parts:
         if len(p) >= 2 and p.startswith("`") and p.endswith("`"):

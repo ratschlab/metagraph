@@ -61,7 +61,8 @@ def fmt_t(ms):
 
 # The tints of a printed execution time (the owner's decision of 2026-10-15): a wall, a server time, a backend time
 # or an MCP phase, alone or as a median, a p90 or a maximum, strictly above TIME_TINT_YELLOW_MS is set on a yellow
-# tint and strictly above TIME_TINT_RED_MS on a red one (doc.sty's timeyellow / timered). The thresholds are this
+# tint and strictly above TIME_TINT_RED_MS on a red one (doc.sty's timeyellow / timered), decided by the value as
+# printed (the owner's decision of 2026-10-16: '10 s' is never tinted, '56 s' always red). The thresholds are this
 # document's own: no budget, timing class or window of the suite is read for them, and nothing else reads them.
 # A difference (fmt_delta: a delta, an overhead, how late a 503 was), a bound (a budget, a cap) and a distance in
 # time (started after, ran before) carry none; a figure quoted in prose or inside a check's text carries its tint
@@ -71,9 +72,22 @@ TIME_TINT_RED_MS = 55000.0
 TINT_MACRO = {"yellow": "\\tyellow", "red": "\\tred"}
 
 
-def time_tint(ms):
-    """'red' above TIME_TINT_RED_MS, 'yellow' above TIME_TINT_YELLOW_MS, else None (None for no value)."""
-    v = _num(ms)
+def printed_ms(text):
+    """The duration a printed time shows, in milliseconds: '26 ms' 26, '3.1 s' 3100, '18 s' 18000, '15,593 ms'
+    15593, '<1 ms' 0; None for '–' or a text that is no duration."""
+    m = re.match(r"^\s*(<)?(\d[\d,]*(?:\.\d+)?)\s*(ms|s)\s*$", str(text or ""))
+    if not m:
+        return None
+    if m.group(1):
+        return 0.0
+    v = float(m.group(2).replace(",", ""))
+    return v * 1000.0 if m.group(3) == "s" else v
+
+
+def tint_of(printed):
+    """The tint of a printed duration's value in milliseconds (printed_ms): 'red' above TIME_TINT_RED_MS, 'yellow'
+    above TIME_TINT_YELLOW_MS, else None."""
+    v = _num(printed)
     if v is None:
         return None
     if v > TIME_TINT_RED_MS:
@@ -81,6 +95,23 @@ def time_tint(ms):
     if v > TIME_TINT_YELLOW_MS:
         return "yellow"
     return None
+
+
+def time_tint(ms):
+    """The tint of the duration `ms` as fmt_t prints it, decided by the printed value (the owner's decision of
+    2026-10-16, what the reader sees; report.py marks the same way): 10,400 ms prints '10 s' and has none, 10,600 ms
+    prints '11 s' and is yellow, 55,400 ms prints '55 s' and is yellow; None for no value."""
+    if _num(ms) is None:
+        return None
+    return tint_of(printed_ms(fmt_t(ms)))
+
+
+def tint_marked(text, printed=None):
+    """`text` (plain, the printed form of an execution time) carrying its tint as a marker that latex.esc sets,
+    the tint decided by the printed value (`printed`, in ms, else read from `text`); `text` itself when none."""
+    import latex
+    tint = tint_of(printed if printed is not None else printed_ms(text))
+    return "%s%s%s" % (latex.TINT_OPEN[tint], text, latex.TINT_CLOSE) if tint else text
 
 
 def tinted(text, ms):
@@ -97,10 +128,11 @@ def fmt_exec(ms):
 
 # A figure quoted in prose or inside a check's text is plain text that latex.esc escapes afterwards, so its tint
 # travels as a marker (latex.TINT_OPEN / TINT_CLOSE) that esc turns into the macro last. The execution times a
-# check's or the runner's text quotes: budget_respected's 503 evidence (`client wall 10452 ms`) and the MCP runner's
-# host-state rule (`resolve_timeout after 30395 ms`, `traversal_resolve_deadline after 29201 ms`); a lateness
+# check's or the runner's text quotes: budget_respected's 503 evidence (`client wall 10452 ms`, `a client wall time of
+# 24281 ms`) and the host's own elapsed time it reads (`elapsed 388 ms`), and the MCP runner's host-state rule
+# (`resolve_timeout after 30395 ms`, `traversal_resolve_deadline after 29201 ms`); a lateness
 # (`delivered 7452 ms after`), a budget (`the 3000 ms budget`) and every other figure in such a text stay plain.
-_QUOTED_TIME_RE = re.compile(r"(client wall |(?:deadline|timeout) after )(\d[\d,]*(?:\.\d+)?) ms")
+_QUOTED_TIME_RE = re.compile(r"(client wall (?:time of )?|(?:deadline|timeout) after |\belapsed )(\d[\d,]*(?:\.\d+)?) ms")
 
 
 def fmt_exec_text(ms):
@@ -122,7 +154,7 @@ def tint_quoted_times(text):
             ms = float(m.group(2).replace(",", ""))
         except ValueError:
             return m.group(0)
-        tint = time_tint(ms)
+        tint = tint_of(ms)  # the figure as the text prints it is the printed value
         if not tint:
             return m.group(0)
         return "%s%s%s ms%s" % (m.group(1), latex.TINT_OPEN[tint], m.group(2), latex.TINT_CLOSE)
@@ -134,6 +166,23 @@ def esc_times(text, limit=None):
     (tint_quoted_times): the detail blocks' finding, checks and host-state lines print such texts through this."""
     import latex
     return latex.esc(tint_quoted_times(text), limit)
+
+
+# -- needs attention -----------------------------------------------------------------------------------------------
+# Red means "needs attention" (the owner's decision of 2026-10-16). A test not implemented via MCP (the MCP-only
+# class: the tools cannot express the request) is marked red wherever it is printed: the ○ glyph (doc.sty's \gni),
+# its counts in the standing, outcomes, agreement and coverage lines, the property-level marks and the class words
+# of the detail blocks; the attention tags of the contents and I.1's attention table are red too.
+
+def attn(tex):
+    """`tex` (LaTeX) set in the attention red (doc.sty's \\attn)."""
+    return "\\attn{%s}" % tex if tex else tex
+
+
+def attn_marked(text):
+    """`text` (plain) carrying the attention marker that latex.esc turns into \\attn{…} (a phrase quoted in prose)."""
+    import latex
+    return "%s%s%s" % (latex.ATTN_OPEN, text, latex.TINT_CLOSE) if text else text
 
 
 def fmt_delta(ms):
@@ -453,13 +502,15 @@ def aggregate(states, arm):
     # request) or not (a refusal at submit), which `by_design_reached_text` states
     extras = []
     if ni:
-        extras.append("%d\\,\\gni{}" % ni)
+        extras.append(attn("%d\\,\\gni{}" % ni))
     if missing:
         extras.append("%d\\,\\gnone{}" % missing)
     not_exercised = bd + ni + missing
     denominator = n - not_exercised
     parts = ["ok %d/%d" % (ok, denominator)] if denominator else []
-    if ni or missing:
+    if ni and not missing:
+        parts.append(attn("not exercised: %d\\,\\gni{}" % ni))
+    elif ni or missing:
         parts.append("not exercised: %s" % " ".join(extras))
     if bd:
         parts.append("by design: %d\\,\\gbd{}%s" % (bd, by_design_reached_text(
@@ -524,7 +575,7 @@ def coverage_text(states, arm):
     if exercised or partly:
         text += ", passed %d" % passed
     if ni:
-        text += "; not exercised %d\\,\\gni{}" % len(ni)
+        text += "; " + attn("not exercised %d\\,\\gni{}" % len(ni))
     if bd:
         text += "; by design %d\\,\\gbd{}%s" % (len(bd), by_design_reached_text(bd))
     other_text = " ".join("%d\\,%s{}" % (other[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if other.get(k))
@@ -634,7 +685,8 @@ def glyph_counts(states_list, arm):
     parts = []
     for k in GLYPH_ORDER:
         if counts.get(k):
-            parts.append("%d\\,%s{}" % (counts[k], GLYPH.get(k, "\\gnone")))
+            pair = "%d\\,%s{}" % (counts[k], GLYPH.get(k, "\\gnone"))
+            parts.append(attn(pair) if k == "not_implemented_mcp" else pair)
     return "\\enspace ".join(parts) if parts else "–"
 
 

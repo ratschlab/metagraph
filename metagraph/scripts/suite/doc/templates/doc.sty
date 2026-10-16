@@ -27,7 +27,9 @@
 \definecolor{failred}{HTML}{C62828}
 \definecolor{findorange}{HTML}{EF6C00}
 \definecolor{incgrey}{HTML}{607D8B}
-\definecolor{niglight}{HTML}{9E9E9E}
+% red means "needs attention" (the owner's decision of 2026-10-16): a test not implemented via MCP (the glyph, its
+% counts and marks) and the attention tags of the contents and of I.1 are set in it
+\definecolor{attnred}{HTML}{C62828}
 \definecolor{bdblue}{HTML}{1565C0}
 % the tints of a printed execution time (the cell grammar's times line; cells.TIME_TINT_YELLOW_MS / _RED_MS):
 % light backgrounds that stay legible in print, black text on both
@@ -39,7 +41,7 @@
 \newcommand\gfail{\leavevmode{\mdseries\upshape\glyphfont\color{failred}\symbol{"2716}}}
 \newcommand\gfind{\leavevmode{\mdseries\upshape\glyphfont\color{findorange}\symbol{"25B2}}}
 \newcommand\ginc{\leavevmode{\mdseries\upshape\glyphfont\color{incgrey}\symbol{"25D0}}}
-\newcommand\gni{\leavevmode{\mdseries\upshape\glyphfont\color{niglight}\symbol{"25CB}}}
+\newcommand\gni{\leavevmode{\mdseries\upshape\glyphfont\color{attnred}\symbol{"25CB}}}
 \newcommand\gbd{\leavevmode{\mdseries\upshape\glyphfont\color{bdblue}\symbol{"25C6}}}
 \newcommand\gerr{\leavevmode{\mdseries\upshape\glyphfont\color{failred}\symbol{"2298}}}
 \newcommand\gnone{\leavevmode{\color{black!50}--}}
@@ -53,6 +55,12 @@
 \newcommand\timetint[2]{{\setlength\fboxsep{0pt}\kern-0.4pt\colorbox{#1}{\color{black}\vphantom{Ag}\kern0.4pt\relax#2\kern0.4pt}\kern-0.4pt}}
 \newcommand\tyellow[1]{\timetint{timeyellow}{#1}}
 \newcommand\tred[1]{\timetint{timered}{#1}}
+% a needs-attention text (cells.attn, latex's attention marker): a not-implemented-via-MCP count, mark or class word,
+% an attention tag; red text, no other change of the font
+\newcommand\attn[1]{\leavevmode{\color{attnred}#1}}
+% the attention tag of a chapter in the table of contents (sections.toc_attention): a line of its own under the
+% chapter's line, indented with the chapter's title, linked to the chapter
+\newcommand\tocattention[2]{\par\nobreak\vspace{-2pt}{\leftskip=1.5em\rightskip=2.55em plus 1fil\noindent\small\sffamily\hyperref[#1]{\attn{#2}}\par}\addvspace{2pt}}
 % headings of a unit and its property line
 \newcommand\unithead[3]{\par\medskip\noindent\textbf{\texttt{#1}}\quad #2\hfill{\small\itshape #3}\par\nopagebreak}
 \newcommand\propline[1]{\noindent{\small #1}\par\nopagebreak\smallskip}

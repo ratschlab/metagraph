@@ -69,6 +69,7 @@ HOST_WORD = {"cold": "host-cold", "warm": "host-warm", "aged": "host-aged",
 WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
 _COND = re.compile(r"\[\[((?:(?!\[\[|\]\]).)*)\]\]", re.S)
 _NONE = ("", "0", "none", "–", "no", "False")
+_MARKERS_RE = re.compile("[\ue000-\ue003]")
 
 
 # -- filling ------------------------------------------------------------------------------------------------------
@@ -197,7 +198,8 @@ def fill(text, values, unresolved=None):
             text = text[:m.start()] + "(UNRESOLVED CONDITION %s)" % flag + text[m.end():]
             continue
         if wanted is not None:
-            value = (_Formatter(values).format_field(obj, "") == wanted)
+            # the printed value without the tint and attention markers (a phrase may carry them)
+            value = (_MARKERS_RE.sub("", _Formatter(values).format_field(obj, "")) == wanted)
         else:
             value = bool(_truthy(obj))
         if negate:
@@ -324,7 +326,7 @@ def exec_phrase(run, sid, line, arm, wall=None):
     if outcome == "error":
         return "ERROR (no HTTP answer%s)" % ((": " + _cut(text, 100)) if text else "")
     if outcome == "not_implemented_mcp":
-        return "not exercised via MCP"
+        return cells.attn_marked("not exercised via MCP")
     if outcome == "service_by_design":
         return "by design (http %s%s)" % (http, (" " + code) if code else "")
     return str(cells.WORD.get(outcome, outcome))
@@ -402,7 +404,7 @@ def arm_facts(ctx, sid, arm):
         f["class"] = cls
         f["class_word"] = blocks.MCP_CLASS_WORD.get(cls, cls)
     if st.glyph_key == "not_implemented_mcp":
-        f["phrase"] = "not exercised via MCP"
+        f["phrase"] = cells.attn_marked("not exercised via MCP")
         if f["class"] == "refused_before_host" and answered:
             f["phrase"] += " (refused at submit: %s)" % _status_text(answered)
         return f
@@ -1313,6 +1315,124 @@ def chapter_facts(ctx, ch):
     v["footnoted_all_gate_blocking"] = bool(footnoted) and len(blocking) == len(footnoted)
     v["gate_judged"] = isinstance(run.gate, dict)
     v["logan_caveat"] = logan_caveat(run)
+    # the chapter's attention counts (the contents' tag and I.1's attention table; the owner's decision of 2026-10-16)
+    v.update(attention_facts(ctx, sids))
+    return v
+
+
+# -- needs attention (the owner's decision of 2026-10-16) ------------------------------------------------------------
+# Red means "needs attention". A chapter's attention tag (the contents, under the chapter's line) and I.1's attention
+# table count TESTS per kind, a test counted once per kind and possibly under several kinds, in this order: the
+# defects first (a failure, an error, a finding, a disagreement between access paths), then the time-budget issues,
+# then the tests not implemented via MCP. The kinds are defined once, in the reading guide's legend
+# (sections.attention_legend_sentence, from ATTENTION_DEFINITION).
+ATTENTION_KINDS = (("failure", "failure", "failures"), ("error", "error", "errors"), ("finding", "finding", "findings"),
+                   ("disagreement", "disagreement", "disagreements"),
+                   ("time_budget", "time-budget issue", "time-budget issues"),
+                   ("not_implemented", "not implemented via MCP", "not implemented via MCP"))
+ATTENTION_DEFINITION = {
+    "failure": "a test with an execution that failed a check, on any access path",
+    "error": "a test with an execution that got no HTTP answer or whose evaluation raised",
+    "finding": "a test with an execution that broke a stated bound on the clock its check reads",
+    "disagreement": "a test whose access paths disagree (the comparison's class disagree, direct or via MCP)",
+    "time_budget": "a test with an execution that hit its time budget (a 503 deadline, an answer the deadline "
+                   "limited or withheld, a walk or a resolve stopped by time, the attempt's duration bound, the "
+                   "service's own deadline) or whose wall prints above %s",
+    "not_implemented": "a test whose MCP access path stands not implemented via MCP (the tools cannot express the "
+                       "request), or one of whose MCP executions had a property check set aside by the manifest's "
+                       "property-level mark not implemented via MCP",
+}
+_SERVICE_DEADLINES = ("resolve_timeout", "traversal_resolve_deadline")
+
+
+def time_budget_issue(line):
+    """Whether an execution hit its time budget (ATTENTION_DEFINITION['time_budget']): a 503 deadline, a recorded
+    time limitation (the runner's `time_limited`: an answer the deadline limited or withheld, a seed or a resolve
+    stopped by time, the attempt's duration bound, the host's deadline relayed by the service), the service's own
+    deadline read as a host state, or a wall printed above 55 s (red by the printed value, cells.time_tint)."""
+    code, _ = _err(line)
+    if line.get("http") == 503 and code == "deadline":
+        return True
+    if str(line.get("time_limited") or ""):
+        return True
+    if line.get("inconclusive_reason") in _SERVICE_DEADLINES:
+        return True
+    return cells.time_tint(line.get("wall_ms")) == "red"
+
+
+def not_implemented_issue(run, sid, st):
+    """Whether a test is not implemented via MCP (ATTENTION_DEFINITION['not_implemented']): its MCP arm standing ○,
+    or an MCP execution whose checks the manifest's property-level mark not_implemented sets aside (read
+    not_exposed; suite_common.checks_marked_aside), or that a scenario-level mark of not-implemented checks left
+    inconclusive."""
+    if st.present and st.glyph_key == "not_implemented_mcp":
+        return True
+    marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
+    if not marks or not any(m.get("mark") == "not_implemented" for m in marks.values()):
+        return False
+    for l in st.lines:
+        aside = run.marked_aside(sid, l) if hasattr(run, "marked_aside") else {}
+        if any(m.get("mark") == "not_implemented" for m in aside.values()):
+            return True
+        if blocks.scenario_level_mark(l):
+            return True
+    return False
+
+
+def attention_of(ctx, sids):
+    """{kind: [sids]} of the ATTENTION_KINDS over the scenarios (each test once per kind, in the given order)."""
+    run = ctx.run
+    out = dict((k, []) for k, _, _ in ATTENTION_KINDS)
+    for sid in sids:
+        states = ctx.state(sid)
+        kinds = set()
+        for arm in ARMS:
+            st = states[arm]
+            for l in st.lines:
+                o = l.get("outcome")
+                if o in ("fail", "other"):
+                    kinds.add("failure")
+                elif o == "error":
+                    kinds.add("error")
+                elif o == "finding":
+                    kinds.add("finding")
+                if time_budget_issue(l):
+                    kinds.add("time_budget")
+            if st.ne:
+                kinds.add("disagreement")
+        if not_implemented_issue(run, sid, states["mcp"]):
+            kinds.add("not_implemented")
+        for k in kinds:
+            out[k].append(sid)
+    return out
+
+
+def attention_items(counts):
+    """[(kind, n, words)] of the nonzero kinds in ATTENTION_KINDS' order: ('failure', 2, '2 failures')."""
+    out = []
+    for k, one, many in ATTENTION_KINDS:
+        n = counts.get(k, 0)
+        if n:
+            out.append((k, n, "%d %s" % (n, one if n == 1 else many)))
+    return out
+
+
+def attention_text(counts):
+    """'2 time-budget issues, 9 not implemented via MCP': the nonzero kinds in order; '' when none."""
+    return ", ".join(w for _, _, w in attention_items(counts))
+
+
+def attention_facts(ctx, sids):
+    """The attention counts of a chapter (or of any set of tests) as facts: n_attention_<kind> (tests),
+    attention_<kind>_ids, attention_text (the nonzero kinds in words, '' when none), n_attention_tests (the tests
+    under any kind)."""
+    by = attention_of(ctx, sids)
+    v = {}
+    for k, _, _ in ATTENTION_KINDS:
+        v["n_attention_%s" % k] = len(by[k])
+        v["attention_%s_ids" % k] = ", ".join(by[k])
+    v["attention_text"] = attention_text(dict((k, len(by[k])) for k in by))
+    v["n_attention_tests"] = len(set(sid for ids in by.values() for sid in ids))
     return v
 
 
@@ -1326,7 +1446,8 @@ def _mcp_agree_short(run, sids):
     (generic checks only or a refusal: no property check compared), n_mcp_agree_partial_checked (partial or
     partial_non_pass: some property check compared and agreeing on both, another not compared on some repeat),
     n_mcp_agree_on_failure (every property check compared, on a failing answer), mcp_agree_short_text (the three in
-    words, the empty ones left out; '' when none)}."""
+    words, separated by semicolons since the first holds a relative clause (the re-verification L-j), the empty ones
+    left out; '' when none)}."""
     counts = {"generic": 0, "partial": 0, "on_failure": 0}
     for sid in sids:
         e = run.comp_entry(sid)
@@ -1349,7 +1470,7 @@ def _mcp_agree_short(run, sids):
     if counts["on_failure"]:
         parts.append("%d with every property check compared on a failing answer" % counts["on_failure"])
     return {"n_mcp_agree_generic": counts["generic"], "n_mcp_agree_partial_checked": counts["partial"],
-            "n_mcp_agree_on_failure": counts["on_failure"], "mcp_agree_short_text": _join(parts)}
+            "n_mcp_agree_on_failure": counts["on_failure"], "mcp_agree_short_text": "; ".join(parts)}
 
 
 def logan_caveat(run):

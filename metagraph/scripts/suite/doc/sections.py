@@ -48,7 +48,7 @@ CLOSING_PREFIX = "Timing"
 # relation: inconclusive or not evaluated against fail).
 GATE_GROUPS = (("evidence", "release evidence missing or mismatched"),
                ("unproven", "required behaviour not shown"),
-               ("violation", "observed violation of a stated rule"))
+               ("violation", "observed violation of a rule the suite applies"))
 GATE_GROUP_ACTION = {
     "evidence": ("the problem names a record that is missing, stale or not the one the policy pins: restore or "
                  "regenerate it (re-evaluate the set with the recorded checks, recompute the comparison, regenerate "
@@ -220,6 +220,7 @@ class Context(object):
                 "counting_example": counting_example_text(self),
                 "standing_example": standing_example_text(self),
                 "standing_vs_outcome_example": standing_vs_outcome_example_text(self),
+                "standing_vs_outcome_example_bd": standing_vs_outcome_example_text(self, kind="by_design"),
                 "service_version_line": service_version_text(run),
                 "relation_example_subset": relation_example_text(run, "subset"),
                 "relation_example_equivalence": relation_example_text(run, "same_answer"),
@@ -527,7 +528,8 @@ def gate_text(word, how, counts_text, problems_text, run=None):
     scope = gate_scope(run)["text"] if run is not None else "the policy's selection"
     passed = run is not None and bool((run.gate or {}).get("passed"))
     if passed:
-        return "%s: nothing blocks (%s); %s; the gate covers %s; %s" % (word, problems_text, counts_text, scope, how)
+        return "%s: nothing blocks (%s); %s; the gate covers %s; %s" % (
+            word, problems_text, counts_text, scope, _without_access_paths(how, run))
     groups = gate_groups_text(run) if run is not None else "–"
     head, kinds = _problems_head_and_kinds(problems_text)
     return ("%s: the run does not authorise a deploy. %s, by what would clear them: %s (by the gate's kinds: %s); the "
@@ -769,21 +771,73 @@ def service_decision_words(run, st):
     return SERVICE_DECISION_WORDS.get(str(outcome or ""), "the service decided the call in the host's place")
 
 
-def standing_vs_outcome_example_text(ctx, sids=None):
-    """A scenario whose MCP standing and recorded outcome differ (READ-102): the glyph not exercised while the
-    line records service_by_design (a refusal the table files under not implemented), plain text; of the given
-    scenarios (a chapter's) or of the run; 'none in this run' / 'none in this chapter' when none."""
+_ROW_WORD = {"service_by_design": "by design", "not_implemented_mcp": "not implemented", "mixed": "mixed"}
+
+
+def standing_outcome_differences(ctx, sids=None):
+    """[(sid, kind, text)] of the tests whose MCP standing (the cell's glyph: the agreement class where the service
+    decided the call) differs from their outcome in the chapter's outcomes row (compare's per-test outcome over the
+    repeats, compare.aggregate_outcome), of the given scenarios (a chapter's) or of the run, in their order (READ-102,
+    the re-verification V2-M1). Two kinds: 'not_implemented', a refusal the by-design table files under not
+    implemented that stands not exercised while its line records service_by_design; 'by_design', a test one repeat
+    of which the service decided by design while the host answered the other, which stands by design while the
+    outcomes row counts it by its repeats (mixed, inconclusive or the other repeat's outcome); 'other' for any
+    other difference. The direct access paths cannot differ (their standing is the worst outcome, which the row's
+    rule gives too). Plain text."""
     run = ctx.run
+    out = []
     for sid in (run.order if sids is None else sids):
         st = ctx.state(sid)["mcp"]
-        if st.present and st.glyph_key == "not_implemented_mcp" and any(
-                l.get("outcome") == "service_by_design" for l in st.lines):
+        if not st.present:
+            continue
+        outcome = (run.comp_arm(sid, "mcp") or {}).get("outcome")
+        standing = st.glyph_key if st.glyph_key != "other" else outcome
+        if outcome is None or standing == outcome:
+            continue
+        reps = ", ".join("r%s %s" % (l.get("repeat"), cells.WORD.get(l.get("outcome"), str(l.get("outcome"))))
+                         for l in st.lines)
+        row = _ROW_WORD.get(outcome, str(outcome))
+        if st.glyph_key == "not_implemented_mcp":
             case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
                                                       if l.get("service_by_design_case")), None)
-            return ("%s: the MCP line records service_by_design (the service refused at submit) while the table files "
-                    "the case%s under not implemented via MCP, so the cell and the standing count read not exercised" % (
-                        sid, (" %s" % case) if case else ""))
+            text = ("%s: the MCP line records service_by_design (the service refused at submit) while the table files "
+                    "the case%s under %s, so the cell and the standing count read not exercised, the outcomes row "
+                    "%s" % (sid, (" %s" % case) if case else "", cells.attn_marked("not implemented via MCP"), row))
+            out.append((sid, "not_implemented", text))
+        elif st.glyph_key == "service_by_design":
+            decided = [l for l in st.lines if cells.by_design_line(st, l)]
+            out.append((sid, "by_design", "%s: via MCP %s, the cell standing by design (the case covers %s) while "
+                                          "the outcomes row counts it %s" % (
+                                              sid, reps, facts._join("r%s" % l.get("repeat") for l in decided)
+                                              or "no repeat", row)))
+        else:
+            out.append((sid, "other", "%s: %s via MCP, the cell standing %s, the outcomes row %s" % (
+                sid, reps, facts.STANDING_WORD.get(st.glyph_key, st.glyph_key), row)))
+    return out
+
+
+def standing_vs_outcome_example_text(ctx, sids=None, kind="not_implemented"):
+    """The first test of the given scenarios (a chapter's) or of the run whose MCP standing and outcome differ by
+    `kind` (standing_outcome_differences), plain text; 'none in this run' / 'none in this chapter' when none."""
+    for sid, k, text in standing_outcome_differences(ctx, sids):
+        if k == kind:
+            return text
     return "none in this run" if sids is None else "none in this chapter"
+
+
+def standing_vs_outcome_reading(ctx, sids):
+    """The reading line's clause on a chapter's differing tests (V2-M1): 'none in this chapter' exactly when no
+    test's MCP standing differs from its outcome (the two rows then agree per access path), else the count and one
+    named case per kind, with how many more of that kind."""
+    diffs = standing_outcome_differences(ctx, sids)
+    if not diffs:
+        return "none in this chapter"
+    parts = []
+    for kind in ("not_implemented", "by_design", "other"):
+        items = [t for _, k, t in diffs if k == kind]
+        if items:
+            parts.append(items[0] + ((" (and %d more of this kind)" % (len(items) - 1)) if len(items) > 1 else ""))
+    return "in this chapter %d test%s: %s" % (len(diffs), "" if len(diffs) == 1 else "s", "; ".join(parts))
 
 
 SERVICE_VERSION_KEYS = ("service_version", "service_commit", "service_git_head", "service_revision", "deployed_version")
@@ -845,15 +899,19 @@ FINDING_KIND_WORDS = {
     "late_503": ("late 503 deadline (no results carried; beyond the suite's tolerance on the client's clock)",
                  "late 503 deadlines (no results carried; beyond the suite's tolerance on the client's clock)"),
     "over_200": ("200 past its budget (the host's own elapsed time)", "200s past their budget (the host's own elapsed time)"),
+    "walk_200": ("walk stopped outside its stated rule (the seed's clock)",
+                 "walks stopped outside their stated rule (the seeds' clocks)"),
     "other": ("other stated bound broken (the detail block names it)", "other stated bounds broken (the detail blocks name them)"),
 }
 
 
 def finding_kinds(run):
     """The run's finding executions by what the check read: {late_503: a 503 deadline delivered late (the client's
-    clock), over_200: a 200 whose budget_respected item is a finding (the host's own elapsed time), other: any other
-    stated bound (a walk stop outside its rule)}."""
-    counts = {"late_503": 0, "over_200": 0, "other": 0}
+    clock), over_200: a 200 of /resolve or /pattern whose budget_respected item is a finding (the host's own elapsed
+    time), walk_200: a 200 of /traverse whose budget_respected item is a finding (a time stop before the budget, or
+    a walk past its pieces after the seed phase used the budget: checks.check_budget_respected, the seed's clock;
+    the re-verification L-b), other: any other stated bound}."""
+    counts = {"late_503": 0, "over_200": 0, "walk_200": 0, "other": 0}
     for sid in run.order:
         for arm in ARMS:
             for l in run.arm_lines(sid, arm):
@@ -863,7 +921,8 @@ def finding_kinds(run):
                 if l.get("http") == 503:
                     counts["late_503"] += 1
                 elif l.get("http") == 200 and any(c.get("check") == "budget_respected" for c in fc):
-                    counts["over_200"] += 1
+                    route = str((run.scenario(sid) or {}).get("route") or "")
+                    counts["walk_200" if "/traverse" in route else "over_200"] += 1
                 else:
                     counts["other"] += 1
     return counts
@@ -874,7 +933,7 @@ def finding_kinds_text(run):
     tolerance on the client's clock)'; 'none' without a finding."""
     counts = finding_kinds(run)
     parts = ["%d %s" % (counts[k], FINDING_KIND_WORDS[k][0 if counts[k] == 1 else 1])
-             for k in ("late_503", "over_200", "other") if counts[k]]
+             for k in ("late_503", "over_200", "walk_200", "other") if counts[k]]
     return ", ".join(parts) or "none"
 
 
@@ -971,7 +1030,8 @@ def gate_line(ctx):
     passed = bool((run.gate or {}).get("passed"))
     if passed:
         return "\\textbf{\\large %s}: nothing blocks (%s); %s; the gate covers %s; %s" % (
-            esc(word), esc(problems_text), esc(counts_text), esc(gate_scope(run)["text"]), esc(how))
+            esc(word), esc(problems_text), esc(counts_text), esc(gate_scope(run)["text"]),
+            esc(_without_access_paths(how, run)))
     head, kinds = _problems_head_and_kinds(problems_text)
     return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s, by what would clear them: %s (by the "
             "gate's kinds: %s); the count is not a count of service defects; %s; the gate covers %s; %s" % (
@@ -1063,7 +1123,7 @@ def _arm_reason(lines, st, name=None, run=None, sid=None):
     if not lines:
         return "no execution"
     if st.glyph_key == "not_implemented_mcp":
-        return "not exercised via MCP"
+        return cells.attn_marked("not exercised via MCP")
     words = []
     is_mcp = getattr(st, "arm", None) == "mcp"
     marks = run.check_marks(sid) if (run is not None and sid and is_mcp) else {}
@@ -1081,7 +1141,8 @@ def _arm_reason(lines, st, name=None, run=None, sid=None):
         aside = run.marked_aside(sid, l) if marks else {}
         marked = next((m for (n, _), m in aside.items() if n == name), None) if name else None
         if marked:
-            w = ("not implemented via MCP (the manifest's property-level mark: %s)" % marked.get("reason")
+            w = ("%s (the manifest's property-level mark: %s)" % (cells.attn_marked("not implemented via MCP"),
+                                                                  marked.get("reason"))
                  if marked.get("mark") == "not_implemented" else
                  "service-side by design (the manifest's property-level mark, case %s)" % marked.get("case"))
         elif is_mcp and blocks.scenario_level_mark(l):
@@ -1215,7 +1276,8 @@ def verdict_table(ctx):
         hc = t.get("host_cache") or {}
         rows.append([esc(arm), str(t.get("executions", 0)), str(o.get("pass", 0)), str(o.get("fail", 0)),
                      str(o.get("error", 0)), str(o.get("finding", 0)), str(o.get("inconclusive", 0)),
-                     str(o.get("not_implemented_mcp", 0)), str(o.get("service_by_design", 0)),
+                     cells.attn(str(o["not_implemented_mcp"])) if o.get("not_implemented_mcp") else "0",
+                     str(o.get("service_by_design", 0)),
                      "%s / %s / %s / %s" % (hc.get("cold", 0), hc.get("warm", 0), hc.get("aged", 0),
                                             hc.get("not_reached", 0))])
     spec = "@{}l r r r r r r r r r@{}"
@@ -1316,6 +1378,7 @@ def decision_summary(ctx):
     out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n\\par\\endgroup\\medskip\n\n" % (
         verdict_line(ctx), gate_line(ctx))
     out += ctx.prose_paragraphs("decision", "verdict", optional=True)
+    out += attention_table(ctx)
     out += "\\parhead{Principal findings}\n"
     out += ctx.prose_paragraphs("decision", "findings", optional=True)
     groups = principal_findings(ctx)
@@ -1414,7 +1477,7 @@ def legend_table(ctx=None):
     prose (`marks` of the reading section) when it has them."""
     reading = ctx.overview_section("reading") if ctx else {}
     marks = [e for e in (reading.get("marks") or []) if isinstance(e, dict) and e.get("mark") in MARK_EXAMPLE]
-    glyph_rows = [[g, esc(w), inline(m)] for g, w, m in vocabulary.legend_rows()]
+    glyph_rows = _glyph_rows()
     if marks:
         mark_rows = [[MARK_EXAMPLE[e["mark"]], esc(e.get("on") or ""), inline(e.get("meaning") or "")]
                      for e in marks]
@@ -1431,8 +1494,14 @@ def _legend_tables(glyph_rows, mark_rows):
     return glyphs + marks_t
 
 
+def _glyph_rows():
+    """The glyph legend's rows from the shared vocabulary; the not-implemented word in the attention red, as the
+    glyph and its counts are (the owner's decision of 2026-10-16)."""
+    return [[g, cells.attn(esc(w)) if g == "\\gni" else esc(w), inline(m)] for g, w, m in vocabulary.legend_rows()]
+
+
 def _legend_builtin(glyph_rows=None):
-    glyph_rows = glyph_rows or [[g, esc(w), inline(m)] for g, w, m in vocabulary.legend_rows()]
+    glyph_rows = glyph_rows or _glyph_rows()
     marks = [("\\ginc\\fn{1}", "any cell", "a detail block follows the table (numbering restarts per chapter)"),
              ("\\gpass\\gne", "direct-remote or mcp", "disagreement with the reference arm (always footnoted)"),
              ("\\gpass\\tmark{t}", "direct-remote", "direct class timing: one arm's answer time-limited"),
@@ -1452,11 +1521,28 @@ def times_legend_sentence():
     """The one sentence of the cell grammar on the tints (the owner's decision of 2026-10-15): the thresholds
     printed from cells' constants, the two words on their own tints."""
     return ("a printed execution time (a wall, a server time, a backend time or an MCP phase, alone or as a median, "
-            "p90 or maximum) above %s is set on a %s tint and above %s on a %s one, in the tables, the detail blocks "
-            "and the prose alike, a time quoted from a check's text too; a difference (a delta, an overhead, how "
-            "late a 503 was), a budget, a cap and a distance in time carry no tint" % (
+            "p90 or maximum) above %s is set on a %s tint and above %s on a %s one, decided by the value as printed "
+            "(a time printed %s carries none, one printed %s is red), in the tables, the detail blocks and the prose "
+            "alike, a time quoted from a check's text and the time a walk's stop used too; a difference (a delta, an "
+            "overhead, how late a 503 was), a budget, a cap and a distance in time carry no tint" % (
                 fmt_t(cells.TIME_TINT_YELLOW_MS), cells.TINT_MACRO["yellow"] + "{yellow}",
-                fmt_t(cells.TIME_TINT_RED_MS), cells.TINT_MACRO["red"] + "{red}"))
+                fmt_t(cells.TIME_TINT_RED_MS), cells.TINT_MACRO["red"] + "{red}",
+                fmt_t(cells.TIME_TINT_YELLOW_MS), fmt_t(cells.TIME_TINT_RED_MS + 1000)))
+
+
+def attention_legend_sentence():
+    """The legend's one definition of each attention kind (the owner's decision of 2026-10-16: red means needs
+    attention), from facts.ATTENTION_DEFINITION, the kinds' words in red as the contents and I.1 print them."""
+    defs = []
+    for k, one, many in facts.ATTENTION_KINDS:
+        d = facts.ATTENTION_DEFINITION[k]
+        if k == "time_budget":
+            d = d % fmt_t(cells.TIME_TINT_RED_MS)
+        defs.append("%s: %s" % (cells.attn(esc(many)), esc(d)))
+    return ("red means needs attention: the contents print under each chapter's line, and I.1's attention table "
+            "per chapter, the tests needing attention by kind, a test once per kind and possibly under several, the "
+            "kinds with none left out; %s; the \\gni\\ glyph of a test not implemented via MCP, its counts, marks and "
+            "class words are red wherever printed" % "; ".join(defs))
 
 
 def grammar_lines(ctx):
@@ -1473,6 +1559,7 @@ def grammar_lines(ctx):
            "code and the class in words (refused before host execution, not expressible through MCP, answered after "
            "service normalization, host refusal relayed through the service), derived from the evidence, never from prose}"
            "\n\\bline{times}{%s}" % times_legend_sentence() +
+           "\n\\bline{attention}{%s}" % attention_legend_sentence() +
            "\n\\par\\endgroup\n\n")
     return out
 
@@ -1780,8 +1867,10 @@ def limitations_table(ctx):
     run = ctx.run
     limits = mcp_limit_counts(run)
     ma = run.summary().get("mcp_agreement") or {}
-    rows = [["not implemented via MCP by the manifest", "%d scenarios, %d distinct reasons" % (
-        limits["manifest_not_implemented"], len(limits["reasons"])), "\\hyperref[app:G]{G}"],
+    rows = [[cells.attn("not implemented via MCP") + " by the manifest", (cells.attn if limits["manifest_not_implemented"]
+                                                                           else str)("%d scenarios" % limits[
+                                                                               "manifest_not_implemented"])
+             + ", %d distinct reasons" % len(limits["reasons"]), "\\hyperref[app:G]{G}"],
             ["not-expressible table cases scenarios name", "%d cases, %d scenarios" % (
                 len(limits["named"]), limits["not_expressible_scenarios"]), "\\hyperref[app:G]{G}"],
             ["by-design cases an MCP answer matched", "%d cases; pairs verified %s, unverified %s" % (
@@ -1867,9 +1956,11 @@ def _agreement_counts(ctx, sids):
                 fewer.append(len(d.get("repeats_compared") or []))
     dtext = ", ".join("%d %s" % (direct[k], k.replace("_", " ")) for k in
                       ("identical", "same_checks", "timing", "not_comparable", "disagree") if direct.get(k)) or "–"
-    mtext = "%d agree (fully checked %d%s), %d not implemented, %d by design (%d verified, %d unverified), %d not " \
+    n_ni = mcp.get("not_implemented_mcp", 0)
+    mtext = "%d agree (fully checked %d%s), %s, %d by design (%d verified, %d unverified), %d not " \
             "comparable, %d disagree%s" % (
-                mcp.get("agree", 0), full, fewer_repeats_text(fewer), mcp.get("not_implemented_mcp", 0),
+                mcp.get("agree", 0), full, fewer_repeats_text(fewer),
+                cells.attn_marked("%d not implemented" % n_ni) if n_ni else "0 not implemented",
                 mcp.get("service_by_design", 0), verified, unverified, mcp.get("not_comparable", 0),
                 mcp.get("disagree", 0), (", %d missing" % mcp["missing"]) if mcp.get("missing") else "")
     return esc(dtext), esc(mtext)
@@ -1901,10 +1992,11 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
         otext = []
         for arm in ARMS:
             o = per_area.get(arm) or {}
-            items = ["%d %s" % (o[k], w) for k, w in (("pass", "pass"), ("fail", "fail"), ("error", "error"),
-                                                     ("finding", "finding"), ("inconclusive", "inconclusive"),
-                                                     ("mixed", "mixed"), ("not_implemented_mcp", "not implemented"),
-                                                     ("service_by_design", "by design"), ("other", "other"))
+            items = [(cells.attn_marked if k == "not_implemented_mcp" else str)("%d %s" % (o[k], w))
+                     for k, w in (("pass", "pass"), ("fail", "fail"), ("error", "error"),
+                                  ("finding", "finding"), ("inconclusive", "inconclusive"),
+                                  ("mixed", "mixed"), ("not_implemented_mcp", "not implemented"),
+                                  ("service_by_design", "by design"), ("other", "other"))
                      if o.get(k)]
             otext.append("%s %s" % (esc(arm), esc(", ".join(items)) if items else "–"))
         # compare's per_area: one entry per test and access path, the recorded outcome over the test's repeats
@@ -1961,10 +2053,11 @@ def summary_reading_text(ctx, chapter, sids=None):
     (agreement_levels_text) and what the property list below counts; plain text."""
     if sids is None:
         sids = ctx.units.chapter_scenarios(chapter)
-    example = standing_vs_outcome_example_text(ctx, sids)
+    example = standing_vs_outcome_reading(ctx, sids)
     text = ("standing and outcomes both count tests, one per access path; they differ only via MCP where the "
-            "service decided the call, the standing showing the agreement class and the outcomes row the recorded "
-            "outcome (in this chapter: %s); the full reading is I.3's. Agreement counts one comparison per test%s; "
+            "service decided the call or one repeat of it, the standing showing the agreement class and the outcomes "
+            "row the recorded outcome over the repeats (%s); the full reading is I.3's. Agreement counts one "
+            "comparison per test%s; "
             "the property list below counts property claims, one per check and test, over every access path" % (
                 example, agreement_levels_text(ctx, chapter)))
     return text
@@ -2023,6 +2116,7 @@ EXCEPTION_GROUPS = (
      "suite, listed in I.1 and quoted in the detail block"),
     ("finding", "a measured operational finding",
      "a stated bound was broken on the clock the check reads: a 200 past its budget (the host's own elapsed time), "
+     "a walk stopped outside its stated rule (the seed's clock), "
      "or a 503 deadline delivered more than max(1 s, the budget) late on the client's clock, which carried no "
      "answer; the FINDING line of the detail block quotes the rule and the overrun"),
     ("unverified", "the property not shown on some access path",
@@ -2287,7 +2381,7 @@ def mcp_unit_note(ctx, chapter, uid, members):
             r = blocks.short_reason(run, sid, case, ctx.short_reasons())
             if r not in reasons:
                 reasons.append(r)
-        body = "Not exercised via MCP: %s; see B." % "; ".join(reasons)
+        body = "%s: %s; see B." % (cells.attn("Not exercised via MCP"), "; ".join(reasons))
     return "\\noindent{\\sffamily\\footnotesize\\gni\\ %s}\\par\\smallskip\n" % body
 
 
@@ -2497,6 +2591,54 @@ def background(ctx, prose, values):
     return out
 
 
+def toc_attention(ctx, ch):
+    """The chapter's attention tag in the table of contents (the owner's decision of 2026-10-16): a red line under
+    the chapter's own entry, linked to the chapter, with the tests needing attention per kind, the nonzero kinds
+    alone in facts.ATTENTION_KINDS' order ('2 time-budget issues, 9 not implemented via MCP'); nothing when the
+    chapter has none. The counts are facts.attention_facts', the ones I.1's attention table prints."""
+    text = facts.attention_facts(ctx, ctx.units.chapter_scenarios(ch))["attention_text"]
+    if not text:
+        return ""
+    return "\\addtocontents{toc}{\\protect\\tocattention{%s}{%s}}\n" % (latex.label_key("ch:%s" % ch), esc(text))
+
+
+def attention_table(ctx):
+    """I.1's attention table (the owner's decision of 2026-10-16): per chapter of the run the tests needing
+    attention by kind (facts.attention_facts: a test counted once per kind and possibly under several), the
+    nonzero counts in red, the kinds no chapter has left out, and the totals; empty when no test needs attention.
+    The kinds are defined once, in I.3's legend (attention_legend_sentence)."""
+    per, totals = [], {}
+    for ch in ctx.chapters:
+        v = facts.attention_facts(ctx, ctx.units.chapter_scenarios(ch))
+        per.append((ch, v))
+        for k, _, _ in facts.ATTENTION_KINDS:
+            totals[k] = totals.get(k, 0) + v["n_attention_%s" % k]
+        totals["tests"] = totals.get("tests", 0) + v["n_attention_tests"]
+    kinds = [(k, many) for k, _, many in facts.ATTENTION_KINDS if totals.get(k)]
+    if not kinds:
+        return ""
+
+    def cell(n):
+        return cells.attn(str(n)) if n else "–"
+    rows = []
+    for ch, v in per:
+        title = (ctx.prose.get(ch) or {}).get("title") or ctx.units.titles.get(ch, ch)
+        rows.append(["\\hyperref[ch:%s]{%s\\ %s}" % (esc(ch), esc(ch), esc(title))]
+                    + [cell(v["n_attention_%s" % k]) for k, _ in kinds]
+                    + [cell(v["n_attention_tests"]), str(len(ctx.units.chapter_scenarios(ch)))])
+    rows.append(["\\textbf{all chapters}"] + ["\\textbf{%s}" % cell(totals[k]) for k, _ in kinds]
+                + ["\\textbf{%s}" % cell(totals["tests"]),
+                   "\\textbf{%d}" % sum(len(ctx.units.chapter_scenarios(ch)) for ch in ctx.chapters)])
+    header = ["chapter"] + [cells.attn(esc(many)) for _, many in kinds] + [cells.attn("tests needing attention"),
+                                                                          "tests"]
+    widths = [34] + [18] * len(kinds) + [20, 10]
+    spec = latex.spec_p(widths, aligns=["raggedright"] + ["raggedleft"] * (len(kinds) + 2))
+    return latex.plain_table(spec, header, rows,
+                             "needs attention: the tests of each chapter by kind, red where any (a test counts once "
+                             "per kind and may count under several; the kinds are defined in I.3's legend, and the "
+                             "contents print each chapter's counts under its line)", needspace=min(16, len(rows) + 4))
+
+
 def chapter(ctx, ch):
     """A chapter: its conclusion first (the `summary` prose and the summary block), then what it leaves untested
     (the `coverage_gap` prose and the computed lines), then the background (`intro`) and the families (the owner's
@@ -2506,6 +2648,7 @@ def chapter(ctx, ch):
     prose = ctx.prose.get(ch) or {}
     title = prose.get("title") or units.titles.get(ch, ch)
     out = latex.section("%s\\qd %s" % (esc(ch), esc(title)), "ch:%s" % ch, mark="%s · %s" % (ch, title))
+    out += toc_attention(ctx, ch)
     # the chapter's purpose in the reader's terms (READ-101): what the operation lets a user ask and what kind of
     # evidence the chapter supplies, before the conclusion's inventory; optional prose (`purpose`)
     purpose = prose.get("purpose")
@@ -2849,7 +2992,9 @@ def cold_mcp_untimed_split(run):
 def cold_mcp_untimed_text(run):
     """'23 by design (the host's /pattern 503 deadline relayed by the service), 3 inconclusive (the host's /resolve
     503 deadline relayed by the service) and 1 inconclusive (the service's own deadline, `resolve_timeout`)'."""
-    parts = ["%d %s (%s)" % (n, o, w) for n, o, w in cold_mcp_untimed_split(run)]
+    ni = _OUTCOME_WORDS["not_implemented_mcp"]
+    parts = ["%s (%s)" % ((cells.attn_marked if o == ni else str)("%d %s" % (n, o)), w)
+             for n, o, w in cold_mcp_untimed_split(run)]
     return facts._join(parts) if parts else "none"
 
 
@@ -3230,7 +3375,10 @@ def by_design_table(ctx):
             # a case of the chapter's area that no scenario named and no answer matched (READ-017): documented,
             # not exercised in this run
             named.append("not exercised in this run")
-        first = [tt(cid) + "\\newline{\\scriptsize %s}" % esc(c.get("agreement") or "–")]
+        agreement = esc(c.get("agreement") or "–")
+        if c.get("agreement") == "not_implemented_mcp":
+            agreement = cells.attn(agreement)  # red wherever printed (the owner's decision of 2026-10-16)
+        first = [tt(cid) + "\\newline{\\scriptsize %s}" % agreement]
         matches = latex.join_units(esc_wrap(c.get("scenario_match"), 600))
         if short.get(cid):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
