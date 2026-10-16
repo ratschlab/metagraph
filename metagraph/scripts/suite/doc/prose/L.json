@@ -74,7 +74,7 @@
   },
   "L-memory": {
    "title": "memory",
-   "prose": "A^100000 with `long_search: paths` in `partial` under `max_memory_mb` 1. The input is a long walk through one repeated node: a homopolymer is a self-loop of the graph, so its single path has L - k + 1 nodes, each the same k-mer. Storing that path for the release, the walk the extension keeps or the result object built from it, is charged to the request's memory account and exceeds one megabyte, so the answer must state the documented stop: the phase `extension` or `output` with the reason `max_memory`, the list cut `max_memory`, and the note `low_complexity_pattern` absent beside a budget stop of the search (sections 7.8 and 12.1). What this bounds is the request's own account, the bytes the host charges to this request for the paths it keeps: not the graph, the process or the container's resident memory, which the load lines of this document report in gigabytes (I.4, Timing 6) and which this test neither measures nor certifies. The stop may come in either phase: the expectation accepts both, and the phase this run recorded is in the row's detail (direct-local: “{x[L-memory-0001][dl][checks][stop][evidence]}”), not a proof that both were exercised. Timing class slow. Not exercised via MCP: the tool has no `max_memory_mb` argument (see B), so no MCP call reaches the host before the direct access paths[[n_cold_dl ? ({n_cold_dl} host-cold direct-local execution{n_cold_dl:s} in this run)]].",
+   "prose": "A^100000 with `long_search: paths` in `partial` under `max_memory_mb` 1. The input is a long walk through one repeated node: a homopolymer is a self-loop of the graph, so its single path has L - k + 1 nodes, each the same k-mer. Storing that path for the release, the walk the extension keeps or the result object built from it, is charged to the request's memory account and exceeds one megabyte, so the answer must state the documented stop: the phase `extension` or `output` with the reason `max_memory`, the list cut `max_memory`, and the note `low_complexity_pattern` absent beside a budget stop of the search (sections 7.8 and 12.1). What this bounds is the request's own account, the bytes the host charges to this request for the paths it keeps: not the graph, the process or the container's resident memory, which the load lines of this document report in gigabytes (I.4, Timing 6) and which this test neither measures nor certifies. The stop may come in either phase: the expectation accepts both, and the phase this run recorded is in the row's detail (direct-local: “{x[L-memory-0001][dl][checks][stop][evidence]}”), not a proof that both were exercised. Timing class slow. !!Not exercised via MCP!!: the tool has no `max_memory_mb` argument (see B), so no MCP call reaches the host before the direct access paths[[n_cold_dl ? ({n_cold_dl} host-cold direct-local execution{n_cold_dl:s} in this run)]].",
    "claim": "the memory account stops a path search and says so"
   },
   "L-long": {
@@ -129,7 +129,7 @@
  },
  "mcp_notes": {
   "units": {
-   "L-memory": "Not exercised via MCP: the `pattern_search` tool has no `max_memory_mb` argument; see B."
+   "L-memory": "!!Not exercised via MCP!!: the `pattern_search` tool has no `max_memory_mb` argument; see B."
   }
  },
  "checks": {},

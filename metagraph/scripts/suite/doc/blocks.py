@@ -195,6 +195,14 @@ MCP_CLASS_WORD = {"not_expressible": "not expressible through MCP",
                   "marked": "every property check marked as not shown via MCP (a scenario-level mark)",
                   "none": "no MCP execution recorded"}
 
+def class_word_tex(cls, st=None):
+    """The class of an MCP outcome in words (MCP_CLASS_WORD) as LaTeX, in the attention red when the arm stands not
+    implemented via MCP (the ○ cell's, the observed line's and the adjudication's class word: red wherever printed,
+    the owner's decision of 2026-10-16); a by-design arm's class word stays black."""
+    word = esc(MCP_CLASS_WORD.get(cls, cls))
+    return cells.attn(word) if st is not None and st.glyph_key == "not_implemented_mcp" else word
+
+
 # how a detail block names a check item a property-level mark of the manifest sets aside, or one the by-design
 # table explains (suite_common.MCP_CHECK_MARKS; compare's explained_items): (glyph, words)
 MARK_GROUP = {"not_implemented": ("\\gni", "\\attn{not implemented via MCP} (the manifest's property-level mark)"),
@@ -563,7 +571,7 @@ def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
         first = next((l for l in lines if l.get("http") is not None), None)
         code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
         status = ("http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "")) if first else None
-        parts.append("%s%s" % (esc(MCP_CLASS_WORD.get(cls, cls)), (" (%s)" % status) if status else ""))
+        parts.append("%s%s" % (class_word_tex(cls, st), (" (%s)" % status) if status else ""))
     others = other_repeats(st)
     if others:
         reps = ["r%s" % esc(r) for r, _ in others]
@@ -703,16 +711,21 @@ def resource_stop_phrase(run, line):
     (bounds.time_budget_ms, 15,000 ms; used 15,593 ms) at 83 bp (left), 82 bp (right)', the 15,593 ms on yellow:
     the owner's rule, any printed execution time; VERIFY-V6-2 M1); '' when the answer names none."""
     parts = []
+
+    def whole(v):
+        # rounded half up to a whole figure, as the document rounds its times (I.3; VERIFY-COLOURS L5: 15,003.67 ms
+        # prints 15,004 ms, never truncated)
+        return int(v + 0.5) if v >= 0 else -int(-v + 0.5)
     for st in resource_stops(run, line):
         res = st["resource"]
         unit = RESOURCE_UNIT.get(res, "")
         figures = []
         if cells._num(st["requested"]) is not None:
-            figures.append("{:,} {}".format(int(st["requested"]), unit).strip())
+            figures.append("{:,} {}".format(whole(st["requested"]), unit).strip())
         if cells._num(st["used"]) is not None:
-            used = "{:,} {}".format(int(st["used"]), unit).strip()
+            used = "{:,} {}".format(whole(st["used"]), unit).strip()
             if res in TIME_RESOURCES:
-                used = cells.tint_marked(used, float(int(st["used"])))
+                used = cells.tint_marked(used, float(whole(st["used"])))
             figures.append("used " + used)
         if res in RESOURCE_WORD:
             text = "seed %d: the %s (%s%s)" % (st["seed"], RESOURCE_WORD[res], st["knob"],
@@ -1120,7 +1133,7 @@ def interpretation(run, sid, states, property_text=None):
             word = cells.attn("not exercised via MCP") if st.glyph_key == "not_implemented_mcp" else \
                 "service-side by design"
             observed.append("%s: %s, %s (%s)%s; the property not evaluated there" % (
-                esc(arm), word, MCP_CLASS_WORD.get(cls, cls), evidence,
+                esc(arm), word, class_word_tex(cls, st), evidence,
                 " (pair unverified)" if "u" in st.glyph_marks else ""))
             continue
         phrases = []

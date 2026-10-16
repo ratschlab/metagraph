@@ -99,7 +99,8 @@ def tint_of(printed):
 
 def time_tint(ms):
     """The tint of the duration `ms` as fmt_t prints it, decided by the printed value (the owner's decision of
-    2026-10-16, what the reader sees; report.py marks the same way): 10,400 ms prints '10 s' and has none, 10,600 ms
+    2026-10-16, what the reader sees; gr/suite-v6's report.py marks the same way, this branch's report.py has no
+    time marks): 10,400 ms prints '10 s' and has none, 10,600 ms
     prints '11 s' and is yellow, 55,400 ms prints '55 s' and is yellow; None for no value."""
     if _num(ms) is None:
         return None
@@ -310,6 +311,10 @@ class ArmState(object):
         self.reasons = []
         self.agreement = {}
         self.depth = None
+        # an MCP arm not standing ○ one of whose executions had a property check set aside by the manifest's
+        # property-level mark not implemented via MCP (property_not_implemented): the cell carries the small red ○
+        # (doc.sty's \gnip) and the test counts under not implemented via MCP (facts.not_implemented_issue)
+        self.ni_marked = False
 
     @property
     def glyph(self):
@@ -348,12 +353,42 @@ class ArmState(object):
             out += "\\tmark{%s}" % m
         if self.ne:
             out += "\\gne"
+        if self.ni_marked:
+            out += "\\gnip"
         if footnote:
             out += "\\fn{%d}" % footnote
         return out
 
 
+def property_not_implemented(run, sid, lines):
+    """Whether an MCP execution of the scenario among `lines` had a property check set aside by the manifest's
+    property-level mark not implemented via MCP (the check read not_exposed: suite_common.checks_marked_aside, the
+    reader's marked_aside), or was left inconclusive by a scenario-level mark over marks that include a
+    not-implemented one (suite_common.SCENARIO_LEVEL_MARK). False for a manifest without property-level marks (v1 to
+    v4). The one rule the cells' mark (ArmState.ni_marked) and the attention count (facts.not_implemented_issue)
+    apply."""
+    marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
+    if not marks or not any(m.get("mark") == "not_implemented" for m in marks.values()):
+        return False
+    for l in lines:
+        aside = run.marked_aside(sid, l) if hasattr(run, "marked_aside") else {}
+        if any(m.get("mark") == "not_implemented" for m in aside.values()):
+            return True
+        if l.get("outcome") == "inconclusive" and l.get("inconclusive_reason") == sc.SCENARIO_LEVEL_MARK:
+            return True
+    return False
+
+
 def arm_state(run, sid, arm):
+    """The ArmState of a scenario on an arm (_arm_state), with the property-level mark of an MCP arm that does not
+    stand ○ (ArmState.ni_marked)."""
+    st = _arm_state(run, sid, arm)
+    if arm == "mcp" and st.present and st.glyph_key != "not_implemented_mcp":
+        st.ni_marked = property_not_implemented(run, sid, st.lines)
+    return st
+
+
+def _arm_state(run, sid, arm):
     st = ArmState(arm)
     lines = run.arm_lines(sid, arm)
     entry = run.comp_entry(sid)
@@ -515,6 +550,9 @@ def aggregate(states, arm):
     if bd:
         parts.append("by design: %d\\,\\gbd{}%s" % (bd, by_design_reached_text(
             [m for m in members if m.glyph_key == "service_by_design"])))
+    marked = sum(1 for m in members if getattr(m, "ni_marked", False))
+    if marked:
+        parts.append(attn(PROPERTY_NI_COUNT % marked))
     if walls:
         wall_text = fmt_pair(percentile(walls, 50), max(v for v in walls if _num(v) is not None))
         mark = host_marks_text(states)
@@ -581,6 +619,9 @@ def coverage_text(states, arm):
     other_text = " ".join("%d\\,%s{}" % (other[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if other.get(k))
     if other_text:
         text += "; not recorded %s" % other_text
+    marked = sum(1 for m in members if getattr(m, "ni_marked", False))
+    if marked:
+        text += "; " + attn(PROPERTY_NI_COUNT % marked)
     return text
 
 
@@ -678,16 +719,28 @@ def glyph_counts(states_list, arm):
     """`27 ● 1 ◐` for the states of several scenarios on an arm (LaTeX): each number bound to its glyph with a
     thin non-breaking space, a wider gap between the pairs; the glyph macro closed with {} so that the space
     after the last pair survives."""
-    counts = {}
+    counts, marked = {}, {}
     for s in states_list:
         k = s[arm].glyph_key
         counts[k] = counts.get(k, 0) + 1
+        if getattr(s[arm], "ni_marked", False):
+            marked[k] = marked.get(k, 0) + 1
     parts = []
     for k in GLYPH_ORDER:
         if counts.get(k):
             pair = "%d\\,%s{}" % (counts[k], GLYPH.get(k, "\\gnone"))
-            parts.append(attn(pair) if k == "not_implemented_mcp" else pair)
+            pair = attn(pair) if k == "not_implemented_mcp" else pair
+            if marked.get(k):
+                # the members of this glyph with a property check the manifest's property-level mark set aside as
+                # not implemented via MCP (red, as every not-implemented count; the owner's decision of 2026-10-16)
+                pair += "\\ " + attn(PROPERTY_NI_COUNT % marked[k])
+            parts.append(pair)
     return "\\enspace ".join(parts) if parts else "–"
+
+
+# the count of an arm's tests with a property check set aside by the manifest's property-level mark not implemented
+# via MCP, after the glyph pair they stand under (glyph_counts, the aggregates, the coverage line)
+PROPERTY_NI_COUNT = "(%d with a property check not implemented via MCP)"
 
 
 def wall_buckets(run, sids, arm):

@@ -47,9 +47,10 @@ another arm's lines. `run_direct.py --out X` on its own writes X/executions.json
   1800 s; direct-remote at most 125 s.
 - Execution outcome (review of lane S1; the MCP runner applies the same rule): checks may report `pass`,
   `fail`, `not_exposed`, `inconclusive` (the scenario could not test its property: an allowed 503, a withheld
-  answer hiding the source, a stated resource stop) or `finding` (the host broke a stated bound or SPEC
-  promise without failing the request, e.g. a walk past its time budget); any other outcome reads as a
-  failure. The execution is `fail` when a check failed, else `finding` when one is a finding, else
+  answer hiding the source, a stated resource stop) or `finding` (a stated bound was broken on the clock the
+  check reads: a 200 past its budget by the host's own elapsed time, a walk stopped outside its stated rule on
+  the seed's clock, an allowed 503 deadline more than max(1 s, the budget) late on the client's clock; apart from
+  fail whatever the HTTP status); any other outcome reads as a failure. The execution is `fail` when a check failed, else `finding` when one is a finding, else
   `inconclusive` when one is inconclusive or none could test anything (no check, or every one not_exposed),
   else `pass` (suite_common.outcome_from_checks). Over a scenario's repeats: error > fail > finding >
   inconclusive. Neither finding nor inconclusive ever counts as pass; the report lists every finding in its
@@ -3970,8 +3971,9 @@ figures; chapters M and T, like R, rendered on two fixtures whose data differ ch
 gaps and their family prose (`FullDocumentTest`); every check kind of both manifests in the catalogue, every by-design
 case named with its short reason. A check kind without an `expect_text` formatter prints `name(args)` with break
 opportunities after ( , = _ (`blocks._generic`), so the expectation column of a list table wraps instead of running
-into the next column. The 164-page v4 document (every chapter, the replayed d1e040aa by-design table, two builds
-byte-identical) is at `~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4/` with its NOTES.md.
+into the next column. The v4 document (every chapter, the replayed d1e040aa by-design table, two builds
+byte-identical; 164 pages at that build, the current build's page count in its NOTES.md) is at
+`~/.cache/metagraph-traverse-plans/2026-10-15/doc/full-v4/` with its NOTES.md.
 
 ### The tints of the printed execution times (2026-10-15, corrected after VERIFY-COLOURS-V5 on 2026-10-16)
 
@@ -4024,9 +4026,10 @@ The owner's decisions of 2026-10-16. **Red means "needs attention".** (1) A test
 class: the tools cannot express the request) is red wherever it is printed: the ○ glyph (doc.sty's `\gni`, colour
 `attnred` C62828), its counts in the standing, outcomes and agreement rows, the coverage and grouped cells, the
 detail blocks' rows, adjudication, classes and observed lines, the property-level marks (`blocks.MARK_GROUP`), the
-untested table's reasons, the unit notes, I.4's tables, appendix B's class tag, and the prose's "could not be
-exercised through the tools" counts (`cells.attn` for LaTeX, `cells.attn_marked` for a phrase the prose quotes,
-`!!...!!` as the prose files' inline markup; a conditional compares a value without the markers). (2) The table of
+untested table's reasons, I.4's tables, appendix B's class tag, and the prose's "could not be exercised through the
+tools" counts (`cells.attn` for LaTeX, `cells.attn_marked` for a phrase the prose quotes, `!!...!!` as the prose
+files' inline markup; a conditional compares a value without the markers). The unit notes, the ○ cells' class words
+and the rest followed after the two verifications of e3098b2e9 (below). (2) The table of
 contents carries each chapter's attention tag in red under the chapter's line (`sections.toc_attention`, doc.sty's
 `\tocattention`, linked to the chapter), e.g. "2 time-budget issues, 9 not implemented via MCP", and I.1 an attention
 table per chapter with the totals (`sections.attention_table`). Both count TESTS per kind, the nonzero kinds only, in
@@ -4038,7 +4041,8 @@ are facts (`facts.attention_facts`: `n_attention_<kind>`, `attention_text`, `n_a
 values); the reading guide's legend defines each kind once (`sections.attention_legend_sentence`, from
 `facts.ATTENTION_DEFINITION`). (3) Every printed execution time is tinted by its **printed** value (`cells.time_tint`
 reads `fmt_t`'s figure back, `printed_ms`; a figure quoted from a text is its own printed value): a time printed
-"10 s" carries no tint whatever its raw value, "56 s" is red, as report.py marks. The time a walk's stop used
+"10 s" carries no tint whatever its raw value, "56 s" is red, as gr/suite-v6's report.py marks (this branch's
+report.py has no time marks). The time a walk's stop used
 (`blocks.resource_stop_phrase`) is printed with its unit and tint ("used 15,593 ms" on yellow; the attempt deadline's
 "requested 25,000 ms; used 22,085 ms"), the work and memory figures with theirs; the quoted texts' `client wall time
 of N ms` and `elapsed N ms` are tinted like `client wall N ms`.
@@ -4052,6 +4056,26 @@ k-mer and stops at it (SPEC D3); I.2's percentiles name I.3's population; the ga
 paths once; a partially checked class judged over the repeats says so; a /traverse 200 finding is "a walk stopped
 outside its stated rule (the seed's clock)" (`sections.finding_kinds`); the document's FINDINGS regex is pinned to
 `report.verdict_text`'s own words by a test (report.py's verdict still says "without failing the request").
+
+After the two Opus verifications of e3098b2e9 (`.../doc/integration/verify-merge/VERIFY.md`,
+`.../verify-colours/VERIFY.md`), decision (1) is carried out where the text is printed and the legend says exactly
+what is red. Red now as well: the unit notes' and the family prose's "Not exercised via MCP" (`!!...!!` in the
+prose files), the class word of a cell, an observed line or an adjudication whose MCP access path stands ○
+(`blocks.class_word_tex`: "not expressible through MCP", "refused before host execution"), appendix B's
+"not implemented mcp: N (...)" evidence state, appendix G's counts, the run statements naming the class (R's
+reading line "read not exercised", the edge families' "not expressible through MCP (N inputs ...)", the not-exercised
+family counts `mcp_not_exercised_by_family`, the classes of `mcp_classes_text` whose members stand ○, P-modes' cell
+counts, now filled from the facts). A property-level mark not implemented via MCP (manifest v5) that set a check
+aside on an MCP execution of a test whose MCP access path does not stand ○ (`cells.property_not_implemented`, the one
+rule of `ArmState.ni_marked` and `facts.not_implemented_issue`) is marked on its cell by a small red ○ raised after
+the glyph (doc.sty's `\gnip`), counted after its glyph pair in the standing, family, grouped and coverage lines
+("4 ● (3 with a property check not implemented via MCP)"), named in the attention tag and under I.1's table ("18 not
+implemented via MCP (3 by a property-level mark: T-labels-0003, -0005 and -0006)"), and listed in appendix G
+(`sections.property_marks_table`). I.3's legend now states the rule as applied: the glyph, its counts (a count of 0
+black), the class words of what stands not implemented, the property-level mark; headings, legends, definitions,
+quoted texts and the by-design table's own statements name the class in black; a footnote digit is red as an
+exception to read, whether or not an attention kind counts the test. A walk's stop figures round half up, as every
+time does. I.1's finding sentence names the seed's clock for a /traverse walk.
 
 ## Glossary
 

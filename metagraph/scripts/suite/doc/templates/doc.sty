@@ -28,7 +28,7 @@
 \definecolor{findorange}{HTML}{EF6C00}
 \definecolor{incgrey}{HTML}{607D8B}
 % red means "needs attention" (the owner's decision of 2026-10-16): a test not implemented via MCP (the glyph, its
-% counts and marks) and the attention tags of the contents and of I.1 are set in it
+% counts, class words and marks) and the attention tags of the contents and of I.1 are set in it
 \definecolor{attnred}{HTML}{C62828}
 \definecolor{bdblue}{HTML}{1565C0}
 % the tints of a printed execution time (the cell grammar's times line; cells.TIME_TINT_YELLOW_MS / _RED_MS):
@@ -46,6 +46,10 @@
 \newcommand\gerr{\leavevmode{\mdseries\upshape\glyphfont\color{failred}\symbol{"2298}}}
 \newcommand\gnone{\leavevmode{\color{black!50}--}}
 \newcommand\gne{\leavevmode{\mdseries\upshape\glyphfont\scriptsize\color{failred}\symbol{"2260}}}
+% the property-level mark not implemented via MCP (cells.ArmState.ni_marked): a small red ○ raised after the glyph of
+% an MCP cell one of whose executions had a property check set aside by the manifest's mark (the owner's decision of
+% 2026-10-16: red wherever printed)
+\newcommand\gnip{\textsuperscript{\mdseries\upshape\glyphfont\scriptsize\color{attnred}\symbol{"25CB}}}
 % marks: a footnote digit, a small letter after a glyph or a time
 \newcommand\fn[1]{\textsuperscript{\scriptsize\color{failred}\textbf{#1}}}
 \newcommand\tmark[1]{\textsuperscript{\scriptsize #1}}

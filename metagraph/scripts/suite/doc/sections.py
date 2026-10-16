@@ -801,8 +801,9 @@ def standing_outcome_differences(ctx, sids=None):
             case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
                                                       if l.get("service_by_design_case")), None)
             text = ("%s: the MCP line records service_by_design (the service refused at submit) while the table files "
-                    "the case%s under %s, so the cell and the standing count read not exercised, the outcomes row "
-                    "%s" % (sid, (" %s" % case) if case else "", cells.attn_marked("not implemented via MCP"), row))
+                    "the case%s under %s, so the cell and the standing count read %s, the outcomes row "
+                    "%s" % (sid, (" %s" % case) if case else "", cells.attn_marked("not implemented via MCP"),
+                            cells.attn_marked("not exercised"), row))
             out.append((sid, "not_implemented", text))
         elif st.glyph_key == "service_by_design":
             decided = [l for l in st.lines if cells.by_design_line(st, l)]
@@ -1444,6 +1445,7 @@ LEGEND_WORD = {"pass": "pass", "fail": "fail", "error": "error", "finding": "fin
                "none": "no execution"}
 LEGEND_PREFIXES = {"not_implemented": ("not exercised via MCP:", "not implemented via MCP:")}
 MARK_EXAMPLE = {"superscript digit": "\\ginc\\fn{1}", "not-equal sign": "\\gpass\\gne", "t": "\\gpass\\tmark{t}",
+                "property-level mark": "\\gpass\\gnip",
                 "s": "\\gpass\\tmark{s}", "n": "\\gpass\\tmark{n}", "u": "\\gbd\\tmark{u}", "c": "9.1 s\\tmark{c}",
                 "a": "9.1 s\\tmark{a}", "i": "9.1 s\\tmark{i}", "m": "\\ginc\\tmark{m}"}
 ANNOTATION_DEFAULT = {
@@ -1477,12 +1479,22 @@ def legend_table(ctx=None):
     prose (`marks` of the reading section) when it has them."""
     reading = ctx.overview_section("reading") if ctx else {}
     marks = [e for e in (reading.get("marks") or []) if isinstance(e, dict) and e.get("mark") in MARK_EXAMPLE]
+    # the property-level mark exists only under a manifest with property-level marks (v5): no row otherwise
+    if ctx is not None and not _has_property_marks(ctx.run):
+        marks = [e for e in marks if e.get("mark") != "property-level mark"]
     glyph_rows = _glyph_rows()
     if marks:
         mark_rows = [[MARK_EXAMPLE[e["mark"]], esc(e.get("on") or ""), inline(e.get("meaning") or "")]
                      for e in marks]
         return _legend_tables(glyph_rows, mark_rows)
     return _legend_builtin(glyph_rows)
+
+
+def _has_property_marks(run):
+    """Whether any scenario of the run's manifest carries a property-level mark not implemented via MCP."""
+    if not hasattr(run, "check_marks"):
+        return False
+    return any(m.get("mark") == "not_implemented" for sid in run.order for m in run.check_marks(sid).values())
 
 
 def _legend_tables(glyph_rows, mark_rows):
@@ -1541,8 +1553,15 @@ def attention_legend_sentence():
         defs.append("%s: %s" % (cells.attn(esc(many)), esc(d)))
     return ("red means needs attention: the contents print under each chapter's line, and I.1's attention table "
             "per chapter, the tests needing attention by kind, a test once per kind and possibly under several, the "
-            "kinds with none left out; %s; the \\gni\\ glyph of a test not implemented via MCP, its counts, marks and "
-            "class words are red wherever printed" % "; ".join(defs))
+            "kinds with none left out; %s; the \\gni\\ glyph of a test not implemented via MCP is red wherever "
+            "printed, and so are its counts (a count of 0 stays black), the class words of a cell, an execution or a "
+            "run statement that stands not implemented via MCP (not exercised via MCP, not expressible through MCP, "
+            "refused before host execution where the arm stands \\gni) and the property-level mark (a small red "
+            "\\gni\\ raised after the glyph of an MCP cell, \\gpass\\gnip: a property check set aside by the "
+            "manifest's mark, the test counted under not implemented via MCP); headings, legends, definitions, quoted "
+            "texts (a check's text, the policy's reasons) and the by-design table's own statements name the class in "
+            "black; a footnote digit is red too: it numbers the test's detail block, an exception to read, whether "
+            "or not a kind above counts the test" % "; ".join(defs))
 
 
 def grammar_lines(ctx):
@@ -1871,8 +1890,9 @@ def limitations_table(ctx):
                                                                            else str)("%d scenarios" % limits[
                                                                                "manifest_not_implemented"])
              + ", %d distinct reasons" % len(limits["reasons"]), "\\hyperref[app:G]{G}"],
-            ["not-expressible table cases scenarios name", "%d cases, %d scenarios" % (
-                len(limits["named"]), limits["not_expressible_scenarios"]), "\\hyperref[app:G]{G}"],
+            ["not-expressible table cases scenarios name", "%d cases, %s" % (
+                len(limits["named"]), (cells.attn if limits["not_expressible_scenarios"] else str)(
+                    "%d scenarios" % limits["not_expressible_scenarios"])), "\\hyperref[app:G]{G}"],
             ["by-design cases an MCP answer matched", "%d cases; pairs verified %s, unverified %s" % (
                 len(limits["matched"]), esc(ma.get("by_design_verified", "–")), esc(ma.get("by_design_unverified", "–"))),
              "\\hyperref[app:B]{B}"]]
@@ -2269,17 +2289,17 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     if cls == "not_expressible":
         case = st.agreement.get("case")
         reason = blocks.short_reason(run, sid, case, ctx.short_reasons())
-        return "%s\\ %s\\newline %s; see B" % (glyph, esc(blocks.MCP_CLASS_WORD[cls]), reason), None
+        return "%s\\ %s\\newline %s; see B" % (glyph, blocks.class_word_tex(cls, st), reason), None
     first = next((l for l in lines if l.get("http") is not None), None)
     code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
     status = "http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "") if first else "–"
     if cls in ("refused_before_host", "service_answered", "relayed", "host_state", "refused_unexplained"):
-        text = "%s\\ %s\\newline %s" % (glyph, esc(blocks.MCP_CLASS_WORD[cls]), status)
+        text = "%s\\ %s\\newline %s" % (glyph, blocks.class_word_tex(cls, st), status)
         return text, None
     if cls == "normalised":
         case = next((l.get("service_by_design_case") for l in st.lines if l.get("service_by_design_case")), None) \
             or st.agreement.get("case")
-        text = "%s\\ %s\\newline %s" % (glyph, esc(blocks.MCP_CLASS_WORD[cls]), status)
+        text = "%s\\ %s\\newline %s" % (glyph, blocks.class_word_tex(cls, st), status)
         if with_times and st.present and st.glyph_key not in ("not_implemented_mcp", "service_by_design"):
             text = _cell_tex(st, footnote, "list")
         if case:
@@ -2289,7 +2309,7 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     # answered by the host through the service: the usual cell
     if with_times:
         return _cell_tex(st, footnote, "list"), None
-    return "%s\\ %s\\newline %s" % (glyph, esc(blocks.MCP_CLASS_WORD[cls]), status), None
+    return "%s\\ %s\\newline %s" % (glyph, blocks.class_word_tex(cls, st), status), None
 
 
 EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the class in words follows from whether "
@@ -2633,10 +2653,18 @@ def attention_table(ctx):
                                                                           "tests"]
     widths = [34] + [18] * len(kinds) + [20, 10]
     spec = latex.spec_p(widths, aligns=["raggedright"] + ["raggedleft"] * (len(kinds) + 2))
+    # the tests counted under not implemented via MCP by a property-level mark alone (their MCP access path does
+    # not stand ○), named so that the reader finds them (VERIFY-MERGE L1)
+    prop = ["%s %s" % (esc(ch), cells.attn("%d (%s)" % (v["n_attention_property"], esc(facts._ids_short(
+        [x.strip() for x in v["attention_property_ids"].split(",") if x.strip()])))))
+            for ch, v in per if v["n_attention_property"]]
+    prop_text = ("; of the not implemented via MCP, by a property-level mark alone (the MCP access path not standing "
+                 "\\gni, the cell carrying the mark): %s" % "; ".join(prop)) if prop else ""
     return latex.plain_table(spec, header, rows,
                              "needs attention: the tests of each chapter by kind, red where any (a test counts once "
                              "per kind and may count under several; the kinds are defined in I.3's legend, and the "
-                             "contents print each chapter's counts under its line)", needspace=min(16, len(rows) + 4))
+                             "contents print each chapter's counts under its line)%s" % prop_text,
+                             needspace=min(16, len(rows) + 4))
 
 
 def chapter(ctx, ch):
@@ -3367,10 +3395,13 @@ def by_design_table(ctx):
         for mark in sorted(marks):
             sids_ = marks[mark]
             if len(sids_) <= 6:
-                named.append("%s: %s" % (esc(mark), ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_)))
+                entry = "%s: %s" % (esc(mark), ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_))
             else:
-                named.append("%s: %d (%s, …)" % (esc(mark), len(sids_),
-                                                 ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_[:3])))
+                entry = "%s: %d (%s, …)" % (esc(mark), len(sids_),
+                                            ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_[:3]))
+            # the class word and count of the tests not implemented via MCP in red, as the case's class tag in the
+            # first column (the owner's decision of 2026-10-16; VERIFY-MERGE M1 b)
+            named.append(cells.attn(entry) if mark == "not implemented mcp" else entry)
         if not marks:
             # a case of the chapter's area that no scenario named and no answer matched (READ-017): documented,
             # not exercised in this run
@@ -3794,7 +3825,7 @@ def mcp_limits(ctx):
         c = run.cases.get(case) or run.table.get(case) or {}
         sa = c.get("service_answer") or {}
         rows.append([tt(case), esc_wrap(c.get("scenario_match"), 160),
-                     esc_wrap(sa.get("missing_argument") or sa.get("detail"), 160), str(len(sids))])
+                     esc_wrap(sa.get("missing_argument") or sa.get("detail"), 160), cells.attn(str(len(sids)))])
     out += "\\parhead{Cases of the by-design table of agreement not implemented via MCP that scenarios name}\n"
     out += latex.plain_table(latex.spec_p([50, 60, 52], extra_cols=1, extra_spec="r"),
                              ["case", "scenario match", "missing argument", "scenarios"], rows)
@@ -3804,10 +3835,11 @@ def mcp_limits(ctx):
         if mcp.get("not_implemented"):
             reasons.setdefault(str(mcp["not_implemented"]), []).append(sid)
     out += "\\parhead{The manifest's reasons for not implemented via MCP}\n"
-    rows = [[esc_wrap(r, 120), str(len(s)), esc(", ".join(s[:8]) + (" …" if len(s) > 8 else ""))]
+    rows = [[esc_wrap(r, 120), cells.attn(str(len(s))), esc(", ".join(s[:8]) + (" …" if len(s) > 8 else ""))]
             for r, s in sorted(reasons.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
     out += latex.plain_table(latex.spec_p([60, 104], extra_cols=1, extra_spec="r"),
                              ["reason", "ids", "scenarios"], [[r[0], r[2], r[1]] for r in rows])
+    out += property_marks_table(ctx)
     dec = run.declared
     out += "\\parhead{Owner-declared exemptions}\n"
     out += ctx.prose_paragraphs("provenance", "exemption_kinds", optional=True) if ctx.overview_section(
@@ -3831,6 +3863,46 @@ def mcp_limits(ctx):
                 "evidence from this run.}\\par\n")
     else:
         out += "None given for this manifest.\n\n"
+    return out
+
+
+def property_marks_table(ctx):
+    """Appendix G's property-level marks not implemented via MCP (manifest v5: `mcp.not_implemented_checks`, one
+    check of a scenario; VERIFY-COLOURS M1): per check and reason the scenarios that carry the mark and, in red,
+    those whose MCP execution had the check set aside in this run (cells.property_not_implemented: the test counts
+    under not implemented via MCP in the attention tags, its MCP cell carries the property-level mark). Empty for a
+    manifest without such marks (v1 to v4)."""
+    run = ctx.run
+    marked = {}
+    for sid in run.order:
+        marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
+        for check, m in sorted(marks.items()):
+            if m.get("mark") == "not_implemented":
+                marked.setdefault((check, str(m.get("reason") or "–")), []).append(sid)
+    if not marked:
+        return ""
+    rows = []
+    for (check, reason), sids in sorted(marked.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        whole = [s for s in sids if ctx.state(s)["mcp"].glyph_key == "not_implemented_mcp"]
+        aside = [s for s in sids if s not in whole
+                 and cells.property_not_implemented(run, s, run.arm_lines(s, "mcp"))]
+        rest = [s for s in sids if s not in aside and s not in whole]
+        names = []
+        if aside:
+            names.append(cells.attn("set aside in this run: %s" % esc(facts._ids_short(aside))))
+        if whole:
+            names.append("%s: %s" % (cells.attn("the whole test not exercised via MCP (\\gni)"),
+                                     esc(facts._ids_short(whole))))
+        if rest:
+            names.append("marked, the check read otherwise on every MCP execution (judged as any check): %s" % esc(
+                facts._ids_short(rest)))
+        rows.append([tt(check), esc_wrap(reason, 160), "; ".join(names), cells.attn(str(len(aside))) if aside else "0"])
+    out = "\\parhead{The manifest's property-level marks not implemented via MCP}\n"
+    out += ("\\noindent{\\small A mark of one check of a scenario: on the MCP access path the marked check, read not "
+            "exposed, is set aside, the rest of the scenario stays tested; the test counts under not implemented via "
+            "MCP in the attention tags, and its MCP cell carries the property-level mark (I.3).}\\par\\smallskip\n")
+    out += latex.plain_table(latex.spec_p([34, 64, 66], extra_cols=1, extra_spec="r"),
+                             ["check", "the manifest's reason", "scenarios", "set aside"], rows)
     return out
 
 

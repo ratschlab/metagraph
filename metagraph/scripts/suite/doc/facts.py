@@ -539,6 +539,12 @@ def _standing_counts(ctx, sids, prefix=""):
         v["%sn_missing_%s" % (prefix, k)] = counts.get(None, 0)
     mcp = [ctx.state(sid)["mcp"] for sid in sids]
     v[prefix + "n_mcp_not_exercised"] = sum(1 for st in mcp if st.present and st.glyph_key == "not_implemented_mcp")
+    # the tests whose MCP access path does not stand ○ but one of whose executions had a property check set aside by
+    # the manifest's property-level mark not implemented via MCP (ArmState.ni_marked): they count under not
+    # implemented via MCP in the attention tags (attention_facts)
+    prop = [sid for sid in sids if ctx.state(sid)["mcp"].ni_marked]
+    v[prefix + "n_mcp_property_ni"] = len(prop)
+    v[prefix + "mcp_property_ni_ids"] = _ids_short(prop) or "none"
     v[prefix + "n_mcp_by_design"] = sum(1 for st in mcp if st.present and st.glyph_key == "service_by_design")
     v[prefix + "n_mcp_by_design_unverified"] = sum(1 for st in mcp if st.present and st.glyph_key == "service_by_design"
                                                    and "u" in st.glyph_marks)
@@ -900,7 +906,15 @@ def _mcp_class_values(x, members):
         codes = sorted(set(x[s]["mcp"]["code"] for s in ids if x[s]["mcp"]["code"]))
         v["mcp_%s_codes" % cls] = ", ".join("`%s`" % c for c in codes) or "none"
         if ids:
-            parts.append("%d %s" % (len(ids), blocks.MCP_CLASS_WORD.get(cls, cls)))
+            # a class whose members stand not exercised via MCP is a not-implemented count, red wherever printed
+            # (the owner's decision of 2026-10-16); a class some of whose members do names those apart
+            part = "%d %s" % (len(ids), blocks.MCP_CLASS_WORD.get(cls, cls))
+            ni = sum(1 for sid in ids if x[sid]["mcp"]["standing"] == "not exercised")
+            if ni == len(ids):
+                part = cells.attn_marked(part)
+            elif ni:
+                part += " (%s)" % cells.attn_marked("%d of them not exercised" % ni)
+            parts.append(part)
     v["mcp_classes_text"] = ", ".join(parts) or "no MCP execution"
     n = len(members)
     v["mcp_all_refused_before_host"] = bool(n) and v.get("n_mcp_refused_before_host", 0) == n
@@ -1244,7 +1258,8 @@ def chapter_facts(ctx, ch):
         if len(classes) > 1:
             text += " (%s)" % ", ".join("%d %s" % (c, w) for w, c in sorted(classes.items(), key=lambda kv: -kv[1]))
         parts.append(text)
-    v["mcp_not_exercised_by_family"] = ", ".join(parts)
+    # the counts of the tests not exercised via MCP, red wherever printed (the owner's decision of 2026-10-16)
+    v["mcp_not_exercised_by_family"] = cells.attn_marked(", ".join(parts))
     n_exec, n_tests, text = _findings(ctx, sids)
     v["n_finding_executions"], v["n_finding_tests"], v["findings_text"] = n_exec, n_tests, text
     totals = run.summary().get("totals") or {}
@@ -1367,16 +1382,7 @@ def not_implemented_issue(run, sid, st):
     inconclusive."""
     if st.present and st.glyph_key == "not_implemented_mcp":
         return True
-    marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
-    if not marks or not any(m.get("mark") == "not_implemented" for m in marks.values()):
-        return False
-    for l in st.lines:
-        aside = run.marked_aside(sid, l) if hasattr(run, "marked_aside") else {}
-        if any(m.get("mark") == "not_implemented" for m in aside.values()):
-            return True
-        if blocks.scenario_level_mark(l):
-            return True
-    return False
+    return cells.property_not_implemented(run, sid, st.lines)
 
 
 def attention_of(ctx, sids):
@@ -1417,21 +1423,33 @@ def attention_items(counts):
     return out
 
 
-def attention_text(counts):
-    """'2 time-budget issues, 9 not implemented via MCP': the nonzero kinds in order; '' when none."""
-    return ", ".join(w for _, _, w in attention_items(counts))
+def attention_text(counts, property_ids=None):
+    """'2 time-budget issues, 9 not implemented via MCP': the nonzero kinds in order; '' when none. `property_ids`:
+    the tests counted under not implemented via MCP by a property-level mark alone (their MCP access path does not
+    stand ○), named after the count so that the reader finds them (VERIFY-MERGE L1): '18 not implemented via MCP
+    (3 by a property-level mark: T-labels-0003, -0005 and -0006)'."""
+    out = []
+    for k, n, w in attention_items(counts):
+        if k == "not_implemented" and property_ids:
+            w += " (%d by a property-level mark: %s)" % (len(property_ids), _ids_short(property_ids))
+        out.append(w)
+    return ", ".join(out)
 
 
 def attention_facts(ctx, sids):
     """The attention counts of a chapter (or of any set of tests) as facts: n_attention_<kind> (tests),
     attention_<kind>_ids, attention_text (the nonzero kinds in words, '' when none), n_attention_tests (the tests
-    under any kind)."""
+    under any kind), attention_property_ids (the tests not implemented via MCP by a property-level mark alone, their
+    MCP access path not standing ○; ArmState.ni_marked) and n_attention_property."""
     by = attention_of(ctx, sids)
     v = {}
     for k, _, _ in ATTENTION_KINDS:
         v["n_attention_%s" % k] = len(by[k])
         v["attention_%s_ids" % k] = ", ".join(by[k])
-    v["attention_text"] = attention_text(dict((k, len(by[k])) for k in by))
+    prop = [sid for sid in by["not_implemented"] if ctx.state(sid)["mcp"].glyph_key != "not_implemented_mcp"]
+    v["attention_property_ids"] = ", ".join(prop)
+    v["n_attention_property"] = len(prop)
+    v["attention_text"] = attention_text(dict((k, len(by[k])) for k in by), prop)
     v["n_attention_tests"] = len(set(sid for ids in by.values() for sid in ids))
     return v
 

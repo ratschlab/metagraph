@@ -1408,9 +1408,9 @@ class VerifyRoundTwoTest(unittest.TestCase):
                 {"class": "not_implemented_mcp", "case": "c.ne"})
         short = {"c.ne": "the tool always sends its own bound"}
         text = blocks._not_exercised_text(s_, R(), "x", short, unit_note=True)
-        self.assertEqual(text, "\\gni\\ \\attn{not exercised via MCP}: refused before host execution (http 400 \\texttt{resolve\\_\\allowbreak{}query\\_\\allowbreak{}too\\_\\allowbreak{}long}); the note under the table and case \\texttt{c.\\allowbreak{}ne} in B")
+        self.assertEqual(text, "\\gni\\ \\attn{not exercised via MCP}: \\attn{refused before host execution} (http 400 \\texttt{resolve\\_\\allowbreak{}query\\_\\allowbreak{}too\\_\\allowbreak{}long}); the note under the table and case \\texttt{c.\\allowbreak{}ne} in B")
         text = blocks._not_exercised_text(s_, R(), "x", short, unit_note=False)
-        self.assertTrue(text.startswith("\\gni\\ \\attn{not exercised via MCP}: the tool always sends its own bound; refused before host execution"), text)
+        self.assertTrue(text.startswith("\\gni\\ \\attn{not exercised via MCP}: the tool always sends its own bound; \\attn{refused before host execution}"), text)
         self.assertTrue(text.endswith("case \\texttt{c.\\allowbreak{}ne} in B"), text)
         rows = blocks._execution_rows(s_, R(), "x", "mcp", is_prop)
         self.assertEqual(rows[0][1], "\\gni\\ \\attn{not exercised}")
@@ -2074,8 +2074,8 @@ class OwnerReviewTwoTest(unittest.TestCase):
             self.assertIn("1 answered by the host through the service", text)
             self.assertNotIn("every call was refused at submit", text)
         self.assertIn("; every test was exercised through the tools", conc_a)
-        self.assertIn("\\attn{1 test could not be exercised through the tools} (a known limit: the time budget 1; I.4 and "
-                      "appendix B)", conc_b)
+        self.assertIn("\\attn{1 test could not be exercised through the tools} (a known limit: \\attn{the time budget 1}; "
+                      "I.4 and appendix B)", conc_b)
         # the agreement's levels (READ-110): fully checked apart from the checks that ran alone
         self.assertIn("Via MCP 1 pair agrees on the checks both access paths evaluated (0 fully checked, every property "
                       "check evaluated on both; 1 on the generic checks or a refusal alone, which verifies no property)", conc_a)
@@ -2434,7 +2434,7 @@ class OwnerReviewTwoTest(unittest.TestCase):
         self.assertFalse(uv["mcp_all_refused_before_host"])
         self.assertIn("R-002", uv["x"])
         note = sections.mcp_unit_note(ctx, "R", "R-two", ["R-002"])
-        self.assertIn("1 test, 1 ", note)
+        self.assertIn("1 test, \\attn{1 ", note)  # the class of a member standing ○ is a red count
         self.assertIn("(not refused)", note)
         self.assertEqual(sections.mcp_unit_note(ctx, "R", "R-budget", ["R-001"]), "")
         fv = f.family_facts(ctx, "R-budget")
@@ -4898,7 +4898,7 @@ class ChapterPLXTest(unittest.TestCase):
         self.assertIn("; the property not evaluated there", block)
         st5 = cells.scenario_states(self.runobj, "P-005")
         block5 = blocks.detail_block(self.runobj, "P-005", st5, 2, self.units)
-        self.assertIn("mcp: \\attn{not exercised via MCP}, %s (" % blocks.MCP_CLASS_WORD["not_expressible"], block5)
+        self.assertIn("mcp: \\attn{not exercised via MCP}, \\attn{%s} (" % blocks.MCP_CLASS_WORD["not_expressible"], block5)
 
     def test_intro_tables_slot(self):
         """READ-209: a chapter's `intro_tables` entry renders as a plain table after the Background paragraph it
@@ -5449,6 +5449,146 @@ class IntegrationRoundTest(unittest.TestCase):
         self.assertTrue(sections._FINDINGS_VERDICT.match(verdict), verdict)
         doc = sections.doc_verdict_text(_Stub(verdict=verdict, order=[]))
         self.assertTrue(doc.startswith("FINDINGS (1 execution(s) with a finding, a stated bound broken"), doc)
+
+
+class ColourRoundTwoTest(unittest.TestCase):
+    """The two Opus verifications of e3098b2e9 (integration/verify-merge, integration/verify-colours): decision (1)
+    carried out where the text is printed (the class word of what stands ○, the unit notes, appendix B's evidence
+    state, the prose's class phrases), the property-level mark not implemented via MCP marked, counted and named, the
+    legend stating exactly what is red, a walk's stop figures rounded half up."""
+
+    @staticmethod
+    def state(key, marks=(), ni_marked=False):
+        st = cells.ArmState("mcp")
+        st.present, st.glyph_key, st.glyph_marks, st.ni_marked = True, key, list(marks), ni_marked
+        return st
+
+    def test_class_word_red_where_the_arm_stands_not_implemented(self):
+        """VERIFY-MERGE M1 (c): the ○ cell's, the observed line's and the adjudication's class word in red; a
+        by-design arm's class word black."""
+        ni, bd = self.state("not_implemented_mcp"), self.state("service_by_design")
+        self.assertEqual(blocks.class_word_tex("not_expressible", ni), "\\attn{not expressible through MCP}")
+        self.assertEqual(blocks.class_word_tex("refused_before_host", ni), "\\attn{refused before host execution}")
+        self.assertEqual(blocks.class_word_tex("refused_before_host", bd), "refused before host execution")
+        self.assertEqual(blocks.class_word_tex("answered"), "answered by the host through the service")
+        # the refusals table's mcp cell of a ○ arm: the glyph and its class word red, the reason black
+        ni.lines = [{"repeat": 0, "outcome": "not_implemented_mcp", "http": None}]
+        ni.agreement = {"class": "not_implemented_mcp"}
+        run = _Stub(scenario=lambda sid: {"mcp": {"not_implemented": "graph"}}, cases={})
+        ctx = _Stub(run=run, short_reasons=lambda: {})
+        cell, note = sections._mcp_edge_cell(ctx, "R-9", ni, None, False)
+        self.assertEqual(cell, "\\gni\\ \\attn{not expressible through MCP}\\newline the request's graph cannot be "
+                               "expressed through the tools; see B")
+        self.assertIsNone(note)
+        # the detail block's adjudication phrase
+        text = blocks._not_exercised_text(ni, run, "R-9", {})
+        self.assertTrue(text.startswith("\\gni\\ \\attn{not exercised via MCP}: the request's graph"), text)
+        # the reading line's 'read not exercised' of a refusal filed under not implemented
+        m3 = self.state("not_implemented_mcp")
+        m3.lines = [{"repeat": 0, "outcome": "service_by_design"}]
+        m3.agreement = {"case": "resolve.not_expressible.bounds_max_query_bp"}
+        stub = _Stub(run=_Stub(order=["R-1"], comp_arm=lambda sid, arm: {"outcome": "service_by_design"}),
+                     state=lambda sid: {"mcp": m3})
+        text = latex.esc(sections.standing_outcome_differences(stub, ["R-1"])[0][2])
+        self.assertIn("so the cell and the standing count read \\attn{not exercised}, the outcomes row by design", text)
+
+    def test_unit_notes_and_prose_class_phrases_red(self):
+        """VERIFY-MERGE M1 (a), (c) and VERIFY-COLOURS L1: every unit note of the prose files and every family prose's
+        'Not exercised via MCP' carries the attention markup; inline sets it red."""
+        notes = 0
+        for ch in ("C", "D", "L", "M", "N", "P", "Q", "R", "T", "X"):
+            with open(os.path.join(DOC, "prose", "%s.json" % ch), encoding="utf-8") as fh:
+                data = json.load(fh)
+            for uid, text in (((data.get("mcp_notes") or {}).get("units")) or {}).items():
+                notes += 1
+                self.assertTrue(text.startswith("!!Not exercised via MCP!!: "), (ch, uid))
+                self.assertTrue(latex.inline(text).startswith("\\attn{Not exercised via MCP}: "), (ch, uid))
+            raw = json.dumps(data, ensure_ascii=False)
+            self.assertNotIn(" Not exercised via MCP:", raw.replace("!!Not exercised via MCP!!:", ""), ch)
+        self.assertEqual(notes, 6)  # C-protocol, L-memory, R-trace, R-budget, T-coords, T-attempts
+        # P-modes' cell counts are facts now (VERIFY-COLOURS L3), never the literal 'three cells'
+        with open(os.path.join(DOC, "prose", "P.json"), encoding="utf-8") as fh:
+            p = fh.read()
+        self.assertNotIn("three cells by design or not exercised", p)
+        self.assertIn("!!{n_mcp_not_exercised:word} not exercised!!", p)
+
+    def test_appendix_b_count_and_class_counts_red(self):
+        """VERIFY-MERGE M1 (b), VERIFY-COLOURS L2: appendix B's 'not implemented mcp: N (...)' evidence state in red;
+        a class whose members stand not exercised is a red count in mcp_classes_text, a mixed class names its
+        not-exercised members apart."""
+        x = {"A": {"mcp": {"class": "not_expressible", "standing": "not exercised", "code": None}, "variant": "a"},
+             "B": {"mcp": {"class": "refused_before_host", "standing": "by design", "code": "x"}, "variant": "b"},
+             "C": {"mcp": {"class": "refused_before_host", "standing": "not exercised", "code": "x"}, "variant": "c"}}
+        v = facts._mcp_class_values(x, ["A", "B", "C"])
+        self.assertEqual(latex.esc(v["mcp_classes_text"]), "\\attn{1 not expressible through MCP}, 2 refused before "
+                                                           "host execution (\\attn{1 of them not exercised})")
+        src = inspect.getsource(sections.by_design_table)
+        self.assertIn('named.append(cells.attn(entry) if mark == "not implemented mcp" else entry)', src)
+
+    def test_property_level_mark(self):
+        """VERIFY-COLOURS M1, VERIFY-MERGE L1: an MCP execution whose check the manifest's property-level mark not
+        implemented via MCP set aside (read not exposed) marks the cell with the small red ○, counts after its glyph
+        pair, and is named in the attention tag; a marked check read otherwise sets nothing aside."""
+        marks = {"label_dict_contains": {"mark": "not_implemented", "reason": "no dictionary via MCP"}}
+
+        class Run(object):
+            def check_marks(self, sid):
+                return marks if sid.startswith("T-labels") else {}
+
+            def marked_aside(self, sid, line):
+                return dict(((c["check"], 0), self.check_marks(sid)[c["check"]]) for c in line.get("checks") or []
+                            if c.get("outcome") == "not_exposed" and c["check"] in self.check_marks(sid))
+        run = Run()
+        aside = [{"checks": [{"check": "walk_in_record", "outcome": "pass"},
+                             {"check": "label_dict_contains", "outcome": "not_exposed"}]}]
+        judged = [{"checks": [{"check": "walk_in_record", "outcome": "pass"},
+                              {"check": "label_dict_contains", "outcome": "pass"}]}]
+        self.assertTrue(cells.property_not_implemented(run, "T-labels-0003", aside))
+        self.assertFalse(cells.property_not_implemented(run, "T-labels-0003", judged))
+        self.assertFalse(cells.property_not_implemented(run, "T-walk-0001", aside))
+        self.assertFalse(cells.property_not_implemented(_Stub(), "T-labels-0003", aside))  # no marks (v1 to v4)
+        st = self.state("pass", ni_marked=True)
+        self.assertEqual(st.glyph_tex(), "\\gpass\\gnip")
+        states = [{"mcp": self.state("pass", ni_marked=True)}, {"mcp": self.state("pass", ni_marked=True)},
+                  {"mcp": self.state("pass")}, {"mcp": self.state("not_implemented_mcp")}]
+        self.assertEqual(cells.glyph_counts(states, "mcp"),
+                         "3\\,\\gpass{}\\ \\attn{(2 with a property check not implemented via MCP)}\\enspace "
+                         "\\attn{1\\,\\gni{}}")
+        self.assertEqual(facts.attention_text({"not_implemented": 18, "time_budget": 1},
+                                              ["T-labels-0003", "T-labels-0005", "T-labels-0006"]),
+                         "1 time-budget issue, 18 not implemented via MCP (3 by a property-level mark: T-labels-0003, "
+                         "-0005 and -0006)")
+        self.assertEqual(facts.attention_text({"not_implemented": 2}), "2 not implemented via MCP")
+        # the attention count applies the same rule: a ○ standing, or the mark that set a check aside
+        st = self.state("pass")
+        st.lines = aside
+        self.assertTrue(facts.not_implemented_issue(run, "T-labels-0003", st))
+        st.lines = judged
+        self.assertFalse(facts.not_implemented_issue(run, "T-labels-0003", st))
+        with open(os.path.join(DOC, "templates", "doc.sty"), encoding="utf-8") as fh:
+            self.assertIn("\\newcommand\\gnip{\\textsuperscript{", fh.read())
+        self.assertIn("property-level mark", sections.MARK_EXAMPLE)
+
+    def test_legend_states_what_is_red(self):
+        """VERIFY-MERGE M1 (the legend narrowed to what is red), VERIFY-COLOURS L4 (the footnote digit stated)."""
+        legend = sections.attention_legend_sentence()
+        self.assertIn("the \\gni\\ glyph of a test not implemented via MCP is red wherever printed", legend)
+        self.assertIn("(a count of 0 stays black)", legend)
+        self.assertIn("headings, legends, definitions, quoted texts", legend)
+        self.assertIn("a footnote digit is red too", legend)
+        self.assertNotIn("counts, marks and class words are red wherever printed", legend)
+
+    def test_stop_figures_round_half_up(self):
+        """VERIFY-COLOURS L5: a walk's stop figures round half up, as every printed time does (15,003.67 ms prints
+        15,004 ms, on its tint by that printed value)."""
+        line = {"raw": "x"}
+        run = _Stub(raw_answer=lambda l: {"body": {"results": [{"resource_stop": {
+            "resource": "time", "requested": 15000, "used": 15003.67}}]}})
+        self.assertEqual(latex.esc(blocks.resource_stop_phrase(run, line)),
+                         "seed 0: the time budget (bounds.time\\_budget\\_ms, 15,000 ms; used \\tyellow{15,004 ms})")
+        run = _Stub(raw_answer=lambda l: {"body": {"results": [{"resource_stop": {
+            "resource": "time", "requested": 10000, "used": 10000.4}}]}})
+        self.assertIn("used 10,000 ms", latex.esc(blocks.resource_stop_phrase(run, line)))
 
 
 if __name__ == "__main__":
