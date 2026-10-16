@@ -555,6 +555,10 @@ checkFileSystem()
 list(APPEND METALIBS ${FILESYSTEM_LIBRARY})
 
 target_link_libraries(metagraph-core PUBLIC ${METALIBS})
+# Resolve the requested OpenSSL before Simple-Web-Server replaces its root on macOS.
+if(APPLE AND (NOT DEFINED USE_OPENSSL OR USE_OPENSSL))
+  find_package(OpenSSL)
+endif()
 add_subdirectory(external-libraries/Simple-Web-Server)
 target_link_libraries(metagraph-cli PUBLIC metagraph-core PRIVATE simple-web-server)
 
