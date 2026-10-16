@@ -1270,7 +1270,7 @@
    "family": "P-iupac",
    "unit_type": "series",
    "unit_title": "N runs",
-   "property": "A run of N, leading or internal, is skipped; the record is still found.",
+   "property": "A run of N, leading or internal, keeps the full pattern; the record is still found.",
    "n": 2,
    "members": [
     "P-iupac-0007",
@@ -1584,7 +1584,7 @@
    "family": "L-long",
    "unit_type": "list",
    "unit_title": "strands, IUPAC and a homopolymer with paths",
-   "property": "A reverse-complement window under strands reverse is the record's path as '-'; a 60 bp IUPAC pattern's paths hold the record's; A^60 with max_anchors 1 lists its two anchors and admits no extension.",
+   "property": "A reverse-complement window under strands reverse and a 60 bp IUPAC pattern with paths each answer at least one path (the spelled path unverified in v4); A^60 with max_anchors 1 lists its two anchors and admits no extension.",
    "n": 3,
    "members": [
     "L-long-0005",
@@ -1840,8 +1840,8 @@
   "X-stop-none": {
    "family": "X-stop",
    "unit_type": "series",
-   "unit_title": "tables without a stop codon",
-   "property": "A stop in a table without stop codons (27, 28, 31): exact 0 without a search.",
+   "unit_title": "tables without an unconditional stop codon",
+   "property": "A stop in a table without an unconditional stop codon (27, 28, 31): exact 0 without a search (the query model's zero, no negative search).",
    "n": 3,
    "members": [
     "X-stop-0007",

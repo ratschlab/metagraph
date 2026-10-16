@@ -460,7 +460,7 @@ def _arm_adjudication(st, run, sid, arm):
     else:
         text = "; ".join("r%s %s" % (esc(r), p) for r, p in phrases)
     if st.ne:
-        text = (text + " · " if text else "") + "DISAGREES with the reference arm"
+        text = (text + " · " if text else "") + "DISAGREES with the reference access path"
     return text
 
 
@@ -731,9 +731,21 @@ def _finding_items(st, arm):
     return out
 
 
+# the mechanism clause of a late-503 finding as checks.py records it names an unpolled piece "of about that
+# length"; the document keeps the observation apart from that hypothesis (READ-108)
+LATE_503_NOTE = "the deadline is read where the work and the delivery poll it"
+LATE_503_READING = ("the document's reading: what is established is a 503 deadline answer delivered late on the "
+                    "client's clock; an unpolled piece of the work (SPEC-labeled-traversal-core section 4.5 names "
+                    "them) is one explanation the contract permits, not a measured cause, since the client's wall "
+                    "also holds the network, the front and any wait for a request thread, so this measurement "
+                    "isolates neither the piece nor its length")
+
+
 def finding_text(items, rule):
-    """The FINDING line: the evidence per execution; the mechanism once when every execution shares it (else
-    with each); the rule once (VERIFY-R2 M2: never the mechanism twice)."""
+    """The FINDING line: the evidence per execution; the check's mechanism note once when every execution shares
+    it (else with each), labelled as the check's note; for a late 503 the document's reading of that note, which
+    keeps the observation apart from the hypothesis (READ-108); the rule once (VERIFY-R2 M2: never the mechanism
+    twice)."""
     whys = []
     for _, _, _, _, why in items:
         if why and why not in whys:
@@ -747,7 +759,9 @@ def finding_text(items, rule):
         parts.append(text)
     text = "; ".join(parts)
     if shared:
-        text += " — %s" % cells.esc_times(whys[0], 400)
+        text += " — the check's note: %s" % cells.esc_times(whys[0], 400)
+    if any(LATE_503_NOTE in w for w in whys):
+        text += "; " + esc(LATE_503_READING)
     if rule:
         text += " · rule: " + esc(rule, 400)
     return text
@@ -818,19 +832,38 @@ def _texts_line(states):
     return "; ".join("%s: “%s”" % (esc(k), esc(t, 300)) for k, t in seen)
 
 
+_RAW_RE = re.compile(r"^(arms/)([^/]+)(/raw/)(.+?)\.([^.]+)\.(\d+)\.json\.gz$")
+
+
 def _artifacts_line(run, states):
-    parts = []
+    """The supporting artifacts, keyed once (READ-114): where every raw answer follows the one pattern
+    arms/<path>/raw/<id>.<path>.<repeat>.json.gz the pattern is printed once with the (access path, repeat) keys it
+    holds, else each path in full; then the executions file's physical lines."""
+    raws = []
+    extras = []
     numbers = []
     for arm in cells.ARMS:
         for l in states[arm].lines:
             if l.get("raw"):
-                parts.append(tt(l["raw"]))
+                raws.append((arm, l.get("repeat"), str(l["raw"])))
             for rr in l.get("warm_up_reruns") or []:
                 if isinstance(rr, dict) and rr.get("raw"):
-                    parts.append("%s (the warm-up's re-run)" % tt(rr["raw"]))
+                    extras.append("%s (the warm-up's re-run)" % tt(rr["raw"]))
             n = run.line_no(l)
             if n:
                 numbers.append(str(n))
+    parts = []
+    patterned = [(_RAW_RE.match(raw), arm, rep) for arm, rep, raw in raws]
+    sid = states[cells.ARMS[0]].lines[0].get("scenario") if states[cells.ARMS[0]].lines else None
+    sid = sid or next((l.get("scenario") for a in cells.ARMS for l in states[a].lines), None)
+    if raws and all(m and m.group(2) == arm and m.group(5) == arm and m.group(6) == str(rep) and m.group(4) == sid
+                    for m, arm, rep in patterned):
+        keys = ", ".join("%s r%s" % (cells.ARM_SHORT.get(arm, arm), esc(rep)) for arm, rep, _ in raws)
+        parts.append("the raw answers %s for %s" % (
+            tt("arms/<access path>/raw/%s.<access path>.<repeat>.json.gz" % sid), esc(keys)))
+    else:
+        parts.extend(tt(raw) for _, _, raw in raws)
+    parts.extend(extras)
     text = ", ".join(parts) if parts else "no raw file recorded"
     if numbers:
         text += "; %s line%s %s" % (tt(run.executions_file), "" if len(numbers) == 1 else "s", esc(", ".join(numbers)))
@@ -838,7 +871,8 @@ def _artifacts_line(run, states):
 
 
 DEPTH_WORD = {"full": "fully checked", "partial": "partially checked", "generic_only": "generic checks only",
-              "refusal": "a refusal on both arms", "partial_non_pass": "partially checked, not a pass on both arms",
+              "refusal": "a refusal on both access paths",
+              "partial_non_pass": "partially checked, not a pass on both access paths",
               "on_failure": "checked on a failure"}
 
 
@@ -853,22 +887,79 @@ def facts_join(items):
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def partly_compared_items(depth):
+    """[(check, skipped repeats, compared repeats)] of an agreement's property checks one repeat compared and
+    another skipped (report.agreement_depth `partly_compared`), in check order."""
+    out = []
+    for name, v in sorted((depth.get("partly_compared") or {}).items()):
+        if isinstance(v, dict):
+            out.append((str(name), list(v.get("skipped") or []), list(v.get("compared") or [])))
+    return out
+
+
+def not_compared_text(depth):
+    """'not compared: a, b; not compared on r0: c (compared on r1)' for the depth's checks no repeat compared and
+    those a repeat skipped; '' when neither. Plain text."""
+    parts = []
+    nc = [str(c) for c in (depth.get("not_compared") or [])]
+    if nc:
+        parts.append("not compared: %s" % latex.cut_text(", ".join(nc), 120))
+    for name, skipped, compared in partly_compared_items(depth):
+        parts.append("not compared on %s: %s (compared on %s)" % (
+            _repeats_text(skipped), name, _repeats_text(compared) if compared else "no other repeat"))
+    return "; ".join(parts)
+
+
 def depth_text(depth):
     """An agreement's depth in words over the MCP repeats compare compared, the excluded repeats named with their
     reason (the owner's second review, point 2; reader.depth_over_compared_repeats): 'fully checked on r1; r0 was
     an inconclusive host-state outcome', 'fully checked on r0 and r1', 'partially checked on r0 (not compared:
-    resolve_runs)'. Plain text."""
+    resolve_runs)', 'partially checked, not a pass on both access paths on r0 and r1 (not compared on r0:
+    walk_in_record (compared on r1))'. Plain text."""
     cls = str(depth.get("class") or "")
     text = DEPTH_WORD.get(cls, cls.replace("_", " "))
     reps = depth.get("repeats_compared") or []
     if reps:
         text += " on " + _repeats_text(reps)
-    if depth.get("not_compared"):
-        text += " (not compared: %s)" % latex.cut_text(", ".join(str(c) for c in depth["not_compared"]), 120)
+    nct = not_compared_text(depth)
+    if nct:
+        text += " (%s)" % nct
     for e in depth.get("repeats_excluded") or []:
         if isinstance(e, dict):
             text += "; r%s was %s" % (e.get("repeat"), e.get("reason") or "left out of the comparison")
     return text
+
+
+def agreement_gap_text(depth):
+    """What an MCP agreement short of fully checked leaves out, in the reader's terms (READ-110): the property
+    checks no repeat compared (not decided on both access paths on any repeat: the agreement does not establish
+    them), the checks one repeat left undecided while another repeat decided them on both (the agreement
+    establishes them on that repeat alone; the readability review's verification of 2026-10-16, chapters issue 3),
+    or that only the generic checks were compared, or that both sides refused; plain text."""
+    cls = str(depth.get("class") or "")
+    nc = [str(c) for c in (depth.get("not_compared") or [])]
+    partly = partly_compared_items(depth)
+    if cls == "refusal":
+        return "the two access paths agree on a refusal (the status and the text are the claim; no property check)"
+    if cls == "generic_only":
+        return ("the two access paths agree on the generic checks alone; no property check was compared, so the "
+                "agreement establishes no property")
+    head = "the two access paths agree on the checks both evaluated"
+    clauses = []
+    if nc:
+        clauses.append("%s %s not compared on any repeat (not decided on both access paths): the agreement does not "
+                       "establish %s" % (latex.cut_text(", ".join(nc), 120), "was" if len(nc) == 1 else "were",
+                                         "that property" if len(nc) == 1 else "those properties"))
+    for name, skipped, compared in partly:
+        clauses.append("%s was not compared on %s (left undecided there) and decided alike on both access paths on "
+                       "%s: the agreement establishes that property on %s alone" % (
+                           name, _repeats_text(skipped), _repeats_text(compared) if compared else "no repeat",
+                           _repeats_text(compared) if compared else "no repeat"))
+    if clauses:
+        head += ", but " + "; ".join(clauses)
+    elif cls == "on_failure":
+        head += ", on a failure"
+    return head
 
 
 def _classes_text(run, sid, states):
@@ -882,7 +973,7 @@ def _classes_text(run, sid, states):
     if cls:
         words = {"identical": "identical answers", "same_checks": "different answers, the same check outcomes",
                  "timing": "the answers differ by timing alone", "not_comparable":
-                 "not comparable (no check both arms evaluated)", "disagree": "DISAGREE"}.get(cls, cls)
+                 "not comparable (no check both access paths evaluated)", "disagree": "DISAGREE"}.get(cls, cls)
         text = "direct: %s" % esc(words)
         if da.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in da["differing_checks"]), 160)
@@ -898,14 +989,22 @@ def _classes_text(run, sid, states):
         parts.append(text)
     mcls = ma.get("class")
     if mcls:
-        text = "mcp: %s" % esc(mcls.replace("_", " ") if mcls != "not_implemented_mcp" else "not implemented via MCP")
-        if ma.get("case"):
-            text += ", case %s" % tt(ma["case"])
-        if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
-            text += "; %s check(s) compared" % esc(ma["checks_compared"])
         depth = (run.depth or {}).get(sid)
-        if depth:
-            text += "; " + esc(depth_text(depth))
+        if mcls == "agree" and depth and depth.get("class") != "full":
+            # the agreement establishes less than the property: say what it leaves out first, the internal class
+            # and the depth after it (READ-110)
+            text = "mcp: " + esc(agreement_gap_text(depth)) + " (class agree"
+            if ma.get("checks_compared") is not None:
+                text += ", %s check(s) compared" % esc(ma["checks_compared"])
+            text += "; %s)" % esc(depth_text(depth))
+        else:
+            text = "mcp: %s" % esc(mcls.replace("_", " ") if mcls != "not_implemented_mcp" else "not implemented via MCP")
+            if ma.get("case"):
+                text += ", case %s" % tt(ma["case"])
+            if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
+                text += "; %s check(s) compared" % esc(ma["checks_compared"])
+            if depth:
+                text += "; " + esc(depth_text(depth))
         if ma.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 160)
         if mcls == "service_by_design" and ma.get("verified") is False:
@@ -977,17 +1076,84 @@ def estimate_lines(body_lines, chars_per_line=150):
 SHORT_BLOCK_LINES = 28
 
 
-def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=False):
+def interpretation(run, sid, states, property_text=None):
+    """The first lines of a detail block in the reader's terms (READ-114): what was requested (the unit's
+    property line, else the scenario's title), what each access path did (facts.exec_phrase, one phrase per
+    path) and what remains unverified (the property checks no execution of the test passed, or the statement that
+    every one was shown somewhere); plain LaTeX."""
+    import facts  # the facts module imports this one: a lazy import
+    sc_ = run.scenario(sid)
+    requested = inline(property_text) if property_text else esc(sc_.get("title"), 200)
+    observed = []
+    for arm in cells.ARMS:
+        st = states[arm]
+        if not st.present:
+            if st.missing_planned:
+                observed.append("%s: a planned execution not recorded" % esc(arm))
+            continue
+        if st.glyph_key in ("not_implemented_mcp", "service_by_design"):
+            # the service decided the call: the class in words with its evidence (whether the host was reached,
+            # the status and code), and that the property was not evaluated there (READ-208: a host search that
+            # timed out and was relayed is told apart from a request never sent)
+            cls, evidence = mcp_class(class_lines(st), sc_, st.agreement, run.cases)
+            word = "not exercised via MCP" if st.glyph_key == "not_implemented_mcp" else "service-side by design"
+            observed.append("%s: %s, %s (%s)%s; the property not evaluated there" % (
+                esc(arm), word, MCP_CLASS_WORD.get(cls, cls), evidence,
+                " (pair unverified)" if "u" in st.glyph_marks else ""))
+            continue
+        phrases = []
+        for l in st.lines:
+            ph = facts.exec_phrase(run, sid, l, arm)
+            if ph not in phrases:
+                phrases.append(ph)
+        text = phrases[0] if len(phrases) == 1 else "; ".join(
+            "r%s %s" % (esc(l.get("repeat")), facts.exec_phrase(run, sid, l, arm)) for l in st.lines)
+        if st.ne:
+            text += " (DISAGREES with the reference access path)"
+        observed.append("%s: %s" % (esc(arm), latex.join_units(esc(text))))
+    props = []
+    for e in sc_.get("expect") or []:
+        name = e.get("check") if isinstance(e, dict) else None
+        if name and run.is_property(name) and name not in props:
+            props.append(name)
+    unshown = [name for name in props if not any(
+        c.get("check") == name and c.get("outcome") == "pass" for arm in cells.ARMS for l in states[arm].lines
+        for c in (l.get("checks") or []) if isinstance(c, dict))]
+    if not props:
+        unverified = "none: the status, code and text are the claim, judged by the rows below"
+    elif unshown:
+        shown_on = []
+        for arm in cells.ARMS:
+            if any(c.get("check") in props and c.get("outcome") == "pass" for l in states[arm].lines
+                   for c in (l.get("checks") or []) if isinstance(c, dict)):
+                shown_on.append(arm)
+        unverified = "%s on every access path and repeat%s" % (
+            ", ".join(tt(n) for n in unshown),
+            ("; the other property check%s passed on %s" % ("" if len(props) - len(unshown) == 1 else "s",
+                                                             esc(", ".join(shown_on)))) if shown_on else "")
+    else:
+        unverified = "none of the property checks: each passed on some access path or repeat (the block explains the exception)"
+    return (latex.bline("requested", requested), latex.bline("observed", "; ".join(observed) or "no execution"),
+            latex.bline("unverified", unverified))
+
+
+def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=False, property_text=None,
+                 title=None, note=None):
     """The LaTeX of one test's detail block (the owner's review, point 1 and the first of the four further
-    changes): the expected line; the adjudication where the rows do not carry it (a failure, an error, a
+    changes; the readability review, READ-114): the interpretation first (requested, observed, unverified), then
+    the technical part: the expected line; the adjudication where the rows do not carry it (a failure, an error, a
     host-state override, a disagreement, a planned execution not recorded, the one phrase of an MCP arm the
     service decided); one row per arm and repeat (final outcome with its qualifier, HTTP and code, wall, requested
     budget, property tested?); a finding's evidence per execution with the mechanism and the rule once; the
     host-state rule and the intermediate evaluation of an overridden execution; the non-passing checks grouped by
-    reason; the texts once; the classes; the relations; the supporting artifacts. `unit_note`: the unit's table
-    carries the MCP reason, so the block only points at it."""
+    reason; the texts once; the classes; the relations; the supporting artifacts, keyed once. `unit_note`: the
+    unit's table carries the MCP reason, so the block only points at it; `property_text`: the unit's property line
+    (prose), the requested behaviour in the reader's words; `title`: a reader-facing title from the chapter prose
+    in place of the manifest's, where the manifest's promises more than the run's checks assert (READ-317);
+    `note`: a `reading` line after the interpretation, the chapter prose's explanation of this block (READ-319,
+    READ-320: what a budget governs beside a longer wall, repeatability apart from an unexposed property)."""
     sc_ = run.scenario(sid)
-    title = esc(sc_.get("title"), 200)
+    title = inline(title) if title else esc(sc_.get("title"), 200)
     meta = [esc(sc_.get("route") or "")]
     if sc_.get("timing_class"):
         meta.append(esc(sc_["timing_class"]))
@@ -997,6 +1163,13 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     if rep:
         meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
     body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
+    body.extend(interpretation(run, sid, states, property_text))
+    if note:
+        body.append(latex.bline("reading", inline(note)))
+    # its own paragraph, so that the label does not run on at the end of the unverified line (READ-114; the
+    # readability review's verification of 2026-10-16, shared L10)
+    body.append("\\par\\noindent{\\color{black!60}\\small\\itshape the technical record (the wire-level expectation, "
+                "the rows, the checks and the artifacts):}")
     body.append(latex.bline("expected", expected_text(sc_, run.is_property)))
     adj = []
     for arm in cells.ARMS:
@@ -1017,7 +1190,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
         if st.present:
             rows.extend(_execution_rows(st, run, sid, arm, run.is_property))
     if rows:
-        body.append(latex.block_table(["arm / repeat", "final outcome", "http · code", "wall", "requested budget",
+        body.append(latex.block_table(["path / repeat", "final outcome", "http · code", "wall", "requested budget",
                                        "property tested?"], rows))
     items = []
     for arm in cells.ARMS:

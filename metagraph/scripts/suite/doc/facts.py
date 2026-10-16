@@ -442,13 +442,13 @@ def arm_facts(ctx, sid, arm):
     else:
         text = "; ".join("r%s %s" % (l.get("repeat"), p) for l, p in zip(lines, phrases))
     if st.ne:
-        text += " (DISAGREES with the reference arm)"
+        text += " (DISAGREES with the reference access path)"
     elif "t" in st.glyph_marks:
-        text += " (the arms differ by timing alone)"
+        text += " (the two direct access paths differ by timing alone)"
     elif "s" in st.glyph_marks:
         text += " (another answer, the same check outcomes)"
     elif "n" in st.glyph_marks:
-        text += " (not comparable with the reference arm)"
+        text += " (not comparable with the reference access path)"
     f["phrase"] = text
     return f
 
@@ -465,6 +465,12 @@ def scenario_facts(ctx, sid):
     for arm in ARMS:
         f[ARM_KEY[arm]] = arm_facts(ctx, sid, arm)
     f["phrase"] = "; ".join("%s %s" % (arm, f[ARM_KEY[arm]]["phrase"]) for arm in ARMS if f[ARM_KEY[arm]]["present"])
+    # whether the deploy gate's policy selects the scenario, and on which access paths (READ-318: a chapter note
+    # states the gate relation from the policy, never as a condition left to the reader)
+    pol = ctx.run.policy if isinstance(ctx.run.policy, dict) else {}
+    sel = pol.get("selection") if isinstance(pol.get("selection"), dict) else {}
+    f["gate_selected"] = sid in set(str(x) for x in (sel.get("scenarios") or []))
+    f["gate_arms"] = _join(str(a) for a in (pol.get("arms") or [])) or "no access path"
     return f
 
 
@@ -490,7 +496,7 @@ def _members_phrase(f, exercised_only=True):
         if exercised_only and arm == "mcp" and a["standing"] in ("not exercised", "by design") and not a["n_outside_case"]:
             continue
         parts.append("%s %s" % (arm, a["phrase"]))
-    return "%s: %s" % (_label(f), "; ".join(parts) if parts else "no exercised arm")
+    return "%s: %s" % (_label(f), "; ".join(parts) if parts else "no exercised access path")
 
 
 def _join(items):
@@ -815,7 +821,7 @@ def _relations(ctx, rids):
              "not_evaluated": "not evaluated"}
     for key, ids in patterns.items():
         if len(set(key)) == 1:
-            how = "%s on every arm" % words.get(key[0], key[0])
+            how = "%s on every access path" % words.get(key[0], key[0])
         else:
             by_outcome = {}
             for arm, o in zip(ARMS, key):
@@ -834,9 +840,9 @@ def _declared(ctx, sids, rids):
     by_arms = {}
     for e in rel:
         by_arms.setdefault(tuple(e.get("arms") or []), []).append(e["relation"])
-    rel_text = "; ".join("%s on %s" % (_ids_short(ids), _join(arms) if arms else "every arm")
+    rel_text = "; ".join("%s on %s" % (_ids_short(ids), _join(arms) if arms else "every access path")
                          for arms, ids in by_arms.items())
-    exc_text = "; ".join("%s on %s" % (e["scenario"], _join(e.get("arms") or []) or "every arm") for e in exc)
+    exc_text = "; ".join("%s on %s" % (e["scenario"], _join(e.get("arms") or []) or "every access path") for e in exc)
     return {"n_declared_relations": len(rel), "declared_relations_text": rel_text,
             "n_declared_exclusions": len(exc), "declared_exclusions_text": exc_text}
 
@@ -961,7 +967,7 @@ def _warm_ups(ctx, sids):
             "n_warm_up_direct_pairs": direct_pairs, "n_warm_ups_after_target_direct": len(direct_after),
             "warm_ups_all_before_target_direct": bool(direct_pairs) and not direct_after,
             "warm_ups_after_target_direct_text": "; ".join(direct_per),
-            "warm_ups_after_target_direct_arms": "both direct arms" if len(direct_arms) > 1 else "".join(direct_arms),
+            "warm_ups_after_target_direct_arms": "both direct access paths" if len(direct_arms) > 1 else "".join(direct_arms),
             "n_warm_up_reruns": len(reruns),
             "n_warm_up_reruns_without_target": sum(1 for r in reruns if not r.get("target_execution")),
             "warm_up_reruns_text": "; ".join(rerun_text(r) for r in reruns)}
@@ -1107,36 +1113,46 @@ def _claims(ctx, ch, fam):
     for a property only one manifest's member tests: VERIFY-T H4)."""
     prose = (ctx.prose.get(ch) or {}).get("families") or {}
     held, unsupported = [], []
+    items = []  # the same claims as records, for the chapter's evidence map (READ-101): sections.claims_map
     for fid in ctx.units.chapter_families(ch):
         fp = prose.get(fid) or {}
         fv = fam[fid]
         for claim, wanted in claim_items(fp):
-            _claim(ctx, fid, fv, fill(claim, fv, ctx.unresolved), wanted, held, unsupported)
-    return held, unsupported
+            _claim(ctx, fid, fv, fill(claim, fv, ctx.unresolved), wanted, held, unsupported, items)
+    return held, unsupported, items
 
 
-def _claim(ctx, fid, fv, claim, wanted, held, unsupported):
-    """One claim sorted into `held` or `unsupported` by the direct arms' standing on its members (`wanted`, else
-    every member of the family)."""
+def _claim(ctx, fid, fv, claim, wanted, held, unsupported, items=None):
+    """One claim sorted into `held` or `unsupported` by the direct access paths' standing on its members (`wanted`,
+    else every member of the family); `items` collects the record {family, claim, n, m, status, words}: status
+    held (every member passes on both direct paths), part (some), none (no member; `words` the standings seen) or
+    failed (a failure, an error or a disagreement among the members)."""
     members = [sid for sid in (wanted or []) if sid in fv["x"]] or list(fv["x"])
     x = fv["x"]
     n = sum(1 for sid in members if x[sid]["dl"]["pass"] and (x[sid]["dr"]["pass"] or not x[sid]["dr"]["present"]))
     failed = any(x[sid][k]["standing"] in ("fail", "error", "other") for sid in members for k in ("dl", "dr")) \
         or any(ctx.state(sid)["direct-remote"].ne for sid in members)
+    words = []
+    for sid in members:
+        for k in ("dl", "dr"):
+            w = x[sid][k]["standing"]
+            if x[sid][k]["present"] and w not in words:
+                words.append(w)
     if failed:
         unsupported.append("%s (%s: %d of %d, with a failure or a disagreement; I.1)" % (claim, fid, n, len(members)))
+        status = "failed"
     elif n == len(members):
         held.append("%s (%s)" % (claim, fid))
+        status = "held"
     elif n:
         held.append("%s (%s, %d of %d)" % (claim, fid, n, len(members)))
+        status = "part"
     else:
-        words = []
-        for sid in members:
-            for k in ("dl", "dr"):
-                w = x[sid][k]["standing"]
-                if x[sid][k]["present"] and w not in words:
-                    words.append(w)
-        unsupported.append("%s (%s: %s on the direct arms)" % (claim, fid, " / ".join(words) or "no execution"))
+        unsupported.append("%s (%s: %s on the direct access paths)" % (claim, fid, " / ".join(words) or "no execution"))
+        status = "none"
+    if items is not None:
+        items.append({"family": fid, "claim": claim, "n": n, "m": len(members), "status": status,
+                      "words": " / ".join(words) or "no execution"})
 
 
 def chapter_facts(ctx, ch):
@@ -1257,10 +1273,27 @@ def chapter_facts(ctx, ch):
     v["n_backend_warm_mcp"] = len(backends)
     cold_by_family = [(fam[fid]["n_cold_dl"], fid) for fid in fams if fam[fid]["n_cold_dl"]]
     v["cold_dl_families"] = ", ".join("%s %d" % (fid, n) for n, fid in sorted(cold_by_family, key=lambda t: (-t[0], t[1])))
-    held, unsupported = _claims(ctx, ch, fam)
+    held, unsupported, items = _claims(ctx, ch, fam)
     v["claims_held"] = "; ".join(held)
     v["claims_unsupported"] = "; ".join(unsupported)
     v["n_claims_held"], v["n_claims_unsupported"] = len(held), len(unsupported)
+    v["claims_items"] = items
+    # the MCP agreements short of fully checked (READ-110), split by what they compared (the readability review's
+    # verification of 2026-10-16, chapters issue 2): on the generic checks or a refusal alone (no property check
+    # compared: the agreement verifies no property), or with some property check compared and agreeing on both
+    # access paths and another not compared on some repeat (the detail block names which); the first such pair in
+    # run order named with what it left uncompared, for the chapter summary's reading line
+    v["n_mcp_agree_partial"] = max(0, v["n_mcp_agree"] - v["n_mcp_full"])
+    v.update(_mcp_agree_short(run, sids))
+    v["mcp_agree_partial_example"] = ""
+    for sid in sids:
+        e = run.comp_entry(sid)
+        d = (run.depth or {}).get(sid)
+        if (e.get("mcp_agreement") or {}).get("class") == "agree" and d and d.get("class") != "full":
+            nct = blocks.not_compared_text(d)
+            v["mcp_agree_partial_example"] = "%s (%s%s)" % (
+                sid, blocks.DEPTH_WORD.get(str(d.get("class")), str(d.get("class"))), ("; " + nct) if nct else "")
+            break
     footnoted = [sid for sid in sids if x[sid]["footnoted"]]
     v["n_footnoted"] = len(footnoted)
     v["footnoted_ids"] = ", ".join(footnoted)
@@ -1272,12 +1305,51 @@ def chapter_facts(ctx, ch):
     # family> every test passed' would imply a non-pass inside it (VERIFY-COLOURS-V5 item 7)
     v["n_footnoted_in_gap"] = len(footnoted) - len(elsewhere)
     v["footnoted_elsewhere_text"] = "; ".join(_members_phrase(x[sid]) for sid in elsewhere)
+    # the same tests by id with their variants alone (READ-111: the chapter page points at the exception index
+    # and the detail blocks instead of repeating each execution's chronology)
+    v["footnoted_elsewhere_ids"] = ", ".join(_label(x[sid]) for sid in elsewhere)
     blocking = _gate_blocking(ctx, footnoted)
     v["n_footnoted_gate_blocking"] = len(blocking)
     v["footnoted_all_gate_blocking"] = bool(footnoted) and len(blocking) == len(footnoted)
     v["gate_judged"] = isinstance(run.gate, dict)
     v["logan_caveat"] = logan_caveat(run)
     return v
+
+
+AGREE_SHORT_GENERIC = ("generic_only", "refusal")
+AGREE_SHORT_PARTIAL = ("partial", "partial_non_pass")
+AGREE_SHORT_ON_FAILURE = ("on_failure",)
+
+
+def _mcp_agree_short(run, sids):
+    """The agreeing MCP pairs short of fully checked, by depth class (report.DEPTH_CLASSES): {n_mcp_agree_generic
+    (generic checks only or a refusal: no property check compared), n_mcp_agree_partial_checked (partial or
+    partial_non_pass: some property check compared and agreeing on both, another not compared on some repeat),
+    n_mcp_agree_on_failure (every property check compared, on a failing answer), mcp_agree_short_text (the three in
+    words, the empty ones left out; '' when none)}."""
+    counts = {"generic": 0, "partial": 0, "on_failure": 0}
+    for sid in sids:
+        e = run.comp_entry(sid)
+        d = (run.depth or {}).get(sid)
+        if (e.get("mcp_agreement") or {}).get("class") != "agree" or not d or d.get("class") == "full":
+            continue
+        cls = str(d.get("class"))
+        if cls in AGREE_SHORT_GENERIC:
+            counts["generic"] += 1
+        elif cls in AGREE_SHORT_PARTIAL:
+            counts["partial"] += 1
+        elif cls in AGREE_SHORT_ON_FAILURE:
+            counts["on_failure"] += 1
+    parts = []
+    if counts["generic"]:
+        parts.append("%d on the generic checks or a refusal alone, which verifies no property" % counts["generic"])
+    if counts["partial"]:
+        parts.append("%d with some property check compared and agreeing on both access paths and another not "
+                     "compared on some repeat (the detail block names which)" % counts["partial"])
+    if counts["on_failure"]:
+        parts.append("%d with every property check compared on a failing answer" % counts["on_failure"])
+    return {"n_mcp_agree_generic": counts["generic"], "n_mcp_agree_partial_checked": counts["partial"],
+            "n_mcp_agree_on_failure": counts["on_failure"], "mcp_agree_short_text": _join(parts)}
 
 
 def logan_caveat(run):

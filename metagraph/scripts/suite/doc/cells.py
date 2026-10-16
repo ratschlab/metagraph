@@ -353,7 +353,7 @@ def arm_state(run, sid, arm):
         if cls == "disagree":
             st.ne = True
             st.clean = False
-            st.reasons.append("the direct arms disagree")
+            st.reasons.append("the direct access paths disagree")
         elif cls in ("timing", "same_checks", "not_comparable"):
             st.glyph_marks.append({"timing": "t", "same_checks": "s", "not_comparable": "n"}[cls])
             st.clean = False
@@ -447,21 +447,23 @@ def aggregate(states, arm):
         servers.append(srv)
         if arm != "mcp" and _num(l.get("wall_ms")) is not None:
             states.append(host_cache_of(l))
-    # the members the arm never exercised (the service refused or could not express the request, no execution
-    # recorded) are said so, never counted as ok 0/0 (the owner's review, point 4)
+    # the members the arm never exercised (the service could not express the request, or no execution was
+    # recorded) are said so, never counted as ok 0/0 (the owner's review, point 4); a member the service decided
+    # by design is said apart (READ-208): the host may have been reached (a relayed refusal, a normalised
+    # request) or not (a refusal at submit), which `by_design_reached_text` states
     extras = []
     if ni:
         extras.append("%d\\,\\gni{}" % ni)
-    if bd:
-        extras.append("%d\\,\\gbd{}" % bd)
     if missing:
         extras.append("%d\\,\\gnone{}" % missing)
     not_exercised = bd + ni + missing
     denominator = n - not_exercised
     parts = ["ok %d/%d" % (ok, denominator)] if denominator else []
-    if not_exercised:
-        parts.append("not exercised: %s" % (extras[0] if len(extras) == 1 else "%d (%s)" % (
-            not_exercised, " ".join(extras))))
+    if ni or missing:
+        parts.append("not exercised: %s" % " ".join(extras))
+    if bd:
+        parts.append("by design: %d\\,\\gbd{}%s" % (bd, by_design_reached_text(
+            [m for m in members if m.glyph_key == "service_by_design"])))
     if walls:
         wall_text = fmt_pair(percentile(walls, 50), max(v for v in walls if _num(v) is not None))
         mark = host_marks_text(states)
@@ -474,31 +476,60 @@ def aggregate(states, arm):
     return text, line2
 
 
+def host_reached(line):
+    """Whether an execution reached the host (its recorded host-cache state is one of the host's)."""
+    return host_cache_of(line) in ("cold", "warm", WARM_AFTER_INTERRUPTED, "aged")
+
+
+def by_design_reached_text(bd_members):
+    """How many of the by-design members' service-decided executions reached the host, in a parenthesis for the
+    grouped cell and the coverage line (READ-208): a relayed host refusal or a normalised request reached the
+    host (the host executed the request; the service decided the pair), a refusal at submit did not. Empty when
+    no member is by design."""
+    if not bd_members:
+        return ""
+    reached = sum(1 for m in bd_members if any(host_reached(l) for l in m.lines if by_design_line(m, l)))
+    if reached == 0:
+        return " (decided before the host)"
+    if reached == len(bd_members):
+        return " (the host reached, the pair decided by the service)"
+    return " (%d the host reached, the rest decided before it)" % reached
+
+
 def coverage_text(states, arm):
-    """The coverage of a replicates unit on an arm, in words: `exercised 6/6, passed 6`, or `not exercised (3 ○)`
-    when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`. A member standing
-    by design whose other repeat the case did not match (by_design_line: a separate host answer) is exercised on
-    that repeat: `exercised 14/22 (3 on one repeat only, the other by design), passed 9` (VERIFY-PLXM H2)."""
+    """The coverage of a replicates unit on an arm, in words: `exercised 6/6, passed 6`, or `exercised 0/3; not
+    exercised 3 ○` when no member reached a tested execution, or `exercised 4/6, passed 3; not exercised 2 ○`; a
+    member the service decided by design is said apart from one never exercised, with whether the host was
+    reached (READ-208): `exercised 1/2, passed 1; by design 1 ◆ (the host reached, the pair decided by the
+    service)`. A member standing by design whose other repeat the case did not match (by_design_line: a separate
+    host answer) is exercised on that repeat: `exercised 14/22 (3 on one repeat only, the other by design),
+    passed 9` (VERIFY-PLXM H2)."""
     members = [s[arm] for s in states.values()]
     n = len(members)
     exercised = [m for m in members if m.present and m.glyph_key not in SERVICE_DECIDED]
     partly = [m for m in members if m.present and m.glyph_key in SERVICE_DECIDED and exercised_lines(m)]
     passed = sum(1 for m in exercised if m.worst == "pass")
     passed += sum(1 for m in partly if all(l.get("outcome") == "pass" for l in exercised_lines(m)))
-    rest = {}
-    for m in members:
-        if m in exercised or m in partly:
+    rest = [m for m in members if m not in exercised and m not in partly]
+    ni = [m for m in rest if m.present and m.glyph_key == "not_implemented_mcp"]
+    bd = [m for m in rest if m.present and m.glyph_key == "service_by_design"]
+    other = {}
+    for m in rest:
+        if m in ni or m in bd:
             continue
-        rest[m.glyph_key] = rest.get(m.glyph_key, 0) + 1
-    rest_text = " ".join("%d\\,%s{}" % (rest[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if rest.get(k))
-    if not exercised and not partly:
-        return "not exercised (%s)" % rest_text if rest_text else "not exercised"
+        other[m.glyph_key] = other.get(m.glyph_key, 0) + 1
     text = "exercised %d/%d" % (len(exercised) + len(partly), n)
     if partly:
         text += " (%d on one repeat only, the other by design)" % len(partly)
-    text += ", passed %d" % passed
-    if rest_text:
-        text += "; not exercised %s" % rest_text
+    if exercised or partly:
+        text += ", passed %d" % passed
+    if ni:
+        text += "; not exercised %d\\,\\gni{}" % len(ni)
+    if bd:
+        text += "; by design %d\\,\\gbd{}%s" % (len(bd), by_design_reached_text(bd))
+    other_text = " ".join("%d\\,%s{}" % (other[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if other.get(k))
+    if other_text:
+        text += "; not recorded %s" % other_text
     return text
 
 
@@ -545,19 +576,51 @@ def property_tested(line, is_property=None, aside=None):
 
 # the local timing legends: what `/` and the brackets mean under each table type (the owner's review, point 6)
 TIMING_LEGEND = {
-    "series": "times: wall per execution in repeat order, a / b (mcp: the cold call / the warm call); [ ] the "
-              "host's server time; be the host call as the service timed it; c a i on a direct time: host-cold, "
-              "aged, warm after an interrupted execution",
-    "list": "times: wall per execution in repeat order, a / b (mcp: cold / warm); [ ] the host's server time; be "
-            "the host call as the service timed it; c a i: host-cold, aged, warm after an interrupted execution",
-    "pairs": "times: wall per execution in repeat order, a / b (mcp: cold / warm); [ ] the host's server time; "
-             "c a i: host-cold, aged, warm after an interrupted execution; = and ≠ on a repeated test: equal / "
-             "different answer digests",
-    "replicates": "times: a / b is the median / the maximum of the members' walls (each member's first "
-                  "host-warm execution, else its only one); [ ] the median server time",
-    "refusals": "no times in the rows: the maximum wall per arm is in the summary line",
-    "summary": "a / b in a summary line is p50 / p90",
+    "series": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP the cold "
+              "call / the warm call); [ ] the host's own server time; be the host call as the service timed it; c a i "
+              "on a direct time: host-cold, aged, warm after an interrupted execution",
+    "list": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
+            "warm); [ ] the host's own server time; be the host call as the service timed it; c a i: host-cold, "
+            "aged, warm after an interrupted execution",
+    "pairs": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
+             "warm); [ ] the host's own server time; c a i: host-cold, aged, warm after an interrupted execution; = "
+             "and ≠ on a repeated test: equal / different answer digests",
+    "replicates": "times: a / b = the median / the maximum of the group's walls, one wall per test (each test's "
+                  "first host-warm execution, else its only one), never cold / warm; n counts the group's tests; "
+                  "[ ] the median server time",
+    "refusals": "no times in the rows: the maximum wall per access path is in the summary line",
+    "summary": "a / b in a summary line is p50 / p90: the median and the 90th percentile over the host-cold or "
+               "host-warm executions with a wall time, whatever their outcome (an execution not reached, aged or warm "
+               "after an interrupted one is left out)",
 }
+# the reader-facing key beside a unit's heading (READ-105): what the two numbers of a time cell mean in this layout
+LAYOUT_KEY = {
+    "series": "series · times: wall per repeat, r0 / r1 (mcp: cold / warm)",
+    "list": "list · times: wall per repeat, r0 / r1 (mcp: cold / warm)",
+    "pairs": "pairs · times: wall per repeat, r0 / r1 (mcp: cold / warm)",
+    "replicates": "grouped · times: wall median / maximum over the group's tests; n = tests",
+    "refusals": "refusals · no times in the rows",
+}
+
+
+def repeats_texts(n, mcp_cold_first=True):
+    """(the heading key, the legend) of a pairs table whose tests are repeated `n` times (chapter D; READ-321):
+    every repeat's wall is printed in execution order, so the key and the legend name the repeats r0 / r1 / ...,
+    say which MCP call was host-cold as the record has it (`mcp_cold_first`: repeat 0 cold, the later ones warm),
+    define the bracketed server time and the `be` line per execution, and tie = / ≠ to the normalised answer
+    digests of the repeats on that access path."""
+    reps = " / ".join("r%d" % i for i in range(n))
+    later = "r1" if n == 2 else ("r1 and r2" if n == 3 else "r1 to r%d" % (n - 1))
+    mcp = ("via MCP r0 is the host-cold call, %s the warm ones" % later) if mcp_cold_first else \
+        "via MCP the detail blocks state each call's host state"
+    key = "pairs · times: wall per repeat, %s (mcp: %s)" % (reps, ("r0 cold, %s warm" % later) if mcp_cold_first
+                                                             else "see the detail blocks")
+    legend = ("times: the wall time of each execution in execution order, %s (%s); [ ] the host's own server time "
+              "per execution, in the same order; be the host call as the service timed it, per execution (MCP "
+              "only); c a i on a direct time: host-cold, aged, warm after an interrupted execution; = and ≠: the "
+              "normalised answer digests of the repeats on that access path are equal / differ (the first repeat "
+              "is the baseline, a repeat a time budget limited is left out)" % (reps, mcp))
+    return key, legend
 
 
 def glyph_counts(states_list, arm):

@@ -5,6 +5,7 @@ section (observations, plots, tables) and the appendices. Every function returns
 `reader.Run`, a `units.Units` and the prose dicts.
 """
 
+import json
 import os
 import re
 import sys
@@ -22,6 +23,7 @@ import latex  # noqa: E402
 import reader  # noqa: E402
 import report  # noqa: E402
 import suite_common as sc  # noqa: E402
+import vocabulary  # noqa: E402
 from cells import ARMS, fmt_t, fmt_delta, fmt_pair, fmt_n  # noqa: E402
 from latex import esc, esc_wrap, tt, inline, paragraphs  # noqa: E402
 
@@ -37,6 +39,34 @@ APPENDICES = [("A", "The check catalogue"), ("B", "The by-design table"), ("C", 
               ("D", "Record key and glossary"), ("E", "Index of test ids"),
               ("F", "Environment, vocabulary and the gate in full"),
               ("G", "Known MCP limits and owner-declared exemptions")]
+# the closing section's displayed prefix (READ-009: chapter C is capabilities and appendix C the relations, so the
+# timing sections are not C.1 .. C.7 on the page; the LaTeX labels sec:C1 .. sec:C7 stay, so that links hold)
+CLOSING_PREFIX = "Timing"
+# the deploy gate's problems grouped by what they ask of the owner (READ-002, READ-023): the gate's kinds stay the
+# record's words; the groups are the document's reading of them. A kind decides the group except where the problem's
+# detail does (an outcome problem: inconclusive is behaviour not shown, a finding or a failure is observed; a
+# relation: inconclusive or not evaluated against fail).
+GATE_GROUPS = (("evidence", "release evidence missing or mismatched"),
+               ("unproven", "required behaviour not shown"),
+               ("violation", "observed violation of a stated rule"))
+GATE_GROUP_ACTION = {
+    "evidence": ("the problem names a record that is missing, stale or not the one the policy pins: restore or "
+                 "regenerate it (re-evaluate the set with the recorded checks, recompute the comparison, regenerate "
+                 "the policy from the table the comparison read) or rerun with a runner that records the live "
+                 "documents. These problems concern the release evidence, not the host's or the service's behaviour."),
+    "unproven": ("the property is not shown on that access path: the execution was inconclusive, a required check "
+                 "had no decisive result, a by-design pair was not verified on one side, or a required relation could "
+                 "not be evaluated. What clears it is a rerun on which the property is shown (a 200 within its budget, "
+                 "a walk reaching its minimum) or an owner-declared exemption with its reason; nothing here says the "
+                 "behaviour is wrong."),
+    "violation": ("a rule the suite applies was broken in this run: a finding (a stated bound broken on the clock the "
+                  "check reads; for a 503 deadline delivered late, the suite's tolerance on the client's clock, where "
+                  "the time went not isolated), a failed check, a disagreement between access paths, a failed "
+                  "relation, an answer the manifest does not predict. What clears it: for a late 503, a rerun within "
+                  "the tolerance, or a fix or a SPEC decision once the delay is located; for a failure or a "
+                  "disagreement, a fix or a SPEC decision, then a rerun; the detail block of each test holds the "
+                  "evidence."),
+}
 README_PATH = "metagraph/scripts/suite/README.md"
 README_SECTION = "Glossary"
 PLOT_FILES = {"paired_dl_mcp": "plot_paired_dl_mcp.csv", "paired_dl_dr": "plot_paired_dl_dr.csv",
@@ -134,8 +164,10 @@ class Context(object):
                 "load_caveat_load1": fmt_n(LOAD_CAVEAT_LOAD1, 0),
                 "load_caveat_line": load_caveat_line(run),
                 "verdict_word": (run.verdict or "–").split(" ")[0],
-                "verdict_text": run.verdict or "–",
-                "verdict_headline": run.verdict_headline or "–",
+                "verdict_text": doc_verdict_text(run),
+                "verdict_headline": report.verdict_headline(doc_verdict_text(run), run.gated, "beside") if run.verdict
+                else (run.verdict_headline or "–"),
+                "finding_kinds_text": finding_kinds_text(run),
                 "n_reruns_for_resume": len(run.reruns),
                 "n_resolve_stops": stops["n_resolve_stops"], "resolve_stop_observed": stops["resolve_stop_observed"],
                 "resolve_stop_ids": stops["resolve_stop_ids"],
@@ -154,10 +186,12 @@ class Context(object):
                 "n_manifest_not_implemented": limits["manifest_not_implemented"],
                 "declared_file": declared["file"], "declared_version": declared["version"],
                 "n_declared_exclusions": declared["exclusions"],
+                "n_declared_exclusion_pairs": declared["exclusion_pairs"],
+                "declared_exclusions_clause": declared["exclusions_clause"],
                 "n_declared_not_required": declared["not_required"],
                 "n_declared_relations": declared["relations_excluded"],
                 "gate_word": gate_word if gate else "not evaluated",
-                "gate_text": gate_text(gate_word, gate_how, gate_counts, gate_problems_text),
+                "gate_text": gate_text(gate_word, gate_how, gate_counts, gate_problems_text, run),
                 "n_gate_outcome_problems": gp["outcome"], "n_gate_inconclusive_executions": gp["inconclusive"],
                 "n_gate_finding_executions": gp["finding"], "n_gate_outcome_pairs": gp["pairs"],
                 "gate_inconclusive_clause": gate_inconclusive_clause(run),
@@ -168,6 +202,28 @@ class Context(object):
                 "n_chapters": len(self.units.chapters), "built_chapters": ", ".join(self.chapters),
                 "readme_path": README_PATH, "readme_commit": self.readme_commit() or "not determined",
                 "logan_caveat": facts.logan_caveat(run), "gate_judged": bool(gate),
+                # the readability review (2026-10-15): the gate's scope and its problems by group (READ-002,
+                # READ-023), the counting units (READ-006), the standing examples (READ-007, READ-102), the
+                # service's revision (READ-021), the relation examples (READ-019) and the shared vocabulary
+                # (READ-022, filled through `vocab[...]`)
+                "gate_routes": gate_scope(run)["routes"], "gate_arms": gate_scope(run)["arms"],
+                "n_gate_selected": gate_scope(run)["selected"], "gate_scope_text": gate_scope(run)["text"],
+                "gate_decision": gate_decision_text(run), "gate_groups_text": gate_groups_text(run),
+                "n_gate_problems": len([x for x in (gate.get("problems") or []) if isinstance(x, dict)]),
+                "n_gate_evidence": gate_group_counts(run)["evidence"],
+                "n_gate_unproven": gate_group_counts(run)["unproven"],
+                "n_gate_violations": gate_group_counts(run)["violation"],
+                "gate_read_text": gate_read_text(run),
+                "n_property_claims": self.untested()["by_chapter"] and sum(
+                    d["pairs"] for d in self.untested()["by_chapter"].values()) or 0,
+                "n_property_claims_untested": sum(d["untested"] for d in self.untested()["by_chapter"].values()),
+                "counting_example": counting_example_text(self),
+                "standing_example": standing_example_text(self),
+                "standing_vs_outcome_example": standing_vs_outcome_example_text(self),
+                "service_version_line": service_version_text(run),
+                "relation_example_subset": relation_example_text(run, "subset"),
+                "relation_example_equivalence": relation_example_text(run, "same_answer"),
+                "vocab": vocabulary.glossary_texts(),
                 # the annotated matrix's column note (annotated_matrix fills both from the unit it picks)
                 "annotated_dimension": "the varied value", "annotated_record_key": False}
 
@@ -437,18 +493,64 @@ def mcp_limit_counts(run):
 def declared_counts(run):
     dec = run.declared
     if not isinstance(dec, dict):
-        return {"file": "none", "version": "–", "exclusions": 0, "not_required": 0, "relations_excluded": 0}
+        return {"file": "none", "version": "–", "exclusions": 0, "not_required": 0, "relations_excluded": 0,
+                "exclusion_pairs": 0, "exclusion_repeat_only_pairs": 0, "exclusions_clause": "no exclusion"}
     out = {"file": dec.get("_file") or "declared", "version": dec.get("declared_version") or "–"}
     for k in ("exclusions", "not_required", "relations_excluded"):
         out[k] = len([e for e in (dec.get(k) or []) if isinstance(e, dict)])
+    # an exclusion entry names one scenario on one or several access paths, whole or for some repeats: the
+    # scenario-arm pairs it covers are the gate's unit (READ-006; the verification of 2026-10-16, shared M6)
+    pairs, repeat_only = 0, []
+    for e in dec.get("exclusions") or []:
+        if not isinstance(e, dict):
+            continue
+        n = len(e.get("arms") or []) or 1
+        pairs += n
+        if e.get("repeats"):
+            repeat_only.append((n, ", ".join(str(r) for r in e["repeats"])))
+    out["exclusion_pairs"] = pairs
+    out["exclusion_repeat_only_pairs"] = sum(n for n, _ in repeat_only)
+    reps = sorted(set(r for _, r in repeat_only))
+    out["exclusions_clause"] = "%d exclusion%s (%d scenario-arm pair%s%s)" % (
+        out["exclusions"], "" if out["exclusions"] == 1 else "s", pairs, "" if pairs == 1 else "s",
+        (", %d of them for repeat%s %s only" % (out["exclusion_repeat_only_pairs"], "" if len(reps) == 1 and "," not in reps[0]
+                                                 else "s", " / ".join(reps))) if repeat_only else "")
     return out
 
 
-def gate_text(word, how, counts_text, problems_text):
-    """The deploy gate in one plain line (the cover's and I.1's wording)."""
+def gate_text(word, how, counts_text, problems_text, run=None):
+    """The deploy gate in one plain line (the cover's and I.1's wording): the verdict word, the plain decision
+    (READ-002: what the gate covers, read from the policy, and that its problem count is not a bug count), the
+    problems by group and by kind, the executions judged, and how it was judged."""
     if counts_text is None:
         return "%s (%s)" % (word, how)
-    return "%s: %s; %s; %s" % (word, problems_text, counts_text, how)
+    scope = gate_scope(run)["text"] if run is not None else "the policy's selection"
+    passed = run is not None and bool((run.gate or {}).get("passed"))
+    if passed:
+        return "%s: nothing blocks (%s); %s; the gate covers %s; %s" % (word, problems_text, counts_text, scope, how)
+    groups = gate_groups_text(run) if run is not None else "–"
+    head, kinds = _problems_head_and_kinds(problems_text)
+    return ("%s: the run does not authorise a deploy. %s, by what would clear them: %s (by the gate's kinds: %s); the "
+            "count is not a count of service defects; %s; the gate covers %s; %s" % (
+                word, head[:1].upper() + head[1:], groups, kinds, counts_text, scope,
+                _without_access_paths(how, run) if run is not None else how))
+
+
+def _problems_head_and_kinds(problems_text):
+    """('50 problems', '5 identity; 13 configuration; ...') of gate_summary's problems text, so that a line prints the
+    kinds once (the readability review's verification of 2026-10-16, shared L5)."""
+    if " (" in problems_text:
+        head, _, rest = problems_text.partition(" (")
+        return head, rest.rstrip(")")
+    return problems_text, "–"
+
+
+def _without_access_paths(how, run):
+    """gate_summary's `how` without its trailing access-paths clause where the line names the gate's scope with the
+    access paths already (gate_scope: a policy pins the run); unchanged when the scope cannot name them."""
+    if gate_scope(run)["arms"] == "–":
+        return how
+    return re.sub(r", access paths [^;]+$", "", how)
 
 
 def gate_outcome_counts(run):
@@ -481,9 +583,9 @@ def gate_inconclusive_clause(run):
     if not gp["judged"]:
         return "whether any of them blocks the deploy gate was not judged (no gate verdict for this run)"
     n = gp["inconclusive"]
-    return ("%d of them block%s the deploy gate: %s on a gated arm, in the policy's selection and not declared "
-            "exempt (the gate's outcome problems, appendix F); the others are on an ungated arm, outside the "
-            "selection or exempt" % (n, "s" if n == 1 else "", "the one" if n == 1 else "those"))
+    return ("%d of them block%s the deploy gate: %s on a gated access path, in the policy's selection and not "
+            "declared exempt (the gate's outcome problems, appendix F); the others are on an ungated access path, "
+            "outside the selection or exempt" % (n, "s" if n == 1 else "", "the one" if n == 1 else "those"))
 
 
 def untested_scope_text(ctx):
@@ -512,6 +614,208 @@ def by_design_table_text(run):
     return text
 
 
+def gate_scope(run):
+    """What the deploy gate covers, read from the policy, never from its file name (READ-002): {routes, arms,
+    selected, text}; dashes without a policy."""
+    pol = run.policy if isinstance(run.policy, dict) else {}
+    sel = pol.get("selection") if isinstance(pol.get("selection"), dict) else {}
+    routes = [str(r) for r in (sel.get("routes") or [])]
+    arms = [str(a) for a in (pol.get("arms") or [])]
+    selected = len(sel.get("scenarios") or [])
+    if not pol:
+        return {"routes": "–", "arms": "–", "selected": 0, "text": "no policy pins this run's manifest"}
+    text = "the scenarios of %s (%d of the run's %d) on the access paths %s" % (
+        facts._join(routes) if routes else "the policy's selection", selected, len(run.order),
+        " and ".join(arms) if arms else "–")
+    return {"routes": ", ".join(routes) or "–", "arms": ", ".join(arms) or "–", "selected": selected, "text": text}
+
+
+def gate_group_of(problem):
+    """The group (GATE_GROUPS) of one gate problem, from its kind and, where the kind does not decide, its detail."""
+    kind = str(problem.get("kind") or "")
+    detail = str(problem.get("detail") or "").strip()
+    if kind in ("identity", "configuration", "missing", "agreement"):
+        return "evidence"
+    if kind in ("property", "nothing_passed"):
+        return "unproven"
+    if kind == "disagreement":
+        return "violation"
+    if kind == "relation":
+        word = detail.split(": ", 1)[1].split(":", 1)[0].strip() if ": " in detail else detail
+        return "violation" if word.startswith("fail") else "unproven"
+    if kind == "outcome":
+        if detail.startswith("inconclusive") or detail.startswith("by-design"):
+            return "unproven"
+        return "violation"
+    return "violation"
+
+
+def gate_group_counts(run):
+    gate = run.gate if isinstance(run.gate, dict) else {}
+    counts = dict((g, 0) for g, _ in GATE_GROUPS)
+    for p in gate.get("problems") or []:
+        if isinstance(p, dict):
+            counts[gate_group_of(p)] += 1
+    return counts
+
+
+def gate_groups_text(run):
+    """'5 release evidence problems, 44 required behaviours not shown, 1 observed violation', from the gate's
+    problems (plain text); 'none' without a problem."""
+    counts = gate_group_counts(run)
+    words = {"evidence": ("release evidence problem", "release evidence problems"),
+             "unproven": ("required behaviour not shown", "required behaviours not shown"),
+             "violation": ("observed violation", "observed violations")}
+    parts = ["%d %s" % (counts[g], words[g][0 if counts[g] == 1 else 1]) for g, _ in GATE_GROUPS if counts[g]]
+    return ", ".join(parts) if parts else "none"
+
+
+def gate_decision_text(run):
+    """The release decision in one plain sentence (READ-002): what the gate's verdict means for a deploy, and
+    what its problem count is not."""
+    gate = run.gate if isinstance(run.gate, dict) else None
+    if not gate:
+        return ("No deploy decision was judged for this run: no gate verdict is recorded and no policy pins its "
+                "manifest, so this document authorises nothing.")
+    scope = gate_scope(run)
+    if gate.get("passed"):
+        return ("The gate passed: every planned and required execution of %s was recorded and nothing blocks. The "
+                "gate certifies that selection on those access paths, not the whole service." % scope["text"])
+    n = len([x for x in (gate.get("problems") or []) if isinstance(x, dict)])
+    return ("This run does not authorise a deploy: the gate failed on %d problem%s over %s. The count is not a count "
+            "of service defects: %s (the groups in appendix F, each with the evidence that would clear it)." % (
+                n, "" if n == 1 else "s", scope["text"], gate_groups_text(run)))
+
+
+def gate_read_text(run):
+    """What the gate judged (READ-023): the set it read, the comparison, the policy, and whether it was judged
+    offline for this document or recorded in the run."""
+    gate = run.gate if isinstance(run.gate, dict) else None
+    if not gate:
+        return "no gate verdict"
+    pol_path = os.path.basename(run.policy_path or "") or "the recorded policy"
+    where = ("judged offline by gate.py when this document was built" if run.gate_offline
+             else "recorded in the run by gate.py")
+    return ("%s, from the run directory's %s set (%s and %s) and the policy %s; the checks it read for the property "
+            "reading are those of the checkout at build time, and an identity problem that names that checkout's "
+            "checks.py or suite_common.py compares it with the checks the re-evaluation recorded" % (
+                where, "re-evaluated" if run.reevaluated else "recorded", run.executions_file,
+                sc.reevaluated_name("compare.json", run.reevaluated), pol_path))
+
+
+def counting_example_text(ctx):
+    """One scenario of the run as a worked example of the counting units (READ-006): its executions per access
+    path and its property claims; plain text."""
+    run = ctx.run
+    best = None
+    for sid in run.order:
+        n = sum(len(run.arm_lines(sid, a)) for a in ARMS)
+        if all(run.arm_lines(sid, a) for a in ARMS) and (best is None or n > best[1]):
+            best = (sid, n)
+            if n >= 5:
+                break
+    if not best:
+        return "no scenario of this run was executed on every access path"
+    sid, n = best
+    per = ", ".join("%d on %s" % (len(run.arm_lines(sid, a)), a) for a in ARMS)
+    props = sum(1 for e in run.scenario(sid).get("expect") or []
+                if isinstance(e, dict) and e.get("check") and run.is_property(e.get("check")))
+    return ("%s is one scenario; it was executed %d times (%s), so it counts %d executions, and it names %d property "
+            "check%s, so it counts %d property claim%s" % (sid, n, per, n, props, "" if props == 1 else "s", props,
+                                                            "" if props == 1 else "s"))
+
+
+def standing_example_text(ctx):
+    """A real MCP cell of the run that shows a documented refusal, not a tested property (READ-007): the first
+    scenario standing service-side by design via MCP with a verified pair; plain text."""
+    run = ctx.run
+    for sid in run.order:
+        st = ctx.state(sid)["mcp"]
+        if not (st.present and st.glyph_key == "service_by_design" and "u" not in st.glyph_marks):
+            continue
+        lines = blocks.class_lines(st)
+        first = next((l for l in lines if l.get("http") is not None), None)
+        code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
+        status = ("http %s%s" % (first.get("http"), (" " + code) if code else "")) if first else "no status"
+        case = st.agreement.get("case") or "its case"
+        dl = ctx.state(sid)["direct-local"]
+        dl_word = facts.STANDING_WORD.get(dl.glyph_key, "no execution") if dl.present else "no execution"
+        return ("%s: via MCP %s (%s, case %s), the recorded outcome is service_by_design and the cell shows the "
+                "by-design glyph without a footnote; direct-local stands %s and matched the case's host side, so the "
+                "pair is verified. The cell establishes the documented service behaviour, not the property: nothing "
+                "of the claim was tested through the tools" % (sid, service_decision_words(run, st), status, case, dl_word))
+    return "no by-design pair in this run"
+
+
+SERVICE_DECISION_WORDS = {
+    "refused_at_submit": "the service refused the call at submit, in the host's place",
+    "relayed": "the service relayed the host's refusal under its own code",
+    "answered": "the service answered in the host's place",
+    "not_expressible": "the service could not express the call",
+}
+
+
+def service_decision_words(run, st):
+    """How the service decided an MCP call, in words from the case's `service_answer.outcome` as the comparison
+    recorded it (mcp_agreement.service_outcome, else the table's case; the same evidence blocks.mcp_class reads:
+    refused at submit, relayed, answered, not expressible), never a fixed phrase (the readability review's
+    verification of 2026-10-16, shared M4: R-edge-0002's 502 is the host's 400 relayed)."""
+    outcome = st.agreement.get("service_outcome")
+    if not outcome:
+        case_id = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
+                                                     if l.get("service_by_design_case")), None)
+        case = (getattr(run, "cases", None) or {}).get(case_id) or (getattr(run, "table", None) or {}).get(case_id) or {}
+        outcome = (case.get("service_answer") or {}).get("outcome")
+    return SERVICE_DECISION_WORDS.get(str(outcome or ""), "the service decided the call in the host's place")
+
+
+def standing_vs_outcome_example_text(ctx, sids=None):
+    """A scenario whose MCP standing and recorded outcome differ (READ-102): the glyph not exercised while the
+    line records service_by_design (a refusal the table files under not implemented), plain text; of the given
+    scenarios (a chapter's) or of the run; 'none in this run' / 'none in this chapter' when none."""
+    run = ctx.run
+    for sid in (run.order if sids is None else sids):
+        st = ctx.state(sid)["mcp"]
+        if st.present and st.glyph_key == "not_implemented_mcp" and any(
+                l.get("outcome") == "service_by_design" for l in st.lines):
+            case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
+                                                      if l.get("service_by_design_case")), None)
+            return ("%s: the MCP line records service_by_design (the service refused at submit) while the table files "
+                    "the case%s under not implemented via MCP, so the cell and the standing count read not exercised" % (
+                        sid, (" %s" % case) if case else ""))
+    return "none in this run" if sids is None else "none in this chapter"
+
+
+SERVICE_VERSION_KEYS = ("service_version", "service_commit", "service_git_head", "service_revision", "deployed_version")
+
+
+def service_version_text(run):
+    """The service's deployed revision as the MCP runner recorded it, or the statement that this run did not record
+    it (READ-021: never a nearby commit in its place)."""
+    mcp_run = run.mcp_run or {}
+    for key in SERVICE_VERSION_KEYS:
+        if mcp_run.get(key):
+            return "the service's deployed revision as the MCP runner recorded it: %s" % mcp_run[key]
+    caps = mcp_run.get("service_capabilities") if isinstance(mcp_run.get("service_capabilities"), dict) else {}
+    doc = caps.get("document") if isinstance(caps.get("document"), dict) else {}
+    for key in ("service_version", "version", "release", "commit"):
+        if isinstance(doc.get(key), (str, int)) and doc.get(key):
+            return "the service's deployed revision as its capabilities document states it: %s" % doc[key]
+    return ("the service's deployed revision is not recorded by this run: the MCP requests cannot be attributed to a "
+            "service revision, and a later run cannot be shown to have met the same service code")
+
+
+def relation_example_text(run, rtype):
+    """One relation of the run of the given type, in words (READ-019): 'REL-subset-0001 (M-twin-0001 ⊆ M-twin-0002:
+    the title)'; 'none in this run' when the manifest has none."""
+    signs = {"subset": "⊆", "same_answer": "=", "prefix_equals": "⊑", "zero_equals_absent": "≡"}
+    for rel in run.relations:
+        if rel.get("type") == rtype:
+            return "%s (%s %s %s: %s)" % (rel.get("id"), rel.get("a"), signs.get(rtype, rtype), rel.get("b"),
+                                         str(rel.get("title") or "").rstrip("."))
+    return "none in this run"
+
+
 # -- the cover ---------------------------------------------------------------------------------------------------
 
 def front_matter(ctx):
@@ -537,11 +841,66 @@ def front_matter(ctx):
     return _kv_table(rows)
 
 
+FINDING_KIND_WORDS = {
+    "late_503": ("late 503 deadline (no results carried; beyond the suite's tolerance on the client's clock)",
+                 "late 503 deadlines (no results carried; beyond the suite's tolerance on the client's clock)"),
+    "over_200": ("200 past its budget (the host's own elapsed time)", "200s past their budget (the host's own elapsed time)"),
+    "other": ("other stated bound broken (the detail block names it)", "other stated bounds broken (the detail blocks name them)"),
+}
+
+
+def finding_kinds(run):
+    """The run's finding executions by what the check read: {late_503: a 503 deadline delivered late (the client's
+    clock), over_200: a 200 whose budget_respected item is a finding (the host's own elapsed time), other: any other
+    stated bound (a walk stop outside its rule)}."""
+    counts = {"late_503": 0, "over_200": 0, "other": 0}
+    for sid in run.order:
+        for arm in ARMS:
+            for l in run.arm_lines(sid, arm):
+                if l.get("outcome") != "finding":
+                    continue
+                fc = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "finding"]
+                if l.get("http") == 503:
+                    counts["late_503"] += 1
+                elif l.get("http") == 200 and any(c.get("check") == "budget_respected" for c in fc):
+                    counts["over_200"] += 1
+                else:
+                    counts["other"] += 1
+    return counts
+
+
+def finding_kinds_text(run):
+    """The run's findings by kind in words, plain text: '4 late 503 deadlines (no results carried; beyond the suite's
+    tolerance on the client's clock)'; 'none' without a finding."""
+    counts = finding_kinds(run)
+    parts = ["%d %s" % (counts[k], FINDING_KIND_WORDS[k][0 if counts[k] == 1 else 1])
+             for k in ("late_503", "over_200", "other") if counts[k]]
+    return ", ".join(parts) or "none"
+
+
+_FINDINGS_VERDICT = re.compile(r"^FINDINGS \((\d+) execution\(s\) where the host broke a stated bound without failing "
+                               r"the request; (no failure, no disagreement)\)(.*)$", re.S)
+
+
+def doc_verdict_text(run):
+    """The run verdict as this document prints it: report.verdict_text's word and figures, the reason of a FINDINGS
+    verdict in the document's vocabulary (READ-003; the readability review's verification of 2026-10-16, shared
+    M1): the findings by what the check read (finding_kinds_text), never 'without failing the request', since a
+    late 503 deadline carried no results. Every other verdict is report.py's line as it stands."""
+    v = run.verdict or "–"
+    m = _FINDINGS_VERDICT.match(v)
+    if not m:
+        return v
+    return "FINDINGS (%s execution(s) with a finding, a stated bound broken on the clock the check reads: %s; %s)%s" % (
+        m.group(1), finding_kinds_text(run), m.group(2), m.group(3))
+
+
 def verdict_line(ctx):
-    """The run verdict on the cover and in I.1: the verdict word large, its reason, and for a run with a deploy
-    gate's verdict (recorded, or judged offline for this document) the label report.py gives the ordinary verdict
-    beside a gate (report.verdict_headline: the gate is the decision, this verdict is exploratory)."""
-    v = ctx.run.verdict or "–"
+    """The run verdict on the cover and in I.1: the verdict word large, its reason in the document's vocabulary
+    (doc_verdict_text), and for a run with a deploy gate's verdict (recorded, or judged offline for this document)
+    the label report.py gives the ordinary verdict beside a gate (report.verdict_headline: the gate is the
+    decision, this verdict is exploratory)."""
+    v = doc_verdict_text(ctx.run)
     word, _, rest = v.partition(" ")
     out = "\\textbf{\\large %s}\\ %s" % (esc(word), esc(rest, 400))
     if ctx.run.gated:
@@ -566,14 +925,14 @@ def gate_summary(ctx):
             # gate.py's sha256 is that of the policy's canonical JSON; the deploy notes cite the file's bytes, so
             # both are printed (VERIFY-COLOURS-V5 item 9)
             file_sha = run.policy_file_sha256() if hasattr(run, "policy_file_sha256") else None
-            how += ", %s version %s (sha256 %s… of the canonical JSON%s), arms %s" % (
+            how += ", %s version %s (sha256 %s… of the canonical JSON%s), access paths %s" % (
                 pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
                 (", %s… of the file" % file_sha[:12]) if file_sha else "",
                 ", ".join((run.policy or {}).get("arms") or []) or "–")
         else:
             # the recorded verdict, in the words of report.py's gate section (gate_headline_parts)
             word, how, _ = report.gate_headline_parts(gate)
-            how = "recorded in the run (%s; the sha256 is that of the policy's canonical JSON), arms %s" % (
+            how = "recorded in the run (%s; the sha256 is that of the policy's canonical JSON), access paths %s" % (
                 how, ", ".join((run.policy or {}).get("arms") or gate.get("arms") or []) or "–")
         counts_text = "%s executions judged, %s passed, %s planned, %s required" % (
             counts.get("judged", "–"), counts.get("passed", "–"), counts.get("planned", "–"),
@@ -602,11 +961,22 @@ def stale_gate_text(run):
 
 
 def gate_line(ctx):
-    """The deploy gate on the cover, as prominent as the run verdict (the owner's review, point 2)."""
+    """The deploy gate on the cover, as prominent as the run verdict (the owner's review, point 2): the word, then
+    the plain decision, the problems by group and kind, the executions judged, the scope read from the policy and
+    how it was judged (READ-002)."""
     word, how, counts_text, problems_text = gate_summary(ctx)
     if counts_text is None:
         return "\\textbf{\\large Deploy gate: %s}\\ (%s)" % (esc(word), esc(how))
-    return "\\textbf{\\large %s}: %s; %s; %s" % (esc(word), esc(problems_text), esc(counts_text), esc(how))
+    run = ctx.run
+    passed = bool((run.gate or {}).get("passed"))
+    if passed:
+        return "\\textbf{\\large %s}: nothing blocks (%s); %s; the gate covers %s; %s" % (
+            esc(word), esc(problems_text), esc(counts_text), esc(gate_scope(run)["text"]), esc(how))
+    head, kinds = _problems_head_and_kinds(problems_text)
+    return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s, by what would clear them: %s (by the "
+            "gate's kinds: %s); the count is not a count of service defects; %s; the gate covers %s; %s" % (
+                esc(word), esc(head[:1].upper() + head[1:]), esc(gate_groups_text(run)), esc(kinds),
+                esc(counts_text), esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run))))
 
 
 def sample_note(ctx):
@@ -679,7 +1049,7 @@ def principal_findings(ctx):
                  for sid, v in failures.items()]
         out.append(("failures and errors (%d test%s)" % (len(failures), "" if len(failures) == 1 else "s"), items))
     if disagreements:
-        out.append(("disagreements between arms (%d)" % len(disagreements), disagreements))
+        out.append(("disagreements between access paths (%d)" % len(disagreements), disagreements))
     if failed_rel:
         out.append(("failed relations (%d)" % len(failed_rel), failed_rel))
     return out
@@ -700,8 +1070,9 @@ def _arm_reason(lines, st, name=None, run=None, sid=None):
     for l in lines:
         if is_mcp and cells.by_design_line(st, l):
             # the case's own repeat; the other repeat outside the case reads its recorded outcome below
-            # (VERIFY-QCND H2)
-            w = "decided by the service (by design)"
+            # (VERIFY-QCND H2); whether the host was reached, as the chapters' grouped cells say it (READ-208)
+            w = ("by design: the host reached, the pair decided by the service" if cells.host_reached(l)
+                 else "by design: decided by the service before the host")
             if w not in words:
                 words.append(w)
             continue
@@ -776,7 +1147,7 @@ def untested_properties(ctx):
                         if t not in texts:
                             texts.append(t)
                     per_unit.append({"chapter": ch, "unit": uid, "check": name,
-                                     "expect": texts[0] if len(texts) == 1 else "\\texttt{%s}" % esc(name),
+                                     "expect": texts[0] if len(texts) == 1 else latex.tt(name),
                                      "n": len(expecting), "passed": len(passed), "missing": missing,
                                      "reasons": reasons})
     by_chapter = {}
@@ -808,7 +1179,7 @@ def untested_lines(ctx, chapter=None):
             ids += " … (%d)" % len(u["missing"])
         reasons = "; ".join("%s: %s" % (esc(cells.ARM_SHORT.get(a, a)), esc(w)) for a, w in u["reasons"] if w)
         n_missing = len(u["missing"])
-        out.append("\\textbf{%s} · \\hyperref[unit:%s]{\\texttt{%s}} · %s: no arm passed it on %s (%d test%s) — %s" % (
+        out.append("\\textbf{%s} · \\hyperref[unit:%s]{\\texttt{%s}} · %s: no access path passed it on %s (%d test%s) — %s" % (
             head, latex.label_key(u["unit"]), esc(u["unit"]), u["expect"], ids, n_missing,
             "" if n_missing == 1 else "s", reasons))
     return out
@@ -829,9 +1200,10 @@ def untested_context_line(ctx):
         if d["untested"]:
             parts.append("%s %d of %d (%d test%s)" % (esc(ch), d["untested"], d["pairs"], len(d["tests"]),
                                                       "" if len(d["tests"]) == 1 else "s"))
-    return ("Over the whole run %d of %d property claims (a scenario's property check) were not passed on any "
-            "arm, in %d test%s%s." % (total_untested, total_pairs, total_tests, "" if total_tests == 1 else "s",
-                                       (": " + "; ".join(parts)) if parts else ""))
+    return ("Over the whole run %d of %d property claims (one claim is one property check of one scenario) were not "
+            "passed on any access path, in %d test%s%s." % (total_untested, total_pairs, total_tests,
+                                                              "" if total_tests == 1 else "s",
+                                                              (": " + "; ".join(parts)) if parts else ""))
 
 
 def verdict_table(ctx):
@@ -847,17 +1219,100 @@ def verdict_table(ctx):
                      "%s / %s / %s / %s" % (hc.get("cold", 0), hc.get("warm", 0), hc.get("aged", 0),
                                             hc.get("not_reached", 0))])
     spec = "@{}l r r r r r r r r r@{}"
-    return latex.plain_table(spec, ["arm", "executions", "\\gpass", "\\gfail", "\\gerr", "\\gfind", "\\ginc", "\\gni",
-                                    "\\gbd", "cold / warm / aged / not reached"], rows,
-                             "the recorded outcomes per arm (the report's counts; \\gni\\ and \\gbd\\ are outcomes "
-                             "here, not the tables' standing)")
+    return latex.plain_table(spec, ["access path", "executions", "\\gpass", "\\gfail", "\\gerr", "\\gfind", "\\ginc",
+                                    "\\gni", "\\gbd", "cold / warm / aged / not reached"], rows,
+                             "the recorded execution outcomes per access path (the report's counts, executions not "
+                             "tests; \\gni\\ and \\gbd\\ are outcomes here, not the tables' standing)")
+
+
+def counting_units_table(ctx):
+    """The counting units of the document with this run's figure for each (READ-006): scenario, execution, property
+    claim, scenario-arm pair, gate problem; the overlaps are stated in the caption."""
+    run = ctx.run
+    values = ctx.placeholders()
+    gp = gate_outcome_counts(run)
+    rows = [["scenario (test)", "one frozen request with its ground truth and expectations; the tables' test id",
+             esc(str(values["n_scenarios"]))],
+            ["execution", "one request of one scenario on one access path, one repeat (the paired loop runs a "
+                          "scenario on three access paths, the MCP path twice where the tools can express it)",
+             esc(str(values["n_executions"]))],
+            ["property claim", "one property check of one scenario (a scenario names one or several); passed when "
+                               "any execution on any access path passed it", esc(str(values["n_property_claims"]))],
+            ["scenario-arm pair", "one scenario on one access path, whatever its repeats: the unit of the gate's "
+                                  "outcome problems and of the owner's exclusions",
+             ("%s with an outcome problem" % gp["pairs"]) if gp["judged"] else "no gate judged"],
+            ["gate problem", "one problem the deploy gate's policy raises against the run's records: an evidence "
+                             "problem, a required behaviour not shown or an observed violation; never a count of "
+                             "tests or of defects (and not a finding, which is an execution outcome)",
+             esc(str(values["n_gate_problems"]))]]
+    return latex.plain_table(latex.spec_p([24, 112, 38]), ["unit", "what one is", "this run"], rows,
+                             "the counting units: the totals of this document count different things and are not "
+                             "added to one another; the limitation counts below overlap too (a scenario may carry a "
+                             "manifest mark and name a table case)", needspace=10)
+
+
+def chapter_map_table(ctx):
+    """The question-to-chapter map of I.1 (READ-001, READ-009): one row per chapter of the run, the reader's
+    question from the overview prose (`decision.chapter_map`: [{chapter, question}]), the chapter's title and
+    page; a chapter the prose has no question for prints its title alone."""
+    questions = {}
+    for e in ctx.overview_section("decision").get("chapter_map") or []:
+        if isinstance(e, dict) and e.get("chapter"):
+            questions[str(e["chapter"])] = str(e.get("question") or "")
+    rows = []
+    for ch in ctx.units.chapters:
+        title = (ctx.prose.get(ch) or {}).get("title") or ctx.units.titles.get(ch, ch)
+        where = ("\\hyperref[ch:%s]{chapter %s, p.\\,\\pageref{ch:%s}}" % (esc(ch), esc(ch), esc(ch))
+                 if ch in ctx.chapters else "chapter %s (not built)" % esc(ch))
+        rows.append([inline(questions.get(ch) or "–"), "%s (%s)" % (esc(title), where)])
+    if not rows:
+        return ""
+    return latex.plain_table(latex.spec_p([96, 70]), ["the question", "where the evidence is"], rows,
+                             "where to look: the chapters by the question they answer (the closing section, "
+                             "Timing 1 to 7, reads the timing across chapters)", needspace=min(16, len(rows) + 3))
+
+
+def untested_table(ctx, chapter=None):
+    """The untested and partly tested properties as a table (READ-005): the question the unit asks (the unit
+    prose's `question`, else its property line), what this run established, what remains unproven (the check in
+    words), why per access path, and the tests (linked); of one chapter or of every built one. Empty when nothing is
+    untested."""
+    rows = []
+    for u in ctx.untested()["per_unit"]:
+        if chapter and u["chapter"] != chapter:
+            continue
+        entry = ((ctx.prose.get(u["chapter"]) or {}).get("units") or {}).get(u["unit"])
+        question = property_text = None
+        if isinstance(entry, dict):
+            question, property_text = entry.get("question"), entry.get("property")
+        elif isinstance(entry, str):
+            property_text = entry
+        head = inline(ctx.fill(question)) if question else (
+            inline(latex.cut_text(ctx.fill(property_text), 160)) if property_text else "–")
+        established = ("%d of %d tests passed it on some access path" % (u["passed"], u["n"]) if u["passed"]
+                       else "no test passed it on any access path (%d test%s)" % (u["n"], "" if u["n"] == 1 else "s"))
+        ids = ", ".join(latex.sid(x, u["unit"], detail=ctx.footnote(x) is not None) for x in u["missing"][:8])
+        if len(u["missing"]) > 8:
+            ids += " … (%d)" % len(u["missing"])
+        reasons = "; ".join("%s: %s" % (esc(cells.ARM_SHORT.get(a, a)), esc(w)) for a, w in u["reasons"] if w)
+        rows.append(["%s\\newline{\\scriptsize\\color{black!60}\\hyperref[unit:%s]{\\texttt{%s}}}" % (
+            head, latex.label_key(u["unit"]), esc(u["unit"])), esc(established), u["expect"], reasons, ids])
+    if not rows:
+        return ""
+    return latex.plain_table(latex.spec_p([42, 24, 34, 40, 26]),
+                             ["the question (unit)", "what this run established", "unproven: the check",
+                              "why, per access path (dl · dr · mcp)", "tests"], rows,
+                             "properties no access path showed: a test passes a property when any execution on any "
+                             "access path passed it; the reasons are the recorded outcomes, not causes")
 
 
 def decision_summary(ctx):
-    """I.1: the scope (prose), the two verdict lines and how they differ (prose `verdict`), the principal findings
-    (prose `findings`, then the computed lists), the properties still untested (prose `untested`, then the computed
-    list and the run-wide count) and where to look (prose `closing`); the per-arm outcome table is I.4's."""
+    """I.1: the orientation and the scope (prose), the question-to-chapter map, the two verdict lines and how they
+    differ (prose `verdict`), the principal findings (prose `findings`, then the computed lists), the properties
+    still untested (prose `untested`, then the computed table and the run-wide count) and where to look (prose
+    `closing`); the per-arm outcome table is I.4's."""
     out = ctx.prose_paragraphs("decision")
+    out += chapter_map_table(ctx)
     out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n\\par\\endgroup\\medskip\n\n" % (
         verdict_line(ctx), gate_line(ctx))
     out += ctx.prose_paragraphs("decision", "verdict", optional=True)
@@ -883,9 +1338,9 @@ def decision_summary(ctx):
             out += ("Inconclusive executions by reason: %s (the checks: a check could not test its property, "
                     "typically an allowed 503 deadline; a host state: the service's own limit ended the call).\n\n"
                     % esc(ibr))
-    lines = untested_lines(ctx)
-    if lines:
-        out += "\\begin{itemize}\\setlength\\itemsep{0pt}\n" + "".join("\\item %s\n" % l for l in lines) + "\\end{itemize}\n"
+    table = untested_table(ctx)
+    if table:
+        out += table
     else:
         out += "Every property check of the built chapters was passed by at least one execution of each test.\n\n"
     out += untested_context_line(ctx) + "\n\n"
@@ -895,10 +1350,26 @@ def decision_summary(ctx):
 
 # -- Part I: methods ----------------------------------------------------------------------------------------------
 
+def budget_scope_table(ctx):
+    """The route-by-route scope of a time budget (READ-015): the rows of the overview prose `methods.budget_scope`
+    ([{route, named_by, clock, scope, not_covered, answers, verified}], constants of the SPECs), rendered after the
+    methods' prose; empty when the prose has none."""
+    rows_in = [r for r in (ctx.overview_section("methods").get("budget_scope") or []) if isinstance(r, dict)]
+    if not rows_in:
+        return ""
+    keys = ("route", "named_by", "clock", "scope", "not_covered", "answers", "verified")
+    rows = [[inline(ctx.fill(str(r.get(k) or "–"))) for k in keys] for r in rows_in]
+    return latex.plain_table(latex.spec_p([12, 26, 22, 26, 30, 26, 30]),
+                             ["route", "the budget", "its clock starts", "what it covers", "what it does not cover",
+                              "possible answers", "what the suite verified"], rows,
+                             "the scope of a time budget per route (the SPECs' contract; the suite's rulings in "
+                             "appendix A, budget\\_respected)", needspace=12)
+
+
 def methods_section(ctx):
-    """I.2: the prose alone (the arms' bases are in it, their executions in I.4's table, their states and runners
-    in appendix F)."""
-    return ctx.prose_paragraphs("methods")
+    """I.2: the prose (the access paths' bases are in it, their executions in I.4's table, their states and runners
+    in appendix F) and the budget-scope table (READ-015)."""
+    return ctx.prose_paragraphs("methods") + budget_scope_table(ctx)
 
 
 # -- Part I: reading guide ----------------------------------------------------------------------------------------
@@ -914,8 +1385,9 @@ MARK_EXAMPLE = {"superscript digit": "\\ginc\\fn{1}", "not-equal sign": "\\gpass
                 "a": "9.1 s\\tmark{a}", "i": "9.1 s\\tmark{i}", "m": "\\ginc\\tmark{m}"}
 ANNOTATION_DEFAULT = {
     "column": "a column is one varied value of the unit's dimension (here {annotated_dimension})"
-              "[[annotated_record_key ?; the key in brackets names the source record (the key in appendix D)]]",
-    "glyph": "the glyph is the arm's standing on the test: pass, fail, error, finding, inconclusive, not "
+              "[[annotated_record_key ?; the record key in brackets names the source record (the key in appendix "
+              "D)]]",
+    "glyph": "the glyph is the access path's standing on the test: pass, fail, error, finding, inconclusive, not "
              "implemented via MCP, service-side by design (the legend below)",
     "repeats": "two numbers separated by a slash are the repeats in order (on mcp the cold call, then the warm "
                "call); the unit is written once",
@@ -930,31 +1402,24 @@ ANNOTATION_DEFAULT = {
             "u an unverified by-design pair",
     "ids": "the ids line names the members in column order (the common prefix once); a unit id line and the index "
            "find every test",
-    "summary": "the family's summary line counts its tests per arm by standing and gives the wall p50 / p90 per "
-               "arm, host-cold and host-warm apart",
+    "summary": "the family's summary line counts its tests per access path by standing and gives the wall p50 / "
+               "p90 (median / 90th percentile) per access path, host-cold and host-warm apart",
 }
 
 
 def legend_table(ctx=None):
-    """The glyph legend and the marks of the reading guide; the wording of the glyphs and marks comes from the
-    overview prose (`legend`, `marks` of the reading section) when it has them, the symbols always from the
-    macros the tables use."""
+    """The glyph legend and the marks of the reading guide. The glyphs' wording is the shared vocabulary's
+    (vocabulary.legend_rows: the same definitions appendix F's tables and the glossary print, so that the three
+    cannot drift; READ-022), the symbols the macros the tables use; the marks' wording comes from the overview
+    prose (`marks` of the reading section) when it has them."""
     reading = ctx.overview_section("reading") if ctx else {}
-    legend = [e for e in (reading.get("legend") or []) if isinstance(e, dict) and e.get("key") in LEGEND_GLYPH]
     marks = [e for e in (reading.get("marks") or []) if isinstance(e, dict) and e.get("mark") in MARK_EXAMPLE]
-    if legend and marks:
-        glyph_rows = []
-        for e in legend:
-            meaning = str(e.get("meaning") or "")
-            for prefix in LEGEND_PREFIXES.get(e["key"], (LEGEND_WORD[e["key"]] + ":",)):
-                if meaning.startswith(prefix):
-                    meaning = meaning[len(prefix):].strip()
-                    break
-            glyph_rows.append([LEGEND_GLYPH[e["key"]], esc(LEGEND_WORD[e["key"]]), inline(meaning)])
+    glyph_rows = [[g, esc(w), inline(m)] for g, w, m in vocabulary.legend_rows()]
+    if marks:
         mark_rows = [[MARK_EXAMPLE[e["mark"]], esc(e.get("on") or ""), inline(e.get("meaning") or "")]
                      for e in marks]
         return _legend_tables(glyph_rows, mark_rows)
-    return _legend_builtin()
+    return _legend_builtin(glyph_rows)
 
 
 def _legend_tables(glyph_rows, mark_rows):
@@ -966,20 +1431,8 @@ def _legend_tables(glyph_rows, mark_rows):
     return glyphs + marks_t
 
 
-def _legend_builtin():
-    rows = [("\\gpass", "pass", "execution outcome pass on every repeat"),
-            ("\\gfail", "fail", "outcome fail on any repeat"),
-            ("\\gerr", "error", "no HTTP answer (an error outcome)"),
-            ("\\gfind", "finding", "the host broke a stated bound or SPEC promise without failing the request"),
-            ("\\ginc", "inconclusive", "the test could not test its property (an allowed 503 deadline, a withheld "
-                                       "list, a service timeout); with the mark m the repeats' outcomes differ"),
-            ("\\gni", "not implemented via MCP", "MCP agreement class not_implemented_mcp (the manifest's mark, "
-                                                 "or a table case of that agreement)"),
-            ("\\gbd", "service-side by design", "the service answered or refused in the host's place, as its table "
-                                                "documents; the mark u when the pair is unverified"),
-            ("\\gnone", "no execution", "the plan had none (a long scenario on direct-remote); a planned execution "
-                                        "not recorded is footnoted")]
-    glyph_rows = [[g, esc(w), esc(m)] for g, w, m in rows]
+def _legend_builtin(glyph_rows=None):
+    glyph_rows = glyph_rows or [[g, esc(w), inline(m)] for g, w, m in vocabulary.legend_rows()]
     marks = [("\\ginc\\fn{1}", "any cell", "a detail block follows the table (numbering restarts per chapter)"),
              ("\\gpass\\gne", "direct-remote or mcp", "disagreement with the reference arm (always footnoted)"),
              ("\\gpass\\tmark{t}", "direct-remote", "direct class timing: one arm's answer time-limited"),
@@ -1011,10 +1464,11 @@ def grammar_lines(ctx):
     tables' MCP cell and the tints of the times (the rest, the lines of a cell, the rounding and the slash, is in
     the prose and in the legend line under every table)."""
     out = ("\\begingroup\\sffamily\\footnotesize\n"
-           "\\bline{aggregates}{a replicates cell is ok n/n · wall median / maximum over each member's first "
-           "host-warm execution (else its only one) and [server median]; a wall not all host-warm carries the state's "
-           "mark, alone when shared (7.0 / 7.8 s\\tmark{c}), else with its share (\\tmark{c 2/6}); members never "
-           "exercised read not exercised: n, never ok 0/0; the coverage line under the table counts per arm}\n"
+           "\\bline{aggregates}{a grouped (replicates) cell is ok n/n · wall median / maximum over each member's "
+           "first host-warm execution (else its only one) and [server median]; n counts the group's tests (source "
+           "windows), not repeats; a wall not all host-warm carries the state's mark, alone when shared "
+           "(7.0 / 7.8 s\\tmark{c}), else with its share (\\tmark{c 2/6}); members never exercised read not "
+           "exercised: n, never ok 0/0; the coverage line under the table counts per access path}\n"
            "\\bline{edge tables}{the mcp cell of a refusals or list table shows the recorded status, the service's "
            "code and the class in words (refused before host execution, not expressible through MCP, answered after "
            "service normalization, host refusal relayed through the service), derived from the evidence, never from prose}"
@@ -1245,7 +1699,7 @@ def provenance_table(ctx):
         rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 300)))
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
-        rows.append(("arm %s" % esc(arm), "%s executions, %s to %s, runner %s" % (
+        rows.append(("access path %s" % esc(arm), "%s executions, %s to %s, runner %s" % (
             esc(info.get("executions_recorded", "–")), _date(info.get("started_utc")), _date(_arm_end(run, arm, info)),
             esc(info.get("runner_host") or "–"))))
     sessions = _sessions(run)
@@ -1294,7 +1748,7 @@ def reruns_text(run):
     orphans = sum(1 for r in run.reruns if not r.get("target_execution"))
     return ("%d (%s): after an interruption between a warm-up and its target the warm-up ran again right before "
             "the target%s; timing evidence beside the target's execution, never an outcome (appendix F)" % (
-                len(run.reruns), ", ".join("%s %d" % (esc(a), n) for a, n in sorted(per_arm.items())) or "per arm not stated",
+                len(run.reruns), ", ".join("%s %d" % (esc(a), n) for a, n in sorted(per_arm.items())) or "per access path not stated",
                 ", except %d that no execution of the target followed" % orphans if orphans else ""))
 
 
@@ -1313,10 +1767,10 @@ def reruns_table(ctx):
                      fmt_n(r.get("before_s"), 3) if isinstance(t, list) else "–"])
     out = "\\parhead{Warm-ups run again for a resume}\n"
     out += ("A resume after an interruption between a warm-up and its target ran the warm-up again right before the "
-            "target, on every arm that ran the target (suite\\_common.resume\\_rewarms). These re-runs are timing "
+            "target, on every access path that ran the target (suite\\_common.resume\\_rewarms). These re-runs are timing "
             "evidence only: the warm-up's outcome is its first execution's, and no table of Part II counts them.\n\n")
     out += latex.plain_table(latex.spec_p([34, 18, 10, 14, 10, 34, 22, 14]),
-                             ["warm-up", "arm", "repeat", "wall", "http", "target", "target execution",
+                             ["warm-up", "access path", "repeat", "wall", "http", "target", "target execution",
                               "s before the target"], rows)
     return out
 
@@ -1351,7 +1805,7 @@ def limitations_table(ctx):
     n_inc = sum(sum((ibr.get(a) or {}).values()) for a in ARMS)
     gp = gate_outcome_counts(run)
     if gp["judged"]:
-        blocking = "%d block the gate (a gated arm, in the policy's selection, not declared exempt)" % gp["inconclusive"]
+        blocking = "%d block the gate (a gated access path, in the policy's selection, not declared exempt)" % gp["inconclusive"]
     else:
         blocking = "the gate was not judged"
     rows.append(["inconclusive executions", "%d; %s; each footnoted in its chapter's tables" % (n_inc, esc(blocking)),
@@ -1367,6 +1821,7 @@ def provenance_section(ctx):
     out += provenance_table(ctx)
     out += "\\parhead{Coverage}\n"
     out += ctx.prose_paragraphs("provenance", "coverage", optional=True)
+    out += counting_units_table(ctx)
     out += verdict_table(ctx)
     out += "\\parhead{Limitations and exemptions}\n"
     out += ctx.prose_paragraphs("provenance", "exemptions", optional=True)
@@ -1439,8 +1894,8 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
     out += "\\bline{chapter %s}{%d test%s · %d unit%s in %d famil%s}\n" % (
         esc(chapter), len(sids), "" if len(sids) == 1 else "s", n_units, "" if n_units == 1 else "s", n_families,
         "y" if n_families == 1 else "ies")
-    out += "\\bline{standing}{%s (by glyph, I.3)}\n" % " · ".join("%s %s" % (esc(arm), cells.glyph_counts(states, arm))
-                                                                 for arm in ARMS)
+    out += "\\bline{standing}{tests · %s (one glyph per test and access path, the worst repeat; I.3)}\n" % " · ".join(
+        "%s %s" % (esc(arm), cells.glyph_counts(states, arm)) for arm in ARMS)
     per_area = (run.summary().get("per_area") or {}).get(chapter) or {}
     if per_area:
         otext = []
@@ -1452,9 +1907,14 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
                                                      ("service_by_design", "by design"), ("other", "other"))
                      if o.get(k)]
             otext.append("%s %s" % (esc(arm), esc(", ".join(items)) if items else "–"))
-        out += "\\bline{outcomes}{%s (the recorded outcomes, as the report counts them)}\n" % " · ".join(otext)
+        # compare's per_area: one entry per test and access path, the recorded outcome over the test's repeats
+        # (compare.aggregate_outcome: the common one, else the worst; mixed where the repeats differ otherwise), so the
+        # row counts tests, as the standing row does, never executions (the verification of 2026-10-16, H1)
+        out += "\\bline{outcomes}{tests · %s (each test's outcome over its repeats, as the comparison records it: the " \
+               "common one, else the worst; mixed: its repeats differ otherwise; I.3)}\n" % " · ".join(otext)
     dtext, mtext = _agreement_counts(ctx, sids)
-    out += "\\bline{agreement}{direct: %s · mcp: %s}\n" % (dtext, mtext)
+    out += "\\bline{agreement}{test pairs · direct: %s · mcp: %s}\n" % (dtext, mtext)
+    out += "\\bline{reading}{%s}\n" % esc(summary_reading_text(ctx, chapter, sids))
     timing = (run.summary().get("timing") or {}).get(chapter) or {}
     cold, warm, server = [], [], []
     for arm in ARMS:
@@ -1490,6 +1950,169 @@ def chapter_summary(ctx, chapter, sids, n_units, n_families):
     out += "\\bline{detail blocks}{%d%s}\n" % (len(ids), (": " + ", ".join(latex.sid(s, detail=True) for s in ids))
                                                 if ids else "")
     out += "\\par\\endgroup\n\n"
+    return out
+
+
+def summary_reading_text(ctx, chapter, sids=None):
+    """One line under the chapter's summary rows (READ-102): both rows count tests, where they differ (the MCP
+    agreement class in the standing, the recorded outcome in the outcomes row) with this chapter's own case or
+    'none in this chapter', the pointer to I.3's full reading (defined once, not repeated per chapter: the
+    verification of 2026-10-16, shared L5), the agreement count with the chapter's pairs short of fully checked
+    (agreement_levels_text) and what the property list below counts; plain text."""
+    if sids is None:
+        sids = ctx.units.chapter_scenarios(chapter)
+    example = standing_vs_outcome_example_text(ctx, sids)
+    text = ("standing and outcomes both count tests, one per access path; they differ only via MCP where the "
+            "service decided the call, the standing showing the agreement class and the outcomes row the recorded "
+            "outcome (in this chapter: %s); the full reading is I.3's. Agreement counts one comparison per test%s; "
+            "the property list below counts property claims, one per check and test, over every access path" % (
+                example, agreement_levels_text(ctx, chapter)))
+    return text
+
+
+def agreement_levels_text(ctx, chapter):
+    """The agreement clause of the reading line (READ-110): the three levels an agreement can mean are I.3's; here
+    the chapter's agreeing pairs short of fully checked, by what they compared (facts._mcp_agree_short: on the
+    generic checks or a refusal alone, which verifies no property; with some property check compared and another
+    not compared on some repeat), the first such pair named from the record (mcp_agree_partial_example)."""
+    v = ctx.chapter_values(chapter)
+    text = " (its three levels, identical answers, the same check outcomes, every property check compared on both: I.3)"
+    if v.get("n_mcp_agree_partial"):
+        text += "; %d agreeing pair%s short of fully checked: %s%s" % (
+            v["n_mcp_agree_partial"], "" if v["n_mcp_agree_partial"] == 1 else "s",
+            v.get("mcp_agree_short_text") or "see the detail blocks",
+            ("; e.g. " + v["mcp_agree_partial_example"]) if v.get("mcp_agree_partial_example") else "")
+    return text
+
+
+CLAIM_STATUS_WORD = {"held": "every test", "part": "%(n)d of %(m)d tests",
+                     "none": "no test passed on both (%(words)s there)",
+                     "failed": "%(n)d of %(m)d tests, with a failure or a disagreement (I.1)"}
+
+
+def claims_map(ctx, chapter):
+    """The chapter's evidence map (READ-101): the families' claims as a compact table after the conclusion's
+    headline, each claim with its family linked and what the direct access paths showed of it (the tests passing
+    on both), the claims shown first; rendered when the chapter prose sets `evidence_map` true, else nothing (the
+    prose then carries the claims inline, as before). The rows are the same records the conclusion's `claims_held`
+    and `claims_unsupported` strings are built from (facts._claims)."""
+    prose = ctx.prose.get(chapter) or {}
+    if not prose.get("evidence_map"):
+        return ""
+    items = list((ctx.chapter_values(chapter).get("claims_items") or []))
+    if not items:
+        return ""
+    order = {"held": 0, "part": 1, "none": 2, "failed": 3}
+    items.sort(key=lambda it: order.get(it["status"], 9))
+    rows = []
+    for it in items:
+        shown = "shown" if it["status"] in ("held", "part") else "not shown"
+        rows.append(["\\hyperref[fam:%s]{\\texttt{%s}}" % (esc(it["family"]), esc(it["family"])),
+                     inline(it["claim"]), "%s: %s" % (shown, esc(CLAIM_STATUS_WORD[it["status"]] % it))])
+    return latex.plain_table(latex.spec_p([22, 108, 36]), ["family", "the claim (the property in words)",
+                                                           "of the tests that carry the claim, those passing on both "
+                                                           "direct access paths"], rows,
+                             "the evidence map: what each family claims and how many of the tests that carry the claim "
+                             "passed on both direct access paths (a family's other tests are not counted; the MCP access "
+                             "path, the exceptions and the properties no path showed follow)")
+
+
+EXCEPTION_GROUPS = (
+    ("failure", "a failure, an error or a disagreement",
+     "a check failed, no HTTP answer came, or two access paths disagree: a defect of the host, the service or the "
+     "suite, listed in I.1 and quoted in the detail block"),
+    ("finding", "a measured operational finding",
+     "a stated bound was broken on the clock the check reads: a 200 past its budget (the host's own elapsed time), "
+     "or a 503 deadline delivered more than max(1 s, the budget) late on the client's clock, which carried no "
+     "answer; the FINDING line of the detail block quotes the rule and the overrun"),
+    ("unverified", "the property not shown on some access path",
+     "an execution could not show the property there (an allowed 503 deadline without results, a late 503 deadline "
+     "that is a finding, a walk a stated limit stopped, a host state, a check that could not decide); the detail "
+     "block names the check and the stated limit, and the property table below says whether another access path or "
+     "repeat showed it"),
+    ("mcp_limit", "not comparable through the MCP tools",
+     "no check was evaluated on both access paths (the MCP answer exposes none of the fields the checks read), so "
+     "nothing is known about the property through the tools"),
+    ("service_difference", "an expected service difference not fully verified",
+     "the service answered in the host's place as its table documents, but one side of the pair did not match the "
+     "case (appendix B states which); no property evidence through the tools"),
+    ("direct_difference", "the two direct access paths answered differently",
+     "direct-local and direct-remote gave different answers (a time limitation on one of them, or the same check "
+     "outcomes on different bodies) without a check disagreeing"),
+    ("missing", "a planned execution not recorded",
+     "the plan had an execution no record holds: the standing there is unknown"),
+)
+
+
+def _finding_without_property(line, is_property):
+    """Whether a finding execution evaluated its property checks without a pass (a late 503 deadline carried no
+    answer: the property is not shown there either; the verification of 2026-10-16, chapters issue 4)."""
+    props = [c for c in (line.get("checks") or []) if isinstance(c, dict) and is_property(c.get("check"))]
+    return bool(props) and not any(c.get("outcome") == "pass" for c in props)
+
+
+def exception_groups_of(states, is_property=None):
+    """The exception groups (EXCEPTION_GROUPS keys) a footnoted test belongs to, from its arm states; with
+    `is_property` (the run's), a finding execution whose property checks passed nothing counts under the property
+    not shown too."""
+    groups = []
+
+    def add(key):
+        if key not in groups:
+            groups.append(key)
+    for arm in ARMS:
+        st = states[arm]
+        if st.missing_planned:
+            add("missing")
+        if not st.present:
+            continue
+        if st.ne or st.worst in ("fail", "error", "other"):
+            add("failure")
+        if any(l.get("outcome") == "finding" for l in st.lines):
+            add("finding")
+            if is_property is not None and any(_finding_without_property(l, is_property) for l in st.lines
+                                               if l.get("outcome") == "finding"):
+                add("unverified")
+        if any(l.get("outcome") == "inconclusive" for l in st.lines):
+            add("unverified")
+        if arm == "mcp" and "n" in st.glyph_marks:
+            add("mcp_limit")
+        if arm == "mcp" and "u" in st.glyph_marks:
+            add("service_difference")
+        if arm == "direct-remote" and any(m in st.glyph_marks for m in ("t", "s", "n")):
+            add("direct_difference")
+    return groups
+
+
+def exception_index(ctx, chapter):
+    """The chapter's footnoted tests grouped by consequence (READ-111): per group its title, the tests linked to
+    their detail blocks, how many of them block the deploy gate, and the practical evidence gap in one sentence;
+    empty when the chapter has no footnoted test. The timings and the raw check texts stay in the detail blocks."""
+    fn = ctx.footnotes.get(chapter)
+    ids = list(fn.order) if fn else []
+    if not ids:
+        return ""
+    by_group = {}
+    for sid in ids:
+        for g in exception_groups_of(ctx.state(sid), ctx.run.is_property):
+            by_group.setdefault(g, []).append(sid)
+    blocking = set(facts._gate_blocking(ctx, ids))
+    gated = isinstance(ctx.run.gate, dict)
+    out = ("\\noindent{\\small The %d footnoted test%s of this chapter, by what each exception means (a test may "
+           "appear under more than one heading; the detail blocks after the tables hold the timings and the raw "
+           "checks):}\\par\\nopagebreak\n\\begin{itemize}\\setlength\\itemsep{0pt}\n" % (
+               len(ids), "" if len(ids) == 1 else "s"))
+    for key, title, gap in EXCEPTION_GROUPS:
+        sids = by_group.get(key)
+        if not sids:
+            continue
+        n_block = sum(1 for x in sids if x in blocking)
+        gate_text_ = ("%d of them among the tests that block the deploy gate" % n_block
+                      if gated else "the gate was not judged")
+        out += "\\item \\textbf{%s} (%d test%s; %s): %s — %s\n" % (
+            esc(title), len(sids), "" if len(sids) == 1 else "s", esc(gate_text_),
+            ", ".join(latex.sid(x, detail=True) for x in sids), esc(gap))
+    out += "\\end{itemize}\n"
     return out
 
 
@@ -1583,12 +2206,25 @@ EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the clas
 
 
 def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
+    """The detail blocks of a unit's footnoted members. The chapter prose's `details[<scenario id>]` may carry a
+    reader-facing `title` in place of the manifest's and a `note` (the block's `reading` line), both filled on
+    the scenario's own facts (`x[<id>]`, `manifest_version`) so that they can be conditional (READ-317, READ-319,
+    READ-320)."""
     out = ""
+    prop, _ = _unit_prose(ctx, chapter, uid)
+    property_text = ctx.fill(prop) if prop else None
+    details = (ctx.prose.get(chapter) or {}).get("details") or {}
     for sid in members:
         n = ctx.footnotes[chapter].get(sid)
         if n is None:
             continue
-        out += blocks.detail_block(ctx.run, sid, ctx.state(sid), n, ctx.units, ctx.short_reasons(), unit_note)
+        d = details.get(sid) if isinstance(details.get(sid), dict) else {}
+        values = {"x": {sid: facts.scenario_facts(ctx, sid)}, "id": sid,
+                  "manifest_version": (ctx.run.manifest or {}).get("manifest_version")} if d else None
+        out += blocks.detail_block(ctx.run, sid, ctx.state(sid), n, ctx.units, ctx.short_reasons(), unit_note,
+                                   property_text=property_text,
+                                   title=ctx.fill(d["title"], values) if d.get("title") else None,
+                                   note=ctx.fill(d["note"], values) if d.get("note") else None)
         ctx.blocks_by_chapter.setdefault(chapter, []).append(sid)
     return out
 
@@ -1662,12 +2298,21 @@ def unit_section(ctx, chapter, uid):
     prop, note = _unit_prose(ctx, chapter, uid)
     prop_tex = inline(ctx.fill(prop)) if prop else latex.placeholder("(unit property: to be written)")
     if note:
-        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note))
-    out = latex.unit_header(uid, esc(u.get("unit_title") or ""), u["unit_type"], prop_tex)
+        # the note is filled on the unit's own values too (facts.unit_facts: its members under `x`), so that it
+        # can state a member's gate relation from the policy (READ-318: N-usecase-defect)
+        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note, facts.unit_facts(ctx, uid)))
     layout = u["unit_type"]
+    key = cells.LAYOUT_KEY.get(layout)
+    legend = cells.TIMING_LEGEND.get(layout)
+    # a pairs table of repeated tests (chapter D) prints every repeat's wall: its key and legend name the repeats in
+    # execution order and the MCP cold call as the record has it (READ-321)
+    repeats = max([run.scenario(sid).get("repeat") for sid in members if isinstance(run.scenario(sid).get("repeat"), int)]
+                  or [1])
+    if layout == "pairs" and repeats > 1:
+        key, legend = cells.repeats_texts(repeats, _mcp_cold_first(run, members))
+    out = latex.unit_header(uid, esc(u.get("unit_title") or ""), u["unit_type"], prop_tex, key=key)
     fns = dict((sid, _footnotes_for(ctx, chapter, sid)) for sid in members)
     meta = units.by_scenario
-    legend = cells.TIMING_LEGEND.get(layout)
     rk = record_key_link(ctx, members, chapter)
     if rk:
         legend = (legend + "; " + rk) if legend else rk
@@ -1777,6 +2422,22 @@ def unit_section(ctx, chapter, uid):
     return out
 
 
+def _mcp_cold_first(run, members):
+    """Whether, over the members' MCP executions, repeat 0 is the host-cold call and every later repeat host-warm
+    (the paired loop's order), so that a repeated pairs table's legend may say so; False when no MCP execution has
+    a host state or the record says otherwise."""
+    seen = False
+    for sid in members:
+        for l in run.arm_lines(sid, "mcp"):
+            hc = cells.host_cache_of(l)
+            if hc not in ("cold", "warm"):
+                continue
+            seen = True
+            if (l.get("repeat") == 0) != (hc == "cold"):
+                return False
+    return seen
+
+
 def units_ids(ctx, members, by_group=None):
     import units as units_mod
     return units_mod.ids_text(members, None, by_group)
@@ -1801,6 +2462,41 @@ def family_section(ctx, chapter, fid):
     return out
 
 
+def intro_table(ctx, table, values):
+    """One comparison table of a chapter's Background (the prose slot `intro_tables`, READ-209: the three notions
+    of path support side by side): {after, caption, columns, rows, widths}; the cells are prose (inline markup,
+    placeholders and conditionals), `after` the index of the Background paragraph the table follows (default: the
+    last)."""
+    cols = [str(c) for c in (table.get("columns") or [])]
+    rows = [[inline(ctx.fill(str(c), values)) for c in r] for r in (table.get("rows") or []) if isinstance(r, list)]
+    if not cols or not rows:
+        return ""
+    widths = table.get("widths") if isinstance(table.get("widths"), list) and len(table.get("widths")) == len(cols) \
+        else [100.0 / len(cols)] * len(cols)
+    caption = inline(ctx.fill(table.get("caption"), values)) if table.get("caption") else None
+    return latex.plain_table(latex.spec_p(widths), [esc(c) for c in cols], rows, caption, needspace=len(rows) + 4)
+
+
+def background(ctx, prose, values):
+    """The chapter's Background: the `intro` items (paragraphs, or a {"table": ...} item, through `prose_blocks`:
+    READ-311), each optionally followed by the `intro_tables` entries whose `after` names it (a table without
+    `after` follows the last item; READ-209)."""
+    intro = prose.get("intro") or []
+    if isinstance(intro, str):
+        intro = [intro]
+    if not intro:
+        return latex.placeholder("(chapter prose: to be written)") + "\n\n"
+    tables = [t for t in (prose.get("intro_tables") or []) if isinstance(t, dict)]
+    out = ""
+    for i, p in enumerate(intro):
+        out += prose_blocks(ctx, [p], values)
+        for t in tables:
+            after = t.get("after")
+            if after == i or (after is None and i == len(intro) - 1):
+                out += intro_table(ctx, t, values)
+    return out
+
+
 def chapter(ctx, ch):
     """A chapter: its conclusion first (the `summary` prose and the summary block), then what it leaves untested
     (the `coverage_gap` prose and the computed lines), then the background (`intro`) and the families (the owner's
@@ -1810,6 +2506,9 @@ def chapter(ctx, ch):
     prose = ctx.prose.get(ch) or {}
     title = prose.get("title") or units.titles.get(ch, ch)
     out = latex.section("%s\\qd %s" % (esc(ch), esc(title)), "ch:%s" % ch, mark="%s · %s" % (ch, title))
+    # the chapter's purpose in the reader's terms (READ-101): what the operation lets a user ask and what kind of
+    # evidence the chapter supplies, before the conclusion's inventory; optional prose (`purpose`)
+    purpose = prose.get("purpose")
     fams = units.chapter_families(ch)
     sids = units.chapter_scenarios(ch)
     body = ""
@@ -1818,29 +2517,50 @@ def chapter(ctx, ch):
     n_units = sum(len(units.families[f]["units"]) for f in fams)
     values = ctx.chapter_values(ch)
     # the summary is built after the families so the footnotes are assigned
+    if purpose:
+        out += prose_blocks(ctx, purpose, values)
     out += "\\parhead{Conclusion}\n"
     summary = prose.get("summary")
-    out += paragraphs([ctx.fill(p, values) for p in ([summary] if isinstance(summary, str) else (summary or []))]) \
-        if summary else latex.placeholder("(chapter summary: to be written)") + "\n\n"
+    out += prose_blocks(ctx, summary, values) if summary else latex.placeholder("(chapter summary: to be written)") + "\n\n"
+    out += claims_map(ctx, ch)
     out += chapter_summary(ctx, ch, sids, n_units, len(fams))
     out += "\\parhead{What this chapter leaves untested}\n"
     gap = prose.get("coverage_gap")
-    out += paragraphs([ctx.fill(p, values) for p in ([gap] if isinstance(gap, str) else (gap or []))]) \
-        if gap else latex.placeholder("(coverage gap: to be written)") + "\n\n"
-    lines = untested_lines(ctx, ch)
-    if lines:
-        # how the list counts, against the conclusion's 'n of m' (VERIFY-T L10: the two counts side by side)
-        out += ("The properties below are counted over every arm: a test passes a property when any execution on "
-                "any arm passed it, whereas the conclusion's n of m counts the tests passing on both direct arms.\n")
-        out += "\\begin{itemize}\\setlength\\itemsep{0pt}\n" + "".join("\\item %s\n" % l for l in lines) + "\\end{itemize}\n"
+    out += prose_blocks(ctx, gap, values) if gap else latex.placeholder("(coverage gap: to be written)") + "\n\n"
+    out += exception_index(ctx, ch)
+    table = untested_table(ctx, ch)
+    if table:
+        # how the table counts, against the conclusion's 'n of m' (VERIFY-T L10: the two counts side by side)
+        out += ("The properties below are counted over every access path: a test passes a property when any "
+                "execution on any access path passed it, whereas the conclusion's n of m counts the tests passing on "
+                "both direct access paths.\n")
+        out += table
     else:
         out += "Every property check of this chapter was passed by at least one execution of each test.\n\n"
     out += "\\parhead{Background}\n"
-    out += paragraphs([ctx.fill(p, values) for p in (prose.get("intro") or [])]) if prose.get("intro") else \
-        latex.placeholder("(chapter prose: to be written)") + "\n\n"
+    out += background(ctx, prose, values)
     # the compact record key right before the first family's tables (re-verification N-1)
     out += record_key_paragraph(ctx, ch)
     return out + body
+
+
+def prose_blocks(ctx, items, values):
+    """A chapter's prose slot (`purpose`, `summary`, `coverage_gap`, `intro`) as LaTeX: a string or a list whose
+    items are paragraphs (strings, filled on the chapter's values) or one small table, written as
+    {"table": {"caption", "columns", "rows", "widths"}} with every cell filled like prose (READ-311: a reader-facing
+    map inside a chapter's background, where a paragraph of lists would hide what is compared)."""
+    out = ""
+    for item in ([items] if isinstance(items, str) else (items or [])):
+        if isinstance(item, dict) and isinstance(item.get("table"), dict):
+            t = item["table"]
+            columns = [inline(ctx.fill(c, values)) for c in (t.get("columns") or [])]
+            rows = [[inline(ctx.fill(c, values)) for c in row] for row in (t.get("rows") or [])]
+            widths = t.get("widths") or [1] * len(columns)
+            caption = inline(ctx.fill(t["caption"], values)) if t.get("caption") else None
+            out += latex.plain_table(latex.spec_p(widths), columns, rows, caption)
+        elif isinstance(item, str) and item:
+            out += paragraphs([ctx.fill(item, values)])
+    return out
 
 
 def part_two(ctx):
@@ -1981,6 +2701,8 @@ def closing_values(ctx):
         v["cold_warm_%s_delta_p50" % key] = fmt_delta((d.get("delta_ms") or {}).get("p50")) if d.get("n") else None
         v["cold_warm_%s_delta_p90" % key] = fmt_delta((d.get("delta_ms") or {}).get("p90")) if d.get("n") else None
         v["cold_warm_%s_ratio_p50" % key] = fmt_n((d.get("ratio") or {}).get("p50"), 2) if d.get("n") else None
+        # the median paired ratio as a signed percentage off one (READ-011: '−4 %', never a ratio of two medians)
+        v["cold_warm_%s_ratio_pct" % key] = fmt_pct_off_one((d.get("ratio") or {}).get("p50")) if d.get("n") else None
     fo = s.get("front_overhead") or {}
     for arm in ("direct-local", "direct-remote"):
         stats("connect_" + cells.ARM_SHORT[arm], (fo.get("connect_ms") or {}).get(arm), tint=False)
@@ -2027,6 +2749,8 @@ def closing_values(ctx):
             largest = (p50, name)
     v["mcp_phase_largest"] = largest[1] if largest else None
     v["mcp_phase_largest_p50"] = cells.fmt_exec_text(largest[0]) if largest else None
+    # the flag of the observation's clause on terminal lag (READ-010: what the phase measures, its cause not isolated)
+    v["mcp_phase_largest_is_terminal_lag"] = bool(largest) and largest[1] == "terminal lag"
     fo_ = s.get("front_overhead") or {}
     v["scenarios_without_warm_pair"] = str(fo_["scenarios_without_warm_pair"]) \
         if cells._num(fo_.get("scenarios_without_warm_pair")) is not None else None
@@ -2129,6 +2853,18 @@ def cold_mcp_untimed_text(run):
     return facts._join(parts) if parts else "none"
 
 
+def fmt_pct_off_one(ratio):
+    """A ratio as a signed whole percentage off one: 0.96 reads '−4 %', 1.05 '+5 %', 1.0 '0 %'; '–' for none."""
+    v = cells._num(ratio)
+    if v is None:
+        return "–"
+    pct = (v - 1.0) * 100.0
+    rounded = int(abs(pct) + 0.5)
+    if rounded == 0:
+        return "0 %"
+    return "%s%d %%" % ("−" if pct < 0 else "+", rounded)
+
+
 def fmt_ratio(x):
     """A ratio with one decimal below 10, whole above (275, not 275.0)."""
     v = cells._num(x)
@@ -2177,7 +2913,7 @@ def closing(ctx):
     out += "\\markright{%s}\n" % esc(title)
     s = ctx.run.summary()
     # C.1 observations: generator-filled sentences from the prose templates, the caveats beside them
-    out += latex.section("C.1\\qd Observations", "sec:C1")
+    out += latex.section("%s 1\\qd Observations" % CLOSING_PREFIX, "sec:C1")
     intro = cp.get("intro") or []
     out += paragraphs([ctx.fill(p, closing_values(ctx)) for p in ([intro] if isinstance(intro, str) else intro)]) \
         if intro else latex.placeholder("(closing intro: to be written)") + "\n\n"
@@ -2192,7 +2928,7 @@ def closing(ctx):
         if caveats else latex.placeholder("(caveats: the shared host load and the cold / warm heuristic: to be "
                                           "written)") + "\n\n"
     # C.2 plots
-    out += latex.section("C.2\\qd Paired latencies and the MCP phases", "sec:C2")
+    out += latex.section("%s 2\\qd Paired latencies and the MCP phases" % CLOSING_PREFIX, "sec:C2")
     plots = cp.get("plots") if isinstance(cp.get("plots"), dict) else {}
     values = closing_values(ctx)
     ctx.data_files.update(plot_data(ctx))
@@ -2217,9 +2953,9 @@ def closing(ctx):
             "side by side, not summed: their medians do not add up to an end-to-end total.")
         out += latex.figure_block(latex.phase_boxplot(boxes, "fig:phases"), inline(ctx.fill(cap, values)))
     # C.3 .. C.7: the tables
-    out += latex.section("C.3\\qd MCP overhead decomposition", "sec:C3")
+    out += latex.section("%s 3\\qd MCP overhead decomposition" % CLOSING_PREFIX, "sec:C3")
     out += closing_section_prose(ctx, "C3", (
-        "Pairs of host-warm executions only: the MCP warm execution (repeat 1 preferred) minus each direct arm's "
+        "Pairs of host-warm executions only: the MCP warm execution (repeat 1 preferred) minus each direct access path's "
         "first warm execution; the phases as the service measured them. In these tables a / b never appears: "
         "p50, p90 and the maximum are columns.\n\n"))
     ph = s.get("mcp_phases") or {}
@@ -2229,19 +2965,19 @@ def closing(ctx):
     mo = s.get("mcp_overhead") or {}
     rows = [[esc(k.replace("_ms", "").replace("_", " "))] + _stats_cells(mo.get(k), signed=True) for k in sorted(mo)]
     out += latex.plain_table("@{}l r r r r@{}", ["MCP minus direct", "p50", "p90", "max", "n"], rows,
-                             "MCP overhead (warm MCP wall minus each direct arm; the backend time minus each direct arm); "
+                             "MCP overhead (warm MCP wall minus each direct access path; the backend time minus each direct access path); "
                              "signed")
     if s.get("mcp_cold_wall_ms"):
         out += latex.plain_table("@{}l r r r r@{}", ["", "p50", "p90", "max", "n"],
                                  [["MCP cold wall"] + _stats_cells(s["mcp_cold_wall_ms"])], "MCP cold wall")
-    out += latex.section("C.4\\qd Front cost", "sec:C4")
+    out += latex.section("%s 4\\qd Front cost" % CLOSING_PREFIX, "sec:C4")
     out += closing_section_prose(ctx, "C4", "")
     fo = s.get("front_overhead") or {}
     # a connection set-up is no execution time (wall_ms excludes it): its figures carry no tint
     rows = [[esc(arm)] + _stats_cells((fo.get("connect_ms") or {}).get(arm), tint=False)
             for arm in sorted(fo.get("connect_ms") or {})]
     out += latex.plain_table("@{}l r r r r@{}", ["connection set-up", "p50", "p90", "max", "n"], rows,
-                             "connect\\_ms per arm")
+                             "connect\\_ms per access path")
     pan = fo.get("per_area_net") or {}
     rows = [[esc(a)] + _stats_cells(pan.get(a), signed=True)
             for a in sorted(pan, key=lambda x: (ctx.units.chapters.index(x) if x in ctx.units.chapters else 99, x))]
@@ -2253,8 +2989,9 @@ def closing(ctx):
         for kind in ("wall_ms", "server_ms"):
             if kind in cold[arm]:
                 rows.append([esc(arm), esc(kind.replace("_ms", ""))] + _stats_cells(cold[arm][kind]))
-    out += latex.plain_table("@{}l l r r r r@{}", ["arm", "", "p50", "p90", "max", "n"], rows, "host-cold executions")
-    out += latex.section("C.5\\qd Cold versus warm", "sec:C5")
+    out += latex.plain_table("@{}l l r r r r@{}", ["access path", "", "p50", "p90", "max", "n"], rows,
+                             "host-cold executions (every recorded host-cold execution with that time, whatever its outcome)")
+    out += latex.section("%s 5\\qd Cold versus warm" % CLOSING_PREFIX, "sec:C5")
     hc = ctx.run.comp.get("host_cache") or {}
     out += closing_section_prose(ctx, "C5", (
         "Cold and warm are the recorded heuristic of I.2 (cold: the scenario's first execution to reach the host "
@@ -2268,10 +3005,10 @@ def closing(ctx):
         rows.append([esc(arm), str(d.get("n", 0)), fmt_delta((d.get("delta_ms") or {}).get("p50")),
                      fmt_delta((d.get("delta_ms") or {}).get("p90")), fmt_n((d.get("ratio") or {}).get("p50"), 2),
                      fmt_n((d.get("ratio") or {}).get("p90"), 2)])
-    out += latex.plain_table("@{}l r r r r r@{}", ["arm", "pairs", "delta p50", "delta p90", "ratio p50", "ratio p90"],
+    out += latex.plain_table("@{}l r r r r r@{}", ["access path", "pairs", "delta p50", "delta p90", "ratio p50", "ratio p90"],
                              rows, "warm minus cold per scenario (delta, signed: negative when warm was faster), "
                                    "warm over cold (ratio)")
-    out += latex.section("C.6\\qd Load telemetry", "sec:C6")
+    out += latex.section("%s 6\\qd Load telemetry" % CLOSING_PREFIX, "sec:C6")
     lf = ctx.run.load or {}
     out += closing_section_prose(ctx, "C6", (
         "%d samples; sra\\_all CPU mean %s\\%% (max %s\\%%), load1 mean %s (max %s). The Logan caveat: above "
@@ -2292,10 +3029,12 @@ def closing(ctx):
             rows.append([esc(area), esc(arm), str(r.get("executions", "–")), str(r.get("executions_with_samples", "–")),
                          fmt_n(r.get("peak_cpu_pct")), cells.fmt_gib(r.get("peak_mem_bytes")),
                          fmt_n(r.get("mean_sra_all_cpu_pct")), fmt_n(r.get("mean_host_load1"), 1)])
-    out += latex.plain_table("@{}l l r r r r r r@{}", ["chapter", "arm", "executions", "with samples", "peak CPU \\%",
+    out += latex.plain_table("@{}l l r r r r r r@{}", ["chapter", "access path", "executions", "with samples", "peak CPU \\%",
                                                         "peak memory", "sra\\_all mean \\%", "load1 mean"], rows,
-                             "the container's peak CPU and memory, the host's sra\\_all CPU and load1 over the executions")
-    out += latex.section("C.7\\qd Per-chapter timing", "sec:C7")
+                             "sampled telemetry over each chapter's executions: the container's peak CPU (100\\,\\% is one "
+                             "logical CPU) and peak memory (the container's memory usage as docker stats reports it), the host's sra\\_all CPU mean and load1 "
+                             "mean; context of the shared host, not any request's own cost")
+    out += latex.section("%s 7\\qd Per-chapter timing" % CLOSING_PREFIX, "sec:C7")
     out += closing_section_prose(ctx, "C7", "")
     timing = s.get("timing") or {}
     rows = []
@@ -2310,9 +3049,12 @@ def closing(ctx):
                     continue
                 rows.append([esc(area), esc(arm), esc(hc_)] + _stats_cells(w) + _stats_cells(sv))
             wai += ((t.get(cells.WARM_AFTER_INTERRUPTED) or {}).get("wall") or {}).get("n") or 0
-    out += latex.plain_table("@{}l l l r r r r r r r r@{}", ["chapter", "arm", "host", "wall p50", "p90", "max", "n",
-                                                              "server p50", "p90", "max", "n"], rows,
-                             "wall and server time per chapter, arm and host-cache state")
+    out += latex.plain_table("@{}l l l r r r r r r r r@{}", ["chapter", "access path", "host", "wall p50", "p90", "max",
+                                                              "n", "server p50", "p90", "max", "n"], rows,
+                             "wall and server time per chapter, access path and host-cache state, over every "
+                             "recorded execution with that time (passes, allowed 503s, refusals and findings alike: "
+                             "not the latency of successful searches); the server columns count only the answers "
+                             "that carry timing.elapsed\\_ms, so their n is smaller and the columns are not paired")
     if wai:
         out += ("%d execution(s) ran warm after an interrupted execution and are counted in neither bucket.\n\n" % wai)
     return out
@@ -2333,6 +3075,15 @@ def _catalogue_entry(ctx, name, entry, chapters_text, generic):
                        ("args", "arguments")):
         if entry.get(key):
             out += latex.catline(label, inline(entry[key])) + "\n"
+    table = entry.get("decision_table")
+    if isinstance(table, dict) and table.get("rows"):
+        # a compact decision table (READ-014: the cases of budget_respected with the clock each uses), from the
+        # catalogue prose: {caption, columns, rows}
+        cols = [str(c) for c in (table.get("columns") or [])]
+        rows = [[inline(str(c)) for c in r] for r in table["rows"] if isinstance(r, list)]
+        widths = [100.0 / max(1, len(cols))] * len(cols)
+        out += latex.plain_table(latex.spec_p(widths), [esc(c) for c in cols], rows,
+                                 inline(table.get("caption") or ""), needspace=len(rows) + 4)
     routes = entry.get("routes")
     if isinstance(routes, dict):
         for route, text in routes.items():
@@ -2475,26 +3226,64 @@ def by_design_table(ctx):
             else:
                 named.append("%s: %d (%s, …)" % (esc(mark), len(sids_),
                                                  ", ".join(latex.sid(s, ctx.units.unit_of(s)) for s in sids_[:3])))
+        if not marks:
+            # a case of the chapter's area that no scenario named and no answer matched (READ-017): documented,
+            # not exercised in this run
+            named.append("not exercised in this run")
         first = [tt(cid) + "\\newline{\\scriptsize %s}" % esc(c.get("agreement") or "–")]
         matches = latex.join_units(esc_wrap(c.get("scenario_match"), 600))
         if short.get(cid):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
         if rules.get(cid):
             matches += "\\newline{\\scriptsize verification: %s}" % inline(rules[cid])
-        rows.append(first + [matches, "; ".join(service) or "–", "; ".join(direct) or "–", "; ".join(named) or "–"])
+        rows.append(first + [matches, "; ".join(service) or "– (none stated)", "; ".join(direct) or "– (none stated)",
+                             "; ".join(named)])
         if unverified_detail:
-            rows[-1] = (rows[-1], "{\\footnotesize unverified: %s}" % latex.join_units(esc_wrap(
-                "; ".join(unverified_detail))))
+            rows[-1] = (rows[-1], "{\\footnotesize %s}" % unverified_note(unverified_detail))
     out = ("One row per case of the service-by-design table that a scenario of the built chapters names, that an "
-           "MCP answer matched, or that belongs to their areas: the case and its agreement class, what it matches "
-           "(and the short reason the tables use, with the case's verification rule where it has one of its own), "
-           "the service's answer, the direct expectation, and the scenarios "
-           "naming it with their verification; where a pair is unverified (the direct side did not match the case, "
-           "or another MCP repeat outside the case has no direct answer to compare with), the reason is under the "
-           "row.\n\n")
+           "MCP answer matched, or that belongs to their areas: the case (its stable id, with the agreement class "
+           "the table gives it), what it matches (with the short reason the tables use and, where the case has one, "
+           "its verification rule), the service's documented answer and the direct expectation (both the table's "
+           "statements, not observations), and this run's scenarios with their evidence.\n\n")
+    out += ("\\noindent{\\small\\textbf{The evidence states of the last column.} \\emph{named}: the scenario's "
+            "manifest entry names the case as its expected MCP behaviour; by itself no execution evidence. "
+            "\\emph{matched by the answer}: an MCP answer of this run matched the case (observed on the MCP side). "
+            "\\emph{verified}: the MCP answer matched the case's service side and the direct answer its host side "
+            "(observed on both). \\emph{unverified}: observed on the MCP side, but the direct side did not match "
+            "the case or another MCP repeat outside the case has no direct answer to compare with; the reason is "
+            "under the row, one line per distinct reason. \\emph{not implemented mcp} and the other class words: "
+            "the MCP agreement class of a scenario that names the case without the case deciding its standing. "
+            "\\emph{not exercised in this run}: no scenario of the built chapters names the case and no answer "
+            "matched it; the row documents the service's behaviour, which this run did not observe. A row proves "
+            "the behaviour occurred only through a verified, unverified or matched state.}\\par\\medskip\n")
     out += latex.plain_table(latex.spec_p([30, 38, 40, 36, 30]),
-                             ["case", "matches", "service", "direct", "scenarios"], rows)
+                             ["case", "matches", "service (the table's answer)", "direct (the table's expectation)",
+                              "this run's scenarios and their evidence"], rows)
     return out
+
+
+def unverified_note(details):
+    """The note under an unverified case's row (READ-018): one line per distinct reason with the tests it holds,
+    the expectation and the observation apart and the consequence stated once; `details` are the 'sid: reason'
+    (or 'sid (direct side not verified): reason') strings the table collected."""
+    by_reason = {}
+    order = []
+    for d in details:
+        sid, _, reason = str(d).partition(": ")
+        reason = reason or str(d)
+        if reason not in by_reason:
+            by_reason[reason] = []
+            order.append(reason)
+        by_reason[reason].append(sid.replace(" (direct side not verified)", ""))
+    lines = []
+    for reason in order:
+        sids = by_reason[reason]
+        lines.append("%d test%s (%s): %s" % (len(sids), "" if len(sids) == 1 else "s",
+                                             latex.join_units(esc_wrap(", ".join(sids))),
+                                             latex.join_units(esc_wrap(reason))))
+    return ("unverified pair%s, by reason — %s. Consequence: the service side matched the case, the pair as a whole "
+            "is not verified; this is a gap in the comparison's evidence, not in itself a service defect." % (
+                "" if len(details) == 1 else "s", "; ".join(lines)))
 
 
 def relations_appendix(ctx):
@@ -2510,7 +3299,7 @@ def relations_appendix(ctx):
         arg_text = ", ".join("%s %s" % (k, v) for k, v in sorted(args.items()) if not isinstance(v, (list, dict)))
         for k, v in sorted(args.items()):
             if isinstance(v, (list, dict)):
-                arg_text += ("; " if arg_text else "") + "%s %s" % (k, blocks._runs(v)[:40])
+                arg_text += ("; " if arg_text else "") + "%s %s" % (k, blocks._runs(v))
         per_arm = []
         for arm in ARMS:
             a = (crel.get("arms") or {}).get(arm) or {}
@@ -2523,9 +3312,11 @@ def relations_appendix(ctx):
                      "%s %s %s" % (latex.sid(rel.get("a"), ctx.units.unit_of(rel.get("a"))),
                                    RELATION_SIGN.get(rel.get("type"), ""),
                                    latex.sid(rel.get("b"), ctx.units.unit_of(rel.get("b")))),
-                     esc(rel.get("title"), 120) + (("\\newline{\\scriptsize %s}" % esc(arg_text, 100)) if arg_text else "")]
+                     esc(rel.get("title"), 240) + (("\\newline{\\scriptsize %s}" % esc_wrap(arg_text, 400)) if arg_text else "")]
                     + per_arm)
-    out = "Every manifest relation among the built chapters' tests, with the comparator's outcome and detail per arm.\n\n"
+    out = appendix_lead(ctx, "appendix_C") or (
+        "Every manifest relation among the built chapters' tests, with the comparator's outcome and detail per "
+        "access path.\n\n")
     out += latex.plain_table(latex.spec_p([28, 34, 40, 24, 24, 24]),
                              ["relation", "pair", "title", "direct-local", "direct-remote", "mcp"], rows)
     return out
@@ -2552,9 +3343,9 @@ def glossary(ctx):
     if rk.get("lead"):
         out += paragraphs([ctx.fill(rk["lead"])])
     out += record_key(ctx, full=True)
-    # the glossary stays one page (the owner's review, point 3): it asks for a page's space and so starts on a
-    # fresh page when the record key's table ends mid-page
-    out += "\\Needspace{56\\baselineskip}\n\\parhead{Glossary}\n"
+    # the glossary at a readable size (the readability review, READ-020: two pages rather than 7.5 pt): it asks for
+    # a dozen lines so that its heading is not left at a page's bottom
+    out += "\\Needspace{12\\baselineskip}\n\\parhead{Glossary}\n"
     lead = ctx.glossary.get("lead")
     if lead:
         out += paragraphs([ctx.fill(lead)])
@@ -2567,8 +3358,8 @@ def glossary(ctx):
     if not entries:
         out += latex.placeholder("(glossary: to be written)") + "\n\n"
     else:
-        # one page for the entries (the owner's review, point 3): a size between footnote and script, two columns
-        out += ("\\begin{multicols}{2}\\fontsize{7.5}{8.8}\\selectfont\\raggedright\\setlength{\\columnsep}{5mm}"
+        # two columns at footnote size (READ-020: readable at ordinary page size, two pages if need be)
+        out += ("\\begin{multicols}{2}\\footnotesize\\raggedright\\setlength{\\columnsep}{5mm}"
                 "\\setlength{\\parskip}{0pt}\n")
         for e in sorted(entries, key=lambda e: _sort_key(e["term"])):
             text = inline(ctx.fill(e.get("definition") or e.get("text") or ""))
@@ -2596,24 +3387,22 @@ def index(ctx):
 
 
 def classes_tables():
-    outcomes = [("pass", "every expected check passed"), ("fail", "a check failed"),
-                ("error", "no HTTP answer"), ("finding", "a stated bound or SPEC promise broken without a failed "
-                                                         "request (budget_respected)"),
-                ("inconclusive", "a check could not test its property (an allowed 503, a withheld list, a host state)"),
-                ("not_implemented_mcp", "the MCP surface cannot express the request (the manifest's mark)"),
-                ("service_by_design", "the service answered or refused in the host's place, as its table says")]
-    direct = [("identical", "equal answers (digest)"), ("same_checks", "different answers, the same check outcomes"),
-              ("timing", "the answers differ by timing alone (one time-limited)"),
-              ("not_comparable", "no check both arms evaluated"), ("disagree", "a check differs")]
-    mcp = [("agree", "the checks both arms evaluated agree (the depth says how many property checks)"),
-           ("not_implemented_mcp", "by the manifest or the table"),
-           ("service_by_design", "a table case matched (verified when both sides match the case)"),
-           ("not_comparable", "no check both arms evaluated"), ("disagree", "a check differs"),
-           ("missing", "no MCP execution recorded")]
-    spec = latex.spec_p([40, 134])
-    out = latex.plain_table(spec, ["execution outcome", "meaning"], [[tt(k), esc(v)] for k, v in outcomes])
-    out += latex.plain_table(spec, ["direct agreement class", "meaning"], [[tt(k), esc(v)] for k, v in direct])
-    out += latex.plain_table(spec, ["MCP agreement class", "meaning"], [[tt(k), esc(v)] for k, v in mcp])
+    """The vocabulary of appendix F, rendered from the shared definitions (doc/vocabulary.py): the three layers of
+    an outcome (the check item, the execution, the displayed standing), then the two agreement classes."""
+    out = ("\\noindent{\\small %s}\\par\\smallskip\n" % inline(vocabulary.CLASSIFICATIONS))
+    out += ("\\noindent{\\small An outcome has three layers. \\textbf{A check item} (one check of one execution) "
+            "answers one of five words; \\textbf{the execution's outcome} follows from its items by precedence, "
+            "or is decided by the runner without them; \\textbf{the cell's standing} is what the tables show. "
+            "The reading guide (I.3) and the glossary (appendix D) print these same definitions.}\\par\\smallskip\n")
+    spec = latex.spec_p([30, 144])
+    out += latex.plain_table(spec, ["check item", "meaning"], [[tt(k), inline(v)] for k, v in vocabulary.CHECK_OUTCOMES])
+    out += latex.plain_table(latex.spec_p([30, 32, 78, 34]), ["execution outcome", "decided", "meaning", "consequence"],
+                             [[tt(k), esc(d), inline(m), inline(c)] for k, d, m, c in vocabulary.outcome_table_rows()])
+    out += "\\noindent{\\small %s}\\par\\smallskip\n" % inline(vocabulary.STANDING)
+    out += latex.plain_table(spec, ["direct agreement class", "meaning"],
+                             [[tt(k), esc(v)] for k, v in vocabulary.DIRECT_CLASSES])
+    out += latex.plain_table(spec, ["MCP agreement class", "meaning"],
+                             [[tt(k), esc(v)] for k, v in vocabulary.MCP_CLASSES])
     return out
 
 
@@ -2668,16 +3457,18 @@ def environment_table(ctx):
         info = info or {}
         ended = _arm_end(run, arm, info)
         scripts = info.get("scripts_commit") or (mcp_run.get("git_head") if arm == "mcp" else None)
-        rows.append(("arm %s" % esc(arm), "%s; state %s; %s executions recorded; runner %s, scripts %s; %s to %s" % (
+        rows.append(("access path %s" % esc(arm), "%s; state %s; %s executions recorded; runner %s, scripts %s; %s to %s" % (
             tt(info.get("base") or "–"), esc(info.get("state") or "–"), esc(info.get("executions_recorded", "–")),
             esc(info.get("runner_host") or "–"), tt(_short(scripts, 12)),
             _date(info.get("started_utc")), _date(ended))))
     if mcp_run:
-        rows.append(("MCP runner", "git head %s; base %s; admin key %s; the service's deployed version is not "
-                                   "recorded by a run of manifest v%s" % (
+        # three revisions are distinct (READ-021): the runner's (the client that asked), the by-design table's service
+        # commit (the documented behaviour the comparison read) and the service's deployed revision (the code that
+        # served the MCP requests); the last is printed only where the run recorded it
+        rows.append(("MCP runner", "git head %s (the client that asked, not the service's revision); base %s; admin "
+                                   "key %s; %s" % (
                                        tt(_short(mcp_run.get("git_head"), 12)), tt(mcp_run.get("base") or "–"),
-                                       esc(mcp_run.get("admin_key") or "–"),
-                                       esc(manifest.get("manifest_version") or "?"))))
+                                       esc(mcp_run.get("admin_key") or "–"), esc(service_version_text(run)))))
     sessions = _sessions_text(run)
     if sessions:
         rows.append(("mode", sessions))
@@ -2699,8 +3490,8 @@ def environment_table(ctx):
         rows.append(("warm-ups run again for a resume", reruns_text(run)))
     hc = comp.get("host_cache") or {}
     rows.append(("host cache", "cold = the scenario's first execution on the host in this run; warm = another "
-                               "within %s s; aged = older; the MCP pair runs cold then warm, the direct arms between "
-                               "them" % esc(hc.get("warm_window_s", "60"))))
+                               "within %s s; aged = older; the MCP pair runs cold then warm, the direct access paths "
+                               "between them" % esc(hc.get("warm_window_s", "60"))))
     gt = manifest.get("ground_truth") or {}
     for key in sorted(gt):
         value = gt[key]
@@ -2710,16 +3501,79 @@ def environment_table(ctx):
     return _kv_table(rows)
 
 
+GATE_PROBLEMS_FILE = "gate_problems.json"
+
+
+def gate_action_table(ctx, problems):
+    """The gate's problems by group (GATE_GROUPS; READ-002, READ-023): per group its problems by kind, the scope they
+    touch (the scenario-arm pairs, else the access paths or the run), what they imply and the evidence that would
+    clear them (GATE_GROUP_ACTION)."""
+    by_group = {}
+    for p in problems:
+        by_group.setdefault(gate_group_of(p), []).append(p)
+    rows = []
+    for key, title in GATE_GROUPS:
+        ps = by_group.get(key) or []
+        if not ps:
+            continue
+        kinds = {}
+        for p in ps:
+            kinds[p.get("kind") or "?"] = kinds.get(p.get("kind") or "?", 0) + 1
+        kinds_text = ", ".join("%d %s" % (kinds[k], k) for k in gate_mod.KINDS if k in kinds) + "".join(
+            ", %d %s" % (kinds[k], k) for k in sorted(k for k in kinds if k not in gate_mod.KINDS))
+        pairs = []
+        arms_ = []
+        n_records = 0
+        for p in ps:
+            if p.get("scenario"):
+                pair = (p["scenario"], p.get("arm") or "")
+                if pair not in pairs:
+                    pairs.append(pair)
+            elif p.get("arm"):
+                if p["arm"] not in arms_:
+                    arms_.append(p["arm"])
+            else:
+                n_records += 1
+        parts_ = []
+        if pairs:
+            parts_.append("%d scenario-arm pair%s: %s" % (len(pairs), "" if len(pairs) == 1 else "s", ", ".join(
+                "%s %s" % (_link_sid(ctx, sid), esc(arm)) for sid, arm in pairs[:12]) + (
+                " … (%d)" % len(pairs) if len(pairs) > 12 else "")))
+        if arms_:
+            n_arm = sum(1 for p in ps if p.get("arm") and not p.get("scenario"))
+            parts_.append("%d problem%s of the access path%s %s" % (n_arm, "" if n_arm == 1 else "s",
+                                                                   "" if len(arms_) == 1 else "s", esc(", ".join(arms_))))
+        if n_records:
+            parts_.append("%d problem%s of the run's records (the checks, the comparison, the table)" % (
+                n_records, "" if n_records == 1 else "s"))
+        scope = "; ".join(parts_) or "the run's records"
+        rows.append([esc(title), "%d (%s)" % (len(ps), esc(kinds_text)), scope, esc(GATE_GROUP_ACTION[key])])
+    return latex.plain_table(latex.spec_p([30, 26, 50, 68]),
+                             ["group", "problems (by the gate's kind)", "scope", "what it implies and what clears it"],
+                             rows, "the gate's problems by what they ask of the owner; the full texts follow, and every "
+                                   "problem in full is in {\\upshape %s} beside this document" % tt(GATE_PROBLEMS_FILE),
+                             needspace=12)
+
+
 def gate_problems(ctx):
-    """The deploy gate's problems by kind (the scenarios linked, the configuration texts each once)."""
+    """The deploy gate's problems (READ-002, READ-023): what the gate read, the problems by group with the evidence
+    that clears each, then by kind (the scenarios linked, every configuration text once, none left out), and the
+    full record written beside the document (GATE_PROBLEMS_FILE)."""
     run = ctx.run
     gate = run.gate
     word, how, counts_text, problems_text = gate_summary(ctx)
     if not isinstance(gate, dict):
         return "\\textbf{%s}: %s.\n\n" % (esc(word), esc(how))
     out = "\\textbf{%s}: %s; %s; %s.\n\n" % (esc(word), esc(how), esc(counts_text), esc(problems_text))
+    out += "%s What the gate read: %s.\n\n" % (inline(gate_decision_text(run)), esc(gate_read_text(run)))
     problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
+    ctx.data_files[GATE_PROBLEMS_FILE] = json.dumps(
+        {"verdict": "GATE PASS" if gate.get("passed") else "GATE FAIL", "policy": gate.get("policy"),
+         "counts": gate.get("counts"), "judged_offline_for_this_document": bool(run.gate_offline),
+         "problems": [dict(p, group=gate_group_of(p)) for p in problems], "notes": gate.get("notes") or []},
+        indent=1, sort_keys=True) + "\n"
     if problems:
+        out += gate_action_table(ctx, problems)
         by_kind = {}
         for p in problems:
             by_kind.setdefault(p.get("kind") or "?", []).append(p)
@@ -2764,14 +3618,13 @@ def gate_problems(ctx):
                 n_exec = sum(1 for p in v if p.get("scenario"))
                 if n_exec != len(names):
                     parts[-1] += " — %d executions in %d scenario-arm pairs" % (n_exec, len(names))
-            for text, n, arms_ in details[:6]:
+            for text, n, arms_ in details:
                 parts.append("%s%s: %s" % (esc(", ".join(arms_)) + " " if arms_ else "",
-                                           ("%d times" % n) if n > 1 else "once", esc_wrap(text, 240)))
-            if len(details) > 6:
-                parts.append("… %d more problem texts (all in gate.py's output)" % (len(details) - 6))
+                                           ("%d times" % n) if n > 1 else "once", esc_wrap(text, 320)))
             rows.append([esc(k), "; ".join(parts), str(len(v))])
         out += latex.plain_table(latex.spec_p([30, 134], extra_cols=1, extra_spec="r"),
-                                 ["problem kind", "scenario, arm", "n"], rows)
+                                 ["problem kind", "scenario and access path, or the problem's text", "n"], rows,
+                                 "every problem by the gate's kind (a text cut here is complete in {\\upshape %s})" % tt(GATE_PROBLEMS_FILE))
     for n in (gate.get("notes") or [])[:6]:
         out += "{\\small\\color{black!60}note: %s}\\par\n" % esc(n, 300)
     return out + "\n"
@@ -2809,6 +3662,8 @@ def mcp_limits(ctx):
                              ["reason", "ids", "scenarios"], [[r[0], r[2], r[1]] for r in rows])
     dec = run.declared
     out += "\\parhead{Owner-declared exemptions}\n"
+    out += ctx.prose_paragraphs("provenance", "exemption_kinds", optional=True) if ctx.overview_section(
+        "provenance").get("exemption_kinds") else exemption_kinds_default()
     if isinstance(dec, dict):
         out += "File %s (declared version %s).\n" % (tt(dec.get("_file") or "declared"), esc(dec.get("declared_version")))
         rows = []
@@ -2816,11 +3671,95 @@ def mcp_limits(ctx):
             for e in dec.get(kind) or []:
                 if isinstance(e, dict):
                     rows.append([esc(kind.replace("_", " ")), latex.breakable_id(e.get("scenario") or e.get("relation") or "–"),
-                                 esc(", ".join(e.get("arms") or [])), esc_wrap(e.get("reason"))])
-        out += latex.plain_table(latex.spec_p([22, 30, 22, 96]), ["kind", "scenario", "arms", "reason"], rows)
+                                 esc(", ".join(e.get("arms") or [])), esc(exemption_consequence(kind, e, run)),
+                                 esc_wrap(e.get("reason"))])
+        out += latex.plain_table(latex.spec_p([18, 26, 18, 44, 68]),
+                                 ["kind", "scenario or relation", "access paths", "what it changes for this gate",
+                                  "the owner's reason"], rows)
+        out += ("\\noindent{\\small An exemption changes what the gate requires, not what the run observed: the test's "
+                "recorded outcome stands as printed in its chapter; what its exempted executions showed stays shown, "
+                "and what they did not show stays unproven there by this run (the fourth column, read from the "
+                "record). A reason that names a later manifest version describes a plan for that version, not "
+                "evidence from this run.}\\par\n")
     else:
         out += "None given for this manifest.\n\n"
     return out
+
+
+def exemption_kinds_default():
+    return ("The declared file holds three kinds of entry, each a release-policy decision of the owner with its "
+            "reason. An \\emph{exclusion} drops one scenario on the named access paths from the gate's required "
+            "executions; a \\emph{check not required} drops one property check of one scenario on those paths, the "
+            "scenario's other checks and the other paths staying required; a \\emph{relation excluded} drops one "
+            "relation on those paths. None of them changes a recorded outcome or shows the omitted behaviour.\n\n")
+
+
+def exempted_evidence(run, entry):
+    """What the executions an exclusion exempts showed, from the record: (outcomes, shown, not_shown, partly) over
+    the scenario's lines on the entry's access paths (and repeats, when it names some): the recorded outcome words
+    per access path and repeat; the property checks every item of which passed on some exempted execution; those
+    no item of which passed there; and {check: (passed items, items)} where some items passed and others did not
+    (the readability review's verification of 2026-10-16, shared M2: an exemption shows nothing, so what passed
+    stays passed and only what did not pass stays unproven)."""
+    sid = entry.get("scenario")
+    reps = entry.get("repeats")
+    lines = []
+    for arm in (entry.get("arms") or list(ARMS)):
+        for l in run.arm_lines(sid, arm):
+            if reps is None or l.get("repeat") in reps:
+                lines.append((arm, l))
+    outcomes = ["%s r%s %s" % (cells.ARM_SHORT.get(arm, arm), l.get("repeat"),
+                               cells.WORD.get(l.get("outcome"), str(l.get("outcome")))) for arm, l in lines]
+    tally = {}
+    for _, l in lines:
+        for c in l.get("checks") or []:
+            if isinstance(c, dict) and run.is_property(c.get("check")):
+                t = tally.setdefault(str(c.get("check")), [0, 0])
+                t[1] += 1
+                if c.get("outcome") == "pass":
+                    t[0] += 1
+    shown = sorted(n for n, (p, m) in tally.items() if p == m)
+    not_shown = sorted(n for n, (p, m) in tally.items() if p == 0)
+    partly = dict((n, (p, m)) for n, (p, m) in tally.items() if 0 < p < m)
+    return outcomes, shown, not_shown, partly
+
+
+def exemption_consequence(kind, entry, run=None):
+    """The coverage consequence of one declared entry in plain words (READ-025): for an exclusion, read from the
+    record when the run is given (exempted_evidence), so that a property the exempted executions passed is not
+    called unproven."""
+    arms_ = ", ".join(entry.get("arms") or []) or "every access path"
+    if kind == "exclusions":
+        reps = entry.get("repeats")
+        where = (" (repeat%s %s; the other repeats stay required)" % (
+            "" if len(reps) == 1 else "s", ", ".join(str(r) for r in reps))) if reps else ""
+        if run is None or not entry.get("scenario"):
+            return ("not required on %s%s; the exemption shows nothing: the recorded outcomes there stand, what the "
+                    "exempted executions showed stays shown, and what they did not show stays unproven there by this "
+                    "run" % (arms_, where))
+        outcomes, shown, not_shown, partly = exempted_evidence(run, entry)
+        head = "not required on %s%s; the exemption shows nothing: the recorded outcome%s there stand%s" % (
+            arms_, where, "" if len(outcomes) == 1 else "s", "s" if len(outcomes) == 1 else "")
+        if not outcomes:
+            return head + " (no execution recorded there)"
+        text = head + " (%s)" % "; ".join(outcomes)
+        if not shown and not not_shown and not partly:
+            return text + "; no property check there: the status, code and text are the claim"
+        parts = []
+        if shown:
+            parts.append("%s passed there and stay%s shown" % (", ".join(shown), "s" if len(shown) == 1 else ""))
+        for name, (p, m) in sorted(partly.items()):
+            parts.append("%s passed %d of its %d items there, the other%s not shown there by this run" % (
+                name, p, m, "" if m - p == 1 else "s"))
+        if not_shown:
+            parts.append("%s %s not shown there by this run" % (", ".join(not_shown), "was" if len(not_shown) == 1 else "were"))
+        return text + "; " + "; ".join(parts)
+    if kind == "not_required":
+        return ("the check %s is not required on %s; the scenario's other checks stay required there, and this "
+                "check stays required on the other access paths" % (entry.get("check") or "?", arms_))
+    if kind == "relations_excluded":
+        return "the relation is not required on %s; the compared answers stand as recorded" % arms_
+    return "–"
 
 
 def appendices(ctx):
