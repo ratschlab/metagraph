@@ -29,7 +29,8 @@ V6_BUDGET = 110000
 # round 2 (the owner, 2026-10-16): the /pattern checks the MCP's answer cannot carry (areas.pattern_mcp_unexposed), by
 # what they read: exactly the 27 scenarios whose MCP executions read them not_exposed in the v5 baseline 81c620ef,
 # less the 3 whose field the MCP answer does carry per entry (MCP_PATTERN_PER_ENTRY: Q-pred-0011 / -0012's
-# predicate block, P-edge-0009's load_ms; an MCP runner change). Two are scenario-level (their only property check).
+# predicate block, P-edge-0009's load_ms; the checks read them there, checks.MCP_PATTERN_ENTRY_FIELDS). Two are
+# scenario-level (their only property check).
 ABSENCE_SCOPE = ["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-%04d" % i for i in range(1, 7)] + \
     ["D-P-exact-0001", "D-P-scope-0004"]
 STRANDS = ["P-scope-%04d" % i for i in range(7, 13)] + ["N-usecase-0005"]
@@ -88,7 +89,7 @@ class ManifestV6(unittest.TestCase):
         """What the MCP's /pattern answer cannot carry is marked not implemented yet via MCP at property level (the
         owner's rule of 2026-10-15): entry_fields reading absence_scope, strands or the pattern text; scenario-level
         where that is the scenario's only property check (P-scope-0004, -0006). The predicate block and load_ms the
-        MCP's answer carries per entry stay unmarked (an MCP runner change)."""
+        MCP's answer carries per entry stay unmarked: the checks read them there (checks.MCP_PATTERN_ENTRY_FIELDS)."""
         marked = {}
         for s in self.v6["scenarios"]:
             for e in (s["mcp"].get("not_implemented_checks") or []):

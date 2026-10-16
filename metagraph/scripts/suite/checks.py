@@ -421,25 +421,62 @@ def check_status(sc, ans, a, arm, client=None):
     return PASS, "http %s%s" % (http, (" code %s" % err.get("code")) if err.get("code") else "")
 
 
+# What the MCP arm's /pattern answer states on its entries in place of the host's top level: the service's
+# pattern_search keeps each database's predicate block (normal form, names, known, unknown_labels, vacuous, scope,
+# strands) and its timing.load_ms on every entry it merges (by_database[].predicate / .load_ms), and the runner's
+# normaliser leaves them there (its body is mode, patterns and index). {the host's top-level path: the entry's key}
+MCP_PATTERN_ENTRY_FIELDS = {"predicate": "predicate", "timing.load_ms": "load_ms"}
+
+
+class _Differs(Exception):
+    """The answered entries state a field of MCP_PATTERN_ENTRY_FIELDS differently."""
+
+
+def _answer_field(sc: dict, body: Any, path: str, arm: str) -> Any:
+    """The value of |path| in an answer's body (_get); on the MCP arm, for a POST /pattern path of
+    MCP_PATTERN_ENTRY_FIELDS that the body does not state, the value every answered entry states there (one value, the
+    host's top-level one: _Differs when two entries differ). Missing when neither states it."""
+    try:
+        return _get(body, path)
+    except Missing:
+        if arm != "mcp" or sc.get("route") != "POST /pattern" or not isinstance(body, dict):
+            raise
+        top = next((k for k in MCP_PATTERN_ENTRY_FIELDS if path == k or path.startswith(k + ".")), None)
+        if top is None:
+            raise
+        sub = MCP_PATTERN_ENTRY_FIELDS[top] + path[len(top):]
+        vals = [_get(e, sub) for e in body.get("patterns") or []
+                if isinstance(e, dict) and "counts" in e and "error" not in e]
+        if not vals:
+            raise
+        if any(v != vals[0] for v in vals[1:]):
+            raise _Differs("%s: the entries state %s" % (path, ", ".join(repr(v) for v in vals[:3])))
+        return vals[0]
+
+
 def check_answer_fields(sc, ans, a, arm):
     """Fields of the answer's body by dotted path (any_status: also on an error body, e.g. a 409's state). when_http:
     the fields of an answer of that status only (another status: nothing to check, pass), e.g. the shape of an
-    attempt's duplicate 409 (A-10)."""
+    attempt's duplicate 409 (A-10). On the MCP arm a /pattern field the service states on every entry instead
+    (MCP_PATTERN_ENTRY_FIELDS) is read there (_answer_field)."""
     if "when_http" in a and ans.get("http") != a["when_http"]:
         return PASS, "http %s: the fields are checked on an http %s only" % (ans.get("http"), a["when_http"])
     body = _body(ans)
-    for path, want in (a.get("equals") or {}).items():
-        got = _get(body, path)
-        if got != want:
-            return FAIL, "%s = %r, expected %r" % (path, got, want)
-    for path in a.get("present", []):
-        _get(body, path)
-    for path in a.get("absent", []):
-        try:
-            _get(body, path)
-            return FAIL, "%s present, expected absent" % path
-        except Missing:
-            pass
+    try:
+        for path, want in (a.get("equals") or {}).items():
+            got = _answer_field(sc, body, path, arm)
+            if got != want:
+                return FAIL, "%s = %r, expected %r" % (path, got, want)
+        for path in a.get("present", []):
+            _answer_field(sc, body, path, arm)
+        for path in a.get("absent", []):
+            try:
+                _answer_field(sc, body, path, arm)
+                return FAIL, "%s present, expected absent" % path
+            except Missing:
+                pass
+    except _Differs as d:
+        return FAIL, "%s (one database, one value)" % d
     return PASS, "fields as expected"
 
 

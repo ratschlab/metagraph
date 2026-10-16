@@ -476,6 +476,39 @@ class PatternChecks(unittest.TestCase):
         self.assertGreater(n, 150)
         self.assertEqual(bad, [])
 
+    def test_mcp_reads_the_predicate_block_and_load_ms_on_its_entries(self):
+        """The MCP's /pattern answer states the host's top-level predicate block and timing.load_ms on every entry
+        (the service keeps each database's, the runner's normaliser leaves them there): answer_fields reads them
+        there on the MCP arm (checks.MCP_PATTERN_ENTRY_FIELDS), where it read not_exposed (Q-pred-0011 / -0012 and
+        P-edge-0009 in the v5 baseline); the direct arm still reads the top level."""
+        def entry(**kw):
+            return dict({"id": "w", "kind": "dna", "length": 25, "scope": "any_offset", "mode": "all_or_count",
+                         "counts": {"contexts": {"relation": "exact", "value": 0}}, "results": [], "returned": 0,
+                         "retrieval_complete": True, "stop": None, "determinism": "full", "notes": [],
+                         "work": {"steps": 3}, "timing": {"elapsed_ms": 5.0}}, **kw)
+
+        def mcp(*entries):
+            return {"http": 200, "error": None, "body": {"mode": "all_or_count", "patterns": list(entries),
+                                                         "index": {"k": 31, "graph_mode": "basic"}}}
+        pred = {"known": 0, "names": 1, "normal_form": False, "unknown_labels": ["999999999"], "vacuous": False}
+        sc = {"route": "POST /pattern", "truth": {}, "request": {"patterns": [{"dna": "A" * 25, "id": "w"}]}}
+        args = {"equals": {"predicate.normal_form": False, "predicate.unknown_labels": ["999999999"]}}
+        self.assertEqual(outcome(sc, mcp(entry(predicate=pred)), "answer_fields", "mcp", **args)[0], "pass")
+        bad = dict(pred, normal_form=True)
+        self.assertEqual(outcome(sc, mcp(entry(predicate=bad)), "answer_fields", "mcp", **args)[0], "fail")
+        out, detail = outcome(sc, mcp(entry(predicate=pred), entry(id="v", predicate=bad)), "answer_fields", "mcp",
+                              **args)
+        self.assertEqual(out, "fail")
+        self.assertIn("the entries state", detail)
+        self.assertEqual(outcome(sc, mcp(entry()), "answer_fields", "mcp", **args)[0], "not_exposed")
+        load = {"equals": {"timing.load_ms": 0}}
+        self.assertEqual(outcome(sc, mcp(entry(load_ms=0.0)), "answer_fields", "mcp", **load)[0], "pass")
+        self.assertEqual(outcome(sc, mcp(entry(load_ms=812.5)), "answer_fields", "mcp", **load)[0], "fail")
+        # the direct arm reads the host's top level only, and another top-level field stays unexposed on the MCP
+        self.assertEqual(outcome(sc, ok_answer(mcp(entry(load_ms=0.0))["body"]), "answer_fields", **load)[0], "fail")
+        self.assertEqual(outcome(sc, mcp(entry()), "answer_fields", "mcp",
+                                 equals={"limits.max_contexts": 10000})[0], "not_exposed")
+
     def test_invariants_refuse_a_mutated_answer(self):
         req, ans = fixture("mismatch_neighbours")
         sc = {"route": "POST /pattern", "request": req, "truth": {}}

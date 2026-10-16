@@ -3239,8 +3239,8 @@ def capability_relations(ctx: Ctx, cid: Dict[str, str], caps: Dict[str, dict]) -
 # the owner's rule of 2026-10-15), and build_manifest.scenario_level_marks makes it the scenario's mark where it would
 # cover every property check. Not marked, because the MCP's answer DOES carry them, per entry: the host's top-level
 # predicate block (by_database[].predicate, verbatim on every entry) and timing.load_ms (by_database[].load_ms): the
-# runner's normaliser leaves them on the entry where the host states them at the top (MCP_PATTERN_PER_ENTRY; an MCP
-# runner change, README "Manifest v6"), so a check reading them stays not_exposed and blocks until it lifts them.
+# runner's normaliser leaves them on the entry where the host states them at the top (MCP_PATTERN_PER_ENTRY), and the
+# checks read them there on the MCP arm (checks.MCP_PATTERN_ENTRY_FIELDS: Q-pred-0011 / -0012, P-edge-0009).
 MCP_PATTERN_BODY_KEYS = ("mode", "patterns", "index")
 MCP_PATTERN_PER_ENTRY = ("predicate", "timing.load_ms")
 MCP_PATTERN_ENTRY_NOT_EXPOSED = {
