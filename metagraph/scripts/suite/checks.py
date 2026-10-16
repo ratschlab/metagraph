@@ -621,21 +621,24 @@ def _pattern_work_time(sc: dict, body: dict) -> Optional[float]:
 
 # The request's time outside its patterns' own timing (the gaps between the patterns' searches): an answer judged by
 # its entries' timing (_pattern_elapsed) may have run this much longer than they state. At most 4.6 ms over the 974
-# direct /pattern 200s of the v5 baseline run (top-level elapsed less the entries' sum).
+# direct /pattern 200s of the v5 baseline run (top-level elapsed less the entries' sum, never below 0).
 _ENTRY_TIMING_SLACK_MS = 25.0
-# An entry's timing values that are part of another one it states (SPEC-pattern-search §8.4: support_ms of
-# extension_ms), left out of the sum
-_NESTED_TIMING = ("support_ms",)
+# An entry's timing values that add up to its part of the request's time (SPEC-pattern-search §8.4): elapsed_ms, that
+# pattern's search, and the reads and passes it states beside the search (label_discovery_ms, placement_ms,
+# selection_ms). The others are parts of its search (extension_ms, label_intersection_ms, verification_ms of a long
+# pattern's search; support_ms of extension_ms) and are not added: summed, they ran up to 1,047 ms past the top-level
+# figure over the v5 baseline's direct answers (L-long-0003), which would admit a stop that early
+_ENTRY_TIMING_OWN = ("elapsed_ms", "label_discovery_ms", "placement_ms", "selection_ms")
 
 
 def _pattern_elapsed(body: dict) -> Tuple[Optional[float], str]:
     """(the elapsed time a /pattern answer states for its search, in ms, where it comes from): the top-level
     timing.elapsed_ms (from the deadline's start to the end of the search, SPEC-pattern-search §8.4); else, on an
     answer without it (the MCP arm's: the service keeps each pattern's own timing and not the request's), the sum
-    over the answered entries of every timing value an entry states (elapsed_ms is that pattern's search; the reads
-    beside it, label_discovery_ms, placement_ms, selection_ms, ..., are its own values; the patterns are searched
-    one after the other within the request's deadline) less _NESTED_TIMING, plus _ENTRY_TIMING_SLACK_MS; (None, '')
-    when neither states a time."""
+    over the answered entries of the timing values _ENTRY_TIMING_OWN names (elapsed_ms is that pattern's search; the
+    reads beside it, label_discovery_ms, placement_ms, selection_ms, are its own values; the patterns are searched
+    one after the other within the request's deadline), plus _ENTRY_TIMING_SLACK_MS; (None, '') when neither states
+    a time."""
     el = _number((body.get("timing") or {}).get("elapsed_ms"))
     if el is not None:
         return el, "timing.elapsed_ms"
@@ -647,7 +650,7 @@ def _pattern_elapsed(body: dict) -> Tuple[Optional[float], str]:
         if _number(t.get("elapsed_ms")) is None:
             return None, ""
         seen += 1
-        total += sum(_number(v) or 0.0 for k, v in t.items() if k not in _NESTED_TIMING)
+        total += sum(_number(t.get(k)) or 0.0 for k in _ENTRY_TIMING_OWN)
     if not seen:
         return None, ""
     return total + _ENTRY_TIMING_SLACK_MS, "the entries' timing (%d pattern(s), +%.0f ms)" % (

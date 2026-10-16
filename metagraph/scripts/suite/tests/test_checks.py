@@ -1892,6 +1892,35 @@ class StatedReasons(unittest.TestCase):
         d["body"]["timing"] = {"elapsed_ms": 109800.0}
         self.assertEqual(outcomes(d, "direct-local")["count_relation"][0], "pass")
 
+    def test_mcp_time_stop_adds_only_the_entries_own_timing(self):
+        """The entries' timing that stands in for the request's on the MCP arm adds an entry's search (elapsed_ms) and
+        the reads beside it (label_discovery_ms, placement_ms, selection_ms), never the parts of its search
+        (extension_ms, label_intersection_ms, verification_ms, support_ms: SPEC-pattern-search §8.4). Summed, those
+        ran up to 1,047 ms past the top-level figure over the v5 baseline's direct answers, so a stop that early
+        passed: a 100 s stop of a 110 s budget with a 10 s extension read as 110 s."""
+        sc = {"route": "POST /pattern", "truth": {},
+              "request": {"patterns": [{"dna": "GCTACACACACC", "id": "w"}], "mode": "count", "scope": "any_offset",
+                          "time_budget_ms": 110000, "max_contexts": 10000},
+              "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}}]}
+        offs = dict((str(o), {"relation": "at_least", "value": 5}) for o in range(20))
+
+        def mcp_answer(timing):
+            e = {"id": "w", "kind": "dna", "length": 12, "scope": "any_offset", "mode": "count",
+                 "counts": {"contexts": {"relation": "at_least", "value": 100, "by_offset": offs}},
+                 "retrieval_complete": False, "stop": {"phase": "discovery", "reason": "time"},
+                 "determinism": "time_limited", "notes": [], "work": {"steps": 10}, "timing": timing}
+            return {"http": 200, "error": None, "body": {"mode": "count", "patterns": [e],
+                                                         "index": {"k": 31, "graph_mode": "basic"}}}
+
+        def inv(ans):
+            return dict((r["check"], (r["outcome"], r["detail"])) for r in checks.evaluate(sc, ans, "mcp"))["invariants"]
+        for nested in ("extension_ms", "label_intersection_ms", "verification_ms", "support_ms"):
+            out, detail = inv(mcp_answer({"elapsed_ms": 100000.0, nested: 10000.0}))
+            self.assertEqual(out, "fail", nested)
+            self.assertIn("after 100025 ms", detail)
+        for own in ("label_discovery_ms", "placement_ms", "selection_ms"):   # beside the search: added
+            self.assertEqual(inv(mcp_answer({"elapsed_ms": 100000.0, own: 9800.0}))[0], "pass", own)
+
     def walk_answer(self, sc, n, trig, counters, limitation, bounds=None, timing=None, resource_stop=None):
         """A walk of scenario |sc| (v2 manifest) following its record for n bp on the requested arm, stopped by
         |trig| (its segment's events list, which the engine writes on every segment, empty)."""
