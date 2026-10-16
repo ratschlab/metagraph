@@ -22,11 +22,11 @@
   "250": "the finalisation reserve of a /resolve, 250 ms (SPEC-labeled-traversal-core section 4.5)"
  },
  "common": [
-  "Every check reads the normalised answer: the HTTP status, the body, the error (code and text) and, on a direct arm, the headers. The MCP arm's normaliser maps the tool results into the same shape for the fields the service exposes.",
-  "Before a check runs, checks.evaluate applies three rules. A check other than status on an answer whose status is not 200 does not run: it is inconclusive (not testable) when the scenario allows that status, which is the case for an expected refusal and for an allowed 503 deadline (see status), and a failure (no answer to check) otherwise; `budget_respected` on an allowed 503 is the one exception, it judges the 503's timing. A field the check needs that the answer lacks is not exposed on the MCP arm and a failure on a direct arm, where the field is part of the contract. An unknown check name, or a check that raises, is a failure stating why, never a silent pass. These are the check items' outcomes (pass, fail, inconclusive, finding, not exposed); the execution's outcome is read from them below, and where checks.evaluate itself raised the direct runners and the re-evaluation record the execution as an error on a direct arm and as a failure via MCP (the shared vocabulary, appendix F).",
+  "Every check reads the normalised answer: the HTTP status, the body, the error (code and text) and, on a direct access path, the headers. The MCP arm's normaliser maps the tool results into the same shape for the fields the service exposes.",
+  "Before a check runs, checks.evaluate applies three rules. A check other than status on an answer whose status is not 200 does not run: it is inconclusive (not testable) when the scenario allows that status, which is the case for an expected refusal and for an allowed 503 deadline (see status), and a failure (no answer to check) otherwise; `budget_respected` on an allowed 503 is the one exception, it judges the 503's timing. A field the check needs that the answer lacks is not exposed on the MCP access path and a failure on a direct access path, where the field is part of the contract. An unknown check name, or a check that raises, is a failure stating why, never a silent pass. These are the check items' outcomes (pass, fail, inconclusive, finding, not exposed); the execution's outcome is read from them below, and where checks.evaluate itself raised the direct runners and the re-evaluation record the execution as an error on a direct access path and as a failure via MCP (the shared vocabulary, appendix F).",
   "The execution's outcome follows from its checks by precedence fail, finding, inconclusive, pass; an execution whose property checks all could not test anything is inconclusive even when its generic checks passed; a scenario without a property check (a refusal: its status, code and text are the claim) is judged by its generic checks (I.3).",
   "A check that cannot test its property because the answer states a hiding (a withheld list, a cut), a stop or a time limitation accepts the statement only once the answer shows it can have happened: for a /resolve stop, a reason of time and a `timing.elapsed_ms` at or after the budget less the reserve. A stated reason that cannot have happened fails the check that met it, and the route's invariants with it; it never makes a check inconclusive.",
-  "On the MCP arm one rule follows the checks: an execution the service ended by one of its own limits before the host answered (a `resolve_timeout` at the service's deadline for the host call, a relayed `traversal_resolve_deadline`, a relayed /pattern deadline) is adjudicated a host state, inconclusive, when the service's own timing shows the limit was reachable, and a status failure otherwise (the MCP runner's rule, replayed by the re-evaluation). The checks as they read on the raw answer stay in the record as the intermediate evaluation; a detail block states the adjudication first and labels those lines so."
+  "On the MCP access path one rule follows the checks: an execution the service ended by one of its own limits before the host answered (a `resolve_timeout` at the service's deadline for the host call, a relayed `traversal_resolve_deadline`, a relayed /pattern deadline) is adjudicated a host state, inconclusive, when the service's own timing shows the limit was reachable, and a status failure otherwise (the MCP runner's rule, replayed by the re-evaluation). The checks as they read on the raw answer stay in the record as the intermediate evaluation; a detail block states the adjudication first and labels those lines so."
  ],
  "checks": {
   "budget_respected": {
@@ -128,7 +128,7 @@
    "routes": {
     "POST /resolve": "`num_kmers` equals L - k + 1 for a query of L bases, or, under a stated stop, equals `stop.resolved_kmers`, with `stop.resolved_bp` equal to `resolved_kmers` + k - 1 (0 for a stop before the first k-mer), `stop.remainder_from_bp` equal to `resolved_kmers`, and `stop.query_kmers` and `query_bp` those of the query; the stop's reason is time and the elapsed time is at or after the budget less the reserve. `graph_runs` are sorted, disjoint and within [0, `num_kmers`). Each label's runs lie within the graph runs and their lengths sum to its `kmers_supported`. A discovery's list is ranked by supported k-mers, most first (not under support trace, whose counts are of trace runs), is at most `max_labels` long (the request's, else the default 1,000), and names no label with more supported k-mers than there are in the graph; its `labels_truncated`, when present, is an object whose kept equals the list's length and `max_labels`, whose total is larger, whose least kept support is at least the most dropped and at most the in-graph k-mer count, whose full-length drops are at most the dropped labels and occur only where the most dropped support equals the in-graph count, and whose least kept support is the last listed label's. With explicit labels every requested label is present in the answer.",
     "POST /pattern": "One entry per request pattern, in request order, each echoing its request `id`. A refused slot (an `error`) carries no `counts` and no `results`. An answered entry: every count has the shape of SPEC section 8.6 (`value`, `relation`, `unit`; `lower` and `upper` with `bounds` only); for a pattern of at most k bases `counts.contexts.by_offset` has one key per offset of the scope (k - L for `suffix`, 0 to k - L for `any_offset`) and the parts (`by_offset`, `by_strand`) sum to an exact total under section 7.4's algebra; with `max_mismatches` above 0, `by_mismatches` has one key per level from 0 to the allowance, the levels sum to the total's relation and value, no level below a stop's `mismatch_level` is `unknown` and none above it is anything else, and `work.steps_by_mismatches` sums to `work.steps`. Mode `count` carries no `results`, `withheld`, `returned` or `cut` and `retrieval_complete` false; a retrieval mode carries `results` with `returned` equal to their number, no result beside a `withheld` list, and a `cut` only in `partial`. Each result's `instance` is `kmer[offset, offset + L)` with the offset in the scope, and matches the oriented pattern of its strand (an IUPAC code by its set, a peptide by its codons in the request's table; with substitutions, the level equals the substitutions recomputed from the instance against P in P's coordinates and these equal the stated ones, no level above the allowance); a path's `sequence` has L bases, spells the pattern on its strand and has L - k + 1 `nodes`; the results are in the answer order of section 7.9 (level, node, offset, orientation; a path by anchor node, orientation, sequence) and no context or path is listed twice. `retrieval_complete` true needs the primary count exact and equal to the list. The note `low_complexity_pattern` is absent beside a budget stop of the search (`max_steps`, `time`, `max_annotation_work`, `max_memory` in an engine phase). A stop in `discovery`, `mask_scan`, `extraction`, `extension` or `selection` comes with a `cut` or a `withheld` list. Every stated `withheld` reason, `cut` reason, `stop` and time limitation is one sections 7.5 and 7.6 list, possible for the request (its mode, projection, predicate, path search, memory account) and shown possible by the answer (a `max_steps` stop with the steps short of the budget, a time stop before the work time, a threshold stop below its threshold are impossible); nothing is judged where the answer does not show the quantity.",
-    "POST /traverse": "One result per seed (a request of identical seeds states how many are distinct, so that the service's merge of duplicates is told from a lost result). The walk ran the scenario's strategy: a preset knob the MCP arm changed or dropped is named, and `strategy.clamped` states only what the engine can lower. Per walked seed and requested arm: `status` is complete, truncated or pruned; complete exactly when `complete_to_bp` equals `max_extension_bp` (section 6.10), and `outcome.walks` complete only when every requested arm is; every segment carries its events list; each path's segments sum to its `length_bp` and chain parent to child, and no path exceeds the radius. A path ended by a resource reason lies on an arm a cap truncated or pruned, by the cap in `cap_trigger` or a later one its limitations name, and at or past the arm's `complete_to_bp` (every path that ended before it ended for a semantic reason); a structural end (`edge_reuse`, `rejoined_seed`, a hairpin, a label end) lies where the request, the strategy and the arm let it happen (sections 6.4 and 6.6), judged on the segments' events. A stated cap trigger must be possible: a `walk_domain` limitation naming the knob with an observed demand past the limit, the arm's counters at the cap (`output_bp` for `max_output_bp`, the seed's steps for `max_steps`, paths and live heads for `max_paths`), a time stop not before the budget on the seed's clock, `resource_limit` with the seed's `resource_stop`."
+    "POST /traverse": "One result per seed (a request of identical seeds states how many are distinct, so that the service's merge of duplicates is told from a lost result). The walk ran the scenario's strategy: a preset knob the MCP access path changed or dropped is named, and `strategy.clamped` states only what the engine can lower. Per walked seed and requested arm: `status` is complete, truncated or pruned; complete exactly when `complete_to_bp` equals `max_extension_bp` (section 6.10), and `outcome.walks` complete only when every requested arm is; every segment carries its events list; each path's segments sum to its `length_bp` and chain parent to child, and no path exceeds the radius. A path ended by a resource reason lies on an arm a cap truncated or pruned, by the cap in `cap_trigger` or a later one its limitations name, and at or past the arm's `complete_to_bp` (every path that ended before it ended for a semantic reason); a structural end (`edge_reuse`, `rejoined_seed`, a hairpin, a label end) lies where the request, the strategy and the arm let it happen (sections 6.4 and 6.6), judged on the segments' events. A stated cap trigger must be possible: a `walk_domain` limitation naming the knob with an observed demand past the limit, the arm's counters at the cap (`output_bp` for `max_output_bp`, the seed's steps for `max_steps`, paths and live heads for `max_paths`), a time stop not before the budget on the seed's clock, `resource_limit` with the seed's `resource_stop`."
    }
   },
   "status": {
@@ -165,7 +165,7 @@
    "args": "equals: dotted paths of the body with the value each must hold; present: paths that must exist; absent: paths that must not; `when_http`: judge the fields of an answer of that status only (another status passes: nothing to check); `any_status`: read an error body too.",
    "asserts": "Each named path of the body holds the given value, exists, or is absent, as asked, read on a 200, or on any status when the expectation says so. In chapter T: a 409's `state` expired; `usage` present with `bound.seeds`, `bound.time_budget_ms`, `bound.allowance_ms` and `bound.walk_until_ms` on an attempt's 200; `attempt.state` and `attempt.usage` present and `usage` absent on a duplicate's 409; `results.1.duplicate` true on two identical seeds; a seed's `labels_supporting_total`, `seed_id` and `seed_id_mismatch`. In chapter P `timing.load_ms` 0 on a single-graph server (`in_ram`); in chapter M no `limits.max_mismatches` on a request at 0; in chapter Q `predicate.unknown_labels` naming the unknown name and `predicate.normal_form` false or true.",
    "inconclusive": "By the common rule only: a non-200 the scenario allows, where the expectation does not read error bodies (`any_status`). An expectation with `when_http` on an answer of another status is not judged and reads as a pass with that note.",
-   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the body (a failure on a direct arm, not exposed on the MCP arm)."
+   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the body (a failure on a direct access path, not exposed on the MCP access path)."
   },
   "blocked_event": {
    "generic": false,
@@ -188,8 +188,8 @@
    ],
    "args": "required: dotted paths the document must carry; equals: {path: value} it must carry exactly; `max_bytes`: the document's size bound as compact JSON.",
    "asserts": "The document carries every required path, each `equals` path with exactly the given value (the pinned `index_fp`, `k`, the regime and graph mode, the contract version, availability, `details` naming the full block's route, the pattern routes, `ready`), and its compact JSON is within `max_bytes` where one is given (the 32 KiB bound of the probe document).",
-   "inconclusive": "Only by the common rule. On the MCP arm the capabilities tools answer the service's own view, which lacks the host's fields: a required path missing there is not exposed, so the MCP cell reads inconclusive by design (appendix B).",
-   "fails": "A value that differs; a document above `max_bytes`; on a direct arm a required path missing (the common rule: the field is part of the contract)."
+   "inconclusive": "Only by the common rule. On the MCP access path the capabilities tools answer the service's own view, which lacks the host's fields: a required path missing there is not exposed, so the MCP cell reads inconclusive by design (appendix B).",
+   "fails": "A value that differs; a document above `max_bytes`; on a direct access path a required path missing (the common rule: the field is part of the contract)."
   },
   "clamped": {
    "generic": false,
@@ -202,7 +202,7 @@
    "args": "field: the request field; requested and effective: the two values; where: limits (the default, /resolve and /pattern) or strategy (/traverse's strategy.clamped).",
    "asserts": "limits.clamped (or strategy.clamped) holds an entry for the field with exactly the requested and the effective value: the host lowered the request's bound to its cap and said so. In chapter R: `bounds.time_budget_ms` 70,000 lowered to 60,000. In chapter T: `bounds.time_budget_ms` 70,000 lowered to the server's `max_time_ms` 60,000 and stated in `strategy.clamped` (T-edge-0012). In chapter P: `max_contexts` 10,001 lowered to 10,000 (P-modes-0004); on /pattern the list is `limits.clamped`.",
    "inconclusive": "Only by the common rule.",
-   "fails": "No entry for the field in the clamped list, or an entry with other values; the list missing from the answer (not exposed on the MCP arm)."
+   "fails": "No entry for the field in the clamped list, or an entry with other values; the list missing from the answer (not exposed on the MCP access path)."
   },
   "contains_source_context": {
    "generic": false,
@@ -225,7 +225,7 @@
    ],
    "args": "value: the expected `Content-Encoding` header, gzip, deflate or null for none; `any_status`: judge an error answer too.",
    "asserts": "The answer's `Content-Encoding` header equals the expected value: gzip or deflate when the request's `Accept-Encoding` asked for it on a 200, none on an error body whatever the request asked.",
-   "inconclusive": "Only by the common rule. The headers are read on the direct arms only: the MCP arm's answer carries none, so the check is not exposed there (the protocol scenarios are not expressible through the tools in any case).",
+   "inconclusive": "Only by the common rule. The headers are read on the direct access paths only: the MCP access path's answer carries none, so the check is not exposed there (the protocol scenarios are not expressible through the tools in any case).",
    "fails": "Another encoding than expected, an encoding on an error body, or none where one was asked and answered 200."
   },
   "count_relation": {
@@ -252,7 +252,7 @@
    "args": "pattern: the entry's index (0 when absent); reason: the reason expected, or a list of those accepted (null among them for no cut).",
    "asserts": "The entry's `cut` names the expected reason: `max_contexts`, `max_steps`, `time`, `max_memory`, `max_paths`, `max_annotation_work`, or in chapter Q `max_predicate_contexts` (the raw release cut at the admission cap in partial), as the scenario's mode and threshold leave it (whether the reason can have happened is the invariants' question).",
    "inconclusive": "Only by the common rule.",
-   "fails": "`cut` null or naming another reason; `cut` absent from the entry (a failure on a direct arm, not exposed on the MCP arm)."
+   "fails": "`cut` null or naming another reason; `cut` absent from the entry (a failure on a direct access path, not exposed on the MCP access path)."
   },
   "deterministic": {
    "generic": false,
@@ -261,8 +261,8 @@
     "SPEC-labeled-traversal-core section 6.8 (determinism provided no time budget tripped)",
     "SPEC-pattern-search section 7.9 (determinism time_limited)"
    ],
-   "args": "none; the runner passes the earlier repeats of the scenario on the same arm as their answer digests and what made each time-limited.",
-   "asserts": "The answer's digest, the sha256 of the canonical JSON of the normalised answer without its headers and without every timing key, equals the digests of the scenario's earlier repeats on the same arm that no time budget limited. It is left out of a scenario's first repeat, which has nothing to compare, so that repeat's outcome rests on the other checks. In chapter R it appears through chapter D's copies of four R scenarios, repeated three times.",
+   "args": "none; the runner passes the earlier repeats of the scenario on the same access path as their answer digests and what made each time-limited.",
+   "asserts": "The answer's digest, the sha256 of the canonical JSON of the normalised answer without its headers and without every timing key, equals the digests of the scenario's earlier repeats on the same access path that no time budget limited. It is left out of a scenario's first repeat, which has nothing to compare, so that repeat's outcome rests on the other checks. In chapter R it appears through chapter D's copies of four R scenarios, repeated three times.",
    "inconclusive": "This answer is itself time-limited (a 503 deadline, a resolve stopped by time, a pattern or seed stopped by its budget, an attempt's bound): it need not repeat; or no earlier repeat is free of a time limitation (then there is nothing to compare).",
    "fails": "The digest differs from an earlier repeat's that no time budget limited; or this answer is time-limited and differs, and its stated time limitation cannot have happened (a /resolve stop before the budget less the reserve, a /pattern or /traverse stop before its work time or budget)."
   },
@@ -277,7 +277,7 @@
    "args": "pattern: the entry's index (0 when absent); equals: dotted paths of the entry with the value each must hold (a number such as `information_bits` compared up to rounding, `tolerance`); present: paths that must exist; absent: paths that must not.",
    "asserts": "Each named path of the entry holds the given value, exists, or is absent: `absence_scope`, `scope`, `strands`, `palindromic`, `returned`, `cut`, `information_bits`, `counts.paths.extension`, `counts.paths.relation`, `counts.supported_paths.level`, `length`, `residues`, `work.steps`, `determinism`, `selection.pass` and `counts.selected.value` (chapter Q: a constant false selects nothing), the absence of `error`, `max_mismatches` or `counts.contexts.by_mismatches`, as the scenario names them.",
    "inconclusive": "Only by the common rule.",
-   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the entry (a failure on a direct arm; not exposed on the MCP arm, whose answer carries no `absence_scope` and no `timing.elapsed_ms`)."
+   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the entry (a failure on a direct access path; not exposed on the MCP access path, whose answer carries no `absence_scope` and no `timing.elapsed_ms`)."
   },
   "label_dict_contains": {
    "generic": false,
@@ -288,7 +288,7 @@
    ],
    "args": "name: the record's label (its taxid column or its accession.version); kind: column or header; `only_kind`: no label of another kind may be in the dictionary.",
    "asserts": "The seed result's `label_dict` names the record's own label with the kind asked, and with `only_kind` every label of the dictionary is of that kind: the permitted set the host derived from the seed (`labels.seed_label_kind`) is of the kind asked and holds the record the seed was cut from.",
-   "inconclusive": "By the common rule. On the MCP arm the dictionary is not in the answer (the service's graphlet export carries none): not exposed, which manifest v5 states as a property-level mark, so the check is not shown via MCP rather than untested.",
+   "inconclusive": "By the common rule. On the MCP access path the dictionary is not in the answer (the service's graphlet export carries none): not exposed, which manifest v5 states as a property-level mark, so the check is not shown via MCP rather than untested.",
    "fails": "The label missing from the dictionary (the first labels listed in the detail), or a label of another kind beside the kind asked."
   },
   "label_not_full": {
@@ -300,7 +300,7 @@
    "args": "label: the unrelated label.",
    "asserts": "The named label is listed and does not support every k-mer of the query: its `kmers_supported` differs from `num_kmers` (a query with no k-mer is not judged). It is the negative half of R-multi's claim that labels are answered independently.",
    "inconclusive": "Only by the common rule.",
-   "fails": "The unrelated label supports every k-mer; the label missing from the answer (not exposed on the MCP arm)."
+   "fails": "The unrelated label supports every k-mer; the label missing from the answer (not exposed on the MCP access path)."
   },
   "labels_per_node": {
    "generic": false,
@@ -311,7 +311,7 @@
    ],
    "args": "cap: the request's `labels.max_labels_per_node`.",
    "asserts": "On every requested arm `labels_per_node.cap` equals the request's cap, and where some node's list was cut (`nodes_truncated` above 0) a limitation names `labels.max_labels_per_node`: the cap is never silent. The pass states each arm's cap, the largest list seen and the lists cut.",
-   "inconclusive": "By the common rule; the arm's `labels_per_node` block missing is not exposed on the MCP arm.",
+   "inconclusive": "By the common rule; the arm's `labels_per_node` block missing is not exposed on the MCP access path.",
    "fails": "Another cap echoed than requested, a cut list without the limitation naming the knob, or a seed that was not walked."
   },
   "low_complexity_note": {
@@ -324,7 +324,7 @@
    "args": "pattern: the entry's index; expected (required): whether sdust flags the pattern over its whole text, computed by the builder with seqtools.sdust_flags (the host's T 20, W 64).",
    "asserts": "The entry carries the note `low_complexity_pattern` exactly when sdust flags the pattern, as long as the answer states no budget stop of the search (`max_steps`, `time`, and for supported paths `max_annotation_work` and `max_memory`, in an engine phase, or a stop without a phase); a stop of a later phase (the labels' reads, a predicate's selection, the output) comes after the diagnostic and leaves the note as the engine decided it, so the note follows sdust there too.",
    "inconclusive": "An expected note left out by a budget stop of the search (the diagnostic does not run after one); a supported-path search's selection stop with the note absent where expected (the selection may run inside the search, refusing a held walk); a pattern of more than 191 bases without the note whose answer states `determinism` `time_limited` (the diagnostic reads the clock between its pieces and may have been cut). Also by the common rule.",
-   "fails": "A refused entry; the note present beside a budget stop of the search; a stop or time limitation that cannot have happened with the note absent; the note present where sdust does not flag the pattern or absent where it does, outside the inconclusive cases. The `notes` field missing from the entry is not exposed on the MCP arm and a failure on a direct arm."
+   "fails": "A refused entry; the note present beside a budget stop of the search; a stop or time limitation that cannot have happened with the note absent; the note present where sdust does not flag the pattern or absent where it does, outside the inconclusive cases. The `notes` field missing from the entry is not exposed on the MCP access path and a failure on a direct access path."
   },
   "motif": {
    "generic": false,
@@ -335,7 +335,7 @@
    "args": "pattern: the entry's index; selected: the expected `motif.selected`; `decided_by_in`: the accepted values of `motif.decided_by` (every_context, tested_contexts, constant, no_instance); `label_present`: a column that must be among `labels_present`.",
    "asserts": "The entry's `motif` states the expected `selected` and a `decided_by` among the accepted ones, with the named label among `labels_present`; and the block is consistent with its own rules: `tested_contexts` with `labels_absent` null (no absence claim on an incomplete pass), `no_instance` with `labels_present` empty (a verdict on the empty set).",
    "inconclusive": "Only by the common rule.",
-   "fails": "`selected` or `decided_by` other than expected (the detail states both); the named label not in `labels_present`; `tested_contexts` with a non-null `labels_absent`; `no_instance` with labels present. The `motif` block missing from the entry is not exposed on the MCP arm and a failure on a direct arm."
+   "fails": "`selected` or `decided_by` other than expected (the detail states both); the named label not in `labels_present`; `tested_contexts` with a non-null `labels_absent`; `no_instance` with labels present. The `motif` block missing from the entry is not exposed on the MCP access path and a failure on a direct access path."
   },
   "notes": {
    "generic": false,
@@ -349,7 +349,7 @@
    "args": "pattern: the entry's index (0 when absent); has: notes that must be stated; lacks: notes that must not.",
    "asserts": "The entry's `notes` hold each note expected (`low_complexity_pattern`, `paths_later_increment`, `no_stop_codon`; in chapter Q `predicate_constant` on a normal form folded to a constant) and none of those excluded (`low_complexity_pattern` beside a budget stop).",
    "inconclusive": "Only by the common rule.",
-   "fails": "An expected note missing (the notes stated in the detail); an excluded note present; `notes` absent from the entry (not exposed on the MCP arm)."
+   "fails": "An expected note missing (the notes stated in the detail); an excluded note present; `notes` absent from the entry (not exposed on the MCP access path)."
   },
   "path_absent": {
    "generic": false,
@@ -362,7 +362,7 @@
    "args": "pattern: the entry's index (0 when absent); sequence: the bases no path may spell (the truth's `spliced_dna` by default).",
    "asserts": "No released path's `sequence` equals the given bases, and the list holds every path (neither withheld nor cut): on this index no walk of retained k-mers spells the spliced coding DNA across the exon junction (an index-empirical claim: the truth names the index). Under a predicate `none(A)` on supported paths (chapter Q) the same reading shows the record's own path not selected (section 20.9); nothing is assumed about the other paths.",
    "inconclusive": "No path spells it, but the list is legitimately shortened (a stated `withheld` or `cut` whose reason can have happened): an absence cannot be read from an incomplete list. Also by the common rule.",
-   "fails": "A path spells the sequence; no path spells it beside a stated reason that cannot have happened; `results` absent from the entry (not exposed on the MCP arm)."
+   "fails": "A path spells the sequence; no path spells it beside a stated reason that cannot have happened; `results` absent from the entry (not exposed on the MCP access path)."
   },
   "path_record_verified": {
    "generic": false,
@@ -375,7 +375,7 @@
    "args": "pattern: the entry's index (0 when absent); strand: the path's strand (the truth's by default).",
    "asserts": "A released path spells the truth window's bases, and on it the record's taxid is listed with support `record_verified` and an occurrence of the record at the window's 1-based coordinates on the strand, with the index's `seq_id` and the record's length; every occurrence that label lists lies inside its own record (start and end within `nt_length`).",
    "inconclusive": "No path spells the window while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
-   "fails": "No path spells the window in a complete list; the taxid on none of the paths spelling it; the taxid's support not `record_verified`; no occurrence of the record at the window's coordinates and strand (the label's first occurrences in the detail); an occurrence outside its record, with another `seq_id` than the index's or another `nt_length` than the record's; the paths' labels absent (not exposed on the MCP arm)."
+   "fails": "No path spells the window in a complete list; the taxid on none of the paths spelling it; the taxid's support not `record_verified`; no occurrence of the record at the window's coordinates and strand (the label's first occurrences in the detail); an occurrence outside its record, with another `seq_id` than the index's or another `nt_length` than the record's; the paths' labels absent (not exposed on the MCP access path)."
   },
   "path_spells": {
    "generic": false,
@@ -386,7 +386,7 @@
    "args": "pattern: the entry's index (0 when absent); strand: the orientation the path must carry (`+`, `-`; the truth's by default).",
    "asserts": "Some released path's `sequence` equals the truth window's bases on the given strand, with `instance` equal to its `sequence`, `offset` 0 and L - k + 1 `nodes`: the record's own walk is among the paths.",
    "inconclusive": "No path spells the window while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
-   "fails": "No path spells the window in a complete list, or beside a stated reason that cannot have happened; a spelling path whose `instance` or `offset` is inconsistent or whose node count is not L - k + 1; `results` absent (not exposed on the MCP arm)."
+   "fails": "No path spells the window in a complete list, or beside a stated reason that cannot have happened; a spelling path whose `instance` or `offset` is inconsistent or whose node count is not L - k + 1; `results` absent (not exposed on the MCP access path)."
   },
   "paths_end": {
    "generic": false,
@@ -397,7 +397,7 @@
    ],
    "args": "reasons_in: the end reasons accepted; `max_bp`: the longest path allowed.",
    "asserts": "Every path of every requested arm ends with one of the accepted reasons, read from its `path_reason`, its `end_reasons` or the reason of a `label_end` event on its leaf at its end, and is at most `max_bp` long when a length is given. In chapter T: under `min_live_labels` 2 with one live label every path ends `below_min_labels` at once (at most 1 bp).",
-   "inconclusive": "By the common rule only; the arm's paths missing from the answer is not exposed on the MCP arm.",
+   "inconclusive": "By the common rule only; the arm's paths missing from the answer is not exposed on the MCP access path.",
    "fails": "A path ended by another reason (named with the expected ones), a path longer than `max_bp`, an arm without a path, or a seed that was not walked."
   },
   "pattern_slot_error": {
@@ -423,7 +423,7 @@
    "args": "pattern: the entry's index; label: the column that must select the mirrors (the truth's taxid by default); min: how many mirror contexts must be returned (1 by default).",
    "asserts": "Under `predicate_strands` either, every returned `-` context whose reverse complement is a k-mer of the record is selected by the label with the selection strand `reverse_complement` or `both`, and at least `min` such contexts are returned. The builder takes windows whose reverse complement the record holds in a longer inverted copy, so the mirrors exist; the check reads only mirrors that are the record's own k-mers, so other records' rows cannot satisfy it.",
    "inconclusive": "Fewer mirror contexts than `min` on a list that is not complete, where the answer states a withheld list or a cut that can have happened (a selection the time budget cut). Also by the common rule.",
-   "fails": "A mirror context not selected by the label, or selected with the strand `context`; fewer mirrors than `min` on a complete list; a refused entry; a stated hiding that cannot have happened. `selection_labels` or `selection_strands` missing from a result is not exposed on the MCP arm and a failure on a direct arm."
+   "fails": "A mirror context not selected by the label, or selected with the strand `context`; fewer mirrors than `min` on a complete list; a refused entry; a stated hiding that cannot have happened. `selection_labels` or `selection_strands` missing from a result is not exposed on the MCP access path and a failure on a direct access path."
   },
   "predicate_selected": {
    "generic": false,
@@ -436,7 +436,7 @@
    "args": "pattern: the entry's index (0 when absent); selected: true (every record context in the results) or false (none); strand: the orientation to read; label: the predicate's label to read in `selection_labels` (the record's taxid by default); `selection_strand_in`: the selection strands accepted for it (`context`, `reverse_complement`, `both`).",
    "asserts": "With `selected` true, every record context of the truth window is among the results (the predicate selected the record's own contexts) and, when asked, the label is in each one's `selection_labels` with a selection strand among those accepted; with `selected` false, none is among them and the filtered list is complete.",
    "inconclusive": "A record context missing (or, for `selected` false, the list incomplete) while the list is legitimately shortened: a stated `withheld` or `cut` that can have happened. Also by the common rule.",
-   "fails": "A record context missing from a complete filtered list (`selected` true); a record context selected (`selected` false); the label not in `selection_labels`, or its selection strand not among those accepted; a stated reason that cannot have happened; `selection_strands` absent (not exposed on the MCP arm); the entry refused in its slot."
+   "fails": "A record context missing from a complete filtered list (`selected` true); a record context selected (`selected` false); the label not in `selection_labels`, or its selection strand not among those accepted; a stated reason that cannot have happened; `selection_strands` absent (not exposed on the MCP access path); the entry refused in its slot."
   },
   "resolve_absent": {
    "generic": false,
@@ -481,7 +481,7 @@
    "args": "label (required): the column or header label to read. On a complete profile: full, the label supports every k-mer as one run [0, `num_kmers`); runs, exactly these runs; covers [lo, hi), some run contains that interval; `run_end_in` [lo, hi], a run from k-mer 0 ends within that range; `run_start_in` [lo, hi], a run to the last k-mer starts within it; kmers, `min_kmers`, `max_kmers` on `kmers_supported`. `prefix_if_stopped`: the scenario's property is a stated stop; `unless_stopped`: a twin of such a scenario, judged on the whole query when complete and on the prefix when stopped.",
    "asserts": "The label is listed exactly once with its runs, and the arguments hold on its profile. Without a stop they hold on the whole query. With a stated stop (which must be possible: reason time at or after the budget less the reserve) and `prefix_if_stopped` or `unless_stopped`, a full expectation holds on the prefix: the label's `kmers_supported` equals `resolved_kmers`, its runs are [[0, `resolved_kmers`]] and so are the `graph_runs`; the pass reads stopped after x of n k-mers, the prefix fully supported. With a stated stop and neither flag, each argument is decided only where the prefix decides it: it passes where the prefix alone proves it (a covered interval inside the prefix, a run end inside it, a minimum already reached), fails where the prefix contradicts it (a hole in a full support, a run from 0 ending before its range, more support than allowed, too few k-mers left to reach a count) and is inconclusive otherwise.",
    "inconclusive": "A stop before the first k-mer (`resolved_kmers` 0): nothing of the label to check. With `prefix_if_stopped`, a complete answer: no stop happened, so the prefix property was not tested, although the whole profile holds. Under a stop without the flags, an argument the prefix leaves open (full support of the query, a run that reaches the prefix's end, an interval past it). Also by the common rule on an allowed non-200.",
-   "fails": "The label listed twice or not at all (a missing label is not exposed on the MCP arm); a stop that cannot have happened; on a complete profile any argument broken (the detail names the label, its `kmers_supported` of `num_kmers` and its first runs); on a stopped profile the prefix contradicting an argument, or a full prefix expectation broken."
+   "fails": "The label listed twice or not at all (a missing label is not exposed on the MCP access path); a stop that cannot have happened; on a complete profile any argument broken (the detail names the label, its `kmers_supported` of `num_kmers` and its first runs); on a stopped profile the prefix contradicting an argument, or a full prefix expectation broken."
   },
   "results_levels": {
    "generic": false,
@@ -492,7 +492,7 @@
    "args": "pattern: the entry's index (0 when absent); `max_level`: the highest level a released result may sit at; `min_returned`: how many results at least (1 by default).",
    "asserts": "At least `min_returned` results are released and every one of them states a level of at most `max_level`: a `partial` list cut inside the lowest level holds that level only, since the answer order puts the closest instances first.",
    "inconclusive": "Only by the common rule.",
-   "fails": "Fewer results than `min_returned`; a result above `max_level` (the levels found in the detail); `results` absent (not exposed on the MCP arm)."
+   "fails": "Fewer results than `min_returned`; a result above `max_level` (the levels found in the detail); `results` absent (not exposed on the MCP access path)."
   },
   "retrieval_complete": {
    "generic": false,
@@ -505,7 +505,7 @@
    "args": "pattern: the entry's index (0 when absent); value: true or false.",
    "asserts": "The entry's `retrieval_complete` is the value expected: true when every context (or path) of the pattern in its scope and strands was returned, so that an item missing from the list is absent from that result domain; false in mode `count` (a count returns no list, and false there says nothing against the search) and after any stop of the graph search. It is one of two routes to an absence, the other being an exact count of 0 in the searched scope (`count_relation`): an empty or shortened list that is not complete (withheld, cut, stopped) licenses no absence at all, and a complete list excludes an item only within its result domain (the graph's retained k-mers, the query's scope and strands, the labels searched; SPEC-pattern-search section 9). As a small example: a `partial` list cut at `max_contexts` after a completed discovery keeps its exact count but is not complete, so an item missing from it is not absent; a `partial` mode answer can also return a complete empty list, which is an absence; a `count` answer with `retrieval_complete` false and an exact 0 is an absence of contexts too, by the count.",
    "inconclusive": "Only by the common rule.",
-   "fails": "The flag has the other value; the flag absent from the entry (not exposed on the MCP arm)."
+   "fails": "The flag has the other value; the flag absent from the entry (not exposed on the MCP access path)."
   },
   "source_absent": {
    "generic": false,
@@ -530,7 +530,7 @@
    "args": "pattern: the entry's index (0 when absent); strand: the orientation to read (the truth's by default).",
    "asserts": "Some record context of the truth window is among the results and lists the record's taxid column among its `labels`: the row of the record's own k-mer carries the record's column.",
    "inconclusive": "No record context returned while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
-   "fails": "No record context returned from a complete list; the taxid on none of the record contexts returned (their `labels_status` in the detail); the contexts' `labels` null (not exposed on the MCP arm)."
+   "fails": "No record context returned from a complete list; the taxid on none of the record contexts returned (their `labels_status` in the detail); the contexts' `labels` null (not exposed on the MCP access path)."
   },
   "source_placement": {
    "generic": false,
@@ -542,7 +542,7 @@
    "args": "pattern: the entry's index (0 when absent); strand: the orientation to read (the truth's by default).",
    "asserts": "On a record context of the truth window, the record's taxid label lists an occurrence of the record at the window's 1-based coordinates (start-end) on the given strand, with the index's `seq_id` for the record and the record's length as `nt_length`, the coordinates inside it: the context is placed where the window was cut.",
    "inconclusive": "No record context returned while the list is legitimately shortened (a stated `withheld` or `cut` that can have happened). Also by the common rule.",
-   "fails": "No record context returned from a complete list; no occurrence of the record at the window's coordinates and strand under the taxid on any record context; an occurrence with another `seq_id` than the index's, another `nt_length` than the record's or coordinates outside the record; the label's `occurrence_list` absent (not exposed on the MCP arm)."
+   "fails": "No record context returned from a complete list; no occurrence of the record at the window's coordinates and strand under the taxid on any record context; an occurrence with another `seq_id` than the index's, another `nt_length` than the record's or coordinates outside the record; the label's `occurrence_list` absent (not exposed on the MCP access path)."
   },
   "stop": {
    "generic": false,
@@ -556,7 +556,7 @@
    "args": "pattern: the entry's index (0 when absent); null: the entry must state no stop; phase and reason: the stop expected, each one value or a list of those accepted; `mismatch_level_in`: the levels the stop may name.",
    "asserts": "The entry's `stop` is null, or names a phase and a reason among those expected (`discovery` with `max_steps`, `extension` with `max_annotation_work` or `max_memory`, `output` with `max_memory`; in chapter Q `selection` with `max_predicate_work`) and, when asked, a `mismatch_level` among those accepted; whether the stop can have happened is the invariants' question.",
    "inconclusive": "Only by the common rule.",
-   "fails": "A stop where none was expected, or none where one was; another phase, reason or level than those accepted; `stop` absent from the entry (not exposed on the MCP arm)."
+   "fails": "A stop where none was expected, or none where one was; another phase, reason or level than those accepted; `stop` absent from the entry (not exposed on the MCP access path)."
   },
   "stops_stated": {
    "generic": false,
@@ -579,7 +579,7 @@
    ],
    "args": "none (the truth gives the record, the seed's start and its length).",
    "asserts": "With trace support and `output.coordinates` true the coordinates block is present and states the record: the record's label is in the dictionary, its occurrence of the whole seed is exactly [start, start + length) in the record, and each arm's run of that label from the seed boundary (`from_bp` 0) lies adjacent to the seed, [end, end + L) on the right arm and [start - L, start) on the left, L the run's length. The positions are 0-based, half-open, forward strand.",
-   "inconclusive": "By the common rule; the `coordinates` key missing altogether is not exposed on the MCP arm (the tool cannot set `output.coordinates`).",
+   "inconclusive": "By the common rule; the `coordinates` key missing altogether is not exposed on the MCP access path (the tool cannot set `output.coordinates`).",
    "fails": "`coordinates` null (the detail quotes `coordinates_reason`), the record missing from the dictionary, the seed's occurrence not stated, or a run not at the adjacent position (the detail quotes its first occurrences)."
   },
   "traverse_seed_outcome": {
@@ -590,7 +590,7 @@
    ],
    "args": "walks: the accepted values of `outcome.walks` (a list, or one value: complete, partial, or a failed outcome such as `not_in_graph` where the scenario allows it); seed: the result's index (0 when absent).",
    "asserts": "The seed result's `outcome.walks` is one of the accepted values: for a walk, complete or partial (a stated limit), never failed (no traversal: a derivation that failed, a budget that did not hold the seed, a stop before it started); for a seed the column may lack (chapter N), the failed outcome the scenario names.",
-   "inconclusive": "By the common rule only; on the MCP arm a seed phase the attempt's own duration bound ended before any walk (the host's AttemptAtBound relayed in a 200) is a time limitation the common rule reads as not testable.",
+   "inconclusive": "By the common rule only; on the MCP access path a seed phase the attempt's own duration bound ended before any walk (the host's AttemptAtBound relayed in a 200) is a time limitation the common rule reads as not testable.",
    "fails": "Another value, with the result's `error` quoted (a failed seed names its cause)."
   },
   "traverse_stop": {
@@ -643,7 +643,7 @@
    "args": "pattern: the entry's index (0 when absent); reason: the reason expected, or a list of those accepted (null among them for no withheld list).",
    "asserts": "The entry's `withheld` names the expected reason: `count_above_threshold`, `threshold_crossed`, `discovery_budget`, `deadline`, `paths_later_increment`, `anchors_above_threshold`, `annotation_budget`, as the scenario's mode and threshold leave it; in chapter Q `predicate_above_threshold` (the raw count above `max_predicate_contexts`, nothing read) and `predicate_budget` (the pass stopped at `max_predicate_work`); in chapter N null (a bounded low-complexity pattern listed whole) or `count_above_threshold` where the bound exceeds the cap. Whether the reason can have happened (its count above its threshold, its stop stated) is the invariants' question, judged on the same answer.",
    "inconclusive": "Only by the common rule.",
-   "fails": "`withheld` null or naming another reason; `withheld` absent from the entry (a failure on a direct arm, not exposed on the MCP arm)."
+   "fails": "`withheld` null or naming another reason; `withheld` absent from the entry (a failure on a direct access path, not exposed on the MCP access path)."
   }
  }
 }

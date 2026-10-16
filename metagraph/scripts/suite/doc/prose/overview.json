@@ -76,7 +76,7 @@
   "built_chapters": "the chapters built (the generator's; a partial build)",
   "n_chapters": "the number of chapters of the run (the generator's)",
   "scenarios": "the same as n_scenarios (the generator's)",
-  "n_gate_outcome_problems": "the gate's outcome problems (gate.json, else the offline verdict): executions on a gated arm, in the policy's selection and not declared exempt, that did not pass (31 in v4: 30 inconclusive, 1 finding); 0 when no gate was judged",
+  "n_gate_outcome_problems": "the gate's outcome problems (gate.json, else the offline verdict): executions on a gated access path, in the policy's selection and not declared exempt, that did not pass (31 in v4: 30 inconclusive, 1 finding); 0 when no gate was judged",
   "n_gate_inconclusive_executions": "the inconclusive executions among the gate's outcome problems (30 in v4)",
   "n_gate_finding_executions": "the findings among the gate's outcome problems (1 in v4)",
   "n_gate_outcome_pairs": "the distinct scenario-arm pairs of the gate's outcome problems (27 in v4: four MCP arms have both repeats)",

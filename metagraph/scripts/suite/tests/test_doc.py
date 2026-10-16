@@ -3471,8 +3471,8 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         self.assertNotIn(";", short)
         self.assertLessEqual(len(short.split()), 25, short)
         rule = cases["verification"]["pattern.deadline_ends_task"]
-        self.assertIn("verified where a direct arm answered the 503 too", rule)
-        self.assertIn("unverified where no direct arm answered the 503", rule)
+        self.assertIn("verified where a direct access path answered the 503 too", rule)
+        self.assertIn("unverified where no direct access path answered the 503", rule)
         self.assertIn("no direct 200 to compare with", rule)
         self.assertEqual(sorted(set(cases["verification"]) - set(cases["short"])), [])
         table = {"pattern.deadline_ends_task": {"areas": ["M"], "agreement": "by_design", "scenario_match": "a 503",
@@ -4349,6 +4349,28 @@ class ChapterPLXTest(unittest.TestCase):
                              "tables without an unconditional stop codon")
         self.assertIn("Three absences are kept apart", X["families"]["X-junction"]["prose"])
         self.assertIn("not an exon-aware spliced alignment", X["families"]["X-junction"]["prose"])
+
+    def test_access_paths_and_agreement_levels(self):
+        """READ-008, the chapter-prose part for P, L and X (the merger's reconciliation of the three chapter lanes): a
+        route to the host is an access path, never a bare arm, in the three prose files, as in the other chapters'.
+        READ-110 (READ-203 merged into it): every chapter's 'Via MCP' sentence says that the agreement is on the checks
+        both access paths evaluated and counts the agreements that verify no property (n_mcp_agree_partial), as R's
+        and T's do."""
+        for ch in ("P", "L", "X"):
+            data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))
+            for path, text in prose_strings(data):
+                for m in re.finditer(r"\barms?\b", text):
+                    before = text[max(0, m.start() - 10):m.start()]
+                    self.assertTrue(before.endswith("traversal "), "%s.json%s: a bare arm in %r" % (
+                        ch, path, text[max(0, m.start() - 40):m.end() + 20]))
+        for ch in ("R", "T", "P", "L", "X", "M", "Q", "N", "D"):
+            data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))
+            summary = " ".join(_prose_texts(data.get("summary")))
+            self.assertIn("on the checks both access paths evaluated[[mcp_all_full ?", summary, ch)
+            self.assertIn("{n_mcp_agree_partial} on the checks that ran alone, which verifies no property", summary, ch)
+        self.assertIn("(SPEC-pattern-search section 23.2)", " ".join(_prose_texts(sc.read_json(
+            os.path.join(PROSE_DIR, "C.json"))["intro"])))
+
 
 
 def _v4_branch(text):

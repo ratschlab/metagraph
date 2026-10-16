@@ -58,7 +58,7 @@
      ],
      [
       "`GET /traverse/capabilities`",
-      "the traversal probe: identity, `k`, the limits, the attempts' `server_instance`, and the gate block, the few pattern fields a client gates on, with `details` naming the full block's route. The document a traversal client reads, small enough to poll.",
+      "the traversal probe: identity, `k`, the limits, the attempts' `server_instance`, and the gate block, the few pattern fields a client gates on, with `details` naming the full block's route (SPEC-pattern-search section 23.2). The document a traversal client reads, small enough to poll.",
       "a summary, within 32 KiB",
       "names the same server as `/capabilities` (REL-same_answer-0004); its gate block is a projection of the full pattern block (REL-same_answer-0006)"
      ]

@@ -85,7 +85,7 @@
   "pattern.empty_pattern_list": "the tool's own validation answers `invalid_arguments` (a non-empty list of patterns) before any request; the host refuses too, with its own text",
   "pattern.too_many_patterns_chunked": "the service splits 17 patterns into chunks of 16 and answers every pattern through two host requests, where one direct request of 17 is refused 400 (never cut)",
   "pattern.duplicate_ids": "the service answers 400 `pattern_invalid` (an id used twice) at submit, where the host echoes the ids and answers both",
-  "pattern.lowercase": "the service upper-cases the pattern before the request, so the host never sees lower case from the MCP arm; the answers agree",
+  "pattern.lowercase": "the service upper-cases the pattern before the request, so the host never sees lower case from the MCP access path; the answers agree",
   "pattern.unknown_field": "the tool has no such argument, and an extra argument is dropped by the MCP SDK without an error, so the request cannot be sent as the host would refuse it",
   "pattern.max_contexts_above_10000": "the service answers 400 `pattern_out_of_bounds` (`caps.max_contexts` above 10,000) at submit, where the host lowers the value to its cap and lists it in `limits.clamped`",
   "pattern.caps_zero": "the service's request model takes every cap as at least 1 and answers 400 `pattern_invalid` at submit, where the host accepts `max_contexts`, `max_anchors` and `max_paths` 0 and answers (a cut, a withheld list, no extension)",
@@ -111,7 +111,7 @@
   "mismatch.value_string_1": "the MCP SDK coerces the string `1` to 1, so the tool sends 1 and the search runs with one substitution where the host refuses the string",
   "mismatch.value_null": "`null` is the tool argument's default: nothing is sent and the search is exact, where the host refuses an explicit null",
   "mismatch.value_true": "the MCP SDK coerces `true` to 1, so the search runs with one substitution where the host refuses the boolean",
-  "mismatch.zero": "0 is never sent: the host receives the request without the field, byte for byte the exact request, so the direct arm's explicit 0 and the MCP arm's absent field answer alike",
+  "mismatch.zero": "0 is never sent: the host receives the request without the field, byte for byte the exact request, so the direct access path's explicit 0 and the MCP access path's absent field answer alike",
   "mismatch.above_kind_cap": "the service answers 400 `pattern_out_of_bounds` (above the host's cap for that kind: 1 for protein on staging) at submit for the whole request, where the host answers that pattern's slot `mismatches_above_cap` and the others",
   "mismatch.long_pattern_without_long_search": "the service answers 400 `pattern_invalid` (more than k bases without `long_search`) at submit, before it looks at substitutions, where the host answers the long pattern's slot `mismatches_above_cap` with the cap 0 and the others",
   "mismatch.long_pattern_with_long_search": "the service answers 400 `pattern_unsupported` (substitutions in a pattern longer than k are a later increment on its host) at submit for the whole request, where the host answers that pattern's slot `mismatches_above_cap` with the cap 0 and the others",
@@ -129,6 +129,6 @@
   "service.pattern_repeat_reuses_search": "the service may answer a repeated identical search with the running or recent one; the MCP runner names an idempotency key per execution, so each repeat is a new search and no reuse applies"
  },
  "verification": {
-  "pattern.deadline_ends_task": "the pair is verified where a direct arm answered the 503 too and the other MCP repeat, when there is one, agrees with the direct arms, and unverified where no direct arm answered the 503 (a 200 within its budget: a timing difference, not a disagreement) or where the other repeat's 200 has no direct 200 to compare with"
+  "pattern.deadline_ends_task": "the pair is verified where a direct access path answered the 503 too and the other MCP repeat, when there is one, agrees with the direct access paths, and unverified where no direct access path answered the 503 (a 200 within its budget: a timing difference, not a disagreement) or where the other repeat's 200 has no direct 200 to compare with"
  }
 }

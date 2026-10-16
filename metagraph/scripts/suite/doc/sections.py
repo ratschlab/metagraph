@@ -2769,7 +2769,7 @@ def closing(ctx):
     # C.3 .. C.7: the tables
     out += latex.section("%s 3\\qd MCP overhead decomposition" % CLOSING_PREFIX, "sec:C3")
     out += closing_section_prose(ctx, "C3", (
-        "Pairs of host-warm executions only: the MCP warm execution (repeat 1 preferred) minus each direct arm's "
+        "Pairs of host-warm executions only: the MCP warm execution (repeat 1 preferred) minus each direct access path's "
         "first warm execution; the phases as the service measured them. In these tables a / b never appears: "
         "p50, p90 and the maximum are columns.\n\n"))
     ph = s.get("mcp_phases") or {}
@@ -2779,7 +2779,7 @@ def closing(ctx):
     mo = s.get("mcp_overhead") or {}
     rows = [[esc(k.replace("_ms", "").replace("_", " "))] + _stats_cells(mo.get(k), signed=True) for k in sorted(mo)]
     out += latex.plain_table("@{}l r r r r@{}", ["MCP minus direct", "p50", "p90", "max", "n"], rows,
-                             "MCP overhead (warm MCP wall minus each direct arm; the backend time minus each direct arm); "
+                             "MCP overhead (warm MCP wall minus each direct access path; the backend time minus each direct access path); "
                              "signed")
     if s.get("mcp_cold_wall_ms"):
         out += latex.plain_table("@{}l r r r r@{}", ["", "p50", "p90", "max", "n"],

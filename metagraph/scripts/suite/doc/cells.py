@@ -270,7 +270,7 @@ def arm_state(run, sid, arm):
         if cls == "disagree":
             st.ne = True
             st.clean = False
-            st.reasons.append("the direct arms disagree")
+            st.reasons.append("the direct access paths disagree")
         elif cls in ("timing", "same_checks", "not_comparable"):
             st.glyph_marks.append({"timing": "t", "same_checks": "s", "not_comparable": "n"}[cls])
             st.clean = False

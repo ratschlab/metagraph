@@ -22,7 +22,7 @@
   "front_net_p50 / _p90 / _n": "the per-scenario front_overhead.net_ms of compare.json (direct-remote minus direct-local, net of the server time), pooled over every scenario",
   "warm_wall_dl_p50 / _p90 / _n": "the first host-warm wall per scenario on direct-local (warm after an interrupted execution excluded); likewise warm_wall_dr_*, warm_wall_mcp_*",
   "paired_dl_mcp_n / _ratio_p50 / _ratio_p10 / _ratio_p90 / _delta_p50 / _delta_p90 / _under_1s": "the scenarios with a host-warm wall on both direct-local and mcp: their count, the ratio mcp / direct-local (p50, p10, p90), the difference (signed) and how many pairs lie within 1 s of each other in either direction (|difference| below 1 s)",
-  "paired_dl_dr_n / _delta_p50 / _delta_p90": "the scenarios with a host-warm wall on both direct arms: their count and the difference direct-remote minus direct-local",
+  "paired_dl_dr_n / _delta_p50 / _delta_p90": "the scenarios with a host-warm wall on both direct access paths: their count and the difference direct-remote minus direct-local",
   "load_samples / load_sra_mean / load_sra_max / load_load1_mean / load_load1_max / load_caveat": "the sampler's figures (report.load_figures) and whether the Logan caveat applies ('applies' / 'does not apply')",
   "load_caveat_sra_cpu_pct / load_caveat_load1": "the caveat's thresholds",
   "warm_after_interrupted_n": "executions that ran warm after an interrupted one (counted in no bucket)",
