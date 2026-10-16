@@ -116,4 +116,67 @@ TEST(HeaderCounts, CountsQueryPositionsInsteadOfDistinctKmers) {
     for (const auto &[label, count] : weighted)
         EXPECT_EQ(count, label == "long" ? 18u : 6u);
 }
+
+TEST(HeaderCounts, PositionalResultsMatchCoordinatesAcrossBackends) {
+    const std::vector<CoordinateRecord> records{
+        {"ACGACGACGTT", "F0", "same header"},
+        {"ACGTTACG", "F0", "same header"},
+        {"TTTACGACG", "F1", "third"},
+        {"ACGACGTTT", "F2", "fourth"}
+    };
+    for (bool row_diff : {false, true}) {
+        for (bool brwt : {false, true}) {
+            auto graph = coordinate_test_graph(3, records, row_diff, brwt);
+            for (const auto &query : {"ACGACGACGTT", "ACGNNNACG", "NNNACG", "ACGNNN",
+                                      "TTTTTT", "NNNNN", "AC"}) {
+                for (double discovery : {0., 0.5, 1.}) {
+                    for (double presence : {0., 0.5, 1.}) {
+                        for (size_t top : {size_t(0), size_t(1), size_t(2), size_t(100)}) {
+                            SCOPED_TRACE(::testing::Message() << row_diff << ' ' << brwt
+                                         << ' ' << query << ' ' << discovery << ' '
+                                         << presence << ' ' << top);
+                            auto coords = graph->get_kmer_coordinates(query, top, discovery, presence);
+                            decltype(graph->get_kmer_counts(query, top, discovery, presence)) expected_counts;
+                            decltype(graph->get_top_label_signatures(query, top, discovery, presence)) expected_masks;
+                            for (const auto &[label, count, positions, length] : coords) {
+                                std::vector<size_t> counts;
+                                sdsl::bit_vector mask(positions.size(), 0);
+                                for (const auto &tuple : positions) {
+                                    mask[counts.size()] = !tuple.empty();
+                                    counts.push_back(tuple.size());
+                                }
+                                expected_counts.emplace_back(label, count, std::move(counts));
+                                expected_masks.emplace_back(label, count, std::move(mask));
+                            }
+                            EXPECT_EQ(expected_counts, graph->get_kmer_counts(query, top, discovery, presence));
+                            EXPECT_EQ(expected_masks, graph->get_top_label_signatures(query, top, discovery, presence));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(HeaderCounts, PositionalResultsPreserveGapsAndRepeatedKmers) {
+    auto graph = coordinate_test_graph(3, {{"ACGACGACG", "F", "first"},
+                                          {"ACGTTT", "F", "second"}});
+    // Query positions are ACG, CGN, GNN, NNN, NNA, NAC, ACG.
+    const std::string query = "ACGNNNACG";
+    auto counts = graph->get_kmer_counts(query, 100, 0, 0);
+    std::sort(counts.begin(), counts.end());
+    ASSERT_EQ(counts.size(), 2u);
+    EXPECT_EQ((std::tuple<std::string, size_t, std::vector<size_t>>{
+        "first", 2, {3, 0, 0, 0, 0, 0, 3}}), counts[0]);
+    EXPECT_EQ((std::tuple<std::string, size_t, std::vector<size_t>>{
+        "second", 2, {1, 0, 0, 0, 0, 0, 1}}), counts[1]);
+    const auto signatures = graph->get_top_label_signatures(query, 100, 0, 0);
+    ASSERT_EQ(signatures.size(), 2u);
+    for (const auto &[label, count, mask] : signatures) {
+        EXPECT_EQ(count, 2u);
+        ASSERT_EQ(mask.size(), 7u);
+        for (size_t i = 0; i < mask.size(); ++i)
+            EXPECT_EQ(mask[i], i == 0 || i == 6);
+    }
+}
 } // namespace mtg::test
