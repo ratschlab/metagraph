@@ -671,7 +671,9 @@ rules:
 - **Tool classes.** Every budgeted tool has a class (`TOOL_CLASS`: view, heavy, parse) with a default (view 30 M lwu
   / 1 GiB, heavy 300 M / 2 GiB, parse 200 M / 2 GiB) and a ceiling of 10× up to which the agent may raise its call's
   budget; every result carries `local {complete, usage, limits, work_model, memory_bound, clamped?, parsed?, stop?}`.
-  Re-parse billing is the service's policy (`ToolLimits.budget_for`, `on_usage`).
+  A parse on demand inside a tool runs under the parse class raised (never lowered) by the call's budget and held to
+  `parse_ceiling` like a call's budget (an unlimited or higher default included); `parsed {..., limits, clamped?}`
+  names the fields held to it. Re-parse billing is the service's policy (`ToolLimits.budget_for`, `on_usage`).
 - Quadratic paths in individual operations are fixed one by one (the cost model of `budget.py` states each
   non-obvious charge).
 

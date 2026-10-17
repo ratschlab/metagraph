@@ -378,6 +378,31 @@ class TestR6ParseOnDemand(unittest.TestCase):
             self.assertEqual(ToolLimits().parse.work_units,
                              out['local']['parsed']['limits']['work_units'])
 
+    def test_the_parse_class_is_held_to_its_ceiling(self):
+        """A parse on demand never escapes the parse class's ceiling, as a call's budget
+        never escapes its class's (LocalLimits.clamped): a default left unlimited or above
+        parse_ceiling is held to it, with or without a raise, and the cut is stated
+        (local.parsed.clamped). The raise stays raise-only (pinned above)."""
+        with tempfile.TemporaryDirectory() as d:
+            st, h = self.stored(d)
+            # memory left unlimited by a one-field default, work above the ceiling
+            limits = ToolLimits(parse=LocalLimits(work_units=10 ** 9),
+                                parse_ceiling=LocalLimits(10 ** 8, 10240))
+            t = GraphletTools(st, secret=SECRET, local_limits=limits)
+            for budget in (None, {'work_units': 10 ** 10}, {'memory_mb': 100}):
+                with self.subTest(budget=budget):
+                    out = t.graphlet_walks(h, 'right', n=3, budget=budget)
+                    self.assertNotIn('error', out, out)
+                    parsed = out['local']['parsed']
+                    self.assertEqual({'work_units': 10 ** 8, 'memory_mb': 10240,
+                                      'deadline_s': None}, parsed['limits'])
+                    self.assertEqual(['work_units', 'memory_mb'], parsed['clamped'])
+            # the shipped limits: nothing to cut, nothing stated
+            out = GraphletTools(st, secret=SECRET, local_limits=ToolLimits()).graphlet_walks(
+                h, 'right', n=3)
+            self.assertEqual(ToolLimits().parse.as_dict(), out['local']['parsed']['limits'])
+            self.assertNotIn('clamped', out['local']['parsed'])
+
     def test_the_store_limits_are_no_lever(self):
         with tempfile.TemporaryDirectory() as d:
             st, h = self.stored(d, LocalLimits(work_units=50_000))

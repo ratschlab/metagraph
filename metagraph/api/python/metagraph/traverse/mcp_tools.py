@@ -731,36 +731,40 @@ class GraphletTools:
         return _LocalCall(b, limits, clamped, TOOL_CLASS[tool], req)
 
     def _parse_budget(self, call=None):
-        """The budget of a parse the store runs inside a tool call |call|: the store's own
-        parse limits when it has them (None here), else the tools' parse class RAISED,
-        field by field, by the agent's budget argument up to the parse class's ceiling --
-        never lowered by it, and never the call's budget itself (the parse is reported as
-        local.parsed, not charged to the operation, DESIGN §5.4). An agent told to raise its
-        budget for a stopped parse can then do so with the call's budget argument: under
-        the parse defaults alone, raise_local_budget could never help."""
+        """(the budget of a parse the store runs inside a tool call |call|, the names of
+        the fields held to the ceiling): the store's own parse limits when it has them
+        (None here), else the tools' parse class RAISED, field by field, by the agent's
+        budget argument -- never lowered by it, and never the call's budget itself (the
+        parse is reported as local.parsed, not charged to the operation, DESIGN §5.4) --
+        then held to the parse class's ceiling as a call's budget is to its class's
+        (LocalLimits.clamped(): a default left unlimited or above the ceiling takes the
+        ceiling's value; the cut is stated as local.parsed.clamped). An agent told to raise
+        its budget for a stopped parse can then do so with the call's budget argument:
+        under the parse defaults alone, raise_local_budget could never help."""
         L = self.local_limits
         if L is None or getattr(self.store, 'parse_limits', None) is not None:
-            return None
+            return None, []
         req = None if call is None else call.request
-        if req is None:
-            return LocalBudget(L.parse)
-        top = L.parse_ceiling
-        fields = []
-        for f in ('work_units', 'memory_mb', 'deadline_s'):
-            mine, want, cap = getattr(L.parse, f), getattr(req, f), getattr(top, f)
-            if mine is not None and want is not None and want > mine:
-                mine = want if cap is None else max(mine, min(want, cap))
-            fields.append(mine)
-        return LocalBudget(LocalLimits(*fields))
+        fields = [getattr(L.parse, f) for f in ('work_units', 'memory_mb', 'deadline_s')]
+        if req is not None:
+            for i, f in enumerate(('work_units', 'memory_mb', 'deadline_s')):
+                want = getattr(req, f)
+                if fields[i] is not None and want is not None and want > fields[i]:
+                    fields[i] = want
+        limits, cut = LocalLimits(*fields).clamped(L.parse_ceiling)
+        return LocalBudget(limits), cut
 
-    def _note_parse(self, pb=None):
+    def _note_parse(self, pb=None, clamped=()):
         """local.parsed: the store's last parse in this call -- its usage and the limits
-        it ran under (which are the parse's, not the call's local.limits)."""
+        it ran under (which are the parse's, not the call's local.limits), and |clamped|,
+        the fields held to the parse class's ceiling, where there are any."""
         call = _CALL.get()
         got = getattr(self.store, 'last_parse', None)
         if call is not None and got is not None:
             lim = pb.limits if pb is not None else getattr(self.store, 'parse_limits', None)
             call.parsed = dict(got, limits=lim.as_dict()) if lim is not None else dict(got)
+            if clamped:
+                call.parsed['clamped'] = list(clamped)
 
     def _parse_stop(self, e, pb, what='The stored body is parsed on demand'):
         """A parse on demand that stopped: the stop names the limits it ran under, and a
@@ -881,7 +885,7 @@ class GraphletTools:
         there is local_budget_exceeded, the entry and its body kept."""
         call = _CALL.get()
         if call is not None:
-            pb = self._parse_budget(call)
+            pb, clamped = self._parse_budget(call)
             try:
                 got = self.store.view(_handle(handle), parse_budget=pb)
             except LocalBudgetExceeded as e:
@@ -889,7 +893,7 @@ class GraphletTools:
                     raise                   # the call's own (a stored view's selection)
                 raise self._parse_stop(e, pb)
             finally:
-                self._note_parse(pb)
+                self._note_parse(pb, clamped)
             if isinstance(got, ops.GraphletView):
                 return got.backing, got
             return got, None
