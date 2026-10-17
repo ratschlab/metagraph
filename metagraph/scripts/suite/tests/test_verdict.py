@@ -743,6 +743,27 @@ class StatedMcpLimitTest(unittest.TestCase):
                              cmp.compare(self.d, cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)))
         return verdict_of(self.d)
 
+    def test_a_detail_entry_states_only_the_items_it_matches(self):
+        # SD-023: the report's stated limit reads a case's explains_checks as the verdict pipeline does
+        # (suite_common.entry_explains): an entry {check, detail_matches} states only a not_exposed item whose detail
+        # it matches; a bare name states every not_exposed item of its check (the report's documented exception:
+        # item_explained never lets a bare name explain one)
+        import report
+        cases = {"dup": {"id": "dup", "agreement": "by_design", "explains_checks": [
+                     {"check": "answer_fields", "detail_matches": "field not in the answer: results\\.1\\.duplicate"}]},
+                 "caps": {"id": "caps", "agreement": "by_design", "explains_checks": ["answer_fields"]}}
+
+        def limit(case, detail):
+            scen = {"id": "T-1", "route": "POST /traverse", "mcp": {"tool": "traverse_fetch", "by_design": [case]}}
+            ln = {"arm": "mcp", "outcome": "inconclusive", "scenario": "T-1", "repeat": 0,
+                  "service_by_design_case": case, "checks": [st("pass"), st("not_exposed", "answer_fields", detail)]}
+            return report.stated_mcp_limit(ln, scen, cases)
+        self.assertEqual(limit("dup", "field not in the answer: results.1.duplicate"), "dup")
+        self.assertIsNone(limit("dup", "field not in the answer: results.0.labels"))
+        self.assertEqual(limit("caps", "field not in the answer: results.0.labels"), "caps")
+        self.assertTrue(sc.states_limit("answer_fields", {"check": "answer_fields", "outcome": "not_exposed"}))
+        self.assertFalse(sc.states_limit("answer_fields", {"check": "answer_fields", "outcome": "fail"}))
+
     def test_stated_limit_is_listed_not_untested(self):
         text, v = self.run_of([self.CASE], [st("pass"), st("not_exposed", "capabilities_doc", "field not in the "
                                                                                               "answer: release")])

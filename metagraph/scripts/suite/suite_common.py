@@ -2156,6 +2156,14 @@ def item_explained(entry, check):
     return outcome == "not_exposed" and isinstance(entry, dict) and entry_explains(entry, check)
 
 
+def states_limit(entry, check):
+    """Whether one explains_checks entry states a not_exposed check item as a limit of the MCP surface (the report's
+    stated limits, report.stated_mcp_limit): a not_exposed item the entry names (entry_explains: an object
+    {check, detail_matches} only an item whose detail it matches; a bare name every item of its check, the report's
+    documented exception to item_explained, under which a bare name explains no not_exposed reading)."""
+    return str(check.get("outcome")) == "not_exposed" and entry_explains(entry, check)
+
+
 def explained_outcome(checks, entries, rule):
     """(the outcome, E) of an execution an answered / clamped case matched (triage-2 B-01; async's runner
     explained_outcome at e334715b): F = the failing checks (outcome fail, or one outside CHECK_OUTCOMES), E = the

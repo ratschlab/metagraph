@@ -345,9 +345,10 @@ def load_figures(samples):
 def stated_mcp_limit(line, scenario, cases, comp=None):
     """The id of the by-design case that states why an MCP execution is inconclusive, else None: the case the scenario
     names (compare.named_cases) that matched the execution (its service_by_design_case, else compare's
-    by_design_notes for the repeat) and whose explains_checks name every check of the line that did not pass, each of
-    which reads not_exposed (a part of the answer the MCP surface does not expose by design, e.g. capabilities_doc of
-    capabilities.traverse_capabilities_document)."""
+    by_design_notes for the repeat) and whose explains_checks state every check item of the line that did not pass
+    (suite_common.states_limit), each of which reads not_exposed (a part of the answer the MCP surface does not expose
+    by design, e.g. capabilities_doc of capabilities.traverse_capabilities_document; an entry {check, detail_matches}
+    only an item whose detail it matches, as the verdict pipeline reads it)."""
     if line.get("arm") != "mcp" or line.get("outcome") != "inconclusive" or not cases:
         return None
     cid = line.get("service_by_design_case")
@@ -358,9 +359,9 @@ def stated_mcp_limit(line, scenario, cases, comp=None):
     case = named.get(cid) if cid else None
     if not case:
         return None
-    names = set(e if isinstance(e, str) else (e or {}).get("check") for e in case.get("explains_checks") or [])
+    entries = case.get("explains_checks") or []
     rest = [c for c in line.get("checks") or [] if c.get("outcome") != "pass"]
-    if rest and all(c.get("outcome") == "not_exposed" and c.get("check") in names for c in rest):
+    if rest and all(any(sc.states_limit(e, c) for e in entries) for c in rest):
         return cid
     return None
 

@@ -2191,8 +2191,11 @@ failing on 14552938.
     lane G3 (Agreement: generic checks only, partial) still names the scenarios whose properties were not compared.
     An MCP execution that is inconclusive only because checks read not_exposed that the scenario's NAMED by-design
     case explains (`report.stated_mcp_limit`: the case it matched, among the cases the scenario names, whose
-    explains_checks name every check of the line that did not pass, each not_exposed; with the table compare judged
-    the run with) is a limit the table states: it does not make a group untested, and the verdict section lists it
+    explains_checks state every check item of the line that did not pass, each not_exposed, by
+    suite_common.states_limit: an entry {check, detail_matches} only an item whose detail it matches, as the verdict
+    pipeline reads it, a bare name every item of its check, the report's exception to item_explained (SD-023); with
+    the table compare judged the run with) is a limit the table states: it does not make a group untested, and the
+    verdict section lists it
     ("Inconclusive via MCP by a limit the by-design table states for the scenario (not counted as untested): ...").
     v3 and v4: C-caps-0001 (capabilities.traverse_capabilities_document) and C-caps-0003
     (capabilities.server_capabilities_document), both explaining capabilities_doc, which the MCP answer never
