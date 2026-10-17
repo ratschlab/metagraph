@@ -1257,6 +1257,12 @@ struct WalkerHooks {
     // build asserts, so that a Release build's tests check that the running total is the
     // recounted sum
     bool recount_derivation_state = false;
+    // told after the derivation reads a row of its window again alone (a row refused by its
+    // demand inside a longer run, spec §6.8): what the seed phase's decode budget held beside
+    // the re-read, the most the re-read held, and the budget's maximum, so that a test checks
+    // the re-read held nothing past the budget
+    std::function<void(uint64_t held_beside, uint64_t reread_bytes, uint64_t max)>
+            derivation_reread;
 };
 
 /**

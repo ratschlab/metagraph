@@ -5036,6 +5036,43 @@ TEST(GraphletStage3Review, DerivationWindowStatesWhatItHolds) {
 }
 
 
+// A derivation row refused by its demand inside a longer run is read again alone beside the
+// rows before it (spec §6.8), and only beside them: the run read with it — its rows not
+// admitted, their vectors, the sub-batch — is let go first, so what the seed phase's decode
+// budget holds beside the re-read and what the re-read holds stay within the budget. The
+// fixture of DerivationWindowStatesWhatItHolds, swept over the budgets
+TEST(GraphletStage3Review, ADerivationRowReadAgainAloneStaysWithinTheBudget) {
+    const std::string S = random_seq(60, 9100);
+    std::string R;
+    for (uint32_t i = 0; i < 60; ++i) {
+        R += S.substr(0, 40) + random_seq(12, 9200 + i);
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, { S, R }, { "A", "B" }, DeBruijnGraph::BASIC, true);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    const Seed seed = seed_of(S.substr(0, 40));
+    const Strategy base = strategy_of(R"({"direction": "right", "support": "trace",
+        "branching": {"on_reconverge": "keep"}, "labels": {"seed_label_kind": "column"},
+        "bounds": {"max_extension_bp": 10}})");
+    size_t rereads = 0;
+    uint64_t memory = 0;
+    WalkerHooks hooks;
+    hooks.derivation_reread = [&](uint64_t beside, uint64_t reread, uint64_t max) {
+        ++rereads;
+        EXPECT_LE(beside + reread, max) << "budget " << memory << ": " << beside
+                                        << " held beside a re-read of " << reread;
+    };
+    for (memory = 4096; memory < (uint64_t(4) << 20); memory = memory * 21 / 20 + 1) {
+        Strategy st = base;
+        st.max_memory_bytes = memory;
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", &hooks);
+        } catch (const SeedBudgetError &) {}
+    }
+    EXPECT_GT(rereads, 0u) << "no derivation row was read again alone";
+}
+
 /********* the seed phase's charges, extra-label chains, float widths, levels to read *********/
 
 namespace {

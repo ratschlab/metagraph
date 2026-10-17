@@ -1478,21 +1478,33 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
         }
     };
     // Whether row |pos|'s read alone — as a run of one row reads it: its sub-batch vector, then
-    // the row with its row-diff dependency rows — fits what is left beside the rows before it;
-    // false with |*need| the least it was seen to need. In a budget of its own (no test hook),
-    // nothing kept. A row refused by its demand inside a longer run was read before the rows
-    // beside it were held: it is stated by its read alone (spec §6.8: whatever the chunks)
+    // the row with its row-diff dependency rows — fits beside what |budget| holds (the caller
+    // let go of the run read with it, so the rows before it only); false with |*need| the least
+    // it was seen to need. Charged to |budget| itself, so that it holds nothing past the
+    // budget, then released: a statement probe, not a charge of the read's admission (the test
+    // hook WalkerHooks::deny_decode is not asked). A row refused by its demand inside a longer
+    // run was read before the rows beside it were held: it is stated by its read alone (spec
+    // §6.8: whatever the chunks)
     auto reads_alone = [&](size_t pos, uint64_t *need) {
-        annot::matrix::DecodeBudget alone(left());
-        bool fits = alone.charge(buffer_bytes(1, sizeof(Row)));
+        const uint64_t beside = budget.held();
+        const uint64_t peak_before = budget.begin_peak();
+        std::function<bool(uint64_t)> deny = std::move(budget.deny);
+        budget.deny = nullptr;
+        bool fits = budget.charge(buffer_bytes(1, sizeof(Row)));
         if (fits) {
             std::vector<RowT> got;
             std::vector<RowCost> got_costs;
             std::vector<uint64_t> held;
-            fits = read_rows(pos, 1, alone, &got, &got_costs, &held) == DecodeStatus::OK;
+            fits = read_rows(pos, 1, budget, &got, &got_costs, &held) == DecodeStatus::OK;
         }
         if (!fits)
-            *need = need_beyond(alone, 0);
+            *need = need_beyond(budget, beside);
+        const uint64_t reread = budget.peak() - beside;
+        budget.end_peak(peak_before);
+        budget.restore(beside);
+        budget.deny = std::move(deny);
+        if (hooks_ && hooks_->derivation_reread)
+            hooks_->derivation_reread(beside, reread, budget.max_bytes());
         return fits;
     };
     out->clear();
@@ -1549,10 +1561,20 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
         }
         for (size_t j = 0; j < len; ++j) {
             if (got_costs[j].demand > left()) {
-                uint64_t need = 0;
-                if (len > 1 && !reads_alone(pos + j, &need))
-                    return refuse(pos + j, FetchRefusal::DECODE, 0, need);
-                return refuse(pos + j, FetchRefusal::DEMAND, got_costs[j].demand);
+                const uint64_t demand = got_costs[j].demand;
+                if (len > 1) {
+                    // the run read with it — its rows not admitted, their vectors, the
+                    // sub-batch — is let go before the row is read again beside the rows
+                    // before it
+                    std::vector<RowT>().swap(got);
+                    std::vector<RowCost>().swap(got_costs);
+                    std::vector<uint64_t>().swap(held);
+                    budget.restore(at_entry + committed);
+                    uint64_t need = 0;
+                    if (!reads_alone(pos + j, &need))
+                        return refuse(pos + j, FetchRefusal::DECODE, 0, need);
+                }
+                return refuse(pos + j, FetchRefusal::DEMAND, demand);
             }
             out->push_back(std::move(got[j]));
             costs->push_back(got_costs[j]);
