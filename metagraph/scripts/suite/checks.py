@@ -3452,6 +3452,43 @@ def _mgt_rejected(r: dict) -> Optional[str]:
            "not judged on the sequence alone)" % why
 
 
+def _seed_label_names(sc: dict, i: int, arm: Optional[str]) -> List[str]:
+    """The label names seed |i| of the arm's request names (seeds[i].labels): on the MCP arm the scenario's MCP
+    arguments' seeds where they state them, else the direct request's."""
+    for whose in ("mcp", "request"):
+        if whose == "mcp":
+            if arm != "mcp":
+                continue
+            req = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
+        else:
+            req = sc.get("request")
+        seeds = req.get("seeds") if isinstance(req, dict) else None
+        seed = seeds[i] if isinstance(seeds, list) and i < len(seeds) and isinstance(seeds[i], dict) else None
+        if seed is not None and isinstance(seed.get("labels"), list):
+            return [str(x) for x in seed["labels"]]
+    return []
+
+
+def _named_label_missing(sc: dict, r: dict, t: dict, i: int, arm: Optional[str]) -> Optional[str]:
+    """Why a walk check fails because the answer's label dictionary (the result's label_dict, a graphlet's L
+    records) leaves out a label of the truth's record (its header, its taxid's column) that seed |i| of the request
+    names, or None (L8 of the re-verification, the owner's decision: the walk is then not judged on the sequence
+    alone). A result that states no dictionary at all is left to the rule before (_route_labels)."""
+    ld = r.get("label_dict")
+    if not isinstance(ld, list):
+        ld = r.get("_mgt_label_dict")
+    if not isinstance(ld, list):
+        return None
+    have = set(str(x.get("name")) for x in ld if isinstance(x, dict))
+    named = _seed_label_names(sc, i, arm)
+    for name in [str(t[k]) for k in ("record", "taxid") if t.get(k) is not None]:
+        if name in named and name not in have:
+            return "seed %d: the request names the record's label %s (record %s), and the answer's label dictionary " \
+                   "(%d label(s)) lacks it: the walk is not judged on the sequence alone" % (i, name, t.get("record"),
+                                                                                           len(ld))
+    return None
+
+
 def _record_label_ids(r: dict, t: dict) -> Optional[set]:
     """The label ids of the truth's record in a seed result's label dictionary (its header, or its taxid's column),
     the graphlet's L records where the result has no label_dict; None without any (the label rule then does not
@@ -4249,6 +4286,9 @@ def check_walk_in_record(sc, ans, a, arm):
     if rejected:
         return FAIL, rejected
     t = sc["truth"] if "truths" not in sc else sc["truths"][i]
+    missing = _named_label_missing(sc, r, t, i, arm)
+    if missing:
+        return FAIL, missing
     L = t["length"]
     copies = [{"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]}]
     if a.get("any_copy"):
@@ -4566,6 +4606,9 @@ def check_walk_end(sc, ans, a, arm):
     if rejected:
         return FAIL, rejected
     t = sc["truth"]
+    missing = _named_label_missing(sc, r, t, i, arm)
+    if missing:
+        return FAIL, missing
     side = a["arm"]
     armo = r["arms"][side]
     want = t["record_length"] - (t["start"] + t["length"]) if side == "right" else t["start"]

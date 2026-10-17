@@ -953,7 +953,13 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   switch targets added, annotate's last P set), the route search passes only segments carrying the record's own
   label (its header or its taxid's column by the label dictionary, a graphlet's L records), and a segment whose list
   the cap cut (`labels_truncated`) passes. Without the record in the dictionary (G14's cut) or without segment
-  labels the search stays sequence-only, and the check's detail says so (`[sequence only: ...]`). On the mini-index
+  labels the search stays sequence-only, and the check's detail says so (`[sequence only: ...]`), except where the
+  request names the record's label (its header or its taxid) as a seed label (`seeds[i].labels`; on the MCP arm
+  the MCP arguments' seeds): a label dictionary (`label_dict`, a graphlet's L records, also none) that lacks it FAILS
+  walk_in_record and walk_end on every arm, naming the label and the record ("seed 0: the request names the
+  record's label NC_X.1 (record NC_X.1), and the answer's label dictionary (0 label(s)) lacks it"; the owner's
+  decision on L8 of the re-verification: a well-formed body with no L records and num_seed_labels 0 passed on the
+  sequence alone). A result that states no dictionary at all keeps the rule before. On the mini-index
   fixtures and on the 714 recorded MCP graphlet segments of the full run whose direct-local twin has the same shape,
   the derived sets equal the full result's labels. The MGT tokens are read as strictly as SPEC §7.5.1 and the
   library (_codec) read them, and tests/test_checks.py `MgtCodecVectors` holds checks.py's readers to the golden

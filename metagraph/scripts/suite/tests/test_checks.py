@@ -2003,7 +2003,8 @@ class StatedReasons(unittest.TestCase):
 
     def walk_answer(self, sc, n, trig, counters, limitation, bounds=None, timing=None, resource_stop=None):
         """A walk of scenario |sc| (v2 manifest) following its record for n bp on the requested arm, stopped by
-        |trig| (its segment's events list, which the engine writes on every segment, empty)."""
+        |trig| (its segment's events list, which the engine writes on every segment, empty), with the label
+        dictionary of the request's seed labels (the record's header: an MGT body states it as L records)."""
         t = sc["truth"]
         side = sc["request"]["strategy"]["direction"]
         cont = checks._seed_frame(t, {"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]},
@@ -2016,6 +2017,7 @@ class StatedReasons(unittest.TestCase):
         b = dict(sc["request"]["strategy"]["bounds"], max_steps=1000000)
         b.update(bounds or {})
         r = {"outcome": {"walks": "partial"}, "arms": {side: arm},
+             "label_dict": [{"name": n, "kind": "header"} for n in (sc["request"]["seeds"][0].get("labels") or [])],
              "timing": timing or {"elapsed_ms": 2000.0, "seed_phase_ms": 500.0,
                                   "deadline": {"longest_piece": {"kind": "read", "ms": 100.0, "rows": 1}}}}
         if resource_stop:
@@ -3051,6 +3053,59 @@ class TraverseChecks(unittest.TestCase):
                 o, d = outcome(dict(sc, truth=t_end), bad, "walk_end", _arm=arm, arm="right", reasons_in=["dead_end"])
                 self.assertEqual(o, "fail", (arm, d))
                 self.assertIn(texts[0], d)
+
+    def test_a_named_record_label_missing_from_the_dictionary_fails(self):
+        # L8 of the re-verification (the owner's decision): a well-formed answer whose label dictionary leaves out the
+        # record's label although the request names it as a seed label (here a graphlet body without L records,
+        # num_seed_labels 0 and no label token, which the strict reader has nothing to reject) fails walk_in_record
+        # and walk_end on every arm, naming the label and the record; it passed on the sequence alone ("the record's
+        # label is not in the seed's label dictionary")
+        sc, ans = self.labelled_merge([0, 1], [0])
+        t_end = dict(sc["truth"], record_length=sc["truth"]["start"] + 40 + 100)
+        named = copy.deepcopy(sc)
+        named["request"]["seeds"][0]["labels"] = ["NC_X.1"]
+        named["mcp"] = {"tool": "traverse_fetch", "arguments": {"seeds": [{"sequence": sc["truth"]["window"],
+                                                                          "labels": ["NC_X.1"]}]}}
+        bare = copy.deepcopy(ans)   # no segment labels, no label dictionary: the body states S 0 and no L record
+        r = bare["body"]["results"][0]
+        del r["label_dict"]
+        for sg in r["arms"]["right"]["segments"]:
+            for k in ("labels", "labels_total", "labels_truncated"):
+                sg.pop(k, None)
+        body = mcp_shaped(bare)
+        g = body["body"]["results"][0]["graphlet"]
+        self.assertIn("\nS s 0 0 0 .\n", g)
+        self.assertNotIn("\nL ", g)
+        other = copy.deepcopy(ans)   # a JSON dictionary of other labels only
+        other["body"]["results"][0]["label_dict"] = [{"name": "NC_Y.1", "kind": "header"}]
+        for arm in ("mcp", "direct-local"):
+            for bad, size in ((body, 0), (other, 1)):
+                o, d = outcome(named, bad, "walk_in_record", _arm=arm, label_scope="derived")
+                self.assertEqual(o, "fail", (arm, d))
+                self.assertIn("seed 0: the request names the record's label NC_X.1 (record NC_X.1), and the answer's "
+                              "label dictionary (%d label(s)) lacks it" % size, d)
+                self.assertNotIn("sequence only", d)
+                o, d = outcome(dict(named, truth=t_end), bad, "walk_end", _arm=arm, arm="right",
+                               reasons_in=["dead_end"])
+                self.assertEqual(o, "fail", (arm, d))
+                self.assertIn("lacks it", d)
+            # the dictionary holding the label: the label rule; a request naming no label of the record: as before
+            o, d = outcome(named, mcp_shaped(ans) if arm == "mcp" else ans, "walk_in_record", _arm=arm,
+                           label_scope="derived")
+            self.assertEqual(o, "pass", (arm, d))
+            o, d = outcome(sc, body, "walk_in_record", _arm=arm, label_scope="derived")
+            self.assertEqual(o, "pass", (arm, d))
+            self.assertIn("sequence only: the record's label is not in the seed's label dictionary", d)
+        # a taxid named as the seed label (a column) is the record's label as well
+        taxid = copy.deepcopy(named)
+        taxid["request"]["seeds"][0]["labels"] = ["1"]
+        taxid["mcp"]["arguments"]["seeds"][0]["labels"] = ["1"]
+        o, d = outcome(taxid, other, "walk_in_record", label_scope="derived")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("the request names the record's label 1 (record NC_X.1)", d)
+        # a result without any label dictionary (a JSON detail that states none) is judged as before
+        o, d = outcome(named, bare, "walk_in_record", label_scope="derived")
+        self.assertEqual(o, "pass", d)
 
     def test_route_search_is_memoised(self):
         # A-05: a DAG whose split children spell the same base (SPEC-violating) doubles the routes per diamond; the
