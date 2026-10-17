@@ -1305,6 +1305,15 @@ def agreement_section(comp, depth=None, mcp_planned_missing=0, manifest=None, li
                   and not (comp["scenarios"][sid].get("mcp_agreement") or {}).get("verified")]
     if unverified:
         out.append("Service-side by design, unverified: %s.\n" % ", ".join(md(x) for x in unverified[:200]))
+    by_table = [(sid, (comp["scenarios"][sid].get("mcp_agreement") or {}).get("named_by_table_only"))
+                for sid in comp["order"]]
+    by_table = [(sid, ids) for sid, ids in by_table if ids]
+    if by_table:
+        # SD-030: compare matched a case the manifest does not name (only the table's scenario_ids do); the gate
+        # accepts a by-design outcome only for a case the manifest names
+        out.append("By design only through the table's scenario_ids (the manifest does not name the case, and the "
+                   "deploy gate does not accept such an outcome): %s.\n" % "; ".join(
+                       "%s (%s)" % (md(sid), md(", ".join(ids))) for sid, ids in by_table[:200]))
     nims = [sid for sid in comp["order"]
             if (comp["scenarios"][sid].get("mcp_agreement") or {}).get("class") == "not_implemented_mcp"]
     if nims:

@@ -656,7 +656,12 @@ def validate(scenarios, cases=None) -> list:
         if not any(e["check"] == "status" for e in s["expect"]):
             problems.append("%s: no status expectation" % s["id"])
         expected = set(e["check"] for e in s["expect"])
-        unknown = [c for c in s["mcp"].get("by_design") or [] if c not in cases]
+        by_design = s["mcp"].get("by_design") or []
+        if not isinstance(by_design, list):
+            # SD-030: never iterated character by character; every manifest states a list
+            problems.append("%s: mcp.by_design %s is not a list of case ids" % (s["id"], json.dumps(by_design)))
+            by_design = []
+        unknown = [c for c in by_design if c not in cases]
         if unknown:
             problems.append("%s: mcp.by_design names %s, not a case of the bundled by-design table" % (
                 s["id"], ", ".join(unknown)))

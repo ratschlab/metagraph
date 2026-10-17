@@ -2443,6 +2443,10 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     host = [r for r in reps if host_state_line(r, run_dir, scenario, refs)]
     judged = [r for r in reps if not any(r is h for h in host)]
     note = {"host_state_repeats": [r.get("repeat") for r in host]} if host else {}
+    # SD-030: a case only the table's scenario_ids name (the manifest does not): matched here as by async's runner,
+    # but the gate accepts a by-design outcome only for a case the manifest names; each match of one is flagged
+    table_only = set(c.get("id") for c in named) - set(sc.named_case_ids(scenario or {}))
+    via_table = set()
     if not judged:
         return dict(note, **{"class": "not_comparable", "by": "host state",
                              "detail": "every MCP execution is inconclusive by a host state (%s)" % sorted(set(
@@ -2459,6 +2463,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         ans, terr, doc = mcp_view(r, run_dir, with_doc=True)
         walls = []
         matched, how = case_matches(cases, scenario, ans, terr, r, doc, walls)
+        if how == "named":
+            via_table.update(c.get("id") for c in matched if c.get("id") in table_only)
         if matched and match_mark(matched[0], how) == "not_implemented_mcp":
             # async's 901893b7: not implemented via MCP on this deployment (rule (c) does not apply): its own group,
             # the class not_implemented_mcp (below)
@@ -2489,6 +2495,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
             groups[key][1].append(r)
         else:
             plain.append(r)
+    if via_table:
+        note["named_by_table_only"] = sorted(via_table)
     if recorded_items:
         # S5c-05: the items are the table's; a line that recorded others (another table) is noted, not trusted
         note["explained_items_recorded"] = dict((str(k), v) for k, v in sorted(recorded_items.items(), key=str))
@@ -3196,6 +3204,9 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                 mcp_summary["by_design_unverified"] += 1  # the MCP runner's own mark: nothing checked here
             if ma["class"] in ("disagree", "not_comparable"):
                 mcp_summary.setdefault(ma["class"] + "_scenarios", []).append(sid)
+            if ma.get("named_by_table_only"):
+                # SD-030: matched by a case only the table's scenario_ids name, which the gate does not accept
+                mcp_summary.setdefault("named_by_table_only_scenarios", []).append(sid)
             mo = mcp_overhead(mcp, local or {}, remote or {})
             if mo:
                 entry["mcp_overhead"] = mo

@@ -395,5 +395,22 @@ class BuilderRules(unittest.TestCase):
                 self.assertNotIn("ignore", r.get("args") or {}, (name, r.get("id")))
 
 
+    def test_mcp_by_design_is_a_list_of_case_ids(self):
+        # SD-030: a string mcp.by_design is refused as such (validate iterated it character by character and named
+        # each letter as an unknown case); every manifest states a list
+        table = set(["pattern.caps_zero"])
+        base = {"id": "P-x", "area": "P", "title": "t", "route": "POST /pattern", "truth": {}, "timing_class": "fast",
+                "repeat": 1, "tags": [], "expect": [{"check": "status", "args": {"http": 200}}],
+                "request": {"patterns": [], "mode": "count", "max_contexts": 1, "time_budget_ms": 1000}}
+        ok = dict(base, mcp={"tool": "pattern_search", "arguments": {}, "by_design": ["pattern.caps_zero"]})
+        self.assertEqual([p for p in bm.validate([ok], table) if "by_design" in p], [])
+        bad = dict(base, mcp={"tool": "pattern_search", "arguments": {}, "by_design": "pattern.caps_zero"})
+        probs = [p for p in bm.validate([bad], table) if "by_design" in p]
+        self.assertEqual(probs, ["P-x: mcp.by_design \"pattern.caps_zero\" is not a list of case ids"])
+        for name, m in self.manifests():
+            for s in m.get("scenarios") or []:
+                self.assertIsInstance((s.get("mcp") or {}).get("by_design", []), list, (name, s.get("id")))
+
+
 if __name__ == "__main__":
     unittest.main()

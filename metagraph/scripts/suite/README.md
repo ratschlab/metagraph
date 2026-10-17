@@ -1487,7 +1487,10 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   error, finding, ANY inconclusive, not_implemented_mcp on a scenario not excluded, service_by_design by a case the
   scenario does not name in the manifest (suite_common.named_case_ids: mcp.by_design, service_by_design, sbd:<id>
   tags, as compare and the MCP runner read them; SD-030; a table case's scenario_ids, which compare.named_cases and
-  the runner also read, is not a manifest naming and the gate does not accept it: an open decision), a by-design
+  the runner also read, is not a manifest naming and the gate does not accept it, by the owner's decision: compare
+  flags such a match (mcp_agreement.named_by_table_only, summary.mcp_agreement.named_by_table_only_scenarios) and
+  the report lists it, "By design only through the table's scenario_ids"; build_manifest.validate refuses an
+  mcp.by_design that is no list), a by-design
   pair not verified when a direct arm ran it, the MCP side not verified when none did); property (a property
   check the scenario expects not passed on a passing or explained execution, e.g. not exposed; the line's outcome
   is not trusted: every check the scenario expects must have a result on each passing line, determinism excepted

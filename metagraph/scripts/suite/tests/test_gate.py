@@ -923,6 +923,41 @@ class JudgeTest(GateCase):
         self.assertEqual(sc.named_case_ids({"mcp": {"by_design": "a"}, "service_by_design": ["b", "a"],
                                             "tags": ["x", "sbd:c", "sbd:b"]}), ["a", "b", "c"])
 
+    def test_a_case_named_only_by_the_tables_scenario_ids(self):
+        # SD-030 (the owner's decision): the gate accepts a by-design outcome only for a case the manifest names; a
+        # case only the table's scenario_ids name is matched by compare (as by async's runner), but compare flags
+        # it (mcp_agreement.named_by_table_only, summary named_by_table_only_scenarios), the report lists it, and
+        # the gate refuses the outcome
+        import report
+        scen = scenarios()
+        r3 = next(x for x in scen if x["id"] == "R-003")
+        del r3["mcp"]["by_design"]
+        m = manifest_of(scen)
+        cases = dict((k, dict(v)) for k, v in TABLE[0].items())
+        cases["case.refused"]["scenario_ids"] = ["R-003"]
+        d = make_run(self.run_dir(), m, mcp_lines(m))
+        comp = cmp.compare(d, (cases, TABLE[1]))
+        sc.write_json_atomic(os.path.join(d, "compare.json"), comp)
+        ma = comp["scenarios"]["R-003"]["mcp_agreement"]
+        self.assertEqual(ma["class"], "service_by_design")
+        self.assertEqual(ma.get("named_by_table_only"), ["case.refused"])
+        self.assertEqual(comp["summary"]["mcp_agreement"].get("named_by_table_only_scenarios"), ["R-003"])
+        text = report.build_report(d, None, 200, None, False)
+        self.assertIn("By design only through the table's scenario_ids", text)
+        self.assertIn("case.refused", text.split("By design only through the table's scenario_ids", 1)[1][:400])
+        v = gate.judge(d, policy_of(m))
+        self.assertFalse(v["passed"])
+        self.assertTrue(any("which the scenario does not name" in p["detail"] for p in self.problems(v, "outcome")),
+                        gate.render(v))
+        # a case the manifest names is not flagged, also when the table lists the scenario too
+        d2 = make_run(self.run_dir("named"), self.m, mcp_lines(self.m))
+        comp2 = cmp.compare(d2, (cases, TABLE[1]))
+        self.assertNotIn("named_by_table_only", comp2["scenarios"]["R-003"]["mcp_agreement"])
+        self.assertNotIn("named_by_table_only_scenarios", comp2["summary"]["mcp_agreement"])
+        sc.write_json_atomic(os.path.join(d2, "compare.json"), comp2)
+        self.assertNotIn("By design only through the table's scenario_ids",
+                         report.build_report(d2, None, 200, None, False))
+
     def test_a_refused_table_without_compare_json(self):
         # SD-017: without compare.json the gate computes it as compare.py does (compare.load_or_compute): the table
         # validated against the run manifest's scenarios; a table compare.py refuses (exit 4) is the gate's
