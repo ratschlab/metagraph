@@ -564,10 +564,23 @@ def _time_limited(ans: dict) -> str:
             return "seed %d stopped by its attempt's duration bound" % i
         if "arms" not in r and _AT_BOUND_RE.fullmatch(_seed_error_text(r) or ""):
             return "seed %d: the attempt reached its duration bound (AttemptAtBound)" % i
+        # a derivation the time budget ended (failed, or partial: traverse.cpp failed_seed_to_json, the D3 partial)
+        for lim in r.get("limitations") if isinstance(r.get("limitations"), list) else []:
+            if isinstance(lim, dict) and lim.get("knob") == _TIME_KNOB:
+                return "seed %d: its %s limitation names the time budget" % (i, lim.get("kind"))
         for side, armo in (r.get("arms") or {}).items():
             if (armo.get("cap_trigger") or {}).get("reason") == "time_budget":
                 return "seed %d %s arm stopped by time_budget" % (i, side)
+            # a time cap that cut walks after another trigger (traverse.cpp arm_limitations: one walk_domain
+            # limitation per cap that ended walks)
+            for lim in armo.get("limitations") if isinstance(armo.get("limitations"), list) else []:
+                if isinstance(lim, dict) and lim.get("knob") == _TIME_KNOB:
+                    return "seed %d %s arm: its %s limitation names the time budget" % (i, side, lim.get("kind"))
     return ""
+
+
+# the knob a /traverse limitation names when a time budget ended the work it states (a walk cap or a derivation)
+_TIME_KNOB = "bounds.time_budget_ms"
 
 
 def check_deterministic(sc, ans, a, arm, previous=None, client=None):

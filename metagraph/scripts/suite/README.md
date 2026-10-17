@@ -468,7 +468,12 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   `determinism: time_limited`); `previous` may give each earlier repeat as a digest or as
   `{"digest", "time_limited"}` (run_direct.py passes the latter since lane S3; the async MCP runner passes digests,
   so on that arm an earlier time-limited repeat is seen only through this answer's own time stop). A time
-  limitation that cannot have happened ("Stated reasons") explains no difference: fail.
+  limitation that cannot have happened ("Stated reasons") explains no difference: fail. A /traverse seed is
+  time-limited by a time or attempt_deadline resource stop, a time_budget cap trigger, the attempt's bound
+  (AttemptAtBound), or any limitation of `bounds.time_budget_ms` on the result (a derivation the budget ended,
+  failed or partial) or on an arm (a time cap that cut walks after another trigger); scripts/traversal's
+  bench_traverse.time_bound reads a seed alike, and tests/test_checks.py `TimeLimitedSeeds` holds the two
+  together (SD-036).
 - Manifests: `suite_v1.json` 587 scenarios, 627 executions per arm (content_sha256 267fb2b4...), 47 of them not
   implemented yet via MCP; `suite_smoke_v1.json` 26 scenarios, 30 executions (e9ec9564...). Lane S1b's
   `suite_v2.json`: 679 scenarios, 719 executions per arm (content_sha256 bdf44c60...), 48 not implemented via MCP,

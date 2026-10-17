@@ -3917,6 +3917,78 @@ class TraverseChecks(unittest.TestCase):
 
 
 
+class TimeLimitedSeeds(unittest.TestCase):
+    """SD-036: a /traverse seed is time-limited (SPEC-labeled-traversal-core §6.8: determinism holds provided no time
+    budget tripped) when the suite's checks (checks.time_limited, which deterministic reads) and the bench's
+    predicate (scripts/traversal/bench_traverse.time_bound) both say so: a time or attempt_deadline resource stop, a
+    time_budget cap trigger, a limitation of bounds.time_budget_ms on the result (a derivation that ran out of time,
+    failed or partial) or on an arm (a secondary time cap after another trigger), the attempt's bound
+    (AttemptAtBound)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        path = os.path.normpath(os.path.join(SUITE, "..", "traversal", "bench_traverse.py"))
+        spec = importlib.util.spec_from_file_location("bench_traverse_under_test", path)
+        cls.BT = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.BT)
+
+    @staticmethod
+    def suite(r):
+        return checks.time_limited({"http": 200, "body": {"results": [r]}, "error": None})
+
+    def cases(self):
+        lim = {"kind": "derivation", "cause": "time_budget", "knob": "bounds.time_budget_ms", "limit": 100,
+               "observed": 120}
+        arm_lim = {"kind": "walk_domain", "knob": "bounds.time_budget_ms", "limit": 100, "observed": 101}
+        return [
+            ("failed derivation", {"outcome": {"seed": "failed"}, "limitations": [lim],
+                                   "error": "The time budget (bounds.time_budget_ms) ran out while deriving the "
+                                            "permitted set"}, True),
+            ("secondary time cap", {"arms": {"right": {"cap_trigger": {"reason": "beam_pruned"},
+                                                       "limitations": [arm_lim]}}}, True),
+            ("attempt_deadline mid-walk", {"arms": {"right": {"cap_trigger": None}},
+                                           "resource_stop": {"resource": "attempt_deadline"}}, True),
+            ("time stop", {"arms": {"right": {}}, "resource_stop": {"resource": "time"}}, True),
+            ("time cap", {"arms": {"right": {"cap_trigger": {"reason": "time_budget"}}}}, True),
+            ("cancelled", {"arms": {"right": {}}, "resource_stop": {"resource": "cancelled"}}, False),
+            ("work stop", {"arms": {"right": {"cap_trigger": {"reason": "resource_limit"},
+                                              "limitations": [{"kind": "walk_domain", "knob": "bounds.max_work_units"}]}},
+                           "resource_stop": {"resource": "work"}}, False),
+            ("complete", {"arms": {"right": {"status": "complete"}}}, False)]
+
+    def test_both_predicates(self):
+        for name, r, want in self.cases():
+            self.assertEqual(bool(self.suite(r)), want, name)
+            self.assertEqual(bool(self.BT.time_bound(r)), want, name)
+        # the bench's repeat columns compare only seeds no time limit stopped
+        r = dict(self.cases()[2][1], seed={"seed_id": "s"})
+        self.assertFalse(self.BT.analyze_seed_result(r, 100, None, 1, None)["deterministic"])
+
+    def test_parity_on_the_recorded_results(self):
+        found = []
+
+        def walk(o):
+            if isinstance(o, dict):
+                res = o.get("results")
+                if isinstance(res, list) and any(isinstance(x, dict) and ("arms" in x or "resource_stop" in x)
+                                                  for x in res):
+                    found.extend(x for x in res if isinstance(x, dict))
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+        import glob
+        for path in sorted(glob.glob(os.path.join(DATA, "*", "*.json")) +
+                           [os.path.join(HERE, "data", "oracle_traverse_answers.json")]):
+            with open(path) as f:
+                walk(json.load(f))
+        self.assertGreater(len(found), 50)
+        # the recorded fixtures hold no time-limited seed: the cases above are the ones that are
+        for r in found + [r for _, r, _ in self.cases()]:
+            self.assertEqual(bool(self.suite(r)), bool(self.BT.time_bound(r)), json.dumps(r)[:400])
+
 class BudgetReaders(unittest.TestCase):
     """SD-021, SD-286, SD-296: the time budget a check holds an answer to is the answer's echo when it is a number,
     else the request's (per route), and /resolve's finalisation reserve is the host's (SPEC-labeled-traversal-core

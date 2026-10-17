@@ -879,17 +879,21 @@ def lim_strings(res):
 
 
 def time_bound(res):
+    """Whether a time limit stopped the seed (SPEC core §6.8: such a result need not repeat): a limitation of
+    bounds.time_budget_ms (a derivation, a walk cap), a time_budget cap trigger, a time or attempt_deadline
+    resource stop; for older responses also a seed error naming the time budget. The suite's checks.time_limited
+    reads a seed alike (scripts/suite/tests/test_checks.py TimeLimitedSeeds holds the two together)."""
     for l in res.get('limitations') or []:
-        if l.get('knob') == 'bounds.time_budget_ms':
+        if isinstance(l, dict) and l.get('knob') == 'bounds.time_budget_ms':
             return True
     for a in (res.get('arms') or {}).values():
         if (a.get('cap_trigger') or {}).get('reason') == 'time_budget':
             return True
         for l in a.get('limitations') or []:
-            if l.get('knob') == 'bounds.time_budget_ms':
+            if isinstance(l, dict) and l.get('knob') == 'bounds.time_budget_ms':
                 return True
     rs = res.get('resource_stop') or {}
-    if rs.get('resource') == 'time':
+    if rs.get('resource') in ('time', 'attempt_deadline'):
         return True
     err = res.get('error') or ''
     return 'time budget' in err or 'time_budget' in err
