@@ -951,9 +951,14 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   id (no `01`, `+1`, `0-0`, `0,1`), every id 64-bit and below the number of L records (none in a body without L
   records); a SETEXPR delta with no empty part and whose R lies in its base and A outside it; the free-text escapes
   %25, %0A and %0D only; an L record's front-coding prefix an integer within the previous name, ending on a
-  character boundary. A body that breaks one of these has no label sets (the checks that read them fall back to the
-  sequence, as before) and no label dictionary from its L records; that such a body fails a check of its own is an
-  open decision.
+  character boundary; an integer field (entry_total, an L record's seq_id) with no sign or leading zero; the S
+  record's num_seed_labels at most the number of L records (constrain mode, as the library's parser), and a `*`
+  entry only where §7.5.3 derives it (the root, a merge's partition, constrain mode). A body that breaks one of
+  these FAILS walk_in_record and walk_end on every arm (the owner's decision on SD-014): the detail names the
+  record, the token and the rule (`the graphlet body breaks SPEC-labeled-traversal-core §7.5: the G record of left
+  segment 0, end '00': RANGES item '00': an id is a decimal integer without sign or leading zero, ...`), and the
+  walk is never judged on the sequence alone for it (the silent sequence-only fallback before). The other checks
+  read such a body's structure as before. Every recorded body of the v5 and v6 baselines reads.
 - The route search is memoised (A-05) on (segment, the seed copies still followed, whether the stated event was seen):
   every route to a segment has the same length and the copies it still follows fix its flank, so each state is
   searched once; `_MAX_ROUTE_STATES` (100,000 states) is a safeguard. A route counted "beyond the truth flank" now

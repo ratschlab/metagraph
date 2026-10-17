@@ -55,15 +55,17 @@ def _ranges(ids):
 def mcp_shaped(answer, json_arms=True):
     """A `detail: full` /traverse answer in the shape the MCP's export (and `detail: graphlet`) gives: each result's
     segments and paths as an MGT graphlet (SPEC-labeled-traversal-core §7.5: A, G, T and R records; with the label
-    dictionary as L records and the segments' labels as explicit G entry / end sets where the result states them),
-    the arms' other fields (status, cap_trigger, limitations, counters, ...) as JSON beside it (none with json_arms
-    False)."""
+    dictionary as L records and the segments' labels as explicit G entry / end sets where the result states them,
+    else derived: the root's from the S record's seed labels, every other segment's its base, `!`; a body the
+    strict reader reads, SD-014), the arms' other fields (status, cap_trigger, limitations, counters, ...) as JSON
+    beside it (none with json_arms False)."""
     out = copy.deepcopy(answer)
     for r in out["body"]["results"]:
         if "arms" not in r:
             continue
         lines = ["H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *"]
         ld = r.pop("label_dict", None)
+        lines.append("S s 0 0 %d ." % len(ld or []))
         prev = ""
         for x in ld or []:
             lines.append("L %s 0 * 0 %s" % ("h" if x.get("kind") == "header" else "c", x["name"]))
@@ -78,7 +80,7 @@ def mcp_shaped(answer, json_arms=True):
             for seg in arm["segments"]:
                 parents = ",".join(str(x) for x in seg["parents"]) or "*"
                 bases = seg["sequence"] if side == "right" else seg["sequence"][::-1]
-                sets = "* * *" if "labels" not in seg else "%s %s %s" % (
+                sets = ("* * *" if not seg["parents"] else "! * *") if "labels" not in seg else "%s %s %s" % (
                     _ranges(seg["labels"]), seg.get("labels_total", "*") if seg.get("labels_truncated") else "*",
                     _ranges(seg["labels"]))
                 lines.append("G %s %d %d %s * * * %s" % (parents, seg["from_bp"], seg["length_bp"], sets, bases or "."))
@@ -2970,6 +2972,63 @@ class TraverseChecks(unittest.TestCase):
         self.assertEqual(o, "pass", d)
         self.assertNotIn("sequence only", d)
 
+    def test_a_body_the_strict_reader_rejects_fails_the_label_checks(self):
+        # SD-014 (the owner's decision): a graphlet body whose label tokens the strict MGT reader rejects (SPEC
+        # §7.5.1) fails walk_in_record and walk_end on every arm, naming the record, the token and the rule; it never
+        # falls back to the sequence alone (it passed so, "[sequence only: the segments state no labels]")
+        sc, ans = self.labelled_merge([0, 1], [0])
+        good = mcp_shaped(ans)
+        t_end = dict(sc["truth"], record_length=sc["truth"]["start"] + 40 + 100)
+
+        def body(edit):
+            g = copy.deepcopy(good)
+            r = g["body"]["results"][0]
+            r["graphlet"] = "\n".join(edit(r["graphlet"].split("\n")))
+            return g
+
+        def set_end(lines, seg, tok):
+            out, n = [], -1
+            for ln in lines:
+                if ln.startswith("G "):
+                    n += 1
+                    if n == seg:
+                        f = ln.split(" ")
+                        f[6] = tok
+                        ln = " ".join(f)
+                out.append(ln)
+            return out
+
+        for arm in ("mcp", "direct-local"):
+            o, d = outcome(sc, good, "walk_in_record", _arm=arm, label_scope="derived")
+            self.assertEqual(o, "pass", d)
+            cases = [
+                # segment 1 (labels {0}): its end '00', a spelling of {0} with a leading zero (the verifier's mutation)
+                (body(lambda ls: set_end(ls, 1, "00")),
+                 ["the G record of right segment 1, end '00'", "without sign or leading zero"]),
+                # segment 0 (labels {0, 1}): '0,1', two consecutive ids not collapsed into a run
+                (body(lambda ls: set_end(ls, 0, "0,1")),
+                 ["the G record of right segment 0, end '0,1'", "consecutive ids collapsed into a run"]),
+                # label ids in a body without L records: no id space (SPEC §7.5.1: every id below their number)
+                (body(lambda ls: [("S s 0 0 0 ." if x.startswith("S ") else x) for x in ls if not x.startswith("L ")]),
+                 ["the G record of right segment 0, entry '0-1'", "below the number of L records (0)"]),
+                # ... and seed labels without them (the library's parser: S's num_seed_labels at most the L records)
+                (body(lambda ls: [x for x in ls if not x.startswith("L ")]),
+                 ["the S record, num_seed_labels 2", "at most the number of L records (0)"]),
+                # an L record whose suffix holds an escape other than %25, %0A, %0D
+                (body(lambda ls: [x.replace("NC_X.1", "NC_X%41.1") if x.startswith("L ") else x for x in ls]),
+                 ["the L record of label id 0", "'%41'", "%25, %0A and %0D are the only escapes"]),
+            ]
+            for bad, texts in cases:
+                o, d = outcome(sc, bad, "walk_in_record", _arm=arm, label_scope="derived")
+                self.assertEqual(o, "fail", (arm, d))
+                self.assertNotIn("sequence only", d)
+                for text in texts:
+                    self.assertIn(text, d)
+                self.assertEqual(d.count(texts[0]), 1, d)   # once, also where both arms break the same rule
+                o, d = outcome(dict(sc, truth=t_end), bad, "walk_end", _arm=arm, arm="right", reasons_in=["dead_end"])
+                self.assertEqual(o, "fail", (arm, d))
+                self.assertIn(texts[0], d)
+
     def test_route_search_is_memoised(self):
         # A-05: a DAG whose split children spell the same base (SPEC-violating) doubles the routes per diamond; the
         # memo on (segment, copies followed) searches each state once, so a divergent leaf fails instead of hitting the
@@ -3487,11 +3546,12 @@ class TraverseChecks(unittest.TestCase):
             return "\n".join([
                 "H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *",
                 "A r c 100 u 0 0 1 1 0 steps=31 * 0 * 5 3 3 2 0 32",
+                "S s 40 10 0 .",
                 "G * 0 10 * * * * %s * %s" % (split, cont[:10]),
-                "G 0 10 10 * * * * %s * %s" % (split, cont[10:20]),
-                "G 0 10 1 * * * * * * %s" % off(cont[10]), "T *",
-                "G 1 20 10 * * * * * * %s" % cont[20:30], "T *",
-                "G 1 20 1 * * * * * * %s" % off(cont[20]), "T *",
+                "G 0 10 10 ! * * * %s * %s" % (split, cont[10:20]),
+                "G 0 10 1 ! * * * * * %s" % off(cont[10]), "T *",
+                "G 1 20 10 ! * * * * * %s" % cont[20:30], "T *",
+                "G 1 20 1 ! * * * * * %s" % off(cont[20]), "T *",
                 "R 2 0 0 11 D 0 * * 0 1 0",
                 "R 3 0 0 30 R 0 * * %s %d 0" % (successors, branches),
                 "R 4 0 0 21 D 0 * * 0 2 0"]) + "\n"
@@ -3910,10 +3970,12 @@ class TraverseChecks(unittest.TestCase):
         self.assertGreater(n, 4)
         self.assertGreater(label_ends, 50)
         self.assertGreater(label_sets, 100)
-        # a body whose sets the rules cannot read leaves them out (the route search falls back to the sequence)
+        # a body whose sets the rules cannot read leaves them out and says why (SD-014: the label checks fail on it)
         arms = checks.graphlet_arms("H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *\nA r c 10 u 0 0 1 0 0 x *\n"
                                     "G * 0 10 !3 * * * * * ACGTACGTAC\nT X\n")
         self.assertNotIn("labels", arms["right"]["segments"][0])
+        self.assertEqual(arms["right"]["_labels_rejected"], "the G record of right segment 0, entry '!3': SETEXPR: a "
+                                                            "delta needs a base (a root's entry set is explicit only)")
 
 
 
@@ -4119,13 +4181,23 @@ class MgtCodecVectors(unittest.TestCase):
     def test_bodies(self):
         head = "H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *\n"
         arm = "A r c 10 u 0 0 1 0 0 x *\nG * 0 10 %s * %s * * * ACGTACGTAC\nT X\n"
-        # a label id in a body without L records: no id space, so the sets are not read (§7.5.1)
-        self.assertNotIn("labels", checks.graphlet_arms(head + arm % ("0", "0"))["right"]["segments"][0])
+        # a label id in a body without L records: no id space, so the sets are not read (§7.5.1), and why is stated
+        arms = checks.graphlet_arms(head + arm % ("0", "0"))
+        self.assertNotIn("labels", arms["right"]["segments"][0])
+        self.assertEqual(arms["right"]["_labels_rejected"], "the G record of right segment 0, entry '0': RANGES item "
+                                                            "'0': every id below the number of L records (0)")
         two = head + "L c 0 * 0 a\nL c 0 * 1 b\n"
         self.assertEqual(checks.graphlet_arms(two + arm % ("0-1", "!1"))["right"]["segments"][0]["labels"], [0, 1])
+        self.assertNotIn("_labels_rejected", checks.graphlet_arms(two + arm % ("0-1", "!1"))["right"])
         # a delta that does not fit its base (5 is not in the entry set {0, 1}) is a body the rules do not read
         three = head + "".join("L c 0 * 0 %s\n" % n for n in "abcdef")
-        self.assertNotIn("labels", checks.graphlet_arms(three + arm % ("0-1", "!5"))["right"]["segments"][0])
+        arms = checks.graphlet_arms(three + arm % ("0-1", "!5"))
+        self.assertNotIn("labels", arms["right"]["segments"][0])
+        self.assertIn("end '!5': SETEXPR: a delta's R lies in its base and its A outside it",
+                      arms["right"]["_labels_rejected"])
+        # an entry_total not spelled as an integer (SPEC §7.5.1: no sign, no leading zero)
+        arms = checks.graphlet_arms(two + "A r c 10 u 0 0 1 0 0 x *\nG * 0 10 0-1 02 * * * * ACGTACGTAC\nT X\n")
+        self.assertIn("entry_total '02'", arms["right"]["_labels_rejected"])
         # front coding: a negative prefix or one past the previous name is no L record
         for bad in ("L c 0 * 0 abc\nL c 0 * -1 \n", "L c 0 * 0 abc\nL c 0 * 9 x\n", "L c 0 * 1 a\n",
                     "L c 0 * 0 a%41\n"):

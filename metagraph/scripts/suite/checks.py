@@ -3007,15 +3007,20 @@ def _mgt_ranges(tok: str, bound: Optional[int]) -> set:
     for item in tok.split(","):
         m = _MGT_RANGES_ITEM.match(item)
         if not m or max(len(m.group(1)), len(m.group(2) or "")) > _MGT_U64_DIGITS:
-            raise ValueError("RANGES item %r" % item)
+            raise ValueError("RANGES item %r: an id is a decimal integer without sign or leading zero, a run a-b, the "
+                             "items comma-separated (one spelling per token)" % item)
         lo = int(m.group(1))
         hi = int(m.group(2)) if m.group(2) is not None else lo
         if m.group(2) is not None and hi <= lo:
-            raise ValueError("RANGES run %r" % item)
+            raise ValueError("RANGES run %r: a run a-b has b above a" % item)
         if last is not None and lo <= last + 1:
-            raise ValueError("RANGES %r is not ascending and collapsed" % tok)
-        if hi > _MGT_U64 or (bound is not None and hi >= bound) or (bound is None and hi - lo > 10 ** 7):
-            raise ValueError("RANGES item %r beyond the id space" % item)
+            raise ValueError("RANGES: ids strictly ascending, consecutive ids collapsed into a run a-b")
+        if hi > _MGT_U64:
+            raise ValueError("RANGES item %r: an id is a 64-bit integer" % item)
+        if bound is not None and hi >= bound:
+            raise ValueError("RANGES item %r: every id below the number of L records (%d)" % (item, bound))
+        if bound is None and hi - lo > 10 ** 7:
+            raise ValueError("RANGES run %r: more than 10**7 ids with no id space to check them against" % item)
         out.update(range(lo, hi + 1))
         last = hi
     return out
@@ -3028,14 +3033,15 @@ def _mgt_setexpr(tok: str, base: Optional[set], bound: Optional[int]) -> set:
     if not tok.startswith("!"):
         return _mgt_ranges(tok, bound)
     if base is None:
-        raise ValueError("a SETEXPR delta without a base: %r" % tok)
+        raise ValueError("SETEXPR: a delta needs a base (a root's entry set is explicit only)")
     removed, plus, added = tok[1:].partition("+")
     if removed == "." or (plus and added in ("", ".")):
-        raise ValueError("empty SETEXPR part in %r" % tok)
+        raise ValueError("SETEXPR: an empty part of a delta is omitted, never written '.' or left after '+'")
     r = _mgt_ranges(removed, bound) if removed else set()
     a = _mgt_ranges(added, bound) if plus else set()
     if not r <= base or a & base:
-        raise ValueError("SETEXPR %r does not fit its base" % tok)
+        raise ValueError("SETEXPR: a delta's R lies in its base and its A outside it (else the reader derived "
+                         "another base)")
     return (set(base) - r) | a
 
 
@@ -3043,7 +3049,7 @@ def _mgt_unescape(text: str) -> str:
     """A free-text last field (SPEC §7.5.1): %25, %0A and %0D are its only escapes; any other `%` sequence or a raw
     LF/CR is a ValueError (the library's _codec.pct_unescape)."""
     if "\n" in text or "\r" in text:
-        raise ValueError("raw LF/CR in a free-text field")
+        raise ValueError("free text: no raw LF or CR (written %0A, %0D)")
     if "%" not in text:
         return text
     out, i = [], 0
@@ -3051,7 +3057,7 @@ def _mgt_unescape(text: str) -> str:
         if text[i] == "%":
             esc = text[i:i + 3]
             if esc not in _MGT_UNPCT:
-                raise ValueError("percent escape %r" % esc)
+                raise ValueError("free text: the escape %r; %%25, %%0A and %%0D are the only escapes" % esc)
             out.append(_MGT_UNPCT[esc])
             i += 3
         else:
@@ -3070,34 +3076,50 @@ def _mgt_front(prev: bytes, tail: str) -> bytes:
     library's _codec.front_decode_parts)."""
     m = _MGT_FRONT.match(tail)
     if not m or len(m.group(1)) > _MGT_U64_DIGITS:
-        raise ValueError("front-coding tail %r" % tail)
+        raise ValueError("front coding: '<prefix_len> <suffix>', prefix_len an integer without sign or leading zero")
     p = int(m.group(1))
     if p > len(prev):
-        raise ValueError("front-coding prefix %d beyond the previous name" % p)
+        raise ValueError("front coding: prefix_len %d beyond the previous name's %d bytes" % (p, len(prev)))
     name = prev[:p] + _mgt_unescape(m.group(2)).encode("utf-8")
     try:
         name.decode("utf-8")
     except UnicodeDecodeError:
-        raise ValueError("front-coding prefix %d ends inside a character" % p) from None
+        raise ValueError("front coding: prefix_len %d ends inside a character of the previous name" % p) from None
     return name
 
 
 def graphlet_label_dict(mgt: str) -> List[dict]:
     """The label dictionary of an MGT v1 body, from its L records (SPEC §7.5.2: name = the previous name's first
-    prefix_len UTF-8 bytes + the suffix; label id = ordinal): [{name, kind header|column, column, seq_id}]."""
+    prefix_len UTF-8 bytes + the suffix; label id = ordinal): [{name, kind header|column, column, seq_id}]. A record
+    the strict reader rejects is a ValueError naming the record, its token and the rule (SD-014)."""
     out: List[dict] = []
     prev = b""
     for line in mgt.split("\n"):
         if not line.startswith("L "):
             continue
         f = line.split(" ", 4)
+        where = "the L record of label id %d" % len(out)
         if len(f) < 5:
-            raise Missing("L record of %d fields" % len(f))
-        name = _mgt_front(prev, f[4])
+            raise ValueError("%s: %d fields, not L <c|h> <column> <seq_id|*> <prefix_len> <suffix>" % (where, len(f)))
+        try:
+            name = _mgt_front(prev, f[4])
+        except ValueError as e:
+            raise ValueError("%s, tail %r: %s" % (where, f[4], e)) from None
+        if f[3] != "*" and not _MGT_INT.match(f[3]):
+            raise ValueError("%s, seq_id %r: an integer without sign or leading zero, or *" % (where, f[3]))
         prev = name
         out.append({"name": name.decode("utf-8"), "kind": "header" if f[1] == "h" else "column",
                     "column": int(f[2]) if f[2].isdigit() else f[2], "seq_id": None if f[3] == "*" else int(f[3])})
     return out
+
+
+def _mgt_token(fn: Callable[..., set], where: str, field: str, tok: str, *args: Any) -> set:
+    """fn(tok, *args) of a label token of record |where|; a ValueError restated with the record, the field and the
+    token (SD-014: the check that reads the sets names all three)."""
+    try:
+        return fn(tok, *args)
+    except ValueError as e:
+        raise ValueError("%s, %s %r: %s" % (where, field, tok, e)) from None
 
 
 def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bound: Optional[int]) -> None:
@@ -3107,8 +3129,11 @@ def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bou
     parents' end sets, the root none), `*` the seed labels at the root and a merge's partition union (constrain);
     G.end against the entry, `*` the entry with, by position and run ends before switch-ins, every run anchored on
     the segment ending before its last node removed and every switch target added (constrain), the last P set or the
-    entry (annotate). Raises ValueError on a body the rules do not read."""
+    entry (annotate). Raises ValueError on a body the rules do not read, naming the record, its token and the rule."""
     segs = a["segments"]
+    if mode == "c" and num_seed_labels is not None and bound is not None and num_seed_labels > bound:
+        raise ValueError("the S record, num_seed_labels %d: at most the number of L records (%d)" % (
+            num_seed_labels, bound))
     runs_on: Dict[int, List[dict]] = {}
     for r in a["_runs"]:
         runs_on.setdefault(r["segment"], []).append(r)
@@ -3116,21 +3141,27 @@ def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bou
     for sg in segs:
         g = sg.pop("_g")
         parents = sg["parents"]
+        where = "the G record of %s segment %d" % (a.get("_side"), sg["id"])
         if any(p >= sg["id"] or p not in end for p in parents):
-            raise ValueError("segment %d: a parent not before it" % sg["id"])
+            raise ValueError("%s, parents %s: every parent an earlier segment" % (where, parents))
         base = None if not parents else set().union(*(end[p] for p in parents))
         if g["entry"] == "*":
             if not parents and mode == "c" and num_seed_labels is not None:
                 entry = set(range(num_seed_labels))
             elif len(parents) > 1 and mode == "c" and g["partition"] != "*":
-                entry = set().union(*(_mgt_ranges(x, bound) for x in g["partition"].split("|")))
+                entry = set().union(*(_mgt_token(_mgt_ranges, where, "partition", x, bound)
+                                      for x in g["partition"].split("|")))
             else:
-                raise ValueError("segment %d: G.entry '*' without its rule" % sg["id"])
+                raise ValueError("%s, entry '*': '*' derives the root's entry from the S record's num_seed_labels and "
+                                 "a merge's from its partition, in constrain mode only (SPEC §7.5.3)" % where)
         else:
-            entry = _mgt_setexpr(g["entry"], base, bound)
+            entry = _mgt_token(_mgt_setexpr, where, "entry", g["entry"], base, bound)
+        if g["entry_total"] != "*" and not _MGT_INT.match(g["entry_total"]):
+            raise ValueError("%s, entry_total %r: an integer without sign or leading zero, or *" % (
+                where, g["entry_total"]))
         total = len(entry) if g["entry_total"] == "*" else int(g["entry_total"])
         if g["end"] != "*":
-            e = _mgt_setexpr(g["end"], entry, bound)
+            e = _mgt_token(_mgt_setexpr, where, "end", g["end"], entry, bound)
         elif mode == "c":
             stop = sg["from_bp"] + sg["length_bp"]
             ops = [(r["to_bp"], 0, r["label"]) for r in runs_on.get(sg["id"], []) if r["to_bp"] < stop]
@@ -3143,8 +3174,9 @@ def _graphlet_label_sets(a: dict, mode: str, num_seed_labels: Optional[int], bou
                     e.add(label)
         else:
             e = set(entry)
-            for ptok in g["presence"]:
-                e = _mgt_setexpr(ptok, e, bound)
+            for j, ptok in enumerate(g["presence"]):
+                e = _mgt_token(_mgt_setexpr, "the P record %d of %s segment %d" % (j, a.get("_side"), sg["id"]),
+                               "SETEXPR", ptok, e, bound)
         end[sg["id"]] = e
         sg["labels"] = sorted(entry)
         sg["labels_total"] = total
@@ -3156,7 +3188,7 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
     far as the checks read it: segments (id, parents, from_bp, length_bp, sequence in natural orientation, events:
     the blocked successors of the E records and the label_end events of the R records with their structural
     successors; labels, labels_total and labels_truncated: the entry sets of the G records, _graphlet_label_sets,
-    left out when the body's sets cannot be read), splits (non-empty when a segment ends in a split), branch_events
+    left out when the body's sets cannot be read, the arm's _labels_rejected then saying why), splits (non-empty when a segment ends in a split), branch_events
     (the V records), and paths (one per leaf, the chain through parents[0], length_bp = from_bp + length_bp,
     end_reasons and end_labels (label, branches) from the runs anchored at the leaf with to_bp = the path length,
     path_reason from T), and the A record's counters and cap_trigger (reason, at_bp)."""
@@ -3239,8 +3271,11 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
         segs = a["segments"]
         try:
             _graphlet_label_sets(a, mode, num_seed_labels, n_labels)
-        except (ValueError, KeyError, IndexError, TypeError):
-            for sg in segs:   # no label sets: the checks that read them fall back to the sequence alone
+        except (ValueError, KeyError, IndexError, TypeError) as e:
+            # a body the strict reader rejects (SPEC §7.5.1, §7.5.3): no label sets, and the checks that read them
+            # fail naming why (_mgt_rejected; SD-014: never the sequence alone)
+            a["_labels_rejected"] = str(e) if isinstance(e, ValueError) else "%s: %s" % (type(e).__name__, e)
+            for sg in segs:
                 for key in ("_g", "labels", "labels_total", "labels_truncated"):
                     sg.pop(key, None)
         # the label_end events (SPEC §7.5.6: derived from the R records with a code end, on their segment at to_bp,
@@ -3285,11 +3320,19 @@ def _result(ans: dict, i: int) -> dict:
     if isinstance(r.get("graphlet"), str) and not any("segments" in a for a in (r.get("arms") or {}).values()):
         r = dict(r)
         parsed = graphlet_arms(r["graphlet"])
-        if "label_dict" not in r:
-            try:
-                r["_mgt_label_dict"] = graphlet_label_dict(r["graphlet"])
-            except (ValueError, Missing):
-                pass
+        rejected = []   # why the strict reader rejects the body's label dictionary or an arm's label sets
+        try:
+            ld = graphlet_label_dict(r["graphlet"])
+            if "label_dict" not in r:
+                r["_mgt_label_dict"] = ld
+        except ValueError as e:
+            rejected.append(str(e))
+        for side in ("left", "right"):
+            why = (parsed.get(side) or {}).get("_labels_rejected")
+            if why and why not in rejected:   # a body-level rule (the S record's) rejects both arms alike
+                rejected.append(why)
+        if rejected:
+            r["_mgt_rejected"] = "; ".join(rejected)
         arms = {}
         for side, a in parsed.items():
             merged = dict((r.get("arms") or {}).get(side) or {})
@@ -3359,6 +3402,18 @@ def _leaf_ends(armo: dict, p: dict, path_reason: bool = True) -> set:
 # follows fix the spelled flank, so each such state is searched once (A-05). _MAX_ROUTE_STATES bounds the states as a
 # safeguard; a check that could not finish the search is inconclusive, never failed.
 _MAX_ROUTE_STATES = 100000
+
+
+def _mgt_rejected(r: dict) -> Optional[str]:
+    """Why the strict MGT reader rejects the body of graphlet result |r| (_result: its L records, or an arm's label
+    tokens), as the detail of the check that reads its labels, or None. The owner's decision on SD-014: such a body
+    fails walk_in_record and walk_end on every arm, naming the record, the token and the rule; never the sequence
+    alone (the fallback before)."""
+    why = r.get("_mgt_rejected")
+    if not why:
+        return None
+    return "the graphlet body breaks SPEC-labeled-traversal-core §7.5: %s (its labels are not read, and the walk is " \
+           "not judged on the sequence alone)" % why
 
 
 def _record_label_ids(r: dict, t: dict) -> Optional[set]:
@@ -4129,6 +4184,9 @@ def check_walk_in_record(sc, ans, a, arm):
         if a.get("if_walked"):
             return INCONCLUSIVE, "seed %d not walked (outcome %r): nothing to follow" % (i, (r.get("outcome") or {}).get("walks"))
         return FAIL, "seed %d not walked (outcome %r, error %r)" % (i, r.get("outcome"), r.get("error"))
+    rejected = _mgt_rejected(r)
+    if rejected:
+        return FAIL, rejected
     t = sc["truth"] if "truths" not in sc else sc["truths"][i]
     L = t["length"]
     copies = [{"start": t["start"], "flank": t["flank"], "flank_start": t["flank_start"]}]
@@ -4443,6 +4501,9 @@ def check_walk_end(sc, ans, a, arm):
     r = _result(ans, i)
     if "arms" not in r:
         return FAIL, "seed not walked (%r)" % r.get("error")
+    rejected = _mgt_rejected(r)
+    if rejected:
+        return FAIL, rejected
     t = sc["truth"]
     side = a["arm"]
     armo = r["arms"][side]
