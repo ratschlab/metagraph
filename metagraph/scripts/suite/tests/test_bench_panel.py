@@ -366,6 +366,29 @@ class BuildPanel(unittest.TestCase):
 
 
 
+class ClockOffsetTest(unittest.TestCase):
+    def test_the_panel_takes_the_merged_runs_offset(self):
+        # SD-028: the panel shifts direct-local's executions by the mex clock offset merge_run applied and recorded
+        # (run.json host_cache.clock_offsets_s: the upper median of the invocations), never the first session's
+        with tempfile.TemporaryDirectory() as d:
+            b = Baseline(d)
+            b.add(scenario("R-pos-0001", "resolve"), resolve_body())
+            b.write()
+            sessions = [{"mex_clock_offset_s": v} for v in (0.0, 2.0, 2.2)]
+            sc.write_json_atomic(os.path.join(b.dir, "orchestrator.json"), {"sessions": sessions})
+            # a run merged before host_cache was recorded: merge_run's rule over the sessions
+            self.assertEqual(bp.load_baseline(b.dir)["mex_clock_offset_s"], 2.0)
+            run = sc.read_json(os.path.join(b.dir, "run.json"))
+            run["host_cache"] = {"clock_offsets_s": {"direct-local": 1.5}}
+            sc.write_json_atomic(os.path.join(b.dir, "run.json"), run)
+            self.assertEqual(bp.load_baseline(b.dir)["mex_clock_offset_s"], 1.5)
+            run["host_cache"] = {"clock_offsets_s": {}}   # merged without any offset: none applied
+            sc.write_json_atomic(os.path.join(b.dir, "run.json"), run)
+            self.assertIsNone(bp.load_baseline(b.dir)["mex_clock_offset_s"])
+        for values, want in (([], None), ([1.0], 1.0), ([1.0, 3.0], 3.0), ([3.0, None, "x", 1.0, 2.0], 2.0)):
+            orch = {"sessions": [{"mex_clock_offset_s": v} for v in values]}
+            self.assertEqual(sc.mex_clock_offsets(orch).get("direct-local"), want, values)
+
 class LoadContextTest(unittest.TestCase):
     def test_a_non_finite_sample_is_no_reading(self):
         # SD-018: the panel's load note takes the medians of the finite figures only (a NaN cannot be ordered, an

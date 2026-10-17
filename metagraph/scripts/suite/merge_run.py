@@ -222,19 +222,9 @@ def arm_dirs(run_dir):
 
 
 def clock_offsets(orchestrator):
-    """{arm: seconds its clock is ahead of the laptop's}: direct-local is stamped on mex, whose offset the
-    orchestrator measures per invocation (the median of the invocations is used)."""
-    vals = []
-    for sess in (orchestrator or {}).get("sessions", []) or []:
-        v = sess.get("mex_clock_offset_s")
-        try:
-            vals.append(float(v))
-        except (TypeError, ValueError):
-            continue
-    if not vals:
-        return {}
-    vals.sort()
-    return {"direct-local": vals[len(vals) // 2]}
+    """{arm: seconds its clock is ahead of the laptop's}: suite_common.mex_clock_offsets (the upper median of the
+    invocations' mex offsets)."""
+    return sc.mex_clock_offsets(orchestrator)
 
 
 def sample_files(run_dir):

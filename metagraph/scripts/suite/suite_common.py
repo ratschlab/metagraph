@@ -653,6 +653,24 @@ def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
     return rows
 
 
+def mex_clock_offsets(orchestrator):
+    """{arm: seconds its clock is ahead of the laptop's}: direct-local is stamped on mex, whose offset the
+    orchestrator measures per invocation (orchestrator.json sessions' mex_clock_offset_s); the upper median of the
+    invocations is used, {} without one. merge_run applies it and records it in run.json host_cache.clock_offsets_s,
+    which the bench panel reads (SD-028)."""
+    vals = []
+    for sess in (orchestrator or {}).get("sessions", []) or []:
+        v = sess.get("mex_clock_offset_s")
+        try:
+            vals.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    if not vals:
+        return {}
+    vals.sort()
+    return {"direct-local": vals[len(vals) // 2]}
+
+
 def finite_or_none(v):
     """A sampler figure (sra_all_cpu_pct, host_load1, ...) as a reading: a finite number, else None (a NaN compares
     False with every limit and an inf is no figure: no reading, never a clean one; the bench load guard's rule since

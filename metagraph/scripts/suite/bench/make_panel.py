@@ -115,11 +115,11 @@ def load_baseline(run_dir, reevaluated=False):
     run = sc.read_json(os.path.join(run_dir, "run.json")) or {}
     orch = sc.read_json(os.path.join(run_dir, "orchestrator.json")) or {}
     reev = sc.read_json(os.path.join(run_dir, "reevaluated.json")) if reevaluated else None
-    offset = None
-    for sess in orch.get("sessions") or []:
-        if isinstance(sess.get("mex_clock_offset_s"), (int, float)):
-            offset = sess["mex_clock_offset_s"]
-            break
+    # the mex clock offset merge_run applied to the set (run.json host_cache.clock_offsets_s), else, for a run
+    # merged before it was recorded, merge_run's rule over the invocations (suite_common.mex_clock_offsets)
+    merged = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated))) or run
+    recorded = (merged.get("host_cache") or {}).get("clock_offsets_s") if isinstance(merged, dict) else None
+    offset = (recorded if isinstance(recorded, dict) else sc.mex_clock_offsets(orch)).get("direct-local")
     return {"run_dir": os.path.abspath(run_dir), "rows": rows, "bad_lines": bad, "by": by,
             "compare": compare.get("scenarios") or {}, "compare_manifest_sha256": compare.get("manifest_sha256"),
             "run_id": run.get("run_id") or compare.get("run_id") or os.path.basename(os.path.normpath(run_dir)),
