@@ -1482,9 +1482,10 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
     // let go of the run read with it, so the rows before it only); false with |*need| the least
     // it was seen to need. Charged to |budget| itself, so that it holds nothing past the
     // budget, then released: a statement probe, not a charge of the read's admission (the test
-    // hook WalkerHooks::deny_decode is not asked). A row refused by its demand inside a longer
-    // run was read before the rows beside it were held: it is stated by its read alone (spec
-    // §6.8: whatever the chunks)
+    // hook WalkerHooks::deny_decode is not asked), not paced and not charged as work (one decode
+    // of one row, after the seed has failed); the oracle's test_read_hook and timing counters
+    // see it as any read. A row refused by its demand inside a longer run was read before the
+    // rows beside it were held: it is stated by its read alone (spec §6.8: whatever the chunks)
     auto reads_alone = [&](size_t pos, uint64_t *need) {
         const uint64_t beside = budget.held();
         const uint64_t peak_before = budget.begin_peak();
@@ -2368,9 +2369,10 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
                 FetchRefusal r = query.refusal();
                 const bool injected = decode_denied_ && r.cause == FetchRefusal::DECODE;
                 // stated by the refused row alone, whatever the chunk and the run it was read in
-                // (spec §6.8): a key refused by its demand inside a longer run was decoded
-                // before the hits beside it were held; read alone beside them it may not fit,
-                // and is then stated as a key read alone is
+                // (spec §6.8): every key refused by its demand is read again alone — one inside
+                // a longer run was decoded before the hits beside it were held, and read alone
+                // beside them it may not fit, then stated as a key read alone is; one that began
+                // its run fits again (the same read)
                 uint64_t alone_need = 0;
                 if (r.cause == FetchRefusal::DEMAND
                         && !query.reads_alone_within(keys[begin + refused_at], r.left,

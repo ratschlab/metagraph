@@ -635,10 +635,14 @@ class LabelQuery {
               ReadPacing *pacing = nullptr);
     // Whether |key|'s read alone — its row with its row-diff dependency rows and its hits, as
     // fetch() decodes a run of one key — fits |left| bytes; false with |*need| the least it was
-    // seen to need (as FetchRefusal::need). Decoded in a budget of its own (no test hook),
-    // nothing kept; the cache and the request counters are not changed. The seed phase states
-    // a refusal by demand per row with it (a key decoded inside a longer run was read before
-    // the hits beside it were held; read alone beside them it may not fit)
+    // seen to need (as FetchRefusal::need). Decoded in a budget of its own of |left| bytes,
+    // whose deny hook is unset, nothing kept: the cache and the contract counters
+    // (rows_requested, cache_hits) are not changed, but the decode is the oracle's like any
+    // other — its test_read_hook is asked, the timing counters (rows_fetched, fetch_seconds)
+    // count it. Not paced and not charged as work: one decode of one key, after the seed has
+    // failed. The validation states every refusal by demand with it (a key decoded inside a
+    // longer run was read before the hits beside it were held; read alone beside them it may
+    // not fit; a key that began its run fits again: the same read)
     bool reads_alone_within(node_index key, uint64_t left, uint64_t *need);
     // what a copy of |hits| holds (the model of decode_budget.hpp)
     static uint64_t held_bytes(const NodeHits &hits);
