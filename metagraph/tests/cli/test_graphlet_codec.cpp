@@ -2814,6 +2814,58 @@ std::vector<BudgetCase> wide_float_cases() {
 
 } // namespace
 
+// The request body reader of /pattern, /resolve, /traverse, /traverse/cancel and the pattern and
+// traverse CLIs (parse_strict_json): one RFC 8259 JSON text whose member names are unique, any
+// root (each route refuses a root that is not an object itself), at most kMaxBodyNesting nested
+// arrays and objects; every fault is the refusal's exception with the prefix
+TEST(GraphletCodec, StrictJsonBodyReader) {
+    auto read = [](const std::string &text) { return parse_strict_json<RefuseRequest>(text, "P: "); };
+    auto refusal = [&](const std::string &text) -> std::string {
+        try {
+            read(text);
+            return "accepted";
+        } catch (const InvalidRequest &e) {
+            return e.what();
+        }
+    };
+    EXPECT_EQ(1, read(" {\"a\": 1}\n")["a"].asInt());
+    EXPECT_EQ(2u, read("[1, 2]").size());
+    EXPECT_EQ("x", read("\"x\"").asString());
+    EXPECT_EQ(7, read("7").asInt());
+    // a name repeated in different objects is no duplicate
+    EXPECT_EQ(1, read("{\"a\": {\"a\": 1}}")["a"]["a"].asInt());
+    // a '/' in a string is text, after an escaped quote or backslash too
+    EXPECT_EQ("x/y", read("{\"a\": \"x/y\"}")["a"].asString());
+    EXPECT_EQ("q\"/\\/", read("{\"a\": \"q\\\"/\\\\/\"}")["a"].asString());
+    EXPECT_EQ("/", read("{\"a\": \"\\/\"}")["a"].asString());
+    EXPECT_TRUE(read(std::string(kMaxBodyNesting, '[') + std::string(kMaxBodyNesting, ']'))
+                        .isArray());
+
+    const std::string comment = "P: a comment (or a '/' outside a string) at byte ";
+    EXPECT_EQ(comment + "0", refusal("// x\n{}"));
+    EXPECT_EQ(comment + "1", refusal("{/* x */}"));
+    EXPECT_EQ(comment + "11", refusal("{\"a\": \"\\\\\"}/"));
+    EXPECT_EQ(comment + "8", refusal("{\"a\": 1 / 2}"));
+    for (const auto &[text, words] : std::vector<std::pair<std::string, std::string>> {
+             { "{\"a\": 1, \"a\": 2}", "Duplicate key: 'a'" },
+             { "{\"b\": {\"a\": 1, \"a\": 1}}", "Duplicate key: 'a'" },
+             { "{\"a\": 1,}", "Missing '}' or object member name" },
+             { "[1,]", "Syntax error: value, object or array expected." },
+             { "{} {}", "Extra non-whitespace after JSON value." },
+             { "{}x", "Extra non-whitespace after JSON value." },
+             { "{\"a\": NaN}", "Syntax error: value, object or array expected." },
+             { "{'a': 1}", "Missing '}' or object member name" },
+             { "", "Syntax error: value, object or array expected." } }) {
+        const std::string error = refusal(text);
+        EXPECT_EQ(0u, error.find("P: * Line 1, Column ")) << text << ": " << error;
+        EXPECT_NE(std::string::npos, error.find(words)) << text << ": " << error;
+    }
+    EXPECT_EQ("P: Exceeded stackLimit in readValue(). (more than 1000 nested arrays and objects)",
+              refusal(std::string(kMaxBodyNesting + 1, '[')
+                      + std::string(kMaxBodyNesting + 1, ']')));
+}
+
+
 TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
     Json::StreamWriterBuilder compact;
     compact["indentation"] = "";

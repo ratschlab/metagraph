@@ -263,8 +263,9 @@ class PatternDelivery {
 };
 
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after
-// it, nested at most 1,000 deep; anything else is refused as invalid_request (the other routes'
-// generic parse error carries no code, and their parser is more lenient)
+// it, nested at most 1,000 deep (parse_strict_json, the traversal routes' reader too); anything
+// else is refused as invalid_request (the traversal routes answer the same faults with their
+// code-less "Bad json received: " 400)
 Json::Value parse_pattern_body(const std::string &content);
 
 /**

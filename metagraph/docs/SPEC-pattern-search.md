@@ -126,7 +126,8 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 
 - `POST /pattern` with a JSON body: one RFC 8259 JSON text, with unique member names in every object, nothing
   after it (no second value, no comment, no trailing comma) and nested at most 1,000 deep; anything else is 400
-  `invalid_request` (§5). The answer is compact JSON, gzip or deflate when the request's `Accept-Encoding` asks
+  `invalid_request` (§5). `/resolve`, `/traverse` and `POST /traverse/cancel` read their body alike, with their
+  own error body (SPEC-labeled-traversal-core.md §5). The answer is compact JSON, gzip or deflate when the request's `Accept-Encoding` asks
   for it (zlib level `--traverse-compression-level`, 1 by default, to keep compression short; the time to write
   and compress the answer is kept back from the work, §7.6). Error bodies are never compressed.
 - The route runs on the server's request pool (`-p`; `--threads-each` is not a pool: it sets the threads used

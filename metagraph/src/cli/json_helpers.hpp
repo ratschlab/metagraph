@@ -3,8 +3,9 @@
 
 /**
  * JSON helpers shared by the routes' request parsers and answer builders (/traverse, /resolve,
- * /pattern and the predicate language): the strict reader of a request object, small value
- * builders, and the digit and escape counts the text-size estimates use. Header-only.
+ * /pattern and the predicate language): the strict reader of a request body and of a request
+ * object, small value builders, and the digit and escape counts the text-size estimates use.
+ * Header-only.
  */
 
 #include <cmath>
@@ -12,6 +13,7 @@
 #include <initializer_list>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -37,6 +39,61 @@ inline std::optional<uint64_t> non_negative_integer(const Json::Value &v) {
     if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0))
         return std::nullopt;
     return v.asUInt64();
+}
+
+// The deepest nesting of arrays and objects a request body may have (jsoncpp's stackLimit, its
+// default): parse_strict_json refuses a deeper one
+constexpr int kMaxBodyNesting = 1000;
+
+/**
+ * A request body as one RFC 8259 JSON text whose member names are unique: no comment, no
+ * trailing comma, nothing after the value, no duplicated member name (jsoncpp would keep the
+ * last value without a word: an id or a budget given twice would be replaced silently), at most
+ * kMaxBodyNesting nested arrays and objects. Throws Refusal()(|prefix| + what is wrong)
+ * otherwise. Not CharReaderBuilder::strictMode(): its strictRoot would refuse a root that is
+ * not an object, which each route refuses in its own order. The reader of /pattern, /resolve,
+ * /traverse and /traverse/cancel and of the pattern and traverse CLIs; /search and /align keep
+ * theirs (parse_json_string).
+ */
+template <class Refusal>
+Json::Value parse_strict_json(std::string_view content, const std::string &prefix) {
+    // jsoncpp skips a comment before an object's member name whatever allowComments says: a
+    // '/' outside a string is no JSON at all, so the text is refused before it is parsed
+    bool in_string = false;
+    for (size_t i = 0; i < content.size(); ++i) {
+        if (in_string) {
+            if (content[i] == '\\')
+                ++i;
+            else if (content[i] == '"')
+                in_string = false;
+        } else if (content[i] == '"') {
+            in_string = true;
+        } else if (content[i] == '/') {
+            throw Refusal()(prefix + "a comment (or a '/' outside a string) at byte "
+                            + std::to_string(i));
+        }
+    }
+    Json::CharReaderBuilder builder;
+    builder["allowComments"] = false;
+    builder["allowTrailingCommas"] = false;
+    builder["failIfExtra"] = true;
+    builder["rejectDupKeys"] = true;
+    builder["stackLimit"] = kMaxBodyNesting;
+    std::unique_ptr<Json::CharReader> reader { builder.newCharReader() };
+    Json::Value json;
+    std::string errors;
+    bool parsed = false;
+    try {
+        parsed = reader->parse(content.data(), content.data() + content.size(), &json, &errors);
+    } catch (const Json::Exception &e) {
+        // jsoncpp throws rather than returns past its nesting limit: the client's to fix, as
+        // every other fault of the text
+        throw Refusal()(prefix + e.what() + " (more than " + std::to_string(kMaxBodyNesting)
+                        + " nested arrays and objects)");
+    }
+    if (!parsed)
+        throw Refusal()(prefix + errors);
+    return json;
 }
 
 /**

@@ -605,6 +605,14 @@ probe_parameters(const SimpleWeb::CaseInsensitiveMultimap &query, const std::str
     return { *name, graph_path };
 }
 
+// The body of /resolve, /traverse or /traverse/cancel, read as /pattern reads its body
+// (parse_strict_json: one RFC 8259 JSON text, member names unique); a fault is 400
+// {"error": "Bad json received: ..."} without a code, as /search's reader answers a body that
+// is no JSON
+Json::Value parse_traversal_body(const std::string &content) {
+    return parse_strict_json<RefuseRequest>(content, "Bad json received: ");
+}
+
 } // namespace
 
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
@@ -1447,7 +1455,7 @@ int run_server(Config *config) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
-            Json::Value json = parse_json_string(content);
+            Json::Value json = parse_traversal_body(content);
             const bool multi = !config->fnames.empty();
             const GraphSelection selection = traverse_graph_selection(json, multi);
             const std::optional<bool> in_ram = in_ram_field(json);
@@ -1585,7 +1593,7 @@ int run_server(Config *config) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
-            Json::Value json = parse_json_string(content);
+            Json::Value json = parse_traversal_body(content);
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
@@ -1699,7 +1707,7 @@ int run_server(Config *config) {
                                                         shared_ptr<HttpServer::Request> request) {
         const size_t request_id = num_requests++;
         process_request(response, request, request_id, [&](const std::string &content) {
-            const CancelRequest cancel = parse_cancel_request(parse_json_string(content));
+            const CancelRequest cancel = parse_cancel_request(parse_traversal_body(content));
             auto [status, body] = attempts.cancel(cancel.attempt_id, cancel.wait_ms,
                                                   cancel.not_after_ms);
             logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}",

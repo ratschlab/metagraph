@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -5547,11 +5548,15 @@ int traverse_graph(Config *config) {
             logger->error("Cannot open request file {}", file);
             return 1;
         }
+        // read as the server reads a body (parse_strict_json): a duplicated member, a comment, a
+        // trailing comma or text after the value is no JSON
+        const std::string content { std::istreambuf_iterator<char>(in),
+                                    std::istreambuf_iterator<char>() };
         Json::Value json;
-        Json::CharReaderBuilder reader;
-        std::string errs;
-        if (!Json::parseFromStream(reader, in, &json, &errs)) {
-            logger->error("Invalid JSON in {}: {}", file, errs);
+        try {
+            json = parse_strict_json<RefuseRequest>(content, "");
+        } catch (const InvalidRequest &e) {
+            logger->error("Invalid JSON in {}: {}", file, e.what());
             return 1;
         }
         // A request with attempt_id states its usage on an error after it was read too, as the

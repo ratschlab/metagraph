@@ -379,6 +379,47 @@ class TestTraverseCLI(TestTraverseBase):
             self.assertIn('error', out)
             self.assertIn(expect, out['error'])
 
+    def test_traverse_request_files_are_strict_json(self):
+        """`metagraph traverse` (and --resolve) reads its request files as the server reads a
+        body (SPEC-labeled-traversal-core.md §5, §10.2): a duplicated member, a comment, a
+        trailing comma or text after the value is no JSON, which ends the run (exit status 1,
+        nothing written, the file and the fault logged); written strictly the file is
+        answered."""
+        traverse = json.dumps({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+                               'strategy': {'bounds': {'max_extension_bp': 10}},
+                               'attempt_id': 'cli-strict'})
+        resolve = json.dumps({'sequence': self.element, 'labels': ['acc1']})
+        path = self.tempdir.name + '/strict.json'
+        for resolve_flag, strict, refused in (
+                ('', traverse, [
+                    (traverse[:-1] + ', "attempt_id": "cli-other"}',
+                     "Duplicate key: 'attempt_id'"),
+                    (traverse.replace('"max_extension_bp": 10',
+                                      '"max_extension_bp": 10, "max_extension_bp": 20'),
+                     "Duplicate key: 'max_extension_bp'"),
+                    ('// a comment\n' + traverse, "a comment (or a '/' outside a string) at byte 0"),
+                    (traverse[:-1] + ',}', "Missing '}' or object member name"),
+                    (traverse + ' {}', 'Extra non-whitespace after JSON value.')]),
+                ('--resolve', resolve, [
+                    (resolve[:-1] + ', "labels": ["acc2"]}', "Duplicate key: 'labels'"),
+                    (resolve + ' x', 'Extra non-whitespace after JSON value.')])):
+            for body, words in [(strict, None)] + refused:
+                with self.subTest(resolve=resolve_flag, body=body[:120]):
+                    with open(path, 'w') as f:
+                        f.write(body)
+                    res = subprocess.run(
+                        shlex.split(f'{METAGRAPH} traverse {resolve_flag} -i {self.graph} '
+                                    f'-a {self.anno} {path}'),
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if words is None:
+                        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+                        self.assertNotIn('error', json.loads(res.stdout.decode()))
+                        continue
+                    self.assertEqual(1, res.returncode, res.stdout.decode()[:500])
+                    self.assertEqual('', res.stdout.decode())
+                    self.assertIn(f'Invalid JSON in {path}: ', res.stderr.decode())
+                    self.assertIn(words, res.stderr.decode())
+
     def test_traverse_attempt_errors_state_their_usage(self):
         """The CLI states the usage of a request with attempt_id on an error after the
         request was read, as the server's 400 does; a malformed id is refused without."""
@@ -1927,6 +1968,71 @@ class TestTraverseAPI(TestTraverseBase):
         ret = self._post('traverse', {'seeds': [], 'strategy': {}})
         self.assertEqual(400, ret.status_code)
         self.assertIn('seeds', ret.json()['error'])
+
+    def test_api_request_json_is_strict(self):
+        """/traverse, /resolve and /traverse/cancel read their body as /pattern does
+        (SPEC-labeled-traversal-core.md §5): one RFC 8259 JSON text whose member names are
+        unique. A duplicated member (jsoncpp would keep its last value without a word: an
+        attempt_id, a time budget, a wait_ms replaced silently), a comment, a trailing comma,
+        text after the value and more than 1000 nested arrays and objects are 400
+        {"error": "Bad json received: ..."}, without a code, as a body that is no JSON at all;
+        the same body written strictly is answered."""
+        traverse = json.dumps({
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'direction': 'right',
+                         'bounds': {'max_extension_bp': 10, 'time_budget_ms': 60000},
+                         'output': {'detail': 'summary', 'timing': False}}})
+        resolve = json.dumps({'sequence': self.element, 'labels': ['acc1'],
+                              'bounds': {'time_budget_ms': 60000}})
+        cancel = json.dumps({'attempt_id': 'strict-cancel', 'wait_ms': 0})
+        duplicate = "Duplicate key: '%s'"
+        comment = "a comment (or a '/' outside a string) at byte %d"
+        deep = ('Exceeded stackLimit in readValue(). (more than 1000 nested arrays and '
+                'objects)')
+
+        def common(t):
+            return [('// a comment\n' + t, comment % 0),
+                    ('{/* a comment */' + t[1:], comment % 1),
+                    # a '/' in a string is text; outside one it is no JSON
+                    (t[:-1] + ', "x": "a/b" / 2}', comment % (len(t) + 12)),
+                    (t[:-1] + ',}', "Missing '}' or object member name"),
+                    (t + ' {}', 'Extra non-whitespace after JSON value.'),
+                    (t + 'x', 'Extra non-whitespace after JSON value.'),
+                    ('[' * 1001 + ']' * 1001, deep)]
+        cases = {
+            'traverse': (traverse, 200, common(traverse) + [
+                (traverse[:-1] + ', "attempt_id": "strict-1", "attempt_id": "strict-2"}',
+                 duplicate % 'attempt_id'),
+                (traverse.replace('"time_budget_ms": 60000',
+                                  '"time_budget_ms": 60000, "time_budget_ms": 1'),
+                 duplicate % 'time_budget_ms'),
+                (traverse.replace('}]', '},]'), 'Syntax error: value, object or array expected.'),
+            ]),
+            'resolve': (resolve, 200, common(resolve) + [
+                (resolve[:-1] + ', "labels": ["acc2"]}', duplicate % 'labels'),
+                (resolve.replace('"time_budget_ms": 60000',
+                                 '"time_budget_ms": 60000, "time_budget_ms": 1'),
+                 duplicate % 'time_budget_ms'),
+                (resolve.replace('"acc1"]', '"acc1",]'),
+                 'Syntax error: value, object or array expected.'),
+            ]),
+            'traverse/cancel': (cancel, 404, common(cancel) + [
+                (cancel[:-1] + ', "wait_ms": 10000}', duplicate % 'wait_ms'),
+                ('{"attempt_id": "strict-0", ' + cancel[1:], duplicate % 'attempt_id'),
+            ]),
+        }
+        url = f'http://{self.host}:{self.port}/'
+        for route, (strict, status, refused) in cases.items():
+            ret = requests.post(url + route, data=strict)
+            self.assertEqual(status, ret.status_code, (route, ret.text[:500]))
+            for body, words in refused:
+                with self.subTest(route=route, body=body[:120]):
+                    ret = requests.post(url + route, data=body)
+                    self.assertEqual(400, ret.status_code, ret.text[:500])
+                    self.assertEqual(['error'], list(ret.json()))
+                    self.assertTrue(ret.json()['error'].startswith('Bad json received: '),
+                                    ret.json()['error'])
+                    self.assertIn(words, ret.json()['error'])
 
     def test_api_seed_not_in_graph_is_400(self):
         """A single-graph server: a seed the graph does not hold is the caller's error, the

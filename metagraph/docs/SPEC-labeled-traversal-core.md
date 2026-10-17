@@ -345,6 +345,15 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 }
 ```
 
+- **The body** of `/traverse`, `/resolve` (§4.1) and `POST /traverse/cancel` (§10.3) is read as `/pattern` reads
+  its body (`SPEC-pattern-search.md` §3): one RFC 8259 JSON text, with unique member names in every object,
+  nothing after it (no second value, no comment, no trailing comma) and nested at most 1,000 deep; anything else
+  is 400 `{"error": "Bad json received: …"}` without a code, as a body that is no JSON at all. A duplicated member
+  is refused, never its last value taken: an `attempt_id`, a `bounds.time_budget_ms`, a `not_after_ms` or a
+  `wait_ms` given twice would be replaced without a word. `metagraph traverse` reads its request files alike
+  (§10.2). Before, these routes and the CLI took jsoncpp's defaults: a comment, a trailing comma and text after
+  the value were accepted, a duplicated member kept its last value, and a body nested deeper than 1,000 was a 400
+  with jsoncpp's text alone (`Exceeded stackLimit in readValue().`, now after the prefix).
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
   rejected with a message naming the field; nothing is silently weakened. Defaults are filled in and the
   **normalized strategy** is echoed. If the server clamps a bound (§10.3) the echo carries
@@ -2566,7 +2575,9 @@ the server. A request that fails gets the body the server's error gives it — `
 has an `attempt_id`; `"Internal server error"` for a failure that is not a `std::exception` (the server's 500) —
 the exit status is 1 and the next file is still answered (before, a failure other than a malformed request, such
 as the walker's on an inconsistent primary graph, ended the run with an abort and nothing written for that file or
-the later ones). A file that cannot be read or is not JSON ends the run (exit status 1).
+the later ones). A file that cannot be read or is not JSON — read as the server reads a body (§5): a duplicated
+member, a comment, a trailing comma or text after the value is no JSON — ends the run (exit status 1, the file and
+the fault logged, nothing written for it).
 
 ### 10.3 Server
 
