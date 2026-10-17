@@ -2173,6 +2173,15 @@ def runner_rule_c_by_design(line):
         bool(line.get("service_by_design_case")) and line.get("inconclusive_reason") in sc.UNDECIDABLE
 
 
+def runner_by_design_finding(line):
+    """Whether an MCP execution records the runner's by-design finding (B5b-10): outcome finding, the case recorded
+    (service_by_design_case; a by-design mark never erases a finding, e.g. a relayed deadline's budget_respected).
+    With no table to replay the case it is the runner's mark, as its service_by_design is: kept by reevaluate, an
+    unverified by-design part in the comparison (mcp_agreement), never compared check by check (SD-022)."""
+    return line.get("arm", "mcp") == "mcp" and line.get("outcome") == "finding" and \
+        bool(line.get("service_by_design_case"))
+
+
 def case_ids(scenario):
     """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
     ids = ((scenario or {}).get("mcp") or {}).get("by_design")
@@ -2490,7 +2499,8 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
     (check_agreement: direct-local's, a check item it left undecided taken from direct-remote's where that one
     decided it), the failing check items the matched answered cases explain apart (B-01, B5b-06:
     service_by_design only when nothing else differs; the case is a note); an unmatched execution the MCP runner
-    marked service_by_design is, with no table, an unverified by-design part of its own beside the others' check
+    marked service_by_design, or as a by-design finding (runner_by_design_finding), is, with no table, an unverified
+    by-design part of its own beside the others' check
     agreement, and with a table judged by its checks like any other (B5b-05, B-06); one it marked not_implemented_mcp
     makes the rest not_implemented_mcp with no table, with a named not_implemented_mcp case, or on a scenario the
     manifest does not map, and else is a disagreement on the MCP side (unmatched_not_implemented_mark); with no table a rule (c) inconclusive the runner decided on its case
@@ -2600,9 +2610,11 @@ def mcp_agreement(mcp, direct_lines, scenario, cases, run_dir):
         parts.append(dropped)
     if plain:
         unmatched = [r for r in plain if r.get("repeat") not in answered]
-        # B5b-05: the runner's marks no case reproduces: with no table each stays an unverified by-design part of
-        # its own; with a table it is judged by its checks (B-06); every other execution is compared check by check
-        marks = [r for r in unmatched if r.get("outcome") == "service_by_design"] if not cases else []
+        # B5b-05: the runner's marks no case reproduces (its service_by_design, its by-design finding: SD-022): with
+        # no table each stays an unverified by-design part of its own; with a table it is judged by its checks
+        # (B-06); every other execution is compared check by check
+        marks = [r for r in unmatched if r.get("outcome") == "service_by_design" or runner_by_design_finding(r)] \
+            if not cases else []
         compared_lines = [r for r in plain if not any(r is x for x in marks)]
         nim_marks = [r for r in unmatched if r.get("outcome") == "not_implemented_mcp"]
         if nim_marks and not (cases and mcp_mapped(scenario)

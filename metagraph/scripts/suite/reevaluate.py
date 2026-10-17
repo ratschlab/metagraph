@@ -252,7 +252,7 @@ def _outcome_of(checks_mod, arm, scenario, answer, line, new_checks, raised, cas
         arm == "mcp" and recorded == "not_implemented_mcp" and bool(line.get("service_by_design_case")))
     if kept and not replayed:
         return recorded, "decided by the runner without the checks"
-    if arm == "mcp" and not cases and recorded == "finding" and line.get("service_by_design_case"):
+    if arm == "mcp" and not cases and compare.runner_by_design_finding(dict(line, arm=arm)):
         # B5b-10: with no table a by-design finding (a relayed deadline's budget_respected) is the runner's mark as
         # its service_by_design is: kept
         _recorded_mark(line, info)

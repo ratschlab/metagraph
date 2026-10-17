@@ -1132,7 +1132,9 @@ f94b079d, and lane S5d below aligns the mirror with them).
   and B, capped by the 10 s write phase, V-04). The recorded ~30.4 s lines stay host states.
 - B5b-03: an undecidable host state is inconclusive whatever the checks say (lane S5b's addendum-11 divergence
   dropped: the replay equals the runner again). B5b-10: with no table, a recorded `finding` whose line names a
-  service_by_design_case is kept, as the runner's mark is.
+  service_by_design_case is kept, as the runner's mark is; the comparison reads it alike (SD-022,
+  compare.runner_by_design_finding, which reevaluate calls too): an unverified by-design part of the runner's, as its
+  service_by_design mark, where it compared the line check by check (a disagreement).
 
 ### Comparator and merge
 - The timing class's content rule (B5b-02, VERIFY-REVIEW): each population count is the range of true values it

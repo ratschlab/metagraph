@@ -1474,6 +1474,24 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertEqual(cmp.mcp_agreement({0: marked}, {"direct-local": d}, s, cases, self.dir)["class"],
                          "disagree")
 
+    def test_by_design_finding_without_a_table(self):
+        # SD-022 (B5b-10): with no table the runner's by-design finding (a relayed deadline whose budget_respected is
+        # a finding) is its mark, as reevaluate keeps it: an unverified by-design part, not a disagreement check by
+        # check; with the table the case is replayed
+        s = dict(scen("P-1", "P"), mcp={"tool": "pattern_search", "arguments": {}})
+        ok = [{"check": "status", "outcome": "pass", "detail": ""},
+              {"check": "budget_respected", "outcome": "pass", "detail": ""}]
+        d = {0: self.raw_line("P-1", "direct-local", 0, checks=ok)}
+        finding = self.raw_line("P-1", "mcp", 0, http=502, outcome="finding", service_by_design_case="pattern.x",
+                                error={"code": "search_failed", "text": "pattern_deadline: x"},
+                                checks=[{"check": "status", "outcome": "fail", "detail": "http 502"},
+                                        {"check": "budget_respected", "outcome": "finding", "detail": "late"}])
+        res = cmp.mcp_agreement({0: finding}, {"direct-local": d}, s, {}, self.dir)
+        self.assertEqual((res["class"], res.get("by"), res.get("verified")), ("service_by_design", "mcp runner", False))
+        self.assertTrue(cmp.runner_by_design_finding(finding))
+        self.assertFalse(cmp.runner_by_design_finding(dict(finding, outcome="fail")))
+        self.assertFalse(cmp.runner_by_design_finding(dict(finding, service_by_design_case=None)))
+
     def test_explained_items(self):
         # B5b-06: explains_checks entries explain check ITEMS ({check, detail_matches}); an unexplained item of the
         # same check is compared (it was hidden behind the name)
