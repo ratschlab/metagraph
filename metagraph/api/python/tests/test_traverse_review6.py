@@ -384,6 +384,30 @@ class TestCompareCostIsALowerBound(unittest.TestCase):
         self.assertGreater(n, 500)
         self.assertEqual([], bad)
 
+    def test_the_claims_estimate_is_above_the_charge(self):
+        """In claims mode the estimate is an upper bound of what compare() charges: the
+        claims' chains priced by the helper that charges them (spelled over the segments
+        the claims are anchored on), not as 4 steps per annotate row -- on deep tries that
+        was up to 18x below the charge -- and the difference rows sorted per side, as
+        compare() sorts its keys."""
+        bad = []
+        deep = [(('comb%d' % n, lambda n=n: parse(comb_annotate(n))),
+                 ('comb%d' % m, lambda m=m: parse(comb_annotate(m))))
+                for n, m in ((300, 300), (1000, 1000), (100, 1000), (1000, 100))]
+        for (ka, ma), (kb, mb) in _pairs() + _comb_pairs() + deep:
+            a0 = ma()
+            kws = [{}] + ([{'labels': [{'ref': a0.labels[-1].ref}]}] if a0.labels else [])
+            for kw in kws:
+                cost = ops.compare_cost(ma(), mb(), mode='claims', **kw)
+                bud = LocalBudget()
+                ma().compare(mb(), mode='claims', budget=bud, **kw)
+                if bud.used_work > cost['work_units']['estimate'] \
+                        or bud.peak_bytes > cost['memory_bytes']['estimate']:
+                    bad.append((os.path.basename(ka), os.path.basename(kb), kw,
+                                cost['work_units']['estimate'], bud.used_work,
+                                cost['memory_bytes']['estimate'], bud.peak_bytes))
+        self.assertEqual([], bad)
+
     def test_incomparable_is_exact(self):
         # nothing is keyed: the estimate is all the comparison charges
         a, b = T.graphlet('fork'), T.graphlet('merge')

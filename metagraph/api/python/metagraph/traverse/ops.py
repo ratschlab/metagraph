@@ -3841,7 +3841,8 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     of each cut, which are only known while comparing: those phases are named in
     |unpriced|. exact: compare() stops before keying (incomparable indexes, no arm in
     common, a side without bases in a mode keyed by bases), so at_least is all it
-    charges. Cost: one pass over each arm's segments and runs (its structural sizes)."""
+    charges. Cost: one pass over each arm's segments and runs (its structural sizes; a
+    constrain run cut at the depth follows its own route to it, as compare() does)."""
     if mode not in _COMPARE_MODES:
         raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     t = _Tally()
@@ -3882,34 +3883,36 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     unpriced = []
     for tag, g in (('a', a), ('b', b)):
         w0 = t.work
+        keys = 0
         for side in sides:
             arm_ = g.arms[side]
             segs = arm_.segments
             if mode in ('claims',) or (mode == 'prefix_subset' and tag == 'a'):
-                n_rows = _price_restricted_claims(t, g, side, depth)
+                n_rows, anchors = _price_restricted_claims(t, g, side, depth)
+                keys += n_rows
+                # the claims' bases, at most the depth each (their rows' charges)
                 bp = sum(min(segs[r.segment].end_bp, depth) for r in arm_.runs) \
                     if g.mode == 'constrain' else n_rows * depth
-                steps = sum(segs[r.segment].depth + 1 for r in arm_.runs) \
-                    if g.mode == 'constrain' else n_rows * 4
+                # the claims' chains priced by the helper compare() charges them with, over
+                # every segment a claim of the restricted DAG is anchored on: an upper
+                # bound, as compare() keys the claims that are not merged (under labels=,
+                # the selected ones)
+                chains = _Tally()
                 if mode == 'prefix_subset':
                     # the tree of the claims' chains and the claims filed under their
                     # anchors (_claim_index(): no prefix is spelled)
-                    est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows \
-                        + sort_work(n_rows)
-                    est_m += min(steps, len(segs)) * (SET_ITEM + 2 * DICT_KEY + INT
-                                                     + LIST_ITEM) \
+                    _charge_chain_tree(chains, arm_, anchors)
+                    est_w += chains.work + 3 * W_ELEM * n_rows + sort_work(n_rows)
+                    est_m += chains.peak \
                         + n_rows * (2 * TUPLE + 5 * 8 + 2 * LIST_ITEM + 2 * DICT_KEY
                                     + 2 * LIST + INT)
                 else:
-                    est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows \
-                        + bp // 128
-                    # the claims' prefixes (2x their bases, as charged) and their spelling
-                    # streamed (derive.walk_iter_bytes(): the kept prefixes, at most the
-                    # bases)
-                    est_m += 2 * n_rows * (STR + TUPLE + LIST + 48 + 2 * STR) + 3 * bp
-                if mode == 'claims':
-                    est_w += sort_work(n_rows) + 2 * n_rows + W_ROW * n_rows
-                    est_m += 2 * list_bytes(n_rows) + n_rows * (dict_bytes(6) + dict_bytes(2))
+                    # the chains spelled (_charge_spellings()), the claims' prefixes (2x
+                    # their bases, as charged) and their rows
+                    _charge_spellings(chains, arm_, anchors)
+                    est_w += chains.work + 3 * W_ELEM * n_rows + bp // 128
+                    est_m += chains.peak + 2 * n_rows * (STR + TUPLE + LIST + 48 + 2 * STR) \
+                        + 2 * bp
             if mode in ('walks', 'prefix_subset'):
                 cuts = _price_cuts(t, g, side, depth)
                 n0 = len(segs[0].entry) if segs else 0
@@ -3930,6 +3933,11 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                 est_w += W_ELEM * 2 * n + sort_work(n) + (2 + W_ROW) * n
                 est_m += n * (TUPLE + 2 * STR + 24 + DICT_KEY) + list_bytes(n) \
                     + n * dict_bytes(5)
+        if mode == 'claims':
+            # as many difference rows as keys: the side's keys of every arm sorted at once
+            # (_charge_differences())
+            est_w += sort_work(keys) + (2 + W_ROW) * keys
+            est_m += 2 * list_bytes(keys) + keys * (dict_bytes(6) + dict_bytes(2))
         phases['keys:' + tag] = t.work - w0
     if mode == 'prefix_subset':
         unpriced.append('omissions')
@@ -3939,7 +3947,9 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
 
 
 def _price_restricted_claims(t, g, side, depth):
-    """_restricted_claims()'s charges into |t|; -> the claims it prices (rows)."""
+    """_restricted_claims()'s charges into |t|; -> (the claims it prices (rows), the
+    segments their claims are anchored on: every claim of the restricted DAG's, merged
+    ones included)."""
     a = g.arms[side]
     if g.mode == 'constrain':
         derive.uses(t, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above', 'merge_depth',
@@ -3947,7 +3957,13 @@ def _price_restricted_claims(t, g, side, depth):
         t.uses((id(a), 'first_parent_at', depth - 1),
                *derive.price(a, 'first_parent_at', len(g.labels), g.mode))
         _charge_all(t, _restricted_claim_prices(t, g, a), _CLAIM_BYTES)
-        return len(a.runs)
+        anchors = set()
+        for run in a.runs:
+            reanchor = _restricted_run_status(a, run, depth)
+            if reanchor is not None:
+                anchors.add(_route_segment_at(a, run, depth - 1)[0] if reanchor
+                            else run.segment)
+        return len(a.runs), anchors
     derive.uses(t, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above', 'merge_depth',
                 'first_paths', 'annotate_route_ends')
     w, m = derive.price(a, 'annotate_route_ends', len(g.labels), g.mode)
@@ -3961,7 +3977,7 @@ def _price_restricted_claims(t, g, side, depth):
     t.charge(sort_work(len(ends)) + n * (W_ROW + 2)
              + sum(3 * md[x] for v in ends.values() for x, _ in v),
              n * (_CLAIM_BYTES + TUPLE) + list_bytes(len(ends)))
-    return n
+    return n, {x for v in ends.values() for x, _ in v}
 
 
 def _price_cuts(t, g, side, depth):
@@ -4568,6 +4584,20 @@ def _evidence_at(a, run, anchor, t):
     return route_from, max(route_from, run.from_bp)
 
 
+def _restricted_run_status(a, run, depth):
+    """Where the DAG restricted to [0, depth) claims |run| (_restricted_run_claim()): None
+    when it has no claim there (the run starts at or beyond the depth), False when its
+    claim is its own uncut one (on its anchor), True when it is anchored at the segment of
+    its own route that holds base depth - 1."""
+    if run.from_bp == run.to_bp:
+        if run.from_bp > depth:
+            return None
+    elif run.from_bp >= depth:
+        return None
+    return run.to_bp > depth or (0 < depth == run.to_bp and (
+        run.merged or a.segments[run.segment].from_bp >= depth))
+
+
 def _restricted_run_claim(g, a, run, depth, exact, inexact):
     """The claim of |run| in the DAG restricted to [0, depth): the run-start guard of a
     cut, then -- for a run reaching past the depth, closed by a merge AT the depth, or
@@ -4580,16 +4610,12 @@ def _restricted_run_claim(g, a, run, depth, exact, inexact):
     merge position would compare unequal with a deeper retrieval). Any other run
     ending within the depth is its uncut claim (its anchor and every merge on its chain lie
     below the depth)."""
-    zero = run.from_bp == run.to_bp
-    if zero:
-        if run.from_bp > depth:
-            return None
-    elif run.from_bp >= depth:
+    reanchor = _restricted_run_status(a, run, depth)
+    if reanchor is None:
         return None
-    reanchor = run.to_bp > depth or (0 < depth == run.to_bp and (
-        run.merged or a.segments[run.segment].from_bp >= depth))
     if not reanchor:
         return _run_claim(g, a, run, depth, exact)
+    zero = run.from_bp == run.to_bp
     t, ok = _route_segment_at(a, run, depth - 1)
     if not ok and inexact is not None:
         inexact.append('%s arm, run %d (%s): its route through a merge is not in any '
