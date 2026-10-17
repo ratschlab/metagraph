@@ -4,6 +4,7 @@ direct arms against the local fake host, the MCP arm through tests/fake_mcp_benc
 probes, the {checks_dir} snapshot, the preflight refusal on a loaded host, --max-steps, Ctrl-C and --resume, the lock,
 the MCP template, and the run's own analysis (classes, guard, verdict)."""
 
+import argparse
 import contextlib
 import io
 import json
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SUITE = os.path.dirname(HERE)
@@ -83,6 +85,78 @@ class BenchCase(unittest.TestCase):
     def run_dir(self, p):
         return p.stdout.strip().splitlines()[-1]
 
+
+
+class FakeMex(object):
+    """A mex that answers each command with the next of |answers| ((rc, output); the last one repeats)."""
+
+    def __init__(self, *answers):
+        self.answers, self.commands = list(answers), []
+
+    def run(self, command):
+        self.commands.append(command)
+        return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+
+
+class LockAndRunnerCheckTest(unittest.TestCase):
+    """SD-037: the bench's port of run_suite.sh's lock and runner check keeps review N3 and the shell's diagnostics:
+    a mex that gives no answer never reads as a running runner (nor as none), and a lock it could not release or
+    update is said."""
+
+    def bench(self, *answers):
+        b = object.__new__(run_bench.Bench)
+        b.cfg = argparse.Namespace(mex="user@mex", mex_dir="suite-dev", runner_pattern="[s]cripts/run_direct\\.py",
+                                   wait_runner_s=0)
+        b.mex = FakeMex(*answers)
+        b.lock_token, b.lock_held, b.run_id = "tok", True, "r1"
+        b.lock_host, b.lock_started = "h", 0.0
+        return b
+
+    def stderr_of(self, fn):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            out = fn()
+        return out, err.getvalue()
+
+    def test_a_silent_mex_is_no_answer(self):
+        self.assertEqual(self.bench((0, "runners: \n")).wait_no_runner(0), "none")
+        self.assertEqual(self.bench((0, "runners: 12 13\n")).wait_no_runner(0), "running")
+        state, err = self.stderr_of(lambda: self.bench((255, "")).wait_no_runner(0))
+        self.assertEqual(state, "silent")
+        self.assertIn("no answer from user@mex", err)
+        with self.assertRaises(run_bench.Setup) as cm:
+            self.stderr_of(lambda: self.bench((255, "")).require_no_runner("x"))
+        self.assertIn("no answer from user@mex while checking for a running run_direct.py", str(cm.exception))
+        with self.assertRaises(run_bench.Setup) as cm:
+            self.stderr_of(lambda: self.bench((0, "runners: 12\n")).require_no_runner("a run_direct.py runs"))
+        self.assertIn("a run_direct.py runs", str(cm.exception))
+        self.assertIsNone(self.stderr_of(lambda: self.bench((0, "runners:\n")).require_no_runner("x"))[0])
+
+    def test_lock_diagnostics(self):
+        b = self.bench((255, ""))
+        _, err = self.stderr_of(b.release_lock)
+        self.assertIn("could not be released (no answer)", err)
+        self.assertIn("echo released", b.mex.commands[0])
+        _, err = self.stderr_of(self.bench((0, "released\n")).release_lock)
+        self.assertNotIn("could not be released", err)
+        _, err = self.stderr_of(self.bench((1, "")).lock_update)
+        self.assertIn("the run id could not be written into the lock (it stays held)", err)
+        # a stale lock whose removal fails says so; the final refusal names the LOCK.break mutex
+        held = json.dumps({"pid": 1, "host": "other-host", "hostname": "x", "started_utc": "2026-01-01T00:00:00Z",
+                           "started_epoch": 0.0, "run_id": "old", "mode": "paired", "token": "t"})
+        b = self.bench((0, ""), (1, ""), (0, held + "\n"), (1, ""))
+        with mock.patch.object(run_bench.sc, "lock_verdict", lambda *a: ("stale", "old")), \
+                mock.patch.object(run_bench.time, "sleep", lambda s: None):
+            with self.assertRaises(run_bench.Setup) as cm:
+                self.stderr_of(b.take_lock)
+        self.assertIn("LOCK.break", str(cm.exception))
+        b = self.bench((0, ""), (1, ""), (0, held + "\n"), (1, ""))
+        err = io.StringIO()
+        with mock.patch.object(run_bench.sc, "lock_verdict", lambda *a: ("stale", "old")), \
+                mock.patch.object(run_bench.time, "sleep", lambda s: None), contextlib.redirect_stderr(err):
+            with self.assertRaises(run_bench.Setup):
+                b.take_lock()
+        self.assertIn("the stale lock was not removed", err.getvalue())
 
 class RunBenchOffline(BenchCase):
     def test_schedule_executed_one_at_a_time(self):

@@ -92,6 +92,10 @@ HEARTBEAT_EVERY_S = 300  # the sampler's heartbeat (it stops 3600 s after the la
 SAMPLER_MAX_S = 6 * 3600
 
 
+# the stop reasons under which a direct-local runner may still run on mex: no closing request after them
+RUNNER_MAY_RUN = ("runner_still_running", "mex_unreachable")
+
+
 class Setup(Exception):
     """A setup refusal: exit 2 (or the code it names) with its message."""
 
@@ -294,23 +298,32 @@ class Bench(object):
                 doc = None
             verdict, reason = sc.lock_verdict(doc, self.lock_host, time.time(), sc._pid_alive, sc._pid_age_s)
             if verdict != "stale":
-                raise Setup("the suite lock ~/%s/LOCK on %s is %s %s; another invocation drives the host" % (
-                    d, self.cfg.mex, verdict, reason))
+                raise Setup("the suite lock ~/%s/LOCK on %s is %s; another invocation drives the host (remove the "
+                            "file only if that process is gone)" % (d, self.cfg.mex, reason))
             log("removing a stale lock (%s)" % reason)
             if self.mex.run(sc.lock_break_command(d, held))[0] != 0:
+                log("the stale lock was not removed (it changed, or another removal is in progress); retrying")
                 time.sleep(1)
-        raise Setup("could not take the lock ~/%s/LOCK on %s" % (d, self.cfg.mex))
+        raise Setup("could not take the lock ~/%s/LOCK on %s (a directory ~/%s/LOCK.break there is a stale-lock "
+                    "removal in progress, or one left by a cut-off invocation: remove it when no invocation runs)"
+                    % (d, self.cfg.mex, d))
 
     def lock_update(self):
         d = self.cfg.mex_dir
-        self.mex.run("grep -q %s %s/LOCK && printf '%%s\\n' %s > %s/LOCK.%s && mv -f %s/LOCK.%s %s/LOCK" % (
+        rc, _ = self.mex.run("grep -q %s %s/LOCK && printf '%%s\\n' %s > %s/LOCK.%s && mv -f %s/LOCK.%s %s/LOCK" % (
             self.lock_token, d, shlex.quote(self.lock_json()), d, self.lock_token, d, self.lock_token, d))
+        if rc != 0:
+            log("the run id could not be written into the lock (it stays held)")
 
     def release_lock(self):
         if not self.lock_held:
             return
         d = self.cfg.mex_dir
-        self.mex.run("if grep -q %s %s/LOCK 2>/dev/null; then rm -f %s/LOCK; fi" % (self.lock_token, d, d))
+        _, out = self.mex.run("if grep -q %s %s/LOCK 2>/dev/null; then rm -f %s/LOCK; fi; echo released"
+                              % (self.lock_token, d, d))
+        if "released" not in (out or ""):
+            log("the lock ~/%s/LOCK on %s could not be released (no answer); the next invocation removes it as "
+                "stale once this process is gone" % (d, self.cfg.mex))
         self.lock_held = False
 
     def runner_pids(self):
@@ -325,19 +338,49 @@ class Bench(object):
         """SIGINT to this run's runner on mex (it stops after its request in flight), then up to 120 s for it."""
         pattern = "%s .*--run-id %s" % (self.cfg.runner_pattern, self.run_id)
         self.mex.run("pkill -INT -u $(id -u) -f %s" % shlex.quote(pattern))
-        if not self.wait_no_runner(120):
+        state = self.wait_no_runner(120)
+        if state == "running":
             log("the direct-local runner still runs on %s; --resume waits for it" % self.cfg.mex)
+        elif state == "silent":
+            log("no answer from %s: whether the direct-local runner still runs is unknown; --resume waits for it"
+                % self.cfg.mex)
 
     def wait_no_runner(self, max_s):
-        waited = 0.0
+        """Until no run_direct.py of the suite runs on mex: "none" then; "running" when one still runs after
+        |max_s| seconds; "silent" when mex did not answer the last check after |max_s| seconds. A failing ssh is
+        retried every 5 s within that time and never reads as "no runner" (run_suite.sh's wait_no_runner, review
+        N3: the next arm would start next to a runner cut off from its ssh)."""
+        waited, silent, last, pids = 0.0, 0, None, None
         while True:
-            pids = self.runner_pids()
-            if pids == "":
-                return True
+            found = self.runner_pids()
+            if found == "":
+                return "none"
+            if found is None:
+                last, silent = "silent", silent + 1
+                if silent % 6 == 1:
+                    log("no answer from %s while checking for a running run_direct.py; retrying for up to %g s"
+                        % (self.cfg.mex, max_s))
+            else:
+                last, pids = "running", found
             if waited >= max_s:
-                return False
+                if last == "running":
+                    log("run_direct.py still running on %s (pid(s) %s)" % (self.cfg.mex, pids))
+                else:
+                    log("no answer from %s for %g s: whether a run_direct.py still runs there is unknown"
+                        % (self.cfg.mex, waited))
+                return last
             time.sleep(5)
             waited += 5
+
+    def require_no_runner(self, running_text):
+        """Setup refusal unless no run_direct.py runs on mex (wait_no_runner within SUITE_WAIT_RUNNER_S): one
+        running, |running_text|; no answer, the shell's refusal (an ssh failure never reads as no runner)."""
+        state = self.wait_no_runner(self.cfg.wait_runner_s)
+        if state == "running":
+            raise Setup(running_text)
+        if state != "none":
+            raise Setup("no answer from %s while checking for a running run_direct.py: refusing to start (an ssh "
+                        "failure never reads as no runner)" % self.cfg.mex)
 
     # -- the run directory --------------------------------------------------------------------------------------
     def release_of_host(self):
@@ -356,8 +399,7 @@ class Bench(object):
             raise Setup("--warmup-arm is one of %s" % ",".join(bl.ARMS))
         seed = self.args.seed if self.args.seed is not None else random.SystemRandom().randrange(1, 2 ** 31)
         self.take_lock()
-        if not self.wait_no_runner(self.cfg.wait_runner_s):
-            raise Setup("a run_direct.py runs under ~/%s on %s; wait for it" % (self.cfg.mex_dir, self.cfg.mex))
+        self.require_no_runner("a run_direct.py runs under ~/%s on %s; wait for it" % (self.cfg.mex_dir, self.cfg.mex))
         log("release: one GET /capabilities on %s (names the run directory)" % self.cfg.remote_base)
         release = self.release_of_host()
         self.run_id = "%s_%s-bench" % (sc.run_stamp(time.time()), sc.release_short(release))
@@ -400,9 +442,8 @@ class Bench(object):
         self.run_id = bench["run_id"]
         self.take_lock()
         self.lock_update()
-        if not self.wait_no_runner(self.cfg.wait_runner_s):
-            raise Setup("a run_direct.py still runs under ~/%s on %s (this run's cut-off step?); wait for it, then "
-                        "--resume again" % (self.cfg.mex_dir, self.cfg.mex))
+        self.require_no_runner("a run_direct.py still runs under ~/%s on %s (this run's cut-off step?); wait for it, "
+                               "then --resume again" % (self.cfg.mex_dir, self.cfg.mex))
         doc, changed, live = sc.snapshot_state(self.run_dir, SUITE)
         if doc is None:
             unreadable = sc.snapshot_refusal(sc.snapshot_dir(self.run_dir), ())
@@ -816,8 +857,11 @@ class Bench(object):
                     if step["arm"] == "direct-local":
                         if STOP.hard:
                             self.stop_mex_runner()
-                        if not self.wait_no_runner(self.cfg.wait_runner_s):
-                            state, reason = "failed", "runner_still_running"
+                        waited = self.wait_no_runner(self.cfg.wait_runner_s)
+                        if waited != "none":
+                            # no answer is no "no runner": the run stops as when one still runs
+                            state, reason = "failed", ("runner_still_running" if waited == "running"
+                                                       else "mex_unreachable")
                             break
                 else:
                     fails[step["arm"]] = 0
@@ -837,14 +881,14 @@ class Bench(object):
             pause_end = time.time() + float(bench.get("pause_s") or 0)
             while time.time() < pause_end and not STOP.requested:
                 time.sleep(min(0.1, pause_end - time.time()))
-        if block is not None and block != probed and reason != "runner_still_running":
+        if block is not None and block != probed and reason not in RUNNER_MAY_RUN:
             self.identity_probe(bench, block)
         return state, reason
 
     def finish(self, bench, arms, state, reason):
         # the closing GET of direct-remote (direct-local's is the last block's identity probe); none while a
         # direct-local runner may still run on the host
-        if "direct-remote" in self.ran_arms and reason != "runner_still_running":
+        if "direct-remote" in self.ran_arms and reason not in RUNNER_MAY_RUN:
             res = self.direct_step(bench, {"arm": "direct-remote"}, self.arm_ids(bench, "direct-remote"), finish=True)
             if res["rc"] != 0:
                 log("direct-remote: the closing GET failed (exit %s)" % res["rc"])

@@ -153,7 +153,10 @@ Per release: `48 x (1 + 6 x 3) = 912` requests (`bench_lib.schedule`, the seed r
   MCP runner records the service's capabilities per invocation (`mcp_runs.jsonl`).
 
 **Isolation**: the suite lock `~/suite-dev/LOCK` on mex (run_suite.sh's protocol and document, mode `bench`), and a
-refusal while any run_direct.py runs there: a suite run and a bench run never overlap. The suite's sampler runs on
+refusal while any run_direct.py runs there: a suite run and a bench run never overlap. As in run_suite.sh (review N3),
+a mex that does not answer the runner check never reads as "no runner": the bench refuses to start ("no answer from
+..."), and within a run it stops (reason `mex_unreachable`, beside `runner_still_running`) with no closing request; a
+lock it cannot release or update, and a stale lock it cannot remove, are said (SD-037). The suite's sampler runs on
 mex for the whole session. The **preflight** samples 20 s and refuses to start (exit 4) unless the load guard finds
 the host clean; before every block the last minute's samples are judged and a loaded host is waited for (up to 30
 min, then exit 4). At each block's start and every 12 steps within a block the run stops (exit 4, resumable) when
