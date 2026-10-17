@@ -2863,6 +2863,14 @@ TEST(GraphletCodec, StrictJsonBodyReader) {
     EXPECT_EQ("P: Exceeded stackLimit in readValue(). (more than 1000 nested arrays and objects)",
               refusal(std::string(kMaxBodyNesting + 1, '[')
                       + std::string(kMaxBodyNesting + 1, ']')));
+    // the text after the prefix is for people (SPEC core §5: only the prefix is the contract):
+    // a syntax error is followed by the extra-text error, a duplicate is named in place of a
+    // later syntax error
+    EXPECT_EQ("P: * Line 1, Column 1\n  Syntax error: value, object or array expected.\n"
+              "* Line 1, Column 2\n  Extra non-whitespace after JSON value.\n",
+              refusal("not json"));
+    EXPECT_EQ("P: * Line 1, Column 10\n  Duplicate key: 'a'\n",
+              refusal("{\"a\": 1, \"a\": 2, \"b\": }"));
 }
 
 

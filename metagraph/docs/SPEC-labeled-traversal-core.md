@@ -348,8 +348,12 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 - **The body** of `/traverse`, `/resolve` (§4.1) and `POST /traverse/cancel` (§10.3) is read as `/pattern` reads
   its body (`SPEC-pattern-search.md` §3): one RFC 8259 JSON text, with unique member names in every object,
   nothing after it (no second value, no comment, no trailing comma) and nested at most 1,000 deep; anything else
-  is 400 `{"error": "Bad json received: …"}` without a code, as a body that is no JSON at all. A duplicated member
-  is refused, never its last value taken: an `attempt_id`, a `bounds.time_budget_ms`, a `not_after_ms` or a
+  is 400 `{"error": "Bad json received: …"}` without a code, as a body that is no JSON at all. Only the prefix is
+  the contract: the text after it is for people (jsoncpp's, or the pre-scan's), and for some bodies the lenient
+  reader refused too it changed: a syntax error is followed by `Extra non-whitespace after JSON value.` (`not
+  json`, a byte-order mark), a `/` outside a string is named by the pre-scan rather than as a syntax error, a
+  duplicated member is named in place of a later syntax error. A duplicated member is refused, never its last
+  value taken: an `attempt_id`, a `bounds.time_budget_ms`, a `not_after_ms` or a
   `wait_ms` given twice would be replaced without a word. `metagraph traverse` reads its request files alike
   (§10.2). Before, these routes and the CLI took jsoncpp's defaults: a comment, a trailing comma and text after
   the value were accepted, a duplicated member kept its last value, and a body nested deeper than 1,000 was a 400
