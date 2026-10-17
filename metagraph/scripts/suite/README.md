@@ -1072,8 +1072,12 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   one, taken whatever its estimate, is the longest (no current window changes).
 - A-07: `_within_kind_caps` leaves out of areas M and N every scenario whose max_mismatches lies above the
   snapshot's cap of one of its patterns' kinds (a pattern of at most k bases), listed in `skipped` with its id
-  consumed, unless it expects the slot refusal (mismatches_above_cap) or a refusal of the request; D picks come from
-  what is left.
+  consumed, unless it expects the slot refusal (mismatches_above_cap) or a refusal of the request (a status that
+  admits no 200: `[200, 400]` admits the answer); D picks come from what is left. The builder side reads a
+  scenario's allowed statuses through one reader, `manifest_lib.allowed_statuses` (build_manifest, areas,
+  budget_expectation), and build_manifest.validate refuses a scenario with more than one status expectation or an
+  expectation whose args is no object, so the judging side's readers (the last entry, every entry) read the same
+  list (SD-094; checks.py and compare.py keep their own loops: the checks are pinned per run).
 - A-08: build_manifest.py refuses as an output any suite_v*.json / suite_smoke_v*.json of manifest/ that exists or
   that git tracks, by whatever path (realpath, samefile: a symbolic link to manifest/ included), and --areas with
   the default outputs (a partial build needs files of its own).

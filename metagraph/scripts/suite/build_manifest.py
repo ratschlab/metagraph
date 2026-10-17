@@ -497,9 +497,7 @@ WARM_EVERY = 10
 
 
 def _wants_200(s) -> bool:
-    st = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
-    w = st.get("http", 200)
-    return 200 in (w if isinstance(w, list) else [w])
+    return 200 in manifest_lib.allowed_statuses(s.get("expect"))
 
 
 def single_execution(s) -> str:
@@ -653,8 +651,12 @@ def validate(scenarios, cases=None) -> list:
             problems.append("%s: mcp without tool or not_implemented" % s["id"])
         if s["mcp"].get("tool") and "idempotency_key" in s["mcp"].get("arguments", {}):
             problems.append("%s: an idempotency_key in mcp.arguments" % s["id"])
-        if not any(e["check"] == "status" for e in s["expect"]):
+        n_status = len([e for e in s["expect"] if e["check"] == "status"])
+        if not n_status:
             problems.append("%s: no status expectation" % s["id"])
+        elif n_status > 1:
+            # SD-094: one, so that every reader of the allowed statuses (first, last or every entry) reads the same
+            problems.append("%s: %d status expectations, not one" % (s["id"], n_status))
         expected = set(e["check"] for e in s["expect"])
         by_design = s["mcp"].get("by_design") or []
         if not isinstance(by_design, list):
@@ -678,6 +680,10 @@ def validate(scenarios, cases=None) -> list:
             problems.append("%s: property-level MCP marks cover every property check: a scenario-level mark "
                             "(mcp.not_implemented, scenario_level_marks)" % s["id"])
         for e in s["expect"]:
+            if not isinstance(e.get("args", {}), dict):
+                problems.append("%s: the expectation %s's args %s is not an object" % (
+                    s["id"], e.get("check"), json.dumps(e["args"])))
+                continue
             problems += ["%s: %s" % (s["id"], m) for m in checks.validate_expectation(e)]
         disc = s["request"].get("discover") if s["route"] == "POST /resolve" and isinstance(s["request"], dict) else None
         if isinstance(disc, dict) and _status_ok(s):
@@ -708,9 +714,7 @@ def validate(scenarios, cases=None) -> list:
 
 def _status_ok(s: dict) -> bool:
     """Whether the scenario's status expectation admits a 200 (a request answered, not a refusal)."""
-    st = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
-    w = st.get("http", 200)
-    return 200 in (w if isinstance(w, list) else [w])
+    return 200 in manifest_lib.allowed_statuses(s.get("expect"))
 
 
 def smoke_of(manifest: dict) -> dict:

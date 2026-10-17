@@ -412,5 +412,41 @@ class BuilderRules(unittest.TestCase):
                 self.assertIsInstance((s.get("mcp") or {}).get("by_design", []), list, (name, s.get("id")))
 
 
+    def test_one_status_expectation_and_one_reader(self):
+        # SD-094 (the decision brief's option 2): validate refuses a scenario with more than one status expectation
+        # or an expectation whose args is no object, so that the readers taking the first, the last or every entry
+        # agree; the builder side reads the allowed statuses through manifest_lib.allowed_statuses, and the M filter
+        # keeps above a kind cap only a scenario whose status admits no 200 (it read [200, 400] as a refusal)
+        base = {"id": "P-x", "area": "P", "title": "t", "route": "POST /pattern", "truth": {}, "timing_class": "fast",
+                "repeat": 1, "tags": [], "mcp": {"tool": "pattern_search", "arguments": {}},
+                "request": {"patterns": [{"dna": "A" * 25}], "mode": "count", "max_contexts": 1,
+                            "time_budget_ms": 1000, "max_mismatches": 9}}
+        st = lambda http: {"check": "status", "args": {"http": http}}  # noqa: E731
+        self.assertEqual([p for p in bm.validate([dict(base, expect=[st(200)])], set()) if "status" in p], [])
+        two = dict(base, expect=[st(200), st(400)])
+        self.assertIn("P-x: 2 status expectations, not one", bm.validate([two], set()))
+        listed = dict(base, expect=[{"check": "status", "args": [200]}])
+        self.assertIn("P-x: the expectation status's args [200] is not an object", bm.validate([listed], set()))
+        self.assertEqual([ml.allowed_statuses(e) for e in ([], [st(404)], [st([200, 400])], [{"check": "status"}])],
+                         [[200], [404], [200, 400], [200]])
+
+        class Ctx(object):
+            skipped = []
+
+            def skip(self, area, what, why):
+                self.skipped.append(what)
+        kept = areas._within_kind_caps(Ctx(), "M", [dict(base, id="M-%d" % i, expect=[st(h)])
+                                                   for i, h in enumerate((200, [200, 400], 400, [400, 413]))])
+        self.assertEqual([x["id"] for x in kept], ["M-2", "M-3"])
+        self.assertEqual([areas._status_200_only(dict(base, expect=[st(h)])) for h in (200, [200], [200, 400], 400)],
+                         [True, True, False, False])
+        # every manifest: at most one status expectation per scenario, every args an object
+        for name, m in self.manifests():
+            for sc_ in m.get("scenarios") or []:
+                exp = sc_.get("expect") or []
+                self.assertLessEqual(len([e for e in exp if e.get("check") == "status"]), 1, (name, sc_["id"]))
+                self.assertTrue(all(isinstance(e.get("args", {}), dict) for e in exp), (name, sc_["id"]))
+
+
 if __name__ == "__main__":
     unittest.main()

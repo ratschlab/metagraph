@@ -16,7 +16,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import seqtools as st
-from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS,
+from manifest_lib import (ABSENT_LABEL, HOST_INDEX, HOST_MISMATCH_MAX, SERVER_MAX_SEED_LABELS, allowed_statuses,
                           SERVICE_DISCOVER_MAX_LABELS, Ctx, DB, K,
                           PATTERN_MAX_CONTEXTS, RESOLVE_MAX_QUERY_BP, acgt_flank, trie_heads, trie_index,
                           PATTERN_TIME_BUDGET_MS, RESOLVE_TIME_BUDGET_MS, WALK_PRESET, pattern_request, relation,
@@ -1905,12 +1905,12 @@ def _within_kind_caps(ctx: Ctx, area: str, scenarios: List[dict]) -> List[dict]:
     """|scenarios| without those whose max_mismatches the snapshot's cap of a pattern kind does not admit (A-07:
     above it the host answers the pattern's slot mismatches_above_cap, which no positive, negative, floor or order
     expectation states), each listed in `skipped` (its id consumed): a scenario that expects the slot refusal, or a
-    refusal of the request (a non-200 status), stays."""
+    refusal of the request (a status that admits no 200: manifest_lib.allowed_statuses, SD-094; [200, 400] admits
+    the answer), stays."""
     out = []
     for s in scenarios:
         why = _above_kind_cap(s.get("request")) if s.get("route") == "POST /pattern" else None
-        status = next((e.get("args") or {} for e in s.get("expect", []) if e.get("check") == "status"), {})
-        refusal = status.get("http", 200) not in (200, [200])
+        refusal = 200 not in allowed_statuses(s.get("expect"))
         if why and not refusal and "mismatches_above_cap" not in json.dumps(s.get("expect")):
             ctx.skip(area, "%s (%s)" % (s["id"], s["title"]), why + ": the host answers its slot, not the expectation")
             continue
@@ -2464,9 +2464,8 @@ def gen_C(ctx: Ctx, caps: Dict[str, dict]) -> List[dict]:
 
 # ================================================================================================= D: determinism
 def _status_200_only(s: dict) -> bool:
-    """Whether the scenario's status expectation admits a 200 only."""
-    st_ = next((e.get("args") or {} for e in s.get("expect") or [] if e.get("check") == "status"), {})
-    return st_.get("http", 200) in (200, [200])
+    """Whether the scenario's status expectation admits a 200 only (manifest_lib.allowed_statuses)."""
+    return allowed_statuses(s.get("expect")) == [200]
 
 
 def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:

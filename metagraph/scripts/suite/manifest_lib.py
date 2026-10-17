@@ -1005,6 +1005,17 @@ def time_budget_of(route: str, req: Any) -> Optional[Any]:
     return None
 
 
+def allowed_statuses(expect: Any) -> List[Any]:
+    """The HTTP statuses a scenario's `status` expectation allows (its args.http: a code or a list; 200 without
+    one): the builder side's one reader (SD-094: build_manifest, areas and budget_expectation).
+    build_manifest.validate refuses a scenario with more than one status expectation or with an args that is no
+    object, so the judging side's readers (checks.evaluate, compare: the last entry; deadline_allowed: every one)
+    read the same list."""
+    st = next((e.get("args", {}) for e in expect or [] if isinstance(e, dict) and e.get("check") == "status"), {})
+    w = st.get("http", 200) if isinstance(st, dict) else 200
+    return list(w) if isinstance(w, list) else [w]
+
+
 def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dict]:
     """budget_respected for a scenario that names a time budget and allows a 200 answer; with cap_ms, the route's
     cap of the snapshot (HOST_BUDGET_CAP_MS), where the request asks more: the effective budget an allowed 503 is
@@ -1012,12 +1023,7 @@ def budget_expectation(route: str, req: Any, expect: List[dict]) -> Optional[dic
     asked = time_budget_of(route, req)
     if asked is None or route not in BUDGET_RULE:
         return None
-    allowed = [200]
-    for e in expect:
-        if e.get("check") == "status":
-            w = e.get("args", {}).get("http", 200)
-            allowed = w if isinstance(w, list) else [w]
-    if 200 not in allowed:
+    if 200 not in allowed_statuses(expect):
         return None
     args = {"rule": BUDGET_RULE[route]}
     cap = HOST_BUDGET_CAP_MS.get(route)
