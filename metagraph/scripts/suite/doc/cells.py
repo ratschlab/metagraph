@@ -399,7 +399,11 @@ def _arm_state(run, sid, arm):
     st.lines = lines
     if not lines:
         st.present = False
-        st.missing_planned = run.planned_missing(sid, arm) or (arm == "mcp" and ma.get("class") == "missing")
+        # compare's class `missing` (no MCP execution) is a planned execution not recorded only where the run's plan
+        # schedules the scenario on that arm (the v6 warm-ups P-warm run on direct-local alone)
+        planned_on = getattr(run, "planned_on", None)
+        st.missing_planned = run.planned_missing(sid, arm) or (arm == "mcp" and ma.get("class") == "missing" and (
+            planned_on is None or planned_on(sid, arm)))
         if st.missing_planned:
             st.clean = False
             st.reasons.append("a planned execution was not recorded")

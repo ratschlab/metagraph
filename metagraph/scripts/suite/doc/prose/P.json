@@ -38,6 +38,7 @@
   "503": "http 503 deadline (SPEC section 7.6)",
   "10,000": "max_contexts 10,000, the host's cap and the service's ceiling (SPEC section 4.5; host capabilities caps.max_contexts; manifest_lib.PATTERN_MAX_CONTEXTS); max_predicate_contexts 10,000 (manifest_lib)",
   "10,001": "max_contexts 10,001 (manifest P-modes-0004)",
+  "110,000": "time_budget_ms 110,000, the /pattern budget of manifest v6 (manifest_lib.PATTERN_TIME_BUDGET_MS since v6; manifest/suite_v6.json)",
   "60,000": "time_budget_ms 60,000, the host's default and the one every request names (manifest_lib.PATTERN_TIME_BUDGET_MS; host capabilities default_time_budget_ms)",
   "6": "k - L for a 25-mer: the offsets 0 to 6 of the Background's worked example, and the suffix offset k - L = 6 (SPEC section 7.2)",
   "21": "the 21 specified bases after the four leading N of P-iupac-0007 (manifest)"
@@ -119,6 +120,11 @@
    "title": "twins",
    "prose": "Four twins made for relations. P-twin-0001 is the upper-case twin of the lower-case P-edge-0004 (the same 25-mer of C. jejuni), with the relation `same_answer` (REL-same_answer-0002): the two bodies equal apart from timing on every access path (via MCP the service upper-cases both before the host sees them). P-twin-0002 to -0004 are the exact windows behind P-iupac-0001, -0003 and -0005 (2, 4 and 3 codes), with the relations `subset` (REL-subset-0004 to -0006): the exact window's contexts are among its IUPAC pattern's on every access path, a context being the same (orientation, k-mer, offset). [[n_relations ? In this run, of the {n_relations:word} relations, {relations_text}.]]",
    "claim": "an upper-case twin answers byte for byte like the lower-case pattern, and an exact window's contexts lie within its IUPAC pattern's"
+  },
+  "P-warm": {
+   "title": "warm-ups",
+   "prose": "Searches that warm the rows a /pattern scenario of chapters P, M and N reads, each its target's own request placed right before the target (the manifest's `warms`; build_manifest.place_warm_ups) and run on direct-local alone (timing class long), so that the target's first MCP call, repeat 0, which the paired loop runs first, meets rows the host has just read: a choice of manifest v6 after the v5 baseline, in which the cold MCP call of each target ended in the host's 503 deadline relayed by the service or in a list cut by time at the 60,000 ms budget then in force (each warm-up's truth states its target's figures in that run). The targets, one warm-up each: M-planted-0007 to -0009 and -0013 to -0018 (P-warm-0001 to -0009), M-protein-0001 and -0003 to -0007 (P-warm-0010 to -0015), N-nearmiss-0006, -0013, -0020, -0027, -0029, -0030 and -0032 (P-warm-0016 to -0022), N-usecase-0008 (P-warm-0023), and M-protein-0002 and P-heavy-0001 (P-warm-0024 and -0025), the two targets that completed no execution in the v5 baseline, warm runs included. A warm-up asks only what every answer must hold, under its target's budget of 110,000 ms: `status`, `invariants`, `budget_respected` and, where its target checks it (all but P-warm-0023 and -0025), `counts_consistent`; the property is the target's. Each is tagged budget_stress (outside the deploy gate, still run and reported): its first run meets the cold host by design, so whether it completes within the budget depends on the host's cache and load, not on the deployment, and a 503 deadline at the budget is allowed and reads inconclusive. [[n_warm_up_arm_pairs ? [[warm_ups_all_before_target ? In this run every warm-up's first execution started before its target's on each access path that ran both ({n_warm_up_arm_pairs} pairs of warm-up and access path compared). | In this run {n_warm_ups_after_target:word} warm-up execution{n_warm_ups_after_target:s} did not start before the target's ({warm_ups_after_target_text}).]] | In this run no access path ran a warm-up and its target both.]] [[n_warm_up_reruns ? A resume after an interruption ran {n_warm_up_reruns:word} warm-up{n_warm_up_reruns:s} again ({warm_up_reruns_text}): timing evidence in I.4 and appendix F, never an outcome.]] [[n_footnoted ? In this run {footnoted_text}; the detail block{n_footnoted:s} follow{n_footnoted:v} the table. | In this run every warm-up passed on direct-local.]]",
+   "claim": "a warm-up's request is answered within its budget on direct-local with what every answer must hold"
   }
  },
  "units": {
@@ -186,6 +192,10 @@
   "P-twin": {
    "property": "The upper-case twin answers byte for byte like the lower-case test (relation same_answer); an exact window's contexts are among its IUPAC pattern's (relations subset).",
    "question": "Does an upper-case twin answer like the lower-case pattern, and does an exact window's list lie within its IUPAC pattern's?"
+  },
+  "P-warm": {
+   "property": "A warm-up of a /pattern scenario of chapters P, M and N (the manifest's `warms`): the target's own request, run on direct-local right before the target so that the target's first MCP call meets rows the host has just read; the generic checks alone (status, invariants, budget_respected, and counts_consistent where the target checks it), tagged budget_stress: a 503 deadline at the budget is allowed (inconclusive).",
+   "question": "Is a warm-up's request answered within its budget on direct-local with what every answer must hold?"
   }
  },
  "mcp_notes": {

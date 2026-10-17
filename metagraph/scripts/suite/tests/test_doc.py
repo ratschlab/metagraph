@@ -279,9 +279,10 @@ class MappingTest(unittest.TestCase):
 class ProseTest(unittest.TestCase):
     def test_prose_complete(self):
         """The owner's rule: a suite test fails if a family or unit lacks prose (every chapter an intro, every family a
-        title and prose, every unit a property line); the message names the missing keys. Over the v4 and the v5
-        mapping (the v5-only family and units have at least the mapping's draft)."""
-        for version in (v4, v5):
+        title and prose, every unit a property line); the message names the missing keys. Over the v4, the v5 and
+        the v6 mapping (the v5-only family and units have at least the mapping's draft; v6's P-warm its prose, the
+        v6 delta of 2026-10-17)."""
+        for version in (v4, v5, v6):
             self.check_prose_complete(version())
 
     def check_prose_complete(self, loaded):
@@ -682,6 +683,40 @@ class FakeRunTest(unittest.TestCase):
 # the cell grammar and the expectation formatters
 
 class CellGrammarTest(unittest.TestCase):
+    def test_mcp_missing_only_where_planned(self):
+        """The v6 delta (2026-10-17): compare's MCP class `missing` (no MCP execution) is a planned execution not
+        recorded only where the run's plan schedules the scenario on the MCP arm; the direct-local warm-ups P-warm
+        (timing class long) are clean there, not footnoted. A run without a plan keeps the comparator's reading."""
+        class Stub(object):
+            def __init__(self, planned):
+                self.planned = planned
+
+            def arm_lines(self, sid, arm):
+                return []
+
+            def comp_entry(self, sid):
+                return {"mcp_agreement": {"class": "missing"}}
+
+            def comp_arm(self, sid, arm):
+                return {}
+
+            def planned_missing(self, sid, arm):
+                return False
+
+            def planned_on(self, sid, arm):
+                return self.planned
+
+        st = cells.arm_state(Stub(False), "P-warm-0001", "mcp")
+        self.assertFalse(st.present)
+        self.assertFalse(st.missing_planned)
+        self.assertTrue(st.clean)
+        st = cells.arm_state(Stub(True), "P-warm-0001", "mcp")
+        self.assertTrue(st.missing_planned)
+        self.assertFalse(st.clean)
+        stub = Stub(False)
+        del Stub.planned_on
+        self.assertTrue(cells.arm_state(stub, "P-warm-0001", "mcp").missing_planned)
+
     def test_fmt_t(self):
         self.assertEqual(cells.fmt_t(None), "–")
         self.assertEqual(cells.fmt_t(0.3), "<1 ms")

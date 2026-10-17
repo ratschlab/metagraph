@@ -4389,6 +4389,14 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   (`{manifest_version}`) and, for v6, what v6 adds in that chapter (the budget, the eight warm-ups before its
   /pattern searches, N-nearmiss-0030's budget_stress tag, N-usecase-0005's property-level mark, the moves in the run
   order).
+- Chapter P's family P-warm (the 25 direct-local warm-ups of /pattern targets) has its family prose and unit line,
+  modelled on R-warm's: the targets with their warm-ups' ids, the generic checks under the target's 110,000 ms
+  budget, the budget_stress tag, and the warm-ups' order, re-runs and footnoted members from the facts. make_doc
+  no longer refuses a v6 run. compare classes a scenario without MCP executions `missing`; the document reads that
+  as "a planned execution not recorded" only where the run's plan schedules the scenario on the MCP arm
+  (`reader.Run.planned_on`, None-safe for a run without a plan), so the warm-ups, which the plan runs on
+  direct-local alone, are not footnoted for their absent MCP column (it reads "not exercised: 25 –", the legend's
+  "no execution: the plan had none").
 
 ## Glossary
 

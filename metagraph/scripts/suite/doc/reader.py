@@ -167,6 +167,10 @@ class Run(object):
         self._marks = {}
         self.missing, self.plan_source = gate_mod.missing_planned(self.dir, self.manifest, self.rows)
         self.missing_set = set((k[0], k[1]) for k in self.missing)
+        # the (scenario, arm) pairs the run's plan schedules, None without a plan: a scenario the plan runs on some
+        # arms only (v6's direct-local warm-ups P-warm, timing class long) has no execution to miss on the others
+        self.planned_pairs = (set((k[0], k[1]) for k in gate_mod.run_plan(self.dir, self.manifest)[0])
+                              if self.plan_source else None)
         self.table, self.table_meta = self._load_table(by_design, reevaluated)
         self.cases = report.report_cases(self.comp, self.dir) or self.table
         self.declared = self._load_declared(declared)
@@ -297,6 +301,10 @@ class Run(object):
 
     def comp_arm(self, sid, arm):
         return (self.comp_entry(sid).get("arms") or {}).get(arm) or {}
+
+    def planned_on(self, sid, arm):
+        """Whether the run's plan schedules the scenario on the arm (True when the run has no plan to consult)."""
+        return self.planned_pairs is None or (sid, arm) in self.planned_pairs
 
     def planned_missing(self, sid, arm):
         return (sid, arm) in self.missing_set
