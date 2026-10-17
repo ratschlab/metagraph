@@ -649,7 +649,9 @@ class LabelQuery {
     // A bound on the cache's bytes (an estimate: entries, hits and coordinates), on top
     // of the row bound, evicting wholesale like it. Unbounded unless set: a request with
     // a memory budget gives the cache a fixed allotment of that budget, which it must
-    // then stay within (exceeded at most by the working set of one call).
+    // then stay within (exceeded at most by the working set of one call). An entry is
+    // priced by one of two estimates, by the fetch (label_oracle.cpp, charged_entry_bytes:
+    // the budget-aware fetch, never past the bound; loose_entry_bytes: the unbudgeted one)
     void set_max_cache_bytes(uint64_t bytes) { max_cache_bytes_ = bytes; }
     uint64_t cache_bytes() const { return cache_bytes_; }
 

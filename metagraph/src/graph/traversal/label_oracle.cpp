@@ -39,6 +39,32 @@ using annot::matrix::small_vector_bytes;
 // values' buffers as decode_budget.hpp models them).
 constexpr uint64_t kCacheEntryBytes = 256;
 constexpr uint64_t kCostEntryBytes = 128;
+// What an entry of the other path's caches is taken to hold besides its value's flat sizes: a
+// slot, with no rehash transient and no costs entry (that path keeps none)
+constexpr uint64_t kLooseEntryBytes = 64;
+
+// The two prices of a label-cache entry (LabelQuery's hits of a node, LabelRecorder's kept
+// labels of a row), compared with the one byte bound the walker gives both caches under a
+// memory budget (its cache allotment), by the annotation's format (SPEC-labeled-traversal-
+// core.md §6.8, §7.0 memory_bound_soft (i) and (ii)):
+//   charged_entry_bytes  the formats whose reads are budget-aware (decode_charged: the row-diff
+//                        family with budgeted reads, production's row_diff_brwt_coord among
+//                        them): kCacheEntryBytes + kCostEntryBytes + the value's buffers in
+//                        decode_budget.hpp's model, checked with the entries a read adds, so
+//                        the cache never passes its bound;
+//   loose_entry_bytes    every other format (column, brwt, row_diff_disk, row_flat, ..., whose
+//                        reads are observed only): kLooseEntryBytes + the value's flat sizes,
+//                        checked before an insertion only, so the cache holds about four times
+//                        the entries in the same bound and may pass it by one call's rows
+//                        (held before it can be charged: memory_bound_soft (ii)).
+// Two prices on purpose: the strict one on the other formats would make them evict earlier,
+// decode more rows again and move memory_bound_soft's observed value — and on row_diff_disk
+// leave less of the bound to the path cache, which once read 2.5 times the stored rows when the
+// label cache left it less (SPEC §6.8). Taken only after a benchmark of such a format served
+// under a memory budget.
+static uint64_t charged_entry_bytes(uint64_t value_bytes) {
+    return kCacheEntryBytes + kCostEntryBytes + value_bytes;
+}
 
 // what is left before |pacing|'s deadline (infinity: none)
 static double ms_left_of(const ReadPacing &pacing) {
@@ -607,14 +633,20 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
               [](const Hit &a, const Hit &b) { return a.label < b.label; });
 }
 
-// The estimate a cache entry's bytes are compared by (the byte bound): slot, vector, hits
-// and coordinates
-static uint64_t hits_cache_bytes(const LabelQuery::NodeHits &hits) {
-    uint64_t bytes = 64 + hits.size() * sizeof(LabelQuery::Hit);
+// The loose price of a LabelQuery cache entry (see charged_entry_bytes): slot, vector, hits and
+// coordinates, flat
+static uint64_t loose_entry_bytes(const LabelQuery::NodeHits &hits) {
+    uint64_t bytes = kLooseEntryBytes + hits.size() * sizeof(LabelQuery::Hit);
     for (const LabelQuery::Hit &h : hits) {
         bytes += h.coords.size() * sizeof(Coord);
     }
     return bytes;
+}
+
+// The loose price of a LabelRecorder cache entry of |kept| labels of |key_bytes| each (see
+// charged_entry_bytes)
+static uint64_t loose_entry_bytes(size_t kept, size_t key_bytes) {
+    return kLooseEntryBytes + kept * key_bytes;
 }
 
 void LabelQuery::fetch_uncached(const node_index *keys, size_t n) {
@@ -679,11 +711,11 @@ void LabelQuery::fetch_uncached(const node_index *keys, size_t n) {
     // the path cache shares the label cache's bound under a memory budget (make_room)
     uint64_t adding = 0;
     for (size_t i = 0; i < n; ++i) {
-        adding += hits_cache_bytes(result[i]);
+        adding += loose_entry_bytes(result[i]);
     }
     oracle_.make_room(adding);
     for (size_t i = 0; i < n; ++i) {
-        cache_bytes_ += hits_cache_bytes(result[i]);
+        cache_bytes_ += loose_entry_bytes(result[i]);
         cache_[keys[i]] = std::move(result[i]);
     }
 }
@@ -882,8 +914,8 @@ void LabelQuery::prime(const std::vector<node_index> &keys,
         // the hits of the ROWS path; DIRECT reads the same cells one by one
         NodeHits hits;
         hits_from_row(rows[i], &hits);
-        oracle_.make_room(hits_cache_bytes(hits));
-        cache_bytes_ += hits_cache_bytes(hits);
+        oracle_.make_room(loose_entry_bytes(hits));
+        cache_bytes_ += loose_entry_bytes(hits);
         cache_[keys[i]] = std::move(hits);
     }
 }
@@ -898,8 +930,8 @@ void LabelQuery::prime(const std::vector<node_index> &keys,
             continue;
         NodeHits hits;
         hits_from_tuples(rows[i], &hits);
-        oracle_.make_room(hits_cache_bytes(hits));
-        cache_bytes_ += hits_cache_bytes(hits);
+        oracle_.make_room(loose_entry_bytes(hits));
+        cache_bytes_ += loose_entry_bytes(hits);
         cache_[keys[i]] = std::move(hits);
     }
 }
@@ -1108,7 +1140,7 @@ bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
     for (size_t i = 0; i < n; ++i) {
         if (keys[i] == npos)
             continue;
-        const uint64_t bytes = kCacheEntryBytes + kCostEntryBytes + held_bytes(hits[i]);
+        const uint64_t bytes = charged_entry_bytes(held_bytes(hits[i]));
         all += bytes;
         all_count++;
         if (!cache_.count(keys[i])) {
@@ -1146,7 +1178,7 @@ bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
         if (keys[i] != npos && !cache_.count(keys[i])) {
             cache_[keys[i]] = hits[i];
             costs_[keys[i]] = costs[i];
-            cache_bytes_ += kCacheEntryBytes + kCostEntryBytes + held_bytes(hits[i]);
+            cache_bytes_ += charged_entry_bytes(held_bytes(hits[i]));
         }
     }
     return true;
@@ -1525,13 +1557,13 @@ void LabelRecorder::fetch_uncached(const node_index *keys, size_t n) {
     // the path cache shares the label cache's bound under a memory budget (make_room)
     uint64_t adding = 0;
     for (size_t i = 0; i < n; ++i) {
-        adding += 64 + result[i].kept.size() * sizeof(Key);
+        adding += loose_entry_bytes(result[i].kept.size(), sizeof(Key));
     }
     oracle_.make_room(adding);
     for (size_t i = 0; i < n; ++i) {
         // a row costs at least one slot even when nothing is on it
         cached_keys_ += std::max<size_t>(1, result[i].kept.size());
-        cache_bytes_ += 64 + result[i].kept.size() * sizeof(Key);
+        cache_bytes_ += loose_entry_bytes(result[i].kept.size(), sizeof(Key));
         cache_[keys[i]] = std::move(result[i]);
     }
 }
@@ -1807,9 +1839,9 @@ DecodeStatus LabelRecorder::decode_run(const node_index *keys, size_t n, DecodeB
 
 void LabelRecorder::cache_raw(node_index key, RawRow &&raw, const KeyCost &cost) {
     // the path cache shares the label cache's bound under a memory budget (make_room)
-    oracle_.make_room(kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw));
+    oracle_.make_room(charged_entry_bytes(raw_bytes(raw)));
     cached_keys_ += std::max<size_t>(1, raw.kept.size());
-    cache_bytes_ += kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw);
+    cache_bytes_ += charged_entry_bytes(raw_bytes(raw));
     cache_[key] = std::move(raw);
     costs_[key] = cost;
 }
@@ -2060,8 +2092,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         if (keys[p] == npos)
             continue;
         const NodeLabels &nl = (*out)[base + p];
-        const uint64_t bytes = kCacheEntryBytes + kCostEntryBytes
-                             + buffer_bytes(nl.labels.size(), sizeof(Key));
+        const uint64_t bytes = charged_entry_bytes(buffer_bytes(nl.labels.size(), sizeof(Key)));
         const uint64_t kept = std::max<size_t>(1, nl.labels.size());
         all += bytes;
         all_kept += kept;
@@ -2117,7 +2148,7 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
             LabelRecorder &r = recorder;
             uint64_t bytes = 0, kept = 0;
             for (const RawRow &raw : raws) {
-                bytes += kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw);
+                bytes += charged_entry_bytes(raw_bytes(raw));
                 kept += std::max<size_t>(1, raw.kept.size());
             }
             // evicted wholesale only for the warm's first run and only to keep it (what was

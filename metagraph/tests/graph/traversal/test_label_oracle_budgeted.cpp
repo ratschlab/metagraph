@@ -3,6 +3,7 @@
 // demand whether it is cached or not.
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <chrono>
 #include <future>
 #include <limits>
@@ -464,6 +465,53 @@ TEST(LabelOraclePathCache, SameAnswersAndCounters) {
         }
     }
 }
+
+// The two prices of a label-cache entry against the one byte bound (label_oracle.cpp,
+// charged_entry_bytes and loose_entry_bytes; SPEC-labeled-traversal-core.md §6.8): the
+// budget-aware fetch prices an entry at 256 + 128 bytes (its share of the map with a rehash's
+// transient, its costs entry) plus its hits' buffers in decode_budget.hpp's model; the
+// unbudgeted fetch, the one the formats without budget-aware reads take under a memory budget,
+// at 64 bytes plus the hits' and coordinates' flat sizes. Two prices on purpose (the loose one
+// lets such a cache hold about four times the entries); this pins both
+TEST(LabelOracleBudgetedQuery, TheTwoCacheEntryPrices) {
+    Fixture fx(true);
+    LabelOracle oracle(*fx.anno, fx.cth.get());
+    ASSERT_TRUE(oracle.decode_charged());
+    for (const auto &[names, with_coords] : label_sets(true)) {
+        std::vector<node_index> keys = oracle.keys_of_sequence(fx.seqs[2]);
+        keys.erase(std::remove(keys.begin(), keys.end(), npos), keys.end());
+        std::sort(keys.begin(), keys.end());
+        keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+        ASSERT_GT(keys.size(), 10u);
+
+        LabelQuery charged(oracle, refs(oracle, names), with_coords);
+        std::vector<LabelQuery::NodeHits> hits;
+        std::vector<KeyCost> costs;
+        hits.reserve(keys.size());
+        costs.reserve(keys.size());
+        DecodeBudget unlimited;
+        size_t refused = 0;
+        ASSERT_TRUE(charged.fetch(keys.data(), keys.size(), unlimited, &hits, &costs, &refused));
+        uint64_t expected = 0;
+        for (const LabelQuery::NodeHits &h : hits) {
+            expected += 256 + 128 + LabelQuery::held_bytes(h);
+        }
+        EXPECT_EQ(expected, charged.cache_bytes()) << names[0];
+
+        LabelQuery loose(oracle, refs(oracle, names), with_coords);
+        const std::vector<LabelQuery::NodeHits> flat = loose.fetch(keys);
+        EXPECT_EQ(hits, flat) << names[0];
+        expected = 0;
+        for (const LabelQuery::NodeHits &h : flat) {
+            expected += 64 + h.size() * sizeof(LabelQuery::Hit);
+            for (const LabelQuery::Hit &hit : h) {
+                expected += hit.coords.size() * sizeof(Coord);
+            }
+        }
+        EXPECT_EQ(expected, loose.cache_bytes()) << names[0];
+    }
+}
+
 
 // A key is admitted exactly when its demand fits what the call has left, cached or not; a
 // refusal returns nothing and leaves the cache and the counters as they were

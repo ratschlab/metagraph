@@ -1351,7 +1351,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     lower bound ("at least": the account with them; its heads need more), the levers of a stop by labels *(review of
     2026-10-06, U03-03: it was stated as a refused head, the dictionary's need as exact, so that raised to it the
     walk stopped at the same depth again, and without `lower_max_labels_per_node`)*. Under a request budget the
-    label caches never exceed their allotments, and the
+    label caches never exceed their allotments on these formats (on the others, below, by one fetch's rows at
+    most), and the
     structural lookahead is cleared before a chain would push it past its allotment (counted keys: each key the
     walk consumes once, `annotation.keys_mapped`).
   - The derivation reads 64 k-mers per window whatever `annotation.batch_kmers` is, under a budget or not (§6.1;
@@ -1362,7 +1363,14 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     the seed phase had left, and what the window's earlier rows held — conservative (each row alone may fit),
     and stated.
   Formats without the budget-aware path are read by the default decode under a budget too; what their reads hold
-  is observed, not charged (§7.0, `memory_bound_soft`). **The formats with budget-aware reads are exactly the four
+  is observed, not charged (§7.0, `memory_bound_soft`). Their label caches price an entry by a looser estimate
+  than the budget-aware formats' — 64 bytes for its slot plus its labels' and coordinates' flat sizes, against
+  256 + 128 bytes (the slot with a rehash's transient, the costs entry) plus its buffers in the decoder's model
+  — and check the allotment before an insertion rather than with it: such a cache holds about four times the
+  entries in the same allotment and may pass it by one fetch's rows, which is observed (`memory_bound_soft`
+  (ii)). Two estimates on purpose: the strict one would make these formats evict earlier, decode more rows again
+  and, on `row_diff_disk`, leave the path cache less of the allotment (above); it waits for a measurement of such
+  a format served under a budget. **The formats with budget-aware reads are exactly the four
   above**; every other format (`column`, `column_coord`, `brwt`, `row_diff_disk`, `row_flat`, …) keeps stage 2's
   observed-only reads. **Stage 3 does not establish a hard request-wide memory bound** (review of stage 3, answer
   5): on every format `memory_bound_soft` names what is still held uncharged beside the admitted account — a
