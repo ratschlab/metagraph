@@ -56,8 +56,9 @@ INTERLEAVED A/B (--interleave LIB_A LIB_B)
   NOISE CONTROL: A's first request of each round against its last (A2/A1, the same code milliseconds apart),
   as a geometric mean and as the 90th percentile of its spread -- a B/A inside that spread is no difference.
   "Changed" is one rule for --compare and --interleave (result_change): an error on one side only (the other
-  side is asked when it was not), else different fingerprints both sides know; an error on both sides is an
-  op that does not apply, a missing fingerprint (a library without dump(envelope=)) no evidence.
+  side is asked when it was not), errors of different exception types on both sides (the type only, not the
+  message), else different fingerprints both sides know; an error of one type on both sides is an op that does
+  not apply, a missing fingerprint (a library without dump(envelope=)) no evidence.
   Output: ab_results.json (one row per (item, op): a_ms, b_ms, a1_ms, a2_ms, fp_a, fp_b, err, err_a, err_b)
   and summary.md.
 
@@ -601,13 +602,22 @@ def summary_md(res):
     return '\n'.join(L)
 
 
+def error_type(err):
+    """The exception type of a recorded error ('<Type>: <message>', or the type alone)."""
+    return str(err).split(':', 1)[0].strip()
+
+
 def result_change(op, fp_a, fp_b, err_a, err_b):
     """Why the result of one (item, op) changed from library A to B, or None: an error on one side only (the op
-    started or stopped raising); else, both sides' fingerprints known (a missing one, e.g. a library without
-    dump(envelope=), is not evidence), different fingerprints, except for an INFORMATIONAL op. An error on both
-    sides is an op that does not apply. The one rule of compare_runs (--compare) and interleave_md (--interleave)."""
+    started or stopped raising); an error on both sides of different exception types (the type only, not the
+    message, which may name a path, an id or a size; the owner's decision on SD-027); else, both sides'
+    fingerprints known (a missing one, e.g. a library without dump(envelope=), is not evidence), different
+    fingerprints, except for an INFORMATIONAL op. An error of one type on both sides is an op that does not apply.
+    The one rule of compare_runs (--compare) and interleave_md (--interleave)."""
     if bool(err_a) != bool(err_b):
         return 'error %s -> %s' % (err_a, err_b)
+    if err_a and error_type(err_a) != error_type(err_b):
+        return 'error type %s -> %s (%s -> %s)' % (error_type(err_a), error_type(err_b), err_a, err_b)
     if err_a or op in INFORMATIONAL:
         return None
     if fp_a and fp_b and fp_a != fp_b:

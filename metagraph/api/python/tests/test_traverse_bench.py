@@ -392,6 +392,40 @@ class TestBenchLibraryInterleaved(unittest.TestCase):
         self.assertEqual(BLIB.result_change('claims', None, None, None, 'E'), 'error None -> E')
         self.assertIsNone(BLIB.result_change('claims', None, None, 'E', 'E'))
 
+    def test_errors_of_different_types_on_both_sides(self):
+        # SD-027 (the owner's decision): an op raising on both sides changed when the exception TYPE differs (a
+        # ValueError became a TypeError); the message alone is no change (it may name a path, an id or a size)
+        rc = BLIB.result_change
+        self.assertEqual(rc('claims', None, None, 'ValueError: x', 'TypeError: x'),
+                         'error type ValueError -> TypeError (ValueError: x -> TypeError: x)')
+        self.assertIsNone(rc('claims', None, None, 'ValueError: x', 'ValueError: another message'))
+        self.assertIsNone(rc('claims', None, None, 'KeyError', 'KeyError: 3'))
+        self.assertEqual(rc('memory_bytes', None, None, 'OSError: a', 'MemoryError: a')[:10], 'error type')
+        # both runs' rows, --compare and --interleave alike (a legacy interleaved row states one error for both)
+        lib = {'path': 'x', 'source_sha': 's', 'git_head': 'h'}
+        base = {'a_ms': None, 'b_ms': None, 'a1_ms': None, 'a2_ms': None, 'fp_a': None, 'fp_b': None, 'op': 'claims'}
+        rows = [dict(base, key='type', err='A: ValueError: x', err_a='ValueError: x', err_b='TypeError: x'),
+                dict(base, key='message', err='A: ValueError: x', err_a='ValueError: x', err_b='ValueError: y'),
+                dict(base, key='legacy', err='A: ValueError: x')]
+        res = {'meta': {'label': 't', 'library_a': lib, 'library_b': lib, 'method': 'm', 'rounds': 2,
+                        'python': '3', 'started': 'now', 'seconds': 1, 'ops': ['claims']},
+               'rows': rows}
+        text, changed = BLIB.interleave_md(res)
+        self.assertEqual(['type'], [r['key'] for r in changed])
+        self.assertIn('error type ValueError -> TypeError', text)
+        with tempfile.TemporaryDirectory() as d:
+            runs = []
+            for tag, err in (('A', 'ValueError: x'), ('B', 'TypeError: x')):
+                path = os.path.join(d, tag + '.json')
+                with open(path, 'w') as f:
+                    json.dump({'meta': {'label': tag, 'library': lib}, 'items': [],
+                               'rows': [{'key': 'k', 'op': 'claims', 't_min_ms': None, 'peak_kb': None,
+                                         'err': err, 'fp': None}]}, f)
+                runs.append(path)
+            text, mism = BLIB.compare_runs(*runs)
+        self.assertEqual(len(mism), 1, text)
+        self.assertIn('error type ValueError -> TypeError', text)
+
     def test_two_workers_of_one_library_agree(self):
         lib = os.path.normpath(os.path.join(HERE, '..'))
         with tempfile.TemporaryDirectory() as d:
