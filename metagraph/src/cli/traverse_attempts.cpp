@@ -35,12 +35,14 @@ constexpr char kSuppressionRule[]
         = "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone";
 constexpr char kReleaseRule[] = "SPEC-labeled-traversal-core.md section 10.3, the release rule";
 
-// whole milliseconds, rounded up (a duration a ledger leases by is never understated); null
+// whole milliseconds, rounded up (a duration a ledger leases by is never understated), then
+// written as number_json writes every number: an integer up to 2^53 - 1, the number beyond
+// (only the CLI's uncapped bound gets there; a cast past uint64's range is undefined); null
 // when there is no bound (an infinite time budget without the HTTP server's cap: the CLI)
 Json::Value ceil_ms_json(double ms) {
     if (!std::isfinite(ms))
         return Json::Value();
-    return uint_json(static_cast<uint64_t>(std::ceil(std::max(0.0, ms))));
+    return number_json(std::ceil(std::max(0.0, ms)));
 }
 
 // Writes the ids of |ids| into |j|: attempt_id (always with |always_attempt_id|, else when

@@ -1958,7 +1958,10 @@ attempt) nor a 400 for a malformed id:
 - `reason`: `completed` (no stop reached the walk), `cancelled`, `deadline` (the attempt's bound, in the walk or
   while the response was built), `error` (a 400/500). `client_gone` appears only in the attempt's state (no
   response is written then).
-- Instants are ISO-8601 UTC with milliseconds; durations are whole ms, rounded up. `received_at` is when the
+- Instants are ISO-8601 UTC with milliseconds; durations are whole ms, rounded up, written as integers up to
+  2⁵³ − 1 and as numbers beyond, as every number the server writes (only the CLI's bound, which has no cap, gets
+  there: a time budget of 10²⁰ ms; `bound_ms` and `walk_until_ms` were then integers cast past 64 bits, 2⁶⁴ − 1 on
+  arm64). `received_at` is when the
   server read the request's header (the attempt's clock), `stopped_at` when the walk stopped (the checkpoint
   that saw the stop, or the end of the last seed's walk), `elapsed_ms` when the block was built (just before
   the response was written; the attempt's state has the final value).
@@ -3121,7 +3124,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null), `tombstone_max_s`,
   `coordinate_account_per_text_byte` and, in
   `deadline_check`,
-  `chunk_target_ms`, `observed_max_uninterruptible_ms` and `observed_window_s` are integers (`allowance_ms` was
+  `chunk_target_ms`, `observed_max_uninterruptible_ms` and `observed_window_s` are integers (`stop_ms`, which is
+  `--traverse-chunk-target-ms` + 950, is a number past 2⁵³ − 1, for a chunk target within 950 of it, as every
+  duration; `allowance_ms` was
   written 10000.0 before
   feature level 3; `--traverse-attempt-allowance-ms`, `--traverse-clock-skew-ms` and
   `--traverse-chunk-target-ms` take integers in [0, 2⁵³ − 1], anything else is refused at start-up, so that a

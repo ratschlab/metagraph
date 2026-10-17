@@ -399,6 +399,23 @@ class TestTraverseCLI(TestTraverseBase):
         out, rc = self._traverse(plain)
         self.assertEqual((1, ['error']), (rc, list(out)))
 
+    def test_traverse_attempt_durations_beyond_the_exact_integers(self):
+        """The CLI's bound has no cap: a time budget of 1e20 ms gives a bound past 2^53 - 1,
+        stated as the number (a real, as every number the server writes past that range), not
+        as an integer cast past uint64's range (18446744073709551615 on arm64, 2^63 under
+        Rosetta)."""
+        out, rc = self._traverse({
+            'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+            'strategy': {'bounds': {'time_budget_ms': 1e20, 'max_extension_bp': 10}},
+            'attempt_id': 'cli-big'})
+        self.assertEqual(0, rc, out)
+        usage = out['usage']
+        self.assertEqual((float, float),
+                         (type(usage['bound_ms']), type(usage['bound']['walk_until_ms'])), usage)
+        self.assertEqual(1e20 + 10000, usage['bound_ms'])
+        self.assertLessEqual(1e20, usage['bound']['walk_until_ms'])
+        self.assertIsInstance(usage['elapsed_ms'], int)
+
     def test_traverse_reports_caps(self):
         out, rc = self._traverse({
             'seeds': [{'sequence': self.element, 'labels': ['acc1']}],

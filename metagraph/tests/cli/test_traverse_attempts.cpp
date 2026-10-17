@@ -211,6 +211,47 @@ TEST(GraphletAttempt, BoundIsEnforcedOnTheAttemptsClock) {
     EXPECT_FALSE(local.usage_json("completed")["bound"]["enforced"].asBool());
 }
 
+// A duration is stated in whole ms, rounded up, by number_json's rule: an integer while every
+// JSON reader keeps it exactly (up to 2^53 - 1), beyond that the number itself — never a cast
+// past uint64's range (undefined: 2^64 - 1 on arm64, 2^63 under Rosetta). Only the CLI, whose
+// bound has no cap, gets there (a time budget of 1e20 ms); an infinite bound stays null
+TEST(GraphletAttempt, DurationsBeyondTheExactIntegersAreStatedAsNumbers) {
+    AttemptSettings cli;
+    cli.hard_cap_ms = 0;
+    cli.allowance_ms = 1000;
+    auto usage = [&](double time_budget_ms) {
+        Attempt local(0, std::chrono::system_clock::now(), cli, "cli", false);
+        AttemptIds ids;
+        ids.attempt_id = "cli";
+        local.set_ids(ids);
+        local.set_bound(1, time_budget_ms);
+        return local.usage_json("completed");
+    };
+    const double top = 9007199254740991.0;   // 2^53 - 1
+    // a bound of 2^53 - 1: the integer
+    Json::Value u = usage(top - 1000);
+    EXPECT_EQ(Json::uintValue, u["bound_ms"].type());
+    EXPECT_EQ(9007199254740991u, u["bound_ms"].asUInt64());
+    EXPECT_EQ(Json::uintValue, u["bound"]["walk_until_ms"].type());
+    // 2^53: the number
+    u = usage(top + 1 - 1000);
+    EXPECT_EQ(Json::realValue, u["bound_ms"].type());
+    EXPECT_EQ(9007199254740992.0, u["bound_ms"].asDouble());
+    // 1e20 ms: the number, also where the walk stops
+    u = usage(1e20);
+    EXPECT_EQ(Json::realValue, u["bound_ms"].type());
+    EXPECT_EQ(1e20 + 1000, u["bound_ms"].asDouble());
+    EXPECT_EQ(Json::realValue, u["bound"]["walk_until_ms"].type());
+    EXPECT_LE(1e20, u["bound"]["walk_until_ms"].asDouble());
+    EXPECT_EQ(std::string::npos, json_text(u, true).find("18446744073709551615"));
+    // below the edge, rounded up as before
+    u = usage(0.25);
+    EXPECT_EQ(Json::uintValue, u["bound_ms"].type());
+    EXPECT_EQ(1001u, u["bound_ms"].asUInt64());
+    // no bound: null
+    EXPECT_TRUE(usage(std::numeric_limits<double>::infinity())["bound_ms"].isNull());
+}
+
 // A client that is gone stops the walk (CLIENT_GONE) and anything built after it
 // (AttemptAborted), whatever stopped the walk first
 TEST(GraphletAttempt, GoneClientAbandonsTheAttempt) {
