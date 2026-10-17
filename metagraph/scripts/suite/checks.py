@@ -1200,6 +1200,25 @@ def _hiding(sc: dict, ans: dict, i: int, e: dict) -> Tuple[str, List[str]]:
     return hidden, _pattern_reason_problems(sc, body, i, e)
 
 
+def _resolve_reserve_problem(body: dict) -> Optional[str]:
+    """Why a /resolve answer's stated finalisation reserve is not the host's, or None: `limits`, stated with every
+    budget (SPEC-labeled-traversal-core §4.5: "the effective budget, the reserve, the clamps"), states
+    finalize_reserve_ms, the host's 250 ms (fixed in this build; capabilities resolve.time_budget
+    finalize_reserve_configurable false). An answer without `limits` (no budget) states none. Read by invariants on
+    every answer and by the stop rule (_resolve_stop_problem), never believed in place of the host's."""
+    lim = body.get("limits") if isinstance(body, dict) else None
+    if not isinstance(lim, dict):
+        return None
+    if "finalize_reserve_ms" not in lim:
+        return "limits states no finalize_reserve_ms (SPEC §4.5: the reserve is stated with the budget, the host's " \
+               "%g ms)" % _RESOLVE_RESERVE_MS
+    v = lim["finalize_reserve_ms"]
+    if not _is_num(v) or v != _RESOLVE_RESERVE_MS:
+        return "limits.finalize_reserve_ms %s, not the host's %g ms (SPEC §4.5: fixed in this build, not " \
+               "configurable)" % (json.dumps(v), _RESOLVE_RESERVE_MS)
+    return None
+
+
 def _resolve_stop_problem(sc: dict, body: dict, client: Optional[dict] = None) -> Optional[str]:
     """Why a /resolve answer's stated stop cannot have happened, or None (SPEC-labeled-traversal-core §4.5: the
     work stops at the budget less the reserve, the only stop reason being time). The deadline starts once the body
@@ -1218,10 +1237,9 @@ def _resolve_stop_problem(sc: dict, body: dict, client: Optional[dict] = None) -
     budget = _effective_budget(sc, body)
     if budget is None:
         return "a resolve time stop without a time budget"
-    stated = _number(lim.get("finalize_reserve_ms"))
-    if stated is not None and stated > _RESOLVE_RESERVE_MS:
-        return "a resolve time stop with a stated finalisation reserve %g ms above the host's %g ms (SPEC §4.5: not " \
-               "configurable)" % (stated, _RESOLVE_RESERVE_MS)
+    stated = _resolve_reserve_problem(body)
+    if stated and "finalize_reserve_ms" in lim:
+        return "a resolve time stop with %s" % stated
     reserve = _RESOLVE_RESERVE_MS
     wall = _number((client or {}).get("wall_ms"))
     if wall is not None and wall < budget - reserve - 1.0:
@@ -2935,12 +2953,15 @@ def _resolve_invariants(sc, ans, a, arm, client=None):
     seq = req.get("sequence", "") if isinstance(req, dict) else ""
     qk = max(0, len(seq) - K + 1)
     num = body.get("num_kmers")
-    # the deadline's terms: a clamp only of what the route clamps, and no budget lowered unstated (the stop rule
-    # reads limits.time_budget_ms)
+    # the deadline's terms: a clamp only of what the route clamps, no budget lowered unstated (the stop rule reads
+    # limits.time_budget_ms), and the host's reserve (L1 of the verification of SD-021)
     probs += _resolve_clamp_problems(sc, body, arm)
+    reserve = _resolve_reserve_problem(body)
+    if reserve:
+        probs.append(reserve)
     if stop:
         bad = _resolve_stop_problem(sc, body, client)
-        if bad:
+        if bad and not (reserve and bad.endswith(reserve)):
             probs.append(bad)
         x = stop.get("resolved_kmers")
         if num != x:

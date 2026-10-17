@@ -635,7 +635,7 @@ A record gives the cap trigger and counters where a result has no JSON arm).
 - /pattern, `stop.reason` (§7.6): `time` and `determinism: time_limited` (also a low-complexity diagnostic the work
   time cut) need `timing.elapsed_ms` at or after a lower bound of the work time, time_budget_ms -
   finalize_reserve_ms - 2 E (the reserve the answer states: the host's is configurable, --pattern-finalize-ms, and
-  checks.py has no host document to check it against; else 250), E the §7.6 formula at the default (slowest)
+  checks.py has no host document to check it against; else 250; see "Open items"), E the §7.6 formula at the default (slowest)
   delivery rates 10 / 50 MB/s over the
   results in the answer plus every withheld result at a generous 2 KiB (64 KiB with labels or a predicate);
   `max_steps` the steps of all patterns at max_steps (every fixture's stop shows them equal); `max_contexts`,
@@ -646,8 +646,10 @@ A record gives the cap trigger and counters where a result has no JSON arm).
   a list with neither holds every result: a source missing from it fails (retrieval_complete false alone means
   the labels are incomplete).
 - /resolve, `stop` (SPEC-labeled-traversal-core §4.5): reason `time` only, with `timing.elapsed_ms` at or after the
-  budget less the reserve. The reserve is the host's 250 ms (not configurable), never the one the answer states; a
-  stated reserve above it fails (as suite_common's rules treat a refusal's). Every budget check reads the time budget
+  budget less the reserve. The reserve is the host's 250 ms (not configurable), never the one the answer states:
+  `limits`, stated with every budget, must state finalize_reserve_ms 250, so invariants fails a /resolve answer
+  whose `limits` states another reserve (100 as well as 900), a non-number or none, on every arm, and a time stop
+  stating one fails the checks that judge the stop (L1 of the verification of SD-021). Every budget check reads the time budget
   the same way (`_effective_budget`): the answer's echo when it is a number, else the request's, so an echoed null
   never skips a time check (SD-021, SD-286, SD-296).
 - /traverse, an arm's `cap_trigger` (§6.7, §7.0): the arm's `walk_domain` limitation of the trigger's knob
@@ -4441,6 +4443,14 @@ branch for a v6 run.
 - manifest/suite_v6.json content 49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1 (computed),
   manifest/, gate/ and every suite module but report.py byte-identical to a71d9177f; the frozen v5 files to
   07dfa4875.
+
+## Open items (the harness, 2026-10-17)
+
+- The /pattern finalisation reserve (SD-021, the owner's decision): checks.py still reads the reserve a /pattern
+  answer states (`limits.finalize_reserve_ms`, else 250) when it bounds the work time; the host's is configurable
+  (`--pattern-finalize-ms`) and checks.evaluate sees no host document. The NEXT manifest states it in the check
+  arguments (`reserve_ms` taken from the capabilities snapshot by the builder); checks.evaluate's API does not
+  change. The frozen v5 and v6 keep the answer's reading.
 
 ## Glossary
 

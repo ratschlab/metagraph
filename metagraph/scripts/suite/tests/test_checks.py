@@ -4061,14 +4061,52 @@ class BudgetReaders(unittest.TestCase):
         stop = {"reason": "time"}
         # a stated reserve of 900 ms would put the work deadline at 100 ms: a stop at a client wall of 200 ms
         body = {"stop": stop, "limits": {"time_budget_ms": 1000, "finalize_reserve_ms": 900}}
-        self.assertIn("stated finalisation reserve 900 ms above the host's 250 ms",
+        self.assertIn("a resolve time stop with limits.finalize_reserve_ms 900, not the host's 250 ms",
                       checks._resolve_stop_problem(sc, body, {"wall_ms": 200.0}) or "")
-        for limits in ({"time_budget_ms": 1000}, {"time_budget_ms": 1000, "finalize_reserve_ms": 250},
-                       {"time_budget_ms": 1000, "finalize_reserve_ms": 100}):
+        for limits in ({"time_budget_ms": 1000}, {"time_budget_ms": 1000, "finalize_reserve_ms": 250}):
             body = {"stop": stop, "limits": limits}
             self.assertIn("before the budget 1000 ms less the reserve 250 ms",
                           checks._resolve_stop_problem(sc, body, {"wall_ms": 200.0}) or "", limits)
             self.assertIsNone(checks._resolve_stop_problem(sc, body, {"wall_ms": 749.5}), limits)
+
+    def test_resolve_states_the_hosts_reserve(self):
+        # L1 of the verification of SD-021: the reserve is the host's 250 ms (SPEC-labeled-traversal-core §4.5: fixed
+        # in this build, capabilities finalize_reserve_configurable false), and `limits` states it whenever it is
+        # stated (a budgeted request): a stated reserve of 100 ms below it went unchecked (the verifier's R-pos-0006
+        # mutation, a stop at a client wall of 59,800 ms for a 60,000 ms budget: failed at base, passed at head)
+        seq = "ACGT" * 15
+        sc = {"route": "POST /resolve", "truth": {},
+              "request": {"sequence": seq, "bounds": {"time_budget_ms": 60000}}}
+        qk = len(seq) - 30
+
+        def ans(limits, stop=None):
+            body = {"num_kmers": qk if stop is None else stop["resolved_kmers"], "graph_runs": [], "labels": [],
+                    "stop": stop, "limits": limits}
+            return ok_answer(body)
+        stop = {"phase": "rows", "reason": "time", "resolved_kmers": 4, "query_kmers": qk, "resolved_bp": 34,
+                "query_bp": len(seq), "remainder_from_bp": 4}
+        lim = lambda **kw: dict({"time_budget_ms": 60000, "clamped": []}, **kw)  # noqa: E731
+        o, d = outcome(sc, ans(lim(finalize_reserve_ms=250)), "invariants")
+        self.assertEqual(o, "pass", d)
+        o, d = outcome(sc, ans(lim(finalize_reserve_ms=250), stop), "invariants", _client={"wall_ms": 59800.0})
+        self.assertEqual(o, "pass", d)
+        for value, text in ((100, "limits.finalize_reserve_ms 100, not the host's 250 ms"),
+                            (900, "limits.finalize_reserve_ms 900, not the host's 250 ms"),
+                            ("250", "limits.finalize_reserve_ms \"250\", not the host's 250 ms"),
+                            (None, "limits.finalize_reserve_ms null, not the host's 250 ms")):
+            for arm in ("direct-local", "mcp"):
+                o, d = outcome(sc, ans(lim(finalize_reserve_ms=value)), "invariants", _arm=arm)
+                self.assertEqual((o, text in d), ("fail", True), (value, arm, d))
+                o, d = outcome(sc, ans(lim(finalize_reserve_ms=value), stop), "invariants", _arm=arm,
+                               _client={"wall_ms": 59800.0})
+                self.assertEqual((o, text in d), ("fail", True), (value, arm, d))
+        o, d = outcome(sc, ans(lim()), "invariants")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("limits states no finalize_reserve_ms", d)
+        # an unbudgeted request's answer states no limits at all: nothing to hold
+        o, d = outcome(dict(sc, request={"sequence": seq}), ok_answer({"num_kmers": qk, "graph_runs": [],
+                                                                       "labels": [], "stop": None}), "invariants")
+        self.assertEqual(o, "pass", d)
 
     def test_pattern_work_time(self):
         sc = {"route": "POST /pattern", "request": {"time_budget_ms": 10000}}
