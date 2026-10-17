@@ -4728,6 +4728,62 @@ class TestTraverseAttempts(TestingBase):
                     self.assertEqual(200, status, out)
                     self.assertEqual('completed', out['usage']['reason'])
 
+    def test_release_verdict_predicts_the_finished_hold(self):
+        """The library's release rule (release_verdict) against the server's hold of a finished
+        attempt's id (SPEC-labeled-traversal-core.md §10.3): a copy of a finished request sent
+        with not_after_ms is refused until not_after_ms + the clock skew allowance, at most
+        tombstone_max_s after the finish (the cap, stated as max(the flag, retention_s)), past
+        the retention; a release on the finished state assumes beyond_tombstone_max exactly
+        when a copy sent before its not_after_ms runs again. A server with no skew allowance,
+        retention 1 s and a 3 s cap: an attempt whose not_after_ms lies within the cap is held
+        past its retention, one whose not_after_ms lies 60 s out runs again once the cap has
+        passed. The ledger's early release on a finished state rests on this rule."""
+        release_verdict = graphlet_lib.release_verdict
+        with self._Server(self, '--traverse-attempt-retention-s', '5',
+                          '--traverse-attempt-tombstone-max-s', '2') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            self.assertEqual((5, 5), (caps['retention_s'], caps['tombstone_max_s']))
+        with self._Server(self, '--traverse-clock-skew-ms', '0',
+                          '--traverse-attempt-retention-s', '1',
+                          '--traverse-attempt-tombstone-max-s', '3') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            self.assertEqual((1, 3, 0), (caps['retention_s'], caps['tombstone_max_s'],
+                                         caps['clock_skew_allowance_ms']))
+
+            def run(attempt_id, not_after_ms):
+                req = self._request(1, radius=10, attempt_id=attempt_id,
+                                    not_after_ms=not_after_ms,
+                                    expect_server_instance=caps['server_instance'])
+                ret = server.post('traverse', req)
+                self.assertEqual(200, ret.status_code, ret.text)
+                state = server.state(attempt_id)
+                self.assertEqual(200, state.status_code, state.text)
+                self.assertEqual('finished', state.json()['state'])
+                verdict = release_verdict(graphlet_lib.AttemptAnswer(state.json(), 200, 'attempt'),
+                                          graphlet_lib.AttemptSent.of(req), attempts=caps)
+                self.assertEqual((True, 'finished'), (verdict.release, verdict.code), verdict.why)
+                return req, verdict
+
+            # not_after_ms within the cap: held past the retention (1 s), until not_after_ms
+            within, verdict = run('hold-within', int(time.time() * 1000) + 2500)
+            self.assertEqual((), verdict.assumptions, verdict.why)
+            time.sleep(1.3)
+            self.assertLess(time.time() * 1000, within['not_after_ms'])
+            copy = server.post('traverse', within)
+            self.assertEqual(409, copy.status_code, copy.text)
+            self.assertNotEqual('expired', copy.json().get('state'), copy.text)
+
+            # not_after_ms beyond the cap: held for the cap only, then a copy runs again
+            beyond, verdict = run('hold-beyond', int(time.time() * 1000) + 60000)
+            self.assertEqual(('beyond_tombstone_max',), verdict.assumptions, verdict.why)
+            copy = server.post('traverse', beyond)
+            self.assertEqual(409, copy.status_code, copy.text)
+            # (a refused copy holds the id the cap from its own arrival)
+            time.sleep(3.5)
+            again = server.post('traverse', beyond)
+            self.assertEqual(200, again.status_code, again.text)
+            self.assertEqual('hold-beyond', again.json()['usage']['attempt_id'])
+
     def test_expect_server_instance_refuses_another_process(self):
         """The restart hole: tombstones live in memory, so a copy reaching a restarted process
         would run. A request naming another server_instance is refused before anything runs
