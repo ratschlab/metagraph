@@ -3737,6 +3737,51 @@ class TraverseChecks(unittest.TestCase):
         follow["request"]["strategy"]["branching"] = {"hairpins": "follow"}
         self.assertIsNone(checks._computed_block(follow, ans, ans["body"]["results"][0], 0, t, t, "right", L))
         self.assertEqual(outcome(follow, ans, "walk_in_record", label_scope="record")[0], "fail")
+        # L3 of the verification of SD-025: the MCP arm walks with its overrides (_strategy_knob per arm): its
+        # override hairpins follow makes the step admissible there, while the direct request's skip keeps the gap
+        mcp = copy.deepcopy(sc)
+        mcp["mcp"] = {"tool": "traverse_fetch", "arguments": {"overrides": {"branching": {"hairpins": "follow"}}}}
+        self.assertIsNone(checks._computed_block(mcp, ans, ans["body"]["results"][0], 0, t, t, "right", L, arm="mcp"))
+        self.assertEqual(checks._computed_block(mcp, ans, ans["body"]["results"][0], 0, t, t, "right", L,
+                                                arm="direct-local")["reason"], "hairpin")
+        o, d = outcome(mcp, ans, "walk_in_record", _arm="mcp", label_scope="record")
+        self.assertEqual(o, "fail", d)
+        self.assertEqual(outcome(mcp, ans, "walk_in_record", label_scope="record")[0], "inconclusive")
+        # ... and a computed hairpin is a truth gap only where the answer states it: the skipped hairpin event at the
+        # leaf (at_bp, the record's base) or the label's hairpin end (SPEC §13: dead_end with text hairpin); a bare
+        # dead_end there is a walk that stopped short
+        def without(keep):
+            a = copy.deepcopy(ans)
+            seg = a["body"]["results"][0]["arms"]["right"]["segments"][0]
+            seg["events"] = [ev for ev in seg["events"] if keep(ev)]
+            return a
+        hp = lambda ev: ev.get("type") == "hairpin"  # noqa: E731
+        le = lambda ev: ev.get("type") == "label_end"  # noqa: E731
+        bare = without(lambda ev: False)
+        o, d = outcome(sc, bare, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "fail", d)
+        self.assertIn("the path ended by ['dead_end']", d)
+        # the hairpin event alone (annotate mode states no label end), the label's hairpin end alone (the engine
+        # writes reason "hairpin")
+        self.assertEqual(outcome(sc, without(hp), "walk_in_record", label_scope="record")[0], "inconclusive")
+        end_only = without(le)
+        end_only["body"]["results"][0]["arms"]["right"]["segments"][0]["events"][0].update(reason="hairpin")
+        self.assertEqual(outcome(sc, end_only, "walk_in_record", label_scope="record")[0], "inconclusive")
+        # a hairpin event that states it was followed, or one at another depth or base, is no skipped hairpin there
+        for change in ({"followed": True}, {"at_bp": 54}, {"char": "N"}):
+            a = without(hp)
+            a["body"]["results"][0]["arms"]["right"]["segments"][0]["events"][0].update(change)
+            self.assertEqual(outcome(sc, a, "walk_in_record", label_scope="record")[0], "fail", change)
+        # the graphlet (the MCP's export) states the skipped hairpin as its E h record
+        g = mcp_shaped(without(hp))
+        r = g["body"]["results"][0]
+        r["graphlet"] = r["graphlet"].replace("\nT D\n", "\nE 55 h %s 1 0 s\nT D\n" % record[515])
+        self.assertIn("E 55 h", r["graphlet"])
+        self.assertEqual([ev for ev in checks.graphlet_arms(r["graphlet"])["right"]["segments"][0]["events"]
+                          if ev["type"] == "hairpin"],
+                         [{"at_bp": 55, "type": "hairpin", "char": record[515], "followed": False}])
+        self.assertEqual(outcome(sc, g, "walk_in_record", _arm="mcp", label_scope="record")[0], "inconclusive")
+        self.assertEqual(outcome(sc, mcp_shaped(bare), "walk_in_record", _arm="mcp", label_scope="record")[0], "fail")
 
     def test_duplicate_seed_count(self):
         # B5b-07 (review of lane S5b): the invariants check states the distinct seeds of a request with identical

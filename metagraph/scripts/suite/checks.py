@@ -3274,6 +3274,11 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
             seg["_g"]["switches"].append((int(f[1]), int(f[4])))   # a switch: E <at_bp> s <from> <to> <cost>
         elif rec == "P" and seg is not None and len(f) >= 5:
             seg["_g"]["presence"].append(f[4])   # an annotate run: P <from_bp> <to_bp> <total> <SETEXPR>
+        elif rec == "E" and seg is not None and len(f) >= 7 and f[2] == "h":
+            # a hairpin step: E <at_bp> h <char> <total> <RANGES> <f|s>, followed or skipped (SPEC §7.5.2), the
+            # JSON event's at_bp, char and followed
+            seg.setdefault("events", []).append({"at_bp": int(f[1]), "type": "hairpin", "char": f[3],
+                                                 "followed": f[6] == "f"})
         elif rec == "E" and seg is not None and len(f) >= 5 and f[2] == "b":
             # a blocked successor: E <at_bp> b <char> <reason code> ... (SPEC §7.5)
             seg.setdefault("events", []).append({"at_bp": int(f[1]), "type": "blocked", "char": f[3],
@@ -4069,9 +4074,33 @@ _MAX_REPEAT_EXITS = 64
 _GAP_ENDS = {"hairpin": "dead_end"}
 
 
-def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side: str, L: int) -> Optional[dict]:
+def _gap_stated(gap: dict, ends: set, armo: dict, routes: List[Tuple[dict, str]], best: int) -> bool:
+    """Whether the answer states the computed block |gap| where the longest routes following the record end (|ends|
+    their leaves' end reasons, _leaf_ends): its end reason (_GAP_ENDS), and for a hairpin the hairpin itself, the
+    label's `hairpin` end (SPEC-labeled-traversal-core §13 note 2: dead_end with text hairpin; a graphlet's Dh) or
+    the skipped `hairpin` event at the gap's depth with the record's base on such a route's leaf (§6.5: "a hairpin
+    event is recorded"; annotate mode states no label end). A bare dead_end there is a walk that stopped short (L3 of
+    the verification of SD-025)."""
+    if _GAP_ENDS.get(gap["reason"], gap["reason"]) not in ends:
+        return False
+    if gap["reason"] != "hairpin" or "hairpin" in ends:
+        return True
+    segs = dict((x.get("id"), x) for x in armo.get("segments") or [])
+    for p, f in routes:
+        if len(f) != best or not p.get("segments"):
+            continue
+        for ev in _seg_events(segs.get(p["segments"][-1])):
+            if ev.get("type") == "hairpin" and ev.get("followed") is not True and ev.get("at_bp") == gap["d"] \
+                    and ev.get("char") == gap["char"]:
+                return True
+    return False
+
+
+def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side: str, L: int,
+                    arm: Optional[str] = None) -> Optional[dict]:
     """The first depth at which the record's own continuation from the seed is inadmissible (_first_block), computed
-    from the truth's flank and the request's seed, never read from the answer: {d, reason, char (the record's base
+    from the truth's flank and the request's seed, never read from the answer, under the hairpin policy the arm's
+    requests declare (_strategy_knob with |arm|: on the MCP arm its overrides): {d, reason, char (the record's base
     there), exits: [(the record coordinate of the exit base, the outward bases from it)] (the junction's other
     successors in the flank: where the walk leaves a collapsed repeat), reaches_end (the flank holds the record's end
     in the walking direction)}, or None."""
@@ -4080,7 +4109,7 @@ def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side
     O, p0, p1, coord = _record_view(t, c, L)
     out = O[p1:] if side == "right" else O[:p0][::-1]
     blk = _first_block(seed, out, side, _regime(ans, r) in ("canonical", "primary"),
-                       hairpins=_strategy_knob(sc, ans, "branching", "hairpins") or "skip")
+                       hairpins=_strategy_knob(sc, ans, "branching", "hairpins", arm) or "skip")
     if blk is None or blk[0] >= len(out):
         return None
     d, why = blk
@@ -4103,7 +4132,8 @@ def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side
 
 
 def _blocked_walk(sc: dict, ans: dict, r: dict, i: int, t: dict, armo: dict, side: str, copies: List[dict], L: int,
-                  labels: Optional[set], exact: Optional[dict], record_scope: bool) -> Optional[Tuple[str, str]]:
+                  labels: Optional[set], exact: Optional[dict], record_scope: bool,
+                  arm: Optional[str] = None) -> Optional[Tuple[str, str]]:
     """G28 (VERIFY-2 item 2, the strict rule): an arm with no route that follows the record for its whole length
     still follows it when the record's own continuation is blocked (SPEC-labeled-traversal-core §6.6: a step into a
     seed node or along a used edge is not taken but reported as a `blocked` event): some route (any parent at a
@@ -4119,7 +4149,7 @@ def _blocked_walk(sc: dict, ans: dict, r: dict, i: int, t: dict, armo: dict, sid
     one that ends at the block passes, none: None."""
     unverifiable = None   # a copy whose repeat exit lies outside the flank: the answer when no other copy decides
     for c in copies:
-        blk = _computed_block(sc, ans, r, i, t, c, side, L)
+        blk = _computed_block(sc, ans, r, i, t, c, side, L, arm)
         if blk is None:
             continue
         if not blk["exits"]:
@@ -4268,7 +4298,7 @@ def check_walk_in_record(sc, ans, a, arm):
             following = [(p, f) for p, f in following if len(f) <= own_end]
         if not following and not capped:
             blocked = _blocked_walk(sc, ans, r, i, t, armo, side, copies, L, labels, exact,
-                                    a.get("label_scope") == "record")
+                                    a.get("label_scope") == "record", arm)
             if blocked is not None:
                 kind, text = blocked
                 (notes if kind == PASS else searched if kind == INCONCLUSIVE else probs).append(
@@ -4323,7 +4353,7 @@ def check_walk_in_record(sc, ans, a, arm):
         unstopped = _resource_end_problem(r, armo, side, ends) or next(
             (m for m in (_resource_end_below_frontier(armo, side, p) for p, f in following if len(f) == best) if m),
             None)
-        gap = _computed_block(sc, ans, r, i, t, copies[0], side, L) if exact is not None else None
+        gap = _computed_block(sc, ans, r, i, t, copies[0], side, L, arm) if exact is not None else None
         odd_base = _outside_alphabet(frames, side, following, best)
         if ends & _STATED_STRUCTURAL_ENDS and exact is None and possible:
             notes.append("%s: the record followed for %d bp, ended at a stated %s (%d expected otherwise)" % (
@@ -4337,7 +4367,7 @@ def check_walk_in_record(sc, ans, a, arm):
         elif ends & _STATED_STRUCTURAL_ENDS and exact is None:
             probs.append("a stated stop that cannot have happened: %s: %s; the record followed for %d of %d bp" % (
                 side, disproved[0], best, expected))
-        elif gap is not None and gap["d"] == best and _GAP_ENDS.get(gap["reason"], gap["reason"]) in ends:
+        elif gap is not None and gap["d"] == best and _gap_stated(gap, ends, armo, following, best):
             # the record's own continuation is inadmissible there (§6.6), which the truth's minimum did not count
             searched.append("%s: the record followed for %d of %d bp, ended by %s, which the record and the seed "
                             "compute there: a truth gap" % (side, best, expected, gap["reason"]))

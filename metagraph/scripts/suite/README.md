@@ -979,9 +979,13 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   of the junction's k-1 bases in the flank followed by another base) for every base the flank holds. A block before
   the truth's min_bp is a truth gap (inconclusive), so is a continuation past the flank; past the record's end with
   the record as the only label it fails. A following route that ends at the computed block before the truth's
-  min_bp, with that reason (a skipped hairpin: `dead_end`, SPEC §13), is the same truth gap. The regime is the
-  answer's capabilities or the graphlet's H record (basic on this index, where no step is a hairpin and the change
-  of SD-025 decides nothing).
+  min_bp, with that reason, is the same truth gap; a skipped hairpin only where the answer states it (L3 of the
+  verification of SD-025): the path's `dead_end` with the label's `hairpin` end (SPEC §13 note 2; a graphlet's
+  `Dh`) or the skipped `hairpin` event at that depth with the record's base on the route's leaf (a graphlet's
+  `E <at_bp> h <char> ... s` record, which `graphlet_arms` now reads); a bare `dead_end` there is a walk that
+  stopped short. The hairpin policy is the arm's (`_strategy_knob` with the arm: on the MCP arm its overrides,
+  then the direct request, then the default skip). The regime is the answer's capabilities or the graphlet's H
+  record (basic on this index, where no step is a hairpin and the change of SD-025 decides nothing).
 
 
 ### The MCP verdict, the comparator and the merge (async's runner at e334715b is the reference)
