@@ -1248,6 +1248,51 @@ def _check_transport(body, result):
                                   % (want, body.count('\n')))
 
 
+def _as_text(body):
+    """A body given as bytes, decoded (GraphletFormatError when it is not UTF-8, as a
+    parse says); a str as it is."""
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            return bytes(body).decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
+    return body
+
+
+def _frame(body):
+    """The checks of a server body that need no parse -> (its H record's fields, where its
+    H line ends, where its Z line begins, the lines it has): it ends with a line feed, its
+    first line is an H record of this MGT version with an integer seed_index, its last a Z
+    record counting its lines -- GraphletFormatError otherwise (a body cut, or not MGT v1:
+    what a parse refuses too) -- and no J line follows H: ValueError (a saved file, not a
+    server body), tested last, so that a cut body is reported as cut. The one copy of these
+    checks: standalone_text(), the store's unparsed put and its copy without a parse."""
+    if not body.endswith('\n'):
+        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
+    first = body.find('\n')
+    head = body[:first].split(' ')
+    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt' or head[2] != str(FORMAT_VERSION):
+        raise GraphletFormatError(1, 'expected the H record of MGT v%d' % FORMAT_VERSION)
+    try:
+        parse_int(head[11])
+    except CodecError as e:
+        raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
+    last = body.rfind('\n', 0, len(body) - 1) + 1
+    z = body[last:-1].split(' ')
+    n = body.count('\n')
+    try:
+        counted = len(z) == 2 and z[0] == 'Z' and parse_int(z[1]) == n
+    except CodecError:
+        counted = False
+    if not counted:
+        raise GraphletFormatError(n, 'expected the Z record counting the body\'s %d lines' % n)
+    # tested in place: a slice of the rest of the body only to read its first two
+    # characters would copy the whole body once more
+    if body.startswith('J ', first + 1):
+        raise ValueError('the body already carries a J line: a saved file, not a server body')
+    return head, first, last, n
+
+
 def from_response(result, response, *, budget=None):
     """results[i] of a detail: graphlet response + the response (the envelope) ->
     Graphlet with the summary attached. A derivation failure ({seed, error}) has no
@@ -1285,42 +1330,18 @@ def standalone_text(body, result, response):
     the body: for a server body (canonical, T37) it is byte for byte
     dump(from_response(result, response), envelope=True), at the cost of a copy, so that a
     large retrieval can be saved or spooled without building its model. The body is checked
-    against graphlet_bytes and graphlet_lines, and for its H and Z records, but NOT
-    validated: load() or parse() of the text does that (a body that is not canonical gives a
-    text that is not what dump() would write). Raises ValueError for a body that already
-    carries a J line (not a server body) and for a response with a reserved top-level name,
-    GraphletFormatError for a body cut in transport or without its H / Z record."""
+    against graphlet_bytes and graphlet_lines, and for its frame (_frame(): MGT v1, H, a Z
+    record counting its lines), but NOT validated: load() or parse() of the text does that
+    (a body that is not canonical gives a text that is not what dump() would write). Raises
+    ValueError for a body that already carries a J line (not a server body) and for a
+    response with a reserved top-level name, GraphletFormatError for a body that is not
+    UTF-8, cut in transport, or without its frame."""
     _refuse_reserved(response)
-    if isinstance(body, (bytes, bytearray)):
-        try:
-            body = bytes(body).decode('utf-8')
-        except UnicodeDecodeError as e:
-            raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
+    body = _as_text(body)
     _check_transport(body, result)
-    if not body.endswith('\n'):
-        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
-    first = body.find('\n')
-    head = body[:first].split(' ')
-    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt':
-        raise GraphletFormatError(1, 'expected the H record')
-    try:
-        seed_index = parse_int(head[11])
-    except CodecError as e:
-        raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
-    # tested in place: a slice of the rest of the body only to read its first two
-    # characters would copy the whole body once more, held until the splice
-    if body.startswith('J ', first + 1):
-        raise ValueError('the body already carries a J line: a saved file, not a server body')
-    last = body.rfind('\n', 0, len(body) - 1) + 1
-    z = body[last:-1].split(' ')
-    if len(z) != 2 or z[0] != 'Z':
-        raise GraphletFormatError(body.count('\n'), 'expected the Z record')
-    try:
-        lines = parse_int(z[1])
-    except CodecError as e:
-        raise GraphletFormatError(body.count('\n'), 'Z: %s' % e) from None
+    head, first, last, lines = _frame(body)
     envelope = seed_envelope({k: v for k, v in response.items() if k != 'results'},
-                             seed_index)
+                             parse_int(head[11]))
     envelope['results'] = [{k: v for k, v in result.items()
                             if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}]
     j = json.dumps(envelope, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
