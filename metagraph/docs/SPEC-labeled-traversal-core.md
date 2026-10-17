@@ -969,7 +969,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     X-EFFICIENCY-04*), with or without `bounds.time_budget_ms`, each check a peek at the socket; the one
     exception is the direct cell path — at most 16 explicit column labels on an annotation with single-cell
     reads, none of the row-diff family — without `bounds.time_budget_ms`, whose read of the query's cells is
-    one piece): the client closed or
+    one piece; once its answer is built, also while the answer is serialised and compressed, as `/traverse`'s
+    and `/pattern`'s, so that nothing is written — before, it was written in full; its errors, a 400 or a 503
+    while the index loads, are still written to it, as `/traverse`'s): the client closed or
     reset its connection, or half-closed it (a client that half-closes after its request is treated as gone, as
     nginx does by default). Found by a non-blocking peek at the request's socket that consumes nothing (at most
     every 100 ms); where bytes past the request wait on the socket (a pipelined request, a trailing CRLF), which

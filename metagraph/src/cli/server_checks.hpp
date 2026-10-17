@@ -1,6 +1,7 @@
 #ifndef __METAGRAPH_SERVER_CHECKS_HPP__
 #define __METAGRAPH_SERVER_CHECKS_HPP__
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -40,6 +41,39 @@ class HttpError : public std::runtime_error {
 class ClientGone : public std::runtime_error {
   public:
     using std::runtime_error::runtime_error;
+};
+
+// The writing check of a route whose client may leave once its answer is built (/resolve;
+// /traverse's attempt and /pattern's delivery ask their own): asks |gone| on the first call and
+// then at most once per |every| on |clock| — a peek at the socket per 64 KiB of text would be a
+// syscall each, so /traverse asks at most every client_check_ms too — and throws ClientGone
+// once it answered true: nothing is written. No predicate (the CLI): nothing is asked
+class GoneCheck {
+  public:
+    using Clock = std::chrono::steady_clock;
+
+    GoneCheck(std::function<bool()> gone, std::chrono::milliseconds every,
+              std::function<Clock::time_point()> clock = &Clock::now)
+          : gone_(std::move(gone)), every_(every), clock_(std::move(clock)) {}
+
+    void operator()() {
+        if (!gone_)
+            return;
+        const Clock::time_point t = clock_();
+        if (asked_ && t < next_)
+            return;
+        asked_ = true;
+        next_ = t + every_;
+        if (gone_())
+            throw ClientGone("the client closed its connection while the answer was written");
+    }
+
+  private:
+    std::function<bool()> gone_;
+    std::chrono::milliseconds every_;
+    std::function<Clock::time_point()> clock_;
+    bool asked_ = false;
+    Clock::time_point next_;
 };
 
 class CurrentlyInitializingError : public std::runtime_error {

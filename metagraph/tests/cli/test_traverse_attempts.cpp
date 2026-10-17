@@ -2348,6 +2348,62 @@ TEST(GraphletServer, CompressionPiecesOfTheServerKeepTheBytes) {
     }
 }
 
+// The check /resolve writes its answer under (GoneCheck, then the deadline): a client that left
+// once the answer was built gets nothing — its text is not serialised, compressed and written
+// in full into a dead connection, as /pattern's and /traverse's are not. The connection is
+// asked on the first check and then at most once per interval (a peek per 64 KiB of text would
+// be a syscall each); errors are not asked about (ResponseControl::gone stays /pattern's)
+TEST(ServerRequest, AGoneCheckStopsTheWriting) {
+    using Clock = GoneCheck::Clock;
+    Clock::time_point now = Clock::time_point() + std::chrono::hours(1);
+    bool gone = false;
+    size_t asked = 0;
+    GoneCheck check([&]() { ++asked; return gone; }, std::chrono::milliseconds(100),
+                    [&]() { return now; });
+    check();
+    EXPECT_EQ(1u, asked);
+    gone = true;
+    // within the interval the connection is not asked again
+    now += std::chrono::milliseconds(99);
+    check();
+    EXPECT_EQ(1u, asked);
+    now += std::chrono::milliseconds(1);
+    EXPECT_THROW(check(), ClientGone);
+    EXPECT_EQ(2u, asked);
+    // without a predicate (the CLI) nothing is asked
+    GoneCheck none(nullptr, std::chrono::milliseconds(100));
+    EXPECT_NO_THROW(none());
+
+    // a large answer under the check: written while the client is there, asked during the
+    // writing at most once per interval (a real clock: the text takes far less than an hour)
+    Json::Value big(Json::arrayValue);
+    for (size_t i = 0; i < 100'000; ++i) {
+        big.append(std::string(20, 'A' + i % 26));
+    }
+    auto process = [&](const std::string &) { return big; };
+    for (const std::string encoding : { "", "gzip" }) {
+        SCOPED_TRACE(encoding);
+        asked = 0;
+        gone = false;
+        ResponseControl control;
+        GoneCheck live([&]() { ++asked; return gone; }, std::chrono::hours(1));
+        control.check = [&]() { live(); };
+        const RequestAnswer answered = answer_request("{}", encoding, 1, process, true, &control);
+        EXPECT_EQ(200, answered.status);
+        EXPECT_EQ(1u, asked);
+        if (encoding.empty())
+            EXPECT_EQ(json_text(big, true), answered.body);
+        // the client left once the answer was built: nothing is written
+        GoneCheck left([&]() { ++asked; return true; }, std::chrono::hours(1));
+        control.check = [&]() { left(); };
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, process, true, &control).status);
+        // an error is still written to it (the check reaches the success path only)
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, [](const std::string &) -> Json::Value {
+            throw std::invalid_argument("Bad json received: x");
+        }, true, &control).status);
+    }
+}
+
 // What process_request writes (answer_request, without the HTTP library) for every outcome of
 // a request: everything for a route that does not ask whether its client left (every route but
 // /pattern: no control, or a control without |gone|); and, for a route that asks

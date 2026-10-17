@@ -1355,8 +1355,8 @@ int run_server(Config *config) {
         // compression of the answer are checked against it
         PatternDelivery delivery;
         // a client that is gone, or a shutdown, is not answered: the work ends at its next
-        // clock reading, the writing at its next check, and nothing is written (as /resolve's and
-        // /traverse's)
+        // clock reading, the writing at its next check, and nothing is written (as on /resolve
+        // and /traverse, which still write their errors to it: control.gone is /pattern's alone)
         auto gone = gone_of(request);
         delivery.set_abort(gone);
         ResponseControl control;
@@ -1441,9 +1441,17 @@ int run_server(Config *config) {
         // the request's deadline, set once its body is parsed (none without the field: the
         // check then does nothing, and the text and its compression are the same bytes)
         ResolveDelivery delivery;
+        // a client that is gone, or a shutdown, is not answered: the work is abandoned at its
+        // next phase (process_resolve_request), the writing and the compression of the answer
+        // at the next check, the connection asked at most every client_check_ms, and nothing
+        // is written (as on /pattern and /traverse). Its errors are still written to it: no
+        // control.gone, which is /pattern's alone
+        GoneCheck writing_gone(gone_of(request),
+                               std::chrono::milliseconds(attempt_settings.client_check_ms));
         ResponseControl control;
         control.compression_level = traversal_io.compression_level;
         control.check = [&]() {
+            writing_gone();
             try {
                 delivery.check();
             } catch (const ResolveDeadline &e) {
