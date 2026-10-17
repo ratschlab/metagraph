@@ -157,8 +157,13 @@ inline uint64_t string_text_bytes(std::string_view s) {
 
 constexpr uint64_t kNoKey = graph::traversal::npos;
 
+// A count object of SPEC §7.4 without an interval: value, relation, unit. Never asked for a
+// bounds count, whose lower and upper only pattern.cpp's count_json(Count) writes (a bounds
+// count rendered here would lose its interval); the counts of retrieval, selection and support
+// are exact, at least or unknown
 inline Json::Value count_json(graph::pattern::Relation relation, uint64_t value,
                               graph::pattern::Unit unit) {
+    assert(relation != graph::pattern::Relation::BOUNDS);
     Json::Value v;
     v["value"] = relation == graph::pattern::Relation::UNKNOWN ? Json::Value() : uint_json(value);
     v["relation"] = graph::pattern::to_string(relation);

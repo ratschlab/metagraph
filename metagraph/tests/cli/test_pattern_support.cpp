@@ -2219,4 +2219,20 @@ TEST(PatternSupport, LowComplexityNoteBesideThresholdStopsOnly) {
     }
 }
 
+// The count object of retrieval, selection and support (retrieval::count_json): value (null
+// when unknown), relation, unit; a bounds count is never asked of it, whose interval only
+// pattern.cpp's count_json(Count) writes (an assertion, so that a bounds count cannot lose
+// its interval here)
+TEST(PatternRetrieval, CountObjectHasNoInterval) {
+    const Json::Value exact = retrieval::count_json(Relation::EXACT, 3, Unit::LABELS);
+    EXPECT_EQ((std::vector<std::string> { "relation", "unit", "value" }), exact.getMemberNames());
+    EXPECT_EQ(3u, exact["value"].asUInt64());
+    EXPECT_EQ("exact", exact["relation"].asString());
+    EXPECT_EQ("labels", exact["unit"].asString());
+    EXPECT_EQ("at_least", retrieval::count_json(Relation::AT_LEAST, 3,
+                                                Unit::PLACED_OCCURRENCES)["relation"].asString());
+    EXPECT_TRUE(retrieval::count_json(Relation::UNKNOWN, 3, Unit::PATHS)["value"].isNull());
+    EXPECT_DEBUG_DEATH(retrieval::count_json(Relation::BOUNDS, 3, Unit::GRAPH_CONTEXTS), "BOUNDS");
+}
+
 } // namespace
