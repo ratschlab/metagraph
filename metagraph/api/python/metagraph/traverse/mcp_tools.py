@@ -356,6 +356,25 @@ class _Receipt(dict):
         return out
 
 
+def _first_result(response):
+    """results[0] of a traversal response (traverse_fetch, traverse_continue): a response
+    without a result is empty_response, not a failed seed."""
+    results = response.get('results') or []
+    if not results:
+        raise ToolError('empty_response', 'the server returned no result')
+    return results[0]
+
+
+def _seed_failed(result, **extra):
+    """The answer of a result without a graphlet (a seed the server could not derive): its
+    message, outcome and limitations -- why it failed -- then |extra| (a continuation's
+    parent, a fetch's coordinates_note)."""
+    out = {'error': 'seed_failed', 'message': result.get('error'),
+           'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
+    out.update(extra)
+    return out
+
+
 def _check_receipt(receipt, limit, lever='raise max_bytes'):
     """Refuse an operation whose receipt could not be returned under the ceiling even with
     every optional field cut -- before it runs, so that nothing is made that the caller
@@ -1243,19 +1262,13 @@ class GraphletTools:
             req = _with_graph(req, client)
             identity = self._check_same_index(client, ident, allow_unverified_index, req)
         response = self._backend(client.traverse_raw, req)
-        results = response.get('results') or []
-        if not results:
-            raise ToolError('empty_response', 'the server returned no result')
-        result = results[0]
+        result = _first_result(response)
         # coordinates the automatic rule asked for under a memory budget, in a seed that
         # stopped on it: how to walk further without them (the client's note)
         coord_note = drop_coordinates_note([result], stated) or coord_note
         if 'graphlet' not in result:
-            out = {'error': 'seed_failed', 'message': result.get('error'),
-                   'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
-            if coord_note is not None:
-                out['coordinates_note'] = coord_note
-            return out
+            return _seed_failed(result, **({} if coord_note is None
+                                           else {'coordinates_note': coord_note}))
         nbytes = result.get('graphlet_bytes')
         if nbytes is None:
             nbytes = len(utf8_bytes(result['graphlet']))
@@ -1357,10 +1370,15 @@ class GraphletTools:
                 out['summary_stop'] = e.stop.as_dict()
 
     def _keep_unparsed(self, e, name, req, result, response, nbytes, spooled, keep,
-                       identity, limit, parent=None, derived_from=None, coord_note=None):
+                       identity, limit, parent=None, derived_from=None, coord_note=None,
+                       extra=None, extra_optional=None):
         """The answer of a fetch (or continuation) whose parse its budget stopped: the
         body stored as an unparsed entry when it is to be kept, the server's own per-seed
-        summary (no parse needed) and the stop; nothing local is derived from it."""
+        summary (no parse needed) and the stop; nothing local is derived from it.
+        |extra|: the caller's essential fields (a continuation's parent, notes and budget
+        statements), |extra_optional|: its optional ones, cut first (loss_budget_labels) --
+        both in the receipt checked before the entry is stored, so that the answer that
+        carries them can always be returned."""
         call = _CALL.get()
         stop = e.stop.as_dict()
         if call is not None:
@@ -1383,14 +1401,23 @@ class GraphletTools:
             out['stop'] = stop
         if coord_note is not None:
             out['coordinates_note'] = coord_note
-        optional = ('server_summary', 'hint', 'graphlet_bytes', 'stop', 'coordinates_note')
+        extra = extra or {}
+        extra_optional = extra_optional or {}
+        optional = tuple(extra_optional) + ('server_summary', 'hint', 'graphlet_bytes', 'stop',
+                                            'coordinates_note')
         if not (spooled or keep):
+            out.update(extra)
+            out.update(extra_optional)
             return out
         receipt = dict(out, handle='g_' + '0' * 12)
+        receipt.update(extra)
+        receipt.update(extra_optional)
         _check_receipt(_Receipt(receipt, optional), limit)
         out['handle'] = self.store.put_unparsed(
             result, response, req, source=name, delivery='spooled' if spooled else None,
             parent=parent, derived_from=derived_from)
+        out.update(extra)
+        out.update(extra_optional)
         return _Receipt(out, optional)
 
     def _replay_request(self, handle):
@@ -1505,9 +1532,9 @@ class GraphletTools:
                                       'identity': identity}, **stated), optional),
                        max_bytes or self.max_bytes)
         response = self._backend(client.traverse_raw, req)
-        result = (response.get('results') or [{}])[0]
+        result = _first_result(response)
         if 'graphlet' not in result:
-            return {'error': 'seed_failed', 'message': result.get('error'), 'parent': parent}
+            return _seed_failed(result, parent=parent)
         from .parser import from_response
         try:
             g2 = from_response(result, response)
@@ -1522,12 +1549,11 @@ class GraphletTools:
             identity = _weakest(identity, _same_index(
                 ident, unparsed_identity(result, response), 'the continuation',
                 allow_unverified_index))
-            got = self._keep_unparsed(e, name, dict(req), result, response, nbytes, False,
-                                      True, identity, max_bytes or self.max_bytes,
-                                      parent=parent, derived_from=handle)
-            got['parent'] = parent
-            got.update(stated)
-            return got
+            return self._keep_unparsed(
+                e, name, dict(req), result, response, nbytes, False, True, identity,
+                max_bytes or self.max_bytes, parent=parent, derived_from=handle,
+                extra=dict({'parent': parent}, **stated),
+                extra_optional={} if per_label is None else {'loss_budget_labels': per_label})
         identity = _weakest(identity, _same_index(ident, self._identity_of(g2),
                                                   'the continuation', allow_unverified_index))
         # again with what answered: a weaker identity states more
