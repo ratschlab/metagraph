@@ -219,12 +219,31 @@ class V4Builder(unittest.TestCase):
         checked = 0
         for r in rows:
             self.assertTrue(r["host"] == "ok" or r["service_case"] is not None, r)   # a refusal has a case
-            if r["service_case"] == "unknown":
-                continue
+            want = r["service_case"]
+            if want == "unknown":
+                # the service's own reading is not stated: the builder's inference where it makes one
+                want = r.get("service_case_inferred")
+                if want is None:
+                    continue
+            else:
+                self.assertNotIn("service_case_inferred", r)
             got = sorted(forms.intersection(p(predicate=r["predicate"])))
-            self.assertEqual(got, [r["service_case"]] if r["service_case"] else [], json.dumps(r)[:300])
+            self.assertEqual(got, [want] if want else [], json.dumps(r)[:300])
             checked += 1
         self.assertGreater(checked, 40)
+        # L4 of the verification of SD-031: the rows whose service case was inferred from the host's text and the
+        # table (a number where a predicate or a name belongs, a null, boolean or list name), not read from the
+        # service's app/pattern/validate.py, state it as unknown with the inference beside it until the service
+        # confirms it
+        key = lambda x: json.dumps(x, sort_keys=True)  # noqa: E731
+        inferred = [r for r in rows if "service_case_inferred" in r]
+        self.assertEqual(sorted(key(r["predicate"]) for r in inferred),
+                         sorted(key(x) for x in ({"and": [5]}, {"any": [[5]]}, {"any": [None]}, {"any": ["562", True]},
+                                                 {"any": [["562"]]})))
+        for r in inferred:
+            self.assertEqual((r["service_case"], r["service_case_inferred"]),
+                             ("unknown", "pattern.predicate_form_other"), r)
+            self.assertIn("until the service confirms it", r["note"])
         # the predicate options without a predicate, split by value (async's 789fb5f0)
         self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif"))
         self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif",
