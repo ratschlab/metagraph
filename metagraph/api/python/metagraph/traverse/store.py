@@ -91,8 +91,8 @@ from . import budget as _B
 from . import coords
 from ._codec import CodecError, GraphletFormatError, parse_int
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .parser import (_check_transport, _replace_atomically, _write_all, dump, from_response, j_object, parse,
-                     seed_envelope, utf8_bytes)
+from .parser import (_check_transport, _replace_atomically, _write_all, _write_user_file, dump,
+                     from_response, j_object, parse, seed_envelope, utf8_bytes)
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
 
@@ -281,6 +281,9 @@ _HASH_CHUNK = 1 << 20
 
 
 def _write_atomic(path, data):
+    """The spool's writer (entries, bodies, tombstones): private (mkstemp, 0600), flushed
+    to the device and renamed into place. A file for the user is written by
+    parser._write_user_file() instead."""
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.tmp-', dir=d)
     # one write, without the 128 KiB buffer a buffered file holds (parser._write_all()),
@@ -1236,12 +1239,13 @@ class GraphletStore:
         return ''.join(pieces)
 
     def save_body(self, handle, path, *, budget=None):
-        """standalone_text() written atomically to |path| (no parse) -> bytes written."""
+        """standalone_text() written atomically to |path| (no parse) -> bytes written: a
+        user's file, by the writer and with the permissions of save()
+        (parser._write_user_file())."""
         b = _B.resolve(budget)
         if b is None:
             data = self._standalone_text(handle, None).encode('utf-8')
-            _write_atomic(os.path.abspath(path), data)
-            return len(data)
+            return _write_user_file(os.path.abspath(path), data, '.mgt-')
         with b.scope('save_body'):
             text = self._standalone_text(handle, b)
             # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
@@ -1249,8 +1253,7 @@ class GraphletStore:
             # its account on 28 of 34 retrievals
             b.charge(0, 2 * (len(text) + 49))
             data = text.encode('utf-8')
-            _write_atomic(os.path.abspath(path), data)
-            return len(data)
+            return _write_user_file(os.path.abspath(path), data, '.mgt-')
 
     def load(self, path, request=None, *, parse_budget=None, graph=None, graph_path=None):
         """A saved .mgt file -> a new handle (its J line restores envelope and view).

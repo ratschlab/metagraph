@@ -99,8 +99,6 @@ import inspect
 import io
 import json
 import os
-import secrets
-import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -115,7 +113,7 @@ from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
 )
-from .parser import _replace_atomically, _write_all, utf8_bytes
+from .parser import _create_beside, _replace_atomically, _write_user_file, utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle, unparsed_identity
 
 __all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names',
@@ -2248,7 +2246,7 @@ class GraphletTools:
         # default <handle>.<ext> is the same for every export of a handle) before a byte is
         # written, and a failed write (a full disk, a quota) would leave a truncated file
         # there -- a FASTA or GFA cut at a line still reads as complete
-        n = _write_export(path, text.encode('utf-8'))
+        n = _write_user_file(path, text.encode('utf-8'), '.export-')
         return _Receipt({'path': path, 'bytes': n, 'records': records},
                         ('records', 'bytes'))
 
@@ -2623,51 +2621,19 @@ _JSON_BUFFER = io.DEFAULT_BUFFER_SIZE
 
 
 def _atomic_open(path):
-    d = os.path.dirname(path)
-    fd, tmp = tempfile.mkstemp(prefix='.export-', dir=d)
+    """The buffered temporary file of a JSON export beside |path| -> (file, its path):
+    created as every export file is (parser._create_beside())."""
+    fd, tmp = _create_beside(path, '.export-')
     return os.fdopen(fd, 'wb', buffering=_JSON_BUFFER), tmp
-
-
-def _write_export(path, data):
-    """Write the bytes |data| to |path| atomically -> len(data): into a new file beside it
-    (".export-" and a random name), renamed over |path| once complete; a failure leaves
-    |path| as it was (an earlier export intact) and no temporary file. The unbudgeted
-    export's writer: the file gets the permissions open(path, 'wb') gave it -- those of
-    the file it replaces, else the umask's -- where mkstemp() would make it private."""
-    d = os.path.dirname(path)
-    try:
-        mode = os.stat(path).st_mode & 0o7777
-    except OSError:
-        mode = None
-    while True:
-        tmp = os.path.join(d, '.export-' + secrets.token_hex(6))
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-            break
-        except FileExistsError:
-            continue
-
-    def fill():
-        if mode is not None:
-            try:
-                os.fchmod(fd, mode)
-            except BaseException:
-                os.close(fd)              # _write_all() closes it otherwise
-                raise
-        _write_all(fd, data)
-    _replace_atomically(tmp, path, fill)
-    return len(data)
 
 
 def _write_text_charged(path, text, b):
     """Write |text| to |path| through a temporary file renamed on completion, charged
     (its encoding and its bytes) before it is written: a stop writes no file. Written
-    without a buffer (parser._write_all()), which the charge leaves out."""
+    without a buffer (parser._write_all()), which the charge leaves out; the file's
+    permissions as without local limits (parser._write_user_file())."""
     b.charge(len(text) >> 8, 2 * (len(text) + 49))
-    data = text.encode('utf-8')
-    fd, tmp = tempfile.mkstemp(prefix='.export-', dir=os.path.dirname(path))
-    _replace_atomically(tmp, path, lambda: _write_all(fd, data))
-    return len(data)
+    return _write_user_file(path, text.encode('utf-8'), '.export-')
 
 
 class _ChargedWriter:

@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import re
-import tempfile
+import secrets
 from array import array
 
 from . import budget as _B
@@ -1331,8 +1331,9 @@ def standalone_text(body, result, response):
 
 def save(g, path, *, budget=None):
     """Write the standalone .mgt file: H, J (envelope with this seed only), body.
-    Atomic: a reader never sees a partial file. budget= (local limits): the text is made
-    in full before the file is opened, so a stop writes no file."""
+    Atomic: a reader never sees a partial file; it keeps the permissions of the file it
+    replaces, else the umask's (_write_user_file()). budget= (local limits): the text is
+    made in full before the file is opened, so a stop writes no file."""
     b = _B.resolve(budget)
     if b is not None:
         with b.scope('save', ('export_mgt',)):
@@ -1346,9 +1347,48 @@ def save(g, path, *, budget=None):
 
 
 def _write_text(text, path):
-    data = text.encode('utf-8')
+    return _write_user_file(path, text.encode('utf-8'), '.mgt-')
+
+
+def _create_beside(path, prefix):
+    """A new temporary file beside |path|, to be renamed over it once written -> (fd, its
+    path): named |prefix| and a random part (O_EXCL), with the permissions open(path, 'wb')
+    would give |path| -- those of the file it replaces, else the umask's. The one rule of
+    the files the library writes for its user (save(), the store's save_body(),
+    graphlet_export in every format, with or without local limits); only the spool's own
+    files are private (store._write_atomic(): mkstemp, 0600)."""
     d = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(prefix='.mgt-', dir=d)
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except OSError:
+        mode = None
+    while True:
+        tmp = os.path.join(d, prefix + secrets.token_hex(6))
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            break
+        except FileExistsError:
+            continue
+    if mode is not None:
+        try:
+            os.fchmod(fd, mode)
+        except BaseException:
+            os.close(fd)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    return fd, tmp
+
+
+def _write_user_file(path, data, prefix):
+    """Write the bytes |data| to the user's file |path| atomically -> len(data): into a new
+    file beside it (_create_beside(): the permissions of the file it replaces, else the
+    umask's), renamed over |path| once complete; a failure leaves |path| as it was and no
+    temporary file. The one writer of the files the library writes for its user. Not
+    flushed to the device (fsync), as open(path, 'wb') is not: the spool's writer is."""
+    fd, tmp = _create_beside(path, prefix)
     _replace_atomically(tmp, path, lambda: _write_all(fd, data))
     return len(data)
 
