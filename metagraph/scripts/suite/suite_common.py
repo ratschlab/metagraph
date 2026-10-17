@@ -653,6 +653,12 @@ def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
     return rows
 
 
+# the MCP runner's start refusals (async's suite_mcp_runner.py exit codes): its step recorded nothing, and the loop
+# stops at once with reason mcp_exit_<rc> (run_suite.sh mcp_after, bench/run_bench.py; SD-029); 130 is an interrupt
+MCP_START_REFUSALS = {2: "the MCP runner refused to run", 3: "the MCP runner refused to run",
+                      4: "the MCP runner refused its by-design table", 5: "the MCP runner refused the run's snapshot"}
+
+
 def mex_clock_offsets(orchestrator):
     """{arm: seconds its clock is ahead of the laptop's}: direct-local is stamped on mex, whose offset the
     orchestrator measures per invocation (orchestrator.json sessions' mex_clock_offset_s); the upper median of the

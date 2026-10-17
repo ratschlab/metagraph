@@ -346,6 +346,38 @@ class RunBenchOffline(BenchCase):
         self.assertEqual(res["classes"]["direct-local"], {"success": 6})
         self.assertIsNone(res["aggregates"]["all"]["pairs"]["mcp/direct-local"]["geo_mean_ratio"])
 
+    def test_mcp_start_refusals_stop_at_once(self):
+        # SD-029: the MCP runner's start refusals (exit 2/3, 4: its by-design table, 5: the run's snapshot) stop the
+        # bench after its first MCP step with reason mcp_exit_<rc>, before a direct step sends anything, as
+        # run_suite.sh's mcp_after does since 671989840 (both read suite_common.MCP_START_REFUSALS)
+        tmpl = "%s %s --ids {ids} --repeat {repeat} --out {out} --manifest {manifest} --checks-dir {checks_dir}" % (
+            shlex.quote(sys.executable), shlex.quote(os.path.join(HERE, "fake_mcp.py")))
+        for rc in (3, 4, 5):
+            with FakeHost() as host:
+                p = self.bench(host, "--panel", self.panel_path, "--seed", "2", "--cycles", "1", "--checks", "stub",
+                               "--pause", "0", "--no-preflight", "--arms", "mcp,direct-local",
+                               SUITE_MCP_CMD=tmpl, FAKE_MCP_MODE="exit%d" % rc)
+                sent = [x for x in host.log if "/stats" not in str(x)]
+            run_dir = self.run_dir(p)
+            doc = sc.read_json(os.path.join(run_dir, "bench.json"))
+            last = doc["sessions"][-1]
+            self.assertEqual((last.get("state"), last.get("reason")), ("failed", "mcp_exit_%d" % rc), p.stderr)
+            steps = [r for r in sc.read_jsonl(os.path.join(run_dir, "steps.jsonl"))[0] if not r.get("probe")]
+            mcp = [r for r in steps if r.get("arm") == "mcp"]
+            self.assertEqual(len(mcp), 1, steps)
+            self.assertFalse([r for r in steps if r.get("arm") != "mcp" and steps.index(r) > steps.index(mcp[0])])
+            self.assertNotIn("in a row", p.stderr)
+        self.assertEqual(sorted(sc.MCP_START_REFUSALS), [2, 3, 4, 5])
+        # run_suite.sh's mcp_after stops on the same codes
+        with open(os.path.join(SUITE, "run_suite.sh")) as fh:
+            shell = fh.read()
+        body = shell[shell.index("mcp_after() {"):]
+        body = body[:body.index("esac")]
+        codes = set()
+        for label in re.findall(r"^\s*([0-9|]+)\)", body, re.M):
+            codes.update(int(x) for x in label.split("|"))
+        self.assertEqual(codes - {130}, set(sc.MCP_START_REFUSALS))
+
     def test_lock_held_refuses(self):
         os.makedirs(os.path.join(self.mex, "suite-dev"))
         with open(os.path.join(self.mex, "suite-dev", "LOCK"), "w") as fh:

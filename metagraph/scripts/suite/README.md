@@ -3262,7 +3262,8 @@ run_suite.sh's mcp_after stopped at once only on exit 2 / 3 / 130. Exit 4 (the r
 5 (it refused the run's snapshot) read as unrecorded executions: two more MCP steps that recorded nothing and the
 direct arms' steps between them ran before the loop stopped as mcp_errors. Both now stop it after the first step
 (`loop.reason` mcp_exit_4 / mcp_exit_5), in the paired and the sequential mode (tests/fake_mcp.py: modes exit4,
-exit5).
+exit5). The bench (bench/run_bench.py, a port made before this fix) stops alike on 2, 3, 4 and 5 (its session's
+reason mcp_exit_N) from suite_common.MCP_START_REFUSALS, which a test holds to mcp_after's case list (SD-029).
 
 ### The gate checks which checks computed the set's comparison
 A compare.json computed while the run's snapshot was changed (the refusal's built-in fallback, or other checks), the

@@ -799,7 +799,8 @@ class Bench(object):
                 res.get("outcome") or ("exit %s" % res["rc"]),
                 "" if res.get("wall_ms") is None else " %.0f ms" % res["wall_ms"]))
             if step["arm"] == "mcp":
-                if res["rc"] in (2, 3):
+                if res["rc"] in sc.MCP_START_REFUSALS:
+                    log("error: %s (exit %d): stopping the bench" % (sc.MCP_START_REFUSALS[res["rc"]], res["rc"]))
                     state, reason = "failed", "mcp_exit_%d" % res["rc"]
                     break
                 if res["rc"] == 130:
