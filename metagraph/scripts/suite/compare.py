@@ -2770,9 +2770,10 @@ def cold_warm(lines):
 # fail, inconclusive (the pair cannot test the claim) or not_exposed (the MCP arm lacks a field the type reads).
 # The semantics are lane S1b's (its README, "Relations"): checks.evaluate_relation of checks.py next to this
 # script is the reference implementation and is used whenever checks.py is there. Without it, same_answer is
-# evaluated here with the same rule (same HTTP status; not 200: the same error code and text; args.paths pairs
-# of dotted paths equal, else the bodies equal without timing and without args.ignore) and the other types read
-# not_evaluated.
+# evaluated here with the same rule, outcome and detail (same HTTP status; not 200: the same error code and text;
+# args.paths pairs of dotted paths equal, else the bodies equal without timing and without args.ignore; a missing
+# field not_exposed on the MCP arm, a failure elsewhere), a stdlib copy of checks.py's that a parity test holds to
+# it, and the other types read not_evaluated.
 
 def load_answer(line, run_dir):
     """The normalised answer of an execution from its raw file (both runners keep it under `answer`)."""
@@ -2787,102 +2788,102 @@ def load_answer(line, run_dir):
     return ans if isinstance(ans, dict) else None
 
 
-def path_values(obj, path):
-    """The values at a dotted path; `*` steps into every element of a list (or value of an object), a number
-    into that element of a list."""
-    cur = [obj]
-    for part in str(path).split("."):
-        nxt = []
-        for c in cur:
-            if part == "*":
-                if isinstance(c, list):
-                    nxt.extend(c)
-                elif isinstance(c, dict):
-                    nxt.extend(c.values())
-            elif isinstance(c, dict) and part in c:
-                nxt.append(c[part])
-            elif isinstance(c, list) and part.isdigit() and int(part) < len(c):
-                nxt.append(c[int(part)])
-        cur = nxt
+class RelationMissing(Exception):
+    """A field same_answer reads is absent from an answer (checks.Missing of the reference)."""
+
+
+def relation_get(obj, path):
+    """The value at a dotted path (checks._get): a step is an object's key or a list's index (int(), so a negative
+    index counts from the end; `*` is no step); RelationMissing when the path does not resolve."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict):
+            if part not in cur:
+                raise RelationMissing(path)
+            cur = cur[part]
+        elif isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                raise RelationMissing(path)
+        else:
+            raise RelationMissing(path)
     return cur
 
 
-def drop_path(obj, path):
-    """obj without the value at a dotted path (`*` as in path_values); obj itself is left unchanged."""
-    obj = json.loads(json.dumps(obj))
-    parts = str(path).split(".")
-
-    def walk(node, i):
-        if i == len(parts) - 1:
-            if isinstance(node, dict):
-                node.pop(parts[i], None)
-            elif isinstance(node, list) and parts[i] == "*":
-                del node[:]
-            return
-        nxt = []
-        if parts[i] == "*":
-            nxt = list(node.values()) if isinstance(node, dict) else (node if isinstance(node, list) else [])
-        elif isinstance(node, dict) and parts[i] in node:
-            nxt = [node[parts[i]]]
-        elif isinstance(node, list) and parts[i].isdigit() and int(parts[i]) < len(node):
-            nxt = [node[int(parts[i])]]
-        for n in nxt:
-            walk(n, i + 1)
-    walk(obj, 0)
-    return obj
+def relation_drop(o, ignore, prefix=""):
+    """|o| without every `timing` key and without the dotted paths in |ignore| (checks._drop): a path names object
+    keys, and a list on the way is looked through (its elements keep the list's prefix)."""
+    if isinstance(o, dict):
+        out = {}
+        for k, v in o.items():
+            p = prefix + k
+            if k == "timing" or p in ignore:
+                continue
+            out[k] = relation_drop(v, ignore, p + ".")
+        return out
+    if isinstance(o, list):
+        return [relation_drop(x, ignore, prefix) for x in o]
+    return o
 
 
 def first_difference(a, b, path=""):
-    """The first dotted path where two JSON values differ, or None."""
-    if type(a) is not type(b):
-        return path or "(top)"
-    if isinstance(a, dict):
-        for k in sorted(set(a) | set(b), key=str):
+    """The first difference of two JSON values as text, or "" (checks._first_difference: leaves compared with ==)."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
             if k not in a or k not in b:
-                return (path + "." if path else "") + str(k)
-            d = first_difference(a[k], b[k], (path + "." if path else "") + str(k))
+                return "%s%s only in %s" % (path, k, "a" if k in a else "b")
+            d = first_difference(a[k], b[k], path + k + ".")
             if d:
                 return d
-        return None
-    if isinstance(a, list):
+        return ""
+    if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
-            return (path or "(top)") + " (length %d vs %d)" % (len(a), len(b))
+            return "%s: %d vs %d items" % (path.rstrip(".") or "<root>", len(a), len(b))
         for i, (x, y) in enumerate(zip(a, b)):
-            d = first_difference(x, y, "%s.%d" % (path, i) if path else str(i))
+            d = first_difference(x, y, "%s%d." % (path, i))
             if d:
                 return d
-        return None
-    return None if a == b else (path or "(top)")
+        return ""
+    return "" if a == b else "%s: %s vs %s" % (path.rstrip(".") or "<root>", json.dumps(a)[:80], json.dumps(b)[:80])
 
 
-def relation_same_answer(a, b, args):
-    """same_answer as lane S1b states it (for runs without checks.py)."""
+def _same_answer(a, b, args):
     if a.get("http") != b.get("http"):
         return "fail", "http %s vs %s" % (a.get("http"), b.get("http"))
     if a.get("http") != 200:
         ea, eb = a.get("error") or {}, b.get("error") or {}
         if (ea.get("code"), ea.get("text")) != (eb.get("code"), eb.get("text")):
-            return "fail", "errors differ: %s %r vs %s %r" % (ea.get("code"), (ea.get("text") or "")[:120],
-                                                              eb.get("code"), (eb.get("text") or "")[:120])
-        return "pass", "the same refusal (http %s, %s)" % (a.get("http"), ea.get("code"))
-    ba = sc.digest_view({"body": a.get("body")})["body"]
-    bb = sc.digest_view({"body": b.get("body")})["body"]
-    pairs = args.get("paths")
-    if pairs:
-        for pa, pb in pairs:
-            va = path_values(ba, pa) if pa else [ba]
-            vb = path_values(bb, pb) if pb else [bb]
-            if not va or not vb:
-                return "fail", "path %s missing" % (pa if not va else pb)
-            if va[0] != vb[0]:
-                return "fail", "%s differs from %s" % (pa or "(body)", pb or "(body)")
-        return "pass", "%d path pair(s) equal" % len(pairs)
-    for p in args.get("ignore") or []:
-        ba, bb = drop_path(ba, p), drop_path(bb, p)
-    diff = first_difference(ba, bb)
-    if diff is None:
-        return "pass", "the same answer (timing aside)"
-    return "fail", "the bodies differ at %s" % diff
+            return "fail", "errors differ: %r vs %r" % (ea, eb)
+        return "pass", "the same refusal (http %s)" % a.get("http")
+    ba, bb = a.get("body"), b.get("body")
+    if ba is None or bb is None:
+        raise RelationMissing("body")
+    if args.get("paths"):
+        for pa, pb in args["paths"]:
+            va = ba if pa == "" else relation_get(ba, pa)
+            vb = bb if pb == "" else relation_get(bb, pb)
+            d = first_difference(relation_drop(va, ()), relation_drop(vb, ()))
+            if d:
+                return "fail", "a.%s differs from b.%s: %s" % (pa or "<root>", pb or "<root>", d)
+        return "pass", "%d field(s) equal" % len(args["paths"])
+    ignore = args.get("ignore") or []
+    d = first_difference(relation_drop(ba, ignore), relation_drop(bb, ignore))
+    if d:
+        return "fail", "answers differ: %s" % d
+    return "pass", "equal answers (timing%s aside)" % ((", " + ", ".join(ignore)) if ignore else "")
+
+
+def relation_same_answer(a, b, args, arm=None):
+    """same_answer for runs whose checks.py does not load: the reference checks.evaluate_relation's rule, outcome
+    and detail (tests/test_compare_report.py test_same_answer_built_in_is_the_reference holds the two together);
+    a missing field is not_exposed on the MCP arm and a failure elsewhere, an exception a failure."""
+    try:
+        return _same_answer(a, b, args)
+    except RelationMissing as m:
+        return ("not_exposed" if arm == "mcp" else "fail"), "field not in the answer: %s" % m
+    except Exception as ex:   # never take the comparison down
+        return "fail", "relation raised %s: %s" % (type(ex).__name__, ex)
 
 
 BUILT_IN_RELATIONS = {"same_answer": relation_same_answer}
@@ -2934,7 +2935,7 @@ def evaluate_relations(manifest, grouped, run_dir, arms, evaluator="auto"):
             elif rel.get("type") not in RELATION_TYPES:
                 outcome, detail = "fail", "unknown relation type %r" % rel.get("type")
             elif rel.get("type") in BUILT_IN_RELATIONS:
-                outcome, detail = BUILT_IN_RELATIONS[rel.get("type")](aa, ab, entry["args"])
+                outcome, detail = BUILT_IN_RELATIONS[rel.get("type")](aa, ab, entry["args"], arm)
             else:
                 outcome, detail = "not_evaluated", "%s needs lane S1's checks.evaluate_relation (checks.py)" % (
                     rel.get("type"))

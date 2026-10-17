@@ -300,7 +300,9 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   inconclusive (the pair cannot test the claim) or not_exposed (the MCP arm lacks a field). The semantics
   (`same_answer`, `prefix_equals`, `zero_equals_absent`, `subset`) are lane S1b's README; its
   `checks.evaluate_relation` is used whenever checks.py is next to compare.py. Without it, `same_answer` is
-  evaluated with the same rule and the other types read `not_evaluated`; an outcome outside the vocabulary
+  evaluated with the same rule, outcome and detail (compare.relation_same_answer, a stdlib copy that
+  tests/test_compare_report.py `test_same_answer_built_in_is_the_reference` holds to checks.py's on every edge
+  case) and the other types read `not_evaluated`; an outcome outside the vocabulary
   reads as a failure. compare.json `relations` (per arm outcome and detail) and `summary.relations` (counts
   per arm, which implementation ran); the report has its own table, and a failed relation makes the verdict
   FAIL.
@@ -502,8 +504,12 @@ depth.
 
 - `same_answer` — the two requests must be answered alike. Both answers must have the same HTTP status; if it is
   not 200, the same error `code` and `text`. With `args.paths` (a list of `[path_in_a, path_in_b]`), each pair
-  of values must be equal (without timing); a missing path fails. Without `paths`, the two bodies must be equal
-  without timing and without the dotted paths in `args.ignore` (default none). Used for: max_mismatches 0 versus
+  of values must be equal (without timing; a path is read on the body, each step an object key or a list index, a
+  negative one counting from the end, `*` no step); a missing path fails (not_exposed on the MCP arm, as a 200
+  without a body). Without `paths`, the two bodies must be equal without timing and without the dotted paths in
+  `args.ignore` (default none; an ignore path names object keys and looks through a list on its way, so
+  `patterns.stop` drops `stop` in every pattern, while an index or `*` step matches nothing). Values are compared
+  with Python's `==` (1 equals 1.0 and true). Used for: max_mismatches 0 versus
   the same request without the field (SPEC-pattern-search §21.2), lower case versus upper case (pattern and
   resolve), and the three capabilities documents (release, server instance, deadline-check and resolve blocks of
   /capabilities and /traverse/capabilities; /capabilities' `pattern` block equal to /pattern/capabilities; the gate

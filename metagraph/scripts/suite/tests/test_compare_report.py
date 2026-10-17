@@ -2275,9 +2275,59 @@ class ReportTest(unittest.TestCase):
         res = cmp.relation_same_answer({"http": 200, "body": {"a": 1, "b": 2}}, {"http": 200, "body": {"a": 1, "b": 3}},
                                        {"paths": [["a", "a"]]})
         self.assertEqual(res[0], "pass")
-        self.assertEqual(cmp.first_difference({"a": [1, {"b": 2}]}, {"a": [1, {"b": 3}]}), "a.1.b")
-        self.assertEqual(cmp.drop_path({"a": {"b": 1, "c": 2}}, "a.b"), {"a": {"c": 2}})
-        self.assertEqual(cmp.path_values({"p": [{"r": [1, 2]}, {"r": [3]}]}, "p.*.r.*"), [1, 2, 3])
+        self.assertEqual(cmp.first_difference({"a": [1, {"b": 2}]}, {"a": [1, {"b": 3}]}), "a.1.b: 2 vs 3")
+        self.assertEqual(cmp.relation_drop({"a": {"b": 1, "c": 2}, "timing": 1}, ["a.b"]), {"a": {"c": 2}})
+        self.assertEqual(cmp.relation_get({"p": [{"r": [1, 2]}, {"r": [3]}]}, "p.0.r.-1"), 2)
+
+    def test_same_answer_built_in_is_the_reference(self):
+        # SD-011: compare.py's built-in same_answer (a refused or absent checks.py) reads every case as the reference
+        # checks.evaluate_relation does, outcome and detail, on a direct arm and on the MCP arm
+        import checks
+        from unittest import mock
+
+        def ans(body):
+            return {"http": 200, "body": body, "error": None}
+        lst = lambda *ts: {"p": [{"t": t, "u": 1} for t in ts]}  # noqa: E731
+        cases = [
+            ("equal but timing", ans({"x": 1, "timing": {"e": 1}}), ans({"x": 1, "timing": {"e": 2}}), {}),
+            ("a value differs", ans({"x": [1, {"y": 2}]}), ans({"x": [1, {"y": 3}]}), {}),
+            ("a key only in b", ans({"x": 1}), ans({"x": 1, "y": 2}), {}),
+            ("list lengths", ans({"x": [1]}), ans({"x": [1, 2]}), {}),
+            ("int vs float", ans({"x": 1}), ans({"x": 1.0}), {}),
+            ("bool vs int", ans({"x": True}), ans({"x": 1}), {}),
+            ("ignore a key", ans({"x": 1, "y": 2}), ans({"x": 1, "y": 3}), {"ignore": ["y"]}),
+            ("ignore through a list", ans(lst(1, 2)), ans(lst(3, 4)), {"ignore": ["p.t"]}),
+            ("ignore with '*'", ans(lst(1, 2)), ans(lst(3, 4)), {"ignore": ["p.*.t"]}),
+            ("ignore with an index", ans(lst(1, 2)), ans(lst(3, 2)), {"ignore": ["p.0.t"]}),
+            ("paths equal", ans({"a": {"b": 1}, "c": 2}), ans({"a": {"b": 1}, "c": 3}), {"paths": [["a.b", "a.b"]]}),
+            ("paths differ", ans({"a": {"b": 1}}), ans({"a": {"b": 2}}), {"paths": [["a", "a"]]}),
+            ("path with '*'", ans({"p": [1, 2]}), ans({"p": [1, 3]}), {"paths": [["p.*", "p.*"]]}),
+            ("negative index", ans({"p": [1, 2]}), ans({"p": [3, 2]}), {"paths": [["p.-1", "p.-1"]]}),
+            ("whole body against a path", ans({"k": 31}), ans({"pattern": {"k": 31}}), {"paths": [["", "pattern"]]}),
+            ("path through timing", ans({"timing": {"a": 1, "timing": 2}}), ans({"timing": {"a": 1, "timing": 3}}),
+             {"paths": [["timing", "timing"]]}),
+            ("missing path", ans({"p": 1}), ans({"q": 1}), {"paths": [["p", "p"]]}),
+            ("200 without a body", ans(None), ans(None), {}),
+            ("malformed paths", ans({"p": 1}), ans({"p": 1}), {"paths": ["p"]}),
+            ("http differs", ans({"x": 1}), {"http": 400, "error": {"code": "c", "text": "t"}}, {}),
+            ("the same refusal", {"http": 400, "error": {"code": "c", "text": "t"}},
+             {"http": 400, "error": {"code": "c", "text": "t"}}, {}),
+            ("refusals differ", {"http": 400, "error": {"code": "c", "text": "t"}},
+             {"http": 400, "error": {"code": "c", "text": "u"}}, {}),
+            ("an error that is not an object", {"http": 400, "error": "boom"}, {"http": 400, "error": "boom"}, {})]
+        sc_ = {"route": "POST /pattern", "request": {}, "truth": {}}
+        for arm in ("direct-local", "mcp"):
+            for name, a, b, args in cases:
+                rel = {"id": "REL-x", "type": "same_answer", "a": "A", "b": "B", "args": args}
+                ref = checks.evaluate_relation(rel, sc_, a, sc_, b, arm)
+                manifest = {"scenarios": [dict(sc_, id="A"), dict(sc_, id="B")], "relations": [rel]}
+                grouped = {"A": {arm: {0: {"raw": "A", "repeat": 0}}}, "B": {arm: {0: {"raw": "B", "repeat": 0}}}}
+                with mock.patch.object(cmp, "load_answer", lambda line, run_dir: {"A": a, "B": b}[line["raw"]]):
+                    rels, summary = cmp.evaluate_relations(manifest, grouped, None, [arm], evaluator=None)
+                self.assertEqual(summary["implementation"], "compare.py built-in")
+                got = rels[0]["arms"][arm]
+                self.assertEqual((got["outcome"], got["detail"]), (ref["outcome"], ref["detail"]),
+                                 "%s on %s" % (name, arm))
 
     def test_inconclusive_verdict(self):
         # review N5: a run in which no execution passed and some were inconclusive is INCONCLUSIVE, never PASS
