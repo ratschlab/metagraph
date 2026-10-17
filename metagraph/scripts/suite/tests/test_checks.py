@@ -681,6 +681,24 @@ class PatternChecks(unittest.TestCase):
         self.assertEqual(outcome(sc, ok_answer(hidden), "source_label", strand="+")[0], "inconclusive")
         self.assertEqual(outcome(sc, ok_answer(hidden), "source_placement", strand="+")[0], "inconclusive")
         self.assertEqual(outcome(sc, a, "source_absent", strand="+")[0], "fail")                # present
+        # SD-377: occurrence_list null is "not placed" (SPEC-pattern-search §14.5, the answer table): it fails on every
+        # arm; only an absent list is a field the answer does not hold (not exposed on the MCP arm, as before)
+        def placed(value):
+            b = copy.deepcopy(ans)
+            for r in b["patterns"][0]["results"]:
+                for lab in r.get("labels") or []:
+                    if lab.get("column") == ndm_truth()["taxid"]:
+                        if value == "absent":
+                            lab.pop("occurrence_list", None)
+                        else:
+                            lab["occurrence_list"] = value
+            return ok_answer(b)
+        for arm in ("direct-local", "mcp"):
+            o, d = outcome(sc, placed(None), "source_placement", _arm=arm, strand="+")
+            self.assertEqual(o, "fail", (arm, d))
+            self.assertIn("occurrence_list null (not placed", d)
+        self.assertEqual(outcome(sc, placed("absent"), "source_placement", _arm="mcp", strand="+")[0], "not_exposed")
+        self.assertEqual(outcome(sc, placed("absent"), "source_placement", strand="+")[0], "fail")
         # the predicate projection places 562's record
         req, ans = fixture("predicate_only_record")
         sc = {"route": "POST /pattern", "request": req,

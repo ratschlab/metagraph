@@ -1756,7 +1756,10 @@ of fe563f38 accepted. The runner vendors checks.py: it takes these rules by re-v
 - /pattern, path_record_verified places the record (SPEC-pattern-search §14.3, §20.6): the occurrence of the
   record at the window's coordinates and strand states the index's seq_id and the record's length (as
   source_placement asks of a context), and every occurrence the label verifies lies in its own record (1 <= start
-  <= end <= nt_length; source_placement applies the same rule to its record's occurrence). Closed: L-verified-0001
+  <= end <= nt_length; source_placement applies the same rule to its record's occurrence; a label's
+  occurrence_list null is "not placed", SPEC-pattern-search §14.5, which source_placement fails on every arm unless
+  another source context places the record, while an absent list is a field the answer lacks, not exposed on the
+  MCP arm: SD-377). Closed: L-verified-0001
   and X-peptide-long-0001 with the record's occurrence at seq_id 999999999 and/or nt_length 1, nt_length + 1000, or
   another occurrence outside its record. All 14,298 recorded occurrences of v3 and v4 lie in their records, and
   every one of the truth's record states its seq_id and length. (L-long-0006's `path_spells` for its '+' path is a

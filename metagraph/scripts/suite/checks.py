@@ -1886,7 +1886,9 @@ def check_source_label(sc, ans, a, arm):
 
 def check_source_placement(sc, ans, a, arm):
     """The record is placed: the source context's label (the record's taxid) lists an occurrence of the record at
-    the window's 1-based coordinates and strand (SPEC §14.3)."""
+    the window's 1-based coordinates and strand (SPEC §14.3). An occurrence_list the label does not state is a
+    field the answer lacks (not exposed on the MCP arm); a null one states "not placed" (SPEC-pattern-search §14.5,
+    the answer table), which fails on every arm where no other source context places the record (SD-377)."""
     i = a.get("pattern", 0)
     e = _entry(ans, i)
     t = sc["truth"]
@@ -1895,19 +1897,27 @@ def check_source_placement(sc, ans, a, arm):
     if not found:
         return _hidden_outcome(sc, ans, i, e, "no source context returned (%s)", "no source context returned")
     coords = "%d-%d" % (t["start"] + 1, t["start"] + t["length"])
+    unplaced = []   # the offsets of the source contexts whose label states occurrence_list null
     for r in found:
         lab = _label_of(r, t["taxid"])
         if lab is None:
             continue
-        occ = lab.get("occurrence_list")
-        if occ is None:
+        if "occurrence_list" not in lab:
             raise Missing("occurrence_list")
+        occ = lab["occurrence_list"]
+        if occ is None:
+            unplaced.append(r.get("offset"))
+            continue
         for o in occ:
             if o.get("record") == t["record"] and o.get("nt_coords") == coords and o.get("strand") == strand:
                 m = _occurrence_problem(o, t)
                 if m:
                     return FAIL, m
                 return PASS, "%s %s %s placed (offset %d)" % (t["record"], coords, strand, r["offset"])
+    if unplaced:
+        return FAIL, "taxid %s states occurrence_list null (not placed, SPEC-pattern-search §14.5) on %d of %d " \
+                     "source contexts (offsets %s): no occurrence %s %s %s" % (
+                         t["taxid"], len(unplaced), len(found), unplaced[:6], t["record"], coords, strand)
     return FAIL, "no occurrence %s %s %s under taxid %s on %d source contexts" % (
         t["record"], coords, strand, t["taxid"], len(found))
 
