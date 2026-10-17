@@ -386,7 +386,8 @@ class BuilderRules(unittest.TestCase):
         rel = lambda ignore: {"id": "REL-x", "type": "same_answer", "a": "A", "b": "B",  # noqa: E731
                               "args": {"ignore": ignore}}
         self.assertEqual(bm.validate_relations([rel(["timing", "patterns.stats.load_ms"])], scen), [])
-        for bad in (["p.0.t"], ["p.*.t"], ["*"], ["p.-1"], ["p..t"], [""], "p.t", [5], {"p": 1}):
+        for bad in (["p.0.t"], ["p.*.t"], ["*"], ["p.-1"], ["p..t"], [""], "p.t", [5], {"p": 1},
+                    ["results[0].x"], ["labels*"], ["a b"]):
             probs = bm.validate_relations([rel(bad)], scen)
             self.assertTrue(any("args.ignore" in p for p in probs), (bad, probs))
         # no manifest uses args.ignore (the rule changes no build)

@@ -439,12 +439,13 @@ def area_list(text):
 
 # a step of a same_answer args.ignore path that names no object key: a list index (negative too) or '*'
 _INDEX_STEP = re.compile(r"(-?[0-9]+|\*)\Z")
+_NO_KEY_CHARS = re.compile(r"[\[\]*\s]")
 
 
 def _ignore_problems(ignore) -> list:
     """Why a same_answer args.ignore is not a list of dotted object-key paths (checks._drop and compare.relation_drop:
-    a path names object keys and looks through lists): a list index or '*' as a step matches nothing in either reader
-    (the owner's decision on SD-011: refused, not given a meaning), nor does an empty step."""
+    a path names object keys and looks through lists): a list index, '*', a bracket or white space in a step matches
+    nothing in either reader (the owner's decision on SD-011: refused, not given a meaning), nor does an empty step."""
     if not isinstance(ignore, list):
         return ["args.ignore %s is not a list of paths" % json.dumps(ignore)]
     out = []
@@ -452,10 +453,11 @@ def _ignore_problems(ignore) -> list:
         if not isinstance(path, str):
             out.append("args.ignore %s is not a dotted path" % json.dumps(path))
             continue
-        bad = [step for step in path.split(".") if step == "" or _INDEX_STEP.match(step)]
+        bad = [step for step in path.split(".")
+               if step == "" or _INDEX_STEP.match(step) or _NO_KEY_CHARS.search(step)]
         if bad:
-            out.append("args.ignore %r: the step %r is no object key (an index, '*' or an empty step matches "
-                       "nothing; a path looks through lists)" % (path, bad[0]))
+            out.append("args.ignore %r: the step %r is no object key (an index, '[', ']', '*', white space or an "
+                       "empty step matches nothing; a path looks through lists)" % (path, bad[0]))
     return out
 
 

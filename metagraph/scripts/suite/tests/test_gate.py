@@ -314,8 +314,8 @@ class PolicyTest(GateCase):
 
     def test_basic_override_list_comes_from_the_table(self):
         # traverse.advanced_path_disabled's request predicate (overrides. not_in [...]) is the one list (SD-095: the
-        # module's copy of the service's list is gone): a table without the case lists no basic override, so every
-        # override reads advanced (the policies pin the real table, which states it)
+        # module's copy of the service's list is gone): without the table's case there is no list, and classifying an
+        # override then refuses (NoBasicOverrides) instead of guessing (the policies pin the real table, which states it)
         args = {"overrides": {"direction": "right", "bounds": {"max_extension_bp": 9}}}
         self.assertFalse(hasattr(gate_policy, "MCP_BASIC_OVERRIDES"))
         with self.assertRaises(gate_policy.NoBasicOverrides):
