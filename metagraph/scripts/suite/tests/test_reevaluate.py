@@ -469,13 +469,16 @@ class Reevaluate(unittest.TestCase):
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, to, line, finding, False, cases, None, info)[0],
                          "inconclusive")
         self.assertEqual(info["inconclusive_reason"], "no service-side timing: plausibility undecidable")
-        # G22: the relayed /resolve deadline: the budget the service sent (the request's) - the host's reserve
+        # G22: the relayed /resolve deadline: the budget the service sent (the request's) - 1 s of slack (SD-020: the
+        # host answers its deadline only once the budget has elapsed; the reserve ends the work, not the answer)
         rdl = {"http": 503, "body": None, "error": {"code": "traversal_resolve_deadline", "text": "the backend could "
                                                     "not build and write its answer within bounds.time_budget_ms "
                                                     "(20000 ms, the finalisation reserve of 250 ms included)"}}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(22522.2), fail, False, cases)[0],
                          "inconclusive")
-        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(19700.0), fail, False, cases)[0], "fail")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(19700.0), fail, False, cases)[0],
+                         "inconclusive")
+        self.assertEqual(reevaluate.outcome_of(None, "mcp", res, rdl, at(18900.0), fail, False, cases)[0], "fail")
         # the tool error's budget is checked against the request's, never read: the service refuses a budget above
         # the host's maximum and never lowers one, so a tool error stating 5000 ms for a request of 20000 ms is a
         # service fault, not a host state (bounds only from the request, the host and the service settings)
@@ -600,7 +603,7 @@ class Reevaluate(unittest.TestCase):
                                                     "250 ms included)"}}
         to = {"http": 504, "body": None, "error": {"code": "resolve_timeout",
                                                    "text": "the backend did not answer within 30.25 s"}}
-        for ans, ms, least in ((rdl, 0.030, 19750), (to, 0.040, 9000)):
+        for ans, ms, least in ((rdl, 0.030, 19000), (to, 0.040, 9000)):
             info = {}
             doc = self.calls(("traverse_resolve", 2000.0, 2000.0 + ms, {"error": ans["error"]}))
             self.assertEqual(reevaluate.outcome_of(None, "mcp", res, ans, {"outcome": "fail"}, fail, False, cases,
@@ -611,7 +614,7 @@ class Reevaluate(unittest.TestCase):
                                                    fail, False, cases, None, info, doc)[0], "fail")
             self.assertEqual(info["verdict_detail"], "client wall %.0f ms + 1 s slack < threshold %d ms: provably "
                                                      "premature" % (ms * 1000, least))
-            # N-realrep-0002 r0's shape (22,522 ms >= 19,750 ms): undecidable as recorded
+            # N-realrep-0002 r0's shape (22,522 ms >= 19,000 ms): undecidable as recorded
             doc = self.calls(("traverse_resolve", 2000.0, 2022.522, {"error": ans["error"]}))
             self.assertEqual(reevaluate.outcome_of(None, "mcp", res, ans, {"outcome": "fail", "mcp_auth": "anonymous"},
                                                    fail, False, cases, None, None, doc)[0], "inconclusive")
@@ -787,7 +790,7 @@ class Reevaluate(unittest.TestCase):
         info = {}
         self.assertEqual(reevaluate.outcome_of(None, "mcp", labels, rdl, at, fail, False, cases, None, info)[0],
                          "fail")
-        self.assertIn("before time_budget_ms - finalize_reserve_ms = 59750 ms: not a host state", info["verdict_detail"])
+        self.assertIn("before time_budget_ms - 1000 ms = 59000 ms: not a host state", info["verdict_detail"])
         self.assertEqual(reevaluate.outcome_of(None, "mcp", labels, rdl, {"outcome": "fail", "mcp_phases": {
             "backend_ms": 60010.0}}, fail, False, cases, {"code": "traversal_resolve_deadline",
                                                           "time_budget_ms": 60000})[0], "inconclusive")

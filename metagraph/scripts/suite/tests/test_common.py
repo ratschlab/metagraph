@@ -571,5 +571,26 @@ class SamplerParsing(unittest.TestCase):
         self.assertEqual(s["error"], "no docker")
 
 
+
+class DeadlineFloor(unittest.TestCase):
+    """SD-020: the host answers its 503 deadline only once the budget has elapsed (Deadline::respond_expired; the
+    finalisation reserve ends the work earlier, not the answer): on the service-side wall, a relayed /resolve deadline
+    (traversal_resolve_deadline, host_state_verdict) and a deadline-ended pattern task (wall_rule_verdict,
+    budget_minus_reserve) are plausible from the same floor, the budget less 1 s of clock and phase slack."""
+
+    def test_one_floor_for_the_host_deadline(self):
+        scen = {"id": "R-x", "route": "POST /resolve", "expect": [],
+                "mcp": {"tool": "traverse_resolve", "arguments": {"time_budget_ms": 20000}}}
+        err = {"code": "traversal_resolve_deadline", "text": "the backend could not build and write its answer "
+               "within bounds.time_budget_ms (20000 ms, the finalisation reserve of 250 ms included)"}
+        self.assertEqual(sc.resolve_deadline_least(scen, None), (19000.0, "time_budget_ms - 1000 ms"))
+        for wall, plausible in ((18900.0, False), (18999.9, False), (19000.0, True), (19100.0, True),
+                                (19700.0, True), (19749.9, True), (19750.0, True), (20000.0, True)):
+            doc = {"phase_sources": {"attempts": [{"span_ms": wall}]}}
+            state = sc.host_state_verdict(scen, {}, doc, err, {"code": err["code"]})[1]
+            rule = sc.wall_rule_verdict("budget_minus_reserve", "c", scen, {"error": err}, {}, doc)[0]
+            self.assertEqual((state, rule), ("host_state" if plausible else "not_plausible",
+                                             "holds" if plausible else "held_back"), wall)
+
 if __name__ == "__main__":
     unittest.main()

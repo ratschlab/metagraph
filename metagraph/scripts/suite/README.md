@@ -984,10 +984,15 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   client's (`service_wall`: mcp_phases.backend_ms; for a pattern search the deadline-ended task's one failed HTTP try
   from the diagnostic log's held-slot line; for a traversal job the last settled attempt's span, then the job's
   finished_at - started_at, from the raw record's phase_sources). pattern.deadline_ends_task (R1) applies when that
-  wall >= the request's time_budget_ms (the MCP arguments', else the request's) - the finalisation reserve its
-  text states (else 250 ms); a known wall below holds the case back (matching continues, the checks judge).
+  wall >= the request's time_budget_ms (the MCP arguments', else the request's) - 1,000 ms (the host answers its
+  deadline only once the budget has elapsed; a reserve its text states above the host's holds the case back); a
+  known wall below holds the case back (matching continues, the checks judge).
   resolve_timeout (R2): wall >= max(budget + reserve + 10,000 ms, the stated "within N s") - 1,000 ms;
-  traversal_resolve_deadline (G22): wall >= budget (the tool error's, else the MCP arguments') - reserve; the R20
+  traversal_resolve_deadline (G22): wall >= the budget the service sent - 1,000 ms, the same floor
+  (suite_common.deadline_least; SD-020: it was budget - reserve, the premise 84e0c7a98 refuted for the direct
+  arm; tests/test_common.py DeadlineFloor holds the two rules to one floor; async's runner keeps its own copy of
+  G22's budget - reserve until it follows, so for a wall in [B - 1000, B - 250) its recorded fail and
+  reevaluate's inconclusive differ, both blocking); the R20
   lockout has no wall rule. Rule (c): an unknown threshold or wall makes the verdict inconclusive with
   verdict_detail "no threshold known: plausibility undecidable" / "no service-side timing: plausibility
   undecidable" (the case, or the host-state code, recorded); a finding wins on the wall-rule path, not on the
@@ -1807,7 +1812,8 @@ service_by_design.json at sha256 ab4100c9...
   ("service write bound ... is not its write cap ...") is no host state whatever the wall; a tool error stating a
   reserve above the host's or a budget other than the one sent ("stated finalisation reserve ... above the host's ...",
   "the tool error's time_budget_ms ... is not the request's ...") is no host state (resolve_timeout and the relayed
-  /resolve deadline). The relayed deadline's threshold is budget - the host's reserve. A legacy record (no stated
+  /resolve deadline). The relayed deadline's threshold is the budget sent - 1 s (deadline_least, as the pattern
+  wall rule's). A legacy record (no stated
   phase) without a budget takes the client timeout as a term (suite_common.legacy_unbudgeted_client_timeout_term:
   threshold 9,000 ms instead of the answer's "within <N> s" - 1 s or rule (c); pending the async session's agreement).
 - pattern.deadline_ends_task's wall rule: the request's budget - 1 s (the engine answers its deadline only once the

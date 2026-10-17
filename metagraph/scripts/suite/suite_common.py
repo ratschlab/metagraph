@@ -1629,15 +1629,24 @@ def legacy_unbudgeted_client_timeout_term(scenario, refs=None):
     return [(t_ms, "the client timeout %g ms" % t_ms)]
 
 
+def deadline_least(budget):
+    """(the least plausible service-side wall of a host's 503 deadline at |budget| ms, the rule as stated): the host
+    answers its deadline only once the budget has elapsed (Deadline::respond_expired; the finalisation reserve ends
+    the work earlier, not the answer), less STATED_TIMEOUT_SLACK_MS of clock and phase slack. One floor for the
+    relayed /resolve deadline (resolve_deadline_least) and a deadline-ended pattern task (wall_rule_verdict); the
+    direct arm's client wall has its own 1 ms slack (checks._budget_503)."""
+    return budget - STATED_TIMEOUT_SLACK_MS, "time_budget_ms - 1000 ms"
+
+
 def resolve_deadline_least(scenario, tool_error, refs=None):
-    """(the least plausible wall of a relayed /resolve deadline, the rule as stated): the budget the service sent
-    (resolve_budget: the request's, an explicit-labels resolve's without one the service's default) - the host's
-    finalisation reserve (resolve.time_budget.finalize_reserve_ms); (None, why) without a budget. The tool error's
-    own budget and reserve are checked, not read (tool_error_problem)."""
+    """(the least plausible wall of a relayed /resolve deadline, the rule as stated): deadline_least of the budget
+    the service sent (resolve_budget: the request's, an explicit-labels resolve's without one the service's default);
+    (None, why) without a budget. The tool error's own budget and reserve are checked, not read
+    (tool_error_problem)."""
     budget, _ = resolve_budget(scenario, refs)
     if budget is None:
         return None, "no time budget known"
-    return budget - term(refs, "resolve_reserve_ms"), "time_budget_ms - finalize_reserve_ms"
+    return deadline_least(budget)
 
 
 def discovery_without_budget(scenario):
@@ -1752,7 +1761,7 @@ def wall_rule_verdict(rule, case_id, scenario, answer, line, doc=None, warnings=
     if m and float(m.group(1)) > host:
         return "held_back", "%s (wall_rule %s): stated finalisation reserve %s ms above the host's %g ms: the case " \
                             "does not apply" % (case_id, rule, m.group(1), host)
-    least = budget - STATED_TIMEOUT_SLACK_MS
+    least, _ = deadline_least(budget)
     terms = "time_budget_ms %g - 1000 ms = %g ms" % (budget, least)
     wall, which = failing_attempt_wall(scenario, line, doc)
     if wall is None:   # rule 2: the anonymous client's wall is an upper bound

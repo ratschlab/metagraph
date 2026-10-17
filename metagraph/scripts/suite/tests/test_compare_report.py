@@ -1181,7 +1181,7 @@ class ReviewFixesTest(unittest.TestCase):
                          "no service-side timing: plausibility undecidable")
         self.assertEqual(cmp.inconclusive_reason(to, s, self.dir), "resolve_timeout")
         self.assertEqual(cmp.inconclusive_reason(dict(to, inconclusive_reason="checks"), s, self.dir), "checks")
-        # G22: the relayed /resolve deadline is a host state at budget - reserve or later
+        # G22: the relayed /resolve deadline is a host state at budget - 1 s or later
         rdl = dict(to, error={"code": "traversal_resolve_deadline", "text": "within bounds.time_budget_ms (20000 ms"},
                    mcp_phases={"backend_ms": 22522.2})
         self.assertTrue(cmp.host_state_line(rdl, None, s))
