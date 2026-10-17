@@ -181,7 +181,11 @@ Deterministic, recorded in the output.
   possible seed use `longest_first`, or raise `min_block_bp` to put a length floor under `max_support`.
 - `explicit`: the caller passes `[{kmer_interval, labels}]`. The interval must lie inside one graph run; each
   label must have a run containing it (labels that do not are reported in `labels_not_covering`, and the seed is
-  rejected if none remain).
+  rejected if none remain). `kmer_interval` is `[begin, end]`, two non-negative integers as every other integer
+  field (any other value is a 400 naming the field, `expected [begin, end] as non-negative integers`); an interval
+  that is empty or ends past the query's k-mers is a 400 `Explicit seed interval out of range`, an end above
+  2⁶³ − 1 included (before, such an end was a 400 with the JSON library's own text and no field, and aborted the
+  CLI).
 - `merge_overlapping: true` (default): candidates whose intervals overlap are merged onto their common interval
   with the union of labels; `overlaps_with` lists seeds that still share k-mers.
 - `max_labels_per_seed`: if a candidate has more labels, keep that many in `label_order`: `hash` (default; FNV-1a of

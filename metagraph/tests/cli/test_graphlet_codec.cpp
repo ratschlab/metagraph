@@ -7305,6 +7305,100 @@ TEST(ResolveDeadline, RequestErrorsAre400WhateverTheStop) {
     EXPECT_THROW(f.resolve(r, nullptr), InvalidRequest);
 }
 
+// An explicit seed's kmer_interval is two non-negative integers, tested as every other
+// non-negative integer of a request is (StrictObject::uint's test): anything else is refused
+// naming the field. An end above INT64_MAX is such an integer, refused by the engine as out of
+// range like any end past the query; it never reaches jsoncpp's asInt64(), which throws
+// Json::LogicError on it (a 400 with jsoncpp's text and no field path, and in the CLI an
+// exception no catch answered)
+TEST(ResolveRequest, ExplicitKmerIntervalEndsAreNonNegativeIntegers) {
+    const ResolveDeadlineFixture f;
+    auto request = [&](const Json::Value &interval) {
+        Json::Value r;
+        r["sequence"] = f.q;
+        r["labels"].append("L3");
+        r["select"]["policy"] = "explicit";
+        Json::Value seed;
+        seed["kmer_interval"] = interval;
+        seed["labels"].append("L3");
+        r["select"]["seeds"].append(seed);
+        return r;
+    };
+    auto pair = [](const Json::Value &begin, const Json::Value &end) {
+        Json::Value iv(Json::arrayValue);
+        iv.append(begin);
+        iv.append(end);
+        return iv;
+    };
+    // the refusal's message; another exception is named as such (it is not the route's 400)
+    auto refusal = [](const std::function<void()> &run) -> std::string {
+        try {
+            run();
+        } catch (const std::invalid_argument &e) {
+            return e.what();
+        } catch (const std::exception &e) {
+            return std::string("not a refusal: ") + e.what();
+        }
+        return "";
+    };
+    const std::string malformed = "request.select.seeds[0].kmer_interval: expected [begin, end] "
+                                  "as non-negative integers";
+    const Json::Value no_end(Json::arrayValue);
+    Json::Value three(Json::arrayValue);
+    three.append(0);
+    three.append(1);
+    three.append(2);
+    const std::vector<std::pair<std::string, Json::Value>> refused = {
+        { "a negative begin", pair(-1, 5) },
+        { "a negative end", pair(0, -1) },
+        { "a fraction", pair(0.5, 3) },
+        { "a number at 2^64 or above", pair(0, 1e20) },
+        { "a begin at 2^64 or above", pair(1e20, 1e20) },
+        { "a negative number below INT64_MIN", pair(0, -1e19) },
+        { "a string", pair(0, "5") },
+        { "null", pair(Json::Value(), 5) },
+        { "no ends", no_end },
+        { "three ends", three },
+        { "not an array", Json::Value(5) },
+    };
+    for (const auto &c : refused) {
+        EXPECT_EQ(malformed, refusal([&] { parse_resolve_request(request(c.second)); }))
+                << c.first;
+    }
+
+    // above INT64_MAX: integers, parsed as such, then out of range on this query (2,970 k-mers)
+    const uint64_t above = (uint64_t(1) << 63);
+    const uint64_t top = std::numeric_limits<uint64_t>::max();
+    struct Large {
+        std::string what;
+        Json::Value interval;
+        uint64_t begin;
+        uint64_t end;
+    };
+    const std::vector<Large> large = {
+        { "end 2^63", pair(0, Json::UInt64(above)), 0, above },
+        { "end 2^64 - 1", pair(0, Json::UInt64(top)), 0, top },
+        { "both above", pair(Json::UInt64(above), Json::UInt64(above + 10)), above, above + 10 },
+        { "end 1e19, a number with no fraction", pair(0, 1e19), 0, 10'000'000'000'000'000'000ull },
+    };
+    for (const Large &c : large) {
+        const std::string parsed = refusal([&] {
+            const ResolveRequest req = parse_resolve_request(request(c.interval));
+            ASSERT_EQ(1u, req.policy.explicit_seeds.size());
+            EXPECT_EQ(c.begin, req.policy.explicit_seeds[0].kmers.begin);
+            EXPECT_EQ(c.end, req.policy.explicit_seeds[0].kmers.end);
+        });
+        EXPECT_EQ("", parsed) << c.what;
+        EXPECT_EQ("Explicit seed interval out of range",
+                  refusal([&] { f.resolve(request(c.interval), nullptr); }))
+                << c.what;
+    }
+    // in range: the seed is selected
+    const Json::Value out = f.resolve(request(pair(0, 40)), nullptr);
+    ASSERT_EQ(1u, out["selection"]["seeds"].size());
+    EXPECT_EQ("L3", out["selection"]["seeds"][0]["labels"][0].asString());
+}
+
 TEST(ResolveDeadline, CapabilitiesBlock) {
     const Json::Value c = resolve_capabilities_json({ 30000, kResolveFinalizeMs });
     ASSERT_EQ(1u, c.size());

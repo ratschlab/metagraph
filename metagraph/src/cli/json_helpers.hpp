@@ -12,6 +12,7 @@
 #include <initializer_list>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -23,6 +24,19 @@
 
 namespace mtg {
 namespace cli {
+
+/**
+ * |v| as a non-negative integer, nullopt when it is not one: an integer, or a number without a
+ * fraction below 2^64, that is not negative. The sign is read with asInt64() only where
+ * isInt64() holds: on an integral value above INT64_MAX asInt64() throws Json::LogicError, which
+ * is no route's refusal (it was answered as a 400 with jsoncpp's text and no field path), and
+ * asUInt64() on a negative one throws too. Each caller keeps its own message and range.
+ */
+inline std::optional<uint64_t> non_negative_integer(const Json::Value &v) {
+    if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0))
+        return std::nullopt;
+    return v.asUInt64();
+}
 
 /**
  * Strict access to one JSON object of a request: every field read is remembered, and finish()
@@ -82,9 +96,10 @@ class StrictObject {
                   uint64_t max = std::numeric_limits<uint64_t>::max()) {
         if (!has(key))
             return def;
-        if (!v_[key].isIntegral() || (v_[key].isInt64() && v_[key].asInt64() < 0))
+        const std::optional<uint64_t> value = non_negative_integer(v_[key]);
+        if (!value)
             refuse(path(key) + ": expected a non-negative integer");
-        const uint64_t x = v_[key].asUInt64();
+        const uint64_t x = *value;
         if (x < min || x > max)
             refuse(path(key) + ": out of range [" + std::to_string(min) + ", "
                        + std::to_string(max) + "]");

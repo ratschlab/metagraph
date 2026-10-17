@@ -529,14 +529,18 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
                 Strict e(ex[i], "request.select.seeds[" + std::to_string(i) + "]");
                 ExplicitSeed seed;
                 const auto &iv = e.raw("kmer_interval");
-                // isIntegral() accepts negatives, and asUInt64() on one aborts, so the
-                // sign has to be checked here rather than left to the conversion
-                if (!iv.isArray() || iv.size() != 2 || !iv[0].isIntegral() || !iv[1].isIntegral()
-                        || iv[0].asInt64() < 0 || iv[1].asInt64() < 0) {
+                // each end as every non-negative integer of a request is read (an end above
+                // INT64_MAX is one, refused by the engine as out of range)
+                std::optional<uint64_t> begin, end;
+                if (iv.isArray() && iv.size() == 2) {
+                    begin = non_negative_integer(iv[0]);
+                    end = non_negative_integer(iv[1]);
+                }
+                if (!begin || !end) {
                     throw InvalidRequest(e.child_path("kmer_interval")
                                          + ": expected [begin, end] as non-negative integers");
                 }
-                seed.kmers = { iv[0].asUInt64(), iv[1].asUInt64() };
+                seed.kmers = { *begin, *end };
                 seed.labels = e.strings("labels");
                 req.policy.explicit_seeds.push_back(std::move(seed));
             }
