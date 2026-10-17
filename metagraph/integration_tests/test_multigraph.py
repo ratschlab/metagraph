@@ -548,6 +548,62 @@ class TestMultiGraphServer(TestingBase):
             self.assertIn("--max-graphs-without-selection must be an integer in [1, 2^53 - 1], "
                           f"got '{value}'", res.stderr.decode(), value)
 
+    def test_pattern_and_search_select_the_same_graphs(self):
+        """SPEC-pattern-search.md §24.1: a well-formed `graphs` (a list of known names, a name
+        given twice, a name over two graphs, or no field) selects the same graphs on /pattern and
+        on /search; /pattern reads the field more strictly. A /search answer does not name its
+        graphs: they are the chunks whose labels its results name (a FASTA file, or a record's
+        accession where the chunk has a record mapping), from a query cut from each chunk's
+        records (the chunks' labels are disjoint)."""
+        chunks = [name for name, _, _, _ in CHUNKS]
+        cut = {c: self.records[c][0][4000:4100] for c in chunks}
+        chunk_of_label = {os.path.basename(f): c for c in chunks for f in self.columns[c]}
+        chunk_of_label.update({h.split()[0]: c for c in chunks for h, _ in self.named_records[c]})
+        chunk_of_graph = {self.pairs[c][0]: c for c in chunks}
+        s = {'FASTA': ''.join(f'>{c}\n{cut[c]}\n' for c in chunks), 'discovery_fraction': 0.5}
+        p = {'patterns': [{'dna': cut[c][:20]} for c in chunks], 'mode': 'count'}
+
+        def searched(selection):
+            out = self.post('search', dict(s, **selection))
+            return {chunk_of_label[os.path.basename(r['sample'])]
+                    for query in out for r in query['results']}
+
+        def patterned(selection):
+            out = self.post('pattern', dict(p, **selection))
+            return {chunk_of_graph[a['graph_path']] for a in out['answers']}
+
+        for selection, expected in (({'graphs': ['ecoli']}, {'ecoli'}),
+                                    ({'graphs': ['kleb']}, {'kleb'}),
+                                    ({'graphs': ['pseudo', 'ecoli', 'ecoli']}, {'ecoli', 'pseudo'}),
+                                    ({'graphs': ['enterics']}, {'ecoli', 'kleb'}),
+                                    ({'graphs': ['kleb', 'enterics']}, {'ecoli', 'kleb'}),
+                                    ({}, set(chunks))):
+            with self.subTest(selection=selection):
+                self.assertEqual(expected, patterned(selection))
+                self.assertEqual(expected, searched(selection))
+
+        # where /pattern is stricter: an empty list, a value that is not a list and an item that
+        # is not a string are its 400; /search answers [] with null (it queries nothing), reads a
+        # value that is not a list as no field, and an item as its text
+        for graphs in ([], 'ecoli', None, [1], ['ecoli', 1]):
+            with self.subTest(graphs=graphs):
+                body = self.post('pattern', dict(p, graphs=graphs), 400)
+                self.assertEqual({'code': 'invalid_request',
+                                  'error': 'request.graphs: expected a non-empty array of graph '
+                                           'names (GET /capabilities lists them)'}, body)
+        self.assertIsNone(self.post('search', dict(s, graphs=[])))
+        self.assertEqual(set(chunks), searched({'graphs': 'ecoli'}))
+        self.assertEqual(set(chunks), searched({'graphs': None}))
+        self.assertEqual({'error': 'Request with an uninitialized graph 1'},
+                         self.post('search', dict(s, graphs=[1]), 400))
+        # an unknown name: 400 on both, each in its own words
+        self.assertEqual({'error': 'Request with an uninitialized graph nope'},
+                         self.post('search', dict(s, graphs=['nope']), 400))
+        self.assertEqual({'code': 'invalid_request',
+                          'error': "request.graphs: unknown graph 'nope' (GET /capabilities "
+                                   "lists the graphs)"},
+                         self.post('pattern', dict(p, graphs=['nope']), 400))
+
     def test_a_refused_pair_is_an_entry_of_the_envelope(self):
         """A pair the request cannot be answered on -- here output.labels "all" on a column
         annotation, annotation_unbudgeted -- is a refused entry of the envelope: its tags,

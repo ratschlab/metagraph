@@ -194,7 +194,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
 | `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. `"motif"` needs a predicate (else 400 `invalid_request`); `"context"` is accepted with any request and acts only with a predicate |
 | `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
-| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, as `/search`'s (§24): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
+| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, the graphs `/search`'s field selects, read more strictly (§24.1): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
 | `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
 
 - An integer is a JSON number with an integral value (`5.0` is 5). A negative or fractional value is 400
@@ -4185,8 +4185,8 @@ how the search service uses it; the route serves any number.
 ### 24.1 `graphs`: what a request selects
 
 - `graphs` names graphs of the server's graph list (`server_query GRAPHS.csv`, whose lines are `name,graph_path,
-  annotation_path[,manifest_path[,index_ns]]`, SPEC-labeled-traversal-core.md §10.3), as `/search`'s field does:
-  a non-empty list of names, deduplicated; without it, every name of a server whose list has at most
+  annotation_path[,manifest_path[,index_ns]]`, SPEC-labeled-traversal-core.md §10.3): a non-empty list of names,
+  deduplicated; without it, every name of a server whose list has at most
   `max_graphs_without_selection` names, else 400 `invalid_request` (`request.graphs: required on this server,
   which hosts N graph names (more than M; GET /capabilities lists them)`, M the threshold). The threshold is
   `/search`'s rule, one server flag for both routes: `--max-graphs-without-selection M` (an integer of at least 1,
@@ -4195,6 +4195,14 @@ how the search service uses it; the route serves any number.
   (400, `Bad request: requests without names (no "graphs" field) are only supported for small indexes (<=M
   names)`) names the same M. A name can list several (graph, annotation) pairs (the chunks of an index): each is
   answered.
+- A well-formed selection — a list of known names (one given twice is one), or no `graphs` — selects the same
+  graphs on `/pattern` and `/search`. `/pattern` reads the field more strictly: an empty list, a value that is not
+  a list (`null` included) and an item that is not a string are 400 `invalid_request` (`request.graphs: expected a
+  non-empty array of graph names (GET /capabilities lists them)`), where `/search` answers an empty list with 200
+  and the body `null` (it queries nothing), reads a value that is not a list as no `graphs`, and reads a scalar
+  item as its text (`1` names the graph `"1"`; an object or list item is 400). An unknown name is 400 on both, in each route's words (`/pattern`:
+  `request.graphs: unknown graph 'X' (GET /capabilities lists the graphs)`, `invalid_request`; `/search`: `Request
+  with an uninitialized graph X`).
 - The pairs are answered in this order: the names in byte order, each name's pairs in the list's order, a pair
   listed twice under one name once (a pair listed under two names is answered under each).
 - Each pair is answered as a single-graph server answers the request without `graphs` (§3 to §19, the pair's own
