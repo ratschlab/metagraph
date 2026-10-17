@@ -321,7 +321,10 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   container's figures during the run, not the request's own (L5). The timing tables give the server columns
   their own n (only answers with the host's timing count: N9); `--compare` puts the host-warm wall p50 of the
   two runs side by side (like with like: N12). The load caveat appears when the sra_all CPU mean exceeds
-  400 % or the load1 mean exceeds 48 (half of mex's 96 cores). compare.json is computed when missing.
+  400 % or the load1 mean exceeds 48 (half of mex's 96 cores). compare.json is computed when missing, by the
+  report and the gate as compare.py computes it (compare.load_or_compute: the table validated against the run
+  manifest's scenarios; a table compare.py refuses makes report.py exit 4 as compare.py does, and is the gate's
+  "compare.py refused" problem, never a cached comparison; SD-017).
 
 ## Ground truth, manifests, checks (lane S1)
 

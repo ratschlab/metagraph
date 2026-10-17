@@ -923,6 +923,29 @@ class JudgeTest(GateCase):
         self.assertEqual(sc.named_case_ids({"mcp": {"by_design": "a"}, "service_by_design": ["b", "a"],
                                             "tags": ["x", "sbd:c", "sbd:b"]}), ["a", "b", "c"])
 
+    def test_a_refused_table_without_compare_json(self):
+        # SD-017: without compare.json the gate computes it as compare.py does (compare.load_or_compute): the table
+        # validated against the run manifest's scenarios; a table compare.py refuses (exit 4) is the gate's
+        # "compare.py refused" problem, never a cached comparison nor a traceback
+        from test_compare_report import CASES
+        for n, (change, want) in enumerate(((("request", [{"path": "patterns", "present": True}]), "whose request"),
+                                            (("request", {"path": "patterns"}), "non-empty list of predicates"))):
+            d = make_run(self.run_dir("run%d" % n), self.m, mcp_lines(self.m))
+            os.remove(os.path.join(d, "compare.json"))
+            cases = [dict(c) for c in CASES.values()]
+            for c in cases:
+                if c["id"] == "case.refused":
+                    c[change[0]] = change[1]
+            table = os.path.join(d, "scripts", "service_by_design.json")
+            os.chmod(table, 0o644)
+            sc.write_json_atomic(table, {"version": 1, "cases": cases})
+            self.assertEqual(cmp.main([d, "--no-merge"]), 4)
+            v = gate.judge(d, policy_of(self.m))
+            refused = [p["detail"] for p in self.problems(v, "agreement") if p["detail"].startswith("compare.py refused")]
+            self.assertEqual(len(refused), 1, gate.render(v))
+            self.assertIn(want, refused[0])
+            self.assertFalse(os.path.exists(os.path.join(d, "compare.json")))
+
     def test_by_design_not_verified_fails(self):
         # the MCP answer is not the case's service answer: neither side verifies the pair
         bad = dict(REFUSED, code="other_code")

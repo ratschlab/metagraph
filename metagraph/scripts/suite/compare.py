@@ -3284,6 +3284,30 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
     }
 
 
+def compute_compare(run_dir, by_design=None, reevaluated=False, warn=None):
+    """compare.json's data of a run as main computes it: the table table_for picks (|by_design| as main's
+    --by-design), its warnings passed to |warn|, loaded and validated against the run manifest's scenarios
+    (load_by_design: TableError when compare.py refuses the table, as async's runner refuses it), then compare."""
+    path, warnings = table_for(run_dir, by_design, reevaluated)
+    for w in warnings:
+        if warn is not None:
+            warn(w)
+    manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
+    table = load_by_design(path, (manifest or {}).get("scenarios") if isinstance(manifest, dict) else None)
+    return compare(run_dir, table, reevaluated=reevaluated, warnings=warnings)
+
+
+def load_or_compute(run_dir, by_design=None, reevaluated=False):
+    """RUN_DIR/compare[.reevaluated].json, computed (compute_compare) and written when absent: the gate's and the
+    report's reading of the comparison (SD-017). TableError when the table is refused."""
+    path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
+    data = sc.read_json(path)
+    if data is None:
+        data = compute_compare(run_dir, by_design, reevaluated)
+        sc.write_json_atomic(path, data)
+    return data
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Join a run's arms per scenario into compare.json.")
     ap.add_argument("run_dir")
@@ -3296,16 +3320,12 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if not args.no_merge and os.path.isdir(os.path.join(args.run_dir, "arms")):
         merge_run.merge(args.run_dir, args.reevaluated)
-    path, warnings = table_for(args.run_dir, args.by_design, args.reevaluated)
-    for w in warnings:
-        sys.stderr.write("compare: warning: %s\n" % w)
-    manifest = sc.read_json(os.path.join(args.run_dir, "manifest.json"))
     try:
-        table = load_by_design(path, (manifest or {}).get("scenarios") if isinstance(manifest, dict) else None)
+        result = compute_compare(args.run_dir, args.by_design, args.reevaluated,
+                                 warn=lambda w: sys.stderr.write("compare: warning: %s\n" % w))
     except TableError as exc:
         sys.stderr.write("compare: refusing: %s\n" % exc)
         return 4
-    result = compare(args.run_dir, table, reevaluated=args.reevaluated, warnings=warnings)
     sc.write_json_atomic(os.path.join(args.run_dir, sc.reevaluated_name("compare.json", args.reevaluated)), result)
     s = result["summary"]
     sys.stdout.write("compare %s: %d scenarios, arms %s; direct agreement %s; mcp %s\n" % (

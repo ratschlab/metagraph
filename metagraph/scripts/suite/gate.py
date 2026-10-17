@@ -415,7 +415,12 @@ def configuration_problems(run_dir, rows, policy, reevaluated=False, notes=None)
         return []
     out = []
     table_path, _ = cmp.table_for(run_dir, None, reevaluated)
-    cases = cmp.load_by_design(table_path)[0] if table_path else {}
+    try:
+        cases = cmp.load_by_design(table_path)[0] if table_path else {}
+    except cmp.TableError as e:   # the comparison's refusal is the agreement problem; nothing to read the evidence by
+        cases = {}
+        out.append(_problem("configuration", "no by-design table to read the configuration evidence by: %s" % e,
+                            arm="mcp"))
     try:
         defined = cmp.gate_configuration_problems(run_dir, cases, reevaluated)
     except (AttributeError, TypeError, ValueError) as e:
@@ -602,8 +607,8 @@ def judge(run_dir, policy, reevaluated=False):
     # outcomes and properties of the policy's arms over the selection
     comp = None
     try:
-        comp = load_compare(run_dir, reevaluated)
-    except SystemExit as e:
+        comp = cmp.load_or_compute(run_dir, None, reevaluated)
+    except (SystemExit, cmp.TableError) as e:
         problems.append(_problem("agreement", "compare.py refused: %s" % e))
     scomp = (comp or {}).get("scenarios") or {}
     pinned = (policy.get("by_design_table") or {}).get("sha256")
@@ -885,16 +890,6 @@ def compared_with_checks_problems(run_dir, comp, reevaluated=False):
     return out + ["%s was judged with %s sha256 %s, not the %s %s: %s"
                   % (name, f, str(jw.get(key))[:12], str(want[f])[:12], where, advice)
                   for key, f in HASH_KEYS if jw.get(key) != want[f]]
-
-
-def load_compare(run_dir, reevaluated=False):
-    path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
-    data = sc.read_json(path)
-    if data is None:
-        table, warnings = cmp.table_for(run_dir, None, reevaluated)
-        data = cmp.compare(run_dir, cmp.load_by_design(table), reevaluated=reevaluated, warnings=warnings)
-        sc.write_json_atomic(path, data)
-    return data
 
 
 def inputs_digest(run_dir, reevaluated=False):

@@ -308,13 +308,9 @@ def mixed_releases_text(run):
 
 
 def load_compare(run_dir, by_design_path=None, reevaluated=False):
-    path = os.path.join(run_dir, sc.reevaluated_name("compare.json", reevaluated))
-    data = sc.read_json(path)
-    if data is None:
-        table, warnings = cmp.table_for(run_dir, by_design_path, reevaluated)
-        data = cmp.compare(run_dir, cmp.load_by_design(table), reevaluated=reevaluated, warnings=warnings)
-        sc.write_json_atomic(path, data)
-    return data
+    """The run's comparison (compare.load_or_compute: computed as compare.py computes it when absent; TableError
+    when compare.py refuses the table)."""
+    return cmp.load_or_compute(run_dir, by_design_path, reevaluated)
 
 
 def area_sort_key(area):
@@ -1722,7 +1718,11 @@ def main(argv=None):
     ap.add_argument("--reevaluated", action="store_true",
                     help="the run's re-evaluated set (reevaluate.py): report.reevaluated.md / .pdf")
     args = ap.parse_args(argv)
-    text = build_report(args.run_dir, args.compare, args.max_failures, args.by_design, args.reevaluated)
+    try:
+        text = build_report(args.run_dir, args.compare, args.max_failures, args.by_design, args.reevaluated)
+    except cmp.TableError as exc:   # a comparison to compute with a table compare.py refuses (as compare.py: 4)
+        sys.stderr.write("report: refusing: %s\n" % exc)
+        return 4
     md_path = os.path.join(args.run_dir, sc.reevaluated_name("report.md", args.reevaluated))
     with open(md_path, "w", encoding="ascii", errors="replace") as fh:
         fh.write(text)
