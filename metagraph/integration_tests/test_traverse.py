@@ -4953,5 +4953,118 @@ class TestTraverseSeedPhase(TestingBase):
                   file=sys.stderr)
 
 
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestTraverseSeedRefusal(TestingBase):
+    """A seed-phase memory refusal is stated by the refused row alone, whatever the read was
+    cut into (SPEC-labeled-traversal-core.md §6.8: a read is the same whatever the chunk
+    sizes). The shape: a 39 bp seed (9 k-mers, k = 31, basic) carried by 3,000 sequences of
+    column A, each its own header label (the hits of keys 0-7 are heavy: one coordinate per
+    header), 3,005 sequences of column B carrying its first 38 bases and another last base (key
+    7's row-diff successor is not key 8), and a long tandem repeat of column J following key 8
+    (key 8's row is light, its row-diff path heavy), on row_diff_brwt_coord. Validating the
+    seed against the 3,000 header labels under max_memory_mb 1 refuses key 8. Without
+    attempt_id the validation reads the 9 keys in one run, key 8 decoded before the hits beside
+    it were held, and it was refused by its standalone demand (the exact demand); with
+    attempt_id the read is paced, its first piece 8 rows, key 8 read alone beside the hits,
+    and it was refused as a read alone that needs more: one request, two statements. Now a row
+    refused by its demand is read again alone beside the rows before it, and stated as such a
+    read when that does not fit."""
+
+    C = 3000
+    N = 16000
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        rng = random.Random(4711)
+
+        def rnd(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+        w = rnd(39)
+        u = w[8:39]
+        b = rng.choice([c for c in 'ACGT' if c != u[0]])
+        v = b + u[1:]
+        t = b + rng.choice([c for c in 'ACGT' if c != v[1]]) + rnd(40)
+        y = rng.choice([c for c in 'ACGT' if c != w[38]])
+        tail = rnd(40)
+        assert u not in {v[i:] + v[:i] for i in range(K)}
+        with open(f'{d}/A.fa', 'w') as f:
+            f.write(''.join(f'>a{i}\n{rnd(40)}{w}{t}\n' for i in range(cls.C)))
+        with open(f'{d}/B.fa', 'w') as f:
+            f.write(''.join(f'>b{i}\n{rnd(40)}{w[:38]}{y}{tail}\n' for i in range(cls.C + 5)))
+        with open(f'{d}/J.fa', 'w') as f:
+            f.write(f'>j\n{rnd(40)}{v * cls.N}{rnd(40)}\n')
+        fastas = f'{d}/A.fa {d}/B.fa {d}/J.fa'
+        os.makedirs(f'{d}/rd')
+        for cmd in ([f'build -p 4 --mode basic --graph succinct -k {K} -o {d}/G {fastas}',
+                     f'annotate -p 1 -i {d}/G.dbg --anno-filename --coordinates -o {d}/anno '
+                     f'{fastas}']
+                    + [f'transform_anno -p 4 --anno-type row_diff --row-diff-stage {stage} '
+                       f'--coordinates -i {d}/G.dbg -o {d}/rd/out {d}/anno.column.annodbg'
+                       for stage in (0, 1, 2)]
+                    + [f'transform_anno -p 4 --anno-type row_diff_brwt_coord --greedy '
+                       f'-i {d}/G.dbg -o {d}/anno {d}/rd/anno.column.annodbg',
+                       f'annotate -p 1 -i {d}/G.dbg --anno-filename --index-header-coords '
+                       f'-o {d}/anno {fastas}']):
+            res = subprocess.run(shlex.split(METAGRAPH) + shlex.split(cmd),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert res.returncode == 0, (cmd, res.stderr.decode()[-2000:])
+        cls.graph = f'{d}/G.dbg'
+        cls.anno = f'{d}/anno.row_diff_brwt_coord.annodbg'
+        cls.seed = w
+
+    def _request(self, **fields):
+        return dict({'seeds': [{'seed_id': 's', 'sequence': self.seed,
+                                'labels': [f'a{i}' for i in range(self.C)]}],
+                     'strategy': {'direction': 'right',
+                                  'bounds': {'max_extension_bp': 10, 'max_memory_mb': 1},
+                                  'output': {'timing': False}}}, **fields)
+
+    @staticmethod
+    def _refusal(out):
+        (result,) = out['results']
+        return {'error': result.get('error'), 'resource_stop': result.get('resource_stop'),
+                'walk_domain': [lim for lim in result.get('limitations', [])
+                                if lim.get('kind') == 'walk_domain']}
+
+    def test_a_seed_refusal_is_stated_whatever_the_cut(self):
+        port = _free_port()
+        log = open(f'{self.tempdir.name}/server-{port}.log', 'w')
+        server = subprocess.Popen(
+            shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                      '--address', '127.0.0.1', '--port', str(port), '-p', '2'],
+            stdout=log, stderr=subprocess.STDOUT)
+        url = f'http://127.0.0.1:{port}'
+        try:
+            for _ in range(600):
+                try:
+                    if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            got = {}
+            for name, fields in (('plain', {}), ('attempt', {'attempt_id': 'cut-1'}),
+                                 ('plain again', {}), ('attempt again', {'attempt_id': 'cut-2'})):
+                ret = requests.post(url + '/traverse', data=json.dumps(self._request(**fields)))
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                got[name] = self._refusal(ret.json())
+        finally:
+            server.kill()
+            server.wait()
+            log.close()
+        plain = got['plain']
+        self.assertIn('did not admit reading the annotation row of seed k-mer 8 to validate the '
+                      'seed against its labels: the row, read alone with its row-diff dependency '
+                      'rows, needs more than', plain['error'] or '', plain)
+        self.assertEqual('memory', plain['resource_stop']['resource'], plain)
+        (domain,) = plain['walk_domain']
+        self.assertIn('at least: its read alone was refused', domain['effect'], plain)
+        for name in ('attempt', 'plain again', 'attempt again'):
+            self.assertEqual(plain, got[name], name)
+
+
 if __name__ == '__main__':
     unittest.main()

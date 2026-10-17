@@ -1320,7 +1320,12 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     own key and successor lists, held beside the account, leave none of the budget for its read stops in phase
     `traversal` too, before reading anything. In the seed phase — the derivation's rows, the validation's — or at
     an annotate root a row that does not fit fails the seed in phase `annotation_decode` (no result complete to 0
-    bp exists yet). At an annotate root, labels that fit beside the row but not beside the depth-0 state, and a
+    bp exists yet). In the seed phase the statement is decided by the refused row alone, whatever the chunks and
+    runs its read was cut into: a row refused by its standalone demand inside a longer run (decoded before the
+    rows beside it were held) is read again alone beside them, and when that read does not fit it is stated as
+    a read alone that needs more ("at least"), as when the row began a run; else by its demand *(review of
+    2026-10-06, W10/U04-01: one validation stated the demand without `attempt_id` and a read alone with it,
+    whose paced read cut the run before the row)*. At an annotate root, labels that fit beside the row but not beside the depth-0 state, and a
     depth-0 state that already reaches the budget before a root's read (the other arm's root, its labels and
     reservation), fail the seed as a depth-0 state (phase `traversal`), without naming the labels or reading the
     row, its need stated as a lower bound ("at least"). The lookahead decodes within what is left and gives up

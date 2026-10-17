@@ -1314,6 +1314,17 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
     return true;
 }
 
+bool LabelQuery::reads_alone_within(node_index key, uint64_t left, uint64_t *need) {
+    DecodeBudget alone(left);
+    std::vector<NodeHits> hits(1);
+    std::vector<KeyCost> costs(1);
+    size_t built = 0;
+    if (decode_run(&key, 1, alone, &hits, 0, &costs, &built) == DecodeStatus::OK)
+        return true;
+    *need = need_beyond(alone, 0);
+    return false;
+}
+
 // The budget-aware lookahead (LabelQuery::warm, LabelRecorder::warm): the misses among |keys|
 // (|cached|(key): a key the cache holds), charged like the rest of the lookahead's read,
 // decoded in runs of at most kMaxDecodeRun and |max_cache_size| keys and cached run by run.

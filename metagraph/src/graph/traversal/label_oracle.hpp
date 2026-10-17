@@ -633,6 +633,13 @@ class LabelQuery {
     // only
     void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
               ReadPacing *pacing = nullptr);
+    // Whether |key|'s read alone — its row with its row-diff dependency rows and its hits, as
+    // fetch() decodes a run of one key — fits |left| bytes; false with |*need| the least it was
+    // seen to need (as FetchRefusal::need). Decoded in a budget of its own (no test hook),
+    // nothing kept; the cache and the request counters are not changed. The seed phase states
+    // a refusal by demand per row with it (a key decoded inside a longer run was read before
+    // the hits beside it were held; read alone beside them it may not fit)
+    bool reads_alone_within(node_index key, uint64_t left, uint64_t *need);
     // what a copy of |hits| holds (the model of decode_budget.hpp)
     static uint64_t held_bytes(const NodeHits &hits);
     // why the last budgeted fetch was refused, and what the keys before the refused one held
