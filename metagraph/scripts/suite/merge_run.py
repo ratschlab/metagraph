@@ -103,21 +103,21 @@ def judged_by_stub(run):
     return mod == "stub" or (isinstance(mod, dict) and bool(mod.get("stub")))
 
 
-def host_state_inconclusive(row, scenario=None, run_dir=None):
+def host_state_inconclusive(row, scenario=None, run_dir=None, refs=None):
     """An MCP execution the host-state rule made inconclusive (an answer refused with one of
     suite_common.MCP_HOST_STATE_CODES the scenario does not expect, whose service-side wall, read from the raw record
     under |run_dir|, the plausibility rule of suite_common.host_state_verdict admits or cannot decide), or that rule
     (c) made inconclusive (its inconclusive_reason: a host-state code or plausibility undecidable; a line of an
     earlier runner without one is judged here): its failing checks judge an environmental state or an undecidable
-    one, not a result."""
+    one, not a result. A line without the reason is judged as compare.host_state_line judges it
+    (suite_common.host_state_of_record: the raw record's error and the run's References, |refs|, default
+    suite_common.run_references of |run_dir|; SD-035); on the reason path the merge also takes rule (c) on an
+    answer-triggered case as decided, which the comparison does not count as a host-state repeat."""
     if row.get("arm") != "mcp" or row.get("outcome") != "inconclusive":
         return False
     why = row.get("inconclusive_reason")   # the runner's (e334715b) or the re-evaluation's class of it
     if why is not None:
         return why in sc.UNDECIDABLE or str(why) in sc.MCP_HOST_STATE_CODES
-    err = row.get("error") if isinstance(row.get("error"), dict) else {}
-    if str(err.get("code")) not in sc.MCP_HOST_STATE_CODES:
-        return False
     doc = None
     raw = row.get("raw")
     if run_dir and isinstance(raw, str) and raw:
@@ -125,7 +125,9 @@ def host_state_inconclusive(row, scenario=None, run_dir=None):
             doc = sc.read_gz_json(raw if os.path.isabs(raw) else os.path.join(run_dir, raw))
         except (OSError, ValueError, EOFError):
             doc = None
-    code, state, _ = sc.host_state_verdict(scenario or {}, row, doc if isinstance(doc, dict) else None)
+    if refs is None and run_dir:
+        refs = sc.run_references(run_dir)
+    code, state, _ = sc.host_state_of_record(scenario, row, doc if isinstance(doc, dict) else None, refs)
     return code is not None and state in ("host_state", "undecidable")
 
 
@@ -159,13 +161,21 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
     changed = {}
     if outcome_fn is None:
         return changed
+    refs = []   # the run's References, read once where a line without the runner's reason needs them
+
+    def run_refs():
+        if not refs:
+            refs.append(sc.run_references(run_dir) if run_dir else None)
+        return refs[0]
     for row in rows:
         old = row.get("outcome")
         checks = row.get("checks")
         if old not in _STRICTNESS or not checks or (
                 judged_by_stub(arm_runs.get(row.get("arm"))) and "reevaluation" not in row):
             continue
-        if host_state_inconclusive(row, (scenarios or {}).get(row.get("scenario")), run_dir) or by_design_decided(row):
+        if host_state_inconclusive(row, (scenarios or {}).get(row.get("scenario")), run_dir,
+                                   run_refs() if row.get("inconclusive_reason") is None else None) or \
+                by_design_decided(row):
             continue   # the runner's host-state or by-design rule (or the re-evaluation's) decided it, not the checks
         items = row.get("explained_items")
         explained = set(row.get("explained_checks") or ())

@@ -1474,6 +1474,44 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertEqual(cmp.mcp_agreement({0: marked}, {"direct-local": d}, s, cases, self.dir)["class"],
                          "disagree")
 
+    def test_host_state_readers_of_merge_and_compare(self):
+        # SD-035: merge_run.host_state_inconclusive (does a verdict rule decide the line: a host state, or rule (c)
+        # by its reason) and compare.host_state_line (is it a host-state repeat) ask different questions on the
+        # reason path, and read a line recorded without inconclusive_reason alike: its raw record's error and the
+        # run's References (the live service document over the table's blocks)
+        import merge_run
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        res = {"id": "R-1", "route": "POST /resolve", "expect": [{"check": "status", "args": {"http": 200}}],
+               "mcp": {"tool": "traverse_resolve", "arguments": {"time_budget_ms": 20000}}}
+        legacy = {"code": "resolve_timeout", "text": "the backend did not answer"}
+        phases = {"backend_ms": 20000.0}
+        os.makedirs(os.path.join(self.dir, "arms", "mcp"))
+
+        def both(ln):
+            refs = cmp.refs_of(cmp.bind_run(cases, self.dir))
+            return (merge_run.host_state_inconclusive(ln, res, self.dir),
+                    cmp.host_state_line(ln, self.dir, res, refs=refs))
+        # a legacy resolve_timeout at 20 s against min(the write cap, budget + reserve + allowance) - 1 s: the table's
+        # 10 s write cap makes it a host state (9 s), the run's live write cap of 40 s does not (29.25 s)
+        ln = self.raw_line("R-1", "mcp", 0, http=504, error=legacy, outcome="inconclusive", mcp_phases=phases)
+        self.assertEqual(both(ln), (True, True))
+        sc.write_json_atomic(os.path.join(self.dir, "arms", "mcp", "run.json"), {"service_capabilities": {
+            "document": {"service_settings": {"resolve": {"http_timeouts_s": {"write": 40}}}}}})
+        self.assertEqual(both(ln), (False, False))
+        # the code only in the raw record (the line's error lost): both read the raw answer's
+        bare = self.raw_line("R-1", "mcp", 1, http=504, error=legacy, outcome="inconclusive", mcp_phases=phases)
+        bare["error"] = None
+        os.remove(os.path.join(self.dir, "arms", "mcp", "run.json"))
+        self.assertEqual(both(bare), (True, True))
+        # the reason path: a host-state reason with its code decides both; rule (c)'s undecidable reason on an
+        # answer-triggered case (a relayed /pattern deadline, search_failed) is the runner's decision for the merge,
+        # no host-state repeat for the comparison (B5b-09)
+        hs = dict(ln, inconclusive_reason="resolve_timeout")
+        self.assertEqual(both(hs), (True, True))
+        relayed = dict(ln, error={"code": "search_failed", "text": "pattern_deadline: x"},
+                       inconclusive_reason=sc.UNDECIDABLE_NO_WALL)
+        self.assertEqual(both(relayed), (True, False))
+
     def test_by_design_finding_without_a_table(self):
         # SD-022 (B5b-10): with no table the runner's by-design finding (a relayed deadline whose budget_respected is
         # a finding) is its mark, as reevaluate keeps it: an unverified by-design part, not a disagreement check by

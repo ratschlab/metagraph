@@ -951,6 +951,120 @@ def default_references():
     return _DEFAULT_REFERENCES[0]
 
 
+
+# The run's recorded configuration, the live documents the references read first (compare's and merge_run's: SD-035).
+# The MCP runner's run.json record of GET /traverse/capabilities at run start (async's runner: {document,
+# host_document, sha256, read_at, base, database, mismatches}, on a failed read the error instead of the document;
+# each invocations[] the same); host_document has the shape of the host's /capabilities document as the service read
+# it: "pattern" the /pattern/capabilities/<db> capabilities.raw, "resolve" {"time_budget": the host's block as
+# received, document.backends.<db>.budgets.resolve_time_budget}
+SERVICE_CAPABILITIES_KEY = "service_capabilities"
+SERVICE_HOST_DOCUMENT_KEY = "host_document"
+# the host's /capabilities document as the direct runners record it (run.json capabilities)
+HOST_CAPABILITIES_PATH = "/capabilities"
+
+
+def direct_host_document(caps, run=None):
+    """The host namespace's document of a run with a direct arm: the host's recorded /capabilities, with the host's
+    identity (suite_common.HOST_IDENTITY_KEYS) it does not state at its top level taken from the identity the arm
+    recorded: its /traverse/capabilities (index_fp, index_meta_fp), else the run.json's own release / index_fp;
+    the same paths as the MCP runner's host_document."""
+    doc = dict(caps.get(HOST_CAPABILITIES_PATH) or {})
+    traverse = caps.get("/traverse/capabilities") if isinstance(caps.get("/traverse/capabilities"), dict) else {}
+    for key in HOST_IDENTITY_KEYS:
+        if doc.get(key) is None:
+            value = traverse.get(key)
+            if value is None and isinstance(run, dict):
+                value = run.get(key)
+            if value is not None:
+                doc[key] = value
+    return doc
+
+
+def recorded_documents(run_dir):
+    """{namespace: {document, origin, read_at, sha256} or None} of a run: "service" the MCP arm's run.json
+    service_capabilities.document (arms/mcp/run.json, else the merged run.json's arms.mcp; sha256 recomputed,
+    suite_common.service_document_sha256, the record's own as sha256_recorded), "host" the /capabilities document a
+    direct arm recorded (the merged run.json's capabilities, else arms/<direct>/run.json; with the host's identity:
+    direct_host_document), else the host document the MCP runner recorded beside the service's
+    (service_capabilities.host_document: an MCP-only run reads the host's references live from it); None
+    where the run recorded none (a run before async's runner read it, or a failed read: then `error` says why). A
+    path the live document lacks reads the table's block, else unknown (suite_common.References)."""
+    out = {"service": None, "host": None}
+    merged = read_json(os.path.join(run_dir, "run.json"), {}) or {}
+    mcp_run = read_json(os.path.join(run_dir, "arms", "mcp", "run.json"), None)
+    if not isinstance(mcp_run, dict):
+        mcp_run = ((merged.get("arms") or {}).get("mcp")) if isinstance(merged.get("arms"), dict) else None
+    rec = (mcp_run or {}).get(SERVICE_CAPABILITIES_KEY) if isinstance(mcp_run, dict) else None
+    if isinstance(rec, dict):
+        doc = rec.get("document")
+        out["service"] = {"document": doc if isinstance(doc, dict) else None,
+                          "origin": "arms/mcp/run.json %s" % SERVICE_CAPABILITIES_KEY,
+                          "read_at": rec.get("read_at"), "sha256": service_document_sha256(rec),
+                          "sha256_recorded": rec.get("sha256"),
+                          "base": rec.get("base"),
+                          "error": rec.get("error") if not isinstance(doc, dict) else None}
+    caps = merged.get("capabilities") if isinstance(merged.get("capabilities"), dict) else None
+    origin, owner = "run.json capabilities", merged
+    if not (caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict)):
+        caps = None
+        for name in DIRECT_ARMS:
+            arm_run = read_json(os.path.join(run_dir, "arms", name, "run.json"), None)
+            if isinstance(arm_run, dict) and isinstance((arm_run.get("capabilities") or {}).get(
+                    HOST_CAPABILITIES_PATH), dict):
+                caps, origin, owner = arm_run["capabilities"], "arms/%s/run.json capabilities" % name, arm_run
+                break
+    if caps and isinstance(caps.get(HOST_CAPABILITIES_PATH), dict):
+        out["host"] = {"document": direct_host_document(caps, owner),
+                       "origin": "%s[%s]" % (origin, HOST_CAPABILITIES_PATH), "read_at": None, "sha256": None}
+    elif isinstance(rec, dict) and isinstance(rec.get(SERVICE_HOST_DOCUMENT_KEY), dict):
+        out["host"] = {"document": rec[SERVICE_HOST_DOCUMENT_KEY],
+                       "origin": "arms/mcp/run.json %s.%s" % (SERVICE_CAPABILITIES_KEY, SERVICE_HOST_DOCUMENT_KEY),
+                       "read_at": rec.get("read_at"), "sha256": None}
+    return out
+
+
+def run_references(run_dir, blocks=None):
+    """References of a run: its recorded live documents (recorded_documents) over |blocks| (namespace -> the table's
+    host_capabilities / service_settings block; default: the table next to this module, default_references)."""
+    docs = recorded_documents(run_dir)
+    live = dict((ns, (d or {}).get("document")) for ns, d in docs.items())
+    origins = dict((ns, (d or {}).get("origin")) for ns, d in docs.items() if d)
+    return References(default_references().table if blocks is None else blocks, live, origins)
+
+
+def record_answer(line, doc):
+    """An MCP execution's answer as the runner's matcher reads it ({http, error, body}): its raw record's |doc|
+    answer where recorded, else its line's http and error."""
+    ans = (doc or {}).get("answer") if isinstance((doc or {}).get("answer"), dict) else None
+    if ans is None:
+        err = line.get("error") if isinstance(line.get("error"), dict) and line["error"] else None
+        ans = {"http": line.get("http"), "error": err, "body": None}
+    return ans
+
+
+def record_error(line, doc):
+    """An MCP execution's error {code, text, field}: its line's when that states one, else its raw record |doc|'s
+    answer error, else the record's top-level one; None when none states one."""
+    err = line.get("error")
+    if isinstance(err, dict) and (err.get("code") or err.get("text")):
+        return err
+    if isinstance(doc, dict):
+        for cand in ((doc.get("answer") or {}).get("error") if isinstance(doc.get("answer"), dict) else None,
+                     doc.get("error")):
+            if isinstance(cand, dict) and (cand.get("code") or cand.get("text")):
+                return cand
+    return None
+
+
+def host_state_of_record(scenario, line, doc, refs=None):
+    """host_state_verdict of an MCP execution from its raw record |doc| as compare and merge_run read a line recorded
+    without the runner's inconclusive_reason (SD-035): the error of its answer (record_answer), else record_error, the
+    tool error behind that answer, and |refs| (the run's References: run_references)."""
+    ans = record_answer(line, doc)
+    return host_state_verdict(scenario or {}, line, doc, ans.get("error") or record_error(line, doc),
+                              tool_error_of(doc, ans), refs=refs)
+
 # The terms the plausibility rules read: (namespace, path, the built-in value when the reference is unknown).
 # host: the host's finalisation reserves and /resolve budget cap; service: the /resolve client's settings
 # (app/traversal/resolve.py client_timeout_s, plan_budget; app/traversal/backend.py _timeout_phase).

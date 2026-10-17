@@ -1298,7 +1298,12 @@ f94b079d plus e427d503 (the suite re-vendored at 3daea97a; the tightened travers
   verdict_detail "service read bound {b} s below its own floor {f} s" (both %g seconds, the runner's `:g`), no
   inconclusive_reason. Write and deadline phases keep bound_s x 1000 - 1000 ms (they fire earlier by design); no
   budget known and the legacy path (no stated phase) are unchanged. compare (host_state_line) and merge_run
-  (host_state_inconclusive) read the same rule.
+  (host_state_inconclusive) read a line recorded without the runner's inconclusive_reason alike
+  (suite_common.host_state_of_record: the raw record's error and tool error, the run's References,
+  suite_common.run_references: its recorded live documents over the table's blocks; SD-035: the merge read the
+  table alone and the line's own error); on the reason path they ask different questions on purpose: the merge
+  takes any host-state reason or rule (c) as the runner's decision (an answer-triggered case's undecidable wall
+  included), the comparison counts a host-state repeat only with a host-state code (B5b-09).
 - `explained_items` (f386a3c0): the runner records on a matched case's line, right after explained_checks, and in
   the raw record the indices into the line's `checks` of the results with outcome fail that an entry of the union of
   the matched cases' explains_checks explains (explained_item_indices, in check order: the set its
