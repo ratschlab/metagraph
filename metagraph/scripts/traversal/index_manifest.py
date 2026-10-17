@@ -16,9 +16,11 @@ loads is listed with its size and that the stated index_fp is the digest of the 
                       [--no-coord-mapping] [--metagraph PATH] [--check-names | --no-check-names]
     index_manifest.py -i GRAPH -a ANNOTATION --inventory   # the files the server loads (JSON:
                                                  # files = the identity, derived = mask, Bloom)
-    index_manifest.py --verify MANIFEST [--root DIR] [--metagraph PATH]
+    index_manifest.py --verify MANIFEST [--root DIR] [--metagraph PATH] [--no-coord-mapping]
                       [--check-names | --no-check-names]  # re-hash every listed file and
-                                                 # compare; report (and re-check) the names
+                                                 # compare; refuse what the server refuses
+                                                 # (manifest_problems); report (and re-check)
+                                                 # the names
     index_manifest.py --server-csv GRAPHS.csv [--jobs N] [--digests FILE ...] [--digests-only]
                       [--match-base-names] [--out-dir DIR] [--write-csv OUT.csv] [--force]
                       [--no-coord-mapping] [--metagraph PATH] [--check-names | --no-check-names]
@@ -298,9 +300,116 @@ def bundle_files(graph, annotation, extra, *, fail=None, coord_mapping=True):
     return out
 
 
+_HEX64 = re.compile(r'[0-9a-f]{64}\Z')
+_U64_MAX = (1 << 64) - 1
+
+
+def manifest_size(v):
+    """The size an entry states, as the server reads it (jsoncpp isUInt64 / asUInt64: a
+    non-negative integer below 2^64, an integral float included, never a boolean), else None."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v if 0 <= v <= _U64_MAX else None
+    if isinstance(v, float) and v.is_integer() and 0 <= v < 2.0 ** 64:
+        return int(v)
+    return None
+
+
 def canonical_lines(entries):
+    """The lines index_fp digests: "<path>\\t<size>\\t<sha256>\\n" sorted by path (bytes), the size
+    in the server's spelling (manifest_size: an entry's 12.0 is 12, as it reads it)."""
     entries = sorted(entries, key=lambda e: e['path'].encode())
-    return ''.join(f"{e['path']}\t{e['size']}\t{e['sha256']}\n" for e in entries)
+    size = lambda v: manifest_size(v) if manifest_size(v) is not None else v  # noqa: E731
+    return ''.join(f"{e['path']}\t{size(e['size'])}\t{e['sha256']}\n" for e in entries)
+
+
+def _is_annotation(name):
+    return os.path.basename(name).endswith('.annodbg')
+
+
+def _is_graph(name):
+    return os.path.basename(name).endswith('dbg') and not _is_annotation(name)
+
+
+def entry_problems(manifest):
+    """The server's refusals of a manifest's shape and entries (traverse.cpp
+    index_manifest_fingerprint, its texts): an object with a non-empty array 'files' of
+    {path: string, size: integer, sha256: string}, a path neither empty nor holding a tab or a
+    line break, a digest of 64 lowercase hex digits, no path listed twice."""
+    files = manifest.get('files') if isinstance(manifest, dict) else None
+    if not isinstance(files, list) or not files:
+        return ["expected an object with a non-empty array 'files' of {path, size, sha256}"]
+    out, seen = [], set()
+    for e in files:
+        if not isinstance(e, dict) or not isinstance(e.get('path'), str) or \
+                manifest_size(e.get('size')) is None or not isinstance(e.get('sha256'), str):
+            out.append("every entry of 'files' is {path: string, size: integer, sha256: string}: "
+                       + json.dumps(e)[:200])
+            continue
+        path = e['path']
+        if not path or any(c in path for c in '\t\n\r'):
+            out.append('a file path is empty or holds a tab or line break: %r' % path)
+        if not _HEX64.match(e['sha256']):
+            out.append('the sha256 of %s is not 64 lowercase hex digits' % path)
+        if path in seen:
+            out.append('the file %s is listed twice' % path)
+        seen.add(path)
+    return out
+
+
+def manifest_problems(manifest, loaded=None, not_loaded=()):
+    """Every refusal of the server's index_manifest_fingerprint (traverse.cpp), rule for rule and
+    in its order, for a manifest the server would read beside the files |loaded| (the loader
+    inventory of the pair, None when unknown: then only one graph with one annotation is
+    required) and the optional files |not_loaded| it does not load: the shape and entries
+    (entry_problems), derived data, shared base names, an optional file not loaded, a loaded file
+    not covered, another graph or annotation, and the stated index_fp, compared only when stated.
+    A loaded file listed with another size is the re-hash's (verify)."""
+    out = entry_problems(manifest)
+    if out:
+        return out
+    files = manifest['files']
+    paths = [e['path'] for e in files]
+    # the graph's derived data is not part of index_fp: the server refuses a manifest that
+    # lists it, however its digests compare
+    for p in paths:
+        if derived_role(p):
+            out.append(f'derived data listed: {p} ({DERIVED_RULE}; the server refuses this '
+                       f'manifest: write it again without the entry, which changes its index_fp)')
+    # the server matches loaded files by base name: entries sharing one (a manifest written for
+    # a directory of bundles) would lend one index_fp to every bundle, and it refuses them
+    for name in duplicate_base_names(paths):
+        out.append(f'base name listed more than once: {name} (a manifest describes one bundle; '
+                   f'the server refuses it)')
+    by_name = dict((os.path.basename(p), p) for p in paths)
+    for path in not_loaded:
+        listed = by_name.get(os.path.basename(path))
+        if listed is not None:
+            out.append(f'it lists {listed}, which the server does not load for this index ({path}: '
+                       f'missing beside the listed file, or --no-coord-mapping)')
+    if loaded is not None:
+        for path in loaded:
+            if os.path.isfile(path) and os.path.basename(path) not in by_name:
+                out.append(f'it does not cover the file {path} ({os.path.getsize(path)} bytes), which '
+                           f'the server loads for this index (the loader inventory)')
+        loaded_names = {os.path.basename(p) for p in loaded}
+        for p in paths:
+            if (_is_graph(p) or _is_annotation(p)) and os.path.basename(p) not in loaded_names:
+                out.append(f'it lists the {"annotation" if _is_annotation(p) else "graph"} {p}, '
+                           f'which this index does not load: a manifest describes one graph with '
+                           f'one annotation')
+    else:
+        graphs, annotations = [p for p in paths if _is_graph(p)], [p for p in paths if _is_annotation(p)]
+        for kind, listed in (('graph', graphs), ('annotation', annotations)):
+            if len(listed) != 1:
+                out.append(f'it lists {len(listed)} {kind}(s) ({", ".join(listed)}): a manifest '
+                           f'describes one graph with one annotation, which this index loads')
+    if 'index_fp' in manifest:
+        fp = hashlib.sha256(canonical_lines(files).encode()).hexdigest()
+        if manifest.get('index_fp') != fp:
+            out.append(f'index_fp {manifest.get("index_fp")} is not the digest of the file list ({fp})')
+    return out
 
 
 # ------------------------------------------------------------------ the names (--check-names)
@@ -688,17 +797,24 @@ def batch(args, hasher=sha256_file):
     return written
 
 
-def verify(path, root=None, metagraph=None):
+def verify(path, root=None, metagraph=None, coord_mapping=True):
+    """Re-hash every listed file under |root| (default: the manifest's directory) and apply the
+    server's acceptance rules of the manifest (manifest_problems; the loader inventory of the
+    one graph and the one annotation it lists, under root, for the coverage rules, with
+    |coord_mapping| as the server's --no-coord-mapping says): exit 1 with every problem, else
+    print OK with the index_fp the server computes."""
     with open(path) as f:
         manifest = json.load(f)
     root = root or os.path.dirname(os.path.abspath(path))
     problems = []
+    entries = not entry_problems(manifest)
+    files = manifest['files'] if entries else []
     # the recorded names, and the check run again when the binary is given (reported after
     # the verdict: a refusal prints its problems only)
-    names = manifest.get('names')
+    names = manifest.get('names') if isinstance(manifest, dict) else None
     report = ['names: ' + (names_summary(names) if names else 'not recorded')]
     if metagraph:
-        annotations = [e['path'] for e in manifest['files'] if e['path'].endswith('.annodbg')]
+        annotations = [e['path'] for e in files if e['path'].endswith('.annodbg')]
         if len(annotations) != 1:
             problems.append('names: %d annotations listed, cannot check the names of one'
                             % len(annotations))
@@ -712,34 +828,28 @@ def verify(path, root=None, metagraph=None):
                 if names is not None and fresh != names:
                     problems.append('names differ from the recorded ones (recorded: %s; now: %s)'
                                     % (names_summary(names), names_summary(fresh)))
-    # the server matches loaded files by base name: entries sharing one (a manifest written for
-    # a directory of bundles) would lend one index_fp to every bundle, and it refuses them
-    for name in duplicate_base_names([e['path'] for e in manifest['files']]):
-        problems.append(f'base name listed more than once: {name} (a manifest describes one '
-                        f'bundle; the server refuses it)')
-    # the graph's derived data is not part of index_fp: the server refuses a manifest that
-    # lists it, however its digests compare
-    for e in manifest['files']:
-        if derived_role(e['path']):
-            problems.append(f'derived data listed: {e["path"]} ({DERIVED_RULE}; the server '
-                            f'refuses this manifest: write it again without the entry, which '
-                            f'changes its index_fp)')
-    for e in manifest['files']:
+    graphs = [e['path'] for e in files if _is_graph(e['path'])]
+    annotations = [e['path'] for e in files if _is_annotation(e['path'])]
+    loaded, not_loaded = None, []
+    if len(graphs) == 1 and len(annotations) == 1:
+        graph, annotation = os.path.join(root, graphs[0]), os.path.join(root, annotations[0])
+        loaded = [p for p, _, _ in load_inventory(graph, annotation, coord_mapping)]
+        not_loaded = unloaded_optional(graph, annotation, coord_mapping)
+    problems.extend(manifest_problems(manifest, loaded, not_loaded))
+    for e in files:
         p = os.path.join(root, e['path'])
         if not os.path.isfile(p):
             problems.append(f'missing: {e["path"]}')
             continue
-        if os.path.getsize(p) != e['size']:
+        if os.path.getsize(p) != manifest_size(e['size']):
             problems.append(f'size differs: {e["path"]}')
             continue
-        if sha256_file(p) != e['sha256']:
+        if _HEX64.match(e['sha256']) and sha256_file(p) != e['sha256']:
             problems.append(f'content differs: {e["path"]}')
-    fp = hashlib.sha256(canonical_lines(manifest['files']).encode()).hexdigest()
-    if manifest.get('index_fp') != fp:
-        problems.append(f'index_fp {manifest.get("index_fp")} is not the digest of the file list ({fp})')
     if problems:
         print('\n'.join(problems))
         sys.exit(1)
+    fp = hashlib.sha256(canonical_lines(files).encode()).hexdigest()
     print(f'{path}: OK, index_fp {fp}')
     print('\n'.join(report))
 
@@ -784,7 +894,7 @@ def main():
         if args.verify:
             # the names arguments are refused before any file is hashed (write and batch probe
             # the binary themselves; the inventory runs no check and probes nothing)
-            verify(args.verify, args.root, names_binary(args))
+            verify(args.verify, args.root, names_binary(args), not args.no_coord_mapping)
         elif args.server_csv:
             batch(args)
         elif args.graph and args.annotation and args.inventory:

@@ -708,6 +708,86 @@ class TestIndexManifestBatch(unittest.TestCase):
         # (the digests and the stated index_fp are right: only the rule is broken)
         self.assertEqual(1, out.getvalue().count('\n'))
 
+    def test_verify_refuses_what_the_server_refuses(self):
+        """SD-019: --verify applies the server's acceptance rules of a manifest
+        (traverse.cpp index_manifest_fingerprint: the entries' shape, path and digest syntax,
+        a path listed twice, derived data, shared base names, the loaded files covered and
+        the optional files it does not load left out, one graph with one annotation, the
+        stated index_fp compared when stated) besides re-hashing the files."""
+        f = self.files
+        good = self._single(f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg'],
+                            os.path.join(self.root, 'good.json'))
+        self.assertEqual(['a1.relaxed.row_diff_brwt_coord.annodbg', 'a1.relaxed.seqs', 'g1.dbg'],
+                         [e['path'] for e in good['files']])
+
+        def entry(name):
+            with open(os.path.join(self.root, name), 'rb') as fh:
+                data = fh.read()
+            return {'path': name, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+
+        def manifest(files, fp='refit'):
+            m = dict(good, files=files)
+            if fp == 'refit':
+                m['index_fp'] = hashlib.sha256(im.canonical_lines(files).encode()).hexdigest()
+            elif fp is None:
+                del m['index_fp']
+            else:
+                m['index_fp'] = fp
+            return m
+
+        def verify(m, *flags):
+            path = os.path.join(self.root, 'm.json')
+            with open(path, 'w') as fh:
+                json.dump(m, fh)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    mock.patch.object(sys, 'argv', ['index_manifest.py', '--verify', path] + list(flags)):
+                try:
+                    im.main()
+                except SystemExit as e:
+                    return e.code, out.getvalue()
+            return None, out.getvalue()
+
+        files = good['files']
+        self.assertEqual(verify(good)[0], None)
+        # the server computes index_fp when the manifest states none
+        self.assertEqual(verify(manifest(files, fp=None))[0], None, verify(manifest(files, fp=None))[1])
+        g1 = [e for e in files if e['path'] == 'g1.dbg'][0]
+        other = [e for e in files if e['path'] != 'g1.dbg']
+        tab = os.path.join(self.root, 'x\ty')
+        with open(tab, 'wb') as fh:
+            fh.write(b'tab')
+        float_size = dict(g1, size=float(g1['size']))
+        refused = [
+            # (which one the server loads its list names: either way the manifest is refused)
+            (manifest(files + [entry('a2.column.annodbg')]), 'it lists 2 annotation(s) '
+                                                             '(a1.relaxed.row_diff_brwt_coord.annodbg, a2.column.annodbg)'),
+            (manifest(files + [entry('g3.dbg')]), 'it lists 2 graph(s) (g1.dbg, g3.dbg)'),
+            (manifest([], fp=hashlib.sha256(b'').hexdigest()), "a non-empty array 'files'"),
+            (manifest(other + [dict(g1, sha256=g1['sha256'].upper())]), 'the sha256 of g1.dbg is not 64 '
+                                                                        'lowercase hex digits'),
+            (manifest(files + [dict(entry('x\ty'))]), 'a file path is empty or holds a tab or line break'),
+            (manifest(files + [g1]), 'the file g1.dbg is listed twice'),
+            (manifest(other + [dict(g1, size=True)]), "every entry of 'files' is {path: string, size: integer"),
+            # a size written 9000.0: the server reads it as 9000 and refuses the index_fp of '9000.0'
+            (manifest(other + [float_size], fp=hashlib.sha256(''.join(
+                '%s\t%s\t%s\n' % (e['path'], e['size'], e['sha256'])
+                for e in sorted(other + [float_size], key=lambda e: e['path'].encode())).encode()).hexdigest()),
+             'is not the digest of the file list'),
+            (manifest([e for e in files if e['path'] != 'a1.relaxed.seqs']),
+             'it does not cover the file %s' % f['a1.relaxed.seqs'])]
+        for m, want in refused:
+            code, text = verify(m)
+            self.assertEqual(code, 1, (want, text))
+            self.assertIn(want, text)
+        self.assertNotIn('content differs', verify(refused[3][0])[1])
+        # the server's own value of a size written 9000.0 is accepted
+        self.assertEqual(verify(manifest(other + [float_size]))[0], None)
+        # --no-coord-mapping: the server does not load the .seqs, so a manifest listing it is refused
+        code, text = verify(good, '--no-coord-mapping')
+        self.assertEqual(code, 1, text)
+        self.assertIn('it lists a1.relaxed.seqs, which the server does not load for this index', text)
+
     def test_no_coord_mapping_leaves_the_headers_out_in_both_modes(self):
         """--no-coord-mapping: the server does not load the .seqs, so neither single nor batch
         mode lists it, and the two write the same manifest."""
