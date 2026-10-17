@@ -35,6 +35,7 @@ And on the same paths (the store's receipts are also in test_traverse_vendored_r
 """
 
 import collections
+import copy
 import gc
 import glob
 import os
@@ -406,6 +407,31 @@ class TestCompareCostIsALowerBound(unittest.TestCase):
                     bad.append((os.path.basename(ka), os.path.basename(kb), kw,
                                 cost['work_units']['estimate'], bud.used_work,
                                 cost['memory_bytes']['estimate'], bud.peak_bytes))
+        self.assertEqual([], bad)
+
+    def test_a_graphlet_compared_with_itself(self):
+        """compare(g, g) charges b's cut pass, as compare_cost(g, g) prices it: the
+        comparison's memo keys a side's cuts by the side, not by the object, so at_least
+        stays below the charge when a is b (and for a shallow copy, which shares the
+        arms)."""
+        bad = []
+        n = 0
+        singles = [x for pair in _pairs(both_orders=False)[:40] for x in pair] \
+            + [('comb%d' % k, lambda k=k: parse(comb_annotate(k))) for k in (1, 3, 100)]
+        for key, make in singles:
+            for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
+                for how, other in (('a is b', lambda g: g), ('copy', copy.copy)):
+                    g = make()
+                    cost = ops.compare_cost(g, other(g), mode=mode)
+                    bud = LocalBudget()
+                    g.compare(other(g), mode=mode, budget=bud)
+                    n += 1
+                    if cost['work_units']['at_least'] > bud.used_work \
+                            or cost['memory_bytes']['at_least'] > bud.peak_bytes:
+                        bad.append((os.path.basename(key), mode, how,
+                                    cost['work_units']['at_least'], bud.used_work,
+                                    cost['memory_bytes']['at_least'], bud.peak_bytes))
+        self.assertGreater(n, 300)
         self.assertEqual([], bad)
 
     def test_incomparable_is_exact(self):

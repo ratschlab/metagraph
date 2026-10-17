@@ -3731,8 +3731,8 @@ def _compare(a, b, arm, labels, mode, cb, state):
         differ = [{'key': _key_json(k, None, lab), 'a': ka[k], 'b': kb[k]}
                   for k in sorted(ka) if k in kb and ka[k] != kb[k]]
     elif mode == 'walks':
-        wa = _keys_of(cb, state, 'a', lambda: _walk_keys(a, sides, depth, sel, memo, cb))
-        wb = _keys_of(cb, state, 'b', lambda: _walk_keys(b, sides, depth, sel, memo, cb))
+        wa = _keys_of(cb, state, 'a', lambda: _walk_keys(a, sides, depth, sel, memo, cb, 'a'))
+        wb = _keys_of(cb, state, 'b', lambda: _walk_keys(b, sides, depth, sel, memo, cb, 'b'))
         _charge_differences(cb, wa, wb, dict_bytes(3) + LIST, per_item=dict_bytes(2))
         only_a = [{'arm': k[0], 'walk': k[1], 'labels': [lab(r) for r in sorted(v)]}
                   for k, v in sorted(wa.items()) if k not in wb]
@@ -4336,15 +4336,19 @@ def _cut_prices(g, a, plan, cost, held):
     return {'seg': own, 'cut': cut, 'pass': pass_bytes}
 
 
-def _cuts(g, side, depth, memo, cb=None):
+def _cuts(g, side, depth, memo, cb=None, tag=None):
     """[(leaf, m, cut info)] for every leaf of the arm's DAG restricted to [0, depth)
     (restricted_leaves), m = min(its end, depth). Leaves sharing the segment that holds
     base m - 1 share one cut, and all cuts are made in ONE parents-first pass over their
     chains (_cut_pass()): each segment's pieces are read once, not once per cut whose chain
     passes through it (on a comb of 4,000 walks that would re-read 16 M segment pieces and
     rewrite {label: j} for every supporting label at every piece). The cut infos are
-    _cut_info()'s, value for value. Memoized per comparison in |memo|."""
-    key = (id(g), side, depth)
+    _cut_info()'s, value for value. Memoized per comparison in |memo|, under the
+    comparison's side |tag| ('a', 'b') when it names one: compare(g, g) then makes and
+    charges b's cuts as it does for any other b, as compare_cost() prices them (keyed by
+    the object, a is b would find a's cuts and charge nothing for b's). Without a tag, by
+    the object."""
+    key = (id(g) if tag is None else tag, side, depth)
     got = memo.get(key)
     if got is not None:
         return got
@@ -4705,12 +4709,12 @@ def _restricted_claims(g, side, depth, inexact=None, cb=None):
     return out
 
 
-def _walk_keys(g, sides, depth, sel, memo=None, cb=None):
+def _walk_keys(g, sides, depth, sel, memo=None, cb=None, tag=None):
     memo = {} if memo is None else memo
     out = {}
     for side in sides:
         seen = set()
-        for p, m, info in _cuts(g, side, depth, memo, cb):
+        for p, m, info in _cuts(g, side, depth, memo, cb, tag):
             if cb is not None:
                 n = len(info[1])
                 cb.charge(W_ELEM + (0 if id(info) in seen else
@@ -4857,14 +4861,14 @@ def _cut_prefix(prefix):
     return prefix
 
 
-def _route_pairs(g, sides, depth, memo=None, cb=None):
+def _route_pairs(g, sides, depth, memo=None, cb=None, tag=None):
     """(side, walk prefix cut at depth in walking order, ref) of every walk under each
     label with displayed support over the whole cut walk."""
     memo = {} if memo is None else memo
     out = set()
     for side in sides:
         seen = set()
-        for p, m, info in _cuts(g, side, depth, memo, cb):
+        for p, m, info in _cuts(g, side, depth, memo, cb, tag):
             if id(info) in seen:
                 continue                     # walks sharing the cut give the same pairs
             seen.add(id(info))
@@ -4877,7 +4881,7 @@ def _route_pairs(g, sides, depth, memo=None, cb=None):
     return out
 
 
-def _supported_prefixes(g, sides, depth, memo=None, cb=None):
+def _supported_prefixes(g, sides, depth, memo=None, cb=None, tag=None):
     """(side, ref) -> the walking-order prefixes w[:j] of every walk w (cut at depth) on
     which the label has displayed support over all of [0, j), j maximal per walk: a
     label that ends inside a walk (at a node where the walk goes on with other labels)
@@ -4886,7 +4890,7 @@ def _supported_prefixes(g, sides, depth, memo=None, cb=None):
     out = {}
     for side in sides:
         seen = set()
-        for p, m, info in _cuts(g, side, depth, memo, cb):
+        for p, m, info in _cuts(g, side, depth, memo, cb, tag):
             if id(info) in seen:
                 continue
             seen.add(id(info))
@@ -5263,18 +5267,18 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
     state = {} if state is None else state
     if cb is not None:
         cb.phase = 'keys:a'
-    pa = _route_pairs(a, sides, depth, memo, cb)
+    pa = _route_pairs(a, sides, depth, memo, cb, 'a')
     state['keys_a'] = len(pa)
     if cb is not None:
         cb.phase = 'keys:b'
-    pb = _route_pairs(b, sides, depth, memo, cb)
+    pb = _route_pairs(b, sides, depth, memo, cb, 'b')
     state['keys_b'] = len(pb)
     if sel is not None:
         pa = {x for x in pa if x[2] in sel}
         pb = {x for x in pb if x[2] in sel}
     # a's walk under a label must be a prefix of a walk of b on which b's label supports
     # at least that prefix -- not necessarily the whole walk (it may end inside it)
-    supported = _supported_prefixes(b, sides, depth, memo, cb)
+    supported = _supported_prefixes(b, sides, depth, memo, cb, 'b')
     if cb is not None:
         cb.phase = 'prefix_scan'
         cb.charge(sort_work(len(pa)) + sort_work(len(pb)), list_bytes(len(pa) + len(pb)))

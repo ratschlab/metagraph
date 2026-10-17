@@ -1255,19 +1255,24 @@ class TestL12Cuts(unittest.TestCase):
                         self.assertEqual(want[2], info[2])
 
     def test_budgeted_cuts_are_the_same_and_priced_alike(self):
+        # at every depth a comparison can cut at: 0, 1, the certified depth and each
+        # segment boundary +-1 (compare_cost() prices each side's cuts with _price_cuts())
         for g in self.graphlets():
-            for side in g.arms:
-                depth = g.arms[side].complete_to_bp
-                b = LocalBudget()
-                with b.scope('cuts'):
-                    got = ops._cuts(g, side, depth, {}, b)
-                self.assertEqual([(x, m, i) for x, m, i in ops._cuts(g, side, depth, {})],
-                                 [(x, m, i) for x, m, i in got])
-                t = LocalBudget()
-                with t.scope('cuts'):
-                    ops._price_cuts(t, g, side, depth)
-                self.assertEqual(b.used_work, t.used_work)
-                self.assertEqual(b.peak_bytes, t.peak_bytes)
+            for side, a in g.arms.items():
+                depths = {0, 1, a.complete_to_bp}
+                for s in a.segments:
+                    depths.update((s.from_bp, s.end_bp, s.end_bp + 1, max(0, s.end_bp - 1)))
+                for depth in sorted(depths):
+                    b = LocalBudget()
+                    with b.scope('cuts'):
+                        got = ops._cuts(g, side, depth, {}, b)
+                    self.assertEqual([(x, m, i) for x, m, i in ops._cuts(g, side, depth, {})],
+                                     [(x, m, i) for x, m, i in got])
+                    t = LocalBudget()
+                    with t.scope('cuts'):
+                        ops._price_cuts(t, g, side, depth)
+                    self.assertEqual((b.used_work, b.peak_bytes), (t.used_work, t.peak_bytes),
+                                     (side, depth))
 
     def test_scale(self):
         for n in (2000, 4000):
