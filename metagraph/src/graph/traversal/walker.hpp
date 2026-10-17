@@ -1,6 +1,7 @@
 #ifndef __TRAVERSAL_WALKER_HPP__
 #define __TRAVERSAL_WALKER_HPP__
 
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <limits>
@@ -18,6 +19,23 @@
 namespace mtg {
 namespace graph {
 namespace traversal {
+
+/**
+ * The walker's trace step for one coordinate (Support::TRACE): coordinate |x| of the next k-mer
+ * continues a chain of the sorted live coordinates |live| when x - 1 is live on the right arm,
+ * x + 1 on the left. Used by the seed's validation and by every step of the walk. A chain is
+ * not stopped at its record's end: a column's coordinates run on across its records, so a
+ * column label's chain can pass the junction of two records with adjacent coordinates, which
+ * every such answer states (trace_record_boundaries, SPEC §7.0). The pattern search's support
+ * step (support_step.hpp) applies the same rule to runs of coordinates and stops a chain at its
+ * record's end; inside one record the two agree (SupportStep.ContinueChainsIsTheWalkersRule,
+ * PatternSupport.TheWalkerCrossesARecordJunctionThePatternDoesNot).
+ */
+template <class Coords>
+inline bool continues_chain(Arm side, const Coords &live, Coord x) {
+    return side == Arm::RIGHT ? x > 0 && std::binary_search(live.begin(), live.end(), x - 1)
+                              : std::binary_search(live.begin(), live.end(), x + 1);
+}
 
 /**
  * A seed with a k-mer the graph does not have (spec §6.1 step 2), raised before any annotation

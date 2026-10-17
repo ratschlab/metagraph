@@ -1248,7 +1248,7 @@ void Walker::validate_seed() {
             } else {
                 next_live.clear();
                 for (Coord c : h.coords) {
-                    if (c > 0 && std::binary_search(lv.begin(), lv.end(), c - 1))
+                    if (continues_chain(Arm::RIGHT, lv, c))
                         next_live.push_back(c);
                 }
                 lv.swap(next_live);
@@ -5034,10 +5034,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                     // charged here as one sum after the whole row, they would run past the
                     // stated bound unchecked)
                     for (Coord x : h.coords) {
-                        bool ok = side == Arm::RIGHT
-                            ? (x > 0 && std::binary_search(e->coords.begin(), e->coords.end(), x - 1))
-                            : std::binary_search(e->coords.begin(), e->coords.end(), x + 1);
-                        if (ok)
+                        if (continues_chain(side, e->coords, x))
                             t.coords.push_back(x);
                     }
                     if (t.coords.empty()) {
