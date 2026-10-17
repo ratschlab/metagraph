@@ -450,6 +450,56 @@ def _mirrored(text):
     return '\n'.join(out)
 
 
+class TestSameIndexParity(unittest.TestCase):
+    """The §3.1 identity rules are written twice on purpose: ops.comparability (compare's
+    verdict, which reports) and mcp_tools._same_index (the gate of a replay or a
+    continuation, which refuses). Their check orders and texts differ; what they decide may
+    not: over every combination of absent ('' or None), equal, different and one-sided
+    ns, fp, meta_fp and release, comparability is False exactly where _same_index refuses
+    with release_mismatch or index_mismatch, 'unverifiable' exactly where it refuses with
+    index_unverifiable or states the identity unverified, and True exactly where it states
+    it verified. A field added to one rule set only fails here."""
+
+    FIELDS = (('ns', 'index_ns'), ('fp', 'index_fp'), ('meta_fp', 'index_meta_fp'),
+              ('release', None))
+    # (a's value, b's value): absent both ways, equal, different, on one side only
+    PAIRS = ((None, None), ('', None), (None, ''), ('v1', 'v1'), ('v1', 'v2'), ('v1', None),
+             (None, 'v1'), ('', 'v1'))
+
+    def test_the_two_rule_sets_decide_alike(self):
+        import copy
+        import itertools
+        from metagraph.traverse.mcp_tools import ToolError, _same_index
+        base = T.graphlet('fork')
+        a, b = copy.copy(base), copy.copy(base)
+        n = 0
+        for pairs in itertools.product(self.PAIRS, repeat=len(self.FIELDS)):
+            ia, ib = {}, {}
+            for (key, attr), (va, vb) in zip(self.FIELDS, pairs):
+                ia[key], ib[key] = va, vb
+                if attr is None:
+                    a.envelope, b.envelope = {'release': va}, {'release': vb}
+                else:
+                    setattr(a, attr, va)
+                    setattr(b, attr, vb)
+            verdict = ops.comparability(a, b)[0]
+            for allow in (False, True):
+                with self.subTest(identity=pairs, allow_unverified=allow):
+                    try:
+                        got = _same_index(ia, ib, 'the other', allow)
+                        code = 'verified' if got['verified'] else 'unverified'
+                    except ToolError as e:
+                        code = e.code
+                    want = {False: ('release_mismatch', 'index_mismatch'),
+                            'unverifiable': ('index_unverifiable', 'unverified'),
+                            True: ('verified',)}[verdict]
+                    self.assertIn(code, want)
+                    if allow:
+                        self.assertNotEqual('index_unverifiable', code)
+                    n += 1
+        self.assertEqual(2 * len(self.PAIRS) ** len(self.FIELDS), n)
+
+
 class TestCompareCli(unittest.TestCase):
     """compare() on CLI retrievals of one seed (documents/compare/cli_*.mgt): prefix_subset
     orientation, interior ends and recorded refusals, claims ending at the comparison depth,
