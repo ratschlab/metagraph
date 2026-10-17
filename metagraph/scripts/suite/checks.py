@@ -2962,39 +2962,97 @@ _END_QUALIFIERS = {"Rm": "minority", "Rb": "below_min_labels", "Rs": "split_limi
                    "Ls": "superseded", "Lx": "switch_sources", "Lw": "label_lost"}
 
 
+_MGT_INT = re.compile(r"(0|[1-9][0-9]*)\Z")
+_MGT_RANGES_ITEM = re.compile(r"(0|[1-9][0-9]*)(?:-(0|[1-9][0-9]*))?\Z")
+_MGT_U64_DIGITS, _MGT_U64 = 20, (1 << 64) - 1
+_MGT_UNPCT = {"%25": "%", "%0A": "\n", "%0D": "\r"}
+
+
 def _mgt_ranges(tok: str, bound: Optional[int]) -> set:
-    """An MGT RANGES token (SPEC §7.5.1): ascending ids, runs `a-b`, `.` empty; every id below |bound| (the number of
-    L records) checked before a run is expanded."""
+    """An MGT RANGES token (SPEC §7.5.1: one valid spelling, every other one a ValueError): `.` empty, else ascending
+    collapsed items `a` or `a-b` (b > a, no leading zero), each id 64-bit and below |bound| (the number of L
+    records), checked before a run is expanded (with no bound, a run of more than 10**7 ids is refused). The library's
+    _codec.decode_ranges, held to the golden vectors by tests/test_checks.py MgtCodecVectors."""
     if tok == ".":
         return set()
     out: set = set()
+    last = None
     for item in tok.split(","):
-        a, dash, b = item.partition("-")
-        lo = int(a)
-        hi = int(b) if dash else lo
-        if hi < lo or (bound is not None and hi >= bound) or hi - lo > 10 ** 7:
+        m = _MGT_RANGES_ITEM.match(item)
+        if not m or max(len(m.group(1)), len(m.group(2) or "")) > _MGT_U64_DIGITS:
             raise ValueError("RANGES item %r" % item)
+        lo = int(m.group(1))
+        hi = int(m.group(2)) if m.group(2) is not None else lo
+        if m.group(2) is not None and hi <= lo:
+            raise ValueError("RANGES run %r" % item)
+        if last is not None and lo <= last + 1:
+            raise ValueError("RANGES %r is not ascending and collapsed" % tok)
+        if hi > _MGT_U64 or (bound is not None and hi >= bound) or (bound is None and hi - lo > 10 ** 7):
+            raise ValueError("RANGES item %r beyond the id space" % item)
         out.update(range(lo, hi + 1))
+        last = hi
     return out
 
 
 def _mgt_setexpr(tok: str, base: Optional[set], bound: Optional[int]) -> set:
-    """An MGT SETEXPR (SPEC §7.5.1): RANGES, or a delta `!`, `!R`, `!+A`, `!R+A` against |base|."""
+    """An MGT SETEXPR (SPEC §7.5.1): RANGES, or a delta `!`, `!R`, `!+A`, `!R+A` against |base| (an empty part is
+    omitted, never `.`); a delta whose R is not inside the base or whose A meets it is a ValueError: the reader
+    derived another base than the writer (the library's _codec.decode_setexpr)."""
     if not tok.startswith("!"):
         return _mgt_ranges(tok, bound)
     if base is None:
         raise ValueError("a SETEXPR delta without a base: %r" % tok)
     removed, plus, added = tok[1:].partition("+")
-    out = set(base)
-    if removed:
-        out -= _mgt_ranges(removed, bound)
-    if plus:
-        out |= _mgt_ranges(added, bound)
-    return out
+    if removed == "." or (plus and added in ("", ".")):
+        raise ValueError("empty SETEXPR part in %r" % tok)
+    r = _mgt_ranges(removed, bound) if removed else set()
+    a = _mgt_ranges(added, bound) if plus else set()
+    if not r <= base or a & base:
+        raise ValueError("SETEXPR %r does not fit its base" % tok)
+    return (set(base) - r) | a
 
 
 def _mgt_unescape(text: str) -> str:
-    return text.replace("%0A", "\n").replace("%0D", "\r").replace("%25", "%")
+    """A free-text last field (SPEC §7.5.1): %25, %0A and %0D are its only escapes; any other `%` sequence or a raw
+    LF/CR is a ValueError (the library's _codec.pct_unescape)."""
+    if "\n" in text or "\r" in text:
+        raise ValueError("raw LF/CR in a free-text field")
+    if "%" not in text:
+        return text
+    out, i = [], 0
+    while i < len(text):
+        if text[i] == "%":
+            esc = text[i:i + 3]
+            if esc not in _MGT_UNPCT:
+                raise ValueError("percent escape %r" % esc)
+            out.append(_MGT_UNPCT[esc])
+            i += 3
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+_MGT_FRONT = re.compile(r"(0|[1-9][0-9]*) (.*)\Z", re.S)
+
+
+def _mgt_front(prev: bytes, tail: str) -> bytes:
+    """An L record's name from its tail `<prefix_len> <suffix>` and the previous name's UTF-8 |prev| (SPEC §7.5.2):
+    the previous name's first prefix_len bytes and the unescaped suffix; a tail without its separating space, a
+    prefix that is no integer, goes beyond the previous name or ends inside a character is a ValueError (the
+    library's _codec.front_decode_parts)."""
+    m = _MGT_FRONT.match(tail)
+    if not m or len(m.group(1)) > _MGT_U64_DIGITS:
+        raise ValueError("front-coding tail %r" % tail)
+    p = int(m.group(1))
+    if p > len(prev):
+        raise ValueError("front-coding prefix %d beyond the previous name" % p)
+    name = prev[:p] + _mgt_unescape(m.group(2)).encode("utf-8")
+    try:
+        name.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("front-coding prefix %d ends inside a character" % p) from None
+    return name
 
 
 def graphlet_label_dict(mgt: str) -> List[dict]:
@@ -3005,12 +3063,12 @@ def graphlet_label_dict(mgt: str) -> List[dict]:
     for line in mgt.split("\n"):
         if not line.startswith("L "):
             continue
-        f = line.split(" ", 5)
-        if len(f) < 6:
+        f = line.split(" ", 4)
+        if len(f) < 5:
             raise Missing("L record of %d fields" % len(f))
-        name = prev[:int(f[4])] + _mgt_unescape(f[5]).encode("utf-8")
+        name = _mgt_front(prev, f[4])
         prev = name
-        out.append({"name": name.decode("utf-8", "replace"), "kind": "header" if f[1] == "h" else "column",
+        out.append({"name": name.decode("utf-8"), "kind": "header" if f[1] == "h" else "column",
                     "column": int(f[2]) if f[2].isdigit() else f[2], "seq_id": None if f[3] == "*" else int(f[3])})
     return out
 
@@ -3153,7 +3211,7 @@ def graphlet_arms(mgt: str) -> Dict[str, dict]:
     for side, a in arms.items():
         segs = a["segments"]
         try:
-            _graphlet_label_sets(a, mode, num_seed_labels, n_labels or None)
+            _graphlet_label_sets(a, mode, num_seed_labels, n_labels)
         except (ValueError, KeyError, IndexError, TypeError):
             for sg in segs:   # no label sets: the checks that read them fall back to the sequence alone
                 for key in ("_g", "labels", "labels_total", "labels_truncated"):

@@ -927,7 +927,15 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   the cap cut (`labels_truncated`) passes. Without the record in the dictionary (G14's cut) or without segment
   labels the search stays sequence-only, and the check's detail says so (`[sequence only: ...]`). On the mini-index
   fixtures and on the 714 recorded MCP graphlet segments of the full run whose direct-local twin has the same shape,
-  the derived sets equal the full result's labels.
+  the derived sets equal the full result's labels. The MGT tokens are read as strictly as SPEC §7.5.1 and the
+  library (_codec) read them, and tests/test_checks.py `MgtCodecVectors` holds checks.py's readers to the golden
+  vectors (api/python/tests/data/traverse/codec_vectors.tsv): RANGES ascending and collapsed with one spelling per
+  id (no `01`, `+1`, `0-0`, `0,1`), every id 64-bit and below the number of L records (none in a body without L
+  records); a SETEXPR delta with no empty part and whose R lies in its base and A outside it; the free-text escapes
+  %25, %0A and %0D only; an L record's front-coding prefix an integer within the previous name, ending on a
+  character boundary. A body that breaks one of these has no label sets (the checks that read them fall back to the
+  sequence, as before) and no label dictionary from its L records; that such a body fails a check of its own is an
+  open decision.
 - The route search is memoised (A-05) on (segment, the seed copies still followed, whether the stated event was seen):
   every route to a segment has the same length and the copies it still follows fix its flank, so each state is
   searched once; `_MAX_ROUTE_STATES` (100,000 states) is a safeguard. A route counted "beyond the truth flank" now

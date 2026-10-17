@@ -3858,5 +3858,93 @@ class TraverseChecks(unittest.TestCase):
         self.assertNotIn("labels", arms["right"]["segments"][0])
 
 
+
+class MgtCodecVectors(unittest.TestCase):
+    """SD-014: checks.py's MGT token readers (RANGES, SETEXPR, the free-text escapes, the L records' front coding)
+    read the shared golden vectors (api/python/tests/data/traverse/codec_vectors.tsv) as SPEC-labeled-traversal-core
+    §7.5.1 and the library do: every valid spelling decodes to its value, every other one raises ValueError."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rows = []
+        with open(os.path.join(DATA, "codec_vectors.tsv"), "rb") as f:
+            for line in f.read().decode("utf-8").split("\n"):
+                if not line or line.startswith("#"):
+                    continue
+                cells = line.split("\t")
+                cls.rows.append((cells[0], json.loads(cells[1]), json.loads(cells[2])))
+
+    def tagged(self, tag):
+        rows = [(i, e) for t, i, e in self.rows if t == tag]
+        self.assertTrue(rows, tag)
+        return rows
+
+    @staticmethod
+    def front(prev, tok):
+        return checks._mgt_front(prev.encode("utf-8"), tok).decode("utf-8")
+
+    def assert_rejects(self, fn, *args):
+        with self.assertRaises(ValueError, msg=repr(args)):
+            fn(*args)
+
+    def test_ranges(self):
+        for ids, token in self.tagged("ranges"):
+            self.assertEqual(checks._mgt_ranges(token, None), set(ids), token)
+        for token, canonical in self.tagged("ranges_decode"):
+            if canonical is None:
+                self.assert_rejects(checks._mgt_ranges, token, None)
+            else:
+                self.assertEqual(checks._mgt_ranges(token, None), checks._mgt_ranges(canonical, None), token)
+        self.assert_rejects(checks._mgt_ranges, "3", 3)                  # every id below the L records' count
+        self.assert_rejects(checks._mgt_ranges, "0-3000000000", 5)       # checked before the run is expanded
+        self.assert_rejects(checks._mgt_ranges, "0", 0)                  # an empty id space has no id
+        self.assert_rejects(checks._mgt_ranges, "18446744073709551616", None)   # beyond 64 bits
+
+    def test_setexpr(self):
+        for (ids, base), token in self.tagged("setexpr"):
+            got = checks._mgt_setexpr(token, None if base is None else set(base), None)
+            self.assertEqual(got, set(ids), token)
+        for (token, base), canonical in self.tagged("setexpr_decode"):
+            b = None if base is None else set(base)
+            if canonical is None:
+                self.assert_rejects(checks._mgt_setexpr, token, b, None)
+            else:
+                self.assertEqual(checks._mgt_setexpr(token, b, None), checks._mgt_setexpr(canonical, b, None), token)
+
+    def test_free_text(self):
+        for text, token in self.tagged("pct"):
+            self.assertEqual(checks._mgt_unescape(token), text, token)
+        for token, canonical in self.tagged("pct_decode"):
+            if canonical is None:
+                self.assert_rejects(checks._mgt_unescape, token)
+            else:
+                self.assertEqual(checks._mgt_unescape(token), checks._mgt_unescape(canonical), token)
+
+    def test_front_coding(self):
+        for (prev, name), token in self.tagged("front"):
+            self.assertEqual(self.front(prev, token), name, token)
+        for (prev, token), canonical in self.tagged("front_decode"):
+            if canonical is None:
+                self.assert_rejects(self.front, prev, token)
+            else:
+                self.assertEqual(self.front(prev, token), self.front(prev, canonical), token)
+
+    def test_bodies(self):
+        head = "H mgt 1 31 basic $ACGT c k m 64 1000 0 walk * * *\n"
+        arm = "A r c 10 u 0 0 1 0 0 x *\nG * 0 10 %s * %s * * * ACGTACGTAC\nT X\n"
+        # a label id in a body without L records: no id space, so the sets are not read (§7.5.1)
+        self.assertNotIn("labels", checks.graphlet_arms(head + arm % ("0", "0"))["right"]["segments"][0])
+        two = head + "L c 0 * 0 a\nL c 0 * 1 b\n"
+        self.assertEqual(checks.graphlet_arms(two + arm % ("0-1", "!1"))["right"]["segments"][0]["labels"], [0, 1])
+        # a delta that does not fit its base (5 is not in the entry set {0, 1}) is a body the rules do not read
+        three = head + "".join("L c 0 * 0 %s\n" % n for n in "abcdef")
+        self.assertNotIn("labels", checks.graphlet_arms(three + arm % ("0-1", "!5"))["right"]["segments"][0])
+        # front coding: a negative prefix or one past the previous name is no L record
+        for bad in ("L c 0 * 0 abc\nL c 0 * -1 \n", "L c 0 * 0 abc\nL c 0 * 9 x\n", "L c 0 * 1 a\n",
+                    "L c 0 * 0 a%41\n"):
+            self.assert_rejects(checks.graphlet_label_dict, head + bad)
+        self.assertEqual([x["name"] for x in checks.graphlet_label_dict(head + "L c 0 * 0 abc\nL c 0 * 2 d%25\n")],
+                         ["abc", "abd%"])
+
 if __name__ == "__main__":
     unittest.main()
