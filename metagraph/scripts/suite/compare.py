@@ -1948,11 +1948,7 @@ def named_cases(cases, scenario):
     mcp.by_design (an id or a list), the scenario's service_by_design, its `sbd:<id>` tags, in that order, then every
     case listing the scenario's id in scenario_ids."""
     scenario = scenario or {}
-    ids = []
-    for own in (((scenario.get("mcp") or {}).get("by_design")), scenario.get("service_by_design")):
-        ids += [own] if isinstance(own, str) else [str(x) for x in own or [] if isinstance(x, str)]
-    ids += [t[4:] for t in scenario.get("tags") or [] if isinstance(t, str) and t.startswith("sbd:")]
-    out = [cases[i] for i in dict.fromkeys(ids) if i in (cases or {})]
+    out = [cases[i] for i in sc.named_case_ids(scenario) if i in (cases or {})]
     sid = str(scenario.get("id"))
     out += [c for c in (cases or {}).values() if sid in (c.get("scenario_ids") or []) and c not in out]
     return out
@@ -2183,13 +2179,9 @@ def runner_by_design_finding(line):
 
 
 def case_ids(scenario):
-    """The table cases a scenario names in mcp.by_design (an id or a list of ids)."""
-    ids = ((scenario or {}).get("mcp") or {}).get("by_design")
-    if isinstance(ids, str):
-        return [ids]
-    if isinstance(ids, list):
-        return [i for i in ids if isinstance(i, str)]
-    return []
+    """The table cases a scenario names in the manifest (suite_common.named_case_ids: mcp.by_design, service_by_design,
+    sbd:<id> tags), table-free: the gate's and its policy's reading, and the ids the table must hold."""
+    return sc.named_case_ids(scenario)
 
 
 def _transport_line(line):

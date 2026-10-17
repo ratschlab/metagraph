@@ -2129,6 +2129,21 @@ def outcome_from_checks(checks):
 EXPLAINABLE_OUTCOMES = ("fail", "not_exposed")
 
 
+def named_case_ids(scenario):
+    """The by-design case ids a scenario names in the manifest, as async's runner reads them (suite_mcp_runner.py
+    ServiceByDesign.named, less the table's scenario_ids): mcp.by_design, the scenario's service_by_design (each an id
+    or a list of ids), its `sbd:<id>` tags, in that order, each once; table-free (an id the table lacks is kept, so a
+    reader can name it). compare.named_cases adds the table's cases listing the scenario in scenario_ids; the gate
+    and its policy read these (SD-030)."""
+    scenario = scenario or {}
+    ids = []
+    for own in (((scenario.get("mcp") or {}).get("by_design")), scenario.get("service_by_design")):
+        ids += [own] if isinstance(own, str) else [x for x in own or [] if isinstance(x, str)] \
+            if isinstance(own, list) else []
+    ids += [t[4:] for t in scenario.get("tags") or [] if isinstance(t, str) and t.startswith("sbd:")]
+    return list(dict.fromkeys(ids))
+
+
 def entry_explains(entry, check):
     """Whether one explains_checks entry names a check item: a name, every item of that check; an object {check,
     detail_matches} (peer review R4), an item of that check whose detail the regex matches completely (re.fullmatch,

@@ -656,7 +656,7 @@ def judge(run_dir, policy, reevaluated=False):
             case = r.get("service_by_design_case")
             if case not in cmp.case_ids(s):
                 problems.append(_problem("outcome", "service_by_design by case %s, which the scenario does not name "
-                                                    "(mcp.by_design %s)" % (case, cmp.case_ids(s)), sid, arm, rep))
+                                                    "(the manifest names %s)" % (case, cmp.case_ids(s)), sid, arm, rep))
                 continue
         else:
             problems.append(_problem("outcome", "outcome %r" % (sc.outcome_value(o),), sid, arm, rep))

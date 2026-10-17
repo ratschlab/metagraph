@@ -901,6 +901,28 @@ class JudgeTest(GateCase):
                            "error": dict(REFUSED)}})))
         self.assertIn("which the scenario does not name", self.problems(v, "outcome")[0]["detail"])
 
+    def test_a_case_named_by_a_tag_or_service_by_design(self):
+        # SD-030: the gate reads the cases a scenario names in the manifest as compare and the MCP runner do
+        # (suite_common.named_case_ids): mcp.by_design, the scenario's service_by_design and its sbd:<id> tags; R-003
+        # named by a tag or by service_by_design is judged as R-003 naming it in mcp.by_design
+        for n, how in enumerate(({"tags": ["sbd:case.refused"]}, {"service_by_design": "case.refused"})):
+            scen = scenarios()
+            r3 = next(x for x in scen if x["id"] == "R-003")
+            del r3["mcp"]["by_design"]
+            r3.update(how)
+            m = manifest_of(scen)
+            self.assertEqual(cmp.case_ids(r3), ["case.refused"], how)
+            self.assertEqual([c["id"] for c in cmp.named_cases(TABLE[0], r3)], ["case.refused"], how)
+            v = gate.judge(make_run(self.run_dir("run%d" % n), m, mcp_lines(m)), policy_of(m))
+            self.assertTrue(v["passed"], gate.render(v))
+        # a case not expressible via MCP named by a tag excludes the scenario from the policy, as mcp.by_design does
+        tagged = scenario("R-009", "POST /resolve", tool="traverse_resolve")
+        tagged["tags"] = ["sbd:case.nim"]
+        ex = gate_policy.mcp_exclusion(tagged, dict(TABLE[0]))
+        self.assertEqual((ex or {}).get("rules"), ["table_not_expressible"])
+        self.assertEqual(sc.named_case_ids({"mcp": {"by_design": "a"}, "service_by_design": ["b", "a"],
+                                            "tags": ["x", "sbd:c", "sbd:b"]}), ["a", "b", "c"])
+
     def test_by_design_not_verified_fails(self):
         # the MCP answer is not the case's service answer: neither side verifies the pair
         bad = dict(REFUSED, code="other_code")
