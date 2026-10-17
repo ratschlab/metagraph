@@ -626,7 +626,9 @@ A record gives the cap trigger and counters where a result has no JSON arm).
   stopped at it; any other reason fails.
 - /pattern, `stop.reason` (§7.6): `time` and `determinism: time_limited` (also a low-complexity diagnostic the work
   time cut) need `timing.elapsed_ms` at or after a lower bound of the work time, time_budget_ms -
-  finalize_reserve_ms - 2 E, E the §7.6 formula at the default (slowest) delivery rates 10 / 50 MB/s over the
+  finalize_reserve_ms - 2 E (the reserve the answer states: the host's is configurable, --pattern-finalize-ms, and
+  checks.py has no host document to check it against; else 250), E the §7.6 formula at the default (slowest)
+  delivery rates 10 / 50 MB/s over the
   results in the answer plus every withheld result at a generous 2 KiB (64 KiB with labels or a predicate);
   `max_steps` the steps of all patterns at max_steps (every fixture's stop shows them equal); `max_contexts`,
   `max_anchors`, `max_paths`, `max_predicate_contexts` stop_at_threshold; `max_annotation_work` a search that reads
@@ -636,7 +638,10 @@ A record gives the cap trigger and counters where a result has no JSON arm).
   a list with neither holds every result: a source missing from it fails (retrieval_complete false alone means
   the labels are incomplete).
 - /resolve, `stop` (SPEC-labeled-traversal-core §4.5): reason `time` only, with `timing.elapsed_ms` at or after the
-  budget less the reserve.
+  budget less the reserve. The reserve is the host's 250 ms (not configurable), never the one the answer states; a
+  stated reserve above it fails (as suite_common's rules treat a refusal's). Every budget check reads the time budget
+  the same way (`_effective_budget`): the answer's echo when it is a number, else the request's, so an echoed null
+  never skips a time check (SD-021, SD-286, SD-296).
 - /traverse, an arm's `cap_trigger` (§6.7, §7.0): the arm's `walk_domain` limitation of the trigger's knob
   (traverse.cpp cap_knob: max_steps, max_live_paths / beam_pruned, max_paths, max_output_bp, time_budget_ms; for
   resource_limit the knob of the seed's resource_stop, which must exist) with the observed demand past its limit

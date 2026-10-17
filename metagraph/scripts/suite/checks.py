@@ -380,6 +380,23 @@ def _resolve_budget(sc: dict) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def _effective_budget(sc: dict, body: Any) -> Optional[float]:
+    """The time budget (ms) an answer is held to: its echo when that is a number (/pattern and /resolve
+    limits.time_budget_ms, /traverse strategy.bounds.time_budget_ms), else the request's (_stated_budget; /traverse
+    strategy.bounds.time_budget_ms); None when neither states one. An echo that is null or no number never hides the
+    request's budget (SD-286)."""
+    b = body if isinstance(body, dict) else {}
+    if sc.get("route") == "POST /traverse":
+        def bounds(x: Any) -> dict:
+            st = x.get("strategy") if isinstance(x, dict) and isinstance(x.get("strategy"), dict) else {}
+            return st.get("bounds") if isinstance(st.get("bounds"), dict) else {}
+        echo = _number(bounds(b).get("time_budget_ms"))
+        return echo if echo is not None else _number(bounds(sc.get("request")).get("time_budget_ms"))
+    lim = b.get("limits") if isinstance(b.get("limits"), dict) else {}
+    echo = _number(lim.get("time_budget_ms"))
+    return echo if echo is not None else _stated_budget(sc)
+
+
 def check_status(sc, ans, a, arm, client=None):
     http = ans.get("http")
     want = a.get("http", 200)
@@ -627,6 +644,13 @@ def check_capabilities_doc(sc, ans, a, arm):
 # SPEC-pattern-search §7.6: E = 1.25 x (B / (b x 1000) + B / (c x 1000)) ms for B bytes of results built, at the
 # delivery rates b and c in MB/s (--pattern-delivery-build-mbps 10, --pattern-delivery-compress-mbps 50 by default).
 _DELIVERY_MBPS = (10.0, 50.0)
+# The finalisation reserves (ms): /resolve's is the host's constant (SPEC-labeled-traversal-core §4.5; capabilities
+# resolve.time_budget.finalize_reserve_ms, finalize_reserve_configurable false), so a reserve the answer states is
+# checked against it, never believed (suite_common's rule: never from the failing answer); /pattern's is the host's
+# configured one (SPEC-pattern-search §10.2, --pattern-finalize-ms, default 250), which only the answer states here
+_RESOLVE_RESERVE_MS = 250.0
+_PATTERN_RESERVE_MS = 250.0
+
 # Bytes counted for each result an answer withholds (built, then not handed over): generous, so that E is an over-
 # estimate and the work time a lower bound (an occurrence list makes labelled results far larger).
 _RESULT_BYTES = {"plain": 2048, "labelled": 65536}
@@ -646,11 +670,11 @@ def _pattern_work_time(sc: dict, body: dict) -> Optional[float]:
     taken at twice its formula at the default (slowest) delivery rates, with every result the answer withholds
     counted at a generous size (_RESULT_BYTES), so an elapsed time below this bound is a time stop or a time
     limitation that came before the work time had passed. None without a budget."""
-    budget = _number(_limit(sc, body, "time_budget_ms"))
+    budget = _effective_budget(sc, body)
     if budget is None:
         return None
     reserve = _number((body.get("limits") or {}).get("finalize_reserve_ms"))
-    reserve = 250.0 if reserve is None else reserve
+    reserve = _PATTERN_RESERVE_MS if reserve is None else reserve
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     labelled = (req.get("output") or {}).get("labels") in ("all", "predicate_only") or req.get("predicate") is not None
     per = _RESULT_BYTES["labelled" if labelled else "plain"]
@@ -1177,15 +1201,15 @@ def _resolve_stop_problem(sc: dict, body: dict, client: Optional[dict] = None) -
         return None
     if stop.get("reason") != "time":
         return "a resolve stop of reason %r (SPEC §4.5 states time only)" % stop.get("reason")
-    lim = body.get("limits") or {}
-    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
-    budget = _number(lim.get("time_budget_ms"))
-    if budget is None:
-        budget = _number((req.get("bounds") or {}).get("time_budget_ms"))
+    lim = body.get("limits") if isinstance(body.get("limits"), dict) else {}
+    budget = _effective_budget(sc, body)
     if budget is None:
         return "a resolve time stop without a time budget"
-    reserve = _number(lim.get("finalize_reserve_ms"))
-    reserve = 250.0 if reserve is None else reserve
+    stated = _number(lim.get("finalize_reserve_ms"))
+    if stated is not None and stated > _RESOLVE_RESERVE_MS:
+        return "a resolve time stop with a stated finalisation reserve %g ms above the host's %g ms (SPEC §4.5: not " \
+               "configurable)" % (stated, _RESOLVE_RESERVE_MS)
+    reserve = _RESOLVE_RESERVE_MS
     wall = _number((client or {}).get("wall_ms"))
     if wall is not None and wall < budget - reserve - 1.0:
         return "a resolve time stop within a client wall of %.0f ms, before the budget %.0f ms less the reserve " \
@@ -1230,7 +1254,7 @@ def _arm_stop_problem(sc: dict, ans: dict, r: dict, i: int, side: str) -> Option
     else:
         knob = _CAP_KNOBS.get(trig)
     if trig == "time_budget":
-        budget = _number(bounds.get("time_budget_ms"))
+        budget = _effective_budget(sc, body)
         if budget is not None and isinstance(r.get("timing"), dict):
             latest, _ = _traverse_time_stop(r, budget)
             if latest is not None and latest < budget - 1.0:
@@ -2098,10 +2122,7 @@ def _budget_503(sc, ans, client, a=None):
     the deadline starts at the parsed body, inside the client's interval (SPEC-pattern-search §7.6,
     SPEC-labeled-traversal-core §4.5); FINDING when it came long past it (an unpolled piece of that length, which the
     SPECs' deadline rule answers at its next reading); else INCONCLUSIVE (nothing in the body to judge)."""
-    route = sc.get("route", "")
-    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
-    asked = _number(req.get("time_budget_ms")) if route == "POST /pattern" else \
-        _number((req.get("bounds") or {}).get("time_budget_ms")) if route == "POST /resolve" else None
+    asked = _stated_budget(sc)
     wall = _number((client or {}).get("wall_ms"))
     code = (ans.get("error") or {}).get("code")
     if asked is None or wall is None or code != "deadline":
@@ -2171,12 +2192,8 @@ def check_budget_respected(sc, ans, a, arm, client=None):
     the budget, is a performance fact stated in the detail (the report's timing section)."""
     body = _body(ans)
     route = sc.get("route", "")
-    req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     if route == "POST /traverse":
-        bounds = (req.get("strategy") or {}).get("bounds") or {}
-        budget = _number(((body.get("strategy") or {}).get("bounds") or {}).get("time_budget_ms"))
-        if budget is None:
-            budget = _number(bounds.get("time_budget_ms"))
+        budget = _effective_budget(sc, body)
         if budget is None:
             raise Missing("strategy.bounds.time_budget_ms")
         res = _get(body, "results")
@@ -2255,10 +2272,7 @@ def check_budget_respected(sc, ans, a, arm, client=None):
             seen, budget, ("; performance: " + "; ".join(facts)) if facts else "")
     if ans.get("http") == 503:
         return _budget_503(sc, ans, client, a)
-    budget = _number((body.get("limits") or {}).get("time_budget_ms"))
-    if budget is None:
-        named = req.get("time_budget_ms") if route == "POST /pattern" else (req.get("bounds") or {}).get("time_budget_ms")
-        budget = _number(named)
+    budget = _effective_budget(sc, body)
     if budget is None:
         raise Missing("limits.time_budget_ms")
     el = _number(_get(body, "timing.elapsed_ms"))

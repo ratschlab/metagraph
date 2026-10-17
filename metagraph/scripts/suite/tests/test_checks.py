@@ -3917,6 +3917,63 @@ class TraverseChecks(unittest.TestCase):
 
 
 
+class BudgetReaders(unittest.TestCase):
+    """SD-021, SD-286, SD-296: the time budget a check holds an answer to is the answer's echo when it is a number,
+    else the request's (per route), and /resolve's finalisation reserve is the host's (SPEC-labeled-traversal-core
+    §4.5: 250 ms, not configurable), never the one the judged answer states."""
+
+    def test_resolve_reserve_is_the_hosts(self):
+        sc = {"route": "POST /resolve", "request": {"bounds": {"time_budget_ms": 1000}}}
+        stop = {"reason": "time"}
+        # a stated reserve of 900 ms would put the work deadline at 100 ms: a stop at a client wall of 200 ms
+        body = {"stop": stop, "limits": {"time_budget_ms": 1000, "finalize_reserve_ms": 900}}
+        self.assertIn("stated finalisation reserve 900 ms above the host's 250 ms",
+                      checks._resolve_stop_problem(sc, body, {"wall_ms": 200.0}) or "")
+        for limits in ({"time_budget_ms": 1000}, {"time_budget_ms": 1000, "finalize_reserve_ms": 250},
+                       {"time_budget_ms": 1000, "finalize_reserve_ms": 100}):
+            body = {"stop": stop, "limits": limits}
+            self.assertIn("before the budget 1000 ms less the reserve 250 ms",
+                          checks._resolve_stop_problem(sc, body, {"wall_ms": 200.0}) or "", limits)
+            self.assertIsNone(checks._resolve_stop_problem(sc, body, {"wall_ms": 749.5}), limits)
+
+    def test_pattern_work_time(self):
+        sc = {"route": "POST /pattern", "request": {"time_budget_ms": 10000}}
+        base = checks._pattern_work_time(sc, {"limits": {"time_budget_ms": 10000}, "patterns": []})
+        self.assertEqual(base, 10000 - 250)
+        self.assertEqual(checks._pattern_work_time(sc, {"limits": {"time_budget_ms": 10000, "finalize_reserve_ms": 250},
+                                                        "patterns": []}), base)
+        # the host's /pattern reserve is configurable (--pattern-finalize-ms): the answer states it
+        self.assertEqual(checks._pattern_work_time(sc, {"limits": {"time_budget_ms": 10000, "finalize_reserve_ms": 1000},
+                                                        "patterns": []}), 9000)
+        # an echoed budget that is not a number: the request's (as budget_respected reads it)
+        for echo in ("10000", None, True):
+            self.assertEqual(checks._pattern_work_time(sc, {"limits": {"time_budget_ms": echo}, "patterns": []}), base,
+                             echo)
+        self.assertIsNone(checks._pattern_work_time({"route": "POST /pattern", "request": {}},
+                                                    {"limits": {"time_budget_ms": "10000"}, "patterns": []}))
+
+    def test_effective_budget(self):
+        for route, req, echo in (("POST /pattern", {"time_budget_ms": 5000}, {"limits": {"time_budget_ms": 4000}}),
+                                 ("POST /resolve", {"bounds": {"time_budget_ms": 5000}},
+                                  {"limits": {"time_budget_ms": 4000}}),
+                                 ("POST /traverse", {"strategy": {"bounds": {"time_budget_ms": 5000}}},
+                                  {"strategy": {"bounds": {"time_budget_ms": 4000}}})):
+            sc = {"route": route, "request": req}
+            self.assertEqual(checks._effective_budget(sc, echo), 4000, route)
+            self.assertEqual(checks._effective_budget(sc, {}), 5000, route)
+            for bad in (None, "4000", False):
+                odd = json.loads(json.dumps(echo).replace("4000", json.dumps(bad)))
+                self.assertEqual(checks._effective_budget(sc, odd), 5000, (route, bad))
+        self.assertIsNone(checks._effective_budget({"route": "POST /resolve", "request": {"bounds": [1000]}}, {}))
+
+    def test_traverse_time_stop_with_an_echoed_null_budget(self):
+        # an echoed strategy.bounds.time_budget_ms of null does not skip the time check: the request's budget holds
+        sc = {"route": "POST /traverse", "request": {"strategy": {"bounds": {"time_budget_ms": 1000}}}}
+        r = {"arms": {"right": {"cap_trigger": {"reason": "time_budget", "at_bp": 5}}}, "timing": {"elapsed_ms": 100}}
+        ans = ok_answer({"results": [r], "strategy": {"bounds": {"time_budget_ms": None}}})
+        self.assertEqual(checks._arm_stop_problem(sc, ans, r, 0, "right"),
+                         "right: truncated by time_budget by 100 ms, before the 1000 ms budget")
+
 class MgtCodecVectors(unittest.TestCase):
     """SD-014: checks.py's MGT token readers (RANGES, SETEXPR, the free-text escapes, the L records' front coding)
     read the shared golden vectors (api/python/tests/data/traverse/codec_vectors.tsv) as SPEC-labeled-traversal-core
