@@ -5596,6 +5596,17 @@ int traverse_graph(Config *config) {
         // server's 400 does; a malformed id is refused
         // without (nothing to reconcile)
         std::unique_ptr<Attempt> attempt;
+        // a failed request gets the body the server answers it with, and the next file is still
+        // answered (an exception that escaped would end the run in std::terminate, without a
+        // body for this file or the later ones)
+        auto answer_failure = [&](const std::string &error) {
+            Json::Value err;
+            err["error"] = error;
+            if (attempt)
+                err["usage"] = attempt->usage_json("error");
+            std::cout << Json::writeString(builder, err) << std::endl;
+            status = 1;
+        };
         try {
             if (!config->traverse_resolve) {
                 const AttemptIds ids = attempt_ids(json);
@@ -5644,12 +5655,14 @@ int traverse_graph(Config *config) {
             status = 1;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());
-            Json::Value err;
-            err["error"] = e.what();
-            if (attempt)
-                err["usage"] = attempt->usage_json("error");
-            std::cout << Json::writeString(builder, err) << std::endl;
-            status = 1;
+            answer_failure(e.what());
+        } catch (const std::exception &e) {
+            // anything else (an internal failure): the server's 400 {"error"} (and usage)
+            logger->error("Request in {} failed: {}", file, e.what());
+            answer_failure(e.what());
+        } catch (...) {
+            logger->error("Request in {} failed", file);
+            answer_failure("Internal server error");
         }
     }
     return status;

@@ -32,10 +32,14 @@
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "cli/load/load_annotation.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/file_utils.hpp"
 
 
@@ -2746,5 +2750,122 @@ TEST(GraphletServer, SymlinkedMainFilesDoNotHideTheirSidecars) {
     } catch (const std::invalid_argument &ex) {
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("one index_fp")) << ex.what();
     }
+    fs::remove_all(dir);
+}
+
+// `metagraph traverse` answers every request file it reads as the server answers the request:
+// one whose processing throws another exception than InvalidRequest (here the walker's
+// runtime_error on an inconsistent primary graph, which stores both strands of S) gets the
+// server's 400 body, {"error"} and its usage when the request is an attempt, the exit status
+// is 1, and the next file is still answered. Before, such an exception escaped the CLI's loop
+// and ended the run in std::terminate, without a body for that file or the later ones
+TEST(GraphletCli, AFailedRequestIsAnsweredAndTheNextFileToo) {
+    using mtg::graph::AnnotatedDBG;
+    using mtg::graph::CanonicalDBG;
+    using mtg::graph::DBGSuccinct;
+    using mtg::graph::DeBruijnGraph;
+    namespace fs = std::filesystem;
+    const size_t k = 11;
+    auto random_seq = [](size_t length, uint32_t seed) {
+        std::mt19937 rng(seed);
+        std::string s(length, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const std::string S = random_seq(80, 17);
+    const std::string T = random_seq(80, 29);
+    std::string rc_s = S;
+    ::reverse_complement(rc_s);
+    // S on both strands (inconsistent for a primary graph), T on one
+    auto base = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
+    base->add_sequence(S);
+    base->add_sequence(rc_s);
+    base->add_sequence(T);
+    base->mask_dummy_kmers(1, false);
+    AnnotatedDBG anno(std::make_shared<CanonicalDBG>(base),
+                      std::make_unique<mtg::annot::ColumnCompressed<>>(base->max_index()));
+    anno.annotate_sequence(S, { "A" });
+    anno.annotate_sequence(T, { "B" });
+
+    const fs::path dir = fs::absolute("temp_traverse_cli_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string graph = (dir / "graph").string() + DBGSuccinct::kExtension;
+    base->serialize(graph);
+    anno.get_annotator().serialize((dir / "anno").string());
+    const std::string annotation
+            = (dir / "anno").string() + mtg::annot::ColumnCompressed<>::kExtension;
+    auto request_file = [&](const std::string &name, const std::string &sequence,
+                            const std::string &label, const std::string &attempt_id) {
+        Json::Value r;
+        Json::Value seed;
+        seed["sequence"] = sequence;
+        seed["labels"].append(label);
+        r["seeds"].append(seed);
+        r["strategy"] = Json::Value(Json::objectValue);
+        if (!attempt_id.empty())
+            r["attempt_id"] = attempt_id;
+        const std::string path = (dir / name).string();
+        std::ofstream(path) << json_text(r, true);
+        return path;
+    };
+    const std::vector<std::string> files = {
+        request_file("attempt.json", S.substr(20, 30), "A", "cli-failed"),
+        request_file("plain.json", S.substr(20, 30), "A", ""),
+        request_file("next.json", T.substr(20, 30), "B", ""),
+    };
+
+    // the Config main() makes from the command line (it sets the swap path; restored)
+    const fs::path swap = utils::get_swap_path();
+    std::vector<std::string> args = { "metagraph", "traverse", "--json", "-i", graph, "-a",
+                                      annotation };
+    args.insert(args.end(), files.begin(), files.end());
+    std::vector<char*> argv;
+    for (std::string &a : args) {
+        argv.push_back(a.data());
+    }
+    argv.push_back(nullptr);
+    Config config(static_cast<int>(args.size()), argv.data());
+    utils::set_swap_path(swap);
+
+    std::ostringstream captured;
+    std::streambuf *cout_buffer = std::cout.rdbuf(captured.rdbuf());
+    int status = -1;
+    std::string escaped;
+    try {
+        status = traverse_graph(&config);
+    } catch (const std::exception &e) {
+        escaped = e.what();
+    }
+    std::cout.rdbuf(cout_buffer);
+    EXPECT_EQ("", escaped) << "an exception escaped the CLI's loop (std::terminate in main)";
+    EXPECT_EQ(1, status);
+
+    std::vector<Json::Value> answers;
+    std::istringstream lines(captured.str());
+    for (std::string line; std::getline(lines, line); ) {
+        Json::Value v;
+        Json::CharReaderBuilder reader;
+        std::string errors;
+        std::istringstream in(line);
+        ASSERT_TRUE(Json::parseFromStream(reader, in, &v, &errors)) << errors << ": " << line;
+        answers.push_back(v);
+    }
+    ASSERT_EQ(3u, answers.size()) << captured.str();
+    // the attempt: the server's 400 with its usage
+    EXPECT_EQ(std::vector<std::string>({ "error", "usage" }), answers[0].getMemberNames());
+    EXPECT_NE(std::string::npos,
+              answers[0]["error"].asString().find("Inconsistent primary graph at node"))
+            << answers[0]["error"];
+    EXPECT_EQ("cli-failed", answers[0]["usage"]["attempt_id"].asString());
+    EXPECT_EQ("error", answers[0]["usage"]["reason"].asString());
+    // without attempt_id: the error alone
+    EXPECT_EQ(std::vector<std::string>({ "error" }), answers[1].getMemberNames());
+    EXPECT_EQ(answers[0]["error"], answers[1]["error"]);
+    // the next file is answered
+    EXPECT_FALSE(answers[2].isMember("error")) << answers[2]["error"];
+    ASSERT_EQ(1u, answers[2]["results"].size());
     fs::remove_all(dir);
 }

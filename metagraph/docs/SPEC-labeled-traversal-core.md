@@ -2562,7 +2562,11 @@ metagraph traverse --resolve -i GRAPH -a ANNOTATION request.json [...]
 ```
 
 Request files are exactly the JSON bodies of §4.1/§5; one JSON document per request on stdout. One code path with
-the server.
+the server. A request that fails gets the body the server's error gives it — `{"error"}`, with `usage` when it
+has an `attempt_id`; `"Internal server error"` for a failure that is no exception the server names — the exit
+status is 1 and the next file is still answered (before, a failure other than a malformed request, such as the
+walker's on an inconsistent primary graph, ended the run with an abort and nothing written for that file or the
+later ones). A file that cannot be read or is not JSON ends the run (exit status 1).
 
 ### 10.3 Server
 
