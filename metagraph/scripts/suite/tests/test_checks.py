@@ -2233,7 +2233,8 @@ class Relations(unittest.TestCase):
 
     def test_same_answer_edge_readings(self):
         # the reference's reading of the edge cases compare.py's built-in evaluation must reproduce (SD-011):
-        # leaves compared with == (1 equals 1.0 and True), args.ignore names object keys and looks through lists,
+        # leaves compared as JSON values (1 equals 1.0; a boolean only the same boolean, the owner's decision: true is
+        # not 1, false not 0, as suite_common.json_equal), args.ignore names object keys and looks through lists,
         # args.paths steps are keys or list indices (a negative one counts from the end, '*' is no step), a path is
         # read on the body before timing is dropped from its value, a missing path or a 200 without a body is
         # not_exposed on the MCP arm and a failure elsewhere, malformed arguments fail
@@ -2242,7 +2243,11 @@ class Relations(unittest.TestCase):
         lst = lambda *ts: {"p": [{"t": t, "u": 1} for t in ts]}  # noqa: E731
         for name, a, b, args, want in (
                 ("int vs float", ans({"x": 1}), ans({"x": 1.0}), {}, ("pass", "pass")),
-                ("bool vs int", ans({"x": True}), ans({"x": 1}), {}, ("pass", "pass")),
+                ("bool vs int", ans({"x": True}), ans({"x": 1}), {}, ("fail", "fail")),
+                ("false vs 0 in a list", ans({"x": [False]}), ans({"x": [0]}), {}, ("fail", "fail")),
+                ("0.0 vs false", ans({"x": 0.0}), ans({"x": False}), {}, ("fail", "fail")),
+                ("bool vs bool", ans({"x": [True, False]}), ans({"x": [True, False]}), {}, ("pass", "pass")),
+                ("bool path", ans({"x": True}), ans({"y": 1}), {"paths": [["x", "y"]]}, ("fail", "fail")),
                 ("ignore through a list", ans(lst(1, 2)), ans(lst(3, 4)), {"ignore": ["p.t"]}, ("pass", "pass")),
                 ("ignore with '*'", ans(lst(1, 2)), ans(lst(3, 4)), {"ignore": ["p.*.t"]}, ("fail", "fail")),
                 ("ignore with an index", ans(lst(1, 2)), ans(lst(3, 2)), {"ignore": ["p.0.t"]}, ("fail", "fail")),

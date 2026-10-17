@@ -430,6 +430,28 @@ def counts(scenarios, relations=()) -> dict:
                                  "budget_stress", "warm-up", "smoke", SMOKE_TAG)}}
 
 
+# a step of a same_answer args.ignore path that names no object key: a list index (negative too) or '*'
+_INDEX_STEP = re.compile(r"(-?[0-9]+|\*)\Z")
+
+
+def _ignore_problems(ignore) -> list:
+    """Why a same_answer args.ignore is not a list of dotted object-key paths (checks._drop and compare.relation_drop:
+    a path names object keys and looks through lists): a list index or '*' as a step matches nothing in either reader
+    (the owner's decision on SD-011: refused, not given a meaning), nor does an empty step."""
+    if not isinstance(ignore, list):
+        return ["args.ignore %s is not a list of paths" % json.dumps(ignore)]
+    out = []
+    for path in ignore:
+        if not isinstance(path, str):
+            out.append("args.ignore %s is not a dotted path" % json.dumps(path))
+            continue
+        bad = [step for step in path.split(".") if step == "" or _INDEX_STEP.match(step)]
+        if bad:
+            out.append("args.ignore %r: the step %r is no object key (an index, '*' or an empty step matches "
+                       "nothing; a path looks through lists)" % (path, bad[0]))
+    return out
+
+
 def validate_relations(relations, scenarios) -> list:
     """Unique ids, a known type, both ends scenarios of the manifest and distinct, the args each type reads."""
     problems = []
@@ -452,6 +474,8 @@ def validate_relations(relations, scenarios) -> list:
         for f in need[r["type"]]:
             if f not in r["args"]:
                 problems.append("%s: no args.%s" % (r["id"], f))
+        if r["type"] == "same_answer" and "ignore" in r["args"]:
+            problems += ["%s: %s" % (r["id"], m) for m in _ignore_problems(r["args"]["ignore"])]
         if r["type"] == "zero_equals_absent" and r["a"] in ids and r["b"] in ids:
             a, b = ids[r["a"]], ids[r["b"]]
             if a["route"] != "POST /pattern" or b["route"] != "POST /resolve" or a["request"].get("strands") != "forward":

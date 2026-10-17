@@ -2757,8 +2757,17 @@ def relation_drop(o, ignore, prefix=""):
     return o
 
 
+def json_leaf_equal(a, b):
+    """Two JSON leaves equal as JSON values (checks._json_leaf_equal, suite_common.json_equal's leaf rule): a boolean
+    only the same boolean (true is not 1; the owner's decision on SD-011), numbers by value (1 equals 1.0)."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    return a == b
+
+
 def first_difference(a, b, path=""):
-    """The first difference of two JSON values as text, or "" (checks._first_difference: leaves compared with ==)."""
+    """The first difference of two JSON values as text, or "" (checks._first_difference: leaves compared as JSON
+    values, json_leaf_equal)."""
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b)):
             if k not in a or k not in b:
@@ -2775,7 +2784,8 @@ def first_difference(a, b, path=""):
             if d:
                 return d
         return ""
-    return "" if a == b else "%s: %s vs %s" % (path.rstrip(".") or "<root>", json.dumps(a)[:80], json.dumps(b)[:80])
+    return "" if json_leaf_equal(a, b) else "%s: %s vs %s" % (path.rstrip(".") or "<root>", json.dumps(a)[:80],
+                                                            json.dumps(b)[:80])
 
 
 def _same_answer(a, b, args):

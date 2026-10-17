@@ -517,8 +517,11 @@ depth.
   negative one counting from the end, `*` no step); a missing path fails (not_exposed on the MCP arm, as a 200
   without a body). Without `paths`, the two bodies must be equal without timing and without the dotted paths in
   `args.ignore` (default none; an ignore path names object keys and looks through a list on its way, so
-  `patterns.stop` drops `stop` in every pattern, while an index or `*` step matches nothing). Values are compared
-  with Python's `==` (1 equals 1.0 and true). Used for: max_mismatches 0 versus
+  `patterns.stop` drops `stop` in every pattern; the builder refuses an ignore path with an index, `*` or empty
+  step, which would match nothing, and no manifest uses `args.ignore`). Values are compared as JSON values, as
+  suite_common.json_equal: numbers by value (1 equals 1.0), a boolean only the same boolean (true is not 1, false
+  not 0), in checks.py and compare.py's built-in copy together (the owner's decisions on SD-011; the stdlib copy and
+  its parity test stay). Used for: max_mismatches 0 versus
   the same request without the field (SPEC-pattern-search §21.2), lower case versus upper case (pattern and
   resolve), and the three capabilities documents (release, server instance, deadline-check and resolve blocks of
   /capabilities and /traverse/capabilities; /capabilities' `pattern` block equal to /pattern/capabilities; the gate

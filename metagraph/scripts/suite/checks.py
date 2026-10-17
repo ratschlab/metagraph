@@ -4893,7 +4893,17 @@ def _drop(o: Any, ignore: Sequence[str], prefix: str = "") -> Any:
     return o
 
 
+def _json_leaf_equal(a: Any, b: Any) -> bool:
+    """Two JSON leaves equal as JSON values (suite_common.json_equal's leaf rule): a boolean only the same boolean
+    (true is not 1, false not 0; the owner's decision on SD-011), numbers by value (1 equals 1.0)."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    return a == b
+
+
 def _first_difference(a: Any, b: Any, path: str = "") -> str:
+    """The first difference of two JSON values as text, or "": objects key by key, lists item by item, leaves as JSON
+    values (_json_leaf_equal); compare.py's first_difference is the same rule (tests/test_compare_report.py)."""
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a) | set(b)):
             if k not in a or k not in b:
@@ -4910,7 +4920,8 @@ def _first_difference(a: Any, b: Any, path: str = "") -> str:
             if d:
                 return d
         return ""
-    return "" if a == b else "%s: %s vs %s" % (path.rstrip(".") or "<root>", json.dumps(a)[:80], json.dumps(b)[:80])
+    return "" if _json_leaf_equal(a, b) else "%s: %s vs %s" % (path.rstrip(".") or "<root>", json.dumps(a)[:80],
+                                                             json.dumps(b)[:80])
 
 
 def _relation_same_answer(rel, a_sc, A, b_sc, B):

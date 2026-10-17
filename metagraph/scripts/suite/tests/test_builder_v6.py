@@ -368,5 +368,32 @@ class ManifestV6(unittest.TestCase):
         self.assertEqual(ml.canonical_json(m["scenarios"]), ml.canonical_json(self.v6["scenarios"]))
 
 
+
+class BuilderRules(unittest.TestCase):
+    """The builder's validation rules of the harness round of 2026-10-17 (the owner's decisions on the
+    semantic-duplication findings), held on hand-made scenarios and on every manifest under manifest/."""
+
+    @staticmethod
+    def manifests():
+        d = os.path.join(SUITE, "manifest")
+        return [(n, sc.read_json(os.path.join(d, n))) for n in sorted(os.listdir(d)) if n.endswith(".json")]
+
+    def test_same_answer_ignore_paths_name_object_keys(self):
+        # SD-011: args.ignore names object keys, dot-separated, looked through lists (checks._drop and compare's
+        # relation_drop alike); a step that is a list index or '*' matches nothing in either reader, so the builder
+        # refuses it, as it refuses a list that is no list of such paths
+        scen = [{"id": "A", "route": "POST /pattern"}, {"id": "B", "route": "POST /pattern"}]
+        rel = lambda ignore: {"id": "REL-x", "type": "same_answer", "a": "A", "b": "B",  # noqa: E731
+                              "args": {"ignore": ignore}}
+        self.assertEqual(bm.validate_relations([rel(["timing", "patterns.stats.load_ms"])], scen), [])
+        for bad in (["p.0.t"], ["p.*.t"], ["*"], ["p.-1"], ["p..t"], [""], "p.t", [5], {"p": 1}):
+            probs = bm.validate_relations([rel(bad)], scen)
+            self.assertTrue(any("args.ignore" in p for p in probs), (bad, probs))
+        # no manifest uses args.ignore (the rule changes no build)
+        for name, m in self.manifests():
+            for r in m.get("relations") or []:
+                self.assertNotIn("ignore", r.get("args") or {}, (name, r.get("id")))
+
+
 if __name__ == "__main__":
     unittest.main()

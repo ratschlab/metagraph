@@ -2360,6 +2360,9 @@ class ReportTest(unittest.TestCase):
             ("list lengths", ans({"x": [1]}), ans({"x": [1, 2]}), {}),
             ("int vs float", ans({"x": 1}), ans({"x": 1.0}), {}),
             ("bool vs int", ans({"x": True}), ans({"x": 1}), {}),
+            ("false vs 0 in a list", ans({"x": [False]}), ans({"x": [0]}), {}),
+            ("bool vs bool", ans({"x": [True, False]}), ans({"x": [True, False]}), {}),
+            ("bool path", ans({"x": True}), ans({"y": 1}), {"paths": [["x", "y"]]}),
             ("ignore a key", ans({"x": 1, "y": 2}), ans({"x": 1, "y": 3}), {"ignore": ["y"]}),
             ("ignore through a list", ans(lst(1, 2)), ans(lst(3, 4)), {"ignore": ["p.t"]}),
             ("ignore with '*'", ans(lst(1, 2)), ans(lst(3, 4)), {"ignore": ["p.*.t"]}),
@@ -2393,6 +2396,12 @@ class ReportTest(unittest.TestCase):
                 got = rels[0]["arms"][arm]
                 self.assertEqual((got["outcome"], got["detail"]), (ref["outcome"], ref["detail"]),
                                  "%s on %s" % (name, arm))
+        # the owner's decision on SD-011, in both copies together: a boolean equals only the same boolean (true is
+        # not 1), numbers by value (1 equals 1.0), as suite_common.json_equal
+        for a, b, want in (({"x": True}, {"x": 1}, "fail"), ({"x": [False]}, {"x": [0]}, "fail"),
+                           ({"x": 1}, {"x": 1.0}, "pass"), ({"x": False}, {"x": False}, "pass")):
+            self.assertEqual(cmp.relation_same_answer(ans(a), ans(b), {})[0], want, (a, b))
+            self.assertEqual(cmp.first_difference(a, b) == "", sc.json_equal(a, b), (a, b))
 
     def test_inconclusive_verdict(self):
         # review N5: a run in which no execution passed and some were inconclusive is INCONCLUSIVE, never PASS
