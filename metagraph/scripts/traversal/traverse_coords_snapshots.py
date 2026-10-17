@@ -109,33 +109,43 @@ def _free_port():
     return port
 
 
+# never through a proxy: the server is on localhost (as the suite oracle's client, oracle/server.py)
+_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 class _Server:
     def __init__(self, binary, index):
-        port = _free_port()
-        cmd = [binary, 'server_query', '-i', os.path.join(index, 'graph_k31.dbg'),
-               '-a', os.path.join(index, 'annotation.relaxed.relabeled.row_diff_brwt_coord'
-                                         '.annodbg'),
-               '--port', str(port), '--address', '127.0.0.1', '-p', '2', '--mmap',
-               '--traverse-max-time-ms', '120000', '--traverse-chunk-target-ms', '0',
-               '--index-name', 'mini_refseq', '--index-manifest',
-               os.path.join(index, 'annotation.relaxed.relabeled.manifest.json')]
-        self.p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.url = 'http://127.0.0.1:%d' % port
-        for _ in range(600):
-            try:
-                with urllib.request.urlopen(self.url + '/traverse/capabilities', timeout=5):
-                    return
-            except (OSError, urllib.error.URLError):
-                if self.p.poll() is not None:
-                    raise RuntimeError('the server exited')
-                time.sleep(0.2)
-        raise RuntimeError('the server did not start')
+        # another free port when the server exits at start (one taken between the probe and
+        # its bind), as pattern_fixtures.Server and the suite oracle's launcher do
+        for _ in range(10):
+            port = _free_port()
+            cmd = [binary, 'server_query', '-i', os.path.join(index, 'graph_k31.dbg'),
+                   '-a', os.path.join(index, 'annotation.relaxed.relabeled.row_diff_brwt_coord'
+                                             '.annodbg'),
+                   '--port', str(port), '--address', '127.0.0.1', '-p', '2', '--mmap',
+                   '--traverse-max-time-ms', '120000', '--traverse-chunk-target-ms', '0',
+                   '--index-name', 'mini_refseq', '--index-manifest',
+                   os.path.join(index, 'annotation.relaxed.relabeled.manifest.json')]
+            self.p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.url = 'http://127.0.0.1:%d' % port
+            for _ in range(600):
+                try:
+                    with _LOCAL.open(self.url + '/traverse/capabilities', timeout=5):
+                        return
+                except (OSError, urllib.error.URLError):
+                    if self.p.poll() is not None:
+                        break
+                    time.sleep(0.2)
+            else:
+                self.close()
+                raise RuntimeError('the server did not start')
+        raise RuntimeError('the server exited at start on 10 ports')
 
     def post(self, payload):
         req = urllib.request.Request(self.url + '/traverse', json.dumps(payload).encode(),
                                      {'Content-Type': 'application/json'})
         try:
-            with urllib.request.urlopen(req, timeout=600) as r:
+            with _LOCAL.open(req, timeout=600) as r:
                 return r.status, r.read()
         except urllib.error.HTTPError as e:
             return e.code, e.read()

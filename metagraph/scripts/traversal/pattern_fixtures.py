@@ -2326,11 +2326,15 @@ def free_port():
         return s.getsockname()[1]
 
 
+# never through a proxy: the server is on localhost (as the suite oracle's client, oracle/server.py)
+LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def http(port, method, path, body=None):
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', data=data, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
+        with LOCAL.open(req, timeout=300) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
