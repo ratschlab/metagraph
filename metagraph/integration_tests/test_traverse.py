@@ -3924,6 +3924,42 @@ class TestTraverseWideIndex(TestingBase):
                 self.assertIn(f'{flag} must be an integer in [0, 2^53 - 1]',
                               res.stdout.decode(), (flag, value))
 
+    def test_caps_and_rates_are_parsed_strictly(self):
+        """The traverse caps, the delivery rates, the compression level and the information
+        floor are read whole, as the other flags the capabilities state: a value that is not
+        what the flag takes refuses to start, naming the flag and what it takes. Read with
+        atoll / atof / atoi, -1 started stating max_seeds 2^64 - 1, 'abc' and '5x' started as 0
+        (unlimited) and 5, and 'inf' started stating a rate no JSON number holds."""
+        cases = []
+        for flag in ('--traverse-max-seeds', '--traverse-max-seed-bp',
+                     '--traverse-max-seed-labels', '--resolve-max-query-bp'):
+            for value in ('-1', '1.5', '9007199254740992', '5x', 'abc'):
+                cases.append((flag, value, f'{flag} must be an integer in [0, 2^53 - 1]'))
+        for value in ('-1', 'abc', '5x', 'inf', '1e400', 'nan'):
+            cases.append(('--traverse-max-time-ms', value,
+                          '--traverse-max-time-ms must be a number >= 0'))
+        for flag in ('--traverse-delivery-compress-mbps', '--traverse-delivery-build-mbps',
+                     '--pattern-delivery-build-mbps', '--pattern-delivery-compress-mbps'):
+            for value in ('0', '-1', 'inf', 'nan', '5x'):
+                cases.append((flag, value, f'{flag} must be a positive number'))
+        for value in ('0', '10', '5x', 'abc'):
+            cases.append(('--traverse-compression-level', value,
+                          '--traverse-compression-level must be an integer in [1, 9]'))
+        for value in ('-1', 'abc', 'inf'):
+            cases.append(('--pattern-min-information-bits', value,
+                          '--pattern-min-information-bits must be a number >= 0'))
+        for flag, value, message in cases:
+            with self.subTest(flag=flag, value=value):
+                try:
+                    res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'server_query', '-i', self.graph, '-a', self.anno, flag, value,
+                        '--port', str(_free_port()), '--address', '127.0.0.1'],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
+                except subprocess.TimeoutExpired:
+                    self.fail(f'server_query started with {flag} {value}')
+                self.assertNotEqual(0, res.returncode)
+                self.assertIn(f"{message}, got '{value}'", res.stdout.decode())
+
     def test_row_diff_budgets_are_kept_within_a_chunk(self):
         """A split read starts with at most 8 rows: a first chunk sized from other reads' rows
         (a level's cheap shared rows) would take 650-880 ms against chunk_target_ms 50, and

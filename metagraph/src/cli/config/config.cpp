@@ -168,6 +168,22 @@ Config::Config(int argc, char *argv[]) {
     const auto bounded = [&](const char *option, const char *text, uint64_t max, uint64_t *out) {
         in_range(option, text, 0, max, out);
     };
+    // A number the capabilities state as given (a time cap, a rate, a floor in bits): the whole
+    // text a finite number, at least 0 or (|positive|) above it. atof read '5x' as 5 and 'abc'
+    // as 0 (unlimited, for a cap), and 'inf' or '1e400' as an infinity no JSON number states
+    const auto exact_number = [&](const char *option, const char *text, bool positive,
+                                  double *out) {
+        char *end = nullptr;
+        const double v = std::strtod(text, &end);
+        if (end == text || *end != '\0' || !std::isfinite(v) || !(positive ? v > 0 : v >= 0)) {
+            std::cerr << "Error: " << option << " must be "
+                      << (positive ? "a positive number" : "a number >= 0") << ", got '" << text
+                      << "'" << std::endl;
+            print_usage_and_exit = true;
+            return;
+        }
+        *out = v == 0 ? 0.0 : v;   // -0 as 0
+    };
 
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
@@ -423,15 +439,24 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--index-manifest")) {
             index_manifest = get_value(i++);
         } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
-            traverse_max_time_ms = atof(get_value(i++));
+            exact_number(argv[i], get_value(i), false, &traverse_max_time_ms);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
-            traverse_max_seeds = atoll(get_value(i++));
+            uint64_t seeds = traverse_max_seeds;
+            exact_ms(argv[i], get_value(i), &seeds);
+            traverse_max_seeds = seeds;
+            i++;
         } else if (!strcmp(argv[i], "--traverse-max-seed-bp")) {
-            traverse_max_seed_bp = atoll(get_value(i++));
+            exact_ms(argv[i], get_value(i), &traverse_max_seed_bp);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-max-seed-labels")) {
-            traverse_max_seed_labels = atoll(get_value(i++));
+            uint64_t labels = traverse_max_seed_labels;
+            exact_ms(argv[i], get_value(i), &labels);
+            traverse_max_seed_labels = labels;
+            i++;
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
-            resolve_max_query_bp = atoll(get_value(i++));
+            exact_ms(argv[i], get_value(i), &resolve_max_query_bp);
+            i++;
         } else if (!strcmp(argv[i], "--max-graphs-without-selection")) {
             // at least 1: with 0 no request without `graphs` could be answered, and the
             // capabilities would state a threshold no list is within
@@ -469,11 +494,16 @@ Config::Config(int argc, char *argv[]) {
             exact_ms(argv[i], get_value(i), &traverse_path_cache_mb);
             i++;
         } else if (!strcmp(argv[i], "--traverse-compression-level")) {
-            traverse_compression_level = atoi(get_value(i++));
+            uint64_t level = traverse_compression_level;
+            in_range(argv[i], get_value(i), 1, 9, &level);
+            traverse_compression_level = static_cast<int>(level);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-delivery-compress-mbps")) {
-            traverse_delivery_compress_mbps = atof(get_value(i++));
+            exact_number(argv[i], get_value(i), true, &traverse_delivery_compress_mbps);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-delivery-build-mbps")) {
-            traverse_delivery_build_mbps = atof(get_value(i++));
+            exact_number(argv[i], get_value(i), true, &traverse_delivery_build_mbps);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-attempt-retention-s")) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionS, &traverse_attempt_retention_s);
             i++;
@@ -492,15 +522,8 @@ Config::Config(int argc, char *argv[]) {
             i++;
         } else if (!strcmp(argv[i], "--pattern-min-information-bits")) {
             // a number of bits: stated in the capabilities as given
-            char *end = nullptr;
-            const char *text = get_value(i++);
-            pattern_min_information_bits = std::strtod(text, &end);
-            if (end == text || *end != '\0' || !(pattern_min_information_bits >= 0)
-                    || !std::isfinite(pattern_min_information_bits)) {
-                std::cerr << "Error: --pattern-min-information-bits must be a number >= 0, got '"
-                          << text << "'" << std::endl;
-                print_usage_and_exit = true;
-            }
+            exact_number(argv[i], get_value(i), false, &pattern_min_information_bits);
+            i++;
         } else if (!strcmp(argv[i], "--pattern-max-checked-entries")) {
             bounded(argv[i], get_value(i), kMaxPatternCheckedEntries,
                     &pattern_max_checked_entries);
@@ -531,9 +554,13 @@ Config::Config(int argc, char *argv[]) {
             exact_ms(argv[i], get_value(i), &pattern_finalize_ms);
             i++;
         } else if (!strcmp(argv[i], "--pattern-delivery-build-mbps")) {
-            pattern_delivery_build_mbps = atof(get_value(i++));
+            // the rates an answer's finalisation estimate assumes (a rate that is not a positive
+            // number would make the estimate meaningless), as /traverse's delivery reserve's
+            exact_number(argv[i], get_value(i), true, &pattern_delivery_build_mbps);
+            i++;
         } else if (!strcmp(argv[i], "--pattern-delivery-compress-mbps")) {
-            pattern_delivery_compress_mbps = atof(get_value(i++));
+            exact_number(argv[i], get_value(i), true, &pattern_delivery_compress_mbps);
+            i++;
         } else if (!strcmp(argv[i], "--pattern-max-patterns")) {
             exact_ms(argv[i], get_value(i), &pattern_max_patterns);
             i++;
@@ -920,16 +947,6 @@ Config::Config(int argc, char *argv[]) {
                   "less " << kServerTransportMarginMs << " ms for the transport)" << std::endl;
         print_usage_and_exit = true;
     }
-    // the rates the finalisation estimate of an answer assumes: a rate that is not a positive
-    // number would make the estimate meaningless
-    if ((identity == PATTERN || identity == SERVER_QUERY)
-            && (!(pattern_delivery_build_mbps > 0) || !std::isfinite(pattern_delivery_build_mbps)
-                || !(pattern_delivery_compress_mbps > 0)
-                || !std::isfinite(pattern_delivery_compress_mbps))) {
-        std::cerr << "Error: --pattern-delivery-build-mbps and --pattern-delivery-compress-mbps "
-                     "must be positive numbers" << std::endl;
-        print_usage_and_exit = true;
-    }
     // the labelled retrieval's caps: a row keeps at least one label, a read needs work and
     // memory; the memory account in bytes must fit 64 bits (2^40 MiB)
     if ((identity == PATTERN || identity == SERVER_QUERY)
@@ -980,15 +997,6 @@ Config::Config(int argc, char *argv[]) {
     }
     if (traverse_max_memory_mb > 1'048'576) {
         std::cerr << "Error: --traverse-max-memory-mb must be in [0, 1048576]" << std::endl;
-        print_usage_and_exit = true;
-    }
-    if (traverse_compression_level < 1 || traverse_compression_level > 9) {
-        std::cerr << "Error: --traverse-compression-level must be in [1, 9]" << std::endl;
-        print_usage_and_exit = true;
-    }
-    if (!(traverse_delivery_compress_mbps > 0) || !(traverse_delivery_build_mbps > 0)) {
-        std::cerr << "Error: the delivery rates (--traverse-delivery-compress-mbps, "
-                     "--traverse-delivery-build-mbps) must be positive" << std::endl;
         print_usage_and_exit = true;
     }
 

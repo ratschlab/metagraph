@@ -3063,7 +3063,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
 - Caps: `--traverse-max-time-ms` (default 30 000; also the cap of `/resolve`'s `bounds.time_budget_ms`, which
   it lowers, never sets, and which is never above 899 000 ms on the server, §4.5), `--traverse-max-seeds` (64),
   `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
-  unlimited for each. A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
+  unlimited for each. The four counts take integers in [0, 2⁵³ − 1] and `--traverse-max-time-ms` a finite number
+  ≥ 0; anything else refuses to start, naming the option and what it takes (read with atoll / atof before,
+  `-1` started and was stated as 2⁶⁴ − 1, `abc` started as 0, unlimited, and `5x` as 5). A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
   `max_seed_bp` are refusals (400), not clamps. **The request-body limit** *(review of 2026-10-10, resources
   finding 2)*: `--max-request-body-mb N` (an integer in [0, 1 048 576] MiB; 0 = unlimited, the default; stated by
   `GET /capabilities` as `max_request_body_mb`, `null` when unlimited) bounds what the HTTP library reads of a
@@ -3141,7 +3143,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   tombstone at once; `--traverse-observed-window-s` takes integers in [1, 31 536 000] alike); `compress_mbps`,
   `build_mbps`,
   `account_per_text_byte`, `margin` and the measured rates and ratios (or null) are numbers (a rate may be
-  fractional), as are the probe's `max_time_ms` and the time budgets.
+  fractional; `--traverse-delivery-compress-mbps` and `--traverse-delivery-build-mbps` take a finite positive
+  number and refuse anything else at start-up, as `--traverse-compression-level` takes an integer in [1, 9]:
+  `inf` had started and was stated as `1e+9999`, no JSON number, and `5x` as 5), as are the probe's
+  `max_time_ms` and the time budgets.
   - `POST /traverse` with `attempt_id`: 200 with `usage` (complete, partial, failed seeds, cancelled); 400 with
     `{error, usage}` for a request error after the attempt was registered (a bad strategy, an unknown label or
     graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id, a malformed
