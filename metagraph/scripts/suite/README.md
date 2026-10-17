@@ -1483,7 +1483,9 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   gate/policy_v4_rt_mcp.json`; a test regenerates it and compares). A v5 policy is one command on the v5 manifest,
   which prints the counts (selected by route and area, exclusions by rule with each reason, required executions per
   arm, relations required and excluded); `--ids-out FILE` writes the ids the policy's arms run (v4: 222), for
-  run_suite.sh --ids or async's runner standalone (`gate.py policy-ids POLICY` prints them comma-separated).
+  run_suite.sh --ids or async's runner standalone (`gate.py policy-ids POLICY` prints them comma-separated). A
+  hand-typed list with spaces selects as the clean one: suite_common.select_scenarios strips ids as it strips
+  areas, and build_manifest --areas 'P, T' builds both areas, empties left out (SD-369; it dropped T without a word).
 - **The gate** (`gate.py RUN_DIR POLICY [--reevaluated]`: exit 0 PASS, 1 FAIL, 2 usage; RUN_DIR/gate.json) fails,
   listing every problem by kind, on: identity (either manifest hash not the policy's, a stated hash not verified, an
   arm or a plan on another manifest, another index_fp, another by-design table); missing (a planned or required

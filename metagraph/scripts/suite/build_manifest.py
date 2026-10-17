@@ -430,6 +430,13 @@ def counts(scenarios, relations=()) -> dict:
                                  "budget_stress", "warm-up", "smoke", SMOKE_TAG)}}
 
 
+def area_list(text):
+    """The areas of --areas ('P, T' as 'P,T', empties left out; SD-369: 'A, B' dropped B without a word), None for
+    all."""
+    out = set(a.strip() for a in (text or "").split(",") if a.strip())
+    return out or None
+
+
 # a step of a same_answer args.ignore path that names no object key: a list index (negative too) or '*'
 _INDEX_STEP = re.compile(r"(-?[0-9]+|\*)\Z")
 
@@ -855,7 +862,7 @@ def main(argv=None) -> int:
         print("%d scenarios, %d with exposed checks" % (len(doc["scenarios"]),
                                                        sum(1 for v in doc["scenarios"].values() if v["exposes"])))
         return 0
-    only = set(args.areas.split(",")) if args.areas else None
+    only = area_list(args.areas)
     if only and (manifest_path(args.out) or manifest_path(args.smoke_out)):
         raise SystemExit("--areas builds a partial manifest: give --out and --smoke-out outside manifest/ (not a "
                          "suite_v*.json / suite_smoke_v*.json there, by any spelling)")

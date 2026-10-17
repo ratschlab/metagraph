@@ -176,7 +176,7 @@ def select_scenarios(manifest, areas=None, limit=None, ids=None):
     the target's first execution meets the rows it read, whatever subset runs.
     """
     area_set = set(a.strip() for a in areas) if areas else None
-    id_set = set(ids) if ids else None
+    id_set = set(i.strip() if isinstance(i, str) else i for i in ids) if ids else None   # 'A, B' as 'A,B' (SD-369)
     scenarios = manifest.get("scenarios", [])
     out = []
     for index, scenario in enumerate(scenarios):

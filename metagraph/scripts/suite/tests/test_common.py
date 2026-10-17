@@ -64,6 +64,18 @@ class ManifestAndPlan(unittest.TestCase):
         self.assertEqual([i for i, _ in sel], [1, 3, 5])
         sel = sc.select_scenarios(m, ids=["P-010", "P-002"])
         self.assertEqual([s["id"] for _, s in sel], ["P-002", "P-010"])
+        # SD-369: a hand-typed list ('P-010, P-002') selects as the clean one, ids stripped as the areas are
+        sel = sc.select_scenarios(m, ids=["P-010", " P-002 "])
+        self.assertEqual([s["id"] for _, s in sel], ["P-002", "P-010"])
+        self.assertEqual([i for i, _ in sc.select_scenarios(m, areas=[" P"], limit=3)], [1, 3, 5])
+
+    def test_build_manifest_areas_list(self):
+        # SD-369: build_manifest --areas 'P, T' builds both areas (it dropped T without a word), empties left out
+        import build_manifest as bm
+        self.assertEqual(bm.area_list("P, T"), {"P", "T"})
+        self.assertEqual(bm.area_list(" P,,T ,"), {"P", "T"})
+        self.assertIsNone(bm.area_list(None))
+        self.assertIsNone(bm.area_list(""))
 
     def test_repeat_count(self):
         self.assertEqual(sc.repeat_count(0, {"repeat": 1}, 10), 2)
