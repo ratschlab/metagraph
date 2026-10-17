@@ -20,6 +20,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 #include "tests/cli/mgt_reader_for_tests.hpp"
 #include "tests/graph/traversal/walker_paths_for_tests.hpp"
+#include "cli/json_helpers.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
@@ -2824,6 +2825,10 @@ TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
         cases.push_back(std::string(3, static_cast<char>(c)));
     }
     cases.push_back("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80plain");
+    // not UTF-8 but priced exactly: a lead byte takes the next bytes into its code point,
+    // whatever they are (a Latin-1 name: 0xF6 and "tti", past U+FFFF, a surrogate pair)
+    cases.push_back("G\xf6ttingen");
+    cases.push_back("\xf1" "abc");
     std::mt19937 rng(17);
     for (size_t i = 0; i < 200; ++i) {
         std::string s;
@@ -2848,6 +2853,11 @@ TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
     for (const std::string &s : { std::string("\xff\xfe"), std::string("\x80"), std::string("a\xc3"),
                                   std::string("\xe2\x82"), std::string("\xf8\x88\x80\x80\x80") }) {
         EXPECT_GE(json_escaped_size(s), written(s)) << s;
+    }
+    // a 4-byte sequence decoding below U+10000 (lead 0xF0, the next byte's low six bits below
+    // 0x10, continuation byte or not): one U+FFFD (6), counted as a surrogate pair (12)
+    for (const std::string &s : { std::string("\xf0\x80\x80\x80"), std::string("\xf0@AB") }) {
+        EXPECT_EQ(written(s) + 6, json_escaped_size(s)) << s;
     }
 }
 

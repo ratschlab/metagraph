@@ -963,6 +963,36 @@ TEST(PatternRoute, CompactJsonBytes) {
     }
 }
 
+// A string's text is priced as jsoncpp's compact writer writes it (json_escaped_size, the one
+// model of that escaping): exactly for valid UTF-8 and every ASCII byte, from above otherwise. A
+// record name is written as the index holds it and need not be UTF-8: in the Latin-1
+// "G\xf6ttingen" the lead byte 0xF6 takes "tti" with it into one code point past U+FFFF, which
+// the writer gives 12 bytes (a surrogate pair); 6 per escaped byte priced it 16 for the
+// writer's 19, below the text the answer's volume is to bound from above
+TEST(PatternRoute, CompactJsonBytesPricesStringsAsTheWriter) {
+    Json::StreamWriterBuilder b;
+    b["indentation"] = "";
+    auto text = [&](const Json::Value &v) { return Json::writeString(b, v).size(); };
+    const std::vector<std::string> exact = {
+        "plain", "a\"b\\c\n\x01\t\x7f", "caf\xc3\xa9", "\xe2\x82\xac" "5",
+        "Escherichia coli \xf0\x9f\xa6\xa0", "G\xf6ttingen", "\xf1" "abc",
+    };
+    for (const std::string &s : exact) {
+        EXPECT_EQ(text(Json::Value(s)), compact_json_bytes(Json::Value(s))) << s;
+        Json::Value member;
+        member[s] = 1;
+        EXPECT_EQ(text(member), compact_json_bytes(member)) << s;
+    }
+    // from above: a 4-byte sequence decoding below U+10000 is one U+FFFD (6), counted 12; a
+    // sequence the string's end cuts; bytes that lead nothing
+    const std::vector<std::string> bounded = {
+        "\xf0\x80\x80\x80", "x\xf0@AB", "\xff\xfe", "a\xc3", "\xe2\x82",
+    };
+    for (const std::string &s : bounded) {
+        EXPECT_GE(compact_json_bytes(Json::Value(s)), text(Json::Value(s))) << s;
+    }
+}
+
 // The 503 states a fractional budget as given (not floored: 1000.5, not 1000)
 // PatternDelivery::check: nothing to miss before the request was parsed, nothing before the
 // deadline; at it, the 503 stating the budget

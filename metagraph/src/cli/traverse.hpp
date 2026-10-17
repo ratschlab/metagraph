@@ -278,9 +278,6 @@ graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool s
                                                uint64_t float_width = kMgtFloatWidth,
                                                CoordinatesOutput coordinates
                                                    = CoordinatesOutput::NONE);
-// the length the JSON writers here give |s| inside a JSON string, quotes excluded: what
-// delivery_costs prices a name's text by
-uint64_t json_escaped_size(std::string_view s);
 // The length of json_text(|value|, true) — the compact text the server writes — counted from
 // digits and fixed punctuation, without writing it (a string's or a real's own text is
 // written by the writer itself, so that its escaping and digits are the writer's)

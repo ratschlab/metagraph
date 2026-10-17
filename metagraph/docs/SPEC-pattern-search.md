@@ -675,7 +675,9 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   Work stops at `time_budget_ms − finalize_reserve_ms − E`, E being the estimated time to write the answer
   built so far: E = 1.25 × (B / (b × 1000) + B / (c × 1000)) ms for B bytes of compact JSON text of the results
   built (with `labels: "all"` the label objects about to be built are counted in B, and once more at the rate
-  b, before they are built), b and c the delivery rates in MB/s (`--pattern-delivery-build-mbps` 10,
+  b, before they are built; B is counted from above: a real at 24 characters, a string as the writer escapes
+  it, exactly for UTF-8 and from above for a record name that is not UTF-8, which before could be counted
+  below its text), b and c the delivery rates in MB/s (`--pattern-delivery-build-mbps` 10,
   `--pattern-delivery-compress-mbps` 50; the capabilities' `delivery_mbps` states the values in force). E is read with
   the work time at every reading, so it grows as results are built: about 0.15 ms per KB of results at the
   defaults, 2.8 s for 16 × 10,000 results (18.4 MB of text, which an M-series Mac wrote and gzipped in 0.3–0.45 s:

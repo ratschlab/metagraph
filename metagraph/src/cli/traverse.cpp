@@ -3892,40 +3892,6 @@ std::string graphlet_text(const SeedResult &result, const Seed &seed, const Stra
 
 // ---------------------------------------------------------------- processing
 
-// The length jsoncpp's writer gives |s| inside a JSON string, quotes excluded (its
-// escaping with emitUTF8 off, which every writer here uses): '"' '\\' and \b \f \n \r \t
-// take two bytes, any other control character six (\u00XX), a code point above U+007F six
-// (twelve as a surrogate pair), and a malformed sequence the six of U+FFFD for the bytes
-// the writer consumes with it. GraphletCodec.JsonEscapedSizeIsTheWriters checks it against
-// the writer itself.
-uint64_t json_escaped_size(std::string_view s) {
-    uint64_t n = 0;
-    for (size_t i = 0; i < s.size(); ++i) {
-        const unsigned char c = static_cast<unsigned char>(s[i]);
-        if (c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t') {
-            n += 2;
-        } else if (c < 0x20) {
-            n += 6;
-        } else if (c < 0x80) {
-            n += 1;
-        } else if (c >= 0xF8) {
-            n += 6;     // no lead byte: one replacement character
-        } else {
-            // a lead byte claims up to three more bytes, as jsoncpp's utf8ToCodepoint does
-            // (without checking that they are continuation bytes); a sequence cut by the
-            // end of the string is one replacement character for its lead byte
-            const size_t width = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-            if (s.size() - i < width) {
-                n += 6;
-                continue;
-            }
-            n += width == 4 ? 12 : 6;
-            i += width - 1;
-        }
-    }
-    return n;
-}
-
 // the decimal exponent of x > 0, finite: x = d.ddd x 10^E (exact, from the shortest digits)
 static int decimal_exponent(double x) {
     char buf[64];

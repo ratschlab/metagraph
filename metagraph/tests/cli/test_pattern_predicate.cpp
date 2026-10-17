@@ -973,7 +973,7 @@ TEST(PatternPredicate, TheModelAndTheEchoText) {
     EXPECT_EQ(5 + compact(f.unknown_labels_json()).size(), f.text_bytes());
     EXPECT_EQ(2 * (64 + 1), f.bytes());
 
-    // names jsoncpp escapes: exact for ASCII, an upper bound beyond it
+    // names jsoncpp escapes: exact (a request's names are UTF-8)
     const std::vector<std::string> odd = { "a\"b", "c\\d", "tab\there", "nl\n", "ctl\x01",
                                            "del\x7f" };
     Json::Value list(Json::arrayValue);
@@ -991,8 +991,7 @@ TEST(PatternPredicate, TheModelAndTheEchoText) {
     const Bound u = bound_json(q, { "é" });
     const uint64_t written = compact(u.normal_form_json()).size()
             + compact(u.unknown_labels_json()).size();
-    EXPECT_GE(u.text_bytes(), written);
-    EXPECT_LE(u.text_bytes(), 6 * written);
+    EXPECT_EQ(written, u.text_bytes());
 }
 
 TEST(PatternPredicate, TheEchoChecksItsDeliveryEvery4096Names) {
