@@ -4397,6 +4397,12 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   (`reader.Run.planned_on`, None-safe for a run without a plan), so the warm-ups, which the plan runs on
   direct-local alone, are not footnoted for their absent MCP column (it reads "not exercised: 25 –", the legend's
   "no execution: the plan had none").
+- The /pattern budget in chapters P, M, N, Q, X and L: the 13 sentences that state it (every request names
+  `time_budget_ms` ..., a 503 deadline at the ... ms budget) read `[[manifest_version >= 6 ? 110,000 | 60,000]]`;
+  P's "(the host's default, which the service sends too)" reads, for v6, "(above the host's default of 60,000; the
+  MCP arguments name it too)". Kept: P-exact's smoke run that "ran past its 60,000 ms budget" (history), the
+  /resolve and /traverse budgets and caps of chapters R and T (60,000 ms, their host maximum) and the ingress
+  figures. Each file's `_assumes` names 110,000 with its source; V6DeltaTest renders the six files for v5 and v6.
 
 ## Glossary
 

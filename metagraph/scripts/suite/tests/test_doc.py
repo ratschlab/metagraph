@@ -1764,7 +1764,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
                 for name in re.findall(r"\{([^{}]+)\}", text):
                     check(name, scope, allowed)
                 for head in strip_conditional_heads(text)[1]:
-                    check(re.split(r">?=", head.lstrip("!"), 1)[0].strip(), scope, allowed)
+                    check(re.split(r">?=", head.lstrip("!"), maxsplit=1)[0].strip(), scope, allowed)
             for fid in any_fams:
                 entry = data["families"].get(fid) or {}
                 if not entry.get("claim") and not any(p.startswith("%s.json: families.%s" % (ch, fid)) for p in ROUND2_PENDING):
@@ -5655,6 +5655,34 @@ class ColourRoundTwoTest(unittest.TestCase):
             "resource": "time", "requested": 10000, "used": 10000.4}}]}})
         self.assertIn("used 10,000 ms", latex.esc(blocks.resource_stop_phrase(run, line)))
 
+
+
+class V6DeltaTest(unittest.TestCase):
+    """The v6 results document as a delta on v5 (the owner, 2026-10-17: v6 is very close to v5): what v6 changes
+    is a branch on `manifest_version`, so a v5 build stays byte-identical."""
+
+    # the /pattern budget mentions a v6 run keeps at 60,000 ms: the v5 baseline's history, not the budget in force
+    V6_KEEPS_60 = ("at the 60,000 ms budget then in force", "ran past its 60,000 ms budget on the staging host",
+                   "above the host's default of 60,000", "the /pattern budget of 110,000 ms (60,000 before)")
+
+    def test_pattern_budget_by_version(self):
+        """Item 3: chapters P, M, N, Q, X and L state the /pattern budget as 110,000 ms for v6 and 60,000 ms for v5
+        (v4 too); their other 60 s figures stay."""
+        for ch in ("P", "M", "N", "Q", "X", "L"):
+            data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))
+            v5_text, v6_text = [], []
+            for path, text in prose_strings(data):
+                v6_text.append(facts.fill(text, {"manifest_version": 6}))
+                if ".P-warm" not in path:  # v6's own family (the warm-ups at 110,000 ms) is in no v5 document
+                    v5_text.append(facts.fill(text, {"manifest_version": 5}))
+            v5_text, v6_text = "\n".join(v5_text), "\n".join(v6_text)
+            self.assertNotIn("110,000", v5_text, ch)
+            self.assertIn("110,000", v6_text, ch)
+            rest = v6_text
+            for keep in self.V6_KEEPS_60:
+                rest = rest.replace(keep, "")
+            self.assertNotIn("60,000", rest, "%s: a 60,000 ms /pattern budget left in the v6 text" % ch)
+            self.assertIn("60,000", v5_text, ch)
 
 if __name__ == "__main__":
     unittest.main()
