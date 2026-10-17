@@ -4355,7 +4355,7 @@ unit metadata"). It is rebuilt for the frozen v6 (content 49907dbb..., 725 scena
 (`~/.cache/metagraph-traverse-plans/2026-10-16/int-v6/scripts/`), the successor of units_v6_rekey.py, which
 refuses the final v6 by design: `python3 -I units_v6_build.py manifest/suite_v5.json manifest/suite_v6.json
 doc/units/suite_v5.json doc/units/suite_v6.json` (deterministic). Every v5 scenario, unit and family keeps its v5
-entry; the warm-ups P-warm-0001..0025 form one new unit, `P-warm` (family P-warm, chapter P, replicates, variant
+entry (a unit's members in v6's order, as the manifest moved them); the warm-ups P-warm-0001..0025 form one new unit, `P-warm` (family P-warm, chapter P, replicates, variant
 "of <target>"), as v5's walk warm-ups form R-warm. The script checks its premises and refuses otherwise: the new ids
 are warm-ups, each right before its target; the v5 ids keep their titles and, but for the /pattern scenarios
 build_manifest.keep_gate_warm_repeats moves (30), their order; the relations are v5's; on v5's ids only request,

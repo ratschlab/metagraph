@@ -178,7 +178,7 @@ class MappingTest(unittest.TestCase):
         """The v6 mapping over the frozen v6 manifest (725 scenarios: v5's 700, every default-budget /pattern request
         at 110,000 ms, and the 25 /pattern warm-ups P-warm-0001..0025, each right before its target; the free /pattern
         scenarios build_manifest.keep_gate_warm_repeats moves change places): every v5 scenario keeps its v5 entry,
-        every v5 unit and family its entry; the warm-ups form one unit, P-warm (family P-warm, chapter P, replicates,
+        every v5 unit and family its entry (a unit's members in v6's order); the warm-ups form one unit, P-warm (family P-warm, chapter P, replicates,
         variant 'of <target>'), as v5's walk warm-ups form R-warm; the generator picks the mapping by the sha; no
         label of a pattern chapter names a /pattern budget (60 s, 110,000 or 120,000 ms; the budgets those chapters
         name are P-caps-0004's 300 ms; '60 bp' and 'A^60' are lengths)."""
@@ -205,7 +205,11 @@ class MappingTest(unittest.TestCase):
             self.assertEqual(mapping[key], v5_mapping[key], key)
         for part in ("_units", "_families"):
             for key in v5_mapping[part]:
-                self.assertEqual(mapping[part][key], v5_mapping[part][key], key)
+                got, want = dict(mapping[part][key]), dict(v5_mapping[part][key])
+                if part == "_units" and isinstance(want.get("members"), list):
+                    # a unit's members are v5's, in v6's order (keep_gate_warm_repeats moved some)
+                    self.assertEqual(got.pop("members"), sorted(want.pop("members"), key=ids6.index), key)
+                self.assertEqual(got, want, key)
             self.assertEqual(sorted(set(mapping[part]) - set(v5_mapping[part])), ["P-warm"])
         self.assertEqual(sorted(k for k in mapping if not k.startswith("_") and k not in v5_mapping), V6_WARM_UPS)
         self.assertEqual([k for k in mapping if not k.startswith("_")], ids6)

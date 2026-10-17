@@ -1,5 +1,5 @@
 {
- "_about": "Unit mapping of manifest v6 (content_sha256 49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1, 725 scenarios) for the suite results document: every scenario -> chapter, family, unit, unit_type (series | replicates | refusals | pairs | list), variant and optional group; _units carries each unit's title, type and property line; _families each family's chapter and title. Built by units_v6_build.py (the successor of units_v6_rekey.py) from the v5 mapping (units_v5_build.py): manifest v6 is v5 with every default-budget /pattern request at 110,000 ms and 25 /pattern warm-ups (P-warm), so every v5 entry is v5's and the warm-ups form the unit P-warm (family P-warm, chapter P), as v5's walk warm-ups form R-warm; no unit label of a pattern chapter names a /pattern budget. The frozen v6 manifest carries no doc blocks, so the generator picks this file by the manifest's content sha.",
+ "_about": "Unit mapping of manifest v6 (content_sha256 49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1, 725 scenarios) for the suite results document: every scenario -> chapter, family, unit, unit_type (series | replicates | refusals | pairs | list), variant and optional group; _units carries each unit's title, type and property line; _families each family's chapter and title. Built by units_v6_build.py (the successor of units_v6_rekey.py) from the v5 mapping (units_v5_build.py): manifest v6 is v5 with every default-budget /pattern request at 110,000 ms and 25 /pattern warm-ups (P-warm), so every v5 entry is v5's (a unit's members in v6's order) and the warm-ups form the unit P-warm (family P-warm, chapter P), as v5's walk warm-ups form R-warm; no unit label of a pattern chapter names a /pattern budget. The frozen v6 manifest carries no doc blocks, so the generator picks this file by the manifest's content sha.",
  "_manifest": {
   "version": 6,
   "content_sha256": "49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1",
@@ -2354,10 +2354,10 @@
    "property": "A shuffled record window: 0 paths on /pattern and no k-mer in the graph on /resolve.",
    "n": 8,
    "members": [
-    "N-negative-0006",
     "N-negative-0007",
-    "N-negative-0008",
     "N-negative-0009",
+    "N-negative-0006",
+    "N-negative-0008",
     "N-negative-0010",
     "N-negative-0011",
     "N-negative-0012",
@@ -2429,9 +2429,9 @@
     "N-nearmiss-0022",
     "N-nearmiss-0023",
     "N-nearmiss-0024",
+    "N-nearmiss-0027",
     "N-nearmiss-0025",
     "N-nearmiss-0026",
-    "N-nearmiss-0027",
     "N-nearmiss-0028"
    ]
   },
@@ -2444,8 +2444,8 @@
    "members": [
     "N-nearmiss-0029",
     "N-nearmiss-0030",
-    "N-nearmiss-0031",
-    "N-nearmiss-0032"
+    "N-nearmiss-0032",
+    "N-nearmiss-0031"
    ]
   },
   "N-nearmiss-mutated": {
@@ -2528,11 +2528,11 @@
    "property": "A 31-mer of a multi-copy repeat is counted and resolved with every k-mer carried; a telomeric seed re-enters itself at 0 bp (rejoined_seed).",
    "n": 5,
    "members": [
-    "N-hard-0018",
     "N-hard-0019",
-    "N-hard-0020",
     "N-hard-0021",
-    "N-hard-0022"
+    "N-hard-0022",
+    "N-hard-0018",
+    "N-hard-0020"
    ]
   },
   "N-realrep": {
@@ -2542,31 +2542,31 @@
    "property": "Real tandem repeats of the records: the pattern's contexts (note as documented), the resolve fully supported, the traverse following the record to its re-entry.",
    "n": 25,
    "members": [
-    "N-realrep-0001",
     "N-realrep-0002",
     "N-realrep-0003",
-    "N-realrep-0004",
     "N-realrep-0005",
     "N-realrep-0006",
+    "N-realrep-0001",
+    "N-realrep-0004",
     "N-realrep-0007",
-    "N-realrep-0008",
     "N-realrep-0009",
-    "N-realrep-0010",
     "N-realrep-0011",
-    "N-realrep-0012",
     "N-realrep-0013",
-    "N-realrep-0014",
     "N-realrep-0015",
+    "N-realrep-0008",
+    "N-realrep-0010",
+    "N-realrep-0012",
+    "N-realrep-0014",
     "N-realrep-0016",
     "N-realrep-0017",
-    "N-realrep-0018",
     "N-realrep-0019",
-    "N-realrep-0020",
     "N-realrep-0021",
-    "N-realrep-0022",
     "N-realrep-0023",
-    "N-realrep-0024",
-    "N-realrep-0025"
+    "N-realrep-0025",
+    "N-realrep-0018",
+    "N-realrep-0020",
+    "N-realrep-0022",
+    "N-realrep-0024"
    ],
    "groups": {
     "/pattern": [
@@ -2633,8 +2633,8 @@
    "property": "Too short or too degenerate patterns are below the floor; a 26-bit degenerate one is admitted and costly.",
    "n": 3,
    "members": [
-    "N-usecase-0007",
     "N-usecase-0008",
+    "N-usecase-0007",
     "N-usecase-0009"
    ]
   },
@@ -2676,8 +2676,8 @@
     "N-zero-0006",
     "N-zero-0007",
     "N-zero-0008",
-    "N-zero-0009",
-    "N-zero-0010"
+    "N-zero-0010",
+    "N-zero-0009"
    ],
    "relations": [
     "REL-zero_equals_absent-0001",
