@@ -680,7 +680,7 @@ class GraphletStore:
         if e is None:
             raise self._unknown(handle)
         now = self.clock()
-        if now - e.accessed > self.ttl_disk_s and not self._fresher_on_disk(e, now):
+        if self._past_disk_ttl(e, now):
             self._expire(handle)
             raise self._unknown(handle)
         # the disk TTL counts from the last use, also across restarts: the entry file is
@@ -727,6 +727,12 @@ class GraphletStore:
         self._index(e)
         self._persisted[handle] = e.accessed
         return e
+
+    def _past_disk_ttl(self, e, now):
+        """Whether entry |e| has outlived the disk TTL: unused for ttl_disk_s here and in
+        the entry file (another process's use counts). get() and sweep() expire such an
+        entry through _expire(), which decides whether a tombstone may be written."""
+        return now - e.accessed > self.ttl_disk_s and not self._fresher_on_disk(e, now)
 
     def _fresher_on_disk(self, e, now):
         """Whether the entry file records a use within the disk TTL that this process
@@ -1040,15 +1046,24 @@ class GraphletStore:
         raise self._unknown(handle)
 
     def _expire(self, handle, *, gc=True):
-        """Expire |handle|: a tombstone keeps its request, its entry file goes, and with |gc|
-        its body when no entry names it any more (a sweep collects the bodies of all it
-        expired at once)."""
+        """Expire |handle| -> its entry, or None when there is nothing to expire: a
+        tombstone keeps its request, its entry file goes, and with |gc| its body when no
+        entry names it any more (a sweep collects the bodies of all it expired at once).
+        A handle whose entry file is gone was freed or expired by another process sharing
+        the spool: it is forgotten here and no tombstone is written -- a freed handle is
+        not replayable, and an expired one keeps the tombstone (and the expiry time) the
+        other process wrote. Under the spool lock, so a free() in another process cannot
+        fall between the check and the tombstone; on a spool without a process lock
+        (_SpoolLock.unlocked) the check narrows that race but does not close it. The
+        freeing process collected the body; a sweep collects orphans too."""
         with self._lock:
             e = self._unindex(handle)
             if e is None:
                 return None               # dropped meanwhile (another thread's GC)
             self._drop_ram(handle)
             self._persisted.pop(handle, None)
+            if not os.path.exists(self._entry_path(handle)):
+                return None
             tomb = {'handle': handle, 'request': e.request, 'index': e.index,
                     'expired': self.clock()}
             _write_atomic(self._tomb_path(handle), json.dumps(tomb).encode('utf-8'))
@@ -1066,18 +1081,21 @@ class GraphletStore:
         spool does not grow without bound. The bodies the expired entries named go when no
         entry file names them any more -- one scan of the entry files for all of them, not
         one per expired entry -- and so does every body no entry file names that is older
-        than _ORPHAN_GRACE_S (otherwise such a body would be kept for good)."""
+        than _ORPHAN_GRACE_S (otherwise such a body would be kept for good). |expired| names
+        the handles this sweep expired: one whose entry file another process removed is
+        forgotten, not expired again (_expire())."""
         now = self.clock()
         ram = [h for h, (_, _, used) in self._ram.items() if now - used > self.ttl_ram_s]
         for h in ram:
             self._drop_ram(h)
-        expired = [h for h, e in self._entries.items() if now - e.accessed > self.ttl_disk_s
-                   and not self._fresher_on_disk(e, now)]
+        due = [h for h, e in self._entries.items() if self._past_disk_ttl(e, now)]
+        expired = []
         with self._lock:
             digests = []
-            for h in expired:
+            for h in due:
                 e = self._expire(h, gc=False)
                 if e is not None:
+                    expired.append(h)
                     digests.append(e.digest)
             self._gc_bodies(digests, orphans=True)
         removed = []

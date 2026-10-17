@@ -909,6 +909,60 @@ class TestSharedSpool(unittest.TestCase):
             self.assertNotIn('g_' + '0' * 12, b)
 
 
+class TestExpiryOfAHandleGoneElsewhere(unittest.TestCase):
+    """The disk-TTL expiry is decided once (GraphletStore._expire, under the spool lock):
+    a handle whose entry file another process removed -- freed, or expired with its own
+    tombstone -- is forgotten here, never tombstoned again, whether get() or sweep() finds
+    it past the disk TTL."""
+
+    def _two_stores(self, d):
+        clock = Clock()
+        spool = os.path.join(d, 'spool')
+        a = GraphletStore(spool, clock=clock, ttl_disk_s=1000)
+        b = GraphletStore(spool, clock=clock, ttl_disk_s=1000)
+        h = a.put(T.doc_json('fork', 'graphlet'), T.doc_json('fork', 'request'))
+        self.assertIn(h, b)                    # b knows it too
+        return clock, a, b, h
+
+    def test_a_sweep_does_not_make_a_freed_handle_replayable(self):
+        with tempfile.TemporaryDirectory() as d:
+            clock, a, b, h = self._two_stores(d)
+            b.free(h)
+            clock.t += 2000
+            self.assertEqual([], a.sweep()['expired'])
+            self.assertEqual([], os.listdir(os.path.join(a.spool_dir, 'tombstones')))
+            for s in (a, b):
+                self.assertFalse(s._unknown(h).replayable)
+            self.assertNotIn(h, a)
+
+    def test_get_does_not_make_a_freed_handle_replayable(self):
+        with tempfile.TemporaryDirectory() as d:
+            clock, a, b, h = self._two_stores(d)
+            b.free(h)
+            clock.t += 2000
+            with self.assertRaises(UnknownHandle) as e:
+                a.get(h)
+            self.assertFalse(e.exception.replayable)
+
+    def test_a_handle_expired_elsewhere_keeps_its_tombstone(self):
+        # the other process's tombstone and its time stand: written again here, its
+        # ttl_tomb_s would start over
+        with tempfile.TemporaryDirectory() as d:
+            clock, a, b, h = self._two_stores(d)
+            clock.t += 2000
+            with self.assertRaises(UnknownHandle) as e:
+                b.get(h)
+            self.assertTrue(e.exception.replayable)
+            with open(a._tomb_path(h), encoding='utf-8') as f:
+                tomb = json.load(f)
+            clock.t += 500
+            self.assertEqual([], a.sweep()['expired'])
+            with open(a._tomb_path(h), encoding='utf-8') as f:
+                self.assertEqual(tomb, json.load(f))
+            self.assertTrue(a._unknown(h).replayable)
+            self.assertNotIn(h, a)
+
+
 class TestStoreFiles(unittest.TestCase):
     def test_entry_files_of_other_versions(self):
         # VMD-03
