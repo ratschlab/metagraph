@@ -365,5 +365,20 @@ class BuildPanel(unittest.TestCase):
             bp.main(["--baseline", b.dir, "--out", out, "--size", "10", "--quota", "resolve=4,traverse=4,pattern=4"])
 
 
+
+class LoadContextTest(unittest.TestCase):
+    def test_a_non_finite_sample_is_no_reading(self):
+        # SD-018: the panel's load note takes the medians of the finite figures only (a NaN cannot be ordered, an
+        # inf is no CPU figure), as the bench load guard reads a sample
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "samples.jsonl")
+            rows = [{"sra_all_cpu_pct": v, "host_load1": w} for v, w in
+                    ((10.0, 1.0), (float("nan"), float("inf")), (30.0, 3.0), (float("inf"), float("nan")), (20.0, 2.0))]
+            for r in rows:
+                sc.append_jsonl(path, r)
+            ctx = bp.load_context(path)
+        self.assertEqual((ctx["samples"], ctx["sra_all_cpu_pct_median"], ctx["host_load1_median"]), (5, 20.0, 2.0))
+        self.assertEqual(bl.median([3.0, float("nan"), 1.0, float("inf"), 2.0]), 2.0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,6 @@ listed under `loosened`, and analyze.py then emits no verdict). Stdlib only.
 
 import argparse
 import json
-import math
 import os
 import sys
 
@@ -60,7 +59,7 @@ def sample_time(sample, offset_s=0.0):
 
 def _num(v):
     """A finite number, else None (NaN compares False with every limit: no reading, never a clean one)."""
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+    return sc.finite_or_none(v)
 
 
 def reading(sample, limits):

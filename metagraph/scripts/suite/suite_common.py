@@ -653,6 +653,13 @@ def assign_host_cache(rows, clock_offsets=None, warm_s=HOST_CACHE_WARM_S):
     return rows
 
 
+def finite_or_none(v):
+    """A sampler figure (sra_all_cpu_pct, host_load1, ...) as a reading: a finite number, else None (a NaN compares
+    False with every limit and an inf is no figure: no reading, never a clean one; the bench load guard's rule since
+    c6306ec1a, which the report, the comparison's resources and the panel's load note read too: SD-018)."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+
+
 def _number_or_none(v):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 

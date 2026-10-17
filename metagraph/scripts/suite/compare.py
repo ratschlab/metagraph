@@ -2941,7 +2941,7 @@ def resources(lines, index):
             load.append(s.get("host_load1"))
         work = (line.get("server") or {}).get("work") or {}
         mem_server.append(work.get("memory_bytes"))
-    nums = lambda vals: [v for v in vals if _num(v) is not None]  # noqa: E731
+    nums = lambda vals: [v for v in vals if sc.finite_or_none(v) is not None]  # noqa: E731  (SD-018)
     return {"executions": len(lines), "executions_with_samples": joined,
             "peak_cpu_pct": max(nums(cpu)) if nums(cpu) else None,
             "peak_mem_bytes": max(nums(mem)) if nums(mem) else None,

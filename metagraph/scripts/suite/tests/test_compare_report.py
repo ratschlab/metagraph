@@ -628,6 +628,15 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(len(idx.window(T0 + 9.0, T0 + 9.5)), 0)
         self.assertEqual(idx.window(None, None), [])
 
+    def test_resources_read_a_non_finite_sample_as_none(self):
+        # SD-018: the run's resource means never carry a NaN or inf figure (compare.json would hold a NaN token)
+        ln = line("P-001", "direct-local", 0, T0, 2000.0)
+        samples = [dict(sample(T0 + 0.5, 50.0, 1, 1.0, 10.0)), dict(sample(T0 + 1.0, 50.0, 1, float("nan"), 30.0)),
+                   dict(sample(T0 + 1.5, 50.0, 1, 3.0, float("inf")))]
+        r = cmp.resources([ln], cmp.SampleIndex(samples))
+        self.assertEqual(r["executions_with_samples"], 1)
+        self.assertEqual((r["mean_sra_all_cpu_pct"], r["mean_host_load1"]), (2.0, 20.0))
+
     def test_helpers(self):
         self.assertEqual(cmp.aggregate_outcome(["pass", "pass"]), "pass")
         self.assertEqual(cmp.aggregate_outcome(["pass", "fail"]), "fail")

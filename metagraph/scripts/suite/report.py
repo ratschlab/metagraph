@@ -327,10 +327,11 @@ LOAD_SAMPLE_ERROR_SHARE = 0.10
 
 
 def load_figures(samples):
-    """The sampler's figures over the run: sra_all CPU and host load1 (mean, max, how many samples state each), the
-    samples, and those that failed (`error`: their figures are null) with the first error."""
-    sra = [s.get("sra_all_cpu_pct") for s in samples if cmp._num(s.get("sra_all_cpu_pct")) is not None]
-    load = [s.get("host_load1") for s in samples if cmp._num(s.get("host_load1")) is not None]
+    """The sampler's figures over the run: sra_all CPU and host load1 (mean, max, how many samples state each: a
+    finite figure, suite_common.finite_or_none), the samples, and those that failed (`error`: their figures are
+    null) with the first error."""
+    sra = [s.get("sra_all_cpu_pct") for s in samples if sc.finite_or_none(s.get("sra_all_cpu_pct")) is not None]
+    load = [s.get("host_load1") for s in samples if sc.finite_or_none(s.get("host_load1")) is not None]
     errors = [s.get("error") for s in samples if s.get("error")]
     return {"sra_mean": (sum(sra) / len(sra)) if sra else None, "sra_max": max(sra) if sra else None,
             "load_mean": (sum(load) / len(load)) if load else None, "load_max": max(load) if load else None,

@@ -419,7 +419,9 @@ def requests_planned(n_queries, cycles=DEFAULT_CYCLES, arms=ARMS):
 # statistics (no tail percentiles: six repeats support a median, not a p99)
 
 def median(values):
-    vals = sorted(v for v in values if _num(v) is not None)
+    """The median of the finite numbers among |values| (suite_common.finite_or_none: a NaN cannot be ordered, an inf
+    is no figure), None without one."""
+    vals = sorted(v for v in values if sc.finite_or_none(v) is not None)
     if not vals:
         return None
     n = len(vals)

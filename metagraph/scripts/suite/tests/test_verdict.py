@@ -633,6 +633,22 @@ class LoadCaveatTest(unittest.TestCase):
         report, lf = self.figures(7000.0, 220.0)
         self.assertIn("**Load caveat:**", report.load_caveat(lf))
 
+    def test_a_non_finite_sample_is_no_reading(self):
+        # SD-018 (as the bench load guard reads it since c6306ec1a): a NaN or inf figure is no reading, never a
+        # clean one; all of them non-finite: the load is not measured, never "not under the Logan load"
+        import report
+        for bad in (float("nan"), float("inf")):
+            samples = [{"t_utc": sc.iso_utc(T0 + i), "sra_all_cpu_pct": 50.0, "host_load1": 7.5} for i in range(9)]
+            samples.append({"t_utc": sc.iso_utc(T0 + 9), "sra_all_cpu_pct": bad, "host_load1": bad})
+            lf = report.load_figures(samples)
+            self.assertEqual((lf["n_sra"], lf["sra_mean"], lf["sra_max"], lf["n_load"], lf["load_mean"]),
+                             (9, 50.0, 50.0, 9, 7.5), bad)
+            report_, lf = self.figures(bad, bad)
+            self.assertIsNone(lf["sra_mean"])
+            text = report.load_caveat(lf)
+            self.assertNotIn("not under the Logan load", text)
+            self.assertIn("**Load not measured:**", text)
+
 
 class UntestedAndExposureTest(unittest.TestCase):
     """A field the MCP drops: with mcp.exposes a disagreement; an area or route x arm where nothing passed and

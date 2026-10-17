@@ -174,7 +174,10 @@ Each block's window is the union of its executions' intervals, padded 30 s; mex'
 direct-local executions with the orchestrator's clock. A block is **clean** when every sample in its window is at
 or below both thresholds and the samples cover its executions without a gap over 15 s; **loaded** when one sample
 exceeds a threshold; **unguarded** when the load is unknown (no samples, a gap, a sample without a reading, the
-Logan container not reported unless `--allow-missing-sra` declares it stopped, a non-finite value). Defaults:
+Logan container not reported unless `--allow-missing-sra` declares it stopped, a non-finite value: the sampler
+records a NaN or inf docker figure as none, and every reader of the figures, this guard, the panel's load note, the
+suite report's load caveat and compare's resource means, reads one as no reading through suite_common.finite_or_none;
+SD-018). Defaults:
 `sra_all` CPU <= 100 % (one core; the Logan load ran at 5,000-14,000 %) and load1 <= 16. **Neither default is
 calibrated**: no quiet sample of mex exists yet, so neither the Logan container's idle CPU nor the host's idle load1
 is known. The preflight prints what it saw; set `--sra-max` and `--load1-max` from it before the first release run

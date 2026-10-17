@@ -2183,7 +2183,9 @@ failing on 14552938.
   first error); with no sra_all figure, or more than 10 % failed samples (LOAD_SAMPLE_ERROR_SHARE), the verdict
   section says "**Load not measured:** ..." with the figures and the failures, never the positive sentence; a busy
   host keeps the Load caveat (with the failures named); the resource section names the failed samples. The recorded
-  runs have no failed sample (v3 12,756, v4 8,693, all with sra_all): their sentence is unchanged.
+  runs have no failed sample (v3 12,756, v4 8,693, all with sra_all): their sentence is unchanged. A NaN or inf
+  figure is no reading either (suite_common.finite_or_none, the bench load guard's rule of c6306ec1a; the sampler
+  records one as none): it never makes a mean NaN nor reads as a clean "not under the Logan load" (SD-018).
 
 ### A field the MCP drops, and a part of the run that tested nothing
 - A field the MCP answer lacks makes its check `not_exposed`; an execution whose property checks all read so is

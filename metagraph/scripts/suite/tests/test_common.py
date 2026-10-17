@@ -548,6 +548,9 @@ class SamplerParsing(unittest.TestCase):
         self.assertEqual(sampler.parse_pair("--"), (None, None))
         self.assertEqual(sampler.parse_percent("7704.04%"), 7704.04)
         self.assertIsNone(sampler.parse_percent("--"))
+        # SD-018: a non-finite figure is no reading (the readers treat it as none too)
+        for bad in ("NaN%", "nan", "inf%", "-inf%", "Infinity%"):
+            self.assertIsNone(sampler.parse_percent(bad), bad)
 
     def test_stats_and_sample(self):
         stats = sampler.parse_stats_lines(self.LINES)

@@ -56,12 +56,13 @@ def parse_pair(text):
 
 
 def parse_percent(text):
-    """'7704.04%' -> 7704.04; None for '--'."""
+    """'7704.04%' -> 7704.04; None for '--' and for a figure that is not finite ('NaN%', 'inf%': no reading,
+    suite_common.finite_or_none)."""
     if text is None:
         return None
     t = str(text).strip().rstrip("%").strip()
     try:
-        return float(t)
+        return sc.finite_or_none(float(t))
     except ValueError:
         return None
 
