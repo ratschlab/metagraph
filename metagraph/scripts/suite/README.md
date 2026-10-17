@@ -4334,6 +4334,51 @@ quoted texts and the by-design table's own statements name the class in black; a
 not red (owner, 2026-10-16: red means only "needs attention"); it numbers the test's detail block. A walk's stop figures round half up, as every
 time does. I.1's finding sentence names the seed's clock for a /traverse walk.
 
+## Suite integration: the frozen v6 and the results document merged (2026-10-16)
+gr/suite-doc (895397620: the results document generator, doc/) merged into the frozen manifest v6 (gr/suite-v6 at
+a71d9177f) on gr/suite-int-v6 with a merge commit; both branches start at 07dfa4875. Two files conflicted:
+- report.py (3 hunks), both sides kept: the doc branch's verdict_text (the verdict word and reason, the rules
+  unchanged), EXPLORATORY_LABEL / exploratory_label / verdict_headline and gate_headline_parts, which the document
+  calls, and gr/suite-v6's time_budget_issue / attention_counts / attention_line, the red marks (mark_nim_counts over
+  the headline, nim_count) and the gate table's wall column. The report any run gets is the one gr/suite-v6's
+  report.py prints: one exploratory label, the wording both branches had ("Exploratory verdict (not the deploy
+  decision, which is the gate's above)"; the document's cover says "beside"); gate_headline_parts prints a missing
+  gate.json field empty, as md() printed it. The doc branch's split of agreement_depth's not_compared (no MCP repeat
+  compared the check) and partly_compared (another repeat did) stays for the document; the report's depth table lists
+  both, sorted, as gr/suite-v6 printed its not_compared (skipped_on_any_repeat, a follow-up commit: the split had
+  merged without a conflict and changed the table of the v5 baseline).
+- README.md: the "Manifest v6" section, then the results document's section and the glossary, which stays last.
+
+The v6 unit mapping (`doc/units/suite_v6.json`) predated the final v6: keyed to the first v6 (e416fdc5, 700
+scenarios), it had no unit for the 25 /pattern warm-ups, so the generator refused a v6 run ("25 scenario(s) without
+unit metadata"). It is rebuilt for the frozen v6 (content 49907dbb..., 725 scenarios) by `units_v6_build.py`
+(`~/.cache/metagraph-traverse-plans/2026-10-16/int-v6/scripts/`), the successor of units_v6_rekey.py, which
+refuses the final v6 by design: `python3 -I units_v6_build.py manifest/suite_v5.json manifest/suite_v6.json
+doc/units/suite_v5.json doc/units/suite_v6.json` (deterministic). Every v5 scenario, unit and family keeps its v5
+entry; the warm-ups P-warm-0001..0025 form one new unit, `P-warm` (family P-warm, chapter P, replicates, variant
+"of <target>"), as v5's walk warm-ups form R-warm. The script checks its premises and refuses otherwise: the new ids
+are warm-ups, each right before its target; the v5 ids keep their titles and, but for the /pattern scenarios
+build_manifest.keep_gate_warm_repeats moves (30), their order; the relations are v5's; on v5's ids only request,
+mcp, truth and tags differ; no unit label of a pattern chapter names a /pattern budget. test_mapping_complete_v6
+states the same over the frozen file.
+
+Not done here (the results document's v6 prose round): chapter P's prose has no family prose and no unit line for
+P-warm, so make_doc still refuses a v6 run, naming them ("prose missing: P: families.P-warm.prose; P:
+units.P-warm"); and the prose's 86 `[[manifest_version = 5 ? ... | ...]]` conditionals take their other (v4)
+branch for a v6 run.
+
+### Validation (offline; no host was contacted)
+- Tests: the full suite (SUITE_TRUTH_CACHE as in round 2) at 75c190465, 879 tests OK, none skipped (1,006 s).
+- The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef, read only; copies in the lane's notes) re-rendered with
+  a71d9177f's and the merged report.py, the clock fixed: byte-identical, ungated, gated by policy_v5_rt_mcp.json
+  (GATE PASS) and gated by policy_v6_rtp_mcp.json (GATE FAIL, 116 problems: the gate's headline with problem kinds).
+  The merge commit alone differed in the depth table (the follow-up above).
+- Its results document built with the merged generator: 174 pages, as the doc branch's build5; no missing character, no undefined reference, the one known
+  overfull box (1.1 pt); every chapter file byte-identical to build5's.
+- manifest/suite_v6.json content 49907dbb95ca0a373199d40cabe888b4c136f376295a1fc526a742eae8231cd1 (computed),
+  manifest/, gate/ and every suite module but report.py byte-identical to a71d9177f; the frozen v5 files to
+  07dfa4875.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
