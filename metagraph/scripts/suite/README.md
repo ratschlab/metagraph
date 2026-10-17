@@ -884,11 +884,13 @@ truth/staging_capabilities/): the frozen v4 is built once the host's capabilitie
   a list belongs). tests/test_manifest_lib.py holds both to the shared corpus
   metagraph/tests/data/pattern_predicate_forms.json: the host's verdicts of tests/cli/test_pattern_predicate.cpp
   and the service's case per predicate, 'unknown' where the service's own reading is not stated (a present null,
-  an integral real n) (SD-031; the gtest does not read the corpus yet). The five rows whose case the builder
-  inferred from the host's text and the table rather than read from the service's app/pattern/validate.py (`{"and":
-  [5]}`, `{"any": [[5]]}`, a null, boolean or list name) state `unknown` too, with `service_case_inferred`
-  (pattern.predicate_form_other) beside it, which the predictor is held to until the service confirms it (L4 of
-  the verification of SD-031).
+  an integral real n) (SD-031; the gtest does not read the corpus yet). The service owner's statement of 2026-10-17
+  (its app/pattern/validate.py) reads the rows the builder had only inferred and those two (`service_reading`,
+  `service_source`): `{"and": [5]}` and n 2.0 are refused with pattern.predicate_form_other's text; a null, boolean or
+  list name with "a name is a string, the column label as the index stores it" (no taxid hint), and a present null
+  predicate is answered as no predicate, answers no case of the table states (`table_gap`, service_case null: the
+  predictor names no case for them); a predicate that is no object fails the service's pydantic type, not its form
+  check, so those two rows are `unknown` again.
 - G10: the builders' absent label is `manifest_lib.ABSENT_LABEL`; a resolve naming it names resolve.unknown_label.
 - G12: R-edge-0019 sends an object cut before its end (no JSON reader accepts it).
 - G14: the header kind of the derived-label pairs (T-labels-0004, -0006) sends labels.max_seed_labels 10,000, the

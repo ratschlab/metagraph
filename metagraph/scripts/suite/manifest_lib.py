@@ -670,12 +670,11 @@ def _predicate_form_fault(p: Any, depth: int = 0) -> bool:
         return True
 
     def names_fault(lst: Any) -> bool:
-        # a name is a non-empty string, once per list; a number is name_not_string's case (_predicate_has_number),
-        # any other item (null, a boolean, a list, an object) this one's, as the host refuses it ("expected a
-        # string (a column label)") and the service's text says ("a name is a non-empty string")
+        # a name is a non-empty string, once per list; a number is name_not_string's case (_predicate_has_number);
+        # any other item (null, a boolean, a list, an object) names no case: the service refuses it with "a name is
+        # a string, the column label as the index stores it" (no taxid hint), a text no case of the table states
+        # (the service owner's statement of 2026-10-17; tests/data/pattern_predicate_forms.json, table_gap)
         if not isinstance(lst, list) or not lst:
-            return True
-        if any(not isinstance(x, (str, int, float)) or isinstance(x, bool) for x in lst):
             return True
         strs = [x for x in lst if isinstance(x, str)]
         return any(x == "" for x in strs) or len(strs) != len(set(strs))

@@ -218,32 +218,40 @@ class V4Builder(unittest.TestCase):
         forms = {"pattern.predicate_form_other", "pattern.predicate_name_not_string"}
         checked = 0
         for r in rows:
-            self.assertTrue(r["host"] == "ok" or r["service_case"] is not None, r)   # a refusal has a case
-            want = r["service_case"]
-            if want == "unknown":
-                # the service's own reading is not stated: the builder's inference where it makes one
-                want = r.get("service_case_inferred")
-                if want is None:
-                    continue
-            else:
-                self.assertNotIn("service_case_inferred", r)
+            # a refusal has a case, unless the service's answer is one no case of the table states (table_gap) or
+            # the service's reading is not stated
+            self.assertTrue(r["host"] == "ok" or r["service_case"] is not None or r.get("table_gap"), r)
+            self.assertNotIn("service_case_inferred", r)
+            if r["service_case"] == "unknown":
+                continue
             got = sorted(forms.intersection(p(predicate=r["predicate"])))
-            self.assertEqual(got, [want] if want else [], json.dumps(r)[:300])
+            self.assertEqual(got, [r["service_case"]] if r["service_case"] else [], json.dumps(r)[:300])
             checked += 1
         self.assertGreater(checked, 40)
-        # L4 of the verification of SD-031: the rows whose service case was inferred from the host's text and the
-        # table (a number where a predicate or a name belongs, a null, boolean or list name), not read from the
-        # service's app/pattern/validate.py, state it as unknown with the inference beside it until the service
-        # confirms it
+        # the service owner's statement of 2026-10-17 (its app/pattern/validate.py) reads the rows the builder had
+        # inferred, the present null and the integral real n: a number where a predicate belongs and n 2.0 are
+        # refused with pattern.predicate_form_other's text; a null, boolean or list name with "a name is a string,
+        # the column label as the index stores it" (no taxid hint), which no case of the table states (table_gap),
+        # as for a present null, which the service answers as no predicate (the host refuses it)
         key = lambda x: json.dumps(x, sort_keys=True)  # noqa: E731
-        inferred = [r for r in rows if "service_case_inferred" in r]
-        self.assertEqual(sorted(key(r["predicate"]) for r in inferred),
-                         sorted(key(x) for x in ({"and": [5]}, {"any": [[5]]}, {"any": [None]}, {"any": ["562", True]},
-                                                 {"any": [["562"]]})))
-        for r in inferred:
-            self.assertEqual((r["service_case"], r["service_case_inferred"]),
-                             ("unknown", "pattern.predicate_form_other"), r)
-            self.assertIn("until the service confirms it", r["note"])
+        stated = dict((key(r["predicate"]), r) for r in rows if "service_source" in r)
+        gap = [None, {"any": [[5]]}, {"any": [None]}, {"any": ["562", True]}, {"any": [["562"]]}]
+        form = [{"and": [5]}, {"at_least": {"n": 2.0, "labels": ["a", "b"]}}]
+        self.assertEqual(sorted(stated), sorted(key(x) for x in gap + form))
+        for x in gap:
+            r = stated[key(x)]
+            self.assertEqual((r["service_case"], r.get("table_gap")), (None, True), r)
+        for x in form:
+            r = stated[key(x)]
+            self.assertEqual((r["service_case"], r.get("table_gap")), ("pattern.predicate_form_other", None), r)
+        for r in stated.values():
+            self.assertTrue(r["service_source"].startswith("the service owner's statement of 2026-10-17"), r)
+            self.assertIn("answer", r["service_reading"])
+        # a predicate that is no object fails the service's pydantic type, not its form check: its case unknown
+        for x in ([{"any": ["562"]}], "any"):
+            r = next(r for r in rows if r["predicate"] == x)
+            self.assertEqual(r["service_case"], "unknown")
+            self.assertIn("pydantic", r["note"])
         # the predicate options without a predicate, split by value (async's 789fb5f0)
         self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif"))
         self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif",
