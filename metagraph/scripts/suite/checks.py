@@ -3906,12 +3906,16 @@ def _regime(ans: dict, r: dict) -> str:
     return str(reg or "basic")
 
 
-def _first_block(seed: str, out: str, side: str, canonical: bool, k: int = K) -> Optional[Tuple[int, str]]:
+def _first_block(seed: str, out: str, side: str, canonical: bool, k: int = K,
+                 hairpins: str = "skip") -> Optional[Tuple[int, str]]:
     """(d, reason) of the first outward depth d at which the step from the seed's arm along |out| (the record's bases
-    in walking order) to out[d] is inadmissible by SPEC-labeled-traversal-core §6.6, or None: rejoined_seed (the
-    step's target k-mer is a seed k-mer, either orientation in canonical/primary), else edge_reuse_rc / edge_reuse
-    (the step's (k+1)-mer, or its reverse complement in canonical/primary, is an earlier step of the walk);
-    precedence rejoined_seed > edge_reuse_rc > edge_reuse."""
+    in walking order) to out[d] is inadmissible by SPEC-labeled-traversal-core §6.5 / §6.6, or None: in
+    canonical/primary a hairpin step under |hairpins| skip (its (k+1)-mer its own reverse complement, at even k also
+    a step into or out of a palindromic k-mer), first; else rejoined_seed (the step's target k-mer is a seed k-mer,
+    either orientation in canonical/primary), else edge_reuse_rc / edge_reuse (the step's (k+1)-mer, or in
+    canonical/primary its reverse complement when that is another (k+1)-mer, is an earlier step of the walk: a
+    palindromic one reused is edge_reuse, as the engine keys it); precedence rejoined_seed > edge_reuse_rc >
+    edge_reuse. The oracle's Walker.block decides each step alike (tests/test_oracle_traverse.py FirstBlockParity)."""
     if len(seed) < k:
         return None
     seedk = set(seed[j:j + k] for j in range(len(seed) - k + 1))
@@ -3921,9 +3925,13 @@ def _first_block(seed: str, out: str, side: str, canonical: bool, k: int = K) ->
     win = seed[-k:] if side == "right" else seed[:k]   # the walk's node, natural orientation
     for d, b in enumerate(out):
         kmer, edge = (win[1:] + b, win + b) if side == "right" else (b + win[:-1], b + win)
+        rc = revcomp(edge)
+        if canonical and hairpins == "skip" and (
+                edge == rc or (k % 2 == 0 and (win == revcomp(win) or kmer == revcomp(kmer)))):
+            return d, "hairpin"
         if kmer in seedk:
             return d, "rejoined_seed"
-        if canonical and revcomp(edge) in used:
+        if canonical and rc != edge and rc in used:
             return d, "edge_reuse_rc"
         if edge in used:
             return d, "edge_reuse"
@@ -3953,6 +3961,11 @@ def _occurrences(text: str, word: str) -> List[int]:
 _MAX_REPEAT_EXITS = 64
 
 
+# the path end of a computed block (_computed_block): a skipped hairpin ends the path as dead_end (SPEC §13), every
+# other block under its own name
+_GAP_ENDS = {"hairpin": "dead_end"}
+
+
 def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side: str, L: int) -> Optional[dict]:
     """The first depth at which the record's own continuation from the seed is inadmissible (_first_block), computed
     from the truth's flank and the request's seed, never read from the answer: {d, reason, char (the record's base
@@ -3963,7 +3976,8 @@ def _computed_block(sc: dict, ans: dict, r: dict, i: int, t: dict, c: dict, side
     seed = str((seeds[i] if i < len(seeds) and isinstance(seeds[i], dict) else {}).get("sequence") or "").upper()
     O, p0, p1, coord = _record_view(t, c, L)
     out = O[p1:] if side == "right" else O[:p0][::-1]
-    blk = _first_block(seed, out, side, _regime(ans, r) in ("canonical", "primary"))
+    blk = _first_block(seed, out, side, _regime(ans, r) in ("canonical", "primary"),
+                       hairpins=_strategy_knob(sc, ans, "branching", "hairpins") or "skip")
     if blk is None or blk[0] >= len(out):
         return None
     d, why = blk
@@ -4217,7 +4231,7 @@ def check_walk_in_record(sc, ans, a, arm):
         elif ends & _STATED_STRUCTURAL_ENDS and exact is None:
             probs.append("a stated stop that cannot have happened: %s: %s; the record followed for %d of %d bp" % (
                 side, disproved[0], best, expected))
-        elif gap is not None and gap["d"] == best and gap["reason"] in ends:
+        elif gap is not None and gap["d"] == best and _GAP_ENDS.get(gap["reason"], gap["reason"]) in ends:
             # the record's own continuation is inadmissible there (§6.6), which the truth's minimum did not count
             searched.append("%s: the record followed for %d of %d bp, ended by %s, which the record and the seed "
                             "compute there: a truth gap" % (side, best, expected, gap["reason"]))

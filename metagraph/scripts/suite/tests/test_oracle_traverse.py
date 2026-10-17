@@ -268,6 +268,49 @@ class RecordedTriplets(unittest.TestCase):
         self.assertEqual(C.FAIL, checks.outcome())
 
 
+
+class FirstBlockParity(unittest.TestCase):
+    """SD-025: the suite's computed block (checks._first_block: the first inadmissible step along the record's own
+    continuation) and the oracle's Walker.block (SPEC 6.5, 6.6) decide every step alike, in the basic and the
+    canonical regime, on both arms and under both hairpin policies."""
+
+    @staticmethod
+    def oracle_first(seed, out, side, mode, k, hairpins):
+        w = T.Walker.__new__(T.Walker)
+        w.mode, w.k = mode, k
+        seed_nodes = w.seed_nodes(seed)
+        node = seed[-k:] if side == 'right' else seed[:k]
+        used = set()
+        for d, b in enumerate(out):
+            v, e = (node[1:] + b, node + b) if side == 'right' else (b + node[:-1], b + node)
+            why = w.block(node, v, e, used, seed_nodes, hairpins)
+            if why:
+                return d, why
+            used.add(w.edge_key(e))
+            node = v
+        return None
+
+    def test_first_block_matches_the_oracle(self):
+        import checks
+        rnd = random.Random(25)
+        n = 0
+        for _ in range(4000):
+            k = rnd.choice((3, 4, 5, 6))
+            seed = ''.join(rnd.choice('ACGT') for _ in range(k + rnd.randrange(4)))
+            parts = []
+            for _ in range(rnd.randrange(1, 4)):
+                x = ''.join(rnd.choice('ACGT') for _ in range(rnd.randrange(1, 9)))
+                parts.append(rnd.choice((x, x + O.revcomp(x), x + x, O.revcomp(seed)[:k + 1])))
+            out = ''.join(parts)
+            for side in ('right', 'left'):
+                for mode in ('basic', 'canonical'):
+                    for hairpins in ('skip', 'follow'):
+                        want = self.oracle_first(seed, out, side, mode, k, hairpins)
+                        got = checks._first_block(seed, out, side, mode != 'basic', k=k, hairpins=hairpins)
+                        self.assertEqual(got, want, (seed, out, side, mode, k, hairpins))
+                        n += want is not None and want[1] in ('hairpin', 'edge_reuse_rc')
+        self.assertGreater(n, 500)
+
 if __name__ == '__main__':
     unittest.main()
 

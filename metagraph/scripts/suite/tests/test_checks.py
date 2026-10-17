@@ -3556,6 +3556,26 @@ class TraverseChecks(unittest.TestCase):
         x = "".join(rnd.choice("ACGT") for _ in range(60))
         self.assertEqual(checks._first_block(seed, x + x, "right", False), (60 + 31, "edge_reuse"))
         self.assertIsNone(checks._first_block(seed, x, "right", False))
+        # SD-025, on a canonical / primary index (SPEC §6.5, §6.6; the engine and the oracle's Walker.block): an
+        # inverted repeat retraces its edges reverse-complemented; a skipped hairpin step (a palindromic (k+1)-mer)
+        # is decided before every other block; under hairpins follow, the reuse of a palindromic edge is edge_reuse
+        y = "".join(rnd.choice("ACGT") for _ in range(40))
+        self.assertEqual(checks._first_block(seed, y + "AC" + checks.revcomp(y), "right", True), (73, "edge_reuse_rc"))
+        self.assertIsNone(checks._first_block(seed, y + "AC" + checks.revcomp(y), "right", False))
+        # without the spacer the inverted repeat's centre is a palindromic 32-mer: a hairpin, skipped by default
+        self.assertEqual(checks._first_block(seed, y + checks.revcomp(y), "right", True), (55, "hairpin"))
+        self.assertEqual(checks._first_block(seed, y + checks.revcomp(y), "right", True, hairpins="follow"),
+                         (56, "edge_reuse_rc"))
+        pal = "".join(rnd.choice("ACGT") for _ in range(16))
+        pal += checks.revcomp(pal)                          # a palindromic 32-mer
+        self.assertEqual(checks._first_block(pal[:31], pal[31:] + x, "right", True), (0, "hairpin"))
+        # followed, the hairpin's target is the seed's reverse complement
+        self.assertEqual(checks._first_block(pal[:31], pal[31:] + x, "right", True, hairpins="follow"),
+                         (0, "rejoined_seed"))
+        self.assertIsNone(checks._first_block(pal[:31], pal[31:] + x, "right", False))
+        # x's last base is A: a spacer starting with A does not retrace the palindrome's left side
+        self.assertEqual(checks._first_block(seed, x + pal + "A" + x[1:20] + pal, "right", True, hairpins="follow"),
+                         (60 + 32 + 20 + 31, "edge_reuse"))
         sc, ans, record = self.repeat_walk()
         o, d = outcome(sc, ans, "walk_in_record", label_scope="record")
         self.assertEqual(o, "pass", d)
@@ -3619,6 +3639,44 @@ class TraverseChecks(unittest.TestCase):
         self.assertIn("truth gap", d)
         # the exit inside the flank: verified as before (pass on the full record)
         self.assertEqual(outcome(self.repeat_walk()[0], ans, "walk_in_record", label_scope="record")[0], "pass")
+
+    def test_walk_ends_at_a_skipped_hairpin(self):
+        # SD-025: on a canonical index the record's own continuation is a hairpin step at 55 bp (a palindromic 32-mer,
+        # SPEC §6.5): under hairpins skip the walk ends there, dead_end with its hairpin event; the truth's minimum
+        # past it is a truth gap the record and the seed compute (inconclusive), not a walk that stopped short
+        import random
+        rnd = random.Random(5)
+        p = "".join(rnd.choice("ACGT") for _ in range(16))
+        record = "".join(rnd.choice("ACGT") for _ in range(484)) + p + checks.revcomp(p)
+        record += "".join(rnd.choice("ACG" if checks.revcomp(record[483]) == "T" else "ACT") for _ in range(1))
+        record += "".join(rnd.choice("ACGT") for _ in range(483))
+        start, L = 420, 40
+        t = {"record": "NC_R.1", "taxid": "1", "seq_id": 0, "record_length": len(record), "start": start,
+             "length": L, "strand": "+", "window": record[start:start + L], "flank": record, "flank_start": 0,
+             "walk": {"right": {"min_bp": 100, "branch_by_bp": 0, "first": "ambiguous"}}}
+        arm = {"status": "complete", "complete_to_bp": 55,
+               "segments": [{"id": 0, "parents": [], "from_bp": 0, "length_bp": 55, "sequence": record[460:515],
+                             "events": [{"at_bp": 55, "type": "hairpin", "char": record[515], "followed": False},
+                                        {"at_bp": 55, "type": "label_end", "label": 0, "reason": "dead_end",
+                                         "text": "hairpin"}]}],
+               "paths": [{"id": 0, "segments": [0], "length_bp": 55, "path_reason": "dead_end",
+                          "end_reasons": {"dead_end": 1}}]}
+        ans = ok_answer({"capabilities": {"regime": "canonical"}, "results": [{"outcome": {"walks": "complete"},
+                                                                               "arms": {"right": arm}}],
+                         "strategy": {"bounds": {"max_extension_bp": 100}}})
+        sc = {"route": "POST /traverse", "truth": t,
+              "request": {"seeds": [{"sequence": t["window"]}], "strategy": {"direction": "right",
+                                                                              "bounds": {"max_extension_bp": 100}}}}
+        blk = checks._computed_block(sc, ans, ans["body"]["results"][0], 0, t, t, "right", L)
+        self.assertEqual((blk["d"], blk["reason"]), (55, "hairpin"))
+        o, d = outcome(sc, ans, "walk_in_record", label_scope="record")
+        self.assertEqual(o, "inconclusive", d)
+        self.assertIn("ended by hairpin, which the record and the seed compute there: a truth gap", d)
+        # following hairpins, the step is admissible: the walk that stops there stopped short
+        follow = copy.deepcopy(sc)
+        follow["request"]["strategy"]["branching"] = {"hairpins": "follow"}
+        self.assertIsNone(checks._computed_block(follow, ans, ans["body"]["results"][0], 0, t, t, "right", L))
+        self.assertEqual(outcome(follow, ans, "walk_in_record", label_scope="record")[0], "fail")
 
     def test_duplicate_seed_count(self):
         # B5b-07 (review of lane S5b): the invariants check states the distinct seeds of a request with identical

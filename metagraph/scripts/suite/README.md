@@ -944,15 +944,19 @@ semantics agreed with async (explains_checks, direct_mismatch, the table's valid
   relabelled reason, a continuation off the record and a fabricated block). An arm with no route that follows the
   record over its whole length still follows it when (1) a route spells the record for exactly its first d bases,
   where (2) d is the first depth at which the record's own continuation is inadmissible by SPEC-core §6.6,
-  computed from the truth's flank and the request's seed (`_first_block`: rejoined_seed, a seed k-mer, either
-  orientation in a canonical/primary regime; else edge_reuse_rc / edge_reuse, the step's (k+1)-mer or its reverse
-  complement already used on the walk), (3) one of its segments states the blocked event at at_bp d with the
+  computed from the truth's flank and the request's seed (`_first_block`, which decides each step as the oracle's
+  Walker.block and the engine do, tests/test_oracle_traverse.py FirstBlockParity: in a canonical/primary regime a
+  hairpin step under `hairpins: skip` first (SPEC §6.5: a palindromic (k+1)-mer); rejoined_seed, a seed k-mer,
+  either orientation in a canonical/primary regime; else edge_reuse_rc / edge_reuse, the step's (k+1)-mer or its
+  reverse complement already used on the walk, a palindromic one reused being edge_reuse), (3) one of its segments
+  states the blocked event at at_bp d with the
   record's base and that reason, and (4) past d it spells the record from a collapsed repeat's exit (an occurrence
   of the junction's k-1 bases in the flank followed by another base) for every base the flank holds. A block before
   the truth's min_bp is a truth gap (inconclusive), so is a continuation past the flank; past the record's end with
   the record as the only label it fails. A following route that ends at the computed block before the truth's
-  min_bp, with that reason, is the same truth gap. The regime is the answer's capabilities or the graphlet's H
-  record (basic on this index).
+  min_bp, with that reason (a skipped hairpin: `dead_end`, SPEC §13), is the same truth gap. The regime is the
+  answer's capabilities or the graphlet's H record (basic on this index, where no step is a hairpin and the change
+  of SD-025 decides nothing).
 
 
 ### The MCP verdict, the comparator and the merge (async's runner at e334715b is the reference)
