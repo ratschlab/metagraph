@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <random>
@@ -19,6 +21,7 @@
 
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "cli/json_helpers.hpp"
 #include "cli/pattern.hpp"
 #include "cli/pattern_predicate.hpp"
 #include "graph/alignment/pattern_search.hpp"
@@ -454,6 +457,40 @@ TEST(PatternPredicate, NestingAtMost64Deep) {
     EXPECT_EQ("", refusal(nots).first);
     EXPECT_EQ("invalid_request", refusal(R"({"not": )" + nots + "}").first);
 }
+
+// The shared corpus of SPEC §19.3's predicate forms (tests/data/pattern_predicate_forms.json):
+// every row's host verdict is Predicate::parse's — "ok", or the refusal's code. The suite's
+// manifest builder holds its own predictor of the service's by-design cases to the same rows
+// (scripts/suite/tests/test_manifest_lib.py), so the two readings cannot drift apart unseen
+TEST(PatternPredicate, TheSharedCorpusIsTheHostsVerdict) {
+    // run from the build directory, like every test reading ../tests/data
+    const char corpus[] = "../tests/data/pattern_predicate_forms.json";
+    std::ifstream in(corpus, std::ios::binary);
+    ASSERT_TRUE(in.good()) << corpus << " not found (run from the build directory)";
+    const std::string text { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+    const Json::Value doc = mtg::cli::parse_strict_json<mtg::cli::InvalidPatternRequest>(text, "");
+    const Json::Value &rows = doc["rows"];
+    ASSERT_GT(rows.size(), 40u);
+    size_t accepted = 0, refused = 0;
+    for (const Json::Value &row : rows) {
+        const std::string host = row["host"].asString();
+        ASSERT_TRUE(row.isMember("predicate")) << row.toStyledString();
+        std::string got = "ok";
+        try {
+            Predicate::parse(row["predicate"], 10'000, "request.predicate");
+        } catch (const PatternRefusal &e) {
+            EXPECT_EQ(400, e.status());
+            got = e.code();
+        }
+        EXPECT_EQ(host, got) << row["host_test"].asString() << ": "
+                             << Json::writeString(Json::StreamWriterBuilder(), row["predicate"])
+                                        .substr(0, 300);
+        ++(host == "ok" ? accepted : refused);
+    }
+    EXPECT_GT(accepted, 0u);
+    EXPECT_GT(refused, 0u);
+}
+
 
 TEST(PatternPredicate, TheCapCountsTheListedNames) {
     // exactly the cap is accepted, one more is refused, naming the count and the cap
