@@ -758,19 +758,34 @@ class TestG15AtomicExport(unittest.TestCase):
         st, h = self._store_and_umask()
         real = parser._write_all
 
+        injected = []
+        real_chunk = mcp_tools._ChargedWriter.write
+
         def half_then_enospc(fd, data, *a, **k):
+            injected.append(1)
             real(fd, data[:len(data) // 2])
+            raise OSError(28, 'No space left on device')
+
+        def chunk_then_enospc(w, chunk):
+            # the budgeted JSON export streams through a buffered temporary file
+            # (_write_json_charged), created and replaced as the one writer does
+            injected.append(1)
+            real_chunk(w, chunk[:len(chunk) // 2])
             raise OSError(28, 'No space left on device')
         for name, write in self._user_writers(st, h):
             with self.subTest(name):
                 path = write()
                 with open(path, 'rb') as f:
                     full = f.read()
-                with mock.patch.object(parser, '_write_all', half_then_enospc):
+                del injected[:]
+                with mock.patch.object(parser, '_write_all', half_then_enospc), \
+                        mock.patch.object(mcp_tools._ChargedWriter, 'write', chunk_then_enospc):
                     try:
                         write()
                     except (OSError, KeyError):
                         pass                # a model's save raises; a tool answers io_error
+                # the failure was injected, so the earlier file below survived a real failure
+                self.assertTrue(injected, '%s: no write failure was injected' % name)
                 with open(path, 'rb') as f:
                     self.assertEqual(full, f.read())
                 d = os.path.dirname(path)

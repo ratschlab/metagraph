@@ -458,7 +458,7 @@ class TestSameIndexParity(unittest.TestCase):
     ns, fp, meta_fp and release, comparability is False exactly where _same_index refuses
     with release_mismatch or index_mismatch, 'unverifiable' exactly where it refuses with
     index_unverifiable or states the identity unverified, and True exactly where it states
-    it verified. A field added to one rule set only fails here."""
+    it verified. A field added to the identity (index_identity) fails here."""
 
     FIELDS = (('ns', 'index_ns'), ('fp', 'index_fp'), ('meta_fp', 'index_meta_fp'),
               ('release', None))
@@ -471,6 +471,9 @@ class TestSameIndexParity(unittest.TestCase):
         import itertools
         from metagraph.traverse.mcp_tools import ToolError, _same_index
         base = T.graphlet('fork')
+        # the identity both rule sets read is exactly the four fields walked below: a field
+        # added to the identity (and so to one rule set) fails here first
+        self.assertEqual({k for k, _ in self.FIELDS}, set(ops.index_identity(base)))
         a, b = copy.copy(base), copy.copy(base)
         n = 0
         for pairs in itertools.product(self.PAIRS, repeat=len(self.FIELDS)):
