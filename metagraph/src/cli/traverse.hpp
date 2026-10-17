@@ -34,6 +34,12 @@ class InvalidRequest : public std::invalid_argument {
     using std::invalid_argument::invalid_argument;
 };
 
+// The refusal of a request object read strictly (StrictObject<RefuseRequest>, json_helpers.hpp)
+// on the traversal routes: an InvalidRequest with the message
+struct RefuseRequest {
+    InvalidRequest operator()(const std::string &message) const { return InvalidRequest(message); }
+};
+
 // Label-change cost as requested, by label NAME (converted per seed to LabelChangeCost
 // over the seed's label dictionary).
 struct CostSpec {

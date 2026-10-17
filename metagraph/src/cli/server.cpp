@@ -1699,31 +1699,12 @@ int run_server(Config *config) {
                                                         shared_ptr<HttpServer::Request> request) {
         const size_t request_id = num_requests++;
         process_request(response, request, request_id, [&](const std::string &content) {
-            Json::Value json = parse_json_string(content);
-            if (!json.isObject())
-                throw InvalidRequest("request: expected an object");
-            for (const std::string &name : json.getMemberNames()) {
-                if (name != "attempt_id" && name != "wait_ms" && name != "not_after_ms")
-                    throw InvalidRequest("request: unknown field '" + name + "'");
-            }
-            if (!json["attempt_id"].isString() || !valid_attempt_id(json["attempt_id"].asString())) {
-                throw InvalidRequest("request.attempt_id: expected a string of 1 to 128 "
-                                     "characters from [A-Za-z0-9._:-]");
-            }
-            uint64_t wait_ms = 0;
-            if (json.isMember("wait_ms")) {
-                const Json::Value &w = json["wait_ms"];
-                if (!w.isIntegral() || (w.isInt64() && w.asInt64() < 0) || w.asUInt64() > 10'000)
-                    throw InvalidRequest("request.wait_ms: expected an integer in [0, 10000]");
-                wait_ms = w.asUInt64();
-            }
-            // the not_after_ms of the request being cancelled (the same rule as /traverse's): a
-            // tombstone of an unknown id is held until it has passed + the skew allowance
-            const std::optional<uint64_t> not_after_ms = read_not_after_ms(json, "request");
-            const std::string id = json["attempt_id"].asString();
-            auto [status, body] = attempts.cancel(id, wait_ms, not_after_ms);
-            logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}", id,
-                         request_id, status, body.get("state", "").asString());
+            const CancelRequest cancel = parse_cancel_request(parse_json_string(content));
+            auto [status, body] = attempts.cancel(cancel.attempt_id, cancel.wait_ms,
+                                                  cancel.not_after_ms);
+            logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}",
+                         cancel.attempt_id, request_id, status,
+                         body.get("state", "").asString());
             if (status != 200)
                 throw HttpError(status, std::move(body));
             return body;

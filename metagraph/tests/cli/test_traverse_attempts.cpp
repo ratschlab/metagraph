@@ -548,6 +548,78 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
     EXPECT_EQ(0u, AttemptRegistry(s).capabilities_json()["retention_s"].asUInt64());
 }
 
+// POST /traverse/cancel's body as parse_cancel_request reads it: an object of kCancelFields only
+// (the list the capabilities state as cancel_fields), an unknown field refused before the known
+// ones are checked, then attempt_id (required; the rule and text of attempt_ids), wait_ms (an
+// integer in [0, kMaxCancelWaitMs], one message for every fault) and not_after_ms (as /traverse
+// reads it). The texts are the ones the route's inline parser gave
+TEST(GraphletAttemptRegistry, CancelRequestIsParsedStrictly) {
+    auto parse = [](const std::string &t) {
+        Json::Value v;
+        std::unique_ptr<Json::CharReader> reader(Json::CharReaderBuilder().newCharReader());
+        std::string errors;
+        EXPECT_TRUE(reader->parse(t.data(), t.data() + t.size(), &v, &errors)) << errors;
+        return v;
+    };
+    auto refusal = [&](const std::string &body) -> std::string {
+        try {
+            parse_cancel_request(parse(body));
+            return "accepted";
+        } catch (const InvalidRequest &e) {
+            return e.what();
+        }
+    };
+    const std::string id_text = "request.attempt_id: expected a string of 1 to 128 characters "
+                                "from [A-Za-z0-9._:-]";
+    const std::string wait_text = "request.wait_ms: expected an integer in [0, 10000]";
+    EXPECT_EQ("request: expected an object", refusal("[]"));
+    EXPECT_EQ("request: expected an object", refusal("\"a\""));
+    EXPECT_EQ("request: expected an object", refusal("null"));
+    EXPECT_EQ("request: unknown field 'x'", refusal(R"({"attempt_id": "a", "x": 1})"));
+    // the unknown field first, whatever else is wrong
+    EXPECT_EQ("request: unknown field 'x'",
+              refusal(R"({"attempt_id": 7, "wait_ms": -1, "x": 1})"));
+    EXPECT_EQ(id_text, refusal("{}"));
+    for (const std::string &id : std::vector<std::string> { "7", "null", "\"\"", "\"a b\"",
+                                                            "[\"a\"]",
+                                                            "\"" + std::string(129, 'a') + "\"" }) {
+        EXPECT_EQ(id_text, refusal(R"({"attempt_id": )" + id + "}")) << id;
+    }
+    // the id before wait_ms, wait_ms before not_after_ms
+    EXPECT_EQ(id_text, refusal(R"({"attempt_id": 7, "wait_ms": -1})"));
+    EXPECT_EQ(wait_text, refusal(R"({"attempt_id": "a", "wait_ms": -1, "not_after_ms": -1})"));
+    for (const char *w : { "-1", "1.5", "\"1\"", "10001", "null", "true", "{}",
+                           "18446744073709551615", "1e30" }) {
+        EXPECT_EQ(wait_text, refusal(std::string(R"({"attempt_id": "a", "wait_ms": )") + w + "}"))
+                << w;
+    }
+    EXPECT_EQ("request.not_after_ms: expected an integer in [0, 9007199254740991] (Unix epoch, "
+              "ms)", refusal(R"({"attempt_id": "a", "not_after_ms": 9007199254740992})"));
+
+    const CancelRequest plain = parse_cancel_request(parse(R"({"attempt_id": "run-7.l:3"})"));
+    EXPECT_EQ("run-7.l:3", plain.attempt_id);
+    EXPECT_EQ(0u, plain.wait_ms);
+    EXPECT_FALSE(plain.not_after_ms);
+    for (const auto &[w, value] : std::vector<std::pair<std::string, uint64_t>> {
+             { "0", 0 }, { "10000", 10000 }, { "3.0", 3 }, { "1e3", 1000 } }) {
+        EXPECT_EQ(value, parse_cancel_request(parse(R"({"attempt_id": "a", "wait_ms": )" + w
+                                                    + "}")).wait_ms) << w;
+    }
+    const CancelRequest full = parse_cancel_request(parse(
+            R"({"not_after_ms": 1759601000000, "wait_ms": 250, "attempt_id": "a"})"));
+    EXPECT_EQ("a", full.attempt_id);
+    EXPECT_EQ(250u, full.wait_ms);
+    EXPECT_EQ(1759601000000ull, full.not_after_ms.value());
+    EXPECT_EQ(10'000u, kMaxCancelWaitMs);
+
+    // the fields read are the fields the capabilities state
+    Json::Value fields(Json::arrayValue);
+    for (const char *f : kCancelFields) {
+        fields.append(f);
+    }
+    EXPECT_EQ(fields, AttemptRegistry(AttemptSettings()).capabilities_json()["cancel_fields"]);
+}
+
 // The rules of the attempts block are references to the sections of
 // SPEC-labeled-traversal-core.md that state them, the same whatever the settings (retention_s
 // 0 included: its case is in the section, the number in retention_s), in printable ASCII; the

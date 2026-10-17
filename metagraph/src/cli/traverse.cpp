@@ -82,10 +82,6 @@ class DeliveryScope {
 
 // ---------------------------------------------------------------- strict JSON access
 
-struct RefuseRequest {
-    InvalidRequest operator()(const std::string &message) const { return InvalidRequest(message); }
-};
-
 // A request object read strictly (StrictObject): an unknown field is refused when it goes out
 // of scope, unless an exception is already on its way
 class Strict : public StrictObject<RefuseRequest> {

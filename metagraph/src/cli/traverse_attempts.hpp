@@ -79,6 +79,25 @@ AttemptIds attempt_ids(const Json::Value &request);
 // in [0, kMaxNotAfterMs]; throws InvalidRequest naming |where| otherwise
 std::optional<uint64_t> read_not_after_ms(const Json::Value &request, const std::string &where);
 
+// The request fields of POST /traverse/cancel, in the order the capabilities list them
+// (cancel_fields)
+constexpr const char *kCancelFields[] = { "attempt_id", "wait_ms", "not_after_ms" };
+// The longest a cancel waits for its attempt to finish (wait_ms, ms)
+constexpr uint64_t kMaxCancelWaitMs = 10'000;
+
+struct CancelRequest {
+    std::string attempt_id;
+    uint64_t wait_ms = 0;
+    // the not_after_ms of the request being cancelled
+    std::optional<uint64_t> not_after_ms;
+};
+
+// A POST /traverse/cancel body, read strictly: an object of kCancelFields only (an unknown field
+// is refused first), attempt_id required (the rule of attempt_ids), wait_ms an integer in
+// [0, kMaxCancelWaitMs], not_after_ms as read_not_after_ms reads it. Throws InvalidRequest
+// naming the first field at fault otherwise
+CancelRequest parse_cancel_request(const Json::Value &request);
+
 // Whether a request carrying |ids| names another server_instance than |instance| (it must then
 // be refused before anything runs), and the 409 body: {error, state: "instance_mismatch",
 // expect_server_instance, server_instance, attempt_id/budget_id/locus_id as given,
