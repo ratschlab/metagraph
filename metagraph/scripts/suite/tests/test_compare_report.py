@@ -892,6 +892,38 @@ class TriageFixesTest(unittest.TestCase):
         self.assertIsNone(cmp.answer_case_of(cases_f, "POST /pattern", 400, m["error"]))
 
 
+def damaged_raw_files(d):
+    """{name: relative path} of raw records a host crash or a cut copy can leave (SD-093): a truncated .gz, a JSON list,
+    a record whose answer is no object, and an intact one with a body (the control)."""
+    import gzip
+    out = {}
+    for name, data in (("truncated", gzip.compress(b'{"answer": {"body": {"patterns": []}}}')[:-12]),
+                       ("list", gzip.compress(b'[1, 2]')),
+                       ("answer-text", gzip.compress(b'{"answer": "x"}')),
+                       ("intact", gzip.compress(json.dumps({"answer": {"http": 200, "body": {"patterns": [
+                           {"error": {"code": "slot_code", "message": "slot text"}}]}}}).encode()))):
+        rel = "raw/%s.json.gz" % name
+        os.makedirs(os.path.join(d, "raw"), exist_ok=True)
+        with open(os.path.join(d, rel), "wb") as fh:
+            fh.write(data)
+        out[name] = rel
+    return out
+
+
+class DamagedRawRecordTest(unittest.TestCase):
+    def test_direct_error_parts_of_a_damaged_raw_record(self):
+        # SD-093 (guards at the crashing sites): a truncated .gz or a raw record that is no object (or whose answer
+        # is none) is no body, its line's own error codes stay; it stopped compare with EOFError / AttributeError
+        with tempfile.TemporaryDirectory() as d:
+            files = damaged_raw_files(d)
+            line = {"error": {"code": "line_code", "text": "line text"}}
+            for name in ("truncated", "list", "answer-text"):
+                self.assertEqual(cmp.direct_error_parts(dict(line, raw=files[name]), d),
+                                 ({"line_code"}, set(), {"line text"}), name)
+            self.assertEqual(cmp.direct_error_parts(dict(line, raw=files["intact"]), d),
+                             ({"line_code"}, {"slot_code"}, {"line text", "slot text"}))
+
+
 class ReviewFixesTest(unittest.TestCase):
     """Lane S5b: the verified review of lane S5 (B-01..B-11) and the triage's second part (item 5: the timing class),
     with async's agreed semantics (explains_checks, direct_mismatch, the table's load validation)."""

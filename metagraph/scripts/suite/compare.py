@@ -822,9 +822,11 @@ def direct_error_parts(line, run_dir):
         path = os.path.join(run_dir, raw)
         if os.path.exists(path):
             try:
-                body = (sc.read_gz_json(path).get("answer") or {}).get("body")
-            except (OSError, ValueError):
-                body = None
+                doc = sc.read_gz_json(path)
+            except (OSError, ValueError, EOFError):   # a truncated .gz or a cut JSON: no body (SD-093)
+                doc = None
+            answer = doc.get("answer") if isinstance(doc, dict) else None
+            body = answer.get("body") if isinstance(answer, dict) else None
             if isinstance(body, dict):
                 for p in body.get("patterns") or []:
                     if isinstance(p, dict) and isinstance(p.get("error"), dict):

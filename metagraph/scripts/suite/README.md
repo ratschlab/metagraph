@@ -4467,6 +4467,11 @@ branch for a v6 run.
   (`--pattern-finalize-ms`) and checks.evaluate sees no host document. The NEXT manifest states it in the check
   arguments (`reserve_ms` taken from the capabilities snapshot by the builder); checks.evaluate's API does not
   change. The frozen v5 and v6 keep the answer's reading.
+- The readers of an execution's raw record (SD-093): a truncated .gz, a cut JSON, a record that is no object or
+  whose answer is none reads as no body at the three sites that crashed on it (compare.direct_error_parts, which
+  then keeps the line's own error codes; run_direct's previous_entry, time_limited unknown; the bench panel's
+  raw_body), as the other readers already did. One shared reader in suite_common (keeping today's lookup order,
+  run_dir/rel then run_dir/arms/<arm>/rel) replaces the ten copies after the open gr/suite-* lanes land.
 
 ## Glossary
 

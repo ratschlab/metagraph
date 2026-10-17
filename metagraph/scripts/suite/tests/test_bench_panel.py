@@ -403,5 +403,20 @@ class LoadContextTest(unittest.TestCase):
         self.assertEqual((ctx["samples"], ctx["sra_all_cpu_pct_median"], ctx["host_load1_median"]), (5, 20.0, 2.0))
         self.assertEqual(bl.median([3.0, float("nan"), 1.0, float("inf"), 2.0]), 2.0)
 
+class DamagedRawRecordTest(unittest.TestCase):
+    def test_raw_body_of_a_damaged_raw_record(self):
+        # SD-093 (guards at the crashing sites): a raw record that is no object, or whose answer is none, is no body
+        # (None), as a truncated .gz already was; it stopped the panel with AttributeError
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        from test_compare_report import damaged_raw_files
+        with tempfile.TemporaryDirectory() as d:
+            files = damaged_raw_files(d)
+            for name in ("truncated", "list", "answer-text"):
+                self.assertIsNone(bp.raw_body(d, {"raw": files[name], "arm": "direct-local"}), name)
+            self.assertEqual(bp.raw_body(d, {"raw": files["intact"], "arm": "direct-local"}),
+                             {"patterns": [{"error": {"code": "slot_code", "message": "slot text"}}]})
+
+
 if __name__ == "__main__":
     unittest.main()

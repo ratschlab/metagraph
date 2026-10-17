@@ -644,10 +644,12 @@ class Runner(object):
                             None)
             wall = line.get("wall_ms")
             try:
-                tl = time_limited_of(self.checks, (sc.read_gz_json(os.path.join(self.out, line["raw"])) or {}).get(
-                    "answer"), scenario, {"wall_ms": wall} if isinstance(wall, (int, float)) else None, line.get("arm"))
-            except (OSError, ValueError):
-                tl = None
+                doc = sc.read_gz_json(os.path.join(self.out, line["raw"]))
+            except (OSError, ValueError, EOFError):   # a truncated .gz or a cut JSON: no answer (SD-093)
+                doc = None
+            answer = doc.get("answer") if isinstance(doc, dict) else None
+            tl = time_limited_of(self.checks, answer, scenario, {"wall_ms": wall} if isinstance(wall, (int, float))
+                                 else None, line.get("arm")) if isinstance(answer, dict) else None
         return {"digest": line.get("answer_digest"), "time_limited": tl or ""}
 
     # -- sampler ----------------------------------------------------------------------------------------------

@@ -614,5 +614,26 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual([x["scenario"] for x in rows], ["S-0"])    # the request in flight is recorded
 
 
+class DamagedRawRecordTest(unittest.TestCase):
+    def test_previous_entry_of_a_damaged_raw_record(self):
+        # SD-093 (guards at the crashing sites): a resume's earlier repeat whose raw record is a truncated .gz or no
+        # object is read as no answer (time_limited unknown: ""), never a crash of the resume
+        from test_compare_report import damaged_raw_files
+
+        class Checks(object):
+            @staticmethod
+            def time_limited(answer, scenario=None, client=None, arm=None):
+                return "limited" if (answer or {}).get("body") else ""
+        with tempfile.TemporaryDirectory() as d:
+            files = damaged_raw_files(d)
+            runner = run_direct.Runner.__new__(run_direct.Runner)
+            runner.manifest, runner.checks, runner.out = {"scenarios": [{"id": "S"}]}, Checks, d
+            for name in ("truncated", "list", "answer-text"):
+                self.assertEqual(runner.previous_entry({"scenario": "S", "raw": files[name], "answer_digest": "x"}),
+                                 {"digest": "x", "time_limited": ""}, name)
+            self.assertEqual(runner.previous_entry({"scenario": "S", "raw": files["intact"], "answer_digest": "x"}),
+                             {"digest": "x", "time_limited": "limited"})
+
+
 if __name__ == "__main__":
     unittest.main()

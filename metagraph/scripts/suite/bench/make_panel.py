@@ -152,7 +152,8 @@ def raw_body(run_dir, line):
                 doc = sc.read_gz_json(path)
             except (OSError, ValueError, EOFError):
                 return None
-            return ((doc or {}).get("answer") or {}).get("body")
+            answer = doc.get("answer") if isinstance(doc, dict) else None   # a record that is no object: no body
+            return answer.get("body") if isinstance(answer, dict) else None
     return None
 
 
