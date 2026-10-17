@@ -21,6 +21,7 @@
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/load/load_graph.hpp"
+#include "cli/merge.hpp"
 #include "cli/pattern.hpp"
 #include "cli/transform_graph.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -519,6 +520,52 @@ TEST(PatternMask, MaskWithAValidSentinelIsRefused) {
 
 
 // ---------------------------------------------------------------- without the mask (#16)
+
+// The commands that write a new graph over a prefix — extend, build --in-ram, merge — leave no
+// dummy-edge mask of an earlier graph beside it when theirs has none (remove_stale_dummy_mask):
+// one of the right size would be loaded as the new graph's own (node counts, degrees and the
+// pattern search's exact counts silently wrong), one of another size makes the graph
+// unloadable. A graph written with its mask replaces the old one
+TEST(PatternMask, WritersOfANewGraphRemoveAStaleMask) {
+    const std::string dir = make_dir("stale");
+    const std::string masked = build_masked(dir, "basic", "stat");
+    const std::string mask = utils::remove_suffix(masked, ".dbg") + ".edgemask";
+    const std::string records = dir + "/records.fa";
+    std::ofstream(dir + "/other.fa") << ">o\nTTTTGGGGCCCCAAAATGCA\n";
+
+    // build --in-ram without --mask-dummy, the same records: the stale mask has the right size
+    fs::copy_file(mask, dir + "/plain.edgemask");
+    ASSERT_EQ(0, build_graph(make_config({ "build", "--in-ram", "-k", std::to_string(kK),
+                                           "-o", dir + "/plain", records }).get()));
+    EXPECT_FALSE(fs::exists(dir + "/plain.edgemask"));
+    EXPECT_EQ(nullptr, load(dir + "/plain.dbg")->get_mask());
+
+    // with --mask-dummy the graph's own mask replaces it
+    fs::copy_file(dir + "/plain.dbg", dir + "/remasked.dbg");
+    std::ofstream(dir + "/remasked.edgemask") << "not a mask";
+    ASSERT_EQ(0, build_graph(make_config({ "build", "--mask-dummy", "--in-ram", "-k",
+                                           std::to_string(kK), "-o", dir + "/remasked",
+                                           records }).get()));
+    expect_same_mask(*load(masked), *load(dir + "/remasked.dbg"));
+
+    // merge: a fresh graph, never masked
+    ASSERT_EQ(0, build_graph(make_config({ "build", "--in-ram", "-k", std::to_string(kK),
+                                           "-o", dir + "/other", dir + "/other.fa" }).get()));
+    fs::copy_file(mask, dir + "/merged.edgemask");
+    ASSERT_EQ(0, merge_graph(make_config({ "merge", "-o", dir + "/merged", dir + "/plain.dbg",
+                                           dir + "/other.dbg" }).get()));
+    EXPECT_FALSE(fs::exists(dir + "/merged.edgemask"));
+    EXPECT_EQ(nullptr, load(dir + "/merged.dbg")->get_mask());
+
+    // extend (pinned with a copied mask in MaskWithAValidSentinelIsRefused too)
+    fs::copy_file(mask, dir + "/extended.edgemask");
+    ASSERT_EQ(0, augment_graph(make_config({ "extend", "-i", dir + "/plain.dbg", "-o",
+                                             dir + "/extended", dir + "/other.fa" }).get()));
+    EXPECT_FALSE(fs::exists(dir + "/extended.edgemask"));
+    EXPECT_EQ(nullptr, load(dir + "/extended.dbg")->get_mask());
+    fs::remove_all(dir);
+}
+
 
 // The Wilson interval at its extremes: every sample real (the interval's top is 1), and its
 // JSON {value, interval, samples, source: "sampled"}

@@ -1370,7 +1370,11 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
   load (§24: sub-second where the full count read the whole W column, 25 minutes on a busy host); the full check
   is made where a mask is written (`transform --mask-dummy` refuses to write a mask that fails it). Beyond that
   check a `file` mask is trusted as written. A mask
-  written by `build --mask-dummy`, `transform --mask-dummy` or `--pattern-build-mask` is correct.
+  written by `build --mask-dummy`, `transform --mask-dummy` or `--pattern-build-mask` is correct. A command that
+  writes a new graph without a mask over a prefix — `build` (in RAM or not), `extend`, `merge` — removes a
+  `.edgemask` another graph left there, which would be loaded with the new one (one of the right size passes the
+  load's check) and which, before this build, `build --in-ram` and `merge` kept; `transform`, which rewrites the
+  same graph, leaves the mask beside it.
 
 A multi-graph server's blocks are §24's: the full block per pair, and on `GET /capabilities` the full block
 without a graph. (The three-field block `{pattern_contract_version, available: false, unavailable_reason:

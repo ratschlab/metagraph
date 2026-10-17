@@ -1,6 +1,8 @@
 #include "load_graph.hpp"
 
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "common/logger.hpp"
@@ -36,6 +38,25 @@ static const std::vector<std::pair<std::string, GraphLoader>> kGraphLoaders = {
     GRAPH_LOADER_ENTRY(DBGBitmap),
     GRAPH_LOADER_ENTRY(DBGSSHash),
 };
+
+void remove_stale_dummy_mask(const DeBruijnGraph &graph, const std::string &filename) {
+    const auto *succinct = dynamic_cast<const DBGSuccinct*>(&graph);
+    if (!succinct || succinct->get_mask())
+        return;
+    const std::string stale = utils::remove_suffix(filename, DBGSuccinct::kExtension)
+                                + DBGSuccinct::kDummyMaskExtension;
+    std::error_code error;
+    if (!std::filesystem::exists(stale, error))
+        return;
+    if (std::filesystem::remove(stale, error)) {
+        logger->warn("Removed the dummy-edge mask {} left beside the output: it was not this "
+                     "graph's (the graph written has no mask)", stale);
+    } else {
+        logger->warn("The dummy-edge mask {} beside the output is not this graph's and could "
+                     "not be removed ({}): delete it, or rebuild it with `metagraph transform "
+                     "--mask-dummy --force`", stale, error.message());
+    }
+}
 
 DummyMaskCounts mask_dummy_edges(DBGSuccinct *graph, size_t num_threads) {
     assert(graph);

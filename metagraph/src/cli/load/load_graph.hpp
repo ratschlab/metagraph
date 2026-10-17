@@ -72,6 +72,17 @@ struct DummyMaskCounts {
  */
 DummyMaskCounts mask_dummy_edges(graph::DBGSuccinct *graph, size_t num_threads);
 
+/**
+ * After |graph| was written to |filename| (DBGSuccinct::serialize writes a .edgemask only for a
+ * graph that has a mask, and leaves an older one in place): when |graph| is a succinct graph
+ * without a mask, removes a .edgemask beside it, which another graph left there and which would
+ * be loaded with this one (a stale mask of the right size passes the load's check), warning
+ * that it did, or that it could not (the user is told to delete it). Called by the commands
+ * that write a new graph over a prefix: extend, build --in-ram and merge; not by transform,
+ * which rewrites the same graph (the mask beside it is the graph's).
+ */
+void remove_stale_dummy_mask(const graph::DeBruijnGraph &graph, const std::string &filename);
+
 } // namespace cli
 } // namespace mtg
 
