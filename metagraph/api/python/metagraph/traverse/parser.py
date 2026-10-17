@@ -71,7 +71,14 @@ _O_DELIVERY = {'i': 'inline', 's': 'spooled', 'p': 'paged'}
 _REGIMES = ('basic', 'primary', 'canonical')
 _TOKEN_RE = re.compile(r'[!-~]+\Z')          # printable ASCII without space
 _NS_RE = re.compile(r'[A-Za-z0-9._-]+\Z')
-_NAME_RE = re.compile(r'[A-Za-z0-9_.\[\]-]+\Z')   # counter / extra names
+_NAME_RE = re.compile(r'[A-Za-z0-9_.\[\]-]+\Z')   # counter names
+# a K record's extra field names as the server writes them (traverse.cpp's K writer): an
+# open [a-z_] token set (DESIGN §14.1), never a fixed field's name (it drops those from the
+# extras), never twice (they come from one JSON object). A K record the writer cannot write
+# is refused, so the limitation's renderers (export.limitation_json, ops.limitation_dict)
+# never meet a name clash they would settle differently
+_K_EXTRA_RE = re.compile(r'[a-z_]+\Z')
+_K_FIXED = frozenset(('kind', 'knob', 'limit', 'observed', 'complete_to_bp', 'effect'))
 
 
 # which fields a record wrote as '*' (check_rules): one shared frozenset per combination
@@ -312,8 +319,12 @@ class _Reader:
         if f[7] != '.':
             for item in f[7].split(','):
                 name, eq, val = item.partition('=')
-                if not eq or not _NAME_RE.match(name):
+                if not eq or not _K_EXTRA_RE.match(name):
                     raise self.err('K extra item %s' % _tok(item))
+                if name in _K_FIXED or any(name == n for n, _ in extra):
+                    raise self.err('K extra field %s: %s' % (
+                        _tok(name), 'a fixed field\'s name' if name in _K_FIXED
+                        else 'given twice'))
                 extra.append((name, decode_kvalue(val)))
         return Limitation(arm, f[2], f[3], decode_kvalue(f[4]), decode_kvalue(f[5]),
                           _opt(f[6], parse_int), extra, pct_unescape(f[8]))

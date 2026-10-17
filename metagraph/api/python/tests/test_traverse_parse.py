@@ -306,6 +306,24 @@ class TestMalformed(unittest.TestCase):
         self.assert_bad(_edit(t, 'O c c c i', 'O c c c z'), 'delivery')
         self.assert_bad(_edit(t, 'T * .', 'W * .'))
 
+    def test_limitation_extras_as_the_server_writes_them(self):
+        """A K record's extra fields are what the server's writer can write: [a-z_] names,
+        none named like a fixed field (kind, knob, limit, observed, complete_to_bp,
+        effect), none twice. The two renderers of a limitation (export.limitation_json, the
+        server's JSON again; ops.limitation_dict, the agents' caveat) then never meet a
+        clash they would settle differently."""
+        t = T.doc_text('linear')
+        k = 'K l scope branching.on_reconverge s:merge i:0 * . '
+        self.assertIn(k, t)
+        ok = parse(_edit(t, k, k.replace(' * . ', ' * lists_cut=i:3,server_limit=i:9 ')))
+        self.assertEqual([('lists_cut', 3), ('server_limit', 9)],
+                         [tuple(x) for x in ok.limitations[0].extra])
+        for extra in ('kind=s:other', 'effect=s:x', 'complete_to_bp=i:4', 'knob=s:k',
+                      'limit=i:1', 'observed=i:1', 'cause=s:a,cause=s:b', 'Server_limit=i:1',
+                      'lists2=i:1', 'a.b=i:1', 'x[0]=i:1', 'with-dash=i:1'):
+            with self.subTest(extra=extra):
+                self.assert_bad(_edit(t, k, k.replace(' * . ', ' * %s ' % extra)), 'K extra')
+
     def test_line_numbers(self):
         t = T.doc_text('linear')
         e = self.assert_bad(_edit(t, 'R 0 1 0 40 D 0 * * 0 0 0', 'R 0 1 0 40 D 0 * * 0 0 x'))
