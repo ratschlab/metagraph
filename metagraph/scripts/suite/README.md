@@ -873,7 +873,12 @@ truth/staging_capabilities/): the frozen v4 is built once the host's capabilitie
   (`manifest_lib.set_host_capabilities`, `HOST_MISMATCH_MAX`), for patterns of at most k bases.
 - G07: Q-more-0003 (at_least 3 of 2 labels) expects the refusal, 400 invalid_request naming
   request.predicate.at_least.n; `pattern_by_design` names pattern.predicate_form_other for a form fault of
-  SPEC-pattern §19.3 other than a non-string name (`_predicate_form_fault`).
+  SPEC-pattern §19.3 other than a number as a name (`_predicate_form_fault`: a null, boolean, list or object as a
+  name included), and pattern.predicate_name_not_string for a number in a name list only (not where a predicate or
+  a list belongs). tests/test_manifest_lib.py holds both to the shared corpus
+  metagraph/tests/data/pattern_predicate_forms.json: the host's verdicts of tests/cli/test_pattern_predicate.cpp
+  and the service's case per predicate, 'unknown' where the service's own reading is not stated (a present null,
+  an integral real n) (SD-031; the gtest does not read the corpus yet).
 - G10: the builders' absent label is `manifest_lib.ABSENT_LABEL`; a resolve naming it names resolve.unknown_label.
 - G12: R-edge-0019 sends an object cut before its end (no JSON reader accepts it).
 - G14: the header kind of the derived-label pairs (T-labels-0004, -0006) sends labels.max_seed_labels 10,000, the

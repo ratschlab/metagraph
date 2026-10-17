@@ -209,6 +209,22 @@ class V4Builder(unittest.TestCase):
             self.assertNotIn("pattern.predicate_form_other", p(predicate=pred), pred)
         self.assertNotIn("pattern.predicate_form_other", p(predicate={"any": [562]}))   # name_not_string's case
         self.assertIn("pattern.predicate_name_not_string", p(predicate={"any": [562]}))
+        # SD-031: the predictor reads every predicate form as the host's parser (tests/cli/test_pattern_predicate.cpp)
+        # and the service's table do, row for row of the shared corpus tests/data/pattern_predicate_forms.json
+        corpus = os.path.join(os.path.dirname(os.path.abspath(ml.__file__)), "..", "..", "tests", "data",
+                              "pattern_predicate_forms.json")
+        with open(corpus) as fh:
+            rows = json.load(fh)["rows"]
+        forms = {"pattern.predicate_form_other", "pattern.predicate_name_not_string"}
+        checked = 0
+        for r in rows:
+            self.assertTrue(r["host"] == "ok" or r["service_case"] is not None, r)   # a refusal has a case
+            if r["service_case"] == "unknown":
+                continue
+            got = sorted(forms.intersection(p(predicate=r["predicate"])))
+            self.assertEqual(got, [r["service_case"]] if r["service_case"] else [], json.dumps(r)[:300])
+            checked += 1
+        self.assertGreater(checked, 40)
         # the predicate options without a predicate, split by value (async's 789fb5f0)
         self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif"))
         self.assertIn("pattern.predicate_options_without_predicate", p(predicate_scope="motif",

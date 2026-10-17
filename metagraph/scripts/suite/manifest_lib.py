@@ -670,7 +670,12 @@ def _predicate_form_fault(p: Any, depth: int = 0) -> bool:
         return True
 
     def names_fault(lst: Any) -> bool:
+        # a name is a non-empty string, once per list; a number is name_not_string's case (_predicate_has_number),
+        # any other item (null, a boolean, a list, an object) this one's, as the host refuses it ("expected a
+        # string (a column label)") and the service's text says ("a name is a non-empty string")
         if not isinstance(lst, list) or not lst:
+            return True
+        if any(not isinstance(x, (str, int, float)) or isinstance(x, bool) for x in lst):
             return True
         strs = [x for x in lst if isinstance(x, str)]
         return any(x == "" for x in strs) or len(strs) != len(set(strs))
@@ -688,10 +693,21 @@ def _predicate_form_fault(p: Any, depth: int = 0) -> bool:
 
 
 def _predicate_has_number(p: Any) -> bool:
-    if isinstance(p, dict):
-        return any(_predicate_has_number(v) for v in p.values())
-    if isinstance(p, list):
-        return any(isinstance(x, (int, float)) and not isinstance(x, bool) or _predicate_has_number(x) for x in p)
+    """Whether a name list of the predicate (any, all, none, at_least's labels; through and, or, not) holds a number
+    (async's case pattern.predicate_name_not_string: the host names the fix, "write a taxid as ..."). A number
+    elsewhere (where a predicate or a list of names belongs) is a form fault only (_predicate_form_fault), as the
+    host refuses it without the hint (tests/data/pattern_predicate_forms.json)."""
+    if not isinstance(p, dict) or len(p) != 1:
+        return False
+    op, arg = next(iter(p.items()))
+    if op == "at_least":
+        arg = arg.get("labels") if isinstance(arg, dict) else None
+    if op in ("any", "all", "none", "at_least"):
+        return isinstance(arg, list) and any(isinstance(x, (int, float)) and not isinstance(x, bool) for x in arg)
+    if op in ("and", "or"):
+        return isinstance(arg, list) and any(_predicate_has_number(x) for x in arg)
+    if op == "not":
+        return _predicate_has_number(arg)
     return False
 
 
