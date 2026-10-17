@@ -2391,8 +2391,9 @@ TEST(ServerRequest, AGoneCheckStopsTheWriting) {
         const RequestAnswer answered = answer_request("{}", encoding, 1, process, true, &control);
         EXPECT_EQ(200, answered.status);
         EXPECT_EQ(1u, asked);
-        if (encoding.empty())
+        if (encoding.empty()) {
             EXPECT_EQ(json_text(big, true), answered.body);
+        }
         // the client left once the answer was built: nothing is written
         GoneCheck left([&]() { ++asked; return true; }, std::chrono::hours(1));
         control.check = [&]() { left(); };
