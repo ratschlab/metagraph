@@ -2792,6 +2792,14 @@ TEST(GraphletCli, AFailedRequestIsAnsweredAndTheNextFileToo) {
     const fs::path dir = fs::absolute("temp_traverse_cli_" + std::to_string(getpid()));
     fs::remove_all(dir);
     fs::create_directories(dir);
+    // removed however the test ends: a failed ASSERT below returns early
+    struct RemoveOnExit {
+        fs::path path;
+        ~RemoveOnExit() {
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    } remove_dir { dir };
     const std::string graph = (dir / "graph").string() + DBGSuccinct::kExtension;
     base->serialize(graph);
     anno.get_annotator().serialize((dir / "anno").string());
@@ -2867,5 +2875,4 @@ TEST(GraphletCli, AFailedRequestIsAnsweredAndTheNextFileToo) {
     // the next file is answered
     EXPECT_FALSE(answers[2].isMember("error")) << answers[2]["error"];
     ASSERT_EQ(1u, answers[2]["results"].size());
-    fs::remove_all(dir);
 }

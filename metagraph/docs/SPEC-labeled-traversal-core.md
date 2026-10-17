@@ -1959,7 +1959,7 @@ attempt) nor a 400 for a malformed id:
   while the response was built), `error` (a 400/500). `client_gone` appears only in the attempt's state (no
   response is written then).
 - Instants are ISO-8601 UTC with milliseconds; durations are whole ms, rounded up, written as integers up to
-  2⁵³ − 1 and as numbers beyond, as every number the server writes (only the CLI's bound, which has no cap, gets
+  2⁵³ − 1 and as numbers beyond, as `number_json` writes every duration (only the CLI's bound, which has no cap, gets
   there: a time budget of 10²⁰ ms; `bound_ms` and `walk_until_ms` were then integers cast past 64 bits, 2⁶⁴ − 1 on
   arm64). `received_at` is when the
   server read the request's header (the attempt's clock), `stopped_at` when the walk stopped (the checkpoint
@@ -2563,10 +2563,10 @@ metagraph traverse --resolve -i GRAPH -a ANNOTATION request.json [...]
 
 Request files are exactly the JSON bodies of §4.1/§5; one JSON document per request on stdout. One code path with
 the server. A request that fails gets the body the server's error gives it — `{"error"}`, with `usage` when it
-has an `attempt_id`; `"Internal server error"` for a failure that is no exception the server names — the exit
-status is 1 and the next file is still answered (before, a failure other than a malformed request, such as the
-walker's on an inconsistent primary graph, ended the run with an abort and nothing written for that file or the
-later ones). A file that cannot be read or is not JSON ends the run (exit status 1).
+has an `attempt_id`; `"Internal server error"` for a failure that is not a `std::exception` (the server's 500) —
+the exit status is 1 and the next file is still answered (before, a failure other than a malformed request, such
+as the walker's on an inconsistent primary graph, ended the run with an abort and nothing written for that file or
+the later ones). A file that cannot be read or is not JSON ends the run (exit status 1).
 
 ### 10.3 Server
 
