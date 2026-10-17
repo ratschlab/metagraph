@@ -345,8 +345,9 @@ Json::Value pattern_traverse_block(const Json::Value &full);
 /**
  * One request of `metagraph pattern` (the text of a request file, |name| in the log) as the
  * CLI answers it on |out|, one JSON text written with |builder|: the answer (true), or the body
- * of a refusal or, for any other failure, the body the server answers 400 without a code
- * ({"error"}) (false). Never throws for a request, so that the next file is still answered.
+ * of a refusal or, for any other failure, the body the server answers without a code: 400
+ * {"error": what} for a std::exception, 500 {"error": "Internal server error"} for anything else
+ * (false). Never throws for a request, so that the next file is still answered.
  * |hooks|: as process_pattern_request's (tests).
  */
 bool write_pattern_answer(const std::string &content,

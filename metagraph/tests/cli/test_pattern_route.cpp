@@ -1021,9 +1021,9 @@ TEST(PatternRoute, DeadlineMessageStatesTheBudget) {
     }
 }
 
-// `metagraph pattern` answers every request file as the server would — a refusal's body, or
-// for any other failure the server's 400 body without a code — and goes on with the next (an
-// escaping exception would abort the run)
+// `metagraph pattern` answers every request file as the server would — a refusal's body, for
+// any other std::exception the server's 400 body without a code, for anything else its 500
+// body — and goes on with the next (an escaping exception would abort the run)
 TEST(PatternRoute, TheCliAnswersEveryRequest) {
     auto g = tiny();
     Json::StreamWriterBuilder b;
@@ -1051,6 +1051,14 @@ TEST(PatternRoute, TheCliAnswersEveryRequest) {
                "\"allow_unbudgeted_annotation\": true}", &failing, &ok);
     EXPECT_FALSE(ok);
     EXPECT_EQ("{\"error\":\"a read failed\"}", Json::writeString(b, v));
+    // a failure that is not a std::exception: the server's 500 body, "Internal server error"
+    // (it escaped the CLI's catches, and the run ended in std::terminate)
+    RetrievalHooks odd;
+    odd.read_hook = [](size_t) { throw 7; };
+    v = answer("{\"patterns\": [{\"dna\": \"AACG\"}], \"output\": {\"labels\": \"all\"}, "
+               "\"allow_unbudgeted_annotation\": true}", &odd, &ok);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ("{\"error\":\"Internal server error\"}", Json::writeString(b, v));
 }
 
 // A caller that left (or a server that stops) is not answered — the work ends at its first

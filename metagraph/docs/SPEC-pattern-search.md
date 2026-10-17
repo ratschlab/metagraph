@@ -157,8 +157,9 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   with its pair and `index_fp`. Both accept `in_ram` (§24).
 - `metagraph pattern -i GRAPH -a ANNOTATION [--json] REQUEST.json ...` answers each request file as the server
   would, under the same `--pattern-*` flags: the answer on stdout; a refusal's body on stdout and exit status 1.
-  A request file that fails otherwise gets the body the server's 400 without a code has (`{"error": …}`, §6),
-  likewise with exit status 1, and the next file is still answered. Answers equal the server's except `timing`
+  A request file that fails otherwise gets the body the server's 400 without a code has (`{"error": …}`, §6), or
+  for a failure that is not a `std::exception` its 500's (`{"error": "Internal server error"}`; before, such a
+  failure ended the run), likewise with exit status 1, and the next file is still answered. Answers equal the server's except `timing`
   and what a time stop touched (without `--json` the CLI's indented text counts twice in the estimate of §7.6).
 
 ## 4. The request

@@ -3096,6 +3096,12 @@ bool write_pattern_answer(const std::string &content,
         Json::Value body;
         body["error"] = e.what();
         out << Json::writeString(builder, body) << std::endl;
+    } catch (...) {
+        // what the server answers 500 for a failure that is not a std::exception
+        logger->error("Request in {} failed", name);
+        Json::Value body;
+        body["error"] = "Internal server error";
+        out << Json::writeString(builder, body) << std::endl;
     }
     return false;
 }
