@@ -55,7 +55,11 @@ INTERLEAVED A/B (--interleave LIB_A LIB_B)
   the pairs with equal result fingerprints (others listed and left out; exit code 1 when any changed), and a
   NOISE CONTROL: A's first request of each round against its last (A2/A1, the same code milliseconds apart),
   as a geometric mean and as the 90th percentile of its spread -- a B/A inside that spread is no difference.
-  Output: ab_results.json (one row per (item, op): a_ms, b_ms, a1_ms, a2_ms, fp_a, fp_b, err) and summary.md.
+  "Changed" is one rule for --compare and --interleave (result_change): an error on one side only (the other
+  side is asked when it was not), else different fingerprints both sides know; an error on both sides is an
+  op that does not apply, a missing fingerprint (a library without dump(envelope=)) no evidence.
+  Output: ab_results.json (one row per (item, op): a_ms, b_ms, a1_ms, a2_ms, fp_a, fp_b, err, err_a, err_b)
+  and summary.md.
 
 OUTPUT (--out DIR, default bench_library_out/<label>_<timestamp>)
   library_results.json   meta (library path, module file, source digest, git head + dirty flag, python),
@@ -597,6 +601,20 @@ def summary_md(res):
     return '\n'.join(L)
 
 
+def result_change(op, fp_a, fp_b, err_a, err_b):
+    """Why the result of one (item, op) changed from library A to B, or None: an error on one side only (the op
+    started or stopped raising); else, both sides' fingerprints known (a missing one, e.g. a library without
+    dump(envelope=), is not evidence), different fingerprints, except for an INFORMATIONAL op. An error on both
+    sides is an op that does not apply. The one rule of compare_runs (--compare) and interleave_md (--interleave)."""
+    if bool(err_a) != bool(err_b):
+        return 'error %s -> %s' % (err_a, err_b)
+    if err_a or op in INFORMATIONAL:
+        return None
+    if fp_a and fp_b and fp_a != fp_b:
+        return 'result fingerprint %s -> %s' % (fp_a, fp_b)
+    return None
+
+
 def compare_runs(pa, pb):
     with open(pa) as f:
         A = json.load(f)
@@ -628,14 +646,13 @@ def compare_runs(pa, pb):
             if k[1] != op:
                 continue
             a, b = ra[k], rb[k]
-            if a.get('err') or b.get('err') or not a.get('t_min_ms') or not b.get('t_min_ms'):
-                if bool(a.get('err')) != bool(b.get('err')):
-                    mism.append((k, 'error %s -> %s' % (a.get('err'), b.get('err'))))
-                continue
-            if op not in INFORMATIONAL and a.get('fp') and b.get('fp') and a['fp'] != b['fp']:
+            why = result_change(op, a.get('fp'), b.get('fp'), a.get('err'), b.get('err'))
+            if why:
                 # not the same completed work: its time is not compared
-                nfp += 1
-                mism.append((k, 'result fingerprint %s -> %s' % (a['fp'], b['fp'])))
+                nfp += 0 if a.get('err') or b.get('err') else 1
+                mism.append((k, why))
+                continue
+            if a.get('err') or b.get('err') or not a.get('t_min_ms') or not b.get('t_min_ms'):
                 continue
             x = b['t_min_ms'] / a['t_min_ms']
             rat.append(x)
@@ -654,7 +671,7 @@ def compare_runs(pa, pb):
                     lwu_changed.append((k, ua['lwu'], ub['lwu']))
         if not rat:
             continue
-        gm = math.exp(sum(math.log(x) for x in rat) / len(rat))
+        gm = geomean(rat)
         rows.append([op, len(rat), fmt(gm, 3), fmt(statistics.median(rat), 3), fmt(tot_a), fmt(tot_b),
                      fmt(tot_b / tot_a if tot_a else None, 3),
                      '%s (%s -> %s ms) %s' % (fmt(worst[0], 2), fmt(worst[2]), fmt(worst[3]), worst[1][:40]),
@@ -744,15 +761,27 @@ def worker(args):
             ts, _, err = time_op(it, table[op], q['reps'], False)
         k = (q['i'], op)
         if k not in fps and not err and op not in INFORMATIONAL:
-            try:
-                if op == 'parse':
+            # as measure() (the --compare runs) fingerprints: parse by the canonical body (None for an older
+            # library without dump(envelope=...)), an op by its result, an op raising there by its error
+            if op == 'parse':
+                try:
                     fps[k] = fingerprint(parser_mod.dump(parse_item(it), envelope=False))
+                except Exception:  # noqa
+                    fps[k] = None
+            else:
+                res, e2 = call(table[op], parse_item(it))
+                fps[k] = None
+                if e2:
+                    fps[k] = {'err': e2}
                 else:
-                    res, e2 = call(table[op], parse_item(it))
-                    fps[k] = None if e2 else fingerprint(res)
-            except Exception as e:  # noqa
-                fps[k] = 'unhashable: %s' % type(e).__name__
-        print(json.dumps({'t': [x * 1e3 for x in ts], 'fp': fps.get(k), 'err': err}), flush=True)
+                    try:
+                        fps[k] = fingerprint(res)
+                    except Exception as e:  # noqa
+                        fps[k] = 'unhashable: %s' % type(e).__name__
+        fp = fps.get(k)
+        if isinstance(fp, dict):
+            err, fp = err or fp['err'], None
+        print(json.dumps({'t': [x * 1e3 for x in ts], 'fp': fp, 'err': err}), flush=True)
     return 0
 
 
@@ -787,10 +816,13 @@ def interleave(args, ops):
         for op in ops:
             reps = reps_for(size, op, args.reps)
             a, b, a1, a2, fa, fb, err = [], [], [], [], None, None, None
+            errs, asked = {}, set()
             for _ in range(max(1, args.rounds)):
                 for j, tag in enumerate('ABBA'):
                     x = ask(procs[0] if tag == 'A' else procs[1], i, op, reps)
+                    asked.add(tag)
                     if x['err']:
+                        errs[tag] = x['err']
                         err = '%s: %s' % (tag, x['err'])
                         break
                     if tag == 'A':
@@ -802,7 +834,11 @@ def interleave(args, ops):
                         fb = x['fp']
                 if err:
                     break
+            if err and 'B' not in asked:
+                # A raised before B was asked: whether B raises too tells a change from an op that does not apply
+                errs['B'] = ask(procs[1], i, op, reps)['err']
             rows.append({'key': key, 'op': op, 'bytes': size, 'err': err,
+                         'err_a': errs.get('A'), 'err_b': errs.get('B'),
                          'a_ms': min(a) if a else None, 'b_ms': min(b) if b else None,
                          'a1_ms': min(a1) if a1 else None, 'a2_ms': min(a2) if a2 else None,
                          'fp_a': fa, 'fp_b': fb})
@@ -834,6 +870,19 @@ def interleave(args, ops):
     return 1 if changed else 0
 
 
+def _row_errors(r):
+    """(A's error, B's error) of an interleaved row; a row of before err_a / err_b states one tagged error, the side
+    that raised first: 'B: ...' after A succeeded (A's none), 'A: ...' with B not asked (read as both raising)."""
+    if 'err_a' in r or 'err_b' in r:
+        return r.get('err_a'), r.get('err_b')
+    err = r.get('err') or ''
+    if err.startswith('B: '):
+        return None, err[3:]
+    if err.startswith('A: '):
+        return err[3:], err[3:]
+    return (err, err) if err else (None, None)
+
+
 def interleave_md(res):
     """The interleaved comparison as markdown -> (text, the rows whose results differ)."""
     meta, rows = res['meta'], res['rows']
@@ -844,7 +893,7 @@ def interleave_md(res):
                                                             lib['git_head'], ' dirty' if lib.get('git_dirty') else ''))
     L.append('- %s; %d rounds of A B B A per (item, op); python %s; started %s, took %.0f s\n' % (
         meta['method'], meta['rounds'], meta['python'], meta['started'], meta.get('seconds') or 0))
-    changed = [r for r in rows if not r['err'] and r['op'] not in INFORMATIONAL and r['fp_a'] != r['fp_b']]
+    changed = [r for r in rows if result_change(r['op'], r['fp_a'], r['fp_b'], *_row_errors(r))]
     trows = []
     for op in meta['ops']:
         rs = [r for r in rows if r['op'] == op and not r['err'] and r['a_ms'] and r['b_ms'] and r not in changed]
@@ -866,14 +915,15 @@ def interleave_md(res):
              'a B/A within that spread is not a difference.\n')
     L.append(md_table(['op', 'items', 'geomean B/A', 'median B/A', 'sum A ms', 'sum B ms', 'sum B/A',
                        'noise A2/A1', 'noise p90 x', 'worst B/A (item)'], trows))
-    errs = [r for r in rows if r['err']]
+    errs = [r for r in rows if r['err'] and r not in changed]
     if errs:
         L.append('\n%d (item, op) rows not timed (an op that does not apply): %s' % (
             len(errs), ', '.join(sorted({r['op'] for r in errs}))))
     if changed:
         L.append('\n**%d results changed** (left out of the ratios):\n' % len(changed))
         for r in changed[:60]:
-            L.append('- %s %s: %s -> %s' % (r['op'], r['key'], r['fp_a'], r['fp_b']))
+            L.append('- %s %s: %s' % (r['op'], r['key'], result_change(r['op'], r['fp_a'], r['fp_b'],
+                                                                      *_row_errors(r))))
     else:
         L.append('\nNo result changed (memory_bytes is informational and not compared).')
     return '\n'.join(L), changed

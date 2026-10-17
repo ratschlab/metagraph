@@ -364,6 +364,34 @@ class TestBenchLibraryInterleaved(unittest.TestCase):
         self.assertIn('1 results changed', text)
         self.assertIn('not timed (an op that does not apply): claims', text)
 
+    def test_a_one_sided_error_and_an_unknown_fingerprint(self):
+        # SD-027 (TT5): the interleaved report decides "result changed" as compare_runs does: an error on one side
+        # only is a change (the op started or stopped raising), an error on both is an op that does not apply, and
+        # a missing fingerprint (a library without dump(envelope=)) is no evidence of a change
+        lib = {'path': 'x', 'source_sha': 's', 'git_head': 'h'}
+        base = {'a_ms': 1.0, 'b_ms': 1.0, 'a1_ms': 1.0, 'a2_ms': 1.0, 'fp_a': 'f', 'fp_b': 'f', 'err': None}
+        rows = [dict(base, key='ok', op='parse'),
+                dict(base, key='unknown', op='parse', fp_a=None),
+                dict(base, key='b-raises', op='claims', a_ms=None, b_ms=None, err='B: ValueError: x',
+                     err_a=None, err_b='ValueError: x'),
+                dict(base, key='a-raises', op='claims', a_ms=None, b_ms=None, err='A: ValueError: x',
+                     err_a='ValueError: x', err_b=None),
+                dict(base, key='both', op='claims', a_ms=None, b_ms=None, err='A: ValueError: x',
+                     err_a='ValueError: x', err_b='ValueError: x'),
+                dict(base, key='legacy-b', op='claims', a_ms=None, b_ms=None, err='B: TypeError')]
+        res = {'meta': {'label': 't', 'library_a': lib, 'library_b': lib, 'method': 'm', 'rounds': 2,
+                        'python': '3', 'started': 'now', 'seconds': 1, 'ops': ['parse', 'claims']},
+               'rows': rows}
+        text, changed = BLIB.interleave_md(res)
+        self.assertEqual(['b-raises', 'a-raises', 'legacy-b'], [r['key'] for r in changed])
+        self.assertIn('| parse | 2 |', text)
+        self.assertIn('not timed (an op that does not apply): claims', text)
+        self.assertIsNone(BLIB.result_change('parse', None, 'f', None, None))
+        self.assertIsNone(BLIB.result_change('memory_bytes', 'a', 'b', None, None))
+        self.assertEqual(BLIB.result_change('claims', 'a', 'b', None, None), 'result fingerprint a -> b')
+        self.assertEqual(BLIB.result_change('claims', None, None, None, 'E'), 'error None -> E')
+        self.assertIsNone(BLIB.result_change('claims', None, None, 'E', 'E'))
+
     def test_two_workers_of_one_library_agree(self):
         lib = os.path.normpath(os.path.join(HERE, '..'))
         with tempfile.TemporaryDirectory() as d:
