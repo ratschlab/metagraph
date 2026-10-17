@@ -7,7 +7,8 @@ Placeholders (str.format syntax, filled by `fill`): `{name}`; `{name:s}` a plura
 `{name:v}` the verb's s when it is 1, `{name:word}` a small number in words; `{x[R-pos-0027][dl][wall]}` a scenario
 fact (the index syntax; `x` holds the chapter's or the family's scenarios, `dl`, `dr` and `mcp` the arms);
 `{fam[R-budget][n_footnoted]}` a family's values from the chapter's prose. Conditionals: `[[flag ? text when true |
-text when false]]`, `[[!flag ? ...]]`, `[[x[R-edge-0003][mcp][class] = refused_before_host ? ...]]`; nested ones are
+text when false]]`, `[[!flag ? ...]]`, `[[x[R-edge-0003][mcp][class] = refused_before_host ? ...]]`,
+`[[manifest_version >= 5 ? ...]]` (a number at least the given one); nested ones are
 resolved innermost first; the texts may hold placeholders; the false text is optional. A placeholder or flag the
 values lack stays visible (`{name}`, `(UNRESOLVED CONDITION name)`) and is reported, never silently dropped.
 
@@ -189,7 +190,12 @@ def fill(text, values, unresolved=None):
         if negate:
             flag = flag[1:].strip()
         wanted = None
-        if "=" in flag:
+        at_least = ">=" in flag
+        if at_least:
+            # `[[manifest_version >= 5 ? ...]]`: a numeric comparison, so that a later manifest takes the branch of
+            # the version that introduced the text (the v6 delta: v6 reads v5's sentences)
+            flag, wanted = (p.strip() for p in flag.split(">=", 1))
+        elif "=" in flag:
             flag, wanted = (p.strip() for p in flag.split("=", 1))
         obj, _ = fmt.get_field(flag, (), {})
         if isinstance(obj, _Missing):
@@ -197,7 +203,14 @@ def fill(text, values, unresolved=None):
             fmt.unresolved.append("[[%s]]" % head.strip())
             text = text[:m.start()] + "(UNRESOLVED CONDITION %s)" % flag + text[m.end():]
             continue
-        if wanted is not None:
+        if at_least:
+            have = cells._num(obj)
+            try:
+                want = float(wanted)
+            except ValueError:
+                want = None
+            value = have is not None and want is not None and have >= want
+        elif wanted is not None:
             # the printed value without the tint and attention markers (a phrase may carry them)
             value = (_MARKERS_RE.sub("", _Formatter(values).format_field(obj, "")) == wanted)
         else:

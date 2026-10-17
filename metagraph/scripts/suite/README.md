@@ -4379,6 +4379,17 @@ branch for a v6 run.
   manifest/, gate/ and every suite module but report.py byte-identical to a71d9177f; the frozen v5 files to
   07dfa4875.
 
+## The v6 results document: a delta on v5 (2026-10-17)
+The owner (2026-10-17): v6 is very close to v5, so its document is v5's with only what v6 changes (v6 = v5 + the
+/pattern budgets of 110,000 ms, the 25 direct-local warm-ups P-warm-0001..0025, the MCP property marks and the
+budget_stress tags). Every change keeps the v5 document's chapters byte-identical (the proof below).
+- The version switches: the prose's `[[manifest_version = 5 ? v5 text | v4 text]]` conditionals read
+  `[[manifest_version >= 5 ? ...]]` (facts.fill compares a number with `>=`; `=` stays an equality), so a v6 run
+  takes every v5 branch, the text unchanged. Chapter N's version note names the run's own version
+  (`{manifest_version}`) and, for v6, what v6 adds in that chapter (the budget, the eight warm-ups before its
+  /pattern searches, N-nearmiss-0030's budget_stress tag, N-usecase-0005's property-level mark, the moves in the run
+  order).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

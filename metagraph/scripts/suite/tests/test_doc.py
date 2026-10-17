@@ -1729,7 +1729,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
                 for name in re.findall(r"\{([^{}]+)\}", text):
                     check(name, scope, allowed)
                 for head in strip_conditional_heads(text)[1]:
-                    check(head.lstrip("!").split("=", 1)[0].strip(), scope, allowed)
+                    check(re.split(r">?=", head.lstrip("!"), 1)[0].strip(), scope, allowed)
             for fid in any_fams:
                 entry = data["families"].get(fid) or {}
                 if not entry.get("claim") and not any(p.startswith("%s.json: families.%s" % (ch, fid)) for p in ROUND2_PENDING):
@@ -3701,6 +3701,11 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         self.assertEqual(facts.claim_items({}), [])
         self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 4}), "a")
         self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 5}), "a, and b")
+        # the v6 delta (2026-10-17): `>=` compares numbers, so that manifest v6 takes the v5 branch
+        self.assertEqual(facts.fill("a[[manifest_version >= 5 ?, and b | , or c]]", {"manifest_version": 4}), "a, or c")
+        self.assertEqual(facts.fill("a[[manifest_version >= 5 ?, and b | , or c]]", {"manifest_version": 5}), "a, and b")
+        self.assertEqual(facts.fill("a[[manifest_version >= 5 ?, and b | , or c]]", {"manifest_version": 6}), "a, and b")
+        self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 6}), "a")
 
 
 def tint_fixture(run_dir):
@@ -4581,7 +4586,7 @@ class ReadabilityReviewTest(unittest.TestCase):
             rel_ctx.run.relations = []
         # the glossary labels the later manifest's mark as not exercised by this run
         entry = [e for e in self.glossary["entries"] if e["term"] == "property-level mark (manifest v5)"][0]
-        self.assertIn("[[manifest_version = 5 ? A mark of this run's manifest. | Not part of this run's manifest", entry["definition"])
+        self.assertIn("[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest", entry["definition"])
         self.assertIn("supplies no evidence about it on that path", entry["definition"])
         rendered = facts.fill(entry["definition"], {"manifest_version": 4})
         self.assertIn("Not part of this run's manifest (version 4)", rendered)
@@ -5052,7 +5057,7 @@ class ChapterPLXTest(unittest.TestCase):
 
 
 def _v4_branch(text):
-    """A prose string as a v4 run reads it: every `[[manifest_version = 5 ? a | b]]` resolved to b, every other
+    """A prose string as a v4 run reads it: every `[[manifest_version >= 5 ? a | b]]` resolved to b, every other
     conditional's two branches kept with its head dropped, innermost first (READ-313: no v4 legend names v5)."""
     pos = 0
     while True:
@@ -5064,7 +5069,7 @@ def _v4_branch(text):
             pos = m.end()
             continue
         yes, _, no = rest.partition("|")
-        chosen = no if head.strip() == "manifest_version = 5" else (yes + " " + no)
+        chosen = no if head.strip() == "manifest_version >= 5" else (yes + " " + no)
         text = text[:m.start()] + " " + chosen + " " + text[m.end():]
         pos = 0
 
