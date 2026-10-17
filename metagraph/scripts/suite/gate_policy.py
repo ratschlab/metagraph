@@ -63,12 +63,10 @@ import gate  # noqa: E402
 import suite_common as sc  # noqa: E402
 
 DEFAULT_ROUTES = ("POST /resolve", "POST /traverse", "GET /traverse/capabilities")
-# The traverse_fetch overrides the MCP passes on while the advanced strategy path is off (strategy key -> the sub-keys
-# allowed, None = the whole key): the service's _TRAVERSE_BASIC_OVERRIDES (app/mcp_server.py, async's runner branch
-# at e334715b), only the fallback of a table without the case traverse.advanced_path_disabled, whose request predicate
-# (`overrides.` not_in [...]) is the one list (basic_overrides); traverse_fetch's documented presets are walk and trie.
-MCP_BASIC_OVERRIDES = {"bounds": None, "direction": None, "exhaustive": None,
-                       "labels": ("max_labels_per_node", "seed_label_kind")}
+# The traverse_fetch overrides the MCP passes on while the advanced strategy path is off are the by-design table's
+# (basic_overrides: the request predicate `overrides.` not_in [...] of traverse.advanced_path_disabled, the service's
+# _TRAVERSE_BASIC_OVERRIDES), matched as compare matches it (suite_common.override_path_listed); the module keeps no
+# copy of the list (SD-095). traverse_fetch's documented presets are walk and trie.
 MCP_BASIC_PRESETS = (None, "walk", "trie")
 # The service always sends its own /resolve query cap as bounds.max_query_bp (app/traversal/resolve.py; app/settings.py
 # TRAVERSAL_RESOLVE_MAX_QUERY_BP 2000, TRAVERSAL_RESOLVE_DISCOVER_MAX_QUERY_BP 500 for a discovery): the case stating
@@ -105,30 +103,26 @@ def basic_overrides(cases):
     return None
 
 
-def _allowed(path, allowed):
-    return path in allowed or any(a.endswith(".*") and path.startswith(a[:-1]) for a in allowed)
+class NoBasicOverrides(ValueError):
+    """A traverse_fetch override to classify with a by-design table that states no basic overrides (no
+    traverse.advanced_path_disabled `overrides.` not_in list): the table is the only list (SD-095)."""
 
 
 def advanced_keys(arguments, allowed=None):
     """The traverse_fetch arguments on the advanced strategy path, as dotted names ([] for none): an override path
-    outside |allowed| (basic_overrides; None: MCP_BASIC_OVERRIDES), a preset other than walk / trie, a strategy."""
+    the table's list |allowed| (basic_overrides) does not hold (suite_common.override_path_listed), a preset other
+    than walk / trie, a strategy. Overrides with |allowed| None (a table without the case) are refused
+    (NoBasicOverrides): the module keeps no copy of the list to fall back on."""
     out = []
     ov = (arguments or {}).get("overrides")
-    if isinstance(ov, dict) and allowed is not None:
+    if isinstance(ov, dict) and ov and allowed is None:
+        raise NoBasicOverrides("the by-design table states no basic overrides (%s's request predicate `overrides.` "
+                               "not_in [...]), which the gate policy needs for the overrides %s" % (
+                                   ADVANCED_CASE, ", ".join(sorted(str(k) for k in ov))))
+    if isinstance(ov, dict):
         for key, value in ov.items():
             paths = ["%s.%s" % (key, sub) for sub in value] if isinstance(value, dict) and value else [str(key)]
-            out.extend("overrides.%s" % p for p in paths if not _allowed(p, allowed))
-    elif isinstance(ov, dict):
-        for key, value in ov.items():
-            allowed = MCP_BASIC_OVERRIDES.get(key, "absent")
-            if allowed is None:
-                continue
-            if allowed == "absent":
-                out.append("overrides.%s" % key)
-                continue
-            for sub in (value if isinstance(value, dict) else {}):
-                if sub not in allowed:
-                    out.append("overrides.%s.%s" % (key, sub))
+            out.extend("overrides.%s" % p for p in paths if not sc.override_path_listed(p, allowed or []))
     if (arguments or {}).get("preset") not in MCP_BASIC_PRESETS:
         out.append("preset %s" % arguments.get("preset"))
     if "strategy" in (arguments or {}):
@@ -467,6 +461,9 @@ def main(argv=None):
                               a.advanced_path, a.warm_every, a.require_agreement, None, a.name,
                               rel if not rel.startswith("..") else os.path.abspath(a.manifest),
                               declared=declared, declared_file=a.declared)
+    except NoBasicOverrides as e:
+        sys.stderr.write("gate_policy.py: --by-design %s: %s\n" % (a.by_design, e))
+        return 2
     except ValueError as e:
         sys.stderr.write("gate_policy.py: --declared %s: %s\n" % (a.declared, e))
         return 2

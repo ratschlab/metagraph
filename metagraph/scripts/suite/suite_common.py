@@ -842,6 +842,15 @@ def lookup(doc, path):
     return True, cur
 
 
+def override_path_listed(name, entries):
+    """Whether the dotted path |name| (an MCP override, or the field a refusal names, less its prefix) is one of the
+    by-design table's |entries|: the path itself, or "x.*" for a whole key, which lists the bare section x as well
+    (the table's own text and the service read {"bounds": 5} as basic). The one matcher of compare's field
+    predicates and the gate policy's basic overrides (SD-095)."""
+    return any(name == e or (str(e).endswith(".*") and (name == e[:-2] or name.startswith(e[:-1])))
+               for e in entries)
+
+
 def json_equal(a, b):
     """JSON equality: a boolean equals only the same boolean (true is not 1), numbers by value (250 and 250.0 are
     one; never a numeric string), strings, null, and lists / objects element by element and key by key."""

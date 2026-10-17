@@ -1634,8 +1634,12 @@ decided on 2026-10-14 that the deploy gate is strict: every inconclusive, missin
   (T-budget-0003 besides), 186 scenarios, 378 executions.
 - The advanced_path rule reads its list of basic override paths from the by-design table (the request predicate
   `overrides.` not_in [...] of traverse.advanced_path_disabled, lane S6b), so the policy and the comparator share one
-  list; gate_policy.MCP_BASIC_OVERRIDES (the service's `_TRAVERSE_BASIC_OVERRIDES`) is only the fallback of a table
-  without that case. gate/policy_v4_rt_mcp.json is regenerated after merging lanes S6g1 and S6b: the same
+  list, and they match it with one rule, suite_common.override_path_listed (SD-095: `x.*` lists the bare section `x`
+  too, as the table's text and the service read `{"bounds": 5}`; the gate called a bare section advanced). The
+  module's own copy of the service's list (MCP_BASIC_OVERRIDES) is gone, and the table's case is required: a
+  scenario's overrides with a table that states no list (no table, `--by-design ''`, included) are refused
+  (gate_policy.NoBasicOverrides; gate_policy.py exits 2 naming --by-design); the policies pin the real table, which
+  states it. gate/policy_v4_rt_mcp.json is regenerated after merging lanes S6g1 and S6b: the same
   selection, exclusions, required executions and relations; the pin is the merged table (sha256 ab4100c9).
 - v4's two-arm policy: 222 selected; MCP 189 scenarios / 384 executions (31 derived exclusions, the declared
   C-caps-0001 and T-budget-0003), direct-local 220 / 253; REL-same_answer-0003 required on both arms,

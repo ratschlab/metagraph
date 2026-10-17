@@ -435,9 +435,8 @@ def _path_values(obj, path):
     return [v for v in vals if v is not None]
 
 
-def _names_in(name, entries):
-    return any(name == e or (str(e).endswith(".*") and (name == e[:-2] or name.startswith(e[:-1])))
-               for e in entries)
+# a field predicate's in / not_in list matches names as the gate policy's basic overrides do (SD-095)
+_names_in = sc.override_path_listed
 
 
 def request_holds(case, scenario, field, refs=None, evidence=None):

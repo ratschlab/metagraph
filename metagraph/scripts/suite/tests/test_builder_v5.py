@@ -803,8 +803,10 @@ class McpClassesInTheManifest(unittest.TestCase):
         a["id"] = "T-a"
         b = self.sc(by_design_checks=[{"check": "answer_fields", "case": "traverse.duplicate_seeds"}])
         b["id"] = "T-b"
+        import compare as cmp
+        adv = "traverse.advanced_path_disabled"   # the table's basic overrides, the policy's only list (SD-095)
         pol = gate_policy.build_policy({"scenarios": [a, b], "relations": []}, arms=("mcp", "direct-local"),
-                                       table=({}, None))
+                                       table=({adv: cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[0][adv]}, None))
         self.assertEqual(pol["properties"]["not_required"], [])
         self.assertEqual(pol["counts"]["properties_not_required"], 0)
         self.assertIn("property checks not required: 0", gate_policy.describe(pol))

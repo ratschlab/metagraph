@@ -32,8 +32,20 @@ from test_compare_report import CASES, T0, line, write_arm  # noqa: E402
 ANSWERED = {"id": "case.answered_explains", "agreement": "by_design",
             "direct_expectation": {"http": 400, "code": "invalid_request", "text": None},
             "service_answer": {"outcome": "answered", "code": None}, "explains_checks": ["status"]}
-TABLE = (dict(list(CASES.items()) + [(ANSWERED["id"], ANSWERED)]),
-         {"sha256": "table-sha", "cases": len(CASES) + 1, "version": 1, "service_commit": "x"})
+# the service's list of the traverse_fetch overrides it passes on without its advanced path, as the real table states
+# it (traverse.advanced_path_disabled's request predicate): the gate policy's only list (SD-095)
+ADVANCED = {"id": "traverse.advanced_path_disabled", "agreement": "not_implemented_mcp",
+            "request": [{"field": "overrides.", "not_in": ["", "bounds.*", "direction", "exhaustive", "labels",
+                                                           "labels.max_labels_per_node", "labels.seed_label_kind"]}]}
+TABLE = (dict(list(CASES.items()) + [(ANSWERED["id"], ANSWERED), (ADVANCED["id"], ADVANCED)]),
+         {"sha256": "table-sha", "cases": len(CASES) + 2, "version": 1, "service_commit": "x"})
+
+
+def table_file(d):
+    """TABLE's cases as a by-design table file in |d| (gate_policy.py --by-design)."""
+    path = os.path.join(d, "table.json")
+    sc.write_json_atomic(path, {"version": 1, "cases": list(TABLE[0].values())})
+    return path
 REFUSED = {"code": "pattern_invalid", "text": "more than 64 per search (PATTERN_MAX_PATTERNS_PER_SEARCH)",
            "field": "patterns"}
 # a read of the service's configuration as async's runner records it: the host's identity in host_document (the
@@ -301,10 +313,14 @@ class PolicyTest(GateCase):
         self.assertIsNotNone(gate_policy.mcp_exclusion(s, {case["id"]: case}))   # the direct request states a bound
 
     def test_basic_override_list_comes_from_the_table(self):
-        # traverse.advanced_path_disabled's request predicate (overrides. not_in [...]) is the one list; the module's
-        # copy of the service's list is only the fallback of a table without the case
+        # traverse.advanced_path_disabled's request predicate (overrides. not_in [...]) is the one list (SD-095: the
+        # module's copy of the service's list is gone): a table without the case lists no basic override, so every
+        # override reads advanced (the policies pin the real table, which states it)
         args = {"overrides": {"direction": "right", "bounds": {"max_extension_bp": 9}}}
-        self.assertEqual(gate_policy.advanced_keys(args), [])
+        self.assertFalse(hasattr(gate_policy, "MCP_BASIC_OVERRIDES"))
+        with self.assertRaises(gate_policy.NoBasicOverrides):
+            gate_policy.advanced_keys(args)
+        self.assertEqual(gate_policy.advanced_keys({"preset": "walk"}), [])   # no override: nothing to classify
         case = {"id": "traverse.advanced_path_disabled", "agreement": "not_implemented_mcp",
                 "request": [{"service": "service_settings.advanced_enabled", "equals": False},
                             {"field": "overrides.", "not_in": ["", "bounds.*", "exhaustive", "labels"]}]}
@@ -319,6 +335,32 @@ class PolicyTest(GateCase):
         self.assertIn("labels.seed_label_kind", real)
         self.assertEqual(gate_policy.advanced_keys({"overrides": {"labels": {"max_seed_labels": 1}}}, real),
                          ["overrides.labels.max_seed_labels"])
+
+    def test_one_matcher_of_the_basic_overrides(self):
+        # SD-095: the gate policy and compare read the table's list with one matcher (suite_common): "x.*" lists the
+        # bare section x as well (the table's text and the service read {"bounds": 5} as basic), a path itself,
+        # nothing else; the gate called a bare section advanced
+        m = sc.override_path_listed
+        listed = ["", "bounds.*", "direction", "labels.seed_label_kind"]
+        for name, want in (("bounds", True), ("bounds.max_steps", True), ("boundsx", False), ("bounds.", True),
+                           ("direction", True), ("direction.x", False), ("labels", False),
+                           ("labels.seed_label_kind", True), ("labels.max_seed_labels", False), ("", True)):
+            self.assertEqual(m(name, listed), want, name)
+        self.assertIs(cmp._names_in, m)
+        self.assertEqual(gate_policy.advanced_keys({"overrides": {"bounds": 5}}, listed), [])
+        self.assertEqual(gate_policy.advanced_keys({"overrides": {"labels": {"seed_label_kind": "header"}}}, listed),
+                         [])
+        self.assertEqual(gate_policy.advanced_keys({"overrides": {"labels": {"max_seed_labels": 3}}}, listed),
+                         ["overrides.labels.max_seed_labels"])
+        # compare's field predicate on the same list agrees with the gate, the bare section included
+        case = {"id": "traverse.advanced_path_disabled", "request": [{"field": "overrides.", "not_in": listed}]}
+        for field, basic in (("overrides.bounds", True), ("overrides.bounds.max_steps", True),
+                             ("overrides.labels.max_seed_labels", False), ("overrides.direction", True)):
+            holds, _ = cmp.request_holds(case, {"mcp": {"arguments": {}}}, field)
+            self.assertEqual(holds, not basic, field)
+            key = field[len("overrides."):].split(".")
+            ov = {key[0]: {key[1]: 1}} if len(key) > 1 else {key[0]: 1}
+            self.assertEqual(gate_policy.advanced_keys({"overrides": ov}, listed) == [], basic, field)
 
     def test_shipped_v4_policy_is_regenerated_exactly(self):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v4_rt_mcp.json"))
@@ -467,9 +509,14 @@ class PolicyTest(GateCase):
     def test_cli_writes_policy_and_ids(self):
         mpath, pol, ids = (os.path.join(self.tmp, n) for n in ("m.json", "p.json", "ids.txt"))
         sc.write_json_atomic(mpath, self.m)
+        # SD-095: the basic overrides are the table's only; without a table the manifest's overrides are refused
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(gate_policy.main([mpath, "--by-design", "", "--warm-every", "0", "--out", pol]), 2)
+        self.assertIn("gate_policy.py: --by-design : the by-design table states no basic overrides", err.getvalue())
+        self.assertFalse(os.path.exists(pol))
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(gate_policy.main([mpath, "--by-design", "", "--warm-every", "0", "--out", pol,
-                                               "--ids-out", ids]), 0)
+            self.assertEqual(gate_policy.main([mpath, "--by-design", table_file(self.tmp), "--warm-every", "0",
+                                               "--out", pol, "--ids-out", ids]), 0)
         self.assertIn("excluded: 2 (advanced_path 1, manifest_not_implemented 1)", out.getvalue())
         self.assertIn("required on mcp: 4 scenario(s), 9 execution(s)", out.getvalue())
         self.assertEqual(gate.read_ids(ids, self.m), ["T-001", "R-002", "R-003", "D-007"])
@@ -653,8 +700,8 @@ class TwoArmAndDeclaredTest(GateCase):
         sc.write_json_atomic(mpath, self.m)
         sc.write_json_atomic(dpath, self.declared())
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(gate_policy.main([mpath, "--by-design", "", "--arms", "mcp,direct-local",
-                                               "--declared", dpath, "--out", pol]), 0)
+            self.assertEqual(gate_policy.main([mpath, "--by-design", table_file(self.tmp), "--arms",
+                                               "mcp,direct-local", "--declared", dpath, "--out", pol]), 0)
         self.assertIn("declared: T-001 excluded on mcp", out.getvalue())
         self.assertEqual(gate.load_policy(pol)["declared"]["file"], dpath)
 
