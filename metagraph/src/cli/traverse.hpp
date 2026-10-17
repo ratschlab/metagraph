@@ -12,6 +12,7 @@
 
 #include <json/json.h>
 
+#include "server_checks.hpp"
 #include "common/utils/string_utils.hpp"
 #include "graph/traversal/resolve.hpp"
 #include "graph/traversal/walker.hpp"
@@ -465,6 +466,35 @@ class ResolveDelivery {
 
   private:
     std::function<void()> check_;
+};
+
+// What POST /resolve writes its answer under: |control| (process_request's ResponseControl),
+// whose check asks whether the client is gone (|gone|, on the first check and then at most
+// every |every|: GoneCheck, nothing is written once it left) and then the request's deadline
+// (|delivery|, set once the body is parsed: 503 with resolve_deadline_body). Its errors are
+// written whatever the client did (no ResponseControl::gone, which is /pattern's). The route
+// builds its control only here (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not
+// copyable: |control| refers to the members
+struct ResolveWriting {
+    ResolveWriting(std::function<bool()> gone, std::chrono::milliseconds every,
+                   int compression_level)
+          : writing_gone(std::move(gone), every) {
+        control.compression_level = compression_level;
+        control.check = [this]() {
+            writing_gone();
+            try {
+                delivery.check();
+            } catch (const ResolveDeadline &e) {
+                throw HttpError(503, resolve_deadline_body(e));
+            }
+        };
+    }
+    ResolveWriting(const ResolveWriting&) = delete;
+    ResolveWriting& operator=(const ResolveWriting&) = delete;
+
+    ResolveDelivery delivery;
+    GoneCheck writing_gone;
+    ResponseControl control;
 };
 
 // The `resolve` block of both capabilities routes (GET /capabilities, GET

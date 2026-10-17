@@ -2405,6 +2405,47 @@ TEST(ServerRequest, AGoneCheckStopsTheWriting) {
     }
 }
 
+// What the /resolve route writes its answer under (ResolveWriting, the route's ResponseControl):
+// the client's connection first (GoneCheck: nothing written once it left), then the request's
+// deadline (503 deadline); its errors are written whatever the client did. The route builds its
+// control only through ResolveWriting, so a route that stopped asking about the client fails here
+TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
+    Json::Value big(Json::arrayValue);
+    for (size_t i = 0; i < 20'000; ++i) {
+        big.append(std::string(20, 'A' + i % 26));
+    }
+    auto process = [&](const std::string &) { return big; };
+    for (const std::string encoding : { "", "gzip" }) {
+        SCOPED_TRACE(encoding);
+        bool gone = false;
+        size_t asked = 0;
+        ResolveWriting connected([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);
+        EXPECT_EQ(1, connected.control.compression_level);
+        EXPECT_FALSE(connected.control.gone);
+        EXPECT_EQ(200, answer_request("{}", encoding, 1, process, true,
+                                      &connected.control).status);
+        EXPECT_EQ(1u, asked);
+        // a client that left: nothing is written, before the deadline is read
+        gone = true;
+        ResolveWriting left([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);
+        left.delivery.set_check([]() { throw ResolveDeadline("past the deadline"); });
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, process, true, &left.control).status);
+        // an error is still written to it
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, [](const std::string &) -> Json::Value {
+            throw std::invalid_argument("Bad json received: x");
+        }, true, &left.control).status);
+        // a client that is there and a passed deadline: the 503 of the deadline
+        gone = false;
+        ResolveWriting late([&]() { return gone; }, std::chrono::hours(1), 1);
+        late.delivery.set_check([]() { throw ResolveDeadline("past the deadline"); });
+        const RequestAnswer answer = answer_request("{}", encoding, 1, process, true,
+                                                    &late.control);
+        EXPECT_EQ(503, answer.status);
+        EXPECT_EQ(json_text(resolve_deadline_body(ResolveDeadline("past the deadline")), true),
+                  answer.body);
+    }
+}
+
 // What process_request writes (answer_request, without the HTTP library) for every outcome of
 // a request: everything for a route that does not ask whether its client left (every route but
 // /pattern: no control, or a control without |gone|); and, for a route that asks

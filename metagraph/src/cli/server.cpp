@@ -1438,26 +1438,16 @@ int run_server(Config *config) {
         auto as_http = [](const ResolveDeadline &e) {
             return HttpError(503, resolve_deadline_body(e));
         };
-        // the request's deadline, set once its body is parsed (none without the field: the
-        // check then does nothing, and the text and its compression are the same bytes)
-        ResolveDelivery delivery;
         // a client that is gone, or a shutdown, is not answered: the work is abandoned at its
         // next phase (process_resolve_request), the writing and the compression of the answer
         // at the next check, the connection asked at most every client_check_ms, and nothing
-        // is written (as on /pattern and /traverse). Its errors are still written to it: no
-        // control.gone, which is /pattern's alone
-        GoneCheck writing_gone(gone_of(request),
-                               std::chrono::milliseconds(attempt_settings.client_check_ms));
-        ResponseControl control;
-        control.compression_level = traversal_io.compression_level;
-        control.check = [&]() {
-            writing_gone();
-            try {
-                delivery.check();
-            } catch (const ResolveDeadline &e) {
-                throw as_http(e);
-            }
-        };
+        // is written (as on /pattern and /traverse); then the request's deadline, set once its
+        // body is parsed (none without the field: the check then does nothing, and the text
+        // and its compression are the same bytes). Its errors are still written to it: no
+        // control.gone, which is /pattern's alone (ResolveWriting)
+        ResolveWriting writing(gone_of(request),
+                               std::chrono::milliseconds(attempt_settings.client_check_ms),
+                               traversal_io.compression_level);
         const size_t request_id = num_requests++;
         process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
@@ -1490,7 +1480,7 @@ int run_server(Config *config) {
                 Json::Value out = process_resolve_request(json, index, config->index_release,
                                                           config->resolve_max_query_bp,
                                                           &identity, gone_of(request),
-                                                          resolve_time, &delivery);
+                                                          resolve_time, &writing.delivery);
                 // in_ram: the time before the work began, waiting for and loading its index
                 if (in_ram)
                     out["timing"]["load_ms"] = lease ? lease->load_ms() : 0.0;
@@ -1500,7 +1490,7 @@ int run_server(Config *config) {
             } catch (const ResolveDeadline &e) {
                 throw as_http(e);
             }
-        }, /* compact */ true, &control);
+        }, /* compact */ true, &writing.control);
     };
 
     // Extend frozen seeds along consistent annotation labels.
