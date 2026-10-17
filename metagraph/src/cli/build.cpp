@@ -436,6 +436,7 @@ int concatenate_graph_chunks(Config *config) {
 
     // graph output
     graph->serialize(config->outfbase);
+    remove_stale_dummy_mask(*graph, config->outfbase);
 
     return 0;
 }
