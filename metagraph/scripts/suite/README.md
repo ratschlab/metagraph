@@ -323,8 +323,9 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   two runs side by side (like with like: N12). The load caveat appears when the sra_all CPU mean exceeds
   400 % or the load1 mean exceeds 48 (half of mex's 96 cores). compare.json is computed when missing, by the
   report and the gate as compare.py computes it (compare.load_or_compute: the table validated against the run
-  manifest's scenarios; a table compare.py refuses makes report.py exit 4 as compare.py does, and is the gate's
-  "compare.py refused" problem, never a cached comparison; SD-017).
+  manifest's scenarios; a table compare.py refuses makes report.py and doc/make_doc.py exit 4 as compare.py does
+  ("make_doc: refusing: ...", L5 of the verification of SD-017), and is the gate's "compare.py refused" problem,
+  never a cached comparison; SD-017).
 
 ## Ground truth, manifests, checks (lane S1)
 
@@ -4136,7 +4137,8 @@ and `test_timing_wordings` bans the removed wordings ("point to", "reflects the"
 - Writes `DIR/doc.tex`, one `chapter_<X>.tex` per chapter and `doc.sty`, then runs xelatex twice (a third time when
   the .aux changed; `/Library/TeX/texbin/xelatex` or PATH; latexmk is not used). Fonts from TeX Live: Libertinus
   Serif, Fira Sans / Mono, DejaVu Sans for the glyphs. Exit 0 built, 1 LaTeX failed (the log's first error echoed),
-  2 usage or missing inputs (each named).
+  2 usage or missing inputs (each named), 4 a comparison to compute (no compare.json) with a by-design table
+  compare.py refuses (as compare.py and report.py; `reader.TableRefused`).
 - The reading model (`doc/units.py`): a scenario belongs to one unit (one builder template, one property, varied
   over one dimension), a unit to one family (the id prefix), a family to one chapter (the area). Five layouts:
   `series` (arms as rows, variants as columns), `replicates` (aggregates per group), `refusals` (glyph only),

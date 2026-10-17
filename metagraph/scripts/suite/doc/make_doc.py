@@ -19,7 +19,8 @@ cover note "Chapter R sample; whole-run summary shown for context";
 entries the prose files lack (existing text untouched) and exits.
 
 Exit 0 built (or --no-pdf), 1 LaTeX failed (the log's first error echoed), 2 usage / missing inputs (a scenario
-without unit metadata, a family or unit without prose, a missing prose file: each named).
+without unit metadata, a family or unit without prose, a missing prose file: each named), 4 a comparison to compute
+(no compare.json) with a by-design table compare.py refuses (as compare.py and report.py).
 """
 
 import argparse
@@ -262,6 +263,9 @@ def main(argv=None):
                                                                                            chapters)
         main_tex, chapter_files, ctx = build_tex(run, units, chapters, prose, overview, glossary, checks_prose,
                                                  closing_prose, cases_prose, sample=args.sample)
+    except reader.TableRefused as e:
+        print("make_doc: refusing: %s" % e, file=sys.stderr)
+        return 4
     except (reader.RunError, units_mod.UnitsError, DocError) as e:
         print("make_doc: %s" % e, file=sys.stderr)
         return 2

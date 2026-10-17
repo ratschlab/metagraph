@@ -29,6 +29,11 @@ class RunError(Exception):
     """A run directory the generator cannot read (usage / missing inputs: exit 2)."""
 
 
+class TableRefused(RunError):
+    """A run whose comparison is to be computed (no compare.json) with a by-design table compare.py refuses
+    (compare.TableError): make_doc exits 4, as compare.py and report.py do."""
+
+
 def _repeat_key(line):
     r = line.get("repeat")
     return r if isinstance(r, int) else -1
@@ -135,7 +140,10 @@ class Run(object):
         # executions_sha256, since 2026-10-15; a comparison before that states none)
         self.executions_file = sc.reevaluated_name("executions.jsonl", reevaluated)
         self.executions_sha256 = sha256_of(os.path.join(self.dir, self.executions_file))
-        self.comp = report.load_compare(self.dir, by_design, reevaluated)
+        try:
+            self.comp = report.load_compare(self.dir, by_design, reevaluated)
+        except cmp.TableError as exc:   # as report.main: a table compare.py refuses is a refusal, never a traceback
+            raise TableRefused(str(exc)) from None
         self.compare_executions_sha256 = self.comp.get("executions_sha256") if isinstance(self.comp, dict) else None
         self.reeval = sc.read_json(os.path.join(self.dir, "reevaluated.json")) if reevaluated else None
         self.samples, _ = sc.read_jsonl(os.path.join(self.dir, "samples.jsonl"))

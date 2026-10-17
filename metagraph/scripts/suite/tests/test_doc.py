@@ -677,6 +677,35 @@ class FakeRunTest(unittest.TestCase):
         rc = make_doc.main([self.run_dir, "--out", out, "--no-pdf", "--units", path, "--prose-dir", self.prose_dir])
         self.assertEqual(rc, 2)
 
+    def test_a_refused_table_without_compare_json(self):
+        # L5 of the verification of SD-017: the document reads the comparison as report.py does (compare's
+        # load_or_compute); a run without compare.json whose table compare.py refuses makes make_doc refuse with
+        # compare.py's and report.py's exit 4, naming the refusal, never a traceback, and caches no comparison
+        import contextlib
+        import io
+        d = os.path.join(self.tmp, "refused-run")
+        shutil.copytree(self.run_dir, d)
+        os.remove(os.path.join(d, "compare.json"))
+        table = os.path.join(self.tmp, "refused-table.json")
+        cases = [dict(c) for c in CASES.values()]
+        for c in cases:
+            if c["id"] == "case.refused":
+                c["request"] = [{"path": "patterns", "present": True}]   # a request that is no object
+        with open(table, "w") as fh:
+            json.dump({"version": 1, "cases": cases}, fh)
+        self.assertEqual(cmp.main([d, "--no-merge", "--by-design", table]), 4)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = make_doc.main([d, "--out", os.path.join(self.tmp, "refused-out"), "--no-pdf", "--units",
+                                self.mapping_path, "--prose-dir", self.prose_dir, "--by-design", table])
+        self.assertEqual(rc, 4)
+        self.assertIn("make_doc: refusing: ", err.getvalue())
+        self.assertIn("the service-by-design table %s is invalid" % table, err.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(d, "compare.json")))
+        with self.assertRaises(reader.TableRefused):
+            reader.Run(d, by_design=table)
+        self.assertTrue(issubclass(reader.TableRefused, reader.RunError))
+
 
 # ---------------------------------------------------------------------------------------------------------------
 # the cell grammar and the expectation formatters
