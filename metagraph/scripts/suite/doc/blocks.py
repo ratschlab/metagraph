@@ -1337,7 +1337,15 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
         meta.append(esc(", ".join(str(t) for t in sc_["tags"]), 120))
     rep = sc_.get("repeat")
     if rep:
-        meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
+        # the manifest's repeat count is not the count of the rows below: the paired loop adds the MCP warm call and
+        # the extra direct repeat of every tenth scenario (I.2), so the recorded executions are named beside it where
+        # they differ (the external review of the v6 document, V6-105)
+        counts = [(cells.ARM_SHORT.get(arm, arm), len(states[arm].lines)) for arm in cells.ARMS
+                  if states[arm].present and states[arm].lines]
+        text = "%s repeat%s in the manifest" % (rep, "" if rep == 1 else "s")
+        if any(n != rep for _, n in counts):
+            text += "; recorded executions %s (the rows below)" % ", ".join("%s %d" % c for c in counts)
+        meta.append(text)
     body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
     body.extend(interpretation(run, sid, states, property_text, title=title_text))
     if note:

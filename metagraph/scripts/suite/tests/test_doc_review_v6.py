@@ -490,5 +490,16 @@ class PairsLegendTest(unittest.TestCase):
         self.assertIn("be the host call as the service timed it", repeated)
 
 
+class RepeatsMetaTest(unittest.TestCase):
+    """V6-105: a detail block's metadata calls the manifest's count the manifest's and names the recorded executions
+    where they differ from it."""
+
+    def test_source(self):
+        import inspect
+        src = inspect.getsource(blocks.detail_block)
+        self.assertIn('text = "%s repeat%s in the manifest"', src)
+        self.assertIn('text += "; recorded executions %s (the rows below)"', src)
+
+
 if __name__ == "__main__":
     unittest.main()
