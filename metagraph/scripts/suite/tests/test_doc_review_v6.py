@@ -315,5 +315,26 @@ class AnnotateWitnessTest(unittest.TestCase):
         self.assertNotIn("Does annotate mode follow every structural successor", t["units"]["T-labels"]["question"])
 
 
+class StrandRefusalStageTest(unittest.TestCase):
+    """V6-103: T-strand names the seed refusal the run observed (facts' seed_refusal, from the answer's text) and
+    bounds the claim: a graph-absence refusal does not show strand-specific label support."""
+
+    def test_prose_branches(self):
+        text = prose("T")["families"]["T-strand"]["prose"]
+        graph = facts.fill(text, {"x": {"T-strand-0001": {"dl": {"seed_refusal": "graph"}, "mcp": {"class": ""}}},
+                                  "manifest_version": 6, "n_footnoted": 0})
+        self.assertIn("a plain absence, so the test shows that this input is refused and not that the header tells "
+                      "the two orientations apart", graph)
+        self.assertNotIn("the traverse-side statement of the strand fact", graph)
+        label = facts.fill(text, {"x": {"T-strand-0001": {"dl": {"seed_refusal": "label"}, "mcp": {"class": ""}}},
+                                  "manifest_version": 6, "n_footnoted": 0})
+        self.assertIn("the traverse-side statement of the strand fact", label)
+
+    def test_fact_from_text(self):
+        import inspect
+        src = inspect.getsource(facts.arm_facts)
+        self.assertIn('"graph" if "not fully present in the graph" in text', src)
+
+
 if __name__ == "__main__":
     unittest.main()

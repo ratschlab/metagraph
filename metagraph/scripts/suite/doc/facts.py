@@ -494,7 +494,7 @@ def arm_facts(ctx, sid, arm):
          "wall": "–", "walls": "–", "wall_cold": "–", "wall_warm": "–", "server": "–", "backend": "–",
          "http": "", "code": "", "host": "", "host_word": "", "late": "", "phrase": "", "phrase_cold": "",
          "phrase_warm": "", "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean),
-         "time_limited": "", "checks": {}, "n_outside_case": 0, "outside_case_phrase": ""}
+         "time_limited": "", "checks": {}, "n_outside_case": 0, "outside_case_phrase": "", "seed_refusal": ""}
     if not st.present:
         f["phrase"] = "no execution recorded although the run planned one" if st.missing_planned else "no execution"
         return f
@@ -519,6 +519,12 @@ def arm_facts(ctx, sid, arm):
     if answered:
         f["http"] = str(answered.get("http"))
         f["code"] = _err(answered)[0] or ""
+        # which seed refusal of SPEC-labeled-traversal-core section 6.1 the answer gave, read from its text (the
+        # external review of the v6 document, V6-103): graph (step 2, a seed k-mer in no record of the graph: a plain
+        # absence) or label (step 3, no seed label supports every k-mer); '' otherwise
+        text = str(_err(answered)[1] or "")
+        f["seed_refusal"] = ("graph" if "not fully present in the graph" in text else
+                             "label" if "No seed label supports every k-mer" in text else "")
     f["host"] = str(cells.host_cache_of(first) or "").replace("_", " ")
     f["host_word"] = HOST_WORD.get(cells.host_cache_of(first), f["host"])
     lates = [_late_ms(run, sid, l) for l in lines]
