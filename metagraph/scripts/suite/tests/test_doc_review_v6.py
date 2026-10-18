@@ -746,5 +746,17 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertIn("the negative and refusal controls (X-table1, X-junction, X-stop-none, the refusals of X-edge)", text)
 
 
+    def test_r2_301_pointers_only_to_present_blocks(self):
+        n = prose("N")
+        summary = n["summary"][0]
+        self.assertIn("[[n_footnoted ? The coverage paragraph below groups the exceptions", summary)
+        self.assertIn("The coverage paragraph states the remaining limits; the unit tables show the recorded timings.",
+                      facts.fill(summary, {"n_footnoted": 0}, unresolved=[]))
+        self.assertIn("[[x[N-hard-0022][footnoted] ?, and the detail block of N-hard-0022]]", str(n))
+        for ch in ("R", "T"):
+            self.assertIn("[[n_footnoted ?; the exception index and the detail blocks hold the exceptions]]",
+                          str(prose(ch)), ch)
+
+
 if __name__ == "__main__":
     unittest.main()
