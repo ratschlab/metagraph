@@ -674,7 +674,12 @@ class VerifyRoundTest(unittest.TestCase):
         text = str(prose("R"))
         self.assertNotIn("chapters P, T (T-strand", text)
         self.assertIn("[[xr[T-strand-0001][dl][seed_refusal] = label ?", text)
-        self.assertIn('v["xr"] = dict((sid, scenario_facts(ctx, sid))', inspect.getsource(facts.family_facts))
+        self.assertIn('v["xr"] = dict((sid, scenario_facts(ctx, sid) if sid in (ctx.run.scenarios or {}) else _Blank())',
+                      inspect.getsource(facts.family_facts))
+        # a test the run lacks reads blank: the condition takes its last branch, nothing unresolved
+        self.assertIn("which refusal T-strand's reverse-complement seed received is not established",
+                      facts.fill(str(prose("R")["families"]["R-rc"]["prose"]),
+                                 {"xr": {"T-strand-0001": facts._Blank()}}, unresolved=[]))
         rrc = [v for k, v in prose("R")["families"].items() if "resolve-side statement of the strand fact" in str(v)]
         self.assertTrue(rrc)
         graph = facts.fill(rrc[0]["prose"], {"xr": {"T-strand-0001": {"dl": {"seed_refusal": "graph"}}}},

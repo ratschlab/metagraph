@@ -75,6 +75,16 @@ _MARKERS_RE = re.compile("[\ue000-\ue003]")
 
 # -- filling ------------------------------------------------------------------------------------------------------
 
+class _Blank(dict):
+    """The facts of a test the run does not have (a cross reference, `xr`): every field reads as empty."""
+
+    def __missing__(self, key):
+        return _Blank()
+
+    def __str__(self):
+        return ""
+
+
 class _Missing(object):
     def __init__(self, text):
         self.text = text
@@ -1242,8 +1252,9 @@ def family_facts(ctx, fid):
     v["x"] = x
     # the scenario facts of another family's test the prose names as `xr[<id>]` (a cross reference: R-rc reads
     # T-strand's observed refusal, the verification of the review's fixes, L1), kept apart from the members' `x`
-    v["xr"] = dict((sid, scenario_facts(ctx, sid)) for sid in sorted(set(re.findall(
-        r"xr\[([A-Za-z0-9_.-]+)\]", str(prose)))) if sid in (ctx.run.scenarios or {}))
+    # a test another run lacks reads blank (every field empty), so that a condition on it takes its last branch
+    v["xr"] = dict((sid, scenario_facts(ctx, sid) if sid in (ctx.run.scenarios or {}) else _Blank())
+                   for sid in sorted(set(re.findall(r"xr\[([A-Za-z0-9_.-]+)\]", str(prose)))))
     v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
     footnoted = [sid for sid in members if x[sid]["footnoted"]]
