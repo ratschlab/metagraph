@@ -4416,6 +4416,12 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   entry's pattern text by design, that the frozen v6 manifest still marks its `entry_fields` not implemented via
   MCP, and that the next manifest revision corrects the class. sections.unit_section prints no note line for a note
   that fills to nothing, so the v5 document is unchanged.
+- No local file path in the document (an internal audience beyond this machine; hosts, staging names and ids stay,
+  never a secret): latex.public_paths rewrites a path inside the suite's tree from `metagraph/scripts/suite/`, a
+  path under a home directory without the home and its hidden directories, a temporary one as its file name, and
+  appendix F applies it to the by-design table's path, the re-evaluation's recorded path, the table warnings and
+  the manifest's ground-truth sources (the index records' `~/.cache/...` report directory); I.4 to its table
+  warnings, the cover to gate.py's error. The v5 document's doc.tex changes in those two appendix F rows only.
 
 ## Glossary
 

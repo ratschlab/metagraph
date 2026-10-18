@@ -497,6 +497,20 @@ class FakeRunTest(unittest.TestCase):
         with open(os.path.join(self.out, name), encoding="utf-8") as fh:
             return fh.read()
 
+    def test_no_local_paths(self):
+        """The v6 delta, item 6: no local file path in the document (the run directory, the suite's checkout, a
+        home or temporary directory); the by-design table's path prints from metagraph/scripts/suite/ or as a
+        file name."""
+        local = re.compile(r"/Users/|/home/|~/|\\textasciitilde\{\}/|/var/folders/|/private/|/tmp/")
+        for name in sorted(os.listdir(self.out)):
+            if not name.endswith(".tex"):
+                continue
+            text = self.tex(name).replace("\\allowbreak{}", "").replace("\\_", "_")
+            self.assertNotIn(self.tmp, text, name)
+            self.assertNotIn(os.path.realpath(self.tmp), text, name)
+            self.assertNotIn(SUITE, text, name)
+            self.assertIsNone(local.search(text), "%s: %s" % (name, (local.search(text) or [None])[0]))
+
     def test_build_tex(self):
         self.assertEqual(self.rc, 0)
         main = self.tex()
@@ -5719,6 +5733,21 @@ class V6DeltaTest(unittest.TestCase):
                 reader.Run(run_dir, identity=path)
         finally:
             shutil.rmtree(tmp)
+
+    def test_public_paths(self):
+        """Item 6: a local path is rewritten (inside the suite's tree from metagraph/scripts/suite/, under a home
+        without the home and its hidden directories, a temporary one as its file name); routes, URLs and a lone ~
+        stay."""
+        pp = latex.public_paths
+        self.assertEqual(pp("/Users/u/git/services/metagraph/metagraph/scripts/suite/runs/R/scripts/service_by_design"
+                            ".json"), "metagraph/scripts/suite/runs/R/scripts/service_by_design.json")
+        self.assertEqual(pp("decoded 2026-10-09 (~/.cache/metagraph-index-defects/r/data/records.tsv, last.tsv)"),
+                         "decoded 2026-10-09 (metagraph-index-defects/r/data/records.tsv, last.tsv)")
+        self.assertEqual(pp("/private/var/folders/k9/x/T/tmp1/run/compare.json"), "compare.json")
+        self.assertEqual(pp("/home/bob/.local/share/f.txt; /tmp/a/b.json"), "share/f.txt; b.json")
+        for keep in ("GET /traverse/capabilities", "POST /pattern", "https://metagraph.ethz.ch:8080/x", "named with `~`"):
+            self.assertEqual(pp(keep), keep)
+        self.assertIsNone(pp(None))
 
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner

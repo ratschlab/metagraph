@@ -1015,7 +1015,7 @@ def gate_summary(ctx):
         return word, how, counts_text, problems_text
     how = ("a stale gate.json in the run (%s)" % stale_gate_text(run)) if run.gate_stale else "no gate.json in the run"
     if run.gate_error:
-        how += ", and gate.py could not judge it offline: %s" % latex.cut_text(str(run.gate_error), 200)
+        how += ", and gate.py could not judge it offline: %s" % latex.cut_text(latex.public_paths(str(run.gate_error)), 200)
     elif run.policy is None:
         how += ", and no policy in the suite's gate directory pins this manifest, so none was judged offline"
     return "not evaluated", how, None, None
@@ -1813,7 +1813,7 @@ def provenance_table(ctx):
             text += " (\\textbf{not} the table the re-evaluation replayed: appendix F)"
         rows.append(("by-design table", text))
     elif table.get("warnings"):
-        rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 300)))
+        rows.append(("by-design table", "none read: %s" % esc(latex.public_paths("; ".join(table["warnings"])), 300)))
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
         rows.append(("access path %s" % esc(arm), "%s executions, %s to %s, runner %s" % (
@@ -3629,21 +3629,21 @@ def environment_table(ctx):
     if table.get("path"):
         text = "version %s, %s cases, service commit %s, generated %s; sha256 %s; %s" % (
             esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)),
-            _date(table.get("generated_utc")), tt(table.get("sha256") or "–"), tt(table.get("path")))
+            _date(table.get("generated_utc")), tt(table.get("sha256") or "–"), tt(latex.public_paths(table.get("path"))))
         if table.get("replayed"):
             recorded = ((run.reeval or {}).get("by_design") or {}).get("path")
             text += "; the table the re-evaluation replayed (reevaluated.json by\\_design), found by its sha256%s" % (
-                (" at this path (the re-evaluation recorded %s)" % tt(recorded))
+                (" at this path (the re-evaluation recorded %s)" % tt(latex.public_paths(recorded)))
                 if recorded and recorded != table.get("path") else " at the recorded path")
         elif table.get("replayed_sha256"):
             text += "; \\textbf{WARNING}: not the table the re-evaluation replayed (sha256 %s, %s cases): %s" % (
                 tt(table["replayed_sha256"]), esc(table.get("replayed_cases", "–")),
-                esc("; ".join(table.get("warnings") or []) or "the replayed table was not found", 400))
+                esc(latex.public_paths("; ".join(table.get("warnings") or []) or "the replayed table was not found"), 400))
         elif table.get("warnings"):
-            text += "; " + esc("; ".join(table["warnings"]), 400)
+            text += "; " + esc(latex.public_paths("; ".join(table["warnings"])), 400)
         rows.append(("by-design table", text))
     elif table.get("warnings"):
-        rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 400)))
+        rows.append(("by-design table", "none read: %s" % esc(latex.public_paths("; ".join(table["warnings"])), 400)))
     mcp_run = run.mcp_run or {}
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
@@ -3689,7 +3689,7 @@ def environment_table(ctx):
         value = gt[key]
         if isinstance(value, (list, dict)):
             value = "%d entries" % len(value)
-        rows.append((esc(key.replace("_", " ")), esc_wrap(value, 220)))
+        rows.append((esc(key.replace("_", " ")), esc_wrap(latex.public_paths(value), 220)))
     return _kv_table(rows)
 
 

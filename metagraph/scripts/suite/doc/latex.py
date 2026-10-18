@@ -49,6 +49,35 @@ def cut_text(text, limit):
     return head.rstrip(" ,;:(\u00a0") + "…"
 
 
+# A local file path never reaches the document (the v6 delta, item 6: the document is read beyond this machine): a
+# path inside the suite's tree prints from metagraph/scripts/suite/, a path under a home directory without the home
+# and its leading hidden directories (~/.cache/x/y -> x/y), a temporary one as its file name. Routes (/pattern),
+# hosts and URLs are not local paths and stay.
+SUITE_TREE = "metagraph/scripts/suite/"
+_HOME_ROOT = r"(?:~|/Users/[^/\s]+|/home/[^/\s]+)"
+_TEMP_ROOT = r"(?:/private/(?:var|tmp)|/var/folders|/tmp)"
+_LOCAL_PATH_RE = re.compile(r"(?<![\w:/.])(?:%s|%s)/[^\s;,()'\"<>]*" % (_HOME_ROOT, _TEMP_ROOT))
+
+
+def public_paths(text):
+    """`text` with every local file path in it rewritten as SUITE_TREE's note says (None stays None)."""
+    if text is None:
+        return None
+
+    def repl(m):
+        path = m.group(0)
+        at = path.rfind("/" + SUITE_TREE)
+        if at >= 0:
+            return path[at + 1:]
+        if re.match(_TEMP_ROOT + "/", path):
+            return path.rstrip("/").rsplit("/", 1)[-1]
+        parts = re.sub("^" + _HOME_ROOT + "/", "", path).split("/")
+        while len(parts) > 1 and parts[0].startswith("."):
+            parts.pop(0)
+        return "/".join(parts)
+    return _LOCAL_PATH_RE.sub(repl, str(text))
+
+
 def esc(text, limit=None):
     """`text` safe inside LaTeX text: specials escaped, control characters and line breaks turned into spaces, long
     sequences cut, symbols the fonts may lack set in the glyph font, cut at `limit` characters with an ellipsis."""
