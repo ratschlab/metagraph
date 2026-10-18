@@ -3096,6 +3096,14 @@ class TraverseChecks(unittest.TestCase):
             o, d = outcome(sc, body, "walk_in_record", _arm=arm, label_scope="derived")
             self.assertEqual(o, "pass", (arm, d))
             self.assertIn("sequence only: the record's label is not in the seed's label dictionary", d)
+        # the MCP arm reads its own seeds: an MCP seed without labels names none (as _seeds_derive reads it), even
+        # where the direct request names the record (re-verification L9), so the MCP walk is judged as before
+        mcp_unnamed = copy.deepcopy(named)
+        del mcp_unnamed["mcp"]["arguments"]["seeds"][0]["labels"]
+        o, d = outcome(mcp_unnamed, body, "walk_in_record", _arm="mcp", label_scope="derived")
+        self.assertEqual(o, "pass", d)
+        o, d = outcome(mcp_unnamed, other, "walk_in_record", _arm="direct-local", label_scope="derived")
+        self.assertEqual(o, "fail", d)   # the direct arm reads the request, which names it
         # a taxid named as the seed label (a column) is the record's label as well
         taxid = copy.deepcopy(named)
         taxid["request"]["seeds"][0]["labels"] = ["1"]

@@ -879,12 +879,12 @@ truth/staging_capabilities/): the frozen v4 is built once the host's capabilitie
   (`manifest_lib.set_host_capabilities`, `HOST_MISMATCH_MAX`), for patterns of at most k bases.
 - G07: Q-more-0003 (at_least 3 of 2 labels) expects the refusal, 400 invalid_request naming
   request.predicate.at_least.n; `pattern_by_design` names pattern.predicate_form_other for a form fault of
-  SPEC-pattern §19.3 other than a number as a name (`_predicate_form_fault`: a null, boolean, list or object as a
-  name included), and pattern.predicate_name_not_string for a number in a name list only (not where a predicate or
-  a list belongs). tests/test_manifest_lib.py holds both to the shared corpus
+  SPEC-pattern §19.3 other than a name fault (`_predicate_form_fault`; a null, boolean, list or object as a name
+  names no case: see below), and pattern.predicate_name_not_string for a number in a name list only (not where a
+  predicate or a list belongs). tests/test_manifest_lib.py holds both to the shared corpus
   metagraph/tests/data/pattern_predicate_forms.json: the host's verdicts of tests/cli/test_pattern_predicate.cpp
-  and the service's case per predicate, 'unknown' where the service's own reading is not stated (a present null,
-  an integral real n) (SD-031; the gtest does not read the corpus yet). The service owner's statement of 2026-10-17
+  and the service's case per predicate, 'unknown' where the service's own reading is not stated (SD-031; the C++
+  test TheSharedCorpusIsTheHostsVerdict reads the corpus on gr/sd-server). The service owner's statement of 2026-10-17
   (its app/pattern/validate.py) reads the rows the builder had only inferred and those two (`service_reading`,
   `service_source`): `{"and": [5]}` and n 2.0 are refused with pattern.predicate_form_other's text; a null, boolean or
   list name with "a name is a string, the column label as the index stores it" (no taxid hint), and a present null

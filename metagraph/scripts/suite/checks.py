@@ -3454,18 +3454,18 @@ def _mgt_rejected(r: dict) -> Optional[str]:
 
 def _seed_label_names(sc: dict, i: int, arm: Optional[str]) -> List[str]:
     """The label names seed |i| of the arm's request names (seeds[i].labels): on the MCP arm the scenario's MCP
-    arguments' seeds where they state them, else the direct request's."""
-    for whose in ("mcp", "request"):
-        if whose == "mcp":
-            if arm != "mcp":
-                continue
-            req = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
-        else:
-            req = sc.get("request")
+    arguments' seeds where they state a seeds list (a seed without labels there names none, as _seeds_derive reads
+    it), else the direct request's."""
+    seeds = None
+    if arm == "mcp":
+        args = (sc.get("mcp") or {}).get("arguments") if isinstance(sc.get("mcp"), dict) else None
+        seeds = args.get("seeds") if isinstance(args, dict) else None
+    if not isinstance(seeds, list):
+        req = sc.get("request")
         seeds = req.get("seeds") if isinstance(req, dict) else None
-        seed = seeds[i] if isinstance(seeds, list) and i < len(seeds) and isinstance(seeds[i], dict) else None
-        if seed is not None and isinstance(seed.get("labels"), list):
-            return [str(x) for x in seed["labels"]]
+    seed = seeds[i] if isinstance(seeds, list) and i < len(seeds) and isinstance(seeds[i], dict) else None
+    if seed is not None and isinstance(seed.get("labels"), list):
+        return [str(x) for x in seed["labels"]]
     return []
 
 
