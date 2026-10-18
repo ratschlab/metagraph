@@ -655,7 +655,10 @@ rules:
   and of the rows and text it produces (`WORK_MODEL` 2; 1 lwu is about 0.1 µs of CPython 3.11 on the reference
   machine). They are charged at the **cold price**: a derivation is charged its structural price on every call,
   whether a cache holds it or not, so the same call on the same graphlet with the same budget stops at the same row
-  in any process and whatever earlier calls cached.
+  in any process and whatever earlier calls cached. It is charged once per outermost call (`LocalBudget.scope()`; a
+  scope the caller holds open around several operations is one call), remembered by its model's identity, and the
+  budget holds that model until the call ends: a model freed during the call is never mistaken for a new one at its
+  address.
 - **Memory is a modelled account** (`memory_bound: "model"`), not a measurement: soft in-process; hard bounds are
   the service's process limits. A budget's memory limit applies to each call on its own; its work accumulates across
   the calls that share it (an analysis allowance).

@@ -257,7 +257,7 @@ def uses(b, g):
             len(r.intervals) for v in got.arms.values() for r in v)
     else:
         entries, occ = _block_counts(g.seed_summary['coordinates'])
-    b.uses((id(g), CACHE_KEY), *index_price(entries, occ))
+    b.uses_of(g, CACHE_KEY, *index_price(entries, occ))
 
 
 # ------------------------------------------------------------------ validation

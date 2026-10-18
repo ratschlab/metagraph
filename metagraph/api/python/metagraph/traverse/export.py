@@ -103,8 +103,8 @@ def _envelope_price(g):
 
 
 def _uses_envelope_price(bud, g):
-    bud.uses((id(g), 'json_envelope_price'),
-             W_ELEM * (len(g.dropped) + len(g.limitations) + len(g.labels) + 1), 64)
+    bud.uses_of(g, 'json_envelope_price',
+                W_ELEM * (len(g.dropped) + len(g.limitations) + len(g.labels) + 1), 64)
     return _envelope_price(g)
 
 

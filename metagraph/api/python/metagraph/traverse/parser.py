@@ -1071,8 +1071,8 @@ def _dump_arm(g, arm, w, bud=None):
     rbs = derive.runs_by_segment(arm)
     nsl = g.seed.num_seed_labels
     if bud is not None:
-        bud.uses((id(arm), 'dump_prices'), 3 * len(arm.segments) + len(arm.runs),
-                 16 * len(arm.segments))
+        bud.uses_of(arm, 'dump_prices', 3 * len(arm.segments) + len(arm.runs),
+                    16 * len(arm.segments))
         pw, pt = _dump_prices(arm, rbs)
         bud.charge(W_DUMP_LINE * (len(arm.growth) + len(arm.branch_events) + len(arm.runs))
                    + arm.cache['dump_branch_ids'])
