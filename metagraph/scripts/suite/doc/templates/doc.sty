@@ -67,7 +67,10 @@
 % chapter's line, indented with the chapter's title, linked to the chapter
 \newcommand\tocattention[2]{\par\nobreak\vspace{-2pt}{\leftskip=1.5em\rightskip=2.55em plus 1fil\noindent\small\sffamily\hyperref[#1]{\attn{#2}}\par}\addvspace{2pt}}
 % headings of a unit and its property line
-\newcommand\unithead[3]{\par\medskip\noindent\textbf{\texttt{#1}}\quad #2\hfill{\small\itshape #3}\par\nopagebreak}
+% the unit's heading: id, title, and the timing key flush right; a key that does not fit beside the title with a gap
+% of 1.5em moves whole to the next line, flush right (the TeXbook's \signed; the external review of the v6 document,
+% V6-108: no title runs into its key, no last word of the key wraps alone)
+\newcommand\unithead[3]{\par\medskip{\noindent\textbf{\texttt{#1}}\quad #2\unskip\nobreak\hfil\penalty50\hskip1.5em\hbox{}\nobreak\hfil\mbox{\small\itshape #3}\parfillskip=0pt\finalhyphendemerits=0\par}\nopagebreak}
 \newcommand\propline[1]{\noindent{\small #1}\par\nopagebreak\smallskip}
 % a family or chapter summary line
 \newcommand\sumline[1]{\par\noindent{\sffamily\footnotesize #1}\par\medskip}

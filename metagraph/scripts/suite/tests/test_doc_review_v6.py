@@ -501,5 +501,17 @@ class RepeatsMetaTest(unittest.TestCase):
         self.assertIn('text += "; recorded executions %s (the rows below)"', src)
 
 
+class UnitHeadingTest(unittest.TestCase):
+    """V6-108: a unit heading's key never runs into its title: a key that does not fit moves whole to the next line,
+    flush right, with a minimum gap (the TeXbook's \\signed construction)."""
+
+    def test_macro(self):
+        sty = open(os.path.join(DOC, "templates", "doc.sty"), encoding="utf-8").read()
+        line = [l for l in sty.splitlines() if l.startswith("\\newcommand\\unithead")][0]
+        self.assertIn("\\unskip\\nobreak\\hfil\\penalty50\\hskip1.5em\\hbox{}\\nobreak\\hfil\\mbox{", line)
+        self.assertIn("\\parfillskip=0pt", line)
+        self.assertNotIn("#2\\hfill{", line)
+
+
 if __name__ == "__main__":
     unittest.main()
