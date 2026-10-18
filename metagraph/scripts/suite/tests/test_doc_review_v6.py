@@ -302,5 +302,18 @@ class JunctionPremiseTest(unittest.TestCase):
                 self.assertEqual(runs, [[[0, t["a_run_end"]]], [[t["b_run_start"], 170]]], s["id"])
 
 
+class AnnotateWitnessTest(unittest.TestCase):
+    """V6-102: annotate mode's all-successor behaviour is the SPEC's contract; the test checks a source-route witness
+    and no claim, property line or question says every successor was shown."""
+
+    def test_prose(self):
+        t = prose("T")
+        fam = t["families"]["T-labels"]
+        self.assertTrue(fam["claim"].startswith("in annotate mode a returned route follows the source record"))
+        self.assertIn("not an enumeration of every successor", fam["prose"])
+        self.assertNotIn("annotate mode lists every structural successor", t["units"]["T-labels"]["property"])
+        self.assertNotIn("Does annotate mode follow every structural successor", t["units"]["T-labels"]["question"])
+
+
 if __name__ == "__main__":
     unittest.main()
