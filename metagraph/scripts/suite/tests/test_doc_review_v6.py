@@ -739,5 +739,12 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertNotIn("r1", facts.unshown_reasons_text(run, "S", states))
 
 
+    def test_r2_201_green_recovery(self):
+        text = str(prose("X"))
+        self.assertNotIn("A green result in this chapter says", text)
+        self.assertIn("In the positive recovery tests, a green result says", text)
+        self.assertIn("the negative and refusal controls (X-table1, X-junction, X-stop-none, the refusals of X-edge)", text)
+
+
 if __name__ == "__main__":
     unittest.main()
