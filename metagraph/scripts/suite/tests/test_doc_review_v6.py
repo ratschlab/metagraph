@@ -237,5 +237,19 @@ class WarmUpCausalTest(unittest.TestCase):
         self.assertIn("Searches meant to read, before a /pattern scenario", text)
 
 
+class ProteinAdmissionTest(unittest.TestCase):
+    """V6-202: the admission-only sentence names the cap and refusal tests, never 'the passing protein tests' as a
+    whole, and points at M-protein-level1 for the recovery where it passed."""
+
+    def test_sentence(self):
+        text = prose("M")["summary"][0]
+        self.assertNotIn("The passing protein tests are admission tests", text)
+        self.assertIn("The passing protein-cap and refusal tests are admission tests, not recoveries", text)
+        filled = facts.fill(text, {"unit": {"M-protein-level1": {"n_pass_dl": 7, "direct_all_pass": True}}})
+        self.assertIn("which only M-protein-level1's passes show", filled)
+        filled = facts.fill(text, {"unit": {"M-protein-level1": {"n_pass_dl": 0, "direct_all_pass": False}}})
+        self.assertNotIn("which only M-protein-level1's passes show", filled)
+
+
 if __name__ == "__main__":
     unittest.main()
