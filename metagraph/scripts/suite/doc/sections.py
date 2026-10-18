@@ -2422,10 +2422,12 @@ def unit_section(ctx, chapter, uid):
     members = list(u["members"])
     prop, note = _unit_prose(ctx, chapter, uid)
     prop_tex = inline(ctx.fill(prop)) if prop else latex.placeholder("(unit property: to be written)")
-    if note:
-        # the note is filled on the unit's own values too (facts.unit_facts: its members under `x`), so that it
-        # can state a member's gate relation from the policy (READ-318: N-usecase-defect)
-        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note, facts.unit_facts(ctx, uid)))
+    # the note is filled on the unit's own values too (facts.unit_facts: its members under `x`), so that it can
+    # state a member's gate relation from the policy (READ-318: N-usecase-defect); a note whose conditional leaves
+    # nothing for this run (P-edge's v6-only note) prints nothing
+    note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""
+    if note_text:
+        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(note_text)
     layout = u["unit_type"]
     key = cells.LAYOUT_KEY.get(layout)
     legend = cells.TIMING_LEGEND.get(layout)

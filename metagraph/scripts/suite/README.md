@@ -4411,6 +4411,11 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   service's deployed revision, taken from <the source's first clause> and not recorded by the runner: service
   commit ..., Railway deployment ..." (the commit shortened in I.4, in full in F); without the option the text is
   v5's ("not recorded by this run").
+- P-edge-0004 (lower case): the P-edge unit's note, printed under its property line for manifest v6 only
+  (`[[manifest_version = 6 ? ...]]`), says that the service's owner states the MCP's /pattern answer leaves out the
+  entry's pattern text by design, that the frozen v6 manifest still marks its `entry_fields` not implemented via
+  MCP, and that the next manifest revision corrects the class. sections.unit_section prints no note line for a note
+  that fills to nothing, so the v5 document is unchanged.
 
 ## Glossary
 

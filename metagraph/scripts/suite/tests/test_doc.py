@@ -5720,5 +5720,20 @@ class V6DeltaTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp)
 
+    def test_p_edge_0004_note(self):
+        """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
+        states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no
+        note line under P-edge (unit_section skips a note that fills to nothing)."""
+        note = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["units"]["P-edge"]["note"]
+        v6 = facts.fill(note, {"manifest_version": 6})
+        self.assertTrue(v6.startswith("P-edge-0004 (lower case): the service's owner states"), v6)
+        self.assertIn("by design", v6)
+        self.assertIn("the frozen v6 manifest", v6)
+        self.assertIn("the next manifest revision corrects it", v6)
+        for version in (4, 5, 7):
+            self.assertEqual(facts.fill(note, {"manifest_version": version}).strip(), "")
+        self.assertIn('note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""',
+                      inspect.getsource(sections.unit_section))
+
 if __name__ == "__main__":
     unittest.main()
