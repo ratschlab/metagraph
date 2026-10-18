@@ -658,6 +658,10 @@ def _execution_rows(st, run, sid, arm, is_property):
         aside = run.marked_aside(sid, l) if (arm == "mcp" and hasattr(run, "marked_aside")) else None
         tested = "–" if outcome in ("not_implemented_mcp", "service_by_design") else _property_cell(
             l, is_property, aside)
+        if aside and tested != "–":
+            # the marked items counted apart make the cell long: a top-aligned box that wraps, so that the block's
+            # table stays within the margin (the v6 delta: D-P-scope-0004's MCP rows; no v5 detail row has one)
+            tested = "\\parbox[t]{30mm}{\\raggedright\\strut %s}" % tested
         rows.append(["%s%s" % (esc(arm), (" r%s" % esc(l.get("repeat"))) if several or arm == "mcp" else ""),
                      "%s\\ %s" % (glyph, word), _status_cell(l), wall, esc(_budget_text(run, sid)), tested])
     return rows

@@ -2803,6 +2803,13 @@ class RebasedFieldsTest(unittest.TestCase):
         self.assertEqual(cells.property_tested(mcp0, run.is_property, aside), ("yes", 1, 1))
         self.assertEqual(cells.property_tested(mcp0, run.is_property), ("partly", 1, 2))
         self.assertEqual(blocks._property_cell(mcp0, run.is_property, aside), "yes (1 of 1); 1 marked not shown via MCP")
+        # in the detail block's rows that long cell wraps in a top-aligned box (the v6 delta: D-P-scope-0004's MCP
+        # rows ran 44 pt past the margin); a row without a mark keeps its plain cell
+        rows = blocks._execution_rows(cells.arm_state(run, "P-001", "mcp"), run, "P-001", "mcp", run.is_property)
+        self.assertEqual(rows[0][-1], "\\parbox[t]{30mm}{\\raggedright\\strut yes (1 of 1); 1 marked not shown via MCP}")
+        rows = blocks._execution_rows(cells.arm_state(run, "P-001", "direct-local"), run, "P-001", "direct-local",
+                                      run.is_property)
+        self.assertNotIn("parbox", rows[0][-1])
         groups = blocks._check_groups(mcp0, True, run.check_marks("P-001"))
         self.assertEqual(groups, [(("marked:not_implemented", "the MCP's records carry no context offsets"),
                                    ["contains_source_context"])])

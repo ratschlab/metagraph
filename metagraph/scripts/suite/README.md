@@ -4430,6 +4430,9 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
 
       doc/make_doc.py runs/20261017T082918Z_refseq97-81c620ef --out DIR --policy gate/policy_v6_rtp_mcp.json \
           --also-policy gate/policy_v6_rt_mcp.json --identity identity-v6-baseline.json
+- A layout fix the v6 build needed (not a brief item): a detail block's "property tested?" cell with items a
+  property-level mark sets aside ("yes (1 of 1); 1 marked not shown via MCP") wraps in a 30 mm top-aligned box;
+  D-P-scope-0004's MCP rows, footnoted in v6, ran 44 pt past the margin. No v5 detail row has such a cell.
 
 ## Glossary
 
