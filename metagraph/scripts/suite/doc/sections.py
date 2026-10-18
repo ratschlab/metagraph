@@ -3813,6 +3813,42 @@ def unverified_note(details):
                 "" if len(details) == 1 else "s", "; ".join(lines)))
 
 
+def relation_paths_text(paths):
+    """A same_answer relation's compared paths in full and readable (the external review of the v6 document, V6-007:
+    no argument is cut): '12 paths, a's against b's: release; server_instance against attempts.server_instance;
+    ...', a path equal on both sides named once, the whole answer for an empty path, and a prefix every b path
+    shares with its a path stated once ('34 paths, each against pattern.<the same path>: annotation, ...')."""
+    pairs = [(str(a), str(b)) for a, b in paths]
+    n = len(pairs)
+    head = "%d path%s" % (n, "" if n == 1 else "s")
+    prefix = None
+    if n > 1 and all(a and b.endswith(a) and len(b) > len(a) for a, b in pairs):
+        cands = set(b[:len(b) - len(a)] for a, b in pairs)
+        prefix = cands.pop() if len(cands) == 1 else None
+    if prefix:
+        return "%s, each of a against %s<the same path> of b: %s" % (head, prefix, ", ".join(a for a, _ in pairs))
+    words = []
+    for a, b in pairs:
+        a_, b_ = a or "the whole answer", b or "the whole answer"
+        words.append(a_ if a == b else "%s against %s" % (a_, b_))
+    return "%s, a's against b's: %s" % (head, "; ".join(words))
+
+
+def relation_args_text(args):
+    """A relation's arguments in full, as appendix C prints them under its title: the scalars, then a same_answer's
+    paths (relation_paths_text) and any other list as JSON, never cut."""
+    text = ", ".join("%s %s" % (k, v) for k, v in sorted(args.items()) if not isinstance(v, (list, dict)))
+    for k, v in sorted(args.items()):
+        if not isinstance(v, (list, dict)):
+            continue
+        if k == "paths" and isinstance(v, list) and all(isinstance(p, list) and len(p) == 2 for p in v):
+            part = relation_paths_text(v)
+        else:
+            part = "%s %s" % (k, blocks._runs(v))
+        text += ("; " if text else "") + part
+    return text
+
+
 def relations_appendix(ctx):
     run = ctx.run
     comp_rel = run.comp_relations()
@@ -3822,11 +3858,7 @@ def relations_appendix(ctx):
         if rel.get("a") not in selected and rel.get("b") not in selected:
             continue
         crel = comp_rel.get(rel.get("id")) or {}
-        args = rel.get("args") or {}
-        arg_text = ", ".join("%s %s" % (k, v) for k, v in sorted(args.items()) if not isinstance(v, (list, dict)))
-        for k, v in sorted(args.items()):
-            if isinstance(v, (list, dict)):
-                arg_text += ("; " if arg_text else "") + "%s %s" % (k, blocks._runs(v))
+        arg_text = relation_args_text(rel.get("args") or {})
         per_arm = []
         for arm in ARMS:
             a = (crel.get("arms") or {}).get(arm) or {}
@@ -3842,7 +3874,7 @@ def relations_appendix(ctx):
                      "%s %s %s" % (latex.sid(rel.get("a"), ctx.units.unit_of(rel.get("a"))),
                                    RELATION_SIGN.get(rel.get("type"), ""),
                                    latex.sid(rel.get("b"), ctx.units.unit_of(rel.get("b")))),
-                     esc(rel.get("title"), 240) + (("\\newline{\\scriptsize %s}" % esc_wrap(arg_text, 400)) if arg_text else "")]
+                     esc(rel.get("title"), 240) + (("\\newline{\\scriptsize %s}" % esc_wrap(arg_text)) if arg_text else "")]
                     + per_arm)
     out = appendix_lead(ctx, "appendix_C") or (
         "Every manifest relation among the built chapters' tests, with the comparator's outcome and detail per "

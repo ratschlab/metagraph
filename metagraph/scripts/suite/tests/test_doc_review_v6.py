@@ -542,5 +542,29 @@ class PhasePopulationTest(unittest.TestCase):
         self.assertIn("below 0 ms in 1 of 3 (-8.7 ms)", sections.phase_omitted_text(ctx))
 
 
+class RelationArgumentsTest(unittest.TestCase):
+    """V6-007: appendix C prints every relation argument in full, the compared paths readable and never cut, so the
+    lead's 'printed in full' holds."""
+
+    def test_paths(self):
+        paths = [["release", "release"], ["server_instance", "attempts.server_instance"]] + [
+            ["field_%02d" % i, "field_%02d" % i] for i in range(40)]
+        text = sections.relation_args_text({"paths": paths})
+        self.assertTrue(text.startswith("42 paths, a's against b's: release; server_instance against "
+                                        "attempts.server_instance; field_00"), text[:120])
+        self.assertTrue(text.endswith("field_39"))
+        self.assertNotIn("…", text)
+        self.assertEqual(sections.relation_args_text({"paths": [["", "pattern"]]}),
+                         "1 path, a's against b's: the whole answer against pattern")
+        self.assertEqual(sections.relation_args_text({"paths": [["k", "pattern.k"], ["mask", "pattern.mask"]]}),
+                         "2 paths, each of a against pattern.<the same path> of b: k, mask")
+        self.assertEqual(sections.relation_args_text({"a_from_kmer": 0, "b_from_kmer": 0, "labels": ["511145"]}),
+                         'a_from_kmer 0, b_from_kmer 0; labels ["511145"]')
+        import inspect
+        self.assertIn("esc_wrap(arg_text))", inspect.getsource(sections.relations_appendix))
+        self.assertIn("The arguments of each relation are printed in full under its title",
+                      prose("overview")["appendix_C"]["paragraphs"][0])
+
+
 if __name__ == "__main__":
     unittest.main()
