@@ -15,6 +15,7 @@
 
 #include "graph/traversal/support_step.hpp"
 #include "graph/traversal/label_oracle.hpp"
+#include "graph/traversal/walker.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/coord_to_header.hpp"
@@ -111,15 +112,12 @@ std::vector<Coord> random_coords(std::mt19937 &gen, Coord n, double density) {
     return out;
 }
 
-// The walker's step rule (walker.cpp, process_item), the oracle of the run merge
+// The walker's step rule (continues_chain, the walker's own), the oracle of the run merge
 std::vector<Coord> walker_rule(Arm side, const std::vector<Coord> &live,
                                const std::vector<Coord> &coords) {
     std::vector<Coord> out;
     for (Coord x : coords) {
-        bool ok = side == Arm::RIGHT
-            ? (x > 0 && std::binary_search(live.begin(), live.end(), x - 1))
-            : std::binary_search(live.begin(), live.end(), x + 1);
-        if (ok)
+        if (continues_chain(side, live, x))
             out.push_back(x);
     }
     return out;

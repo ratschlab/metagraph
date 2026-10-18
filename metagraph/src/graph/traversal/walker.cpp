@@ -910,7 +910,9 @@ class Walker {
     // standalone demand beside the rows read before it, so that where the read stops depends
     // on the rows alone. Every row read: returns rows.size(), |*out| and |*costs| filled and
     // |budget| holding them. Otherwise the position of the first row that does not fit, with
-    // |*refusal| saying why; nothing is kept, |budget| is as on entry.
+    // |*refusal| saying why — by the row alone, whatever run it was read in: one refused by
+    // its demand inside a longer run is DECODE when its read alone does not fit beside the
+    // rows before it —; nothing is kept, |budget| is as on entry.
     // |pacing|: its runs at most a paced chunk long, its stop checked before each; a stop
     // returns the position reached with |*refusal| INTERRUPTED and ReadPacing::units the work
     // of the rows read (nothing kept)
@@ -1246,7 +1248,7 @@ void Walker::validate_seed() {
             } else {
                 next_live.clear();
                 for (Coord c : h.coords) {
-                    if (c > 0 && std::binary_search(lv.begin(), lv.end(), c - 1))
+                    if (continues_chain(Arm::RIGHT, lv, c))
                         next_live.push_back(c);
                 }
                 lv.swap(next_live);
@@ -1453,14 +1455,58 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
     // what the rows admitted so far hold, with the window's vectors
     uint64_t committed = 0;
     auto left = [&]() { return budget.max_bytes() - at_entry - committed; };
-    auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand) {
+    auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand,
+                      std::optional<uint64_t> need = std::nullopt) {
         *refusal = FetchRefusal::at(cause, pos, left(), committed, demand,
-                                    cause == FetchRefusal::DECODE
-                                        ? need_beyond(budget, at_entry + committed) : 0);
+                                    cause != FetchRefusal::DECODE ? 0
+                                        : need ? *need : need_beyond(budget, at_entry + committed));
         std::vector<RowT>().swap(*out);
         std::vector<RowCost>().swap(*costs);
         budget.restore(at_entry);
         return pos;
+    };
+    // the read of |rows|[pos, pos + len) into |budget|: the sub-batch's rows, their costs and
+    // what each holds
+    auto read_rows = [&](size_t pos, size_t len, annot::matrix::DecodeBudget &into,
+                         std::vector<RowT> *got, std::vector<RowCost> *got_costs,
+                         std::vector<uint64_t> *held) {
+        const std::vector<Row> sub(rows.begin() + pos, rows.begin() + pos + len);
+        if constexpr(std::is_same_v<RowT, annot::matrix::BinaryMatrix::SetBitPositions>) {
+            return oracle_.get_rows(sub, into, got, got_costs, held);
+        } else {
+            return oracle_.get_row_tuples(sub, into, got, got_costs, held);
+        }
+    };
+    // Whether row |pos|'s read alone — as a run of one row reads it: its sub-batch vector, then
+    // the row with its row-diff dependency rows — fits beside what |budget| holds (the caller
+    // let go of the run read with it, so the rows before it only); false with |*need| the least
+    // it was seen to need. Charged to |budget| itself, so that it holds nothing past the
+    // budget, then released: a statement probe, not a charge of the read's admission (the test
+    // hook WalkerHooks::deny_decode is not asked), not paced and not charged as work (one decode
+    // of one row, after the seed has failed); the oracle's test_read_hook and timing counters
+    // see it as any read. A row refused by its demand inside a longer run was read before the
+    // rows beside it were held: it is stated by its read alone (spec §6.8: whatever the chunks)
+    auto reads_alone = [&](size_t pos, uint64_t *need) {
+        const uint64_t beside = budget.held();
+        const uint64_t peak_before = budget.begin_peak();
+        std::function<bool(uint64_t)> deny = std::move(budget.deny);
+        budget.deny = nullptr;
+        bool fits = budget.charge(buffer_bytes(1, sizeof(Row)));
+        if (fits) {
+            std::vector<RowT> got;
+            std::vector<RowCost> got_costs;
+            std::vector<uint64_t> held;
+            fits = read_rows(pos, 1, budget, &got, &got_costs, &held) == DecodeStatus::OK;
+        }
+        if (!fits)
+            *need = need_beyond(budget, beside);
+        const uint64_t reread = budget.peak() - beside;
+        budget.end_peak(peak_before);
+        budget.restore(beside);
+        budget.deny = std::move(deny);
+        if (hooks_ && hooks_->derivation_reread)
+            hooks_->derivation_reread(beside, reread, budget.max_bytes());
+        return fits;
     };
     out->clear();
     costs->clear();
@@ -1495,18 +1541,12 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
             run = std::max<size_t>(1, len / 2);
             continue;
         }
-        const std::vector<Row> sub(rows.begin() + pos, rows.begin() + pos + len);
         std::vector<RowT> got;
         std::vector<RowCost> got_costs;
         std::vector<uint64_t> held;
-        DecodeStatus status;
         const uint64_t coords = pacer.coords_now();
         PacerTimer timer(pacer);
-        if constexpr(std::is_same_v<RowT, annot::matrix::BinaryMatrix::SetBitPositions>) {
-            status = oracle_.get_rows(sub, budget, &got, &got_costs, &held);
-        } else {
-            status = oracle_.get_row_tuples(sub, budget, &got, &got_costs, &held);
-        }
+        const DecodeStatus status = read_rows(pos, len, budget, &got, &got_costs, &held);
         previous_ms = timer.elapsed_ms();
         pacer.record(len, previous_ms,
                      !pacing || (!pos && len == n) ? "read" : pos + len == n ? "rest" : "chunk",
@@ -1521,8 +1561,22 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
             continue;
         }
         for (size_t j = 0; j < len; ++j) {
-            if (got_costs[j].demand > left())
-                return refuse(pos + j, FetchRefusal::DEMAND, got_costs[j].demand);
+            if (got_costs[j].demand > left()) {
+                const uint64_t demand = got_costs[j].demand;
+                if (len > 1) {
+                    // the run read with it — its rows not admitted, their vectors, the
+                    // sub-batch — is let go before the row is read again beside the rows
+                    // before it
+                    std::vector<RowT>().swap(got);
+                    std::vector<RowCost>().swap(got_costs);
+                    std::vector<uint64_t>().swap(held);
+                    budget.restore(at_entry + committed);
+                    uint64_t need = 0;
+                    if (!reads_alone(pos + j, &need))
+                        return refuse(pos + j, FetchRefusal::DECODE, 0, need);
+                }
+                return refuse(pos + j, FetchRefusal::DEMAND, demand);
+            }
             out->push_back(std::move(got[j]));
             costs->push_back(got_costs[j]);
             committed += held[j];
@@ -2312,8 +2366,21 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
             if (!query.fetch(keys.data() + begin, end - begin, budget, &hits, &costs, &refused_at,
                              pace)) {
                 interrupted();
-                const FetchRefusal &r = query.refusal();
+                FetchRefusal r = query.refusal();
                 const bool injected = decode_denied_ && r.cause == FetchRefusal::DECODE;
+                // stated by the refused row alone, whatever the chunk and the run it was read in
+                // (spec §6.8): every key refused by its demand is read again alone — one inside
+                // a longer run was decoded before the hits beside it were held, and read alone
+                // beside them it may not fit, then stated as a key read alone is; one that began
+                // its run fits again (the same read)
+                uint64_t alone_need = 0;
+                if (r.cause == FetchRefusal::DEMAND
+                        && !query.reads_alone_within(keys[begin + refused_at], r.left,
+                                                     &alone_need)) {
+                    r.cause = FetchRefusal::DECODE;
+                    r.demand = 0;
+                    r.need = alone_need;
+                }
                 ResourceStop detail;
                 detail.cause = ResourceStop::READ_ROW;
                 detail.where = ResourceStop::SEED;
@@ -4991,10 +5058,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                     // charged here as one sum after the whole row, they would run past the
                     // stated bound unchecked)
                     for (Coord x : h.coords) {
-                        bool ok = side == Arm::RIGHT
-                            ? (x > 0 && std::binary_search(e->coords.begin(), e->coords.end(), x - 1))
-                            : std::binary_search(e->coords.begin(), e->coords.end(), x + 1);
-                        if (ok)
+                        if (continues_chain(side, e->coords, x))
                             t.coords.push_back(x);
                     }
                     if (t.coords.empty()) {

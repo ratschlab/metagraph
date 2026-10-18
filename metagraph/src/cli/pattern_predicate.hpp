@@ -202,10 +202,9 @@ class Bound {
      */
     Json::Value normal_form_json(const std::function<void()> &check = nullptr) const;
     Json::Value unknown_labels_json(const std::function<void()> &check = nullptr) const;
-    // the bytes of the compact JSON text of the two (no indentation, no spaces), at most:
-    // exact when every name is printable ASCII; a character that jsoncpp escapes counted as
-    // its escape, a byte outside ASCII as 6 (its \u escape). What the answer's volume and
-    // account are charged before the echo is built
+    // the bytes of the compact JSON text of the two (no indentation, no spaces), every name
+    // as jsoncpp escapes it (json_escaped_size; exact, the names being UTF-8). What the
+    // answer's volume is charged before the echo is built
     uint64_t text_bytes() const { return text_bytes_; }
 
     /**

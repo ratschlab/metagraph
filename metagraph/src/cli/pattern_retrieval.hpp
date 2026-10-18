@@ -139,8 +139,8 @@ class AnswerVolume {
 constexpr double kAnswerVolumeMargin = 1.25;
 
 // The length of |value| written as compact JSON by jsoncpp's StreamWriter, from above: a
-// string's every control, quote, backslash or non-ASCII byte counted as an escape of 6 bytes,
-// a double as 24 characters
+// string as the writer escapes it (json_escaped_size: exact for valid UTF-8, from above
+// otherwise), a double as 24 characters
 uint64_t compact_json_bytes(const Json::Value &value);
 
 /**

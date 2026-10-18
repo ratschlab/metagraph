@@ -35,12 +35,14 @@ constexpr char kSuppressionRule[]
         = "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone";
 constexpr char kReleaseRule[] = "SPEC-labeled-traversal-core.md section 10.3, the release rule";
 
-// whole milliseconds, rounded up (a duration a ledger leases by is never understated); null
+// whole milliseconds, rounded up (a duration a ledger leases by is never understated), then
+// written as number_json writes every number: an integer up to 2^53 - 1, the number beyond
+// (only the CLI's uncapped bound gets there; a cast past uint64's range is undefined); null
 // when there is no bound (an infinite time budget without the HTTP server's cap: the CLI)
 Json::Value ceil_ms_json(double ms) {
     if (!std::isfinite(ms))
         return Json::Value();
-    return uint_json(static_cast<uint64_t>(std::ceil(std::max(0.0, ms))));
+    return number_json(std::ceil(std::max(0.0, ms)));
 }
 
 // Writes the ids of |ids| into |j|: attempt_id (always with |always_attempt_id|, else when
@@ -54,6 +56,17 @@ void put_attempt_ids(Json::Value *j, const AttemptIds &ids, bool always_attempt_
         (*j)["locus_id"] = ids.locus_id;
     if (ids.not_after_ms)
         (*j)["not_after_ms"] = uint_json(*ids.not_after_ms);
+}
+
+// An id field of a request (attempt_id, budget_id, locus_id, expect_server_instance): a string
+// matching the id pattern; throws InvalidRequest naming request.|field| otherwise (a missing
+// field is the null value: refused alike)
+std::string read_attempt_id(const Json::Value &v, const std::string &field) {
+    if (!v.isString() || !valid_attempt_id(v.asString())) {
+        throw InvalidRequest("request." + field + ": expected a string of 1 to 128 characters "
+                             "from [A-Za-z0-9._:-]");
+    }
+    return v.asString();
 }
 
 // Appends |x| to |window|, which keeps the last kRateWindow values
@@ -187,14 +200,8 @@ AttemptIds attempt_ids(const Json::Value &request) {
         return ids;   // parse_traverse_request names the problem
     ids.not_after_ms = read_not_after_ms(request, "request");
     auto read = [&](const char *field, std::string *out) {
-        if (!request.isMember(field))
-            return;
-        const Json::Value &v = request[field];
-        if (!v.isString() || !valid_attempt_id(v.asString())) {
-            throw InvalidRequest(std::string("request.") + field + ": expected a string of 1 to "
-                                 "128 characters from [A-Za-z0-9._:-]");
-        }
-        *out = v.asString();
+        if (request.isMember(field))
+            *out = read_attempt_id(request[field], field);
     };
     read("attempt_id", &ids.attempt_id);
     read("budget_id", &ids.budget_id);
@@ -210,6 +217,29 @@ AttemptIds attempt_ids(const Json::Value &request) {
     if (ids.attempt_id.empty() && !ids.expect_server_instance.empty())
         throw InvalidRequest("request.expect_server_instance: given without request.attempt_id");
     return ids;
+}
+
+CancelRequest parse_cancel_request(const Json::Value &request) {
+    StrictObject<RefuseRequest> body(request, "request");
+    for (const char *field : kCancelFields) {
+        body.has(field);
+    }
+    // an unknown field is refused before the known ones are checked
+    body.finish();
+    CancelRequest cancel;
+    cancel.attempt_id = read_attempt_id(request["attempt_id"], "attempt_id");
+    if (request.isMember("wait_ms")) {
+        const std::optional<uint64_t> wait_ms = non_negative_integer(request["wait_ms"]);
+        if (!wait_ms || *wait_ms > kMaxCancelWaitMs) {
+            throw InvalidRequest("request.wait_ms: expected an integer in [0, "
+                                 + std::to_string(kMaxCancelWaitMs) + "]");
+        }
+        cancel.wait_ms = *wait_ms;
+    }
+    // the not_after_ms of the request being cancelled (the same rule as /traverse's): a
+    // tombstone of an unknown id is held until it has passed + the skew allowance
+    cancel.not_after_ms = read_not_after_ms(request, "request");
+    return cancel;
 }
 
 
@@ -1125,7 +1155,7 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["id_pattern"] = "^[A-Za-z0-9._:-]{1,128}$";
     att["cancel"] = "POST /traverse/cancel";
     Json::Value cancel_fields(Json::arrayValue);
-    for (const char *f : { "attempt_id", "wait_ms", "not_after_ms" }) {
+    for (const char *f : kCancelFields) {
         cancel_fields.append(f);
     }
     att["cancel_fields"] = std::move(cancel_fields);

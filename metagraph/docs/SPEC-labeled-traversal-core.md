@@ -181,7 +181,11 @@ Deterministic, recorded in the output.
   possible seed use `longest_first`, or raise `min_block_bp` to put a length floor under `max_support`.
 - `explicit`: the caller passes `[{kmer_interval, labels}]`. The interval must lie inside one graph run; each
   label must have a run containing it (labels that do not are reported in `labels_not_covering`, and the seed is
-  rejected if none remain).
+  rejected if none remain). `kmer_interval` is `[begin, end]`, two non-negative integers as every other integer
+  field (any other value is a 400 naming the field, `expected [begin, end] as non-negative integers`); an interval
+  that is empty or ends past the query's k-mers is a 400 `Explicit seed interval out of range`, an end above
+  2⁶³ − 1 included (before, such an end was a 400 with the JSON library's own text and no field, and aborted the
+  CLI).
 - `merge_overlapping: true` (default): candidates whose intervals overlap are merged onto their common interval
   with the union of labels; `overlaps_with` lists seeds that still share k-mers.
 - `max_labels_per_seed`: if a candidate has more labels, keep that many in `label_order`: `hash` (default; FNV-1a of
@@ -341,6 +345,19 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
 }
 ```
 
+- **The body** of `/traverse`, `/resolve` (§4.1) and `POST /traverse/cancel` (§10.3) is read as `/pattern` reads
+  its body (`SPEC-pattern-search.md` §3): one RFC 8259 JSON text, with unique member names in every object,
+  nothing after it (no second value, no comment, no trailing comma) and nested at most 1,000 deep; anything else
+  is 400 `{"error": "Bad json received: …"}` without a code, as a body that is no JSON at all. Only the prefix is
+  the contract: the text after it is for people (jsoncpp's, or the pre-scan's), and for some bodies the lenient
+  reader refused too it changed: a syntax error is followed by `Extra non-whitespace after JSON value.` (`not
+  json`, a byte-order mark), a `/` outside a string is named by the pre-scan rather than as a syntax error, a
+  duplicated member is named in place of a later syntax error. A duplicated member is refused, never its last
+  value taken: an `attempt_id`, a `bounds.time_budget_ms`, a `not_after_ms` or a
+  `wait_ms` given twice would be replaced without a word. `metagraph traverse` reads its request files alike
+  (§10.2). Before, these routes and the CLI took jsoncpp's defaults: a comment, a trailing comma and text after
+  the value were accepted, a duplicated member kept its last value, and a body nested deeper than 1,000 was a 400
+  with jsoncpp's text alone (`Exceeded stackLimit in readValue().`, now after the prefix).
 - **Strict validation.** Unknown keys, wrong types, out-of-range values and unsupported `schema_version` are
   rejected with a message naming the field; nothing is silently weakened. Defaults are filled in and the
   **normalized strategy** is echoed. If the server clamps a bound (§10.3) the echo carries
@@ -956,7 +973,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     X-EFFICIENCY-04*), with or without `bounds.time_budget_ms`, each check a peek at the socket; the one
     exception is the direct cell path — at most 16 explicit column labels on an annotation with single-cell
     reads, none of the row-diff family — without `bounds.time_budget_ms`, whose read of the query's cells is
-    one piece): the client closed or
+    one piece; once its answer is built, also while the answer is serialised and compressed, as `/traverse`'s
+    and `/pattern`'s, so that nothing is written — before, it was written in full; its errors, a 400 or a 503
+    while the index loads, are still written to it, as `/traverse`'s): the client closed or
     reset its connection, or half-closed it (a client that half-closes after its request is treated as gone, as
     nginx does by default). Found by a non-blocking peek at the request's socket that consumes nothing (at most
     every 100 ms); where bytes past the request wait on the socket (a pipelined request, a trailing CRLF), which
@@ -1305,7 +1324,14 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     own key and successor lists, held beside the account, leave none of the budget for its read stops in phase
     `traversal` too, before reading anything. In the seed phase — the derivation's rows, the validation's — or at
     an annotate root a row that does not fit fails the seed in phase `annotation_decode` (no result complete to 0
-    bp exists yet). At an annotate root, labels that fit beside the row but not beside the depth-0 state, and a
+    bp exists yet). In the seed phase the statement is decided by the refused row alone, whatever the chunks and
+    runs its read was cut into: a row refused by its standalone demand — in the validation every such row, in
+    the derivation one of a longer run (decoded before the rows beside it were held) — is read again alone
+    beside the rows before it (one decode within the budget, not paced and not charged as work: the seed has
+    failed), and when that read does not fit it is stated as a read alone that needs more ("at least"), as when
+    the row began a run; else by its demand *(review of
+    2026-10-06, W10/U04-01: one validation stated the demand without `attempt_id` and a read alone with it,
+    whose paced read cut the run before the row)*. At an annotate root, labels that fit beside the row but not beside the depth-0 state, and a
     depth-0 state that already reaches the budget before a root's read (the other arm's root, its labels and
     reservation), fail the seed as a depth-0 state (phase `traversal`), without naming the labels or reading the
     row, its need stated as a lower bound ("at least"). The lookahead decodes within what is left and gives up
@@ -1336,7 +1362,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     lower bound ("at least": the account with them; its heads need more), the levers of a stop by labels *(review of
     2026-10-06, U03-03: it was stated as a refused head, the dictionary's need as exact, so that raised to it the
     walk stopped at the same depth again, and without `lower_max_labels_per_node`)*. Under a request budget the
-    label caches never exceed their allotments, and the
+    label caches never exceed their allotments on these formats (on the others, below, by one fetch's rows at
+    most), and the
     structural lookahead is cleared before a chain would push it past its allotment (counted keys: each key the
     walk consumes once, `annotation.keys_mapped`).
   - The derivation reads 64 k-mers per window whatever `annotation.batch_kmers` is, under a budget or not (§6.1;
@@ -1347,7 +1374,14 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     the seed phase had left, and what the window's earlier rows held — conservative (each row alone may fit),
     and stated.
   Formats without the budget-aware path are read by the default decode under a budget too; what their reads hold
-  is observed, not charged (§7.0, `memory_bound_soft`). **The formats with budget-aware reads are exactly the four
+  is observed, not charged (§7.0, `memory_bound_soft`). Their label caches price an entry by a looser estimate
+  than the budget-aware formats' — 64 bytes for its slot plus its labels' and coordinates' flat sizes, against
+  256 + 128 bytes (the slot with a rehash's transient, the costs entry) plus its buffers in the decoder's model
+  — and check the allotment before an insertion rather than with it: such a cache holds about four times the
+  entries in the same allotment and may pass it by one fetch's rows, which is observed (`memory_bound_soft`
+  (ii)). Two estimates on purpose: the strict one would make these formats evict earlier, decode more rows again
+  and, on `row_diff_disk`, leave the path cache less of the allotment (above); it waits for a measurement of such
+  a format served under a budget. **The formats with budget-aware reads are exactly the four
   above**; every other format (`column`, `column_coord`, `brwt`, `row_diff_disk`, `row_flat`, …) keeps stage 2's
   observed-only reads. **Stage 3 does not establish a hard request-wide memory bound** (review of stage 3, answer
   5): on every format `memory_bound_soft` names what is still held uncharged beside the admitted account — a
@@ -1954,7 +1988,10 @@ attempt) nor a 400 for a malformed id:
 - `reason`: `completed` (no stop reached the walk), `cancelled`, `deadline` (the attempt's bound, in the walk or
   while the response was built), `error` (a 400/500). `client_gone` appears only in the attempt's state (no
   response is written then).
-- Instants are ISO-8601 UTC with milliseconds; durations are whole ms, rounded up. `received_at` is when the
+- Instants are ISO-8601 UTC with milliseconds; durations are whole ms, rounded up, written as integers up to
+  2⁵³ − 1 and as numbers beyond, as `number_json` writes every duration (only the CLI's bound, which has no cap, gets
+  there: a time budget of 10²⁰ ms; `bound_ms` and `walk_until_ms` were then integers cast past 64 bits, 2⁶⁴ − 1 on
+  arm64). `received_at` is when the
   server read the request's header (the attempt's clock), `stopped_at` when the walk stopped (the checkpoint
   that saw the stop, or the end of the last seed's walk), `elapsed_ms` when the block was built (just before
   the response was written; the attempt's state has the final value).
@@ -2555,7 +2592,13 @@ metagraph traverse --resolve -i GRAPH -a ANNOTATION request.json [...]
 ```
 
 Request files are exactly the JSON bodies of §4.1/§5; one JSON document per request on stdout. One code path with
-the server.
+the server. A request that fails gets the body the server's error gives it — `{"error"}`, with `usage` when it
+has an `attempt_id`; `"Internal server error"` for a failure that is not a `std::exception` (the server's 500) —
+the exit status is 1 and the next file is still answered (before, a failure other than a malformed request, such
+as the walker's on an inconsistent primary graph, ended the run with an abort and nothing written for that file or
+the later ones). A file that cannot be read or is not JSON — read as the server reads a body (§5): a duplicated
+member, a comment, a trailing comma or text after the value is no JSON — ends the run (exit status 1, the file and
+the fault logged, nothing written for it).
 
 ### 10.3 Server
 
@@ -3052,7 +3095,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
 - Caps: `--traverse-max-time-ms` (default 30 000; also the cap of `/resolve`'s `bounds.time_budget_ms`, which
   it lowers, never sets, and which is never above 899 000 ms on the server, §4.5), `--traverse-max-seeds` (64),
   `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
-  unlimited for each. A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
+  unlimited for each. The four counts take integers in [0, 2⁵³ − 1] and `--traverse-max-time-ms` a finite number
+  ≥ 0; anything else refuses to start, naming the option and what it takes (read with atoll / atof before,
+  `-1` started and was stated as 2⁶⁴ − 1, `abc` started as 0, unlimited, and `5x` as 5). A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
   `max_seed_bp` are refusals (400), not clamps. **The request-body limit** *(review of 2026-10-10, resources
   finding 2)*: `--max-request-body-mb N` (an integer in [0, 1 048 576] MiB; 0 = unlimited, the default; stated by
   `GET /capabilities` as `max_request_body_mb`, `null` when unlimited) bounds what the HTTP library reads of a
@@ -3117,7 +3162,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null), `tombstone_max_s`,
   `coordinate_account_per_text_byte` and, in
   `deadline_check`,
-  `chunk_target_ms`, `observed_max_uninterruptible_ms` and `observed_window_s` are integers (`allowance_ms` was
+  `chunk_target_ms`, `observed_max_uninterruptible_ms` and `observed_window_s` are integers (`stop_ms`, which is
+  `--traverse-chunk-target-ms` + 950, is a number past 2⁵³ − 1, for a chunk target within 950 of it, as every
+  duration; `allowance_ms` was
   written 10000.0 before
   feature level 3; `--traverse-attempt-allowance-ms`, `--traverse-clock-skew-ms` and
   `--traverse-chunk-target-ms` take integers in [0, 2⁵³ − 1], anything else is refused at start-up, so that a
@@ -3128,7 +3175,10 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   tombstone at once; `--traverse-observed-window-s` takes integers in [1, 31 536 000] alike); `compress_mbps`,
   `build_mbps`,
   `account_per_text_byte`, `margin` and the measured rates and ratios (or null) are numbers (a rate may be
-  fractional), as are the probe's `max_time_ms` and the time budgets.
+  fractional; `--traverse-delivery-compress-mbps` and `--traverse-delivery-build-mbps` take a finite positive
+  number and refuse anything else at start-up, as `--traverse-compression-level` takes an integer in [1, 9]:
+  `inf` had started and was stated as `1e+9999`, no JSON number, and `5x` as 5), as are the probe's
+  `max_time_ms` and the time budgets.
   - `POST /traverse` with `attempt_id`: 200 with `usage` (complete, partial, failed seeds, cancelled); 400 with
     `{error, usage}` for a request error after the attempt was registered (a bad strategy, an unknown label or
     graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id, a malformed

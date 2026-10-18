@@ -29,6 +29,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/traversal/support_step.hpp"
+#include "graph/traversal/walker.hpp"
 
 
 // The supported-path search (long_search "supported_paths", SPEC §20): the label and trace
@@ -818,6 +819,63 @@ TEST(PatternSupport, CrossRecordChain) {
         return a;
     }()), std::invalid_argument);
 }
+
+// The walker's trace support and the pattern search's record-verified support: one step rule
+// (continues_chain), the pattern's step stopping a chain at its record's end, the walker's
+// not. On CrossRecordChain's index, where column B's records b0 (ACGTA) and b1 (TACC) have
+// adjacent coordinates, both follow B's chain inside b0 and A's inside a0; at the junction of
+// b0 and b1 the walker goes on with B (every such /traverse answer states
+// trace_record_boundaries, label_evidence qualified) and the pattern search does not verify it
+TEST(PatternSupport, TheWalkerCrossesARecordJunctionThePatternDoesNot) {
+    const Index idx = build_rd(3, { { "A", "a0", "TTGTACCTT" },
+                                    { "B", "b0", "ACGTA" },
+                                    { "B", "b1", "TACC" } });
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    // how far right the walker extends |seed| under trace support of the column label |label|
+    auto walked = [&](const std::string &label, const std::string &seed_seq, uint64_t radius) {
+        traversal::Seed seed;
+        seed.sequence = seed_seq;
+        seed.labels = { label };
+        traversal::Strategy st;
+        st.support = Support::TRACE;
+        st.merge_reconverge = false;
+        st.direction = traversal::Strategy::RIGHT;
+        st.max_extension_bp = radius;
+        const traversal::SeedResult r = traversal::traverse_seed(
+                oracle, seed, st, traversal::LabelChangeCost::forbid());
+        uint64_t to = 0;
+        for (const auto &run : r.arms[static_cast<size_t>(traversal::Arm::RIGHT)].runs) {
+            to = std::max(to, run.to_bp);
+        }
+        return to;
+    };
+    // the support the record-verified search gives |label| on the walk |text| ("no walk": no
+    // label verifies it)
+    auto support = [&](const std::string &text, const std::string &label) -> std::string {
+        Outcome out = run_support(idx, text, false, Ask());
+        for (size_t i = 0; i < out.paths.size(); ++i) {
+            if (out.paths[i].sequence != text)
+                continue;
+            const PathLabels labels = labels_of(out.labels->result_fields[i]["labels"]);
+            return labels.count(label) ? std::get<0>(labels.at(label)) : "absent";
+        }
+        return "no walk";
+    };
+    // inside one record: the walker extends as far as the pattern verifies
+    EXPECT_EQ(2u, walked("B", "ACG", 2));
+    EXPECT_EQ("record_verified", support("ACGTA", "B"));
+    EXPECT_EQ(6u, walked("A", "TTG", 100));
+    EXPECT_EQ("record_verified", support("TTGTACCTT", "A"));
+    // across b0's end into b1: the walker's chain of B goes on to b1's end, the pattern's
+    // stops at b0's end (GTACC is listed for A, which a0 holds whole; B carries it at the label
+    // level only)
+    EXPECT_EQ(4u, walked("B", "ACG", 100));
+    EXPECT_EQ(2u, walked("B", "GTA", 100));
+    EXPECT_EQ("no walk", support("ACGTAC", "B"));
+    EXPECT_EQ("record_verified", support("GTACC", "A"));
+    EXPECT_EQ("label_intersection", support("GTACC", "B"));
+}
+
 
 TEST(PatternSupport, ALabelSupportsAWalkInOneOrientationOnly) {
     // the walk ATCGG (k = 3: ATC, TCG, CGG) exists through B. A holds ATC and TCG as spelled and
@@ -2217,6 +2275,22 @@ TEST(PatternSupport, LowComplexityNoteBesideThresholdStopsOnly) {
             EXPECT_EQ(flagged && threshold, noted_low_complexity(r));
         }
     }
+}
+
+// The count object of retrieval, selection and support (retrieval::count_json): value (null
+// when unknown), relation, unit; a bounds count is never asked of it, whose interval only
+// pattern.cpp's count_json(Count) writes (an assertion, so that a bounds count cannot lose
+// its interval here)
+TEST(PatternRetrieval, CountObjectHasNoInterval) {
+    const Json::Value exact = retrieval::count_json(Relation::EXACT, 3, Unit::LABELS);
+    EXPECT_EQ((std::vector<std::string> { "relation", "unit", "value" }), exact.getMemberNames());
+    EXPECT_EQ(3u, exact["value"].asUInt64());
+    EXPECT_EQ("exact", exact["relation"].asString());
+    EXPECT_EQ("labels", exact["unit"].asString());
+    EXPECT_EQ("at_least", retrieval::count_json(Relation::AT_LEAST, 3,
+                                                Unit::PLACED_OCCURRENCES)["relation"].asString());
+    EXPECT_TRUE(retrieval::count_json(Relation::UNKNOWN, 3, Unit::PATHS)["value"].isNull());
+    EXPECT_DEBUG_DEATH(retrieval::count_json(Relation::BOUNDS, 3, Unit::GRAPH_CONTEXTS), "BOUNDS");
 }
 
 } // namespace

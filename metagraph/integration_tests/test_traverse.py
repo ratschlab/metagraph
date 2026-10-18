@@ -379,6 +379,47 @@ class TestTraverseCLI(TestTraverseBase):
             self.assertIn('error', out)
             self.assertIn(expect, out['error'])
 
+    def test_traverse_request_files_are_strict_json(self):
+        """`metagraph traverse` (and --resolve) reads its request files as the server reads a
+        body (SPEC-labeled-traversal-core.md §5, §10.2): a duplicated member, a comment, a
+        trailing comma or text after the value is no JSON, which ends the run (exit status 1,
+        nothing written, the file and the fault logged); written strictly the file is
+        answered."""
+        traverse = json.dumps({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+                               'strategy': {'bounds': {'max_extension_bp': 10}},
+                               'attempt_id': 'cli-strict'})
+        resolve = json.dumps({'sequence': self.element, 'labels': ['acc1']})
+        path = self.tempdir.name + '/strict.json'
+        for resolve_flag, strict, refused in (
+                ('', traverse, [
+                    (traverse[:-1] + ', "attempt_id": "cli-other"}',
+                     "Duplicate key: 'attempt_id'"),
+                    (traverse.replace('"max_extension_bp": 10',
+                                      '"max_extension_bp": 10, "max_extension_bp": 20'),
+                     "Duplicate key: 'max_extension_bp'"),
+                    ('// a comment\n' + traverse, "a comment (or a '/' outside a string) at byte 0"),
+                    (traverse[:-1] + ',}', "Missing '}' or object member name"),
+                    (traverse + ' {}', 'Extra non-whitespace after JSON value.')]),
+                ('--resolve', resolve, [
+                    (resolve[:-1] + ', "labels": ["acc2"]}', "Duplicate key: 'labels'"),
+                    (resolve + ' x', 'Extra non-whitespace after JSON value.')])):
+            for body, words in [(strict, None)] + refused:
+                with self.subTest(resolve=resolve_flag, body=body[:120]):
+                    with open(path, 'w') as f:
+                        f.write(body)
+                    res = subprocess.run(
+                        shlex.split(f'{METAGRAPH} traverse {resolve_flag} -i {self.graph} '
+                                    f'-a {self.anno} {path}'),
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if words is None:
+                        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+                        self.assertNotIn('error', json.loads(res.stdout.decode()))
+                        continue
+                    self.assertEqual(1, res.returncode, res.stdout.decode()[:500])
+                    self.assertEqual('', res.stdout.decode())
+                    self.assertIn(f'Invalid JSON in {path}: ', res.stderr.decode())
+                    self.assertIn(words, res.stderr.decode())
+
     def test_traverse_attempt_errors_state_their_usage(self):
         """The CLI states the usage of a request with attempt_id on an error after the
         request was read, as the server's 400 does; a malformed id is refused without."""
@@ -398,6 +439,23 @@ class TestTraverseCLI(TestTraverseBase):
         plain = {k: v for k, v in bad.items() if k not in ('attempt_id', 'locus_id')}
         out, rc = self._traverse(plain)
         self.assertEqual((1, ['error']), (rc, list(out)))
+
+    def test_traverse_attempt_durations_beyond_the_exact_integers(self):
+        """The CLI's bound has no cap: a time budget of 1e20 ms gives a bound past 2^53 - 1,
+        stated as the number (a real, as every number the server writes past that range), not
+        as an integer cast past uint64's range (18446744073709551615 on arm64, 2^63 under
+        Rosetta)."""
+        out, rc = self._traverse({
+            'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+            'strategy': {'bounds': {'time_budget_ms': 1e20, 'max_extension_bp': 10}},
+            'attempt_id': 'cli-big'})
+        self.assertEqual(0, rc, out)
+        usage = out['usage']
+        self.assertEqual((float, float),
+                         (type(usage['bound_ms']), type(usage['bound']['walk_until_ms'])), usage)
+        self.assertEqual(1e20 + 10000, usage['bound_ms'])
+        self.assertLessEqual(1e20, usage['bound']['walk_until_ms'])
+        self.assertIsInstance(usage['elapsed_ms'], int)
 
     def test_traverse_reports_caps(self):
         out, rc = self._traverse({
@@ -1910,6 +1968,71 @@ class TestTraverseAPI(TestTraverseBase):
         ret = self._post('traverse', {'seeds': [], 'strategy': {}})
         self.assertEqual(400, ret.status_code)
         self.assertIn('seeds', ret.json()['error'])
+
+    def test_api_request_json_is_strict(self):
+        """/traverse, /resolve and /traverse/cancel read their body as /pattern does
+        (SPEC-labeled-traversal-core.md §5): one RFC 8259 JSON text whose member names are
+        unique. A duplicated member (jsoncpp would keep its last value without a word: an
+        attempt_id, a time budget, a wait_ms replaced silently), a comment, a trailing comma,
+        text after the value and more than 1000 nested arrays and objects are 400
+        {"error": "Bad json received: ..."}, without a code, as a body that is no JSON at all;
+        the same body written strictly is answered."""
+        traverse = json.dumps({
+            'seeds': [{'sequence': self.element}],
+            'strategy': {'direction': 'right',
+                         'bounds': {'max_extension_bp': 10, 'time_budget_ms': 60000},
+                         'output': {'detail': 'summary', 'timing': False}}})
+        resolve = json.dumps({'sequence': self.element, 'labels': ['acc1'],
+                              'bounds': {'time_budget_ms': 60000}})
+        cancel = json.dumps({'attempt_id': 'strict-cancel', 'wait_ms': 0})
+        duplicate = "Duplicate key: '%s'"
+        comment = "a comment (or a '/' outside a string) at byte %d"
+        deep = ('Exceeded stackLimit in readValue(). (more than 1000 nested arrays and '
+                'objects)')
+
+        def common(t):
+            return [('// a comment\n' + t, comment % 0),
+                    ('{/* a comment */' + t[1:], comment % 1),
+                    # a '/' in a string is text; outside one it is no JSON
+                    (t[:-1] + ', "x": "a/b" / 2}', comment % (len(t) + 12)),
+                    (t[:-1] + ',}', "Missing '}' or object member name"),
+                    (t + ' {}', 'Extra non-whitespace after JSON value.'),
+                    (t + 'x', 'Extra non-whitespace after JSON value.'),
+                    ('[' * 1001 + ']' * 1001, deep)]
+        cases = {
+            'traverse': (traverse, 200, common(traverse) + [
+                (traverse[:-1] + ', "attempt_id": "strict-1", "attempt_id": "strict-2"}',
+                 duplicate % 'attempt_id'),
+                (traverse.replace('"time_budget_ms": 60000',
+                                  '"time_budget_ms": 60000, "time_budget_ms": 1'),
+                 duplicate % 'time_budget_ms'),
+                (traverse.replace('}]', '},]'), 'Syntax error: value, object or array expected.'),
+            ]),
+            'resolve': (resolve, 200, common(resolve) + [
+                (resolve[:-1] + ', "labels": ["acc2"]}', duplicate % 'labels'),
+                (resolve.replace('"time_budget_ms": 60000',
+                                 '"time_budget_ms": 60000, "time_budget_ms": 1'),
+                 duplicate % 'time_budget_ms'),
+                (resolve.replace('"acc1"]', '"acc1",]'),
+                 'Syntax error: value, object or array expected.'),
+            ]),
+            'traverse/cancel': (cancel, 404, common(cancel) + [
+                (cancel[:-1] + ', "wait_ms": 10000}', duplicate % 'wait_ms'),
+                ('{"attempt_id": "strict-0", ' + cancel[1:], duplicate % 'attempt_id'),
+            ]),
+        }
+        url = f'http://{self.host}:{self.port}/'
+        for route, (strict, status, refused) in cases.items():
+            ret = requests.post(url + route, data=strict)
+            self.assertEqual(status, ret.status_code, (route, ret.text[:500]))
+            for body, words in refused:
+                with self.subTest(route=route, body=body[:120]):
+                    ret = requests.post(url + route, data=body)
+                    self.assertEqual(400, ret.status_code, ret.text[:500])
+                    self.assertEqual(['error'], list(ret.json()))
+                    self.assertTrue(ret.json()['error'].startswith('Bad json received: '),
+                                    ret.json()['error'])
+                    self.assertIn(words, ret.json()['error'])
 
     def test_api_seed_not_in_graph_is_400(self):
         """A single-graph server: a seed the graph does not hold is the caller's error, the
@@ -3907,6 +4030,42 @@ class TestTraverseWideIndex(TestingBase):
                 self.assertIn(f'{flag} must be an integer in [0, 2^53 - 1]',
                               res.stdout.decode(), (flag, value))
 
+    def test_caps_and_rates_are_parsed_strictly(self):
+        """The traverse caps, the delivery rates, the compression level and the information
+        floor are read whole, as the other flags the capabilities state: a value that is not
+        what the flag takes refuses to start, naming the flag and what it takes. Read with
+        atoll / atof / atoi, -1 started stating max_seeds 2^64 - 1, 'abc' and '5x' started as 0
+        (unlimited) and 5, and 'inf' started stating a rate no JSON number holds."""
+        cases = []
+        for flag in ('--traverse-max-seeds', '--traverse-max-seed-bp',
+                     '--traverse-max-seed-labels', '--resolve-max-query-bp'):
+            for value in ('-1', '1.5', '9007199254740992', '5x', 'abc'):
+                cases.append((flag, value, f'{flag} must be an integer in [0, 2^53 - 1]'))
+        for value in ('-1', 'abc', '5x', 'inf', '1e400', 'nan'):
+            cases.append(('--traverse-max-time-ms', value,
+                          '--traverse-max-time-ms must be a number >= 0'))
+        for flag in ('--traverse-delivery-compress-mbps', '--traverse-delivery-build-mbps',
+                     '--pattern-delivery-build-mbps', '--pattern-delivery-compress-mbps'):
+            for value in ('0', '-1', 'inf', 'nan', '5x'):
+                cases.append((flag, value, f'{flag} must be a positive number'))
+        for value in ('0', '10', '5x', 'abc'):
+            cases.append(('--traverse-compression-level', value,
+                          '--traverse-compression-level must be an integer in [1, 9]'))
+        for value in ('-1', 'abc', 'inf'):
+            cases.append(('--pattern-min-information-bits', value,
+                          '--pattern-min-information-bits must be a number >= 0'))
+        for flag, value, message in cases:
+            with self.subTest(flag=flag, value=value):
+                try:
+                    res = subprocess.run(shlex.split(METAGRAPH) + [
+                        'server_query', '-i', self.graph, '-a', self.anno, flag, value,
+                        '--port', str(_free_port()), '--address', '127.0.0.1'],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
+                except subprocess.TimeoutExpired:
+                    self.fail(f'server_query started with {flag} {value}')
+                self.assertNotEqual(0, res.returncode)
+                self.assertIn(f"{message}, got '{value}'", res.stdout.decode())
+
     def test_row_diff_budgets_are_kept_within_a_chunk(self):
         """A split read starts with at most 8 rows: a first chunk sized from other reads' rows
         (a level's cheap shared rows) would take 650-880 ms against chunk_target_ms 50, and
@@ -4569,6 +4728,62 @@ class TestTraverseAttempts(TestingBase):
                     self.assertEqual(200, status, out)
                     self.assertEqual('completed', out['usage']['reason'])
 
+    def test_release_verdict_predicts_the_finished_hold(self):
+        """The library's release rule (release_verdict) against the server's hold of a finished
+        attempt's id (SPEC-labeled-traversal-core.md §10.3): a copy of a finished request sent
+        with not_after_ms is refused until not_after_ms + the clock skew allowance, at most
+        tombstone_max_s after the finish (the cap, stated as max(the flag, retention_s)), past
+        the retention; a release on the finished state assumes beyond_tombstone_max exactly
+        when a copy sent before its not_after_ms runs again. A server with no skew allowance,
+        retention 1 s and a 3 s cap: an attempt whose not_after_ms lies within the cap is held
+        past its retention, one whose not_after_ms lies 60 s out runs again once the cap has
+        passed. The ledger's early release on a finished state rests on this rule."""
+        release_verdict = graphlet_lib.release_verdict
+        with self._Server(self, '--traverse-attempt-retention-s', '5',
+                          '--traverse-attempt-tombstone-max-s', '2') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            self.assertEqual((5, 5), (caps['retention_s'], caps['tombstone_max_s']))
+        with self._Server(self, '--traverse-clock-skew-ms', '0',
+                          '--traverse-attempt-retention-s', '1',
+                          '--traverse-attempt-tombstone-max-s', '3') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            self.assertEqual((1, 3, 0), (caps['retention_s'], caps['tombstone_max_s'],
+                                         caps['clock_skew_allowance_ms']))
+
+            def run(attempt_id, not_after_ms):
+                req = self._request(1, radius=10, attempt_id=attempt_id,
+                                    not_after_ms=not_after_ms,
+                                    expect_server_instance=caps['server_instance'])
+                ret = server.post('traverse', req)
+                self.assertEqual(200, ret.status_code, ret.text)
+                state = server.state(attempt_id)
+                self.assertEqual(200, state.status_code, state.text)
+                self.assertEqual('finished', state.json()['state'])
+                verdict = release_verdict(graphlet_lib.AttemptAnswer(state.json(), 200, 'attempt'),
+                                          graphlet_lib.AttemptSent.of(req), attempts=caps)
+                self.assertEqual((True, 'finished'), (verdict.release, verdict.code), verdict.why)
+                return req, verdict
+
+            # not_after_ms within the cap: held past the retention (1 s), until not_after_ms
+            within, verdict = run('hold-within', int(time.time() * 1000) + 2500)
+            self.assertEqual((), verdict.assumptions, verdict.why)
+            time.sleep(1.3)
+            self.assertLess(time.time() * 1000, within['not_after_ms'])
+            copy = server.post('traverse', within)
+            self.assertEqual(409, copy.status_code, copy.text)
+            self.assertNotEqual('expired', copy.json().get('state'), copy.text)
+
+            # not_after_ms beyond the cap: held for the cap only, then a copy runs again
+            beyond, verdict = run('hold-beyond', int(time.time() * 1000) + 60000)
+            self.assertEqual(('beyond_tombstone_max',), verdict.assumptions, verdict.why)
+            copy = server.post('traverse', beyond)
+            self.assertEqual(409, copy.status_code, copy.text)
+            # (a refused copy holds the id the cap from its own arrival)
+            time.sleep(3.5)
+            again = server.post('traverse', beyond)
+            self.assertEqual(200, again.status_code, again.text)
+            self.assertEqual('hold-beyond', again.json()['usage']['attempt_id'])
+
     def test_expect_server_instance_refuses_another_process(self):
         """The restart hole: tombstones live in memory, so a copy reaching a restarted process
         would run. A request naming another server_instance is refused before anything runs
@@ -4736,6 +4951,119 @@ class TestTraverseSeedPhase(TestingBase):
             print(f"{where}: seed_phase_ms {t['seed_phase_ms']:.3f}, label_resolve_ms "
                   f"{t['label_resolve_ms']:.3f}, longest_piece {t['deadline']['longest_piece']}",
                   file=sys.stderr)
+
+
+
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestTraverseSeedRefusal(TestingBase):
+    """A seed-phase memory refusal is stated by the refused row alone, whatever the read was
+    cut into (SPEC-labeled-traversal-core.md §6.8: a read is the same whatever the chunk
+    sizes). The shape: a 39 bp seed (9 k-mers, k = 31, basic) carried by 3,000 sequences of
+    column A, each its own header label (the hits of keys 0-7 are heavy: one coordinate per
+    header), 3,005 sequences of column B carrying its first 38 bases and another last base (key
+    7's row-diff successor is not key 8), and a long tandem repeat of column J following key 8
+    (key 8's row is light, its row-diff path heavy), on row_diff_brwt_coord. Validating the
+    seed against the 3,000 header labels under max_memory_mb 1 refuses key 8. Without
+    attempt_id the validation reads the 9 keys in one run, key 8 decoded before the hits beside
+    it were held, and it was refused by its standalone demand (the exact demand); with
+    attempt_id the read is paced, its first piece 8 rows, key 8 read alone beside the hits,
+    and it was refused as a read alone that needs more: one request, two statements. Now a row
+    refused by its demand is read again alone beside the rows before it, and stated as such a
+    read when that does not fit."""
+
+    C = 3000
+    N = 16000
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        rng = random.Random(4711)
+
+        def rnd(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+        w = rnd(39)
+        u = w[8:39]
+        b = rng.choice([c for c in 'ACGT' if c != u[0]])
+        v = b + u[1:]
+        t = b + rng.choice([c for c in 'ACGT' if c != v[1]]) + rnd(40)
+        y = rng.choice([c for c in 'ACGT' if c != w[38]])
+        tail = rnd(40)
+        assert u not in {v[i:] + v[:i] for i in range(K)}
+        with open(f'{d}/A.fa', 'w') as f:
+            f.write(''.join(f'>a{i}\n{rnd(40)}{w}{t}\n' for i in range(cls.C)))
+        with open(f'{d}/B.fa', 'w') as f:
+            f.write(''.join(f'>b{i}\n{rnd(40)}{w[:38]}{y}{tail}\n' for i in range(cls.C + 5)))
+        with open(f'{d}/J.fa', 'w') as f:
+            f.write(f'>j\n{rnd(40)}{v * cls.N}{rnd(40)}\n')
+        fastas = f'{d}/A.fa {d}/B.fa {d}/J.fa'
+        os.makedirs(f'{d}/rd')
+        for cmd in ([f'build -p 4 --mode basic --graph succinct -k {K} -o {d}/G {fastas}',
+                     f'annotate -p 1 -i {d}/G.dbg --anno-filename --coordinates -o {d}/anno '
+                     f'{fastas}']
+                    + [f'transform_anno -p 4 --anno-type row_diff --row-diff-stage {stage} '
+                       f'--coordinates -i {d}/G.dbg -o {d}/rd/out {d}/anno.column.annodbg'
+                       for stage in (0, 1, 2)]
+                    + [f'transform_anno -p 4 --anno-type row_diff_brwt_coord --greedy '
+                       f'-i {d}/G.dbg -o {d}/anno {d}/rd/anno.column.annodbg',
+                       f'annotate -p 1 -i {d}/G.dbg --anno-filename --index-header-coords '
+                       f'-o {d}/anno {fastas}']):
+            res = subprocess.run(shlex.split(METAGRAPH) + shlex.split(cmd),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert res.returncode == 0, (cmd, res.stderr.decode()[-2000:])
+        cls.graph = f'{d}/G.dbg'
+        cls.anno = f'{d}/anno.row_diff_brwt_coord.annodbg'
+        cls.seed = w
+
+    def _request(self, **fields):
+        return dict({'seeds': [{'seed_id': 's', 'sequence': self.seed,
+                                'labels': [f'a{i}' for i in range(self.C)]}],
+                     'strategy': {'direction': 'right',
+                                  'bounds': {'max_extension_bp': 10, 'max_memory_mb': 1},
+                                  'output': {'timing': False}}}, **fields)
+
+    @staticmethod
+    def _refusal(out):
+        (result,) = out['results']
+        return {'error': result.get('error'), 'resource_stop': result.get('resource_stop'),
+                'walk_domain': [lim for lim in result.get('limitations', [])
+                                if lim.get('kind') == 'walk_domain']}
+
+    def test_a_seed_refusal_is_stated_whatever_the_cut(self):
+        port = _free_port()
+        log = open(f'{self.tempdir.name}/server-{port}.log', 'w')
+        server = subprocess.Popen(
+            shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                      '--address', '127.0.0.1', '--port', str(port), '-p', '2'],
+            stdout=log, stderr=subprocess.STDOUT)
+        url = f'http://127.0.0.1:{port}'
+        try:
+            for _ in range(600):
+                try:
+                    if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            got = {}
+            for name, fields in (('plain', {}), ('attempt', {'attempt_id': 'cut-1'}),
+                                 ('plain again', {}), ('attempt again', {'attempt_id': 'cut-2'})):
+                ret = requests.post(url + '/traverse', data=json.dumps(self._request(**fields)))
+                self.assertEqual(200, ret.status_code, ret.text[:2000])
+                got[name] = self._refusal(ret.json())
+        finally:
+            server.kill()
+            server.wait()
+            log.close()
+        plain = got['plain']
+        self.assertIn('did not admit reading the annotation row of seed k-mer 8 to validate the '
+                      'seed against its labels: the row, read alone with its row-diff dependency '
+                      'rows, needs more than', plain['error'] or '', plain)
+        self.assertEqual('memory', plain['resource_stop']['resource'], plain)
+        (domain,) = plain['walk_domain']
+        self.assertIn('at least: its read alone was refused', domain['effect'], plain)
+        for name in ('attempt', 'plain again', 'attempt again'):
+            self.assertEqual(plain, got[name], name)
 
 
 if __name__ == '__main__':

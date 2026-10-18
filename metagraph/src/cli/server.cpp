@@ -605,6 +605,14 @@ probe_parameters(const SimpleWeb::CaseInsensitiveMultimap &query, const std::str
     return { *name, graph_path };
 }
 
+// The body of /resolve, /traverse or /traverse/cancel, read as /pattern reads its body
+// (parse_strict_json: one RFC 8259 JSON text, member names unique); a fault is 400
+// {"error": "Bad json received: ..."} without a code, as /search's reader answers a body that
+// is no JSON
+Json::Value parse_traversal_body(const std::string &content) {
+    return parse_strict_json<RefuseRequest>(content, "Bad json received: ");
+}
+
 } // namespace
 
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
@@ -1347,8 +1355,8 @@ int run_server(Config *config) {
         // compression of the answer are checked against it
         PatternDelivery delivery;
         // a client that is gone, or a shutdown, is not answered: the work ends at its next
-        // clock reading, the writing at its next check, and nothing is written (as /resolve's and
-        // /traverse's)
+        // clock reading, the writing at its next check, and nothing is written (as on /resolve
+        // and /traverse, which still write their errors to it: control.gone is /pattern's alone)
         auto gone = gone_of(request);
         delivery.set_abort(gone);
         ResponseControl control;
@@ -1430,24 +1438,22 @@ int run_server(Config *config) {
         auto as_http = [](const ResolveDeadline &e) {
             return HttpError(503, resolve_deadline_body(e));
         };
-        // the request's deadline, set once its body is parsed (none without the field: the
-        // check then does nothing, and the text and its compression are the same bytes)
-        ResolveDelivery delivery;
-        ResponseControl control;
-        control.compression_level = traversal_io.compression_level;
-        control.check = [&]() {
-            try {
-                delivery.check();
-            } catch (const ResolveDeadline &e) {
-                throw as_http(e);
-            }
-        };
+        // a client that is gone, or a shutdown, is not answered: the work is abandoned at its
+        // next phase (process_resolve_request), the writing and the compression of the answer
+        // at the next check, the connection asked at most every client_check_ms, and nothing
+        // is written (as on /pattern and /traverse); then the request's deadline, set once its
+        // body is parsed (none without the field: the check then does nothing, and the text
+        // and its compression are the same bytes). Its errors are still written to it: no
+        // control.gone, which is /pattern's alone (ResolveWriting)
+        ResolveWriting writing(gone_of(request),
+                               std::chrono::milliseconds(attempt_settings.client_check_ms),
+                               traversal_io.compression_level);
         const size_t request_id = num_requests++;
         process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
-            Json::Value json = parse_json_string(content);
+            Json::Value json = parse_traversal_body(content);
             const bool multi = !config->fnames.empty();
             const GraphSelection selection = traverse_graph_selection(json, multi);
             const std::optional<bool> in_ram = in_ram_field(json);
@@ -1474,7 +1480,7 @@ int run_server(Config *config) {
                 Json::Value out = process_resolve_request(json, index, config->index_release,
                                                           config->resolve_max_query_bp,
                                                           &identity, gone_of(request),
-                                                          resolve_time, &delivery);
+                                                          resolve_time, &writing.delivery);
                 // in_ram: the time before the work began, waiting for and loading its index
                 if (in_ram)
                     out["timing"]["load_ms"] = lease ? lease->load_ms() : 0.0;
@@ -1484,7 +1490,7 @@ int run_server(Config *config) {
             } catch (const ResolveDeadline &e) {
                 throw as_http(e);
             }
-        }, /* compact */ true, &control);
+        }, /* compact */ true, &writing.control);
     };
 
     // Extend frozen seeds along consistent annotation labels.
@@ -1585,7 +1591,7 @@ int run_server(Config *config) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
-            Json::Value json = parse_json_string(content);
+            Json::Value json = parse_traversal_body(content);
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
@@ -1699,31 +1705,12 @@ int run_server(Config *config) {
                                                         shared_ptr<HttpServer::Request> request) {
         const size_t request_id = num_requests++;
         process_request(response, request, request_id, [&](const std::string &content) {
-            Json::Value json = parse_json_string(content);
-            if (!json.isObject())
-                throw InvalidRequest("request: expected an object");
-            for (const std::string &name : json.getMemberNames()) {
-                if (name != "attempt_id" && name != "wait_ms" && name != "not_after_ms")
-                    throw InvalidRequest("request: unknown field '" + name + "'");
-            }
-            if (!json["attempt_id"].isString() || !valid_attempt_id(json["attempt_id"].asString())) {
-                throw InvalidRequest("request.attempt_id: expected a string of 1 to 128 "
-                                     "characters from [A-Za-z0-9._:-]");
-            }
-            uint64_t wait_ms = 0;
-            if (json.isMember("wait_ms")) {
-                const Json::Value &w = json["wait_ms"];
-                if (!w.isIntegral() || (w.isInt64() && w.asInt64() < 0) || w.asUInt64() > 10'000)
-                    throw InvalidRequest("request.wait_ms: expected an integer in [0, 10000]");
-                wait_ms = w.asUInt64();
-            }
-            // the not_after_ms of the request being cancelled (the same rule as /traverse's): a
-            // tombstone of an unknown id is held until it has passed + the skew allowance
-            const std::optional<uint64_t> not_after_ms = read_not_after_ms(json, "request");
-            const std::string id = json["attempt_id"].asString();
-            auto [status, body] = attempts.cancel(id, wait_ms, not_after_ms);
-            logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}", id,
-                         request_id, status, body.get("state", "").asString());
+            const CancelRequest cancel = parse_cancel_request(parse_traversal_body(content));
+            auto [status, body] = attempts.cancel(cancel.attempt_id, cancel.wait_ms,
+                                                  cancel.not_after_ms);
+            logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}",
+                         cancel.attempt_id, request_id, status,
+                         body.get("state", "").asString());
             if (status != 200)
                 throw HttpError(status, std::move(body));
             return body;

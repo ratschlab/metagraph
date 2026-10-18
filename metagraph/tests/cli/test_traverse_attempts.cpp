@@ -32,10 +32,14 @@
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "cli/load/load_annotation.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/file_utils.hpp"
 
 
@@ -209,6 +213,47 @@ TEST(GraphletAttempt, BoundIsEnforcedOnTheAttemptsClock) {
     EXPECT_FALSE(local.enforced());
     EXPECT_TRUE(local.usage_json("completed")["bound_ms"].isNull());
     EXPECT_FALSE(local.usage_json("completed")["bound"]["enforced"].asBool());
+}
+
+// A duration is stated in whole ms, rounded up, by number_json's rule: an integer while every
+// JSON reader keeps it exactly (up to 2^53 - 1), beyond that the number itself — never a cast
+// past uint64's range (undefined: 2^64 - 1 on arm64, 2^63 under Rosetta). Only the CLI, whose
+// bound has no cap, gets there (a time budget of 1e20 ms); an infinite bound stays null
+TEST(GraphletAttempt, DurationsBeyondTheExactIntegersAreStatedAsNumbers) {
+    AttemptSettings cli;
+    cli.hard_cap_ms = 0;
+    cli.allowance_ms = 1000;
+    auto usage = [&](double time_budget_ms) {
+        Attempt local(0, std::chrono::system_clock::now(), cli, "cli", false);
+        AttemptIds ids;
+        ids.attempt_id = "cli";
+        local.set_ids(ids);
+        local.set_bound(1, time_budget_ms);
+        return local.usage_json("completed");
+    };
+    const double top = 9007199254740991.0;   // 2^53 - 1
+    // a bound of 2^53 - 1: the integer
+    Json::Value u = usage(top - 1000);
+    EXPECT_EQ(Json::uintValue, u["bound_ms"].type());
+    EXPECT_EQ(9007199254740991u, u["bound_ms"].asUInt64());
+    EXPECT_EQ(Json::uintValue, u["bound"]["walk_until_ms"].type());
+    // 2^53: the number
+    u = usage(top + 1 - 1000);
+    EXPECT_EQ(Json::realValue, u["bound_ms"].type());
+    EXPECT_EQ(9007199254740992.0, u["bound_ms"].asDouble());
+    // 1e20 ms: the number, also where the walk stops
+    u = usage(1e20);
+    EXPECT_EQ(Json::realValue, u["bound_ms"].type());
+    EXPECT_EQ(1e20 + 1000, u["bound_ms"].asDouble());
+    EXPECT_EQ(Json::realValue, u["bound"]["walk_until_ms"].type());
+    EXPECT_LE(1e20, u["bound"]["walk_until_ms"].asDouble());
+    EXPECT_EQ(std::string::npos, json_text(u, true).find("18446744073709551615"));
+    // below the edge, rounded up as before
+    u = usage(0.25);
+    EXPECT_EQ(Json::uintValue, u["bound_ms"].type());
+    EXPECT_EQ(1001u, u["bound_ms"].asUInt64());
+    // no bound: null
+    EXPECT_TRUE(usage(std::numeric_limits<double>::infinity())["bound_ms"].isNull());
 }
 
 // A client that is gone stops the walk (CLIENT_GONE) and anything built after it
@@ -501,6 +546,78 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
     // retention 0: no tombstones, stated by the number (the rule of both cases is the SPEC's)
     s.retention_s = 0;
     EXPECT_EQ(0u, AttemptRegistry(s).capabilities_json()["retention_s"].asUInt64());
+}
+
+// POST /traverse/cancel's body as parse_cancel_request reads it: an object of kCancelFields only
+// (the list the capabilities state as cancel_fields), an unknown field refused before the known
+// ones are checked, then attempt_id (required; the rule and text of attempt_ids), wait_ms (an
+// integer in [0, kMaxCancelWaitMs], one message for every fault) and not_after_ms (as /traverse
+// reads it). The texts are the ones the route's inline parser gave
+TEST(GraphletAttemptRegistry, CancelRequestIsParsedStrictly) {
+    auto parse = [](const std::string &t) {
+        Json::Value v;
+        std::unique_ptr<Json::CharReader> reader(Json::CharReaderBuilder().newCharReader());
+        std::string errors;
+        EXPECT_TRUE(reader->parse(t.data(), t.data() + t.size(), &v, &errors)) << errors;
+        return v;
+    };
+    auto refusal = [&](const std::string &body) -> std::string {
+        try {
+            parse_cancel_request(parse(body));
+            return "accepted";
+        } catch (const InvalidRequest &e) {
+            return e.what();
+        }
+    };
+    const std::string id_text = "request.attempt_id: expected a string of 1 to 128 characters "
+                                "from [A-Za-z0-9._:-]";
+    const std::string wait_text = "request.wait_ms: expected an integer in [0, 10000]";
+    EXPECT_EQ("request: expected an object", refusal("[]"));
+    EXPECT_EQ("request: expected an object", refusal("\"a\""));
+    EXPECT_EQ("request: expected an object", refusal("null"));
+    EXPECT_EQ("request: unknown field 'x'", refusal(R"({"attempt_id": "a", "x": 1})"));
+    // the unknown field first, whatever else is wrong
+    EXPECT_EQ("request: unknown field 'x'",
+              refusal(R"({"attempt_id": 7, "wait_ms": -1, "x": 1})"));
+    EXPECT_EQ(id_text, refusal("{}"));
+    for (const std::string &id : std::vector<std::string> { "7", "null", "\"\"", "\"a b\"",
+                                                            "[\"a\"]",
+                                                            "\"" + std::string(129, 'a') + "\"" }) {
+        EXPECT_EQ(id_text, refusal(R"({"attempt_id": )" + id + "}")) << id;
+    }
+    // the id before wait_ms, wait_ms before not_after_ms
+    EXPECT_EQ(id_text, refusal(R"({"attempt_id": 7, "wait_ms": -1})"));
+    EXPECT_EQ(wait_text, refusal(R"({"attempt_id": "a", "wait_ms": -1, "not_after_ms": -1})"));
+    for (const char *w : { "-1", "1.5", "\"1\"", "10001", "null", "true", "{}",
+                           "18446744073709551615", "1e30" }) {
+        EXPECT_EQ(wait_text, refusal(std::string(R"({"attempt_id": "a", "wait_ms": )") + w + "}"))
+                << w;
+    }
+    EXPECT_EQ("request.not_after_ms: expected an integer in [0, 9007199254740991] (Unix epoch, "
+              "ms)", refusal(R"({"attempt_id": "a", "not_after_ms": 9007199254740992})"));
+
+    const CancelRequest plain = parse_cancel_request(parse(R"({"attempt_id": "run-7.l:3"})"));
+    EXPECT_EQ("run-7.l:3", plain.attempt_id);
+    EXPECT_EQ(0u, plain.wait_ms);
+    EXPECT_FALSE(plain.not_after_ms);
+    for (const auto &[w, value] : std::vector<std::pair<std::string, uint64_t>> {
+             { "0", 0 }, { "10000", 10000 }, { "3.0", 3 }, { "1e3", 1000 } }) {
+        EXPECT_EQ(value, parse_cancel_request(parse(R"({"attempt_id": "a", "wait_ms": )" + w
+                                                    + "}")).wait_ms) << w;
+    }
+    const CancelRequest full = parse_cancel_request(parse(
+            R"({"not_after_ms": 1759601000000, "wait_ms": 250, "attempt_id": "a"})"));
+    EXPECT_EQ("a", full.attempt_id);
+    EXPECT_EQ(250u, full.wait_ms);
+    EXPECT_EQ(1759601000000ull, full.not_after_ms.value());
+    EXPECT_EQ(10'000u, kMaxCancelWaitMs);
+
+    // the fields read are the fields the capabilities state
+    Json::Value fields(Json::arrayValue);
+    for (const char *f : kCancelFields) {
+        fields.append(f);
+    }
+    EXPECT_EQ(fields, AttemptRegistry(AttemptSettings()).capabilities_json()["cancel_fields"]);
 }
 
 // The rules of the attempts block are references to the sections of
@@ -2231,6 +2348,104 @@ TEST(GraphletServer, CompressionPiecesOfTheServerKeepTheBytes) {
     }
 }
 
+// The check /resolve writes its answer under (GoneCheck, then the deadline): a client that left
+// once the answer was built gets nothing — its text is not serialised, compressed and written
+// in full into a dead connection, as /pattern's and /traverse's are not. The connection is
+// asked on the first check and then at most once per interval (a peek per 64 KiB of text would
+// be a syscall each); errors are not asked about (ResponseControl::gone stays /pattern's)
+TEST(ServerRequest, AGoneCheckStopsTheWriting) {
+    using Clock = GoneCheck::Clock;
+    Clock::time_point now = Clock::time_point() + std::chrono::hours(1);
+    bool gone = false;
+    size_t asked = 0;
+    GoneCheck check([&]() { ++asked; return gone; }, std::chrono::milliseconds(100),
+                    [&]() { return now; });
+    check();
+    EXPECT_EQ(1u, asked);
+    gone = true;
+    // within the interval the connection is not asked again
+    now += std::chrono::milliseconds(99);
+    check();
+    EXPECT_EQ(1u, asked);
+    now += std::chrono::milliseconds(1);
+    EXPECT_THROW(check(), ClientGone);
+    EXPECT_EQ(2u, asked);
+    // without a predicate (the CLI) nothing is asked
+    GoneCheck none(nullptr, std::chrono::milliseconds(100));
+    EXPECT_NO_THROW(none());
+
+    // a large answer under the check: written while the client is there, asked during the
+    // writing at most once per interval (a real clock: the text takes far less than an hour)
+    Json::Value big(Json::arrayValue);
+    for (size_t i = 0; i < 100'000; ++i) {
+        big.append(std::string(20, 'A' + i % 26));
+    }
+    auto process = [&](const std::string &) { return big; };
+    for (const std::string encoding : { "", "gzip" }) {
+        SCOPED_TRACE(encoding);
+        asked = 0;
+        gone = false;
+        ResponseControl control;
+        GoneCheck live([&]() { ++asked; return gone; }, std::chrono::hours(1));
+        control.check = [&]() { live(); };
+        const RequestAnswer answered = answer_request("{}", encoding, 1, process, true, &control);
+        EXPECT_EQ(200, answered.status);
+        EXPECT_EQ(1u, asked);
+        if (encoding.empty()) {
+            EXPECT_EQ(json_text(big, true), answered.body);
+        }
+        // the client left once the answer was built: nothing is written
+        GoneCheck left([&]() { ++asked; return true; }, std::chrono::hours(1));
+        control.check = [&]() { left(); };
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, process, true, &control).status);
+        // an error is still written to it (the check reaches the success path only)
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, [](const std::string &) -> Json::Value {
+            throw std::invalid_argument("Bad json received: x");
+        }, true, &control).status);
+    }
+}
+
+// What the /resolve route writes its answer under (ResolveWriting, the route's ResponseControl):
+// the client's connection first (GoneCheck: nothing written once it left), then the request's
+// deadline (503 deadline); its errors are written whatever the client did. The route builds its
+// control only through ResolveWriting, so a route that stopped asking about the client fails here
+TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
+    Json::Value big(Json::arrayValue);
+    for (size_t i = 0; i < 20'000; ++i) {
+        big.append(std::string(20, 'A' + i % 26));
+    }
+    auto process = [&](const std::string &) { return big; };
+    for (const std::string encoding : { "", "gzip" }) {
+        SCOPED_TRACE(encoding);
+        bool gone = false;
+        size_t asked = 0;
+        ResolveWriting connected([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);
+        EXPECT_EQ(1, connected.control.compression_level);
+        EXPECT_FALSE(connected.control.gone);
+        EXPECT_EQ(200, answer_request("{}", encoding, 1, process, true,
+                                      &connected.control).status);
+        EXPECT_EQ(1u, asked);
+        // a client that left: nothing is written, before the deadline is read
+        gone = true;
+        ResolveWriting left([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);
+        left.delivery.set_check([]() { throw ResolveDeadline("past the deadline"); });
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, process, true, &left.control).status);
+        // an error is still written to it
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, [](const std::string &) -> Json::Value {
+            throw std::invalid_argument("Bad json received: x");
+        }, true, &left.control).status);
+        // a client that is there and a passed deadline: the 503 of the deadline
+        gone = false;
+        ResolveWriting late([&]() { return gone; }, std::chrono::hours(1), 1);
+        late.delivery.set_check([]() { throw ResolveDeadline("past the deadline"); });
+        const RequestAnswer answer = answer_request("{}", encoding, 1, process, true,
+                                                    &late.control);
+        EXPECT_EQ(503, answer.status);
+        EXPECT_EQ(json_text(resolve_deadline_body(ResolveDeadline("past the deadline")), true),
+                  answer.body);
+    }
+}
+
 // What process_request writes (answer_request, without the HTTP library) for every outcome of
 // a request: everything for a route that does not ask whether its client left (every route but
 // /pattern: no control, or a control without |gone|); and, for a route that asks
@@ -2706,4 +2921,128 @@ TEST(GraphletServer, SymlinkedMainFilesDoNotHideTheirSidecars) {
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("one index_fp")) << ex.what();
     }
     fs::remove_all(dir);
+}
+
+// `metagraph traverse` answers every request file it reads as the server answers the request:
+// one whose processing throws another exception than InvalidRequest (here the walker's
+// runtime_error on an inconsistent primary graph, which stores both strands of S) gets the
+// server's 400 body, {"error"} and its usage when the request is an attempt, the exit status
+// is 1, and the next file is still answered. Before, such an exception escaped the CLI's loop
+// and ended the run in std::terminate, without a body for that file or the later ones
+TEST(GraphletCli, AFailedRequestIsAnsweredAndTheNextFileToo) {
+    using mtg::graph::AnnotatedDBG;
+    using mtg::graph::CanonicalDBG;
+    using mtg::graph::DBGSuccinct;
+    using mtg::graph::DeBruijnGraph;
+    namespace fs = std::filesystem;
+    const size_t k = 11;
+    auto random_seq = [](size_t length, uint32_t seed) {
+        std::mt19937 rng(seed);
+        std::string s(length, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    const std::string S = random_seq(80, 17);
+    const std::string T = random_seq(80, 29);
+    std::string rc_s = S;
+    ::reverse_complement(rc_s);
+    // S on both strands (inconsistent for a primary graph), T on one
+    auto base = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
+    base->add_sequence(S);
+    base->add_sequence(rc_s);
+    base->add_sequence(T);
+    base->mask_dummy_kmers(1, false);
+    AnnotatedDBG anno(std::make_shared<CanonicalDBG>(base),
+                      std::make_unique<mtg::annot::ColumnCompressed<>>(base->max_index()));
+    anno.annotate_sequence(S, { "A" });
+    anno.annotate_sequence(T, { "B" });
+
+    const fs::path dir = fs::absolute("temp_traverse_cli_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    // removed however the test ends: a failed ASSERT below returns early
+    struct RemoveOnExit {
+        fs::path path;
+        ~RemoveOnExit() {
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    } remove_dir { dir };
+    const std::string graph = (dir / "graph").string() + DBGSuccinct::kExtension;
+    base->serialize(graph);
+    anno.get_annotator().serialize((dir / "anno").string());
+    const std::string annotation
+            = (dir / "anno").string() + mtg::annot::ColumnCompressed<>::kExtension;
+    auto request_file = [&](const std::string &name, const std::string &sequence,
+                            const std::string &label, const std::string &attempt_id) {
+        Json::Value r;
+        Json::Value seed;
+        seed["sequence"] = sequence;
+        seed["labels"].append(label);
+        r["seeds"].append(seed);
+        r["strategy"] = Json::Value(Json::objectValue);
+        if (!attempt_id.empty())
+            r["attempt_id"] = attempt_id;
+        const std::string path = (dir / name).string();
+        std::ofstream(path) << json_text(r, true);
+        return path;
+    };
+    const std::vector<std::string> files = {
+        request_file("attempt.json", S.substr(20, 30), "A", "cli-failed"),
+        request_file("plain.json", S.substr(20, 30), "A", ""),
+        request_file("next.json", T.substr(20, 30), "B", ""),
+    };
+
+    // the Config main() makes from the command line (it sets the swap path; restored)
+    const fs::path swap = utils::get_swap_path();
+    std::vector<std::string> args = { "metagraph", "traverse", "--json", "-i", graph, "-a",
+                                      annotation };
+    args.insert(args.end(), files.begin(), files.end());
+    std::vector<char*> argv;
+    for (std::string &a : args) {
+        argv.push_back(a.data());
+    }
+    argv.push_back(nullptr);
+    Config config(static_cast<int>(args.size()), argv.data());
+    utils::set_swap_path(swap);
+
+    std::ostringstream captured;
+    std::streambuf *cout_buffer = std::cout.rdbuf(captured.rdbuf());
+    int status = -1;
+    std::string escaped;
+    try {
+        status = traverse_graph(&config);
+    } catch (const std::exception &e) {
+        escaped = e.what();
+    }
+    std::cout.rdbuf(cout_buffer);
+    EXPECT_EQ("", escaped) << "an exception escaped the CLI's loop (std::terminate in main)";
+    EXPECT_EQ(1, status);
+
+    std::vector<Json::Value> answers;
+    std::istringstream lines(captured.str());
+    for (std::string line; std::getline(lines, line); ) {
+        Json::Value v;
+        Json::CharReaderBuilder reader;
+        std::string errors;
+        std::istringstream in(line);
+        ASSERT_TRUE(Json::parseFromStream(reader, in, &v, &errors)) << errors << ": " << line;
+        answers.push_back(v);
+    }
+    ASSERT_EQ(3u, answers.size()) << captured.str();
+    // the attempt: the server's 400 with its usage
+    EXPECT_EQ(std::vector<std::string>({ "error", "usage" }), answers[0].getMemberNames());
+    EXPECT_NE(std::string::npos,
+              answers[0]["error"].asString().find("Inconsistent primary graph at node"))
+            << answers[0]["error"];
+    EXPECT_EQ("cli-failed", answers[0]["usage"]["attempt_id"].asString());
+    EXPECT_EQ("error", answers[0]["usage"]["reason"].asString());
+    // without attempt_id: the error alone
+    EXPECT_EQ(std::vector<std::string>({ "error" }), answers[1].getMemberNames());
+    EXPECT_EQ(answers[0]["error"], answers[1]["error"]);
+    // the next file is answered
+    EXPECT_FALSE(answers[2].isMember("error")) << answers[2]["error"];
+    ASSERT_EQ(1u, answers[2]["results"].size());
 }

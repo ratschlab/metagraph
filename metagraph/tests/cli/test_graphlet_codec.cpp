@@ -20,6 +20,7 @@
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 #include "tests/cli/mgt_reader_for_tests.hpp"
 #include "tests/graph/traversal/walker_paths_for_tests.hpp"
+#include "cli/json_helpers.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
@@ -2813,6 +2814,66 @@ std::vector<BudgetCase> wide_float_cases() {
 
 } // namespace
 
+// The request body reader of /pattern, /resolve, /traverse, /traverse/cancel and the pattern and
+// traverse CLIs (parse_strict_json): one RFC 8259 JSON text whose member names are unique, any
+// root (each route refuses a root that is not an object itself), at most kMaxBodyNesting nested
+// arrays and objects; every fault is the refusal's exception with the prefix
+TEST(GraphletCodec, StrictJsonBodyReader) {
+    auto read = [](const std::string &text) { return parse_strict_json<RefuseRequest>(text, "P: "); };
+    auto refusal = [&](const std::string &text) -> std::string {
+        try {
+            read(text);
+            return "accepted";
+        } catch (const InvalidRequest &e) {
+            return e.what();
+        }
+    };
+    EXPECT_EQ(1, read(" {\"a\": 1}\n")["a"].asInt());
+    EXPECT_EQ(2u, read("[1, 2]").size());
+    EXPECT_EQ("x", read("\"x\"").asString());
+    EXPECT_EQ(7, read("7").asInt());
+    // a name repeated in different objects is no duplicate
+    EXPECT_EQ(1, read("{\"a\": {\"a\": 1}}")["a"]["a"].asInt());
+    // a '/' in a string is text, after an escaped quote or backslash too
+    EXPECT_EQ("x/y", read("{\"a\": \"x/y\"}")["a"].asString());
+    EXPECT_EQ("q\"/\\/", read("{\"a\": \"q\\\"/\\\\/\"}")["a"].asString());
+    EXPECT_EQ("/", read("{\"a\": \"\\/\"}")["a"].asString());
+    EXPECT_TRUE(read(std::string(kMaxBodyNesting, '[') + std::string(kMaxBodyNesting, ']'))
+                        .isArray());
+
+    const std::string comment = "P: a comment (or a '/' outside a string) at byte ";
+    EXPECT_EQ(comment + "0", refusal("// x\n{}"));
+    EXPECT_EQ(comment + "1", refusal("{/* x */}"));
+    EXPECT_EQ(comment + "11", refusal("{\"a\": \"\\\\\"}/"));
+    EXPECT_EQ(comment + "8", refusal("{\"a\": 1 / 2}"));
+    for (const auto &[text, words] : std::vector<std::pair<std::string, std::string>> {
+             { "{\"a\": 1, \"a\": 2}", "Duplicate key: 'a'" },
+             { "{\"b\": {\"a\": 1, \"a\": 1}}", "Duplicate key: 'a'" },
+             { "{\"a\": 1,}", "Missing '}' or object member name" },
+             { "[1,]", "Syntax error: value, object or array expected." },
+             { "{} {}", "Extra non-whitespace after JSON value." },
+             { "{}x", "Extra non-whitespace after JSON value." },
+             { "{\"a\": NaN}", "Syntax error: value, object or array expected." },
+             { "{'a': 1}", "Missing '}' or object member name" },
+             { "", "Syntax error: value, object or array expected." } }) {
+        const std::string error = refusal(text);
+        EXPECT_EQ(0u, error.find("P: * Line 1, Column ")) << text << ": " << error;
+        EXPECT_NE(std::string::npos, error.find(words)) << text << ": " << error;
+    }
+    EXPECT_EQ("P: Exceeded stackLimit in readValue(). (more than 1000 nested arrays and objects)",
+              refusal(std::string(kMaxBodyNesting + 1, '[')
+                      + std::string(kMaxBodyNesting + 1, ']')));
+    // the text after the prefix is for people (SPEC core §5: only the prefix is the contract):
+    // a syntax error is followed by the extra-text error, a duplicate is named in place of a
+    // later syntax error
+    EXPECT_EQ("P: * Line 1, Column 1\n  Syntax error: value, object or array expected.\n"
+              "* Line 1, Column 2\n  Extra non-whitespace after JSON value.\n",
+              refusal("not json"));
+    EXPECT_EQ("P: * Line 1, Column 10\n  Duplicate key: 'a'\n",
+              refusal("{\"a\": 1, \"a\": 2, \"b\": }"));
+}
+
+
 TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
     Json::StreamWriterBuilder compact;
     compact["indentation"] = "";
@@ -2824,6 +2885,10 @@ TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
         cases.push_back(std::string(3, static_cast<char>(c)));
     }
     cases.push_back("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80plain");
+    // not UTF-8 but priced exactly: a lead byte takes the next bytes into its code point,
+    // whatever they are (a Latin-1 name: 0xF6 and "tti", past U+FFFF, a surrogate pair)
+    cases.push_back("G\xf6ttingen");
+    cases.push_back("\xf1" "abc");
     std::mt19937 rng(17);
     for (size_t i = 0; i < 200; ++i) {
         std::string s;
@@ -2848,6 +2913,11 @@ TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
     for (const std::string &s : { std::string("\xff\xfe"), std::string("\x80"), std::string("a\xc3"),
                                   std::string("\xe2\x82"), std::string("\xf8\x88\x80\x80\x80") }) {
         EXPECT_GE(json_escaped_size(s), written(s)) << s;
+    }
+    // a 4-byte sequence decoding below U+10000 (lead 0xF0, the next byte's low six bits below
+    // 0x10, continuation byte or not): one U+FFFD (6), counted as a surrogate pair (12)
+    for (const std::string &s : { std::string("\xf0\x80\x80\x80"), std::string("\xf0@AB") }) {
+        EXPECT_EQ(written(s) + 6, json_escaped_size(s)) << s;
     }
 }
 
@@ -4973,6 +5043,43 @@ TEST(GraphletStage3Review, DerivationWindowStatesWhatItHolds) {
     EXPECT_GT(passes_from, 0u);
 }
 
+
+// A derivation row refused by its demand inside a longer run is read again alone beside the
+// rows before it (spec §6.8), and only beside them: the run read with it — its rows not
+// admitted, their vectors, the sub-batch — is let go first, so what the seed phase's decode
+// budget holds beside the re-read and what the re-read holds stay within the budget. The
+// fixture of DerivationWindowStatesWhatItHolds, swept over the budgets
+TEST(GraphletStage3Review, ADerivationRowReadAgainAloneStaysWithinTheBudget) {
+    const std::string S = random_seq(60, 9100);
+    std::string R;
+    for (uint32_t i = 0; i < 60; ++i) {
+        R += S.substr(0, 40) + random_seq(12, 9200 + i);
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, { S, R }, { "A", "B" }, DeBruijnGraph::BASIC, true);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    const Seed seed = seed_of(S.substr(0, 40));
+    const Strategy base = strategy_of(R"({"direction": "right", "support": "trace",
+        "branching": {"on_reconverge": "keep"}, "labels": {"seed_label_kind": "column"},
+        "bounds": {"max_extension_bp": 10}})");
+    size_t rereads = 0;
+    uint64_t memory = 0;
+    WalkerHooks hooks;
+    hooks.derivation_reread = [&](uint64_t beside, uint64_t reread, uint64_t max) {
+        ++rereads;
+        EXPECT_LE(beside + reread, max) << "budget " << memory << ": " << beside
+                                        << " held beside a re-read of " << reread;
+    };
+    for (memory = 4096; memory < (uint64_t(4) << 20); memory = memory * 21 / 20 + 1) {
+        Strategy st = base;
+        st.max_memory_bytes = memory;
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", &hooks);
+        } catch (const SeedBudgetError &) {}
+    }
+    EXPECT_GT(rereads, 0u) << "no derivation row was read again alone";
+}
 
 /********* the seed phase's charges, extra-label chains, float widths, levels to read *********/
 
@@ -7303,6 +7410,100 @@ TEST(ResolveDeadline, RequestErrorsAre400WhateverTheStop) {
     // the same without a deadline: the discovery met every label, 'nope' among none: 400
     r["bounds"].removeMember("time_budget_ms");
     EXPECT_THROW(f.resolve(r, nullptr), InvalidRequest);
+}
+
+// An explicit seed's kmer_interval is two non-negative integers, tested as every other
+// non-negative integer of a request is (StrictObject::uint's test): anything else is refused
+// naming the field. An end above INT64_MAX is such an integer, refused by the engine as out of
+// range like any end past the query; it never reaches jsoncpp's asInt64(), which throws
+// Json::LogicError on it (a 400 with jsoncpp's text and no field path, and in the CLI an
+// exception no catch answered)
+TEST(ResolveRequest, ExplicitKmerIntervalEndsAreNonNegativeIntegers) {
+    const ResolveDeadlineFixture f;
+    auto request = [&](const Json::Value &interval) {
+        Json::Value r;
+        r["sequence"] = f.q;
+        r["labels"].append("L3");
+        r["select"]["policy"] = "explicit";
+        Json::Value seed;
+        seed["kmer_interval"] = interval;
+        seed["labels"].append("L3");
+        r["select"]["seeds"].append(seed);
+        return r;
+    };
+    auto pair = [](const Json::Value &begin, const Json::Value &end) {
+        Json::Value iv(Json::arrayValue);
+        iv.append(begin);
+        iv.append(end);
+        return iv;
+    };
+    // the refusal's message; another exception is named as such (it is not the route's 400)
+    auto refusal = [](const std::function<void()> &run) -> std::string {
+        try {
+            run();
+        } catch (const std::invalid_argument &e) {
+            return e.what();
+        } catch (const std::exception &e) {
+            return std::string("not a refusal: ") + e.what();
+        }
+        return "";
+    };
+    const std::string malformed = "request.select.seeds[0].kmer_interval: expected [begin, end] "
+                                  "as non-negative integers";
+    const Json::Value no_end(Json::arrayValue);
+    Json::Value three(Json::arrayValue);
+    three.append(0);
+    three.append(1);
+    three.append(2);
+    const std::vector<std::pair<std::string, Json::Value>> refused = {
+        { "a negative begin", pair(-1, 5) },
+        { "a negative end", pair(0, -1) },
+        { "a fraction", pair(0.5, 3) },
+        { "a number at 2^64 or above", pair(0, 1e20) },
+        { "a begin at 2^64 or above", pair(1e20, 1e20) },
+        { "a negative number below INT64_MIN", pair(0, -1e19) },
+        { "a string", pair(0, "5") },
+        { "null", pair(Json::Value(), 5) },
+        { "no ends", no_end },
+        { "three ends", three },
+        { "not an array", Json::Value(5) },
+    };
+    for (const auto &c : refused) {
+        EXPECT_EQ(malformed, refusal([&] { parse_resolve_request(request(c.second)); }))
+                << c.first;
+    }
+
+    // above INT64_MAX: integers, parsed as such, then out of range on this query (2,970 k-mers)
+    const uint64_t above = (uint64_t(1) << 63);
+    const uint64_t top = std::numeric_limits<uint64_t>::max();
+    struct Large {
+        std::string what;
+        Json::Value interval;
+        uint64_t begin;
+        uint64_t end;
+    };
+    const std::vector<Large> large = {
+        { "end 2^63", pair(0, Json::UInt64(above)), 0, above },
+        { "end 2^64 - 1", pair(0, Json::UInt64(top)), 0, top },
+        { "both above", pair(Json::UInt64(above), Json::UInt64(above + 10)), above, above + 10 },
+        { "end 1e19, a number with no fraction", pair(0, 1e19), 0, 10'000'000'000'000'000'000ull },
+    };
+    for (const Large &c : large) {
+        const std::string parsed = refusal([&] {
+            const ResolveRequest req = parse_resolve_request(request(c.interval));
+            ASSERT_EQ(1u, req.policy.explicit_seeds.size());
+            EXPECT_EQ(c.begin, req.policy.explicit_seeds[0].kmers.begin);
+            EXPECT_EQ(c.end, req.policy.explicit_seeds[0].kmers.end);
+        });
+        EXPECT_EQ("", parsed) << c.what;
+        EXPECT_EQ("Explicit seed interval out of range",
+                  refusal([&] { f.resolve(request(c.interval), nullptr); }))
+                << c.what;
+    }
+    // in range: the seed is selected
+    const Json::Value out = f.resolve(request(pair(0, 40)), nullptr);
+    ASSERT_EQ(1u, out["selection"]["seeds"].size());
+    EXPECT_EQ("L3", out["selection"]["seeds"][0]["labels"][0].asString());
 }
 
 TEST(ResolveDeadline, CapabilitiesBlock) {

@@ -14,6 +14,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "config/config.hpp"
+#include "load/load_graph.hpp"
 #include "parse_sequences.hpp"
 #include "stats.hpp"
 
@@ -353,6 +354,7 @@ int build_graph(Config *config) {
 
     graph->serialize(config->outfbase);
     graph->serialize_extensions(config->outfbase);
+    remove_stale_dummy_mask(*graph, config->outfbase);
 
     return 0;
 }
@@ -434,6 +436,7 @@ int concatenate_graph_chunks(Config *config) {
 
     // graph output
     graph->serialize(config->outfbase);
+    remove_stale_dummy_mask(*graph, config->outfbase);
 
     return 0;
 }

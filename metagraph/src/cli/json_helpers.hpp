@@ -3,8 +3,9 @@
 
 /**
  * JSON helpers shared by the routes' request parsers and answer builders (/traverse, /resolve,
- * /pattern and the predicate language): the strict reader of a request object, small value
- * builders, and the digit count the text-size estimates use. Header-only.
+ * /pattern and the predicate language): the strict reader of a request body and of a request
+ * object, small value builders, and the digit and escape counts the text-size estimates use.
+ * Header-only.
  */
 
 #include <cmath>
@@ -12,9 +13,12 @@
 #include <initializer_list>
 #include <iomanip>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -23,6 +27,74 @@
 
 namespace mtg {
 namespace cli {
+
+/**
+ * |v| as a non-negative integer, nullopt when it is not one: an integer, or a number without a
+ * fraction below 2^64, that is not negative. The sign is read with asInt64() only where
+ * isInt64() holds: on an integral value above INT64_MAX asInt64() throws Json::LogicError, which
+ * is no route's refusal (it was answered as a 400 with jsoncpp's text and no field path), and
+ * asUInt64() on a negative one throws too. Each caller keeps its own message and range.
+ */
+inline std::optional<uint64_t> non_negative_integer(const Json::Value &v) {
+    if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0))
+        return std::nullopt;
+    return v.asUInt64();
+}
+
+// The deepest nesting of arrays and objects a request body may have (jsoncpp's stackLimit, its
+// default): parse_strict_json refuses a deeper one
+constexpr int kMaxBodyNesting = 1000;
+
+/**
+ * A request body as one RFC 8259 JSON text whose member names are unique: no comment, no
+ * trailing comma, nothing after the value, no duplicated member name (jsoncpp would keep the
+ * last value without a word: an id or a budget given twice would be replaced silently), at most
+ * kMaxBodyNesting nested arrays and objects. Throws Refusal()(|prefix| + what is wrong)
+ * otherwise. Not CharReaderBuilder::strictMode(): its strictRoot would refuse a root that is
+ * not an object, which each route refuses in its own order. The reader of /pattern, /resolve,
+ * /traverse and /traverse/cancel and of the pattern and traverse CLIs; /search and /align keep
+ * theirs (parse_json_string).
+ */
+template <class Refusal>
+Json::Value parse_strict_json(std::string_view content, const std::string &prefix) {
+    // jsoncpp skips a comment before an object's member name whatever allowComments says: a
+    // '/' outside a string is no JSON at all, so the text is refused before it is parsed
+    bool in_string = false;
+    for (size_t i = 0; i < content.size(); ++i) {
+        if (in_string) {
+            if (content[i] == '\\')
+                ++i;
+            else if (content[i] == '"')
+                in_string = false;
+        } else if (content[i] == '"') {
+            in_string = true;
+        } else if (content[i] == '/') {
+            throw Refusal()(prefix + "a comment (or a '/' outside a string) at byte "
+                            + std::to_string(i));
+        }
+    }
+    Json::CharReaderBuilder builder;
+    builder["allowComments"] = false;
+    builder["allowTrailingCommas"] = false;
+    builder["failIfExtra"] = true;
+    builder["rejectDupKeys"] = true;
+    builder["stackLimit"] = kMaxBodyNesting;
+    std::unique_ptr<Json::CharReader> reader { builder.newCharReader() };
+    Json::Value json;
+    std::string errors;
+    bool parsed = false;
+    try {
+        parsed = reader->parse(content.data(), content.data() + content.size(), &json, &errors);
+    } catch (const Json::Exception &e) {
+        // jsoncpp throws rather than returns past its nesting limit: the client's to fix, as
+        // every other fault of the text
+        throw Refusal()(prefix + e.what() + " (more than " + std::to_string(kMaxBodyNesting)
+                        + " nested arrays and objects)");
+    }
+    if (!parsed)
+        throw Refusal()(prefix + errors);
+    return json;
+}
 
 /**
  * Strict access to one JSON object of a request: every field read is remembered, and finish()
@@ -82,9 +154,10 @@ class StrictObject {
                   uint64_t max = std::numeric_limits<uint64_t>::max()) {
         if (!has(key))
             return def;
-        if (!v_[key].isIntegral() || (v_[key].isInt64() && v_[key].asInt64() < 0))
+        const std::optional<uint64_t> value = non_negative_integer(v_[key]);
+        if (!value)
             refuse(path(key) + ": expected a non-negative integer");
-        const uint64_t x = v_[key].asUInt64();
+        const uint64_t x = *value;
         if (x < min || x > max)
             refuse(path(key) + ": out of range [" + std::to_string(min) + ", "
                        + std::to_string(max) + "]");
@@ -199,6 +272,44 @@ inline uint64_t decimal_digits(uint64_t x) {
         ++digits;
     }
     return digits;
+}
+
+// The length jsoncpp's writer gives |s| inside a JSON string, quotes excluded (its
+// escaping with emitUTF8 off, which every writer here uses): '"' '\\' and \b \f \n \r \t
+// take two bytes, any other control character six (\u00XX), a code point above U+007F six
+// (twelve as a surrogate pair), and a malformed sequence the six of U+FFFD for the bytes
+// the writer consumes with it. Exact for valid UTF-8 and for most bytes that are not, from
+// above for the rest: a 4-byte sequence that decodes below U+10000 (lead 0xF0, the next byte's
+// low six bits below 0x10) is one U+FFFD (6), counted as a pair (12). The one model of that
+// escaping: /traverse's delivery costs and compact_json_size, /pattern's answer text
+// (string_text_bytes) and its predicate echo (quoted_bytes) price names by it.
+// GraphletCodec.JsonEscapedSizeIsTheWriters checks it against the writer itself.
+inline uint64_t json_escaped_size(std::string_view s) {
+    uint64_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t') {
+            n += 2;
+        } else if (c < 0x20) {
+            n += 6;
+        } else if (c < 0x80) {
+            n += 1;
+        } else if (c >= 0xF8) {
+            n += 6;     // no lead byte: one replacement character
+        } else {
+            // a lead byte claims up to three more bytes, as jsoncpp's utf8ToCodepoint does
+            // (without checking that they are continuation bytes); a sequence cut by the
+            // end of the string is one replacement character for its lead byte
+            const size_t width = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+            if (s.size() - i < width) {
+                n += 6;
+                continue;
+            }
+            n += width == 4 ? 12 : 6;
+            i += width - 1;
+        }
+    }
+    return n;
 }
 
 } // namespace cli

@@ -174,10 +174,6 @@ const char *const kPredicateOperators[] = {
     "any", "all", "none", "at_least", "and", "or", "not",
 };
 
-// The deepest nesting of arrays and objects a request body may have (jsoncpp's stackLimit,
-// its default): a deeper one is refused invalid_request
-constexpr int kMaxBodyNesting = 1000;
-
 constexpr InvalidPatternRequest invalid{};
 
 using Fields = StrictObject<InvalidPatternRequest>;
@@ -1515,47 +1511,9 @@ PatternLimits pattern_limits(const Config &config) {
 }
 
 Json::Value parse_pattern_body(const std::string &content) {
-    // one RFC 8259 JSON text, its members' names unique: no comments, no trailing comma,
-    // nothing after the value, and no duplicated member name, whose earlier value jsoncpp would
-    // drop without a word (a budget given twice would be replaced silently). Not
-    // CharReaderBuilder::strictMode(): its strictRoot would refuse a root that is not an object
-    // here, before the graph check (§5 step 4), where step 5 does. The route's own reader:
-    // /search, /align and /traverse keep theirs
-    // jsoncpp skips a comment before an object's member name whatever allowComments says: a
-    // '/' outside a string is no JSON at all, so the text is refused before it is parsed
-    bool in_string = false;
-    for (size_t i = 0; i < content.size(); ++i) {
-        if (in_string) {
-            if (content[i] == '\\')
-                ++i;
-            else if (content[i] == '"')
-                in_string = false;
-        } else if (content[i] == '"') {
-            in_string = true;
-        } else if (content[i] == '/') {
-            throw invalid("request: not JSON: a comment (or a '/' outside a string) at byte "
-                          + std::to_string(i));
-        }
-    }
-    Json::CharReaderBuilder builder;
-    builder["allowComments"] = false;
-    builder["allowTrailingCommas"] = false;
-    builder["failIfExtra"] = true;
-    builder["rejectDupKeys"] = true;
-    builder["stackLimit"] = kMaxBodyNesting;
-    std::unique_ptr<Json::CharReader> reader { builder.newCharReader() };
-    Json::Value json;
-    std::string errors;
-    try {
-        if (!reader->parse(content.data(), content.data() + content.size(), &json, &errors))
-            throw invalid("request: not JSON: " + errors);
-    } catch (const Json::Exception &e) {
-        // jsoncpp throws rather than returns past its nesting limit: the client's to fix, not a
-        // server bug (a 400 without a code)
-        throw invalid("request: not JSON: " + std::string(e.what()) + " (more than "
-                      + std::to_string(kMaxBodyNesting) + " nested arrays and objects)");
-    }
-    return json;
+    // one RFC 8259 JSON text, its members' names unique (parse_strict_json, the reader of the
+    // traversal routes too), refused invalid_request
+    return parse_strict_json<InvalidPatternRequest>(content, "request: not JSON: ");
 }
 
 void validate_pattern_request(const Json::Value &json, const PatternLimits &limits) {
@@ -3137,6 +3095,12 @@ bool write_pattern_answer(const std::string &content,
         logger->error("Request in {} failed: {}", name, e.what());
         Json::Value body;
         body["error"] = e.what();
+        out << Json::writeString(builder, body) << std::endl;
+    } catch (...) {
+        // what the server answers 500 for a failure that is not a std::exception
+        logger->error("Request in {} failed", name);
+        Json::Value body;
+        body["error"] = "Internal server error";
         out << Json::writeString(builder, body) << std::endl;
     }
     return false;

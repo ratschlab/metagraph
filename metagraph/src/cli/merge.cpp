@@ -111,7 +111,9 @@ int merge_graph(Config *config) {
     logger->info("Graphs merged in {} sec", timer.elapsed());
 
     // graph output
-    graph::DBGSuccinct(graph, config->graph_mode).serialize(config->outfbase);
+    const graph::DBGSuccinct merged(graph, config->graph_mode);
+    merged.serialize(config->outfbase);
+    remove_stale_dummy_mask(merged, config->outfbase);
 
     return 0;
 }

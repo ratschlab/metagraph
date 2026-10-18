@@ -1,14 +1,11 @@
 #include "augment.hpp"
 
-#include <filesystem>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
-#include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -145,26 +142,7 @@ int augment_graph(Config *config) {
 
     graph->serialize(config->outfbase);
     graph->serialize_extensions(config->outfbase);
-    if (dynamic_cast<const graph::DBGSuccinct*>(graph.get())
-            && !dynamic_cast<const graph::DBGSuccinct&>(*graph).get_mask()) {
-        // a mask left beside the output by an earlier graph would be loaded with this one
-        // (a stale mask of the right size passes the load's check): it is removed
-        const std::string stale
-                = utils::remove_suffix(config->outfbase, graph::DBGSuccinct::kExtension)
-                    + graph::DBGSuccinct::kDummyMaskExtension;
-        std::error_code error;
-        if (std::filesystem::exists(stale, error)) {
-            if (std::filesystem::remove(stale, error)) {
-                logger->warn("Removed the dummy-edge mask {} left beside the output: it was "
-                             "not this graph's (the extended graph has no mask)", stale);
-            } else {
-                logger->warn("The dummy-edge mask {} beside the output is not this graph's "
-                             "and could not be removed ({}): delete it, or rebuild it with "
-                             "`metagraph transform --mask-dummy --force`", stale,
-                             error.message());
-            }
-        }
-    }
+    remove_stale_dummy_mask(*graph, config->outfbase);
     graph.reset();
 
     logger->trace("Serialized in {} sec", timer.elapsed());

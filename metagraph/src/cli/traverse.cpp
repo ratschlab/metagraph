@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -81,10 +82,6 @@ class DeliveryScope {
 };
 
 // ---------------------------------------------------------------- strict JSON access
-
-struct RefuseRequest {
-    InvalidRequest operator()(const std::string &message) const { return InvalidRequest(message); }
-};
 
 // A request object read strictly (StrictObject): an unknown field is refused when it goes out
 // of scope, unless an exception is already on its way
@@ -529,14 +526,18 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
                 Strict e(ex[i], "request.select.seeds[" + std::to_string(i) + "]");
                 ExplicitSeed seed;
                 const auto &iv = e.raw("kmer_interval");
-                // isIntegral() accepts negatives, and asUInt64() on one aborts, so the
-                // sign has to be checked here rather than left to the conversion
-                if (!iv.isArray() || iv.size() != 2 || !iv[0].isIntegral() || !iv[1].isIntegral()
-                        || iv[0].asInt64() < 0 || iv[1].asInt64() < 0) {
+                // each end as every non-negative integer of a request is read (an end above
+                // INT64_MAX is one, refused by the engine as out of range)
+                std::optional<uint64_t> begin, end;
+                if (iv.isArray() && iv.size() == 2) {
+                    begin = non_negative_integer(iv[0]);
+                    end = non_negative_integer(iv[1]);
+                }
+                if (!begin || !end) {
                     throw InvalidRequest(e.child_path("kmer_interval")
                                          + ": expected [begin, end] as non-negative integers");
                 }
-                seed.kmers = { iv[0].asUInt64(), iv[1].asUInt64() };
+                seed.kmers = { *begin, *end };
                 seed.labels = e.strings("labels");
                 req.policy.explicit_seeds.push_back(std::move(seed));
             }
@@ -3888,40 +3889,6 @@ std::string graphlet_text(const SeedResult &result, const Seed &seed, const Stra
 
 // ---------------------------------------------------------------- processing
 
-// The length jsoncpp's writer gives |s| inside a JSON string, quotes excluded (its
-// escaping with emitUTF8 off, which every writer here uses): '"' '\\' and \b \f \n \r \t
-// take two bytes, any other control character six (\u00XX), a code point above U+007F six
-// (twelve as a surrogate pair), and a malformed sequence the six of U+FFFD for the bytes
-// the writer consumes with it. GraphletCodec.JsonEscapedSizeIsTheWriters checks it against
-// the writer itself.
-uint64_t json_escaped_size(std::string_view s) {
-    uint64_t n = 0;
-    for (size_t i = 0; i < s.size(); ++i) {
-        const unsigned char c = static_cast<unsigned char>(s[i]);
-        if (c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t') {
-            n += 2;
-        } else if (c < 0x20) {
-            n += 6;
-        } else if (c < 0x80) {
-            n += 1;
-        } else if (c >= 0xF8) {
-            n += 6;     // no lead byte: one replacement character
-        } else {
-            // a lead byte claims up to three more bytes, as jsoncpp's utf8ToCodepoint does
-            // (without checking that they are continuation bytes); a sequence cut by the
-            // end of the string is one replacement character for its lead byte
-            const size_t width = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-            if (s.size() - i < width) {
-                n += 6;
-                continue;
-            }
-            n += width == 4 ? 12 : 6;
-            i += width - 1;
-        }
-    }
-    return n;
-}
-
 // the decimal exponent of x > 0, finite: x = d.ddd x 10^E (exact, from the shortest digits)
 static int decimal_exponent(double x) {
     char buf[64];
@@ -5581,17 +5548,32 @@ int traverse_graph(Config *config) {
             logger->error("Cannot open request file {}", file);
             return 1;
         }
+        // read as the server reads a body (parse_strict_json): a duplicated member, a comment, a
+        // trailing comma or text after the value is no JSON
+        const std::string content { std::istreambuf_iterator<char>(in),
+                                    std::istreambuf_iterator<char>() };
         Json::Value json;
-        Json::CharReaderBuilder reader;
-        std::string errs;
-        if (!Json::parseFromStream(reader, in, &json, &errs)) {
-            logger->error("Invalid JSON in {}: {}", file, errs);
+        try {
+            json = parse_strict_json<RefuseRequest>(content, "");
+        } catch (const InvalidRequest &e) {
+            logger->error("Invalid JSON in {}: {}", file, e.what());
             return 1;
         }
         // A request with attempt_id states its usage on an error after it was read too, as the
         // server's 400 does; a malformed id is refused
         // without (nothing to reconcile)
         std::unique_ptr<Attempt> attempt;
+        // a failed request gets the body the server answers it with, and the next file is still
+        // answered (an exception that escaped would end the run in std::terminate, without a
+        // body for this file or the later ones)
+        auto answer_failure = [&](const std::string &error) {
+            Json::Value err;
+            err["error"] = error;
+            if (attempt)
+                err["usage"] = attempt->usage_json("error");
+            std::cout << Json::writeString(builder, err) << std::endl;
+            status = 1;
+        };
         try {
             if (!config->traverse_resolve) {
                 const AttemptIds ids = attempt_ids(json);
@@ -5640,12 +5622,14 @@ int traverse_graph(Config *config) {
             status = 1;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());
-            Json::Value err;
-            err["error"] = e.what();
-            if (attempt)
-                err["usage"] = attempt->usage_json("error");
-            std::cout << Json::writeString(builder, err) << std::endl;
-            status = 1;
+            answer_failure(e.what());
+        } catch (const std::exception &e) {
+            // anything else (an internal failure): the server's 400 {"error"} (and usage)
+            logger->error("Request in {} failed: {}", file, e.what());
+            answer_failure(e.what());
+        } catch (...) {
+            logger->error("Request in {} failed", file);
+            answer_failure("Internal server error");
         }
     }
     return status;

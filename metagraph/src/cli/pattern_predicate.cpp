@@ -247,22 +247,10 @@ uint32_t Parser::node(const Json::Value &v, const std::string &path, unsigned de
     return out_.nodes.size() - 1;
 }
 
-// The bytes of |name| written as a JSON string by jsoncpp, quotes included, at most: exact for
-// printable ASCII, a character it escapes as its escape, a byte outside ASCII as 6 (a \u
-// escape; a code point of several bytes is written in fewer)
+// The bytes of |name| written as a JSON string by jsoncpp, quotes included (json_escaped_size:
+// exact, a request's names being UTF-8)
 uint64_t quoted_bytes(const std::string &name) {
-    uint64_t bytes = 2;
-    for (unsigned char c : name) {
-        if (c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r'
-                || c == '\t') {
-            bytes += 2;
-        } else if (c < 0x20 || c >= 0x80) {
-            bytes += 6;
-        } else {
-            bytes += 1;
-        }
-    }
-    return bytes;
+    return 2 + json_escaped_size(name);
 }
 
 // The bytes of {"<key>":<value>} in compact JSON

@@ -263,8 +263,9 @@ class PatternDelivery {
 };
 
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after
-// it, nested at most 1,000 deep; anything else is refused as invalid_request (the other routes'
-// generic parse error carries no code, and their parser is more lenient)
+// it, nested at most 1,000 deep (parse_strict_json, the traversal routes' reader too); anything
+// else is refused as invalid_request (the traversal routes answer the same faults with their
+// code-less "Bad json received: " 400)
 Json::Value parse_pattern_body(const std::string &content);
 
 /**
@@ -344,8 +345,9 @@ Json::Value pattern_traverse_block(const Json::Value &full);
 /**
  * One request of `metagraph pattern` (the text of a request file, |name| in the log) as the
  * CLI answers it on |out|, one JSON text written with |builder|: the answer (true), or the body
- * of a refusal or, for any other failure, the body the server answers 400 without a code
- * ({"error"}) (false). Never throws for a request, so that the next file is still answered.
+ * of a refusal or, for any other failure, the body the server answers without a code: 400
+ * {"error": what} for a std::exception, 500 {"error": "Internal server error"} for anything else
+ * (false). Never throws for a request, so that the next file is still answered.
  * |hooks|: as process_pattern_request's (tests).
  */
 bool write_pattern_answer(const std::string &content,

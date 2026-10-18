@@ -145,15 +145,10 @@ constexpr uint64_t kPathLabelText = 80 + kCountText;
 // "paths":<count>,"paths_record_verified":<count>}, (73 and three counts)
 constexpr uint64_t kPathByLabelText = 80 + 3 * kCountText;
 
-// a string's text: quoted, every byte jsoncpp may escape (a control character, a quote, a
-// backslash, a byte of a non-ASCII character: \uXXXX) counted as 6
+// a string's text, quoted, as jsoncpp writes it (json_escaped_size): exact for valid UTF-8,
+// from above otherwise (a record name need not be UTF-8)
 inline uint64_t string_text_bytes(const char *begin, const char *end) {
-    uint64_t bytes = 2;
-    for (const char *c = begin; c != end; ++c) {
-        const unsigned char u = static_cast<unsigned char>(*c);
-        bytes += u < 0x20 || u >= 0x80 || u == '"' || u == '\\' ? 6 : 1;
-    }
-    return bytes;
+    return 2 + json_escaped_size(std::string_view(begin, end - begin));
 }
 
 inline uint64_t string_text_bytes(std::string_view s) {
@@ -162,8 +157,13 @@ inline uint64_t string_text_bytes(std::string_view s) {
 
 constexpr uint64_t kNoKey = graph::traversal::npos;
 
+// A count object of SPEC §7.4 without an interval: value, relation, unit. Never asked for a
+// bounds count, whose lower and upper only pattern.cpp's count_json(Count) writes (a bounds
+// count rendered here would lose its interval); the counts of retrieval, selection and support
+// are exact, at least or unknown
 inline Json::Value count_json(graph::pattern::Relation relation, uint64_t value,
                               graph::pattern::Unit unit) {
+    assert(relation != graph::pattern::Relation::BOUNDS);
     Json::Value v;
     v["value"] = relation == graph::pattern::Relation::UNKNOWN ? Json::Value() : uint_json(value);
     v["relation"] = graph::pattern::to_string(relation);

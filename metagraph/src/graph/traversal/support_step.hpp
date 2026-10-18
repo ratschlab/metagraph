@@ -18,8 +18,9 @@ namespace traversal {
 
 /**
  * The support step: how the support a label gives a walk narrows when the walk takes one step
- * (the walker's step rule, factored out as pure linear merges so that the pattern's
- * supported-path search and the walker can share it). Nothing here reads the annotation, the
+ * (the walker's step rule as pure linear merges, for the pattern's supported-path search; the
+ * walker keeps its per-coordinate form, continues_chain in walker.hpp, which does not see
+ * record ends: the gap stated below). Nothing here reads the annotation, the
  * graph or a clock of its own: the caller reads the rows, says which k-mer each row belongs
  * to, charges the units a call returns and owns the deadline.
  *
@@ -30,7 +31,7 @@ namespace traversal {
  *    the whole walk, i.e. a column coordinate c of the first k-mer with c + i a coordinate of
  *    the i-th, all in one record. A step continues the CHAINS: the walker keeps a coordinate x
  *    of the next k-mer when x - 1 is live on its right arm and x + 1 on its left arm
- *    (walker.cpp, process_item and validate_seed: a binary search per coordinate). Here the
+ *    (continues_chain, walker.hpp: a binary search per coordinate). Here the
  *    live coordinates are runs of consecutive coordinates (ChainRun), shifted by one and
  *    intersected with the row's coordinates turned into runs once per row (CoordRun): linear
  *    in runs, so a homopolymer's thousands of coordinates are one run and one comparison per
