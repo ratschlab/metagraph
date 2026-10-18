@@ -4585,6 +4585,34 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   data are in `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/` (DELTA.md).
 - Tests: the full suite (SUITE_TRUTH_CACHE as in round 2) at 4c4d0c3ad, 889 tests OK, none skipped (780 s).
 
+### The delta verifier's round (2026-10-18, on gr/int-sd)
+The Opus verifier of the merged document (`~/.cache/metagraph-traverse-plans/2026-10-18/doc-v6-verify/VERIFY.md`) found
+every number right and three medium and nine low wording errors; each is fixed, the v5 document changing only where
+the text was wrong for v5 too:
+- M1: an arm the run's plan does not schedule (v6's direct-local warm-ups on direct-remote and mcp) reads "no
+  execution planned" in the coverage line (cells.coverage_text, ArmState.not_planned), the agreement row ("25 with no
+  MCP execution planned") and the classes line ("no MCP execution planned (the plan runs this test on direct-local
+  alone)"), never "not recorded" or compare's bare "missing"; a run without a plan reads as before.
+- M2: chapter P counts the answer-side scenario-level marks apart from the requests the tools cannot express (chapter
+  facts n_mcp_answer_lacks, mcp_answer_lacks_ids / _fields, n_mcp_not_exercised_tools,
+  mcp_not_exercised_tools_by_family); where the manifest has such a mark (sections.answer_side_mark_ids), I.3's ○ row,
+  the attention definition, appendix F's vocabulary, the glossary entry and appendix G's lead add "or, by the
+  manifest's scenario-level mark, the MCP answer lacks every field the test's property checks read".
+- M3: I.2's /resolve row names 60,000 ms for manifest v5 and later (v5 too); L1: the client time-outs state the
+  direct-remote cap of 125 s (v5 too) and v6's budget-plus-30-s rule.
+- L2: N's version note keeps the warm repeats of the scenarios policy_v6_rt_mcp selects; L4: P-warm's two targets
+  "whose searches all ended at the budget in the v5 baseline"; L3: M's and N's "the rest read inconclusive" only when
+  a direct test did not pass (v5's chapter N too); L5: Timing 4 names the population of its unpaired count (v5 too);
+  L6: counts of one in the singular (facts' :s / :v read a count carried as text); L7: a not-exercised arm whose
+  reason is the manifest's own mark without a by-design case points at appendix G (blocks.limit_appendix; v5's
+  T-edge-0005 too); L8: chapter C's prose gives the document relations' reason (C-caps-0001 / -0002 not run via MCP;
+  v5 too); L9: a check the marks set aside reads "set aside by the marks", not "not compared".
+- Validation: the v5 document (174 pages) differs from build5 only in the lines DELTA.md section 7 lists; the v6
+  document (169 pages, the re-evaluated set) and the v5 one have no missing character, no undefined reference, no
+  LaTeX warning, the known 1.1 pt overfull box alone and no local path. The full suite at 868134d6a: 937 tests OK,
+  none skipped (744 s). The changed lines against the verifier's builds:
+  `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/CHANGED-LINES.md`.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
