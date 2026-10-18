@@ -3399,15 +3399,54 @@ def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
     return out
 
 
-def mark_pattern_mcp_fields(scenarios: List[dict]) -> Dict[str, List[str]]:
+# v7 (the service owner's statement, 2026-10-17): the MCP's /pattern answer leaves out the entry's pattern text BY
+# DESIGN, not for want of a feature. A check that reads nothing else of what the answer leaves out is classed
+# service-side by design at property level (mcp.by_design_checks [{check, case}], lane V5's manifest-side mechanism:
+# the mark sets a not_exposed reading of the check aside on the MCP arm, the check stays required on the direct arms)
+# instead of not implemented yet via MCP, under the by-design table's case that the scenario names (mcp.by_design)
+# for the service's handling of that field: pattern.lowercase for the pattern text (the service checks the text in
+# either case and upper-cases it before it is stored and sent, so the host never sees the caller's text from the MCP
+# arm; P-edge-0004 reads the host's upper-cased echo). T-edge-0008 is modelled through the table instead: its case
+# traverse.duplicate_seeds states an explains_checks entry {check, detail_matches} for the not_exposed answer_fields,
+# which the comparison verifies as a by-design pair; the same here would add such an entry to pattern.lowercase, a
+# change of the service's own file (service_by_design.json), which the suite does not make. A scenario that names
+# none of a field's cases keeps the not-implemented mark (the builder refuses a by_design_checks case outside the
+# table).
+MCP_PATTERN_ENTRY_BY_DESIGN = {"pattern": ("pattern.lowercase",)}
+
+
+def pattern_by_design_case(sc: dict, check: str, what: List[str]) -> Optional[str]:
+    """The by-design table's case under which the MCP's /pattern answer leaves out everything |check| of |sc| reads
+    of what it cannot carry (|what|: pattern_mcp_unexposed's descriptions), by MCP_PATTERN_ENTRY_BY_DESIGN: an
+    entry_fields check whose unexposed fields are all by design, each with a case the scenario names; else None."""
+    if check != "entry_fields" or not what:
+        return None
+    named = (sc.get("mcp") or {}).get("by_design") or []
+    heads = dict((MCP_PATTERN_ENTRY_NOT_EXPOSED[h], h) for h in MCP_PATTERN_ENTRY_NOT_EXPOSED)
+    cases = []
+    for w in what:
+        case = next((c for c in MCP_PATTERN_ENTRY_BY_DESIGN.get(heads.get(w), ()) if c in named), None)
+        if case is None:
+            return None
+        cases.append(case)
+    return cases[0] if len(set(cases)) == 1 else None
+
+
+def mark_pattern_mcp_fields(scenarios: List[dict], by_design: bool = False) -> Dict[str, List[str]]:
     """Marks every property check of a /pattern scenario that reads what the MCP's answer cannot carry
-    (pattern_mcp_unexposed) not implemented yet via MCP (mcp_not_implemented_check, with the fields as its reason);
-    returns {id: [checks marked]}."""
+    (pattern_mcp_unexposed) not implemented yet via MCP (mcp_not_implemented_check, with the fields as its reason),
+    or, with |by_design| (manifest v7), service-side by design where the service leaves out by design all it reads
+    (pattern_by_design_case: mcp_by_design_check with the case); returns {id: [checks marked]}."""
     out = {}
     for s in scenarios:
         for check, what in pattern_mcp_unexposed(s).items():
-            if any(e.get("check") == check for e in (s["mcp"].get("not_implemented_checks") or [])):
+            if any(e.get("check") == check for key in ("not_implemented_checks", "by_design_checks")
+                   for e in (s["mcp"].get(key) or [])):
                 continue
-            mcp_not_implemented_check(s, check, "the MCP's /pattern answer does not carry %s" % "; ".join(what))
+            case = pattern_by_design_case(s, check, what) if by_design else None
+            if case:
+                mcp_by_design_check(s, check, case)
+            else:
+                mcp_not_implemented_check(s, check, "the MCP's /pattern answer does not carry %s" % "; ".join(what))
             out.setdefault(s["id"], []).append(check)
     return out

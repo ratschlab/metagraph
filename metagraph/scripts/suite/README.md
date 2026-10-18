@@ -4613,6 +4613,33 @@ the text was wrong for v5 too:
   none skipped (744 s). The changed lines against the verifier's builds:
   `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/CHANGED-LINES.md`.
 
+## Manifest v7 (2026-10-18)
+v7 = v6 plus exactly the owner's approved changes, each below; v6 (content 49907dbb...), v5 and every frozen policy
+stay byte-identical. build_manifest.py builds v7 by default (MANIFEST_VERSION 7) and the frozen v6 again, byte for
+byte, with `--manifest-version 6` (build(manifest_version=6): test_frozen_v6_is_what_the_builder_makes); the v7
+steps run only for version 7.
+
+### P-edge-0004's pattern text: service-side by design (item 1)
+The service owner (2026-10-17): the MCP's /pattern answer leaves out the entry's pattern text BY DESIGN. v6 marked
+P-edge-0004's entry_fields check (it reads the host's upper-cased echo of the lower-case pattern) not implemented yet
+via MCP (mcp.not_implemented_checks). v7 classes it service-side by design by the suite's manifest-side mechanism for
+that class at property level, `mcp.by_design_checks` [{check, case}] (lane V5; "Property-level marks" above):
+`{"check": "entry_fields", "case": "pattern.lowercase"}`, the table's case the scenario already names (mcp.by_design)
+for the service's handling of the pattern text (it checks the text in either case and upper-cases it before it is
+stored and sent, so the host never sees the caller's text from the MCP arm). Why not T-edge-0008's route: T-edge-0008
+is modelled through the table, its case traverse.duplicate_seeds stating an explains_checks entry
+{check, detail_matches} that explains the not_exposed answer_fields reading (verified as a by-design pair); the same
+here needs an explains_checks entry on pattern.lowercase, a change of service_by_design.json, the service's own file,
+which the suite does not edit. The mark sets the not_exposed reading aside on the MCP arm exactly as the not-implemented
+mark did (suite_common.checks_marked_aside reads both marks alike), the check stays required on the direct arms, and the
+comparison, the report and the results document list it under "Service-side by design (property)" instead of "Not
+implemented yet via MCP (property)" (compare's marked_checks mark by_design). The rule is areas.MCP_PATTERN_ENTRY_BY_DESIGN
+(field -> the cases a scenario may name for it) with areas.pattern_by_design_case: an entry_fields check whose every
+field the MCP's answer cannot carry is left out by design, each under a case the scenario names, is marked by design;
+any other (another unexposed field beside it, no case named) keeps v6's not-implemented mark. In v7 that is
+P-edge-0004 alone (the only scenario reading the pattern text). Nothing else of the scenario changes: its request,
+expectations, exposes and repeats are v6's.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
