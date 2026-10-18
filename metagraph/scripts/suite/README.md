@@ -4383,7 +4383,7 @@ branch for a v6 run.
 ## The v6 results document: a delta on v5 (2026-10-17)
 The owner (2026-10-17): v6 is very close to v5, so its document is v5's with only what v6 changes (v6 = v5 + the
 /pattern budgets of 110,000 ms, the 25 direct-local warm-ups P-warm-0001..0025, the MCP property marks and the
-budget_stress tags). Every change keeps the v5 document's chapters byte-identical (the proof below).
+budget_stress tags). Every change keeps the v5 document's chapters byte-identical (the validation below).
 - The version switches: the prose's `[[manifest_version = 5 ? v5 text | v4 text]]` conditionals read
   `[[manifest_version >= 5 ? ...]]` (facts.fill compares a number with `>=`; `=` stays an equality), so a v6 run
   takes every v5 branch, the text unchanged. Chapter N's version note names the run's own version
@@ -4436,6 +4436,19 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
 - A wording fix the v6 run needed (not a brief item): I.1's and I.4's inconclusive executions by reason count the
   one inconclusive by a scenario-level mark (D-P-scope-0004's MCP r0, marks_cover_repeat) as "by a scenario-level
   mark (every property check marked as not shown via MCP)", never as "the service's ... (a host state)".
+
+### Validation (offline; no host was contacted; the run directories were only read)
+- The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef) re-rendered with this generator: every chapter file,
+  doc.sty, the three plot files and doc.aux / .toc / .out byte-identical to build5 (gr/suite-doc 895397620); doc.tex
+  differs in the README pin and appendix F's two path rows; 174 pages, no missing character, no undefined
+  reference, the known 1.1 pt overfull box, no local path in the PDF text.
+- The v6 baseline (runs/20261017T082918Z_refseq97-81c620ef) built with the command above: 169 pages, no missing
+  character, no undefined reference, no LaTeX warning, the same single 1.1 pt overfull box (T-edge-0011), no local
+  path in the PDF text; the cover's GATE PASS (policy_v6_rtp_mcp: 2068 judged, 1950 passed, 0 problems) and I.4's
+  policy_v6_rt_mcp row (689 judged, 635 passed, 0 problems) equal the acceptance note's offline verdicts. The builds,
+  the chapter-by-chapter delta against v5 with each difference's source and the numbers checked against the run's
+  data are in `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/` (DELTA.md).
+- Tests: the full suite (SUITE_TRUTH_CACHE as in round 2) at da2e1eb2a, 887 tests OK, none skipped (811 s).
 
 ## Glossary
 
