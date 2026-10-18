@@ -703,5 +703,18 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertIn("as the blocks below state per route", prose("overview")["sections"]["methods"]["paragraphs"][3])
 
 
+    def test_l5_r2_002_gate_record(self):
+        import inspect
+        src = inspect.getsource(sections.gate_problems)
+        self.assertIn('pol_rec["path"] = latex.public_paths(pol_rec["path"])', src)
+        ev = inspect.getsource(sections.evidence_manifest)
+        self.assertIn('"record_sha256": hashlib.sha256(record.encode("utf-8")).hexdigest()', ev)
+        self.assertIn('"path_bases"', ev)
+        app = inspect.getsource(sections.appendices)
+        self.assertLess(app.index("gate_problems(ctx)"), app.index("evidence_manifest(ctx)"))
+        lead = prose("overview")["appendix_F"]["paragraphs"][0]
+        self.assertIn("is not in the repository (runs/ is git-ignored)", lead)
+
+
 if __name__ == "__main__":
     unittest.main()

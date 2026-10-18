@@ -4168,7 +4168,12 @@ def evidence_manifest(ctx):
     dec_path = os.path.join(reader.SUITE_DIR, "gate", dec["_file"]) if dec and dec.get("_file") else None
     table = run.table_meta or {}
     ident = run.identity if isinstance(getattr(run, "identity", None), dict) else None
+    record = ctx.data_files.get(GATE_PROBLEMS_FILE)
     return {
+        "path_bases": {"inputs": "the run directory (run_directory below; metagraph/scripts/suite/runs/ is "
+                                 "git-ignored: the directory travels as a copy, its files checked by these sha256)",
+                       "gate.record": "the document's build directory, beside doc.pdf and this file",
+                       "other paths": "the repository root"},
         "document": {"run_id": run.run_id(), "set": "re-evaluated" if run.reevaluated else "recorded",
                      "generator": "metagraph/scripts/suite/doc/make_doc.py",
                      "generator_commit": reader.git_commit_of(HERE, os.path.dirname(HERE)),
@@ -4176,6 +4181,7 @@ def evidence_manifest(ctx):
         "run_directory": latex.public_paths(run.dir),
         "inputs": inputs,
         "gate": {"record": GATE_PROBLEMS_FILE if gate else None,
+                 "record_sha256": hashlib.sha256(record.encode("utf-8")).hexdigest() if record else None,
                  "verdict": None if not gate else ("GATE PASS" if gate.get("passed") else "GATE FAIL"),
                  "judged_offline_for_this_document": bool(run.gate_offline), "policy": pol, "also_policies": also,
                  "declared": None if not dec else {"path": latex.public_paths(dec_path) if dec_path else dec.get(
@@ -4258,10 +4264,17 @@ def gate_problems(ctx):
     out += "%s What the gate read: %s.\n\n" % (inline(gate_decision_text(run)), esc(gate_read_text(run)))
     out += gate_ledger(ctx)
     problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
+    # no local path in the delivered record (the verification of the review's fixes, L5): the policy's path and any
+    # path in a problem's text or a note in the suite's tree, as evidence.json and the document print them
+    pol_rec = dict(gate.get("policy") or {})
+    if pol_rec.get("path"):
+        pol_rec["path"] = latex.public_paths(pol_rec["path"])
     ctx.data_files[GATE_PROBLEMS_FILE] = json.dumps(
-        {"verdict": "GATE PASS" if gate.get("passed") else "GATE FAIL", "policy": gate.get("policy"),
+        {"verdict": "GATE PASS" if gate.get("passed") else "GATE FAIL", "policy": pol_rec,
          "counts": gate.get("counts"), "judged_offline_for_this_document": bool(run.gate_offline),
-         "problems": [dict(p, group=gate_group_of(p)) for p in problems], "notes": gate.get("notes") or []},
+         "problems": [dict(p, group=gate_group_of(p), detail=latex.public_paths(p.get("detail")))
+                      if isinstance(p.get("detail"), str) else dict(p, group=gate_group_of(p)) for p in problems],
+         "notes": [latex.public_paths(n) if isinstance(n, str) else n for n in (gate.get("notes") or [])]},
         indent=1, sort_keys=True) + "\n"
     if problems:
         out += gate_action_table(ctx, problems)
@@ -4511,7 +4524,6 @@ def appendices(ctx):
     out += latex.section("E\\qd %s" % titles["E"], "app:E")
     out += index(ctx)
     out += latex.section("F\\qd %s" % titles["F"], "app:F")
-    ctx.data_files[EVIDENCE_FILE] = json.dumps(evidence_manifest(ctx), indent=1, sort_keys=True) + "\n"
     out += appendix_lead(ctx, "appendix_F")
     out += "\\parhead{Environment}\n" + environment_table(ctx)
     out += reruns_table(ctx)
@@ -4519,6 +4531,8 @@ def appendices(ctx):
     out += "\\parhead{Vocabulary}\n" + classes_tables(bool(answer_side_mark_ids(ctx.run)))
     out += colour_rules(ctx)
     out += "\\parhead{The deploy gate}\n" + gate_problems(ctx)
+    # written after the gate's record, whose sha256 it carries (the second review, R2-002)
+    ctx.data_files[EVIDENCE_FILE] = json.dumps(evidence_manifest(ctx), indent=1, sort_keys=True) + "\n"
     out += latex.section("G\\qd %s" % titles["G"], "app:G")
     out += appendix_lead(ctx, "appendix_G")
     out += mcp_limits(ctx)
