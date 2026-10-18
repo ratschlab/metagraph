@@ -4456,17 +4456,19 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   every other v5 chapter stays byte-identical.
 
 ### Validation (offline; no host was contacted; the run directories were only read)
-- The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef) re-rendered with this generator: every chapter file,
-  doc.sty, the three plot files and doc.aux / .toc / .out byte-identical to build5 (gr/suite-doc 895397620); doc.tex
-  differs in the README pin and appendix F's two path rows; 174 pages, no missing character, no undefined
-  reference, the known 1.1 pt overfull box, no local path in the PDF text.
-- The v6 baseline (runs/20261017T082918Z_refseq97-81c620ef) built with the command above: 169 pages, no missing
+- The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef) re-rendered with this generator (4c4d0c3ad): nine
+  chapter files (all but C), doc.sty, the three plot files and doc.aux / .toc / .out byte-identical to build5
+  (gr/suite-doc 895397620); chapter C differs in the one relations line the relation fix corrects (C-caps-0001 /
+  -0002 not run via MCP), doc.tex in appendix C's three C-caps rows (the same fix), the README pin and appendix F's
+  two path rows; 174 pages, no missing character, no undefined reference, the known 1.1 pt overfull box, no local
+  path in the PDF text.
+- The v6 baseline (runs/20261017T082918Z_refseq97-81c620ef) built with the command above (4c4d0c3ad): 169 pages, no missing
   character, no undefined reference, no LaTeX warning, the same single 1.1 pt overfull box (T-edge-0011), no local
   path in the PDF text; the cover's GATE PASS (policy_v6_rtp_mcp: 2068 judged, 1950 passed, 0 problems) and I.4's
   policy_v6_rt_mcp row (689 judged, 635 passed, 0 problems) equal the acceptance note's offline verdicts. The builds,
   the chapter-by-chapter delta against v5 with each difference's source and the numbers checked against the run's
   data are in `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/` (DELTA.md).
-- Tests: the full suite (SUITE_TRUTH_CACHE as in round 2) at da2e1eb2a, 887 tests OK, none skipped (811 s).
+- Tests: the full suite (SUITE_TRUTH_CACHE as in round 2) at 4c4d0c3ad, 889 tests OK, none skipped (780 s).
 
 ## Glossary
 
