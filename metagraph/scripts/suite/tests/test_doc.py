@@ -1338,8 +1338,11 @@ class VerifyRoundTwoTest(unittest.TestCase):
         gp = sections.gate_outcome_counts(R())
         self.assertEqual(gp, {"judged": True, "outcome": 3, "inconclusive": 2, "finding": 1, "pairs": 2})
         clause = sections.gate_inconclusive_clause(R())
-        self.assertTrue(clause.startswith("2 of them block the deploy gate: those on a gated access path, in the policy's selection"), clause)
-        self.assertIn("the others are on an ungated access path, outside the selection or exempt", clause)
+        # V6-001: the criterion names the policy's required population, its automatic exclusions included
+        self.assertTrue(clause.startswith("2 of them block the deploy gate: those the policy requires on that access "
+                                          "path and repeat"), clause)
+        self.assertIn("the others are on an ungated access path, outside the selection, removed by the policy's "
+                      "automatic exclusions or declared exempt", clause)
 
         class N(object):
             gate = None
@@ -1944,7 +1947,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
         self.assertIn("each footnoted in its chapter's tables", sections.limitations_table(ctx))
         glossary = sc.read_json(os.path.join(PROSE_DIR, "glossary.json"))
         inc = [e for e in glossary["entries"] if e["term"] == "inconclusive"][0]
-        self.assertIn("in the policy's selection and not declared exempt", inc["definition"])
+        self.assertIn("not removed by the policy's automatic exclusions nor declared exempt", inc["definition"])
         # L-e: the by-design row of F says the table was found by its sha
         ctx.run.table_meta = {"path": "/w/service_by_design.json", "version": 1, "cases": 5, "service_commit": "abc",
                               "sha256": "d" * 64, "replayed": True, "warnings": []}
@@ -4278,7 +4281,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("The count is not a count of service defects: 2 release evidence problems", decision)
         self.assertIn("judged offline by gate.py when this document was built", sections.gate_read_text(stub))
         stub.gate = {"problems": [], "passed": True}
-        self.assertTrue(sections.gate_decision_text(stub).startswith("The gate passed: every planned and required execution"))
+        # V6-001 (the external review of the v6 document): with a policy, the passed decision names the required
+        # population after the policy's automatic exclusions
+        self.assertTrue(sections.gate_decision_text(stub).startswith(
+            "The gate passed: every planned execution was recorded, every execution the policy requires passed"))
         self.assertIn("not the whole service", sections.gate_decision_text(stub))
         # the ungated fake run: no decision judged, and the cover says so
         ctx = self.ctx(overview=self.overview)

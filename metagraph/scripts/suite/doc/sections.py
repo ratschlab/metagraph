@@ -209,6 +209,10 @@ class Context(object):
                 "gate_routes": gate_scope(run)["routes"], "gate_arms": gate_scope(run)["arms"],
                 "n_gate_selected": gate_scope(run)["selected"], "gate_scope_text": gate_scope(run)["text"],
                 "gate_decision": gate_decision_text(run), "gate_groups_text": gate_groups_text(run),
+                # the external review of the v6 document (V6-001): the policy's automatic exclusions and the
+                # required population per gated access path
+                "gate_auto_text": gate_auto_text(run) or "none (no policy)",
+                "gate_required_text": gate_required_text(run),
                 "n_gate_problems": len([x for x in (gate.get("problems") or []) if isinstance(x, dict)]),
                 "n_gate_evidence": gate_group_counts(run)["evidence"],
                 "n_gate_unproven": gate_group_counts(run)["unproven"],
@@ -500,7 +504,7 @@ def mcp_limit_counts(run):
 
 
 def declared_counts(run):
-    dec = run.declared
+    dec = getattr(run, "declared", None)
     if not isinstance(dec, dict):
         return {"file": "none", "version": "–", "exclusions": 0, "not_required": 0, "relations_excluded": 0,
                 "exclusion_pairs": 0, "exclusion_repeat_only_pairs": 0, "exclusions_clause": "no exclusion"}
@@ -567,7 +571,7 @@ def gate_outcome_counts(run):
     """The gate's outcome problems (gate.json, else the offline verdict): {judged, outcome: all of them,
     inconclusive: the inconclusive executions among them, finding: the findings, pairs: distinct (scenario, arm)}.
     These, not the run's inconclusive count, are what blocks the gate: an execution on a gated arm, in the
-    policy's selection and not declared exempt (VERIFY-R2 H1). Zeros with judged False when no gate was judged."""
+    policy's required population: selected, not removed by its automatic exclusions nor declared exempt (VERIFY-R2 H1, V6-001). Zeros with judged False when no gate was judged."""
     gate = run.gate if isinstance(run.gate, dict) else None
     out = {"judged": gate is not None, "outcome": 0, "inconclusive": 0, "finding": 0, "pairs": 0}
     if not gate:
@@ -593,9 +597,10 @@ def gate_inconclusive_clause(run):
     if not gp["judged"]:
         return "whether any of them blocks the deploy gate was not judged (no gate verdict for this run)"
     n = gp["inconclusive"]
-    return ("%d of them block%s the deploy gate: %s on a gated access path, in the policy's selection and not "
-            "declared exempt (the gate's outcome problems, appendix F); the others are on an ungated access path, "
-            "outside the selection or exempt" % (n, "s" if n == 1 else "", "the one" if n == 1 else "those"))
+    return ("%d of them block%s the deploy gate: %s the policy requires on that access path and repeat (the gate's "
+            "outcome problems, appendix F); the others are on an ungated access path, outside the selection, removed "
+            "by the policy's automatic exclusions or declared exempt" % (n, "s" if n == 1 else "",
+                                                                          "the one" if n == 1 else "those"))
 
 
 def untested_scope_text(ctx):
@@ -638,6 +643,178 @@ def gate_scope(run):
         facts._join(routes) if routes else "the policy's selection", selected, len(run.order),
         " and ".join(arms) if arms else "–")
     return {"routes": ", ".join(routes) or "–", "arms": ", ".join(arms) or "–", "selected": selected, "text": text}
+
+
+# The policy's automatic exclusion rules (gate_policy.py), in plain words and in the ledger's order (V6-001): derived
+# from the manifest, its tags and the by-design table, not decisions of the owner; `declared` (the owner's file) is
+# counted apart. A rule the generator does not know prints its own name.
+GATE_RULE_WORDS = (
+    ("budget_stress", "tagged budget_stress: a property that depends on the host's load, which no budget makes "
+                      "decisive"),
+    ("manifest_not_implemented", "the manifest marks the request not implemented via MCP"),
+    ("table_not_expressible", "a by-design case the scenario names states the request not expressible via MCP"),
+    ("advanced_path", "traverse_fetch arguments on the advanced strategy path, which the deployment does not enable"),
+    ("marks_cover_repeat", "on this MCP repeat the manifest's property-level marks set aside every property check "
+                           "it can test"),
+    ("needs_direct_arm", "a by-design case that only a direct execution verifies, in a policy without a direct "
+                         "access path"),
+)
+GATE_MCP_EXPRESS_RULES = ("manifest_not_implemented", "table_not_expressible")
+
+
+def gate_population(run):
+    """The deploy gate's populations from the policy (V6-001): the route selection, the policy's automatic
+    exclusions grouped by rules / access paths / repeats, the owner's declared exclusions, and per gated access path
+    the scenarios and executions the policy requires. None without a policy."""
+    pol = run.policy if isinstance(run.policy, dict) else None
+    if not pol:
+        return None
+    rank = dict((r, i) for i, (r, _) in enumerate(GATE_RULE_WORDS))
+    groups, auto, declared = {}, [], []
+    for ex in pol.get("exclusions") or []:
+        if not isinstance(ex, dict):
+            continue
+        rules = tuple(str(r) for r in (ex.get("rules") or []))
+        if "declared" in rules:
+            declared.append(ex)
+            continue
+        auto.append(ex)
+        key = (rules, tuple(ex.get("arms") or []), tuple(ex.get("repeats") or []))
+        groups.setdefault(key, []).append(str(ex.get("scenario")))
+    order = sorted(groups, key=lambda k: (min(rank.get(r, len(rank)) for r in k[0]) if k[0] else len(rank),
+                                          -len(groups[k]), k))
+    need = gate_mod.required_keys(pol)
+    required = []
+    for arm in pol.get("arms") or []:
+        keys = [k for k in need if k[1] == arm]
+        required.append((arm, len(set(k[0] for k in keys)), len(keys)))
+    return {"selected": len((pol.get("selection") or {}).get("scenarios") or []),
+            "n_run": len(getattr(run, "order", None) or []),
+            "auto": auto, "groups": [(k, groups[k]) for k in order], "declared": declared,
+            "required": required, "n_required": len(need)}
+
+
+def _gate_auto_kind(rules):
+    """The summary's kind of an automatic exclusion: budget, mcp (the tools cannot express it), advanced, marks,
+    direct, or the first rule's own name."""
+    if "budget_stress" in rules:
+        return "budget"
+    if any(r in GATE_MCP_EXPRESS_RULES for r in rules):
+        return "mcp"
+    return {"advanced_path": "advanced", "marks_cover_repeat": "marks", "needs_direct_arm": "direct"}.get(
+        rules[0] if rules else "", rules[0] if rules else "?")
+
+
+def gate_auto_text(run):
+    """The policy's automatic exclusions in one plain clause (V6-001): '94 entries: 35 budget-stress tests on
+    direct-local and mcp, 57 requests the MCP tools cannot express on mcp, ...'; '' without a policy."""
+    pop = gate_population(run)
+    if pop is None:
+        return ""
+    kinds = {}
+    for (rules, arms, repeats), sids in pop["groups"]:
+        k = kinds.setdefault(_gate_auto_kind(rules), {"n": 0, "arms": [], "repeats": set()})
+        k["n"] += len(sids)
+        for a in arms:
+            if a not in k["arms"]:
+                k["arms"].append(a)
+        k["repeats"].update(repeats)
+    words = {"budget": ("budget-stress test", "budget-stress tests"),
+             "mcp": ("request the MCP tools cannot express", "requests the MCP tools cannot express"),
+             "advanced": ("request on the advanced strategy path", "requests on the advanced strategy path"),
+             "marks": ("repeat whose property checks the marks all set aside",
+                       "repeats whose property checks the marks all set aside"),
+             "direct": ("by-design case only a direct execution verifies",
+                        "by-design cases only a direct execution verifies")}
+    parts = []
+    for kind in ("budget", "mcp", "advanced", "marks", "direct") + tuple(sorted(k for k in kinds if k not in words)):
+        if kind not in kinds:
+            continue
+        k = kinds[kind]
+        w = words.get(kind, (kind, kind))
+        arms = [a for a in sc.ARMS if a in k["arms"]] + [a for a in k["arms"] if a not in sc.ARMS]
+        parts.append("%d %s on %s%s" % (k["n"], w[0] if k["n"] == 1 else w[1], " and ".join(arms) or "every access "
+                                        "path", (" (repeat%s %s only)" % ("" if len(k["repeats"]) == 1 else "s",
+                                                                         ", ".join(str(r) for r in
+                                                                                   sorted(k["repeats"]))))
+                     if k["repeats"] else ""))
+    n = len(pop["auto"])
+    return "%d entr%s%s" % (n, "y" if n == 1 else "ies", (": " + facts._join(parts)) if parts else "")
+
+
+def gate_required_text(run):
+    """'686 scenarios (793 executions) on direct-local and 628 scenarios (1275 executions) on mcp' (V6-001)."""
+    pop = gate_population(run)
+    if pop is None:
+        return "–"
+    return facts._join(["%d scenario%s (%d execution%s) on %s" % (s, "" if s == 1 else "s", e, "" if e == 1 else "s",
+                                                                 arm) for arm, s, e in pop["required"]])
+
+
+def gate_population_text(run):
+    """The sentence that defines the gate's required population (V6-001): route selection, the policy's automatic
+    exclusions (appendix F), the owner's declared exemptions (I.4, appendix G), the required scenarios and executions
+    per gated access path."""
+    pop = gate_population(run)
+    if pop is None:
+        return ""
+    scope = gate_scope(run)
+    dec = declared_counts(run)
+    return ("Required means selected by route (%s), not removed by one of the policy's automatic exclusions, which "
+            "its rules derive from the manifest, its tags and the by-design table and which are no decision of the "
+            "owner (%s; appendix F lists them), and not declared exempt by the owner (%s; I.4, appendix G): %s, %d "
+            "executions in all. The gate certifies those executions, not the excluded ones and not the whole "
+            "service." % (scope["text"], gate_auto_text(run), ("%d exclusion%s" % (
+                dec["exclusions"], "" if dec["exclusions"] == 1 else "s")) if isinstance(getattr(
+                    run, "declared", None), dict)
+                else "no declared file", gate_required_text(run), pop["n_required"]))
+
+
+def gate_judged_outcomes(run):
+    """{outcome: executions} over what the gate judged (V6-001): the policy's selection on its access paths less
+    its exclusions, as gate.judge counts `judged`; {} without a policy."""
+    pol = run.policy if isinstance(run.policy, dict) else None
+    if not pol:
+        return {}
+    selected = set((pol.get("selection") or {}).get("scenarios") or [])
+    arms = set(pol.get("arms") or [])
+    out = {}
+    for r in getattr(run, "rows", None) or []:
+        sid, arm, rep = sc.execution_key(r)
+        if sid not in selected or arm not in arms or gate_mod.excluded(pol, sid, arm, rep):
+            continue
+        o = str(r.get("outcome"))
+        out[o] = out.get(o, 0) + 1
+    return out
+
+
+def gate_ledger(ctx):
+    """Appendix F's ledger of the policy's automatic exclusions (V6-001): one row per rule combination, access paths
+    and repeats, with the scenarios; the owner's declared entries stay in appendix G."""
+    pop = gate_population(ctx.run)
+    if pop is None or not pop["groups"]:
+        return ""
+    words = dict(GATE_RULE_WORDS)
+    rows = []
+    for (rules, arms, repeats), sids in pop["groups"]:
+        why = "; and ".join(words.get(r, r) for r in rules) or "–"
+        rows.append([esc(why) + " (%s)" % ", ".join(tt(r) for r in rules),
+                     esc(", ".join(arms) or "all") + ((" (repeat%s %s)" % ("" if len(repeats) == 1 else "s",
+                                                                          ", ".join(str(r) for r in repeats)))
+                                                      if repeats else ""),
+                     ", ".join(_link_sid(ctx, s) for s in sids), str(len(sids))])
+    out = "\\parhead{The policy's automatic exclusions}\n"
+    out += ("%s The rules derive each exclusion from the manifest, its tags and the by-design table, never from an "
+            "answer the run received; they are not the owner's decisions, which appendix G lists apart. An entry "
+            "removes one scenario on the access paths named, or only the repeats named, from the gate's required "
+            "executions; the scenario keeps its recorded outcome in its chapter, and nothing it did not show is "
+            "shown by the exclusion. A scenario can be excluded on one access path and required on the other, so "
+            "the counts below are entries, not distinct tests.\n\n" % esc(
+                "The policy %s excludes %s." % (os.path.basename(ctx.run.policy_path or "") or "–",
+                                                gate_auto_text(ctx.run))))
+    out += latex.plain_table(latex.spec_p([52, 22, 80, 12]), ["rule", "access paths", "scenarios", "entries"],
+                             rows, needspace=min(len(rows), 4) + 3)
+    return out
 
 
 def gate_group_of(problem):
@@ -688,13 +865,18 @@ def gate_decision_text(run):
         return ("No deploy decision was judged for this run: no gate verdict is recorded and no policy pins its "
                 "manifest, so this document authorises nothing.")
     scope = gate_scope(run)
+    population = gate_population_text(run)
     if gate.get("passed"):
+        if population:
+            return ("The gate passed: every planned execution was recorded, every execution the policy requires "
+                    "passed or matched the by-design case its scenario names, and nothing blocks. %s" % population)
         return ("The gate passed: every planned and required execution of %s was recorded and nothing blocks. The "
                 "gate certifies that selection on those access paths, not the whole service." % scope["text"])
     n = len([x for x in (gate.get("problems") or []) if isinstance(x, dict)])
     return ("This run does not authorise a deploy: the gate failed on %d problem%s over %s. The count is not a count "
-            "of service defects: %s (the groups in appendix F, each with the evidence that would clear it)." % (
-                n, "" if n == 1 else "s", scope["text"], gate_groups_text(run)))
+            "of service defects: %s (the groups in appendix F, each with the evidence that would clear it).%s" % (
+                n, "" if n == 1 else "s", scope["text"], gate_groups_text(run), (" " + population) if population
+                else ""))
 
 
 def gate_read_text(run):
@@ -1013,8 +1195,8 @@ def gate_summary(ctx):
             word, how, _ = report.gate_headline_parts(gate)
             how = "recorded in the run (%s; the sha256 is that of the policy's canonical JSON), access paths %s" % (
                 how, ", ".join((run.policy or {}).get("arms") or gate.get("arms") or []) or "–")
-        counts_text = "%s executions judged, %s passed, %s planned, %s required" % (
-            counts.get("judged", "–"), counts.get("passed", "–"), counts.get("planned", "–"),
+        counts_text = "%s executions judged%s, %s planned, %s required" % (
+            counts.get("judged", "–"), judged_outcomes_text(run, counts), counts.get("planned", "–"),
             counts.get("required", "–"))
         by_kind = "; ".join("%d %s" % (sum(1 for p in problems if p.get("kind") == k), k)
                             for k in gate_mod.KINDS if any(p.get("kind") == k for p in problems))
@@ -1027,6 +1209,20 @@ def gate_summary(ctx):
     elif run.policy is None:
         how += ", and no policy in the suite's gate directory pins this manifest, so none was judged offline"
     return "not evaluated", how, None, None
+
+
+def judged_outcomes_text(run, counts):
+    """' (1950 passed, 118 service-side by design)': the gate's judged executions by outcome (V6-001), the passed
+    count the gate's own; ', N passed' when the policy's population cannot be read."""
+    out = gate_judged_outcomes(run)
+    if not out or out.get("pass", 0) != counts.get("passed"):
+        return ", %s passed" % counts.get("passed", "–")
+    words = [("pass", "passed"), ("service_by_design", "service-side by design")]
+    parts = ["%d %s" % (out[o], w) for o, w in words if out.get(o)]
+    parts += ["%d %s" % (n, o) for o, n in sorted(out.items()) if o not in dict(words)]
+    if not out.get("pass"):
+        parts.insert(0, "0 passed")
+    return " (%s)" % ", ".join(parts)
 
 
 def stale_gate_text(run):
@@ -1960,6 +2156,8 @@ def limitations_table(ctx):
                 len(limits["matched"]), esc(ma.get("by_design_verified", "–")), esc(ma.get("by_design_unverified", "–"))),
              "\\hyperref[app:B]{B}"]]
     dec = declared_counts(run)
+    if gate_population(run) is not None:
+        rows.append(["the gate policy's automatic exclusions", esc(gate_auto_text(run)), "\\hyperref[app:F]{F}"])
     if isinstance(run.declared, dict):
         rows.append(["owner-declared exemptions",
                      "%d exclusion%s, %d check%s not required, %d relation%s excluded" % (
@@ -1979,7 +2177,7 @@ def limitations_table(ctx):
     n_inc = sum(sum((ibr.get(a) or {}).values()) for a in ARMS)
     gp = gate_outcome_counts(run)
     if gp["judged"]:
-        blocking = "%d block the gate (a gated access path, in the policy's selection, not declared exempt)" % gp["inconclusive"]
+        blocking = "%d block the gate (required by the policy on that access path and repeat)" % gp["inconclusive"]
     else:
         blocking = "the gate was not judged"
     rows.append(["inconclusive executions", "%d; %s; each footnoted in its chapter's tables" % (n_inc, esc(blocking)),
@@ -3846,6 +4044,7 @@ def gate_problems(ctx):
         return "\\textbf{%s}: %s.\n\n" % (esc(word), esc(how))
     out = "\\textbf{%s}: %s; %s; %s.\n\n" % (esc(word), esc(how), esc(counts_text), esc(problems_text))
     out += "%s What the gate read: %s.\n\n" % (inline(gate_decision_text(run)), esc(gate_read_text(run)))
+    out += gate_ledger(ctx)
     problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
     ctx.data_files[GATE_PROBLEMS_FILE] = json.dumps(
         {"verdict": "GATE PASS" if gate.get("passed") else "GATE FAIL", "policy": gate.get("policy"),

@@ -121,7 +121,7 @@
   },
   {
    "term": "inconclusive",
-   "definition": "The answer could not show the property: an allowed 503 deadline (no results), a list a stated hiding shortened, a walk a stated limit stopped first, a stop that was the property and did not happen, nothing to compare, no property field exposed via MCP, a host state. Never a pass, never a failure; on a gated access path, in the policy's selection and not declared exempt, it blocks the gate (I.1 counts those).",
+   "definition": "The answer could not show the property: an allowed 503 deadline (no results), a list a stated hiding shortened, a walk a stated limit stopped first, a stop that was the property and did not happen, nothing to compare, no property field exposed via MCP, a host state. Never a pass, never a failure; where the policy requires it (a gated access path, in the selection, not removed by the policy's automatic exclusions nor declared exempt), it blocks the gate (I.1 counts those).",
    "see": [
     "host state"
    ]
