@@ -4433,6 +4433,9 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
 - A layout fix the v6 build needed (not a brief item): a detail block's "property tested?" cell with items a
   property-level mark sets aside ("yes (1 of 1); 1 marked not shown via MCP") wraps in a 30 mm top-aligned box;
   D-P-scope-0004's MCP rows, footnoted in v6, ran 44 pt past the margin. No v5 detail row has such a cell.
+- A wording fix the v6 run needed (not a brief item): I.1's and I.4's inconclusive executions by reason count the
+  one inconclusive by a scenario-level mark (D-P-scope-0004's MCP r0, marks_cover_repeat) as "by a scenario-level
+  mark (every property check marked as not shown via MCP)", never as "the service's ... (a host state)".
 
 ## Glossary
 

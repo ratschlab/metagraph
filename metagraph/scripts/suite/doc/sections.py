@@ -457,6 +457,10 @@ def inconclusive_by_reason_text(run):
         for reason, n in sorted(d.items(), key=lambda kv: (-kv[1], kv[0])):
             if reason == "checks":
                 words.append("%d by the checks" % n)
+            elif reason == getattr(sc, "SCENARIO_LEVEL_MARK", None):
+                # the manifest's marks cover every property check of the execution (the v6 delta: D-P-scope-0004's
+                # MCP r0, marks_cover_repeat): the mark's reading, never a host state
+                words.append("%d by a scenario-level mark (every property check marked as not shown via MCP)" % n)
             else:
                 words.append("%d by the service's %s (a host state)" % (n, reason))
         parts.append("%s %s" % (arm, ", ".join(words)))

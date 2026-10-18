@@ -5773,6 +5773,17 @@ class V6DeltaTest(unittest.TestCase):
         self.assertIn("other gate policy", inspect.getsource(sections.provenance_table)
                       if hasattr(sections, "provenance_table") else inspect.getsource(sections))
 
+    def test_scenario_level_mark_inconclusive_wording(self):
+        """The v6 run's D-P-scope-0004 MCP r0 is inconclusive by a scenario-level mark (marks_cover_repeat): I.1 and
+        I.4 count it by the mark, never as the service's limit or a host state."""
+        run = _Stub(summary=lambda: {"inconclusive_by_reason": {
+            "direct-local": {"checks": 4}, "mcp": {"checks": 3, sc.SCENARIO_LEVEL_MARK: 1,
+                                                   "traversal_resolve_deadline": 2}}})
+        self.assertEqual(sections.inconclusive_by_reason_text(run),
+                         "direct-local 4 by the checks; mcp 3 by the checks, 2 by the service's "
+                         "traversal_resolve_deadline (a host state), 1 by a scenario-level mark (every property "
+                         "check marked as not shown via MCP)")
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no
