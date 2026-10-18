@@ -1135,6 +1135,12 @@ def _relations_text(run, sid, units):
             if not a:
                 continue
             o = a.get("outcome")
+            unrun = cells.relation_unrun(run, rel, arm, o)
+            if unrun:
+                # not judged there: a scenario of the relation is not run via MCP; the comparator's "a raw answer is
+                # missing" is that, said as what it is
+                per_arm.append("%s \\gnone{} (%s)" % (esc(cells.ARM_SHORT.get(arm, arm)), cells.relation_unrun_text(unrun)))
+                continue
             if o in RELATION_NOT_EVALUATED:
                 # the relation could not be evaluated on this arm (a raw answer or a field is missing via MCP):
                 # neither passed nor inconclusive, the dash the sum line prints (VERIFY-QCND L5)

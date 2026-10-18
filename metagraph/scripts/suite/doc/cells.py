@@ -454,6 +454,26 @@ def _arm_state(run, sid, arm):
     return st
 
 
+def relation_unrun(run, rel, arm, outcome):
+    """The relation's scenarios that stand not implemented via MCP on `arm`, when the comparator could not judge the
+    relation there (`not_evaluated`): the reason it was not judged (no MCP execution of theirs to compare), else []
+    (the coordinator's accuracy fix of 2026-10-18: never "a raw answer is missing" for a scenario not run via MCP)."""
+    if outcome != "not_evaluated":
+        return []
+    return [sid for sid in (rel.get("a"), rel.get("b"))
+            if sid and arm_state(run, sid, arm).glyph_key == "not_implemented_mcp"]
+
+
+def relation_unrun_text(ids, short=False):
+    """'not judged via MCP: P-scope-0004 is not run via MCP (not implemented yet via MCP)', LaTeX, the class in the
+    attention red as wherever a test not implemented via MCP is printed; `short` for a table's mcp column, where the
+    column says via MCP: 'not judged: P-scope-0004 not run (not implemented yet via MCP)'."""
+    if short:
+        return "not judged: %s not run (%s)" % (esc(" and ".join(ids)), attn("not implemented yet via MCP"))
+    return "not judged via MCP: %s %s not run via MCP (%s)" % (
+        esc(" and ".join(ids)), "is" if len(ids) == 1 else "are", attn("not implemented yet via MCP"))
+
+
 def scenario_states(run, sid):
     return dict((arm, arm_state(run, sid, arm)) for arm in ARMS)
 

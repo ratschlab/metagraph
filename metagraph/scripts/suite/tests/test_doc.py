@@ -5822,6 +5822,71 @@ class V6DeltaTest(unittest.TestCase):
         self.assertEqual(blocks.short_reason(_Stub(scenario=lambda sid: req, cases={}), "R-x", None),
                          "the request's support cannot be expressed through the tools")
 
+    def test_relation_not_run_via_mcp(self):
+        """The coordinator's accuracy fix (2026-10-18): a relation the comparator could not judge on the MCP arm
+        (`not_evaluated`, "a raw answer is missing") because one of its scenarios stands not implemented via MCP
+        (no MCP execution) reads "not judged via MCP: <id> is not run via MCP (not implemented yet via MCP)" with
+        the no-execution dash, in the pairs tables, appendix C and the detail blocks; a relation not evaluated for
+        another reason keeps the comparator's words."""
+        class Stub(object):
+            relations = [{"id": "REL-subset-0002", "type": "subset", "a": "A", "b": "B", "title": "t"}]
+            depth = {}
+
+            def property_not_implemented(self, *a):
+                return False
+
+            def arm_lines(self, sid, arm):
+                if sid == "A" and arm == "mcp":
+                    return [{"scenario": "A", "arm": "mcp", "repeat": 0, "outcome": "not_implemented_mcp", "http": None}]
+                return [{"scenario": sid, "arm": arm, "repeat": 0, "outcome": "pass", "http": 200}]
+
+            def comp_entry(self, sid):
+                return {"mcp_agreement": {"class": "not_implemented_mcp" if sid == "A" else "agree"}}
+
+            def comp_arm(self, sid, arm):
+                return {}
+
+            def planned_missing(self, sid, arm):
+                return False
+
+            def planned_on(self, sid, arm):
+                return True
+
+            def comp_relations(self):
+                return {"REL-subset-0002": {"arms": {
+                    "direct-local": {"outcome": "pass", "detail": "a's 60 results within b's 640"},
+                    "direct-remote": {"outcome": "pass", "detail": "a's 60 results within b's 640"},
+                    "mcp": {"outcome": "not_evaluated", "detail": "a raw answer is missing"}}}}
+
+        run = Stub()
+        rel = run.relations[0]
+        self.assertEqual(cells.relation_unrun(run, rel, "mcp", "not_evaluated"), ["A"])
+        self.assertEqual(cells.relation_unrun(run, rel, "mcp", "inconclusive"), [])
+        self.assertEqual(cells.relation_unrun(run, rel, "direct-local", "not_evaluated"), [])
+        self.assertEqual(cells.relation_unrun_text(["A"]),
+                         "not judged via MCP: A is not run via MCP (\\attn{not implemented yet via MCP})")
+        self.assertIn(" are not run via MCP", cells.relation_unrun_text(["A", "B"]))
+        units = _Stub(unit_of=lambda sid: "U")
+        text = blocks._relations_text(run, "B", units)[0]
+        self.assertIn("mcp \\gnone{} (not judged via MCP: A is not run via MCP (\\attn{not implemented yet via MCP}))",
+                      text)
+        self.assertNotIn("a raw answer is missing", text)
+        # the tables' mcp column says via MCP itself: the short form there
+        self.assertEqual(cells.relation_unrun_text(["A"], short=True),
+                         "not judged: A not run (\\attn{not implemented yet via MCP})")
+        for source in (inspect.getsource(sections._relation_rows), inspect.getsource(sections.relations_appendix)):
+            self.assertIn("cells.relation_unrun_text(unrun, short=True)", source)
+        # chapter P's P-scope sentence: both suffix scenarios not run via MCP (v6) -> the relations not judged there;
+        # v5's inconclusive branch unchanged
+        prose = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["families"]["P-scope"]["prose"]
+        ne = {"mcp": {"standing": "not exercised"}}
+        filled = facts.fill(prose, {"x": {"P-scope-0004": ne, "P-scope-0006": ne}, "n_relations": 0})
+        self.assertIn("so via MCP neither is run (!!not implemented yet via MCP!!: the MCP answer lacks that field), and "
+                      "the two relations are not judged there.", filled)
+        inc = {"mcp": {"standing": "inconclusive"}}
+        self.assertIn("they read inconclusive (the check not exposed",
+                      facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0}))
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no

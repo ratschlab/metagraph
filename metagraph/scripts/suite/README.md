@@ -4444,6 +4444,16 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   answer lacks absence_scope, the field entry_fields checks" (the field from the check's arguments), never "cannot
   be expressed through the tools", which stays for the request-side marks (support, bounds.max_query_bp, a raw body)
   and the table's not-expressible cases. v6's P-scope-0004 / -0006 read so; no v5 scenario has such a mark.
+- An accuracy fix (the coordinator, 2026-10-18; not a brief item): a relation the comparator could not judge on the
+  MCP arm (`not_evaluated`, its detail "a raw answer is missing") because one of its scenarios stands not
+  implemented via MCP and has no MCP execution reads "not judged via MCP: P-scope-0004 is not run via MCP (not
+  implemented yet via MCP)" in the detail blocks' relations line and, in the mcp column of the pairs tables and
+  appendix C, "not judged: P-scope-0004 not run (not implemented yet via MCP)", with the no-execution dash
+  (cells.relation_unrun / relation_unrun_text); any other not-evaluated relation keeps the comparator's words. Chapter P's P-scope sentence says, when both suffix scenarios stand not exercised (v6), that neither is
+  run via MCP and the two relations are not judged there. The rule is general, so it also corrects v5's document
+  where the same case printed the comparator's words: chapter C's relations line under C-caps-0003
+  (REL-same_answer-0004 / -0005: C-caps-0001 and -0002 are not run via MCP) and appendix C's three C-caps rows;
+  every other v5 chapter stays byte-identical.
 
 ### Validation (offline; no host was contacted; the run directories were only read)
 - The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef) re-rendered with this generator: every chapter file,

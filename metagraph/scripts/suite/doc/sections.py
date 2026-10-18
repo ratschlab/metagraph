@@ -2410,6 +2410,11 @@ def _relation_rows(ctx, relations):
                 cs.append("\\gnone")
                 continue
             o = a.get("outcome")
+            unrun = cells.relation_unrun(run, rel, arm, o)
+            if unrun:
+                # not judged: a scenario of the relation is not run via MCP (not "a raw answer is missing")
+                cs.append("\\gnone {\\scriptsize %s}" % cells.relation_unrun_text(unrun, short=True))
+                continue
             glyph = cells.GLYPH.get(o, "\\ginc") if o in cells.GLYPH else "\\ginc"
             detail = a.get("detail")
             if o == "pass" or not detail:
@@ -3534,8 +3539,11 @@ def relations_appendix(ctx):
         per_arm = []
         for arm in ARMS:
             a = (crel.get("arms") or {}).get(arm) or {}
+            unrun = cells.relation_unrun(run, rel, arm, a.get("outcome")) if a else []
             if not a:
                 per_arm.append("\\gnone")
+            elif unrun:
+                per_arm.append("\\gnone {\\scriptsize %s}" % cells.relation_unrun_text(unrun, short=True))
             else:
                 per_arm.append("%s {\\scriptsize %s}" % (cells.GLYPH.get(a.get("outcome"), "\\ginc"),
                                                         esc(a.get("detail"), 90)))
