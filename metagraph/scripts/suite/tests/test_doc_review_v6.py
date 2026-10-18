@@ -621,5 +621,32 @@ class EvidenceManifestTest(unittest.TestCase):
         self.assertNotIn("beside this document", inspect.getsource(sections.gate_action_table))
 
 
+class OverviewReadingPathTest(unittest.TestCase):
+    """V6-003: I.1 leads with the result; the attention caption names its tests by ranges; I.2's budget scope is one
+    full-width block per route; the tint and attention rules move to appendix F, I.3 keeping a short key."""
+
+    def test_ids_ranges(self):
+        self.assertEqual(facts.ids_ranges(["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-0001", "P-scope-0002",
+                                                                                      "P-scope-0005", "P-edge-0004"]),
+                         "P-exact-0001 to -0008, P-scope-0001, -0002, -0005, P-edge-0004")
+        self.assertEqual(facts.ids_ranges(["T-labels-0003"]), "T-labels-0003")
+
+    def test_findings_lead(self):
+        run = _Stub(rows=[{"outcome": "inconclusive"}, {"outcome": "pass"}], gate={"problems": [], "passed": True})
+        lead = sections.findings_lead_text(_Stub(run=run), [])
+        self.assertEqual(lead, "*The result.* No execution failed or errored, no resource-budget finding was "
+                               "recorded, no comparison between access paths disagreed and no relation failed in this "
+                               "run; 1 execution was inconclusive, not required by the deploy gate "
+                               "(Properties still untested, below).")
+        lead = sections.findings_lead_text(_Stub(run=run), [("findings (1 execution, 1 test)", [])])
+        self.assertTrue(lead.startswith("*The result.* Listed below: findings (1 execution, 1 test); 1 execution"))
+
+    def test_moves(self):
+        import inspect
+        self.assertIn("\\\\bline{colour}", inspect.getsource(sections.grammar_lines))
+        self.assertIn("colour_rules(ctx)", inspect.getsource(sections.appendices))
+        self.assertNotIn("{vocab[classifications]}", prose("overview")["sections"]["decision"]["findings"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

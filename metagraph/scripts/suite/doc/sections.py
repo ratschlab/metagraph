@@ -1332,6 +1332,29 @@ def principal_findings(ctx):
     return out
 
 
+def findings_lead_text(ctx, groups=None):
+    """I.1's principal findings, the result first (V6-003): what failed, broke a bound, disagreed or failed as a
+    relation, else that nothing did, and how many executions were inconclusive and required by the gate."""
+    run = ctx.run
+    groups = principal_findings(ctx) if groups is None else groups
+    n_inc = sum(1 for l in run.rows if l.get("outcome") == "inconclusive")
+    gp = gate_outcome_counts(run)
+    if not gp["judged"]:
+        gate = ", whether any is required by a gate was not judged"
+    elif n_inc == 1:
+        gate = ", %s by the deploy gate" % ("required" if gp["inconclusive"] else "not required")
+    elif n_inc:
+        gate = ", %s of them required by the deploy gate" % (gp["inconclusive"] or "none")
+    else:
+        gate = ""
+    tail = "%d execution%s %s inconclusive%s (Properties still untested, below)" % (
+        n_inc, "" if n_inc == 1 else "s", "was" if n_inc == 1 else "were", gate)
+    if not groups:
+        return ("*The result.* No execution failed or errored, no resource-budget finding was recorded, no "
+                "comparison between access paths disagreed and no relation failed in this run; %s." % tail)
+    return ("*The result.* Listed below: %s; %s." % (facts._join(t for t, _ in groups), tail))
+
+
 def _arm_reason(lines, st, name=None, run=None, sid=None):
     """Why an arm did not pass a property, in a few words, from its lines. For the MCP arm a check |name| the
     manifest marks at property level (suite_common.mcp_check_marks) that read not_exposed reads as the mark says
@@ -1597,10 +1620,10 @@ def decision_summary(ctx):
     out += ctx.prose_paragraphs("decision", "verdict", optional=True)
     out += attention_table(ctx)
     out += "\\parhead{Principal findings}\n"
-    out += ctx.prose_paragraphs("decision", "findings", optional=True)
     groups = principal_findings(ctx)
-    if not groups:
-        out += "None: no finding, no failure, no error, no disagreement, no failed relation in this run.\n\n"
+    # the actual result before the definitions (the external review of the v6 document, V6-003)
+    out += inline(findings_lead_text(ctx, groups)) + "\n\n"
+    out += ctx.prose_paragraphs("decision", "findings", optional=True)
     for title, items in groups:
         out += "\\noindent\\textbf{%s}\\par\\nopagebreak\n\\begin{itemize}\\setlength\\itemsep{0pt}\n" % esc(title)
         for it in items[:20]:
@@ -1637,13 +1660,19 @@ def budget_scope_table(ctx):
     rows_in = [r for r in (ctx.overview_section("methods").get("budget_scope") or []) if isinstance(r, dict)]
     if not rows_in:
         return ""
-    keys = ("route", "named_by", "clock", "scope", "not_covered", "answers", "verified")
-    rows = [[inline(ctx.fill(str(r.get(k) or "–"))) for k in keys] for r in rows_in]
-    return latex.plain_table(latex.spec_p([12, 26, 22, 26, 30, 26, 30]),
-                             ["route", "the budget", "its clock starts", "what it covers", "what it does not cover",
-                              "possible answers", "what the suite verified"], rows,
-                             "the scope of a time budget per route (the SPECs' contract; the suite's rulings in "
-                             "appendix A, budget\\_respected)", needspace=12)
+    # one full-width block per route, its six statements labelled (the external review of the v6 document, V6-003:
+    # a seven-column table squeezed the /traverse exceptions into a word-wide column); nothing is left out
+    labels = (("named_by", "The budget"), ("clock", "Its clock starts"), ("scope", "It covers"),
+              ("not_covered", "It does not cover"), ("answers", "Possible answers"),
+              ("verified", "What the suite verified"))
+    out = ("\\Needspace{6\\baselineskip}\n{\\small\\itshape the scope of a time budget per route (the SPECs' contract; "
+           "the suite's rulings in appendix A, budget\\_respected)}\\par\\nopagebreak\\smallskip\n")
+    for r in rows_in:
+        parts = ["\\emph{%s:} %s" % (esc(label), inline(ctx.fill(str(r.get(k) or "–")).rstrip(".")))
+                 for k, label in labels]
+        out += ("{\\small\\noindent\\textbf{%s.} %s\\par}\\smallskip\n" % (inline(ctx.fill(str(r.get("route") or "–"))),
+                                                                        " ".join(p + "." for p in parts)))
+    return out + "\n"
 
 
 def methods_section(ctx):
@@ -1816,10 +1845,20 @@ def grammar_lines(ctx):
            "\\bline{edge tables}{the mcp cell of a refusals or list table shows the recorded status, the service's "
            "code and the class in words (refused before host execution, not expressible through MCP, answered after "
            "service normalization, host refusal relayed through the service), derived from the evidence, never from prose}"
-           "\n\\bline{times}{%s}" % times_legend_sentence() +
-           "\n\\bline{attention}{%s}" % attention_legend_sentence(bool(ctx is not None and answer_side_mark_ids(ctx.run))) +
+           "\n\\bline{colour}{red marks what needs attention (I.1's table counts the kinds); a time above 10 s is set "
+           "on a yellow tint, above 55 s on a red one; a footnote digit is dark grey; the full rules, with the "
+           "attention kinds, are in appendix F's vocabulary}"
            "\n\\par\\endgroup\n\n")
     return out
+
+
+def colour_rules(ctx):
+    """Appendix F's colour rules (moved from I.3's grammar by the external review of the v6 document, V6-003): the
+    tints of the printed times and the attention kinds with their red."""
+    return ("\\begingroup\\sffamily\\footnotesize\n"
+            "\\bline{times}{%s}" % times_legend_sentence() +
+            "\n\\bline{attention}{%s}" % attention_legend_sentence(bool(ctx is not None and answer_side_mark_ids(ctx.run))) +
+            "\n\\par\\endgroup\n\n")
 
 
 def _pick_annotated_unit(ctx):
@@ -2930,7 +2969,7 @@ def attention_table(ctx):
     """I.1's attention table (the owner's decision of 2026-10-16): per chapter of the run the tests needing
     attention by kind (facts.attention_facts: a test counted once per kind and possibly under several), the
     nonzero counts in red, the kinds no chapter has left out, and the totals; empty when no test needs attention.
-    The kinds are defined once, in I.3's legend (attention_legend_sentence)."""
+    The kinds are defined once, in appendix F's vocabulary (attention_legend_sentence; I.3 until V6-003)."""
     per, totals = [], {}
     for ch in ctx.chapters:
         v = facts.attention_facts(ctx, ctx.units.chapter_scenarios(ch))
@@ -2959,14 +2998,14 @@ def attention_table(ctx):
     spec = latex.spec_p(widths, aligns=["raggedright"] + ["raggedleft"] * (len(kinds) + 2))
     # the tests counted under not implemented via MCP by a property-level mark alone (their MCP access path does
     # not stand ○), named so that the reader finds them (VERIFY-MERGE L1)
-    prop = ["%s %s" % (esc(ch), cells.attn("%d (%s)" % (v["n_attention_property"], esc(facts._ids_short(
+    prop = ["%s %s" % (esc(ch), cells.attn("%d (%s)" % (v["n_attention_property"], esc(facts.ids_ranges(
         [x.strip() for x in v["attention_property_ids"].split(",") if x.strip()])))))
             for ch, v in per if v["n_attention_property"]]
     prop_text = ("; of the not implemented via MCP, by a property-level mark alone (the MCP access path not standing "
                  "\\gni, the cell carrying the mark): %s" % "; ".join(prop)) if prop else ""
     return latex.plain_table(spec, header, rows,
                              "needs attention: the tests of each chapter by kind, red where any (a test counts once "
-                             "per kind and may count under several; the kinds are defined in I.3's legend, and the "
+                             "per kind and may count under several; the kinds are defined in appendix F's vocabulary, and the "
                              "contents print each chapter's counts under its line)%s" % prop_text,
                              needspace=min(16, len(rows) + 4))
 
@@ -4462,6 +4501,7 @@ def appendices(ctx):
     out += reruns_table(ctx)
     out += appendix_rules(ctx)
     out += "\\parhead{Vocabulary}\n" + classes_tables(bool(answer_side_mark_ids(ctx.run)))
+    out += colour_rules(ctx)
     out += "\\parhead{The deploy gate}\n" + gate_problems(ctx)
     out += latex.section("G\\qd %s" % titles["G"], "app:G")
     out += appendix_lead(ctx, "appendix_G")

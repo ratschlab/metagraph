@@ -664,6 +664,40 @@ def _ids_short(ids):
     return _join(ids)
 
 
+def ids_ranges(ids):
+    """Test ids with consecutive numbers as ranges, a shared prefix once per run of ids (the external review of the
+    v6 document, V6-003): 'P-exact-0001 to -0008, P-scope-0001 to -0003, -0005, -0007 to -0012, P-edge-0004'; every
+    id is still named, by its range."""
+    groups = []
+    for sid in ids:
+        prefix, _, num = str(sid).rpartition("-")
+        if not prefix or not num.isdigit():
+            groups.append([str(sid), None, []])
+            continue
+        if groups and groups[-1][0] == prefix and groups[-1][1] is not None:
+            groups[-1][2].append(num)
+        else:
+            groups.append([prefix, len(num), [num]])
+    parts = []
+    for prefix, width, nums in groups:
+        if width is None:
+            parts.append(prefix)
+            continue
+        runs = []
+        for n in nums:
+            if runs and int(n) == int(runs[-1][-1]) + 1:
+                runs[-1].append(n)
+            else:
+                runs.append([n])
+        texts = []
+        for i, r in enumerate(runs):
+            head = ("%s-%s" % (prefix, r[0])) if i == 0 else "-%s" % r[0]
+            texts.append(head if len(r) == 1 else "%s to -%s" % (head, r[-1]) if len(r) > 2 else
+                         "%s, -%s" % (head, r[-1]))
+        parts.append(", ".join(texts))
+    return ", ".join(parts)
+
+
 # -- family and chapter facts -------------------------------------------------------------------------------------
 
 def _standing_counts(ctx, sids, prefix=""):

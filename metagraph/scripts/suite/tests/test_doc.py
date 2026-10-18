@@ -3982,7 +3982,10 @@ class TimeTintTest(unittest.TestCase):
         import sections
         g = sections.grammar_lines(None)
         self.assertLess(g.index("\\bline{aggregates}"), g.index("\\bline{edge tables}"))
-        self.assertLess(g.index("\\bline{edge tables}"), g.index("\\bline{times}"))
+        # V6-003: the tint and attention rules are appendix F's; I.3 keeps a short colour key
+        self.assertLess(g.index("\\bline{edge tables}"), g.index("\\bline{colour}"))
+        self.assertNotIn("\\bline{times}", g)
+        self.assertIn("\\bline{times}", sections.colour_rules(None))
         self.assertIn("members never exercised read not exercised: n, never ok 0/0; the coverage line under the "
                       "table counts per access path}", g)
         self.assertIn("derived from the evidence, never from prose}", g)
@@ -4525,8 +4528,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         ctx = self.ctx(overview=self.overview)
         text = sections.methods_section(ctx)
         self.assertIn("the scope of a time budget per route", text)
-        self.assertIn("route & the budget & its clock starts & what it covers & what it does not cover & possible answers & "
-                      "what the suite verified", text)
+        # V6-003: one full-width block per route, its six statements labelled (no seven-column table)
+        self.assertIn("\\textbf{POST /resolve.} \\emph{The budget:}", text)
+        for label in ("Its clock starts", "It covers", "It does not cover", "Possible answers", "What the suite verified"):
+            self.assertEqual(text.count("\\emph{%s:}" % label), len(rows), label)
         self.assertLess(text.find("\\emph{Times and load.}"), text.find("the scope of a time budget per route"))
         self.assertEqual(sections.budget_scope_table(self.ctx()), "")
         entry = self.checks["checks"]["budget_respected"]
@@ -4744,7 +4749,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertLess(summary.find("where to look: the chapters"), summary.find("\\bline{run verdict}"))
         self.assertIn("MCP, the Model Context Protocol", summary)
         self.assertNotIn("UNRESOLVED", summary)
-        self.assertIn("Three classifications are distinct", summary)
+        # V6-003 (the external review of the v6 document): the result first; the three classifications' full text is
+        # appendix F's vocabulary, I.1 names them and points there
+        self.assertIn("three classifications, never read for one another (appendix F's vocabulary)", summary)
+        self.assertLess(summary.find("\\emph{The result.}"), summary.find("A \\emph{finding} is the suite's category"))
         self.assertIn("one claim is one property check of one scenario", summary)
 
 
