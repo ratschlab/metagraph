@@ -410,5 +410,18 @@ class ExpectedStopTest(unittest.TestCase):
         self.assertIn("a test whose property is a correctly stated stop", text)
 
 
+class DeterminismStopsTest(unittest.TestCase):
+    """V6-306: chapter D and the catalogue keep time-limited stops (not repeated, not promised) apart from a work-limit
+    stop (max_steps), which D-M-order-0003 repeats."""
+
+    def test_prose(self):
+        gap = prose("D")["coverage_gap"]
+        self.assertIn("the repeat of a stop by elapsed time or of a 503 deadline is not asked", gap[0])
+        self.assertIn("a stop by a work limit, which no clock decides, is repeated like any answer", gap[0])
+        self.assertIn("(a stop or a cut by elapsed time, a 503 deadline)", gap[1])
+        det = prose("checks")["checks"]["deterministic"]["inconclusive"]
+        self.assertIn("A stop by a work limit (`max_steps`), which no clock decides, is compared like any answer", det)
+
+
 if __name__ == "__main__":
     unittest.main()

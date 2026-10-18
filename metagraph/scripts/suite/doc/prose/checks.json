@@ -263,7 +263,7 @@
    ],
    "args": "none; the runner passes the earlier repeats of the scenario on the same access path as their answer digests and what made each time-limited.",
    "asserts": "The answer's digest, the sha256 of the canonical JSON of the normalised answer without its headers and without every timing key, equals the digests of the scenario's earlier repeats on the same access path that no time budget limited. It is left out of a scenario's first repeat, which has nothing to compare, so that repeat's outcome rests on the other checks. In chapter R it appears through chapter D's copies of four R scenarios, repeated three times.",
-   "inconclusive": "This answer is itself time-limited (a 503 deadline, a resolve stopped by time, a pattern or seed stopped by its budget, an attempt's bound): it need not repeat; or no earlier repeat is free of a time limitation (then there is nothing to compare).",
+   "inconclusive": "This answer is itself time-limited (a 503 deadline, a resolve stopped by time, a pattern stopped or cut by time, a seed stopped by its time budget, an attempt's bound): it need not repeat; or no earlier repeat is free of a time limitation (then there is nothing to compare). A stop by a work limit (`max_steps`), which no clock decides, is compared like any answer.",
    "fails": "The digest differs from an earlier repeat's that no time budget limited; or this answer is time-limited and differs, and its stated time limitation cannot have happened (a /resolve stop before the budget less the reserve, a /pattern or /traverse stop before its work time or budget)."
   },
   "entry_fields": {
