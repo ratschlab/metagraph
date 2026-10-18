@@ -251,5 +251,17 @@ class ProteinAdmissionTest(unittest.TestCase):
         self.assertNotIn("which only M-protein-level1's passes show", filled)
 
 
+class DefectPinTest(unittest.TestCase):
+    """V6-304: the known-defect pin's note names the observation that would support the repair; any other failure
+    is diagnosed, and a failure alone never licenses revising the expectation."""
+
+    def test_note(self):
+        note = prose("N")["units"]["N-usecase-defect"]["note"]
+        self.assertNotIn("a failure signals the repair", note)
+        self.assertIn("consistent with the repair only when its answer shows the k-mer still in the graph and its "
+                      "header now supporting it", note)
+        self.assertIn("is diagnosed like any failure", note)
+
+
 if __name__ == "__main__":
     unittest.main()

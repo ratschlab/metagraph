@@ -5372,7 +5372,9 @@ class ChapterMQCNDTest(unittest.TestCase):
         self.assertIn("a count of two is not two copies", N["families"]["N-hard"]["prose"])
         self.assertIn("test no amplicon", N["families"]["N-usecase"]["prose"])
         self.assertTrue(N["units"]["N-usecase-defect"]["property"].startswith("Diagnostic pin of a known index defect"))
-        self.assertIn("a failure signals the repair, not a regression", N["units"]["N-usecase-defect"]["note"])
+        # V6-304 (the external review of the v6 document): a failure is consistent with the repair only under the
+        # stated observation, never by itself
+        self.assertIn("a failed test alone does not establish the repair", N["units"]["N-usecase-defect"]["note"])
         # the gate relation stated from the policy, never left as a condition for the reader (READ-318)
         note = N["units"]["N-usecase-defect"]["note"]
         self.assertNotIn("Where the gate's selection includes this scenario", note)
