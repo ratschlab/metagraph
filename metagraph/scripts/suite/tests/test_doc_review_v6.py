@@ -770,5 +770,19 @@ class VerifyRoundTest(unittest.TestCase):
                       "rules nor declared exempt)", prose("overview")["appendix_F"]["rules"][1])
 
 
+    def test_r2_003_overview_moves(self):
+        import inspect
+        self.assertIn("gate_population_table(ctx)", inspect.getsource(sections.decision_summary))
+        self.assertIn('"gate_decision": gate_decision_short(run)', inspect.getsource(sections.Context.placeholders))
+        self.assertIn("reading_reference(ctx)", inspect.getsource(sections.appendices))
+        reading = prose("overview")["sections"]["reading"]["paragraphs"]
+        self.assertNotIn("Times are rounded half up", reading[1])
+        self.assertNotIn("The family and chapter counts are by standing", reading[2])
+        ref = prose("overview")["appendix_F"]["reading_reference"]
+        self.assertTrue(ref[0].startswith("*The standing and the outcomes row.* The family and chapter counts"))
+        self.assertIn("{standing_vs_outcome_example_bd}", ref[0])
+        self.assertTrue(ref[1].startswith("*Rounding.* Times are rounded half up"))
+
+
 if __name__ == "__main__":
     unittest.main()

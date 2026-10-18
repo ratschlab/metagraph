@@ -209,7 +209,7 @@ class Context(object):
                 # (READ-022, filled through `vocab[...]`)
                 "gate_routes": gate_scope(run)["routes"], "gate_arms": gate_scope(run)["arms"],
                 "n_gate_selected": gate_scope(run)["selected"], "gate_scope_text": gate_scope(run)["text"],
-                "gate_decision": gate_decision_text(run), "gate_groups_text": gate_groups_text(run),
+                "gate_decision": gate_decision_short(run), "gate_groups_text": gate_groups_text(run),
                 # the external review of the v6 document (V6-001): the policy's automatic exclusions and the
                 # required population per gated access path
                 "gate_auto_text": gate_auto_text(run) or "none (no policy)",
@@ -872,6 +872,54 @@ def gate_groups_text(run):
              "violation": ("observed violation", "observed violations")}
     parts = ["%d %s" % (counts[g], words[g][0 if counts[g] == 1 else 1]) for g, _ in GATE_GROUPS if counts[g]]
     return ", ".join(parts) if parts else "none"
+
+
+def gate_decision_short(run):
+    """I.1's release decision without the population sentence, which I.1's population table carries (the second
+    external review, R2-003); the long form (gate_decision_text) stays in appendix F."""
+    gate = run.gate if isinstance(run.gate, dict) else None
+    if gate and gate.get("passed") and gate_population(run) is not None:
+        return ("The gate passed: every planned execution was recorded, every execution the policy requires passed or "
+                "matched the by-design case its scenario names, and nothing blocks. It certifies those required "
+                "executions (the table below), not the excluded ones and not the whole service.")
+    return gate_decision_text(run)
+
+
+def gate_population_table(ctx):
+    """I.1's table of the gate's populations (R2-003): the route selection, the policy's automatic exclusions, the
+    owner's exemptions, the required scenarios and executions per gated access path and in all, with the judged
+    executions by outcome; empty without a policy."""
+    run = ctx.run
+    pop = gate_population(run)
+    gate = run.gate if isinstance(run.gate, dict) else None
+    if pop is None or not gate:
+        return ""
+    scope = gate_scope(run)
+    dec = declared_counts(run)
+    rows = [["selected by route", esc("%d of the run's %d scenarios (%s)" % (pop["selected"], pop["n_run"],
+                                                                         scope["routes"]))],
+            ["the policy's automatic exclusions", esc("%s; rules derived from the manifest, its tags and the "
+                                                      "by-design table, no decision of the owner (appendix F)"
+                                                      % gate_auto_text(run))],
+            ["the owner's exemptions", esc(("%d exclusion%s, %d check%s not required, %d relation%s excluded "
+                                            "(appendix G)" % (dec["exclusions"], "" if dec["exclusions"] == 1 else "s",
+                                                              dec["not_required"], "" if dec["not_required"] == 1
+                                                              else "s", dec["relations_excluded"], "" if
+                                                              dec["relations_excluded"] == 1 else "s"))
+                                           if isinstance(getattr(run, "declared", None), dict) else "no declared file")]]
+    for arm, s_, e_ in pop["required"]:
+        rows.append(["required on %s" % esc(arm), "%d scenarios, %d executions (repeats included)" % (s_, e_)])
+    counts = gate.get("counts") or {}
+    rows.append(["required in all", esc("%d executions%s" % (pop["n_required"],
+                                                           judged_outcomes_text(run, counts).replace(",", ":", 1)
+                                                           if judged_outcomes_text(run, counts).startswith(",")
+                                                           else judged_outcomes_text(run, counts)))])
+    ungated = [a for a in ARMS if a not in ((run.policy or {}).get("arms") or [])]
+    note = (" %s is reported but not gated by this policy." % facts._join(ungated)) if ungated else ""
+    return latex.plain_table(latex.spec_p([46, 128]), ["population", "this run"], rows,
+                             "the deploy gate's populations: exclusion entries are not distinct tests (an entry can "
+                             "apply to one access path or one repeat), and scenario counts are not added across "
+                             "access paths;%s" % esc(note), needspace=len(rows) + 4)
 
 
 def gate_decision_text(run):
@@ -1634,6 +1682,7 @@ def decision_summary(ctx):
     out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n\\par\\endgroup\\medskip\n\n" % (
         verdict_line(ctx), gate_line(ctx))
     out += ctx.prose_paragraphs("decision", "verdict", optional=True)
+    out += gate_population_table(ctx)
     out += attention_table(ctx)
     out += "\\parhead{Principal findings}\n"
     groups = principal_findings(ctx)
@@ -1866,6 +1915,17 @@ def grammar_lines(ctx):
            "attention kinds, are in appendix F's vocabulary}"
            "\n\\par\\endgroup\n\n")
     return out
+
+
+def reading_reference(ctx):
+    """The reading guide's reference rules, moved from I.3 by the second external review (R2-003): the standing
+    against the outcomes row with its two examples, and the rounding of times (overview.json
+    `appendix_F.reading_reference`); nothing when the prose has none."""
+    entry = ctx.overview.get("appendix_F") if isinstance(ctx.overview.get("appendix_F"), dict) else {}
+    items = entry.get("reading_reference") or []
+    if not items:
+        return ""
+    return "\\parhead{Reading the tables: the reference rules}\n" + paragraphs([ctx.fill(p) for p in items])
 
 
 def colour_rules(ctx):
@@ -4530,6 +4590,7 @@ def appendices(ctx):
     out += appendix_rules(ctx)
     out += "\\parhead{Vocabulary}\n" + classes_tables(bool(answer_side_mark_ids(ctx.run)))
     out += colour_rules(ctx)
+    out += reading_reference(ctx)
     out += "\\parhead{The deploy gate}\n" + gate_problems(ctx)
     # written after the gate's record, whose sha256 it carries (the second review, R2-002)
     ctx.data_files[EVIDENCE_FILE] = json.dumps(evidence_manifest(ctx), indent=1, sort_keys=True) + "\n"
