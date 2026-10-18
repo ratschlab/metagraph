@@ -306,7 +306,7 @@ class JunctionPremiseTest(unittest.TestCase):
         import inspect
         import areas
         text = str(prose("R"))
-        self.assertIn("looks up every k-mer of the 170 bp query in the whole of each fetched record", text)
+        self.assertIn("looks up each of the 170 k-mers of the 200 bp query in the whole of each fetched record", text)
         self.assertIn("no junction k-mer occurs elsewhere in either record", text)
         self.assertIn("every query k-mer looked up in the whole record", prose("R")["units"]["R-junction"]["property"])
         src = inspect.getsource(areas._record_runs)
