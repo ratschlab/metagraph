@@ -1982,7 +1982,7 @@
   "M-planted": {
    "family": "M-planted",
    "unit_type": "replicates",
-   "unit_title": "planted substitutions by m and max_mismatches",
+   "unit_title": "planted substitutions t and max_mismatches m",
    "property": "A window with m planted substitutions at max_mismatches >= m: the source at level m with the substitutions reported (mirrored in the reverse orientation).",
    "n": 22,
    "members": [
@@ -6402,7 +6402,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer mge",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 1"
  },
  "M-planted-0002": {
@@ -6411,7 +6411,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer mge",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 1"
  },
  "M-planted-0003": {
@@ -6420,7 +6420,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer mge",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 1"
  },
  "M-planted-0004": {
@@ -6429,7 +6429,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer mpn",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 2"
  },
  "M-planted-0005": {
@@ -6438,7 +6438,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer mpn",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 2"
  },
  "M-planted-0006": {
@@ -6447,7 +6447,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer mpn",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 2"
  },
  "P-warm-0001": {
@@ -6464,7 +6464,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer ser",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 3"
  },
  "P-warm-0002": {
@@ -6481,7 +6481,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer ser",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 3"
  },
  "P-warm-0003": {
@@ -6498,7 +6498,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer ser",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "1 sub at m 3"
  },
  "M-planted-0010": {
@@ -6507,7 +6507,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer mja",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "2 sub at m 2"
  },
  "M-planted-0011": {
@@ -6516,7 +6516,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer mja",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "2 sub at m 2"
  },
  "M-planted-0012": {
@@ -6525,7 +6525,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer mja",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "2 sub at m 2"
  },
  "P-warm-0004": {
@@ -6542,7 +6542,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer sso",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "2 sub at m 3"
  },
  "P-warm-0005": {
@@ -6559,7 +6559,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer sso",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "2 sub at m 3"
  },
  "P-warm-0006": {
@@ -6576,7 +6576,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer sso",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "2 sub at m 3"
  },
  "P-warm-0007": {
@@ -6593,7 +6593,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer tth",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "3 sub at m 3"
  },
  "P-warm-0008": {
@@ -6610,7 +6610,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "31-mer tth",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "3 sub at m 3"
  },
  "P-warm-0009": {
@@ -6627,7 +6627,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "25-mer tth",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "3 sub at m 3"
  },
  "M-planted-0019": {
@@ -6636,7 +6636,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "reverse #1",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "reverse, 2 subs at m 2"
  },
  "M-planted-0020": {
@@ -6645,7 +6645,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "reverse #2",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "reverse, 2 subs at m 2"
  },
  "M-planted-0021": {
@@ -6654,7 +6654,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "reverse #3",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "reverse, 2 subs at m 2"
  },
  "M-planted-0022": {
@@ -6663,7 +6663,7 @@
   "unit_id": "M-planted",
   "unit_type": "replicates",
   "variant": "reverse #4",
-  "unit_title": "planted substitutions by m and max_mismatches",
+  "unit_title": "planted substitutions t and max_mismatches m",
   "group": "reverse, 2 subs at m 2"
  },
  "M-below-0001": {

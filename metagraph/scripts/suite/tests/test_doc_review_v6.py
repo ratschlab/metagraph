@@ -451,5 +451,15 @@ class WarmedTwinMarkerTest(unittest.TestCase):
         self.assertNotIn("the marker tracks", facts.fill(text, {"manifest_version": 4}))
 
 
+class PlantedTitleTest(unittest.TestCase):
+    """V6-208: the planted-substitution unit names t (planted) and m (max_mismatches) as its two dimensions."""
+
+    def test_mappings(self):
+        for v in (4, 5, 6):
+            text = open(os.path.join(DOC, "units", "suite_v%d.json" % v), encoding="utf-8").read()
+            self.assertNotIn("planted substitutions by m and max_mismatches", text, v)
+            self.assertIn('"unit_title": "planted substitutions t and max_mismatches m"', text, v)
+
+
 if __name__ == "__main__":
     unittest.main()
