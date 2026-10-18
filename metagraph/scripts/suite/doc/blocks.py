@@ -383,14 +383,16 @@ def _budget_text(run, sid):
     return ("{:,} ms".format(int(b)) if isinstance(b, (int, float)) else "none")
 
 
-def _property_cell(line, is_property, aside=None):
+def _property_cell(line, is_property, aside=None, refusal=True):
     """The 'property tested?' cell: what the execution tested of its property checks; the items a property-level
-    mark of the manifest sets aside (|aside|, suite_common.checks_marked_aside) are counted apart."""
+    mark of the manifest sets aside (|aside|, suite_common.checks_marked_aside) are counted apart. A test without a
+    property check reads 'status is the claim' only when it expects a refusal (`refusal`), else 'no property
+    declared' (a warm-up, whose generic checks are all it asks: the external review of the v6 document, V6-204)."""
     word, passed, total = cells.property_tested(line, is_property, aside)
     marked = len(aside or ())
     suffix = ("; %d marked not shown via MCP" % marked) if marked else ""
     if word == "n/a":
-        return ("n/a (status is the claim)" if total else "n/a") + suffix
+        return (("n/a (status is the claim)" if refusal else "n/a (no property declared)") if total else "n/a") + suffix
     if word == "yes":
         return "yes (%d of %d)%s" % (passed, total, suffix)
     if word == "partly":
@@ -731,7 +733,7 @@ def _execution_rows(st, run, sid, arm, is_property):
             wall += " (%s)" % esc(HC_SHORT.get(hc, hc))
         aside = run.marked_aside(sid, l) if (arm == "mcp" and hasattr(run, "marked_aside")) else None
         tested = "–" if outcome in ("not_implemented_mcp", "service_by_design") else _property_cell(
-            l, is_property, aside)
+            l, is_property, aside, refusal=host_expects_refusal(run.scenario(sid)))
         if aside and tested != "–":
             # the marked items counted apart make the cell long: a top-aligned box that wraps, so that the block's
             # table stays within the margin (the v6 delta: D-P-scope-0004's MCP rows; no v5 detail row has one)
@@ -1236,6 +1238,11 @@ def interpretation(run, sid, states, property_text=None, title=None):
         requested = inline(title) if title else esc(sc_.get("title"), 200)
         if props:
             requested += " (property check%s %s)" % ("" if len(props) == 1 else "s", ", ".join(tt(n) for n in props))
+        elif host_expects_refusal(sc_):
+            requested += " (no property check: the refusal's status, code and text are the claim)"
+        else:
+            requested += " (no property check: the generic checks alone%s)" % (
+                ("; the property is its target's, %s" % esc(sc_["warms"])) if sc_.get("warms") else "")
     observed = []
     for arm in cells.ARMS:
         st = states[arm]
@@ -1267,8 +1274,18 @@ def interpretation(run, sid, states, property_text=None, title=None):
     unshown = [name for name in props if not any(
         c.get("check") == name and c.get("outcome") == "pass" for arm in cells.ARMS for l in states[arm].lines
         for c in (l.get("checks") or []) if isinstance(c, dict))]
-    if not props:
+    if not props and host_expects_refusal(sc_):
         unverified = "none: the status, code and text are the claim, judged by the rows below"
+    elif not props:
+        # a test that declares no property of its own (a warm-up asks only what every answer must hold): nothing
+        # source-specific is verified or unverified here, and an allowed 503 leaves even the generic checks
+        # inconclusive; never 'the status is the claim', which is a refusal's (V6-204)
+        gaps = facts.unshown_reasons_text(run, sid, states)
+        unverified = "no property of its own declared: the test asks only the generic checks every answer must hold"
+        if gaps:
+            unverified += ", left undecided on %s" % esc(gaps)
+        if sc_.get("warms"):
+            unverified += "; the property is its target's, %s, shown or not by that test" % esc(sc_["warms"])
     elif unshown:
         shown_on = []
         for arm in cells.ARMS:

@@ -188,5 +188,42 @@ class ExceptionSummaryTest(unittest.TestCase):
         self.assertIn("on every access path: none, each property check passed on some access path or repeat; ", src)
 
 
+class WarmUpTimeoutTest(unittest.TestCase):
+    """V6-204: a test without a property check that expects a 200 (a warm-up) is not 'the status is the claim':
+    its detail block says it declares no property of its own and that the allowed 503 left its generic checks
+    undecided; a refusal keeps 'the status, code and text are the claim'."""
+
+    def test_property_cell(self):
+        line = {"outcome": "inconclusive", "checks": [{"check": "status", "outcome": "inconclusive"}]}
+        generic = lambda name: False  # noqa: E731
+        self.assertEqual(blocks._property_cell(line, generic, refusal=False), "n/a (no property declared)")
+        self.assertEqual(blocks._property_cell(line, generic), "n/a (status is the claim)")
+
+    def test_interpretation(self):
+        warm = {"id": "P-warm-0025", "title": "warm-up of P-heavy-0001: its request", "warms": "P-heavy-0001",
+                "expect": [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}}]}
+        refusal = {"id": "R-edge-0002", "title": "k-1 bases: refused",
+                   "expect": [{"check": "status", "args": {"http": 400, "text": "Query shorter than k"}}]}
+        line = {"outcome": "inconclusive", "http": 503, "error": {"code": "deadline"}, "repeat": 0, "wall_ms": 1000,
+                "checks": [{"check": "status", "outcome": "inconclusive"}]}
+        scen = {"P-warm-0025": warm, "R-edge-0002": refusal}
+        run = _Stub(scenario=scen.get, is_property=lambda name: False, budget_ms=lambda sid: 110000)
+        states = {"direct-local": _Arm([line]), "direct-remote": _Arm([], False), "mcp": _Arm([], False)}
+        for st in states.values():
+            st.missing_planned, st.glyph_key, st.ne = False, "inconclusive", False
+        req, _, unv = blocks.interpretation(run, "P-warm-0025", states)
+        self.assertIn("(no property check: the generic checks alone; the property is its target's, P-heavy-0001)", req)
+        self.assertIn("no property of its own declared", unv)
+        self.assertIn("left undecided on direct-local: an allowed 503 deadline (no answer to check)", unv)
+        self.assertNotIn("status, code and text are the claim", unv)
+        line_r = dict(line, http=400, error={"code": "invalid_request"}, outcome="pass")
+        states["direct-local"] = _Arm([line_r])
+        states["direct-local"].missing_planned, states["direct-local"].glyph_key = False, "pass"
+        states["direct-local"].ne = False
+        req, _, unv = blocks.interpretation(run, "R-edge-0002", states)
+        self.assertIn("the status, code and text are the claim", unv)
+        self.assertIn("(no property check: the refusal's status, code and text are the claim)", req)
+
+
 if __name__ == "__main__":
     unittest.main()

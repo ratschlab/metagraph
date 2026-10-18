@@ -36,10 +36,11 @@ CHECK_OUTCOMES = (
 
 # layer 2: the outcome of one execution (suite_common.OUTCOMES), with how it is decided and what it means
 EXECUTION_OUTCOMES = (
-    {"key": "pass", "legend": "every check that ran passed and at least one tested the claim (a property check, or a refusal's generic checks)",
+    {"key": "pass", "legend": "every check that ran passed and at least one tested the claim (a property check, or the generic checks of a test without one)",
      "glyph": "\\gpass", "word": "pass", "decided": "by the checks",
      "meaning": "every check that ran passed and at least one of them tested the claim: a property check, or, for a "
-                "scenario without one (a refusal: its status, code and text are the claim), its generic checks; a "
+                "scenario without one, its generic checks (a refusal: its status, code and text are the claim; a "
+                "warm-up: what every answer must hold); a "
                 "check that did not apply to the answer, or that a property-level mark of the manifest set aside, "
                 "is not counted",
      "consequence": "the property was shown on this execution"},

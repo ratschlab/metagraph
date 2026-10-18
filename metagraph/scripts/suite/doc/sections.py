@@ -4273,7 +4273,10 @@ def exemption_consequence(kind, entry, run=None):
             return head + " (no execution recorded there)"
         text = head + " (%s)" % "; ".join(outcomes)
         if not shown and not not_shown and not partly:
-            return text + "; no property check there: the status, code and text are the claim"
+            scen = run.scenario(entry["scenario"]) if hasattr(run, "scenario") else None
+            if not scen or blocks.host_expects_refusal(scen):
+                return text + "; no property check there: the status, code and text are the claim"
+            return text + "; no property check there: the test declares none of its own"
         parts = []
         if shown:
             parts.append("%s passed there and stay%s shown" % (", ".join(shown), "s" if len(shown) == 1 else ""))
