@@ -5270,7 +5270,7 @@ class ChapterMQCNDTest(unittest.TestCase):
         self.assertIn("the first entry reports forward-only strands", title4)
         self.assertNotIn("both", title4)
         self.assertIn("both entries report + and both are counted", facts.fill(n_details["N-usecase-0005"]["title"], {"manifest_version": 5}))
-        self.assertIn("I.2's budget table", n_details["N-hard-0022"]["note"])
+        self.assertIn("I.2's budget scope", n_details["N-hard-0022"]["note"])
         self.assertIn("not about end-to-end latency", n_details["N-hard-0022"]["note"])
         self.assertEqual(set(self.prose["D"]["details"]), {"D-P-scope-0004"})
         self.assertIn("repeatability and the source property", self.prose["D"]["details"]["D-P-scope-0004"]["note"])

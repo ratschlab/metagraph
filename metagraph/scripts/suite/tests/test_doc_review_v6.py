@@ -696,5 +696,12 @@ class VerifyRoundTest(unittest.TestCase):
                       "one the budget does not stop", text)
 
 
+    def test_l4_budget_scope_references(self):
+        import glob
+        for p in glob.glob(os.path.join(PROSE_DIR, "*.json")):
+            self.assertNotIn("I.2's budget table", open(p, encoding="utf-8").read(), p)
+        self.assertIn("as the blocks below state per route", prose("overview")["sections"]["methods"]["paragraphs"][3])
+
+
 if __name__ == "__main__":
     unittest.main()

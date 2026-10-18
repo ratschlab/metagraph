@@ -1693,7 +1693,7 @@ def budget_scope_table(ctx):
 
 def methods_section(ctx):
     """I.2: the prose (the access paths' bases are in it, their executions in I.4's table, their states and runners
-    in appendix F) and the budget-scope table (READ-015)."""
+    in appendix F) and the budget-scope blocks (READ-015; one per route since V6-003)."""
     return ctx.prose_paragraphs("methods") + budget_scope_table(ctx)
 
 
