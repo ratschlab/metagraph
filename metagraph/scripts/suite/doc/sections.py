@@ -2359,7 +2359,8 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     if cls in ("not_expressible", "answer_lacks_field"):
         case = st.agreement.get("case")
         reason = blocks.short_reason(run, sid, case, ctx.short_reasons())
-        return "%s\\ %s\\newline %s; see B" % (glyph, blocks.class_word_tex(cls, st), reason), None
+        return "%s\\ %s\\newline %s; see %s" % (glyph, blocks.class_word_tex(cls, st), reason,
+                                                 blocks.limit_appendix(run, sid, st)), None
     first = next((l for l in lines if l.get("http") is not None), None)
     code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
     status = "http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "") if first else "–"
@@ -2481,7 +2482,7 @@ def mcp_unit_note(ctx, chapter, uid, members):
     if text:
         body = inline(ctx.fill(text, facts.unit_facts(ctx, uid)))
     else:
-        reasons = []
+        reasons, where = [], []
         for sid in members:
             st = ctx.state(sid)["mcp"]
             case = st.agreement.get("case") or next((l.get("service_by_design_case") for l in st.lines
@@ -2489,7 +2490,11 @@ def mcp_unit_note(ctx, chapter, uid, members):
             r = blocks.short_reason(run, sid, case, ctx.short_reasons())
             if r not in reasons:
                 reasons.append(r)
-        body = "%s: %s; see B." % (cells.attn("Not exercised via MCP"), "; ".join(reasons))
+            a = blocks.limit_appendix(run, sid, st)
+            if a not in where:
+                where.append(a)
+        body = "%s: %s; see %s." % (cells.attn("Not exercised via MCP"), "; ".join(reasons),
+                                    " and ".join(sorted(where)) or "B")
     return "\\noindent{\\sffamily\\footnotesize\\gni\\ %s}\\par\\smallskip\n" % body
 
 

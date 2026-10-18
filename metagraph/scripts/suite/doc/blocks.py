@@ -638,9 +638,22 @@ def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
                           for r, l in others)), "" if len(others) == 1 else "s"))
     if st.glyph_key == "service_by_design" and st.agreement.get("verified") is False:
         parts.append("UNVERIFIED pair: %s" % esc(unverified_reason(st.agreement, st), 240))
-    tail = ("the note under the table and " if unit_note else "") + (("case %s in B" % tt(case)) if case else "B")
+    tail = ("the note under the table and " if unit_note else "") + (("case %s in B" % tt(case)) if case
+                                                                       else limit_appendix(run, sid, st))
     parts.append(tail)
     return "%s\\ %s: %s" % (glyph, head, "; ".join(parts))
+
+
+def limit_appendix(run, sid, st):
+    """Where a not-exercised MCP arm's reason is listed: appendix B when a by-design case is named (the agreement's
+    or an execution's case, or the scenario's mcp.by_design), else appendix G when the manifest's own mark
+    (mcp.not_implemented) is the reason (G's table of the manifest's reasons; the delta verifier's L7), else B."""
+    case = (st.agreement or {}).get("case") or next((l.get("service_by_design_case") for l in (st.lines or [])
+                                                     if isinstance(l, dict) and l.get("service_by_design_case")), None)
+    mcp = (run.scenario(sid) or {}).get("mcp") or {}
+    if case or mcp.get("by_design"):
+        return "B"
+    return "G" if mcp.get("not_implemented") else "B"
 
 
 def short_reason(run, sid, case, short_reasons=None):

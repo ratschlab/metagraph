@@ -5593,9 +5593,12 @@ class ColourRoundTwoTest(unittest.TestCase):
         run = _Stub(scenario=lambda sid: {"mcp": {"not_implemented": "graph"}}, cases={})
         ctx = _Stub(run=run, short_reasons=lambda: {})
         cell, note = sections._mcp_edge_cell(ctx, "R-9", ni, None, False)
+        # the manifest's own mark without a by-design case: its reason is in appendix G (the delta verifier's L7)
         self.assertEqual(cell, "\\gni\\ \\attn{not expressible through MCP}\\newline the request's graph cannot be "
-                               "expressed through the tools; see B")
+                               "expressed through the tools; see G")
         self.assertIsNone(note)
+        run.scenario = lambda sid: {"mcp": {"not_implemented": "graph", "by_design": ["resolve.not_expressible.graph"]}}
+        self.assertTrue(sections._mcp_edge_cell(ctx, "R-9", ni, None, False)[0].endswith("; see B"))
         # the detail block's adjudication phrase
         text = blocks._not_exercised_text(ni, run, "R-9", {})
         self.assertTrue(text.startswith("\\gni\\ \\attn{not exercised via MCP}: the request's graph"), text)
@@ -5994,6 +5997,19 @@ class V6DeltaTest(unittest.TestCase):
         self.assertIn("Or, by the manifest's scenario-level mark (P-scope-0004: absence_scope), the request is expressible",
                       facts.fill(entry, {"answer_side_mark": True, "answer_side_mark_text": "P-scope-0004: absence_scope"}))
         self.assertIn("a protocol body). The cell says", facts.fill(entry, {"answer_side_mark": False}))
+
+    def test_limit_appendix(self):
+        """The delta verifier's L7 (2026-10-18): a not-exercised MCP arm points at appendix B when a by-design case
+        is named, at appendix G when the manifest's own mark is the reason (G lists the manifest's reasons)."""
+        st = cells.ArmState("mcp")
+        st.agreement = {"class": "not_implemented_mcp", "by": "manifest"}
+        run = _Stub(scenario=lambda sid: {"mcp": {"not_implemented": "graphs", "by_design": []}})
+        self.assertEqual(blocks.limit_appendix(run, "T-edge-0005", st), "G")
+        run = _Stub(scenario=lambda sid: {"mcp": {"not_implemented": "graphs", "by_design": ["resolve.x"]}})
+        self.assertEqual(blocks.limit_appendix(run, "R-edge-0017", st), "B")
+        st.agreement = {"class": "service_by_design", "case": "pattern.lowercase"}
+        run = _Stub(scenario=lambda sid: {"mcp": {}})
+        self.assertEqual(blocks.limit_appendix(run, "P-edge-0004", st), "B")
 
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
