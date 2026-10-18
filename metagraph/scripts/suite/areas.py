@@ -3364,17 +3364,26 @@ MCP_PATTERN_ENTRY_NOT_EXPOSED = {
 }
 
 
+# v7 (the owner's scope addition, 2026-10-18, with the service bundle that carries the identity): the MCP's /pattern
+# answer carries, per by_database[] entry, the host answer's absence_scope (verbatim, a string) and strands (the
+# host's list), per by_graph[] entry for a database with several answers (checks.MCP_PATTERN_DATABASE_FIELDS, where
+# entry_fields reads them on the MCP arm). From v7 they are not among what the answer cannot carry: the checks that
+# read them run on the MCP arm, unmarked (v6's marks of P-exact-0001..0008, P-scope-0001..0003 / -0005 / -0007..0012,
+# N-usecase-0005, D-P-exact-0001, D-P-scope-0004, and the scenario-level ones of P-scope-0004 / -0006, are gone).
+MCP_PATTERN_ENTRY_CARRIED_V7 = ("absence_scope", "strands")
+
+
 def _expected_paths(args: dict) -> List[str]:
     """The paths an entry_fields / answer_fields expectation reads a value from (equals, present); `absent` reads
     an absence, which an unexposed field shows as well."""
     return list((args.get("equals") or {}).keys()) + list(args.get("present") or [])
 
 
-def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
+def pattern_mcp_unexposed(sc: dict, carried: Tuple[str, ...] = ()) -> Dict[str, List[str]]:
     """{check: [what the MCP's /pattern answer cannot carry that it reads]} of a scenario the MCP runs
-    (pattern_search): an entry_fields path whose first field is in MCP_PATTERN_ENTRY_NOT_EXPOSED (a refused slot's
-    mismatch keys are carried), an answer_fields path outside MCP_PATTERN_BODY_KEYS that the entries do not carry
-    either (MCP_PATTERN_PER_ENTRY)."""
+    (pattern_search): an entry_fields path whose first field is in MCP_PATTERN_ENTRY_NOT_EXPOSED and not in |carried|
+    (v7: MCP_PATTERN_ENTRY_CARRIED_V7; a refused slot's mismatch keys are carried), an answer_fields path outside
+    MCP_PATTERN_BODY_KEYS that the entries do not carry either (MCP_PATTERN_PER_ENTRY)."""
     if sc.get("route") != "POST /pattern" or (sc.get("mcp") or {}).get("tool") != "pattern_search":
         return {}
     refused = set((e.get("args") or {}).get("pattern", 0) for e in sc["expect"] if e["check"] == "pattern_slot_error")
@@ -3385,7 +3394,7 @@ def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
             slot = a.get("pattern", 0) in refused
             for p in _expected_paths(a):
                 head = p.split(".", 1)[0]
-                if head in MCP_PATTERN_ENTRY_NOT_EXPOSED and not (slot and "mismatch" in head):
+                if head in MCP_PATTERN_ENTRY_NOT_EXPOSED and head not in carried and not (slot and "mismatch" in head):
                     out.setdefault("entry_fields", [])
                     if MCP_PATTERN_ENTRY_NOT_EXPOSED[head] not in out["entry_fields"]:
                         out["entry_fields"].append(MCP_PATTERN_ENTRY_NOT_EXPOSED[head])
@@ -3461,14 +3470,16 @@ def pattern_by_design_case(sc: dict, check: str, what: List[str]) -> Optional[st
     return cases[0] if len(set(cases)) == 1 else None
 
 
-def mark_pattern_mcp_fields(scenarios: List[dict], by_design: bool = False) -> Dict[str, List[str]]:
+def mark_pattern_mcp_fields(scenarios: List[dict], by_design: bool = False,
+                            carried: Tuple[str, ...] = ()) -> Dict[str, List[str]]:
     """Marks every property check of a /pattern scenario that reads what the MCP's answer cannot carry
-    (pattern_mcp_unexposed) not implemented yet via MCP (mcp_not_implemented_check, with the fields as its reason),
-    or, with |by_design| (manifest v7), service-side by design where the service leaves out by design all it reads
-    (pattern_by_design_case: mcp_by_design_check with the case); returns {id: [checks marked]}."""
+    (pattern_mcp_unexposed, less the fields in |carried|: v7's MCP_PATTERN_ENTRY_CARRIED_V7) not implemented yet via
+    MCP (mcp_not_implemented_check, with the fields as its reason), or, with |by_design| (manifest v7), service-side
+    by design where the service leaves out by design all it reads (pattern_by_design_case: mcp_by_design_check with
+    the case); returns {id: [checks marked]}."""
     out = {}
     for s in scenarios:
-        for check, what in pattern_mcp_unexposed(s).items():
+        for check, what in pattern_mcp_unexposed(s, carried).items():
             if any(e.get("check") == check for key in ("not_implemented_checks", "by_design_checks")
                    for e in (s["mcp"].get(key) or [])):
                 continue

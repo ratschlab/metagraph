@@ -3,7 +3,9 @@ entry_fields check, which reads the pattern text the MCP's /pattern answer leave
 statement, 2026-10-17), is classed service-side by design at property level (mcp.by_design_checks under the table's
 pattern.lowercase) instead of not implemented yet via MCP. Item 2: every /pattern scenario's budget_respected states
 the host's finalisation reserve (reserve_ms, the capabilities snapshot's pattern finalize_reserve_ms). The tests that
-build skip without the record cache (SUITE_TRUTH_CACHE or truth/cache)."""
+build skip without the record cache (SUITE_TRUTH_CACHE or truth/cache). Item 5 (the owner's scope addition of
+2026-10-18): the MCP's answer carries absence_scope and strands per database, so the checks that read them are no
+longer marked not implemented via MCP and P-scope-0004 / -0006 run on the MCP arm again."""
 import copy
 import json
 import os
@@ -26,6 +28,11 @@ PATTERN_TEXT_BY_DESIGN = {"P-edge-0004": "pattern.lowercase"}
 N_PATTERN_BUDGET = 454
 # the snapshot's pattern_capabilities finalize_reserve_ms (truth/staging_capabilities/, release refseq97-6f945db4)
 SNAPSHOT_RESERVE_MS = 250
+# item 5: v6's marks of what v7's MCP answer carries per database (test_builder_v6's ABSENCE_SCOPE and STRANDS)
+ABSENCE_SCOPE = ["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-%04d" % i for i in (1, 2, 3, 5)] + \
+    ["D-P-exact-0001", "D-P-scope-0004"]
+STRANDS = ["P-scope-%04d" % i for i in range(7, 13)] + ["N-usecase-0005"]
+UNMARKED_SCENARIOS = ["P-scope-0004", "P-scope-0006"]   # v6's scenario-level marks (absence_scope their only check)
 
 
 def read(name):
@@ -113,6 +120,22 @@ class PatternTextByDesign(unittest.TestCase):
         self.assertEqual(sorted(reserve), sorted(x["id"] for x in v6["scenarios"] if x["route"] == "POST /pattern"
                                                  and any(e["check"] == "budget_respected" for e in x["expect"])))
         self.assertEqual(len(reserve), N_PATTERN_BUDGET)
+        what = {"absence_scope": "the entry's absence_scope (the service states the request's scope instead)",
+                "strands": "the entry's strands"}
+        for ids, field in ((ABSENCE_SCOPE, "absence_scope"), (STRANDS, "strands")):
+            for sid in ids:
+                self.assertEqual(changed.pop(sid), [(".mcp.not_implemented_checks", [
+                    {"check": "entry_fields", "reason": "the MCP's /pattern answer does not carry %s" % what[field]}],
+                    None)], sid)
+        v5 = by_id(read("suite_v5.json"))
+        for sid in UNMARKED_SCENARIOS:
+            # the MCP mapping v5 had (its tool, arguments and exposes), with v6's budget
+            self.assertNotIn("not_implemented", s7[sid]["mcp"])
+            want = dict(v5[sid]["mcp"], arguments=dict(v5[sid]["mcp"]["arguments"], time_budget_ms=110000))
+            self.assertEqual(s7[sid]["mcp"], want, sid)
+            self.assertEqual(sorted(p for p, _, _ in changed.pop(sid)),
+                             [".mcp.arguments", ".mcp.exposes", ".mcp.not_implemented", ".mcp.tool"], sid)
+            self.assertEqual(s7[sid]["request"]["time_budget_ms"], s7[sid]["mcp"]["arguments"]["time_budget_ms"])
         self.assertEqual(sorted(changed), sorted(PATTERN_TEXT_BY_DESIGN))
         for sid, case in PATTERN_TEXT_BY_DESIGN.items():
             self.assertEqual(changed[sid], [
@@ -122,7 +145,15 @@ class PatternTextByDesign(unittest.TestCase):
                  None)])
             self.assertIn(case, s7[sid]["mcp"]["by_design"])
         c6, c7 = json.loads(json.dumps(v6["counts"])), json.loads(json.dumps(m["counts"]))
+        self.assertEqual(c6.pop("mcp_not_implemented") - c7.pop("mcp_not_implemented"), len(UNMARKED_SCENARIOS))
         self.assertEqual(c7, c6)
+        self.assertEqual(m["mcp_exposure_baseline"]["scenarios_with_exposes"],
+                         v6["mcp_exposure_baseline"]["scenarios_with_exposes"] + len(UNMARKED_SCENARIOS))
+        # no /pattern check is marked for absence_scope or strands any more; P-edge-0004's by-design mark stays
+        marks = [(x["id"], e.get("reason") or e.get("case")) for x in m["scenarios"]
+                 for key in ("not_implemented_checks", "by_design_checks") for e in x["mcp"].get(key) or []
+                 if x["route"] == "POST /pattern"]
+        self.assertEqual(marks, [("P-edge-0004", "pattern.lowercase")])
 
 
 class PatternReserve(unittest.TestCase):
@@ -149,3 +180,25 @@ class PatternReserve(unittest.TestCase):
     def test_snapshot_reserve(self):
         caps = bm.load_capabilities(bm.DEFAULT_CAPABILITIES)
         self.assertEqual(caps["pattern_capabilities"]["finalize_reserve_ms"], SNAPSHOT_RESERVE_MS)
+
+
+class PerDatabaseFields(unittest.TestCase):
+    """Item 5: the fields the MCP's answer carries per database from v7 (areas.MCP_PATTERN_ENTRY_CARRIED_V7) are not
+    among what it cannot carry; v6's rule still marks them."""
+
+    def test_carried(self):
+        self.assertEqual(areas.MCP_PATTERN_ENTRY_CARRIED_V7, ("absence_scope", "strands"))
+        import checks
+        self.assertEqual(sorted(checks.MCP_PATTERN_DATABASE_FIELDS), sorted(areas.MCP_PATTERN_ENTRY_CARRIED_V7))
+        both = pattern_scenario("A", {"absence_scope": "suffix_only", "strands": ["+"]})
+        self.assertEqual(areas.pattern_mcp_unexposed(both, areas.MCP_PATTERN_ENTRY_CARRIED_V7), {})
+        self.assertEqual(areas.pattern_mcp_unexposed(both), {"entry_fields": [
+            "the entry's absence_scope (the service states the request's scope instead)", "the entry's strands"]})
+        mixed = pattern_scenario("B", {"strands": ["+"], "limits.max_contexts": 5})
+        self.assertEqual(areas.pattern_mcp_unexposed(mixed, areas.MCP_PATTERN_ENTRY_CARRIED_V7),
+                         {"entry_fields": ["the entry's limits"]})
+        v7, v6 = [copy.deepcopy(both)], [copy.deepcopy(both)]
+        self.assertEqual(areas.mark_pattern_mcp_fields(v7, by_design=True, carried=areas.MCP_PATTERN_ENTRY_CARRIED_V7),
+                         {})
+        self.assertNotIn("not_implemented_checks", v7[0]["mcp"])
+        self.assertEqual(areas.mark_pattern_mcp_fields(v6), {"A": ["entry_fields"]})

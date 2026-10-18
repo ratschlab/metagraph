@@ -4712,6 +4712,36 @@ raw/ in either layout, so the file is the same); a record that is no object read
 a raw record (tests/test_common RawRecordReader). run_direct.py and suite_common.py are snapshot files: the change
 reaches new runs (a run's snapshot pairs the two); recorded runs keep theirs.
 
+### absence_scope and strands via MCP (item 5; the owner's scope addition of 2026-10-18)
+With the service bundle that carries the identity, the MCP's /pattern answer states per by_database[] entry the
+host answer's `absence_scope` (verbatim, a string: "any_offset", "suffix_only", "long") and `strands` (the host's list
+verbatim: ["+","-"], ["+"], ["-"], ["="] for a palindrome; some fixtures ["forward","reverse"]); for a database with
+several answers (graph chunks) both are null there and each graph's values sit in by_graph[]; a key is absent when the
+host's answer states none. The entry's own absence_scope (the service's merged {scope, tasks_failed}) and the predicate
+block's strands ("either" / "context") are other fields.
+- **The checks** (checks.MCP_PATTERN_DATABASE_FIELDS, _mcp_database_values): on the MCP arm, entry_fields reads these
+  two fields from the entry's by_database[] items (each database's own non-null value), else their by_graph[] items,
+  and the entry's own by_graph[]; with neither list, the entry's own value where it has the host's type (a normaliser
+  that flattens the one database's keys onto the entry, as it does predicate and load_ms; the merged absence_scope
+  object or a strands string is no host statement). Every stated value is held to the expectation: a present but
+  different one fails ("absence_scope = 'any_offset' (by_database[0]), expected 'suffix_only'"), none stated is not
+  exposed, with the same detail as before ("field not in the answer: absence_scope"). A direct arm reads the entry as
+  before. The recorded v5 / v6 MCP answers carry neither field and their manifests keep the marks, so they judge
+  exactly as before. The runner's normaliser must keep by_database[] (with by_graph[]) on the entry, or flatten a
+  single database's two values onto it; otherwise the checks read them not exposed.
+- **The manifest**: areas.MCP_PATTERN_ENTRY_CARRIED_V7 (absence_scope, strands) is left out of what the MCP's answer
+  cannot carry for v7 (mark_pattern_mcp_fields(carried=)), so v6's not-implemented marks of entry_fields on
+  P-exact-0001..0008, P-scope-0001 / -0002 / -0003 / -0005 / -0007..0012, N-usecase-0005, D-P-exact-0001 and
+  D-P-scope-0004 are gone, and P-scope-0004 / -0006 (absence_scope their only property check, scenario-level marks in
+  v6) get back v5's MCP mapping (pattern_search with their arguments at 110,000 ms, exposes counts_consistent,
+  invariants, status). P-edge-0004 (item 1) is the one /pattern mark left. counts.mcp_not_implemented 53 -> 51,
+  mcp_exposure_baseline.scenarios_with_exposes 510 -> 512.
+- **The policies follow from the marks**: the rt policy is v6's but for its pins; the rtp policy requires on mcp 630
+  scenarios / 1,280 executions (v6 628 / 1,275: P-scope-0004 and -0006 r0 and r1, D-P-scope-0004 r0, which
+  marks_cover_repeat no longer excludes), REL-subset-0002 / -0003 on both arms (19 relations required, as before; 8
+  excluded instead of 10), 91 exclusions (manifest_not_implemented 48, no marks_cover_repeat), direct-local unchanged
+  (686 / 793).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

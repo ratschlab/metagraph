@@ -532,11 +532,78 @@ class PatternChecks(unittest.TestCase):
                          ("fail", "field not in the answer: absence_scope"))
         self.assertEqual(outcome(sc, ans(scope="any_offset"), "entry_fields", **args)[1],
                          "scope = 'any_offset', expected 'suffix'")
-        # present and absent alike: a stated absent field fails before a missing present one is reported
-        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", present=["pattern"],
+        # present and absent alike: a stated absent field fails before a missing present one is reported (v7: the
+        # host's strands is a list; a value of another type on the MCP entry is no host statement,
+        # PerDatabaseFields)
+        self.assertEqual(outcome(sc, ans(strands=["+"]), "entry_fields", "mcp", present=["pattern"],
                                  absent=["strands"])[0], "fail")
         self.assertEqual(outcome(sc, ans(), "entry_fields", "mcp", present=["pattern"], absent=["strands"]),
                          ("not_exposed", "field not in the answer: pattern"))
+
+    def test_per_database_fields_on_the_mcp_arm(self):
+        """Manifest v7 (the service bundle of 2026-10-18): the MCP's /pattern answer states the host's absence_scope (a
+        string) and strands (a list) per database, by_database[], or per graph, by_graph[], where a database has
+        several answers (its own value null); entry_fields reads them there on the MCP arm, every stated value held to
+        the expectation: a present but different value fails, none stated is not exposed (as before), and the
+        entry's own absence_scope object (the service's merged {scope, tasks_failed}) or the predicate block's strands
+        is never read for them. A direct arm reads the entry as before."""
+        def ans(by_database=None, by_graph=None, **kw):
+            e = dict({"id": "w", "kind": "dna", "length": 25, "scope": "suffix",
+                      "counts": {"contexts": {"relation": "exact", "value": 0}},
+                      "predicate": {"strands": "either"}}, **kw)
+            if by_database is not None:
+                e["by_database"] = by_database
+            if by_graph is not None:
+                e["by_graph"] = by_graph
+            return {"http": 200, "error": None, "body": {"mode": "count", "patterns": [e]}}
+        sc = {"route": "POST /pattern", "truth": {}, "request": {"patterns": [{"dna": "A" * 25, "id": "w"}]}}
+        scope = {"pattern": 0, "equals": {"absence_scope": "suffix_only", "scope": "suffix"}}
+        strands = {"pattern": 0, "equals": {"strands": ["+"]}}
+        db = lambda **kw: dict({"database": "refseq33m-experimental"}, **kw)  # noqa: E731
+        # a database with one answer
+        self.assertEqual(outcome(sc, ans([db(absence_scope="suffix_only", strands=["+"])]), "entry_fields", "mcp",
+                                 **scope), ("pass", "entry fields as expected"))
+        self.assertEqual(outcome(sc, ans([db(absence_scope="suffix_only", strands=["+"])]), "entry_fields", "mcp",
+                                 **strands)[0], "pass")
+        self.assertEqual(outcome(sc, ans([db(absence_scope="any_offset")]), "entry_fields", "mcp", **scope),
+                         ("fail", "absence_scope = 'any_offset' (by_database[0]), expected 'suffix_only'"))
+        self.assertEqual(outcome(sc, ans([db(strands=["+", "-"])]), "entry_fields", "mcp", **strands),
+                         ("fail", "strands = ['+', '-'] (by_database[0]), expected ['+']"))
+        # a chunked database: null at the database, each graph's value in by_graph[] (every one held to it)
+        chunked = [db(absence_scope=None, strands=None, by_graph=[{"graph": "g1", "absence_scope": "suffix_only",
+                                                                   "strands": ["+"]},
+                                                                  {"graph": "g2", "absence_scope": "suffix_only",
+                                                                   "strands": ["+"]}])]
+        self.assertEqual(outcome(sc, ans(chunked), "entry_fields", "mcp", **scope)[0], "pass")
+        self.assertEqual(outcome(sc, ans(chunked), "entry_fields", "mcp", **strands)[0], "pass")
+        chunked[0]["by_graph"][1]["strands"] = ["forward", "reverse"]
+        self.assertEqual(outcome(sc, ans(chunked), "entry_fields", "mcp", **strands),
+                         ("fail", "strands = ['forward', 'reverse'] (by_database[0].by_graph[1]), expected ['+']"))
+        self.assertEqual(outcome(sc, ans(by_graph=[{"absence_scope": "suffix_only"}]), "entry_fields", "mcp",
+                                 **scope)[0], "pass")
+        # a key the host's answer does not state (absent or null everywhere): not exposed, as before
+        for a in (ans([db()]), ans([db(absence_scope=None, by_graph=[{"graph": "g1"}])]), ans(), ans([])):
+            self.assertEqual(outcome(sc, a, "entry_fields", "mcp", **scope),
+                             ("not_exposed", "field not in the answer: absence_scope"))
+        # the entry's own absence_scope object and the predicate block's strands are other fields
+        self.assertEqual(outcome(sc, ans(absence_scope={"scope": "suffix", "tasks_failed": 0}), "entry_fields", "mcp",
+                                 **scope), ("not_exposed", "field not in the answer: absence_scope"))
+        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", **strands)[0], "not_exposed")
+        # a normaliser that flattens the one database's keys onto the entry: read there (the host's types only)
+        self.assertEqual(outcome(sc, ans(absence_scope="suffix_only", strands=["+"]), "entry_fields", "mcp",
+                                 **scope)[0], "pass")
+        self.assertEqual(outcome(sc, ans(strands=["-"]), "entry_fields", "mcp", **strands)[0], "fail")
+        # present / absent read the same statements; a carried wrong field beside a missing one still fails first
+        self.assertEqual(outcome(sc, ans([db(strands=["+"])]), "entry_fields", "mcp", absent=["strands"]),
+                         ("fail", "strands present (by_database[0]), expected absent"))
+        self.assertEqual(outcome(sc, ans([db(strands=["+"])]), "entry_fields", "mcp", present=["strands"])[0], "pass")
+        self.assertEqual(outcome(sc, ans([db()]), "entry_fields", "mcp", present=["strands"])[0], "not_exposed")
+        self.assertEqual(outcome(sc, ans([db()], scope="any_offset"), "entry_fields", "mcp", **scope),
+                         ("fail", "scope = 'any_offset', expected 'suffix'"))
+        # a direct arm reads the entry itself (by_database is no field of the host's answer)
+        self.assertEqual(outcome(sc, ans([db(absence_scope="suffix_only")]), "entry_fields", **scope),
+                         ("fail", "field not in the answer: absence_scope"))
+        self.assertEqual(outcome(sc, ans(absence_scope="suffix_only"), "entry_fields", **scope)[0], "pass")
 
     def test_invariants_refuse_a_mutated_answer(self):
         req, ans = fixture("mismatch_neighbours")

@@ -28,7 +28,11 @@ service-side by design at property level (mcp.by_design_checks under the table's
 areas.MCP_PATTERN_ENTRY_BY_DESIGN) instead of not implemented yet via MCP; v6 is built again, byte for byte, with
 --manifest-version 6 (build(manifest_version=6)); and every /pattern scenario's budget_respected states the host's
 finalisation reserve, reserve_ms, the snapshot's pattern_capabilities finalize_reserve_ms
-(areas.state_pattern_reserve), which checks._pattern_work_time reads instead of the reserve the answer states.
+(areas.state_pattern_reserve), which checks._pattern_work_time reads instead of the reserve the answer states; and
+(the owner's scope addition of 2026-10-18, with the service bundle that carries them) the checks that read the
+entry's absence_scope or strands are no longer marked not implemented via MCP (areas.MCP_PATTERN_ENTRY_CARRIED_V7:
+the MCP's answer states them per database, checks.MCP_PATTERN_DATABASE_FIELDS), so P-scope-0004 / -0006 run on the
+MCP arm again.
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -168,7 +172,9 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         scenarios += areas.gen_D(ctx, scenarios)
     areas.state_chance_bounds(scenarios)
     # v6: what the MCP's /pattern answer cannot carry, at property level; v7: what it leaves out by design, classed so
-    areas.mark_pattern_mcp_fields(scenarios, by_design=manifest_version >= 7)
+    # v7: absence_scope and strands carried per database (areas.MCP_PATTERN_ENTRY_CARRIED_V7), no longer marked
+    areas.mark_pattern_mcp_fields(scenarios, by_design=manifest_version >= 7,
+                                  carried=areas.MCP_PATTERN_ENTRY_CARRIED_V7 if manifest_version >= 7 else ())
     scenario_level_marks(scenarios)
     areas.tag_pattern_budget_stress(scenarios)   # v6: the heavy /pattern scenarios outside the gate
     # v6's /pattern warm-ups must not move the deploy gate's executions: the warm-repeat status of every scenario on
