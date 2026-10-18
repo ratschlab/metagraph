@@ -409,6 +409,32 @@ class TestCompareCostIsALowerBound(unittest.TestCase):
                                 cost['memory_bytes']['estimate'], bud.peak_bytes))
         self.assertEqual([], bad)
 
+    def test_the_labels_estimate_is_above_the_charge(self):
+        """In labels mode too the estimate is an upper bound of what compare() charges: the
+        keys bounded per arm by the labels its clipped summary can hold, and the difference
+        rows as compare() charges them -- each side's keys of every arm sorted at once, in
+        two lists -- not a sort and one list per arm (below the charge by a few lwu on
+        two-armed pairs and by 9 bytes a key everywhere)."""
+        bad = []
+        deep = [(('comb%d' % n, lambda n=n: parse(comb_annotate(n))),
+                 ('comb%d' % m, lambda m=m: parse(comb_annotate(m))))
+                for n, m in ((300, 300), (1000, 1000), (100, 1000), (1000, 100))]
+        for (ka, ma), (kb, mb) in _pairs() + _comb_pairs() + deep:
+            a0 = ma()
+            kws = [{}] + ([{'labels': [{'ref': a0.labels[-1].ref}]}] if a0.labels else [])
+            for kw in kws:
+                for arm in (None,) + tuple(s for s in ('left', 'right')
+                                           if s in a0.arms and s in mb().arms):
+                    cost = ops.compare_cost(ma(), mb(), arm, mode='labels', **kw)
+                    bud = LocalBudget()
+                    ma().compare(mb(), arm=arm, mode='labels', budget=bud, **kw)
+                    if bud.used_work > cost['work_units']['estimate'] \
+                            or bud.peak_bytes > cost['memory_bytes']['estimate']:
+                        bad.append((os.path.basename(ka), os.path.basename(kb), kw, arm,
+                                    cost['work_units']['estimate'], bud.used_work,
+                                    cost['memory_bytes']['estimate'], bud.peak_bytes))
+        self.assertEqual([], bad)
+
     def test_a_graphlet_compared_with_itself(self):
         """compare(g, g) charges b's cut pass, as compare_cost(g, g) prices it: the
         comparison's memo keys a side's cuts by the side, not by the object, so at_least

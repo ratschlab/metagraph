@@ -3830,10 +3830,14 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     of the claims' prefixes, the keys, and as many difference rows as keys (an upper
     bound for those) -- and, for prefix_subset, its scans priced on the supported labels
     of each cut, which are only known while comparing: those phases are named in
-    |unpriced|. exact: compare() stops before keying (incomparable indexes, no arm in
-    common, a side without bases in a mode keyed by bases), so at_least is all it
-    charges. Cost: one pass over each arm's segments and runs (its structural sizes; a
-    constrain run cut at the depth follows its own route to it, as compare() does)."""
+    |unpriced|. In claims and labels mode the estimate is an upper bound of what the
+    completed comparison charges (its keys bounded from above: the claims' chains over
+    every anchor of the restricted DAG, the labels each clipped summary can hold); in
+    walks and prefix_subset mode it is not promised to be one. exact: compare() stops
+    before keying (incomparable indexes, no arm in common, a side without bases in a mode
+    keyed by bases), so at_least is all it charges. Cost: one pass over each arm's
+    segments and runs (its structural sizes; a constrain run cut at the depth follows its
+    own route to it, as compare() does)."""
     if mode not in _COMPARE_MODES:
         raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     t = _Tally()
@@ -3918,17 +3922,18 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                         + cuts * n0 * dict_bytes(2)
             if mode == 'labels':
                 n = _clipped_summary_price(t, g, arm_)
+                keys += n
                 # the keys: compare() charges the labels the clipped summary holds, which
                 # n (the most it can hold) bounds from above -- an estimate, not at_least
                 # (charged into at_least, it exceeded a comparison with labels=)
-                est_w += W_ELEM * 2 * n + sort_work(n) + (2 + W_ROW) * n
-                est_m += n * (TUPLE + 2 * STR + 24 + DICT_KEY) + list_bytes(n) \
-                    + n * dict_bytes(5)
-        if mode == 'claims':
-            # as many difference rows as keys: the side's keys of every arm sorted at once
-            # (_charge_differences())
+                est_w += W_ELEM * 2 * n
+                est_m += n * (TUPLE + 2 * STR + 24 + DICT_KEY)
+        if mode in ('claims', 'labels'):
+            # as many difference rows as keys: the side's keys of every arm sorted at once,
+            # in two lists (_charge_differences())
             est_w += sort_work(keys) + (2 + W_ROW) * keys
-            est_m += 2 * list_bytes(keys) + keys * (dict_bytes(6) + dict_bytes(2))
+            est_m += 2 * list_bytes(keys) + keys * (dict_bytes(6) + dict_bytes(2)
+                                                     if mode == 'claims' else dict_bytes(5))
         phases['keys:' + tag] = t.work - w0
     if mode == 'prefix_subset':
         unpriced.append('omissions')
