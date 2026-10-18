@@ -120,10 +120,10 @@ def _uses_g(b, g, *names):
             # per key and the ref string Label.ref makes for each (measured: 200-260 bytes
             # a label; dict_bytes() models a dict at 16 bytes a key and would leave the index
             # at 0.7x its size)
-            b.uses((id(g), name), 4 * n,
-                   2 * (DICT + 48 * n) + n * (2 * (TUPLE + 8) + STR + 24))
+            b.uses_of(g, name, 4 * n,
+                      2 * (DICT + 48 * n) + n * (2 * (TUPLE + 8) + STR + 24))
         elif name == 'name_counts':
-            b.uses((id(g), name), 2 * n, dict_bytes(n) + n * INT)
+            b.uses_of(g, name, 2 * n, dict_bytes(n) + n * INT)
         elif name == 'label_summary':
             w = 6 * n * len(g.arms)
             m = len(g.arms) * n * (dict_bytes(4) + LIST) + n * (LIST + LIST_ITEM)
@@ -137,7 +137,7 @@ def _uses_g(b, g, *names):
                     w += W_ELEM * (3 * z['segments'] + z['presence']) \
                         + ((2 * z['presence_ids'] + 2 * z['entry_ids']) >> 2)
                     m += z['segments'] * (SET + LIST_ITEM) + z['entry_ids'] * SET_ITEM
-            b.uses((id(g), name), w, m)
+            b.uses_of(g, name, w, m)
         else:
             raise KeyError(name)
 
@@ -1054,8 +1054,8 @@ def _annotate_ends_price(b, g, a):
     n = sum(len(v) for v in ends.values())
     b.charge(W_ELEM * len(ends) + n)
     walk = sum(3 * md[s] for es in ends.values() for s, _ in es)
-    b.uses((id(a), 'annotate_ends'), 2 * n + walk + sort_work(n),
-           list_bytes(n) + n * (2 * TUPLE + 2 * INT + 120))
+    b.uses_of(a, 'annotate_ends', 2 * n + walk + sort_work(n),
+              list_bytes(n) + n * (2 * TUPLE + 2 * INT + 120))
 
 
 # ------------------------------------------------------------------ walks
@@ -1380,8 +1380,8 @@ def _annotate_leaf_ends_price(b, g, a):
     sort of the labels, a visit per route end, and the index's dict, lists and pairs."""
     ends = _annotate_route_ends(a)[1]
     e = sum(len(v) for v in ends.values())
-    b.uses((id(a), 'annotate_leaf_ends'), sort_work(len(ends)) + W_ELEM * e,
-           list_bytes(len(ends)) + dict_bytes(e) + e * (LIST + LIST_ITEM + TUPLE + 16))
+    b.uses_of(a, 'annotate_leaf_ends', sort_work(len(ends)) + W_ELEM * e,
+              list_bytes(len(ends)) + dict_bytes(e) + e * (LIST + LIST_ITEM + TUPLE + 16))
 
 
 def _leaf_end_counts(a):
@@ -2057,7 +2057,7 @@ def label_summary(g, *, budget=None):
 
 def _label_summary_prices(b, g):
     """(lwu, bytes) per label of label_summary()'s row (its runs copied), cached."""
-    b.uses((id(g), 'label_summary_prices'), 2 * len(g.labels))
+    b.uses_of(g, 'label_summary_prices', 2 * len(g.labels))
     got = g.cache.get('label_summary_prices')
     if got is None:
         rows = derive.label_summary(g)
@@ -3798,13 +3798,15 @@ def _charge_differences(cb, ka, kb, row_bytes, per_item=0):
               2 * list_bytes(n) + n * row_bytes + items * per_item)
 
 
-class _Tally:
+class _Tally(_B._OncePerCall):
     """The charging interface of a LocalBudget with no limits, which only adds up: what
-    compare_cost() prices compare()'s structural phases with (the same expressions)."""
+    compare_cost() prices compare()'s structural phases with (the same expressions, and
+    the same once-per-call keys: one call, its owners held while it lives)."""
 
     def __init__(self):
         self.work = self.mem = self.peak = 0
         self._used = set()
+        self._held = {}
         self.phase = None
         self.done = {}
 
@@ -3813,19 +3815,8 @@ class _Tally:
         self.mem += nbytes
         self.peak = max(self.peak, self.mem)
 
-    def uses(self, key, work, nbytes=0):
-        if key not in self._used:
-            self._used.add(key)
-            self.charge(work, nbytes)
-
     def release(self, nbytes):
         self.mem = max(0, self.mem - nbytes)
-
-    def first(self, key):
-        if key in self._used:
-            return False
-        self._used.add(key)
-        return True
 
 
 def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
@@ -3839,10 +3830,14 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     of the claims' prefixes, the keys, and as many difference rows as keys (an upper
     bound for those) -- and, for prefix_subset, its scans priced on the supported labels
     of each cut, which are only known while comparing: those phases are named in
-    |unpriced|. exact: compare() stops before keying (incomparable indexes, no arm in
-    common, a side without bases in a mode keyed by bases), so at_least is all it
-    charges. Cost: one pass over each arm's segments and runs (its structural sizes; a
-    constrain run cut at the depth follows its own route to it, as compare() does)."""
+    |unpriced|. In claims and labels mode the estimate is an upper bound of what the
+    completed comparison charges (its keys bounded from above: the claims' chains over
+    every anchor of the restricted DAG, the labels each clipped summary can hold); in
+    walks and prefix_subset mode it is not promised to be one. exact: compare() stops
+    before keying (incomparable indexes, no arm in common, a side without bases in a mode
+    keyed by bases), so at_least is all it charges. Cost: one pass over each arm's
+    segments and runs (its structural sizes; a constrain run cut at the depth follows its
+    own route to it, as compare() does)."""
     if mode not in _COMPARE_MODES:
         raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     t = _Tally()
@@ -3927,21 +3922,23 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                         + cuts * n0 * dict_bytes(2)
             if mode == 'labels':
                 n = _clipped_summary_price(t, g, arm_)
+                keys += n
                 # the keys: compare() charges the labels the clipped summary holds, which
                 # n (the most it can hold) bounds from above -- an estimate, not at_least
                 # (charged into at_least, it exceeded a comparison with labels=)
-                est_w += W_ELEM * 2 * n + sort_work(n) + (2 + W_ROW) * n
-                est_m += n * (TUPLE + 2 * STR + 24 + DICT_KEY) + list_bytes(n) \
-                    + n * dict_bytes(5)
-        if mode == 'claims':
-            # as many difference rows as keys: the side's keys of every arm sorted at once
-            # (_charge_differences())
+                est_w += W_ELEM * 2 * n
+                est_m += n * (TUPLE + 2 * STR + 24 + DICT_KEY)
+        if mode in ('claims', 'labels'):
+            # as many difference rows as keys: the side's keys of every arm sorted at once,
+            # in two lists (_charge_differences())
             est_w += sort_work(keys) + (2 + W_ROW) * keys
-            est_m += 2 * list_bytes(keys) + keys * (dict_bytes(6) + dict_bytes(2))
+            est_m += 2 * list_bytes(keys) + keys * (dict_bytes(6) + dict_bytes(2)
+                                                     if mode == 'claims' else dict_bytes(5))
         phases['keys:' + tag] = t.work - w0
     if mode == 'prefix_subset':
         unpriced.append('omissions')
-    else:
+    elif mode not in ('claims', 'labels'):
+        # claims and labels price their difference rows above (_charge_differences())
         unpriced.append('differences')
     return result(False, unpriced, est_w, est_m)
 
@@ -3954,8 +3951,8 @@ def _price_restricted_claims(t, g, side, depth):
     if g.mode == 'constrain':
         derive.uses(t, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above', 'merge_depth',
                     'first_paths', 'partition_sets')
-        t.uses((id(a), 'first_parent_at', depth - 1),
-               *derive.price(a, 'first_parent_at', len(g.labels), g.mode))
+        t.uses_of(a, 'first_parent_at',
+                  *derive.price(a, 'first_parent_at', len(g.labels), g.mode), depth=depth - 1)
         _charge_all(t, _restricted_claim_prices(t, g, a), _CLAIM_BYTES)
         anchors = set()
         for run in a.runs:
@@ -3967,7 +3964,7 @@ def _price_restricted_claims(t, g, side, depth):
     derive.uses(t, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above', 'merge_depth',
                 'first_paths', 'annotate_route_ends')
     w, m = derive.price(a, 'annotate_route_ends', len(g.labels), g.mode)
-    t.uses((id(a), 'route_ends_at', depth), w, m)
+    t.uses_of(a, 'route_ends_at', w, m, depth=depth)
     # the ends of the DAG restricted to the depth, as compare() keys them: the whole DAG's
     # ends would price every end beyond the depth too, and at_least would exceed what the
     # comparison charges
@@ -4670,8 +4667,8 @@ def _restricted_claims(g, side, depth, inexact=None, cb=None):
         if cb is not None:
             derive.uses(cb, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above',
                         'merge_depth', 'first_paths', 'partition_sets')
-            cb.uses((id(a), 'first_parent_at', depth - 1), *derive.price(
-                a, 'first_parent_at', len(g.labels), g.mode))
+            cb.uses_of(a, 'first_parent_at', *derive.price(
+                a, 'first_parent_at', len(g.labels), g.mode), depth=depth - 1)
             # every run is keyed (a comparison has no partial answer)
             _charge_all(cb, _restricted_claim_prices(cb, g, a), _CLAIM_BYTES)
         for run in a.runs:
@@ -4683,7 +4680,7 @@ def _restricted_claims(g, side, depth, inexact=None, cb=None):
         derive.uses(cb, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above', 'merge_depth',
                     'first_paths', 'annotate_route_ends')
         w, m = derive.price(a, 'annotate_route_ends', len(g.labels), g.mode)
-        cb.uses((id(a), 'route_ends_at', depth), w, m)
+        cb.uses_of(a, 'route_ends_at', w, m, depth=depth)
         md = derive.merge_depth(a)
     ends_at = _annotate_route_ends_at(a, depth)
     if cb is not None:
@@ -5353,7 +5350,7 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
                 # a's recorded refusals indexed once per comparison (their chains' tree and
                 # each refusal under its anchor), then per omission the segments seq
                 # reaches and the refusals anchored there (_recorded_refusal() charges them)
-                if cb.first((id(arm), 'refusal_spellings')):
+                if cb.first_of(arm, 'refusal_spellings'):
                     _charge_chain_tree(cb, arm, {be.segment for be in arm.branch_events}
                                        | {x.id for x in arm.segments if x.events})
                     cb.charge(W_ELEM * n_refusal[side],
@@ -5368,7 +5365,7 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
                 if cb is not None:
                     # the divergence of every restricted walk of a (a base at a time), the
                     # tree of their chains once per comparison
-                    if cb.first((id(arm), 'divergence_spellings', depth)):
+                    if cb.first_of(arm, 'divergence_spellings', depth=depth):
                         _charge_chain_tree(cb, arm, restricted_leaves(arm, depth))
                     cb.charge(n_leaves[side] * (1 + (min(depth, len(seq)) >> 1)))
                 div = _divergence(arm, seq, depth, memo)

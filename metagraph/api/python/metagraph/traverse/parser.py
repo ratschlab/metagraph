@@ -667,6 +667,11 @@ def _resolve_arm(rd, g, raw):
                         raise CodecError('C sequence of %d bases for n %d' % (len(seq), n_bp))
                 elif seg.walk is None and n_bp > 0:
                     raise CodecError('C carries its sequence when G carries no bases')
+                elif n_bp > g.seed.length_bp + seg.end_bp:
+                    # derived from seed + flank, so within them: the bound under which the
+                    # server's writer leaves the sequence out (beyond it, it writes it)
+                    raise CodecError('C n %d beyond the seed and its flank (%d + %d) without '
+                                     'its sequence' % (n_bp, g.seed.length_bp, seg.end_bp))
                 seg.leaf.continuation = LeafContinuation(
                     n_bp, parse_num(c[2]), parse_int(c[3]),
                     rd._ids(decode_setexpr(c[4], list(seg.end), len(g.labels)), len(g.labels)), seq)
@@ -1071,8 +1076,8 @@ def _dump_arm(g, arm, w, bud=None):
     rbs = derive.runs_by_segment(arm)
     nsl = g.seed.num_seed_labels
     if bud is not None:
-        bud.uses((id(arm), 'dump_prices'), 3 * len(arm.segments) + len(arm.runs),
-                 16 * len(arm.segments))
+        bud.uses_of(arm, 'dump_prices', 3 * len(arm.segments) + len(arm.runs),
+                    16 * len(arm.segments))
         pw, pt = _dump_prices(arm, rbs)
         bud.charge(W_DUMP_LINE * (len(arm.growth) + len(arm.branch_events) + len(arm.runs))
                    + arm.cache['dump_branch_ids'])

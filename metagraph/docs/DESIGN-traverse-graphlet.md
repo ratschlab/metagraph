@@ -204,7 +204,9 @@ C <n> <loss_used> <branches_used> <labels SETEXPR against the leaf's end set> [<
                                        #   right arm: the LAST n bases of  seed + natural(right flank)
                                        #   left arm:  the FIRST n bases of natural(left flank) + seed
                                        # (n <= |seed| + flank length; a continuation may cross into the seed).
-                                       # <sequence> present only when G carries no bases.
+                                       # <sequence> present only when G carries no bases, or where the derived
+                                       # spelling would not reproduce the walker's; a C without it and n beyond
+                                       # |seed| + flank is refused (the writer leaves it out only within them).
 R <segment> <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev_run|*> <structural_successors|*> <branches> <loss> [<needed_budget>]
                                        # run id = ordinal (ArmResult::runs order, so end_labels[].run / label_summary.runs /
                                        # prev_run keep their meaning). <segment> = anchor (§4). <end> = two-letter code (ended
@@ -655,7 +657,10 @@ rules:
   and of the rows and text it produces (`WORK_MODEL` 2; 1 lwu is about 0.1 µs of CPython 3.11 on the reference
   machine). They are charged at the **cold price**: a derivation is charged its structural price on every call,
   whether a cache holds it or not, so the same call on the same graphlet with the same budget stops at the same row
-  in any process and whatever earlier calls cached.
+  in any process and whatever earlier calls cached. It is charged once per outermost call (`LocalBudget.scope()`; a
+  scope the caller holds open around several operations is one call), remembered by its model's identity, and the
+  budget holds that model until the call ends: a model freed during the call is never mistaken for a new one at its
+  address.
 - **Memory is a modelled account** (`memory_bound: "model"`), not a measurement: soft in-process; hard bounds are
   the service's process limits. A budget's memory limit applies to each call on its own; its work accumulates across
   the calls that share it (an analysis allowance).

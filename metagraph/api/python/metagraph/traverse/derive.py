@@ -1043,8 +1043,8 @@ def price_list(b, g, arm, name, fn, per=1):
     its cold price (|per| lwu per element of the arm's segments and runs) charged once per
     call. What block admission reads instead of pricing each row in Python."""
     if b is not None:
-        b.uses((id(arm), name), per * (len(arm.segments) + len(arm.runs)),
-               8 * (len(arm.segments) + len(arm.runs)) + 56)
+        b.uses_of(arm, name, per * (len(arm.segments) + len(arm.runs)),
+                  8 * (len(arm.segments) + len(arm.runs)) + 56)
     got = arm.cache.get(name)
     if got is None:
         got = arm.cache[name] = fn()
@@ -1057,9 +1057,7 @@ def uses(b, g, arm, *names):
     first. No-op without a budget."""
     if b is None:
         return
-    key = id(arm)
-    if (key, 'sizes') not in b._used:
-        b.uses((key, 'sizes'), sizes_price(arm))
+    if b.uses_of(arm, 'sizes', sizes_price(arm)):
         z = arm_sizes(arm)
         # the pass's P runs and events, read from what it counted (the same charge warm
         # or cold): the one part of a price charged after its work, at most a few ns each
@@ -1069,11 +1067,8 @@ def uses(b, g, arm, *names):
         # the prices are facts of the model (its sizes): computed once
         table = arm.cache['prices'] = _derivation_prices(arm_sizes(arm), len(g.labels),
                                                          g.mode)
-    used = b._used
     for n in names:
-        if (key, n) not in used:
-            w, m = table[n]
-            b.uses((key, n), w, m)
+        if b.uses_of(arm, n, *table[n]):
             build = _BUILT_WHEN_CHARGED.get(n)
             if build is not None:
                 # paid for whole: a budgeted call reads the whole index, as priced, never

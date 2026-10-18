@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
 
 from metagraph.traverse import (  # noqa: E402
-    GraphletFormatError, MissingEnvelope, dump, from_response, is_canonical, load, parse,
+    GraphletFormatError, MissingEnvelope, derive, dump, from_response, is_canonical, load, parse,
 )
 from metagraph.traverse.export import normalize_result  # noqa: E402
 
@@ -323,6 +323,27 @@ class TestMalformed(unittest.TestCase):
                       'lists2=i:1', 'a.b=i:1', 'x[0]=i:1', 'with-dash=i:1'):
             with self.subTest(extra=extra):
                 self.assert_bad(_edit(t, k, k.replace(' * . ', ' * %s ' % extra)), 'K extra')
+
+    def test_a_derived_continuation_lies_within_the_seed_and_its_flank(self):
+        """A C record without its sequence is derived from seed + flank (right arm: the
+        last n bases of seed + natural flank; left arm: the first n of natural flank +
+        seed), so its n is at most |seed| + flank: the bound under which the server's
+        writer leaves the sequence out (beyond it the writer writes the sequence). A C
+        without one beyond the bound is refused, not derived short of n."""
+        t = T.doc_text('fork')          # a 40-base seed, the leaves at 10 bp on both arms
+        for side, old in (('left', 'T X .\nC 15 0 0 !\n'), ('right', 'T X .\nC 15 0 0 1\n')):
+            with self.subTest(arm=side):
+                at = parse(_edit(t, old, old.replace('C 15 ', 'C 50 ')))
+                leaf = next(x.id for x in at.arms[side].segments
+                            if x.leaf and x.leaf.continuation and x.leaf.continuation.n == 50)
+                seq = derive.continuation_sequence(at, at.arms[side], leaf)
+                self.assertEqual(50, len(seq))
+                flank = derive.natural_flank(at.arms[side], leaf)
+                whole = at.seed.sequence + flank if side == 'right' else flank + at.seed.sequence
+                self.assertEqual(whole, seq)
+                self.assertEqual(at.dump(), parse(at.dump()).dump())
+                self.assert_bad(_edit(t, old, old.replace('C 15 ', 'C 51 ')),
+                                'C n 51 beyond the seed and its flank (40 + 10)')
 
     def test_line_numbers(self):
         t = T.doc_text('linear')
