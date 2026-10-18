@@ -1229,6 +1229,10 @@ def family_facts(ctx, fid):
          "n_units": len(f.get("units") or []), "members": ", ".join(members)}
     x = dict((sid, scenario_facts(ctx, sid)) for sid in members)
     v["x"] = x
+    # the scenario facts of another family's test the prose names as `xr[<id>]` (a cross reference: R-rc reads
+    # T-strand's observed refusal, the verification of the review's fixes, L1), kept apart from the members' `x`
+    v["xr"] = dict((sid, scenario_facts(ctx, sid)) for sid in sorted(set(re.findall(
+        r"xr\[([A-Za-z0-9_.-]+)\]", str(prose)))) if sid in (ctx.run.scenarios or {}))
     v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
     footnoted = [sid for sid in members if x[sid]["footnoted"]]

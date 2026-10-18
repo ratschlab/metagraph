@@ -665,5 +665,22 @@ class OverviewReadingPathTest(unittest.TestCase):
         self.assertNotIn("{vocab[classifications]}", prose("overview")["sections"]["decision"]["findings"][0])
 
 
+class VerifyRoundTest(unittest.TestCase):
+    """The verification of the review's fixes (doc-v6-review-verify/VERIFY.md) and the second external review
+    (v6-baseline-r2-review): one test per item where behaviour or a statement changes."""
+
+    def test_l1_rrc_cross_reference(self):
+        import inspect
+        text = str(prose("R"))
+        self.assertNotIn("chapters P, T (T-strand", text)
+        self.assertIn("[[xr[T-strand-0001][dl][seed_refusal] = label ?", text)
+        self.assertIn('v["xr"] = dict((sid, scenario_facts(ctx, sid))', inspect.getsource(facts.family_facts))
+        rrc = [v for k, v in prose("R")["families"].items() if "resolve-side statement of the strand fact" in str(v)]
+        self.assertTrue(rrc)
+        graph = facts.fill(rrc[0]["prose"], {"xr": {"T-strand-0001": {"dl": {"seed_refusal": "graph"}}}},
+                           unresolved=[])
+        self.assertIn("a plain absence that says nothing of the strand (chapter T)", graph)
+
+
 if __name__ == "__main__":
     unittest.main()
