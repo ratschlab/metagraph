@@ -423,5 +423,22 @@ class DeterminismStopsTest(unittest.TestCase):
         self.assertIn("A stop by a work limit (`max_steps`), which no clock decides, is compared like any answer", det)
 
 
+class DemonstratedStopTest(unittest.TestCase):
+    """V6-106: a demonstrated stop is not filed under 'unsupported': the coverage heading is neutral and R's lead
+    depends on whether the stop was observed; the MCP limit is named apart."""
+
+    def test_heading_and_lead(self):
+        import inspect
+        self.assertIn("\\parhead{Coverage and remaining limits}", inspect.getsource(sections.chapter))
+        gap = prose("R")["coverage_gap"][0]
+        shown = facts.fill(gap, {"fam": {"R-budget": {"stop_observed": True, "stop_observed_text": "R-budget-0001 on "
+                                                      "direct-local"}},
+                                 "x": {"R-budget-0001": {"mcp": {"standing": "not exercised"}}}, "manifest_version": 6})
+        self.assertTrue(shown.startswith("*Shown in this run.* The stated stop"), shown[:80])
+        self.assertIn("it remains untested through MCP, which cannot express these requests (see B)", shown)
+        not_shown = facts.fill(gap, {"fam": {"R-budget": {"stop_observed": False}}, "manifest_version": 6})
+        self.assertTrue(not_shown.startswith("*What remains unsupported.*"), not_shown[:80])
+
+
 if __name__ == "__main__":
     unittest.main()

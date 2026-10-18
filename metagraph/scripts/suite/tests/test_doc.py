@@ -1713,7 +1713,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
         ctx = self.ctx(prose)
         whole = sections.chapter(ctx, "R")
         conclusion = whole.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
-        gap = whole.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        gap = whole.split("\\parhead{Coverage and remaining limits}", 1)[1].split("\\parhead{Background}", 1)[0]
         texts.append(("chapter", conclusion + gap))
         for where, text in texts:
             for lit in V4_LITERALS:
@@ -2087,7 +2087,7 @@ class OwnerReviewTwoTest(unittest.TestCase):
         text = sections.chapter(ctx, "R")
         self.last_whole = text  # the whole chapter, for the evidence map after the conclusion (READ-101)
         conclusion = text.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
-        gap = text.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        gap = text.split("\\parhead{Coverage and remaining limits}", 1)[1].split("\\parhead{Background}", 1)[0]
         family = text.split("fam:R-budget", 1)[1].split("\\unithead", 1)[0]
         return ctx, conclusion, gap, family
 
@@ -3356,7 +3356,7 @@ class FullDocumentTest(unittest.TestCase):
     @staticmethod
     def parts(text):
         conclusion = text.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
-        gap = text.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        gap = text.split("\\parhead{Coverage and remaining limits}", 1)[1].split("\\parhead{Background}", 1)[0]
         return conclusion, gap
 
     def test_every_chapter_renders_from_computed_facts(self):

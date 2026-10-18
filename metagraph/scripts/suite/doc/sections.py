@@ -2998,7 +2998,7 @@ def chapter(ctx, ch):
     out += prose_blocks(ctx, summary, values) if summary else latex.placeholder("(chapter summary: to be written)") + "\n\n"
     out += claims_map(ctx, ch)
     out += chapter_summary(ctx, ch, sids, n_units, len(fams))
-    out += "\\parhead{What this chapter leaves untested}\n"
+    out += "\\parhead{Coverage and remaining limits}\n"
     gap = prose.get("coverage_gap")
     out += prose_blocks(ctx, gap, values) if gap else latex.placeholder("(coverage gap: to be written)") + "\n\n"
     out += exception_index(ctx, ch)
