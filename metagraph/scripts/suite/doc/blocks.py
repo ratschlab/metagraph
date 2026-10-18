@@ -185,6 +185,7 @@ def refusal_expected(scenario, previous=None, is_property=None):
 # -- the MCP arm's standing on an edge input ---------------------------------------------------------------------
 
 MCP_CLASS_WORD = {"not_expressible": "not expressible through MCP",
+                  "answer_lacks_field": "not implemented yet via MCP (the answer lacks a checked field)",
                   "refused_before_host": "refused before host execution",
                   "service_answered": "answered by the service in the host's place",
                   "normalised": "answered after service normalization",
@@ -209,6 +210,57 @@ MARK_GROUP = {"not_implemented": ("\\gni", "\\attn{not implemented via MCP} (the
               "by_design": ("\\gbd", "service-side by design (the manifest's property-level mark)"),
               "explained": ("\\gbd", "explained by the by-design table's case (set aside by the comparison and "
                                      "the gate)")}
+
+
+# A manifest scenario-level mark (build_manifest.scenario_level_marks: the property-level marks of a scenario with an
+# MCP tool mapping covered every property check, so they became its mcp.not_implemented, each part "not implemented
+# yet via MCP: <reason> (<check>)" or "service-side by design: the table's case <case>; the MCP answer cannot carry
+# <check>") is answer-side: the request is expressible through the tools, the MCP answer lacks what the checks read.
+# Every other mcp.not_implemented names what the tools cannot express (support, bounds.max_query_bp, a raw body).
+_MARK_NI_RE = re.compile(r"not implemented yet via MCP: (.*?) \((\w+)\)(?=; not implemented yet via MCP: |"
+                         r"; service-side by design: |$)")
+_MARK_BD_RE = re.compile(r"service-side by design: the table's case (\S+); the MCP answer cannot carry (\w+)")
+
+
+def scenario_mark_parts(scenario):
+    """The parts of the scenario's manifest scenario-level mark: [(kind, check, reason, case)], kind
+    `not_implemented` or `by_design`; [] when its mcp.not_implemented is a request-side mark or absent."""
+    ni = str(((scenario or {}).get("mcp") or {}).get("not_implemented") or "")
+    if not ni.startswith(("not implemented yet via MCP: ", "service-side by design: ")):
+        return []
+    parts = [(m.start(), "not_implemented", m.group(2), m.group(1), None) for m in _MARK_NI_RE.finditer(ni)]
+    parts += [(m.start(), "by_design", m.group(2), None, m.group(1)) for m in _MARK_BD_RE.finditer(ni)]
+    return [p[1:] for p in sorted(parts)]
+
+
+def mark_fields(scenario, check):
+    """The answer fields a check of the scenario reads, from its expectation (entry_fields' `equals` keys, a
+    `fields` list), [] when the arguments name none."""
+    fields = []
+    for e in (scenario or {}).get("expect") or []:
+        if isinstance(e, dict) and e.get("check") == check:
+            args = e.get("args") or {}
+            if isinstance(args.get("equals"), dict):
+                fields += [str(k) for k in args["equals"] if str(k) not in fields]
+            elif isinstance(args.get("fields"), list):
+                fields += [str(k) for k in args["fields"] if str(k) not in fields]
+    return fields
+
+
+def answer_mark_text(scenario):
+    """A scenario-level mark in words, plain text: 'the request is expressible through the tools, but the MCP answer
+    lacks absence_scope, the field entry_fields checks' (a by-design part names its case); None for a request-side
+    mark."""
+    parts = []
+    for kind, check, reason, case in scenario_mark_parts(scenario):
+        fields = mark_fields(scenario, check)
+        what = ("%s, the field%s %s checks" % (", ".join(fields), "" if len(fields) == 1 else "s", check) if fields
+                else "what %s checks" % check)
+        parts.append(what if kind == "not_implemented" else "%s (service-side by design: the table's case %s)" % (
+            what, case))
+    if not parts:
+        return None
+    return "the request is expressible through the tools, but the MCP answer lacks %s" % "; ".join(parts)
 
 
 def scenario_level_mark(line):
@@ -253,6 +305,11 @@ def mcp_class(lines, scenario, agreement, cases):
     sa = case.get("service_answer") or {}
     service_outcome = sa.get("outcome")
     if not answered:
+        lacks = answer_mark_text(scenario)
+        if lacks:
+            # an answer-side scenario-level mark: the request is expressible, the answer lacks the checked field;
+            # the runner makes no MCP call for it (not implemented yet via MCP), never "not expressible"
+            return "answer_lacks_field", "no MCP call made: %s" % esc(lacks, 300)
         reason = (scenario.get("mcp") or {}).get("not_implemented") or sa.get("missing_argument")
         return "not_expressible", ("no MCP call made: %s" % tt(reason)) if reason else "no MCP call made"
     first = answered[0]
@@ -567,7 +624,7 @@ def _not_exercised_text(st, run, sid, short_reasons, unit_note=False):
     parts = []
     if not unit_note:
         parts.append(short_reason(run, sid, case, short_reasons))
-    if cls != "not_expressible":
+    if cls not in ("not_expressible", "answer_lacks_field"):
         first = next((l for l in lines if l.get("http") is not None), None)
         code = (first.get("error") or {}).get("code") if first and isinstance(first.get("error"), dict) else None
         status = ("http %s%s" % (esc(first.get("http")), (" " + tt(code)) if code else "")) if first else None
@@ -593,6 +650,10 @@ def short_reason(run, sid, case, short_reasons=None):
     if case and short_reasons.get(case):
         return inline(short_reasons[case])
     ni = (run.scenario(sid).get("mcp") or {}).get("not_implemented")
+    lacks = answer_mark_text(run.scenario(sid))
+    if lacks:
+        # an answer-side scenario-level mark: expressible, the answer lacks the field (not "cannot be expressed")
+        return esc(lacks, 300)
     if ni:
         # a reason the manifest words with its own article ('the raw /pattern/capabilities document') is not
         # "the request's the ..." (VERIFY-QCND L3)
@@ -658,6 +719,10 @@ def _execution_rows(st, run, sid, arm, is_property):
         aside = run.marked_aside(sid, l) if (arm == "mcp" and hasattr(run, "marked_aside")) else None
         tested = "–" if outcome in ("not_implemented_mcp", "service_by_design") else _property_cell(
             l, is_property, aside)
+        if aside and tested != "–":
+            # the marked items counted apart make the cell long: a top-aligned box that wraps, so that the block's
+            # table stays within the margin (the v6 delta: D-P-scope-0004's MCP rows; no v5 detail row has one)
+            tested = "\\parbox[t]{30mm}{\\raggedright\\strut %s}" % tested
         rows.append(["%s%s" % (esc(arm), (" r%s" % esc(l.get("repeat"))) if several or arm == "mcp" else ""),
                      "%s\\ %s" % (glyph, word), _status_cell(l), wall, esc(_budget_text(run, sid)), tested])
     return rows
@@ -1070,6 +1135,12 @@ def _relations_text(run, sid, units):
             if not a:
                 continue
             o = a.get("outcome")
+            unrun = cells.relation_unrun(run, rel, arm, o)
+            if unrun:
+                # not judged there: a scenario of the relation is not run via MCP; the comparator's "a raw answer is
+                # missing" is that, said as what it is
+                per_arm.append("%s \\gnone{} (%s)" % (esc(cells.ARM_SHORT.get(arm, arm)), cells.relation_unrun_text(unrun)))
+                continue
             if o in RELATION_NOT_EVALUATED:
                 # the relation could not be evaluated on this arm (a raw answer or a field is missing via MCP):
                 # neither passed nor inconclusive, the dash the sum line prints (VERIFY-QCND L5)

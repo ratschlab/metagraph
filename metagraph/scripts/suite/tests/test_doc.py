@@ -279,9 +279,10 @@ class MappingTest(unittest.TestCase):
 class ProseTest(unittest.TestCase):
     def test_prose_complete(self):
         """The owner's rule: a suite test fails if a family or unit lacks prose (every chapter an intro, every family a
-        title and prose, every unit a property line); the message names the missing keys. Over the v4 and the v5
-        mapping (the v5-only family and units have at least the mapping's draft)."""
-        for version in (v4, v5):
+        title and prose, every unit a property line); the message names the missing keys. Over the v4, the v5 and
+        the v6 mapping (the v5-only family and units have at least the mapping's draft; v6's P-warm its prose, the
+        v6 delta of 2026-10-17)."""
+        for version in (v4, v5, v6):
             self.check_prose_complete(version())
 
     def check_prose_complete(self, loaded):
@@ -495,6 +496,20 @@ class FakeRunTest(unittest.TestCase):
     def tex(self, name="doc.tex"):
         with open(os.path.join(self.out, name), encoding="utf-8") as fh:
             return fh.read()
+
+    def test_no_local_paths(self):
+        """The v6 delta, item 6: no local file path in the document (the run directory, the suite's checkout, a
+        home or temporary directory); the by-design table's path prints from metagraph/scripts/suite/ or as a
+        file name."""
+        local = re.compile(r"/Users/|/home/|~/|\\textasciitilde\{\}/|/var/folders/|/private/|/tmp/")
+        for name in sorted(os.listdir(self.out)):
+            if not name.endswith(".tex"):
+                continue
+            text = self.tex(name).replace("\\allowbreak{}", "").replace("\\_", "_")
+            self.assertNotIn(self.tmp, text, name)
+            self.assertNotIn(os.path.realpath(self.tmp), text, name)
+            self.assertNotIn(SUITE, text, name)
+            self.assertIsNone(local.search(text), "%s: %s" % (name, (local.search(text) or [None])[0]))
 
     def test_build_tex(self):
         self.assertEqual(self.rc, 0)
@@ -711,6 +726,40 @@ class FakeRunTest(unittest.TestCase):
 # the cell grammar and the expectation formatters
 
 class CellGrammarTest(unittest.TestCase):
+    def test_mcp_missing_only_where_planned(self):
+        """The v6 delta (2026-10-17): compare's MCP class `missing` (no MCP execution) is a planned execution not
+        recorded only where the run's plan schedules the scenario on the MCP arm; the direct-local warm-ups P-warm
+        (timing class long) are clean there, not footnoted. A run without a plan keeps the comparator's reading."""
+        class Stub(object):
+            def __init__(self, planned):
+                self.planned = planned
+
+            def arm_lines(self, sid, arm):
+                return []
+
+            def comp_entry(self, sid):
+                return {"mcp_agreement": {"class": "missing"}}
+
+            def comp_arm(self, sid, arm):
+                return {}
+
+            def planned_missing(self, sid, arm):
+                return False
+
+            def planned_on(self, sid, arm):
+                return self.planned
+
+        st = cells.arm_state(Stub(False), "P-warm-0001", "mcp")
+        self.assertFalse(st.present)
+        self.assertFalse(st.missing_planned)
+        self.assertTrue(st.clean)
+        st = cells.arm_state(Stub(True), "P-warm-0001", "mcp")
+        self.assertTrue(st.missing_planned)
+        self.assertFalse(st.clean)
+        stub = Stub(False)
+        del Stub.planned_on
+        self.assertTrue(cells.arm_state(stub, "P-warm-0001", "mcp").missing_planned)
+
     def test_fmt_t(self):
         self.assertEqual(cells.fmt_t(None), "–")
         self.assertEqual(cells.fmt_t(0.3), "<1 ms")
@@ -1758,7 +1807,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
                 for name in re.findall(r"\{([^{}]+)\}", text):
                     check(name, scope, allowed)
                 for head in strip_conditional_heads(text)[1]:
-                    check(head.lstrip("!").split("=", 1)[0].strip(), scope, allowed)
+                    check(re.split(r">?=", head.lstrip("!"), maxsplit=1)[0].strip(), scope, allowed)
             for fid in any_fams:
                 entry = data["families"].get(fid) or {}
                 if not entry.get("claim") and not any(p.startswith("%s.json: families.%s" % (ch, fid)) for p in ROUND2_PENDING):
@@ -2783,6 +2832,13 @@ class RebasedFieldsTest(unittest.TestCase):
         self.assertEqual(cells.property_tested(mcp0, run.is_property, aside), ("yes", 1, 1))
         self.assertEqual(cells.property_tested(mcp0, run.is_property), ("partly", 1, 2))
         self.assertEqual(blocks._property_cell(mcp0, run.is_property, aside), "yes (1 of 1); 1 marked not shown via MCP")
+        # in the detail block's rows that long cell wraps in a top-aligned box (the v6 delta: D-P-scope-0004's MCP
+        # rows ran 44 pt past the margin); a row without a mark keeps its plain cell
+        rows = blocks._execution_rows(cells.arm_state(run, "P-001", "mcp"), run, "P-001", "mcp", run.is_property)
+        self.assertEqual(rows[0][-1], "\\parbox[t]{30mm}{\\raggedright\\strut yes (1 of 1); 1 marked not shown via MCP}")
+        rows = blocks._execution_rows(cells.arm_state(run, "P-001", "direct-local"), run, "P-001", "direct-local",
+                                      run.is_property)
+        self.assertNotIn("parbox", rows[0][-1])
         groups = blocks._check_groups(mcp0, True, run.check_marks("P-001"))
         self.assertEqual(groups, [(("marked:not_implemented", "the MCP's records carry no context offsets"),
                                    ["contains_source_context"])])
@@ -3730,6 +3786,11 @@ class VerifiedFullDocumentTest(unittest.TestCase):
         self.assertEqual(facts.claim_items({}), [])
         self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 4}), "a")
         self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 5}), "a, and b")
+        # the v6 delta (2026-10-17): `>=` compares numbers, so that manifest v6 takes the v5 branch
+        self.assertEqual(facts.fill("a[[manifest_version >= 5 ?, and b | , or c]]", {"manifest_version": 4}), "a, or c")
+        self.assertEqual(facts.fill("a[[manifest_version >= 5 ?, and b | , or c]]", {"manifest_version": 5}), "a, and b")
+        self.assertEqual(facts.fill("a[[manifest_version >= 5 ?, and b | , or c]]", {"manifest_version": 6}), "a, and b")
+        self.assertEqual(facts.fill("a[[manifest_version = 5 ?, and b]]", {"manifest_version": 6}), "a")
 
 
 def tint_fixture(run_dir):
@@ -4610,7 +4671,7 @@ class ReadabilityReviewTest(unittest.TestCase):
             rel_ctx.run.relations = []
         # the glossary labels the later manifest's mark as not exercised by this run
         entry = [e for e in self.glossary["entries"] if e["term"] == "property-level mark (manifest v5)"][0]
-        self.assertIn("[[manifest_version = 5 ? A mark of this run's manifest. | Not part of this run's manifest", entry["definition"])
+        self.assertIn("[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest", entry["definition"])
         self.assertIn("supplies no evidence about it on that path", entry["definition"])
         rendered = facts.fill(entry["definition"], {"manifest_version": 4})
         self.assertIn("Not part of this run's manifest (version 4)", rendered)
@@ -5081,7 +5142,7 @@ class ChapterPLXTest(unittest.TestCase):
 
 
 def _v4_branch(text):
-    """A prose string as a v4 run reads it: every `[[manifest_version = 5 ? a | b]]` resolved to b, every other
+    """A prose string as a v4 run reads it: every `[[manifest_version >= 5 ? a | b]]` resolved to b, every other
     conditional's two branches kept with its head dropped, innermost first (READ-313: no v4 legend names v5)."""
     pos = 0
     while True:
@@ -5093,7 +5154,7 @@ def _v4_branch(text):
             pos = m.end()
             continue
         yes, _, no = rest.partition("|")
-        chosen = no if head.strip() == "manifest_version = 5" else (yes + " " + no)
+        chosen = no if head.strip() == "manifest_version >= 5" else (yes + " " + no)
         text = text[:m.start()] + " " + chosen + " " + text[m.end():]
         pos = 0
 
@@ -5644,6 +5705,231 @@ class ColourRoundTwoTest(unittest.TestCase):
             "resource": "time", "requested": 10000, "used": 10000.4}}]}})
         self.assertIn("used 10,000 ms", latex.esc(blocks.resource_stop_phrase(run, line)))
 
+
+
+class V6DeltaTest(unittest.TestCase):
+    """The v6 results document as a delta on v5 (the owner, 2026-10-17: v6 is very close to v5): what v6 changes
+    is a branch on `manifest_version`, so a v5 build stays byte-identical."""
+
+    # the /pattern budget mentions a v6 run keeps at 60,000 ms: the v5 baseline's history, not the budget in force
+    V6_KEEPS_60 = ("at the 60,000 ms budget then in force", "ran past its 60,000 ms budget on the staging host",
+                   "above the host's default of 60,000", "the /pattern budget of 110,000 ms (60,000 before)")
+
+    def test_pattern_budget_by_version(self):
+        """Item 3: chapters P, M, N, Q, X and L state the /pattern budget as 110,000 ms for v6 and 60,000 ms for v5
+        (v4 too); their other 60 s figures stay."""
+        for ch in ("P", "M", "N", "Q", "X", "L"):
+            data = sc.read_json(os.path.join(PROSE_DIR, "%s.json" % ch))
+            v5_text, v6_text = [], []
+            for path, text in prose_strings(data):
+                v6_text.append(facts.fill(text, {"manifest_version": 6}))
+                if ".P-warm" not in path:  # v6's own family (the warm-ups at 110,000 ms) is in no v5 document
+                    v5_text.append(facts.fill(text, {"manifest_version": 5}))
+            v5_text, v6_text = "\n".join(v5_text), "\n".join(v6_text)
+            self.assertNotIn("110,000", v5_text, ch)
+            self.assertIn("110,000", v6_text, ch)
+            rest = v6_text
+            for keep in self.V6_KEEPS_60:
+                rest = rest.replace(keep, "")
+            self.assertNotIn("60,000", rest, "%s: a 60,000 ms /pattern budget left in the v6 text" % ch)
+            self.assertIn("60,000", v5_text, ch)
+
+    def test_service_identity_input(self):
+        """Item 4: the deployed service's identity from an input file (make_doc --identity), labelled as taken from
+        its source (the deployment log) and not recorded by the runner: short in I.4, in full in appendix F; a run
+        whose runner recorded none and no input keeps the statement that it is not recorded; a file naming another
+        run, or contradicting what the run recorded, is refused."""
+        ident = {"run": "R", "service_commit": "60e737f75ff696c170841c983c0464d1157425c9",
+                 "railway_deployment_id": "fa013db1-70f0-4dc9-bca1-275c7eefa053",
+                 "source": "the deployment log (deploy 2); the MCP runner records no service commit"}
+        run = _Stub(mcp_run={"git_head": "9d76035e"}, identity=ident)
+        short = sections.service_version_text(run)
+        self.assertEqual(short, "the service's deployed revision, taken from the deployment log (deploy 2) and not "
+                                "recorded by the runner: service commit 60e737f75ff6…, Railway deployment "
+                                "fa013db1-70f0-4dc9-bca1-275c7eefa053")
+        self.assertIn("service commit 60e737f75ff696c170841c983c0464d1157425c9,",
+                      sections.service_version_text(run, full=True))
+        self.assertIn("is not recorded by this run", sections.service_version_text(_Stub(mcp_run={}, identity=None)))
+        tmp = tempfile.mkdtemp()
+        try:
+            run_dir = os.path.join(tmp, "run")
+            os.makedirs(run_dir)
+            build_run(run_dir)
+            merge_run.merge(run_dir)
+            sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": 5})))
+            run_id = reader.Run(run_dir).run_id()
+            path = os.path.join(tmp, "identity.json")
+            sc.write_json_atomic(path, dict(ident, run=run_id))
+            self.assertEqual(reader.Run(run_dir, identity=path).identity["service_commit"], ident["service_commit"])
+            sc.write_json_atomic(path, dict(ident, run="another-run"))
+            with self.assertRaises(reader.RunError):
+                reader.Run(run_dir, identity=path)
+            sc.write_json_atomic(path, dict(ident, run=run_id, manifest="v6, content " + "0" * 64))
+            with self.assertRaises(reader.RunError):
+                reader.Run(run_dir, identity=path)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_public_paths(self):
+        """Item 6: a local path is rewritten (inside the suite's tree from metagraph/scripts/suite/, under a home
+        without the home and its hidden directories, a temporary one as its file name); routes, URLs and a lone ~
+        stay."""
+        pp = latex.public_paths
+        self.assertEqual(pp("/Users/u/git/services/metagraph/metagraph/scripts/suite/runs/R/scripts/service_by_design"
+                            ".json"), "metagraph/scripts/suite/runs/R/scripts/service_by_design.json")
+        self.assertEqual(pp("decoded 2026-10-09 (~/.cache/metagraph-index-defects/r/data/records.tsv, last.tsv)"),
+                         "decoded 2026-10-09 (metagraph-index-defects/r/data/records.tsv, last.tsv)")
+        self.assertEqual(pp("/private/var/folders/k9/x/T/tmp1/run/compare.json"), "compare.json")
+        self.assertEqual(pp("/home/bob/.local/share/f.txt; /tmp/a/b.json"), "share/f.txt; b.json")
+        for keep in ("GET /traverse/capabilities", "POST /pattern", "https://metagraph.ethz.ch:8080/x", "named with `~`"):
+            self.assertEqual(pp(keep), keep)
+        self.assertIsNone(pp(None))
+
+    def test_also_policy_row(self):
+        """The coordinator's instruction for the v6 document: a further gate policy (make_doc --also-policy: the
+        resolve/traverse policy_v6_rt_mcp beside the deploy gate policy_v6_rtp_mcp) is judged offline and named in
+        I.4 with its verdict, never in the deploy gate's place; a policy that cannot be judged says why."""
+        entry = {"path": "/x/gate/policy_v6_rt_mcp.json", "policy": {"arms": ["mcp", "direct-local"]}, "error": None,
+                 "verdict": {"passed": True, "problems": [], "counts": {"judged": 689, "passed": 635, "required": 689},
+                             "policy": {"name": "v6-rt-mcp", "policy_version": 1, "sha256": "1ed3f31501c5" + "0" * 52}}}
+        self.assertEqual(sections.also_gate_text(entry),
+                         "policy_v6_rt_mcp.json, v6-rt-mcp version 1 (sha256 1ed3f31501c5… of the canonical JSON), "
+                         "access paths mcp, direct-local: GATE PASS, 0 problems; 689 executions judged, 635 passed, "
+                         "689 required; judged offline by gate.py for this document beside the deploy gate, which it "
+                         "does not replace")
+        self.assertEqual(sections.also_gate_text({"path": "/x/p.json", "error": "ValueError: bad", "verdict": None}),
+                         "p.json: not judged (ValueError: bad)")
+        self.assertIn("other gate policy", inspect.getsource(sections.provenance_table)
+                      if hasattr(sections, "provenance_table") else inspect.getsource(sections))
+
+    def test_scenario_level_mark_inconclusive_wording(self):
+        """The v6 run's D-P-scope-0004 MCP r0 is inconclusive by a scenario-level mark (marks_cover_repeat): I.1 and
+        I.4 count it by the mark, never as the service's limit or a host state."""
+        run = _Stub(summary=lambda: {"inconclusive_by_reason": {
+            "direct-local": {"checks": 4}, "mcp": {"checks": 3, sc.SCENARIO_LEVEL_MARK: 1,
+                                                   "traversal_resolve_deadline": 2}}})
+        self.assertEqual(sections.inconclusive_by_reason_text(run),
+                         "direct-local 4 by the checks; mcp 3 by the checks, 2 by the service's "
+                         "traversal_resolve_deadline (a host state), 1 by a scenario-level mark (every property "
+                         "check marked as not shown via MCP)")
+
+    def test_answer_side_scenario_mark(self):
+        """The coordinator's accuracy fix (2026-10-18): a manifest scenario-level mark (build_manifest.
+        scenario_level_marks: property-level marks covering every property check, answer-side) reads as an
+        expressible request whose MCP answer lacks the checked field, not implemented yet via MCP (the field named
+        from the mark's check), never "cannot be expressed through the tools"; a request-side mark (a field the
+        tools have no argument for) keeps the not-expressible wording."""
+        mark = ("not implemented yet via MCP: the MCP's /pattern answer does not carry the entry's absence_scope (the "
+                "service states the request's scope instead) (entry_fields)")
+        scen = {"id": "P-scope-0004", "mcp": {"not_implemented": mark},
+                "expect": [{"check": "status", "args": {"http": 200}},
+                           {"check": "entry_fields", "args": {"equals": {"absence_scope": "suffix_only"}}}]}
+        self.assertEqual(blocks.scenario_mark_parts(scen), [("not_implemented", "entry_fields", mark[29:-15], None)])
+        self.assertEqual(blocks.answer_mark_text(scen), "the request is expressible through the tools, but the MCP "
+                                                        "answer lacks absence_scope, the field entry_fields checks")
+        line = {"scenario": "P-scope-0004", "arm": "mcp", "repeat": 0, "outcome": "not_implemented_mcp", "http": None}
+        cls, evidence = blocks.mcp_class([line], scen, {"class": "not_implemented_mcp", "by": "manifest"}, {})
+        self.assertEqual(cls, "answer_lacks_field")
+        self.assertIn("no MCP call made: the request is expressible", evidence)
+        self.assertEqual(blocks.MCP_CLASS_WORD[cls], "not implemented yet via MCP (the answer lacks a checked field)")
+        run = _Stub(scenario=lambda sid: scen, cases={})
+        reason = blocks.short_reason(run, "P-scope-0004", None)
+        self.assertNotIn("cannot be expressed", reason)
+        self.assertIn("absence\\_scope", reason)
+        # two parts, one of them service-side by design, in the mark's order
+        both = dict(scen, mcp={"not_implemented": "service-side by design: the table's case c.x; the MCP answer "
+                                                  "cannot carry deterministic; " + mark})
+        self.assertEqual([p[:2] for p in blocks.scenario_mark_parts(both)],
+                         [("by_design", "deterministic"), ("not_implemented", "entry_fields")])
+        self.assertIn("what deterministic checks (service-side by design: the table's case c.x)",
+                      blocks.answer_mark_text(both))
+        # a request-side mark keeps its wording and class
+        req = {"id": "R-x", "mcp": {"not_implemented": "support"}, "expect": []}
+        self.assertEqual(blocks.scenario_mark_parts(req), [])
+        self.assertIsNone(blocks.answer_mark_text(req))
+        self.assertEqual(blocks.mcp_class([dict(line, scenario="R-x")], req, {}, {})[0], "not_expressible")
+        self.assertEqual(blocks.short_reason(_Stub(scenario=lambda sid: req, cases={}), "R-x", None),
+                         "the request's support cannot be expressed through the tools")
+
+    def test_relation_not_run_via_mcp(self):
+        """The coordinator's accuracy fix (2026-10-18): a relation the comparator could not judge on the MCP arm
+        (`not_evaluated`, "a raw answer is missing") because one of its scenarios stands not implemented via MCP
+        (no MCP execution) reads "not judged via MCP: <id> is not run via MCP (not implemented yet via MCP)" with
+        the no-execution dash, in the pairs tables, appendix C and the detail blocks; a relation not evaluated for
+        another reason keeps the comparator's words."""
+        class Stub(object):
+            relations = [{"id": "REL-subset-0002", "type": "subset", "a": "A", "b": "B", "title": "t"}]
+            depth = {}
+
+            def property_not_implemented(self, *a):
+                return False
+
+            def arm_lines(self, sid, arm):
+                if sid == "A" and arm == "mcp":
+                    return [{"scenario": "A", "arm": "mcp", "repeat": 0, "outcome": "not_implemented_mcp", "http": None}]
+                return [{"scenario": sid, "arm": arm, "repeat": 0, "outcome": "pass", "http": 200}]
+
+            def comp_entry(self, sid):
+                return {"mcp_agreement": {"class": "not_implemented_mcp" if sid == "A" else "agree"}}
+
+            def comp_arm(self, sid, arm):
+                return {}
+
+            def planned_missing(self, sid, arm):
+                return False
+
+            def planned_on(self, sid, arm):
+                return True
+
+            def comp_relations(self):
+                return {"REL-subset-0002": {"arms": {
+                    "direct-local": {"outcome": "pass", "detail": "a's 60 results within b's 640"},
+                    "direct-remote": {"outcome": "pass", "detail": "a's 60 results within b's 640"},
+                    "mcp": {"outcome": "not_evaluated", "detail": "a raw answer is missing"}}}}
+
+        run = Stub()
+        rel = run.relations[0]
+        self.assertEqual(cells.relation_unrun(run, rel, "mcp", "not_evaluated"), ["A"])
+        self.assertEqual(cells.relation_unrun(run, rel, "mcp", "inconclusive"), [])
+        self.assertEqual(cells.relation_unrun(run, rel, "direct-local", "not_evaluated"), [])
+        self.assertEqual(cells.relation_unrun_text(["A"]),
+                         "not judged via MCP: A is not run via MCP (\\attn{not implemented yet via MCP})")
+        self.assertIn(" are not run via MCP", cells.relation_unrun_text(["A", "B"]))
+        units = _Stub(unit_of=lambda sid: "U")
+        text = blocks._relations_text(run, "B", units)[0]
+        self.assertIn("mcp \\gnone{} (not judged via MCP: A is not run via MCP (\\attn{not implemented yet via MCP}))",
+                      text)
+        self.assertNotIn("a raw answer is missing", text)
+        # the tables' mcp column says via MCP itself: the short form there
+        self.assertEqual(cells.relation_unrun_text(["A"], short=True),
+                         "not judged: A not run (\\attn{not implemented yet via MCP})")
+        for source in (inspect.getsource(sections._relation_rows), inspect.getsource(sections.relations_appendix)):
+            self.assertIn("cells.relation_unrun_text(unrun, short=True)", source)
+        # chapter P's P-scope sentence: both suffix scenarios not run via MCP (v6) -> the relations not judged there;
+        # v5's inconclusive branch unchanged
+        prose = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["families"]["P-scope"]["prose"]
+        ne = {"mcp": {"standing": "not exercised"}}
+        filled = facts.fill(prose, {"x": {"P-scope-0004": ne, "P-scope-0006": ne}, "n_relations": 0})
+        self.assertIn("so via MCP neither is run (!!not implemented yet via MCP!!: the MCP answer lacks that field), and "
+                      "the two relations are not judged there.", filled)
+        inc = {"mcp": {"standing": "inconclusive"}}
+        self.assertIn("they read inconclusive (the check not exposed",
+                      facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0}))
+
+    def test_p_edge_0004_note(self):
+        """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
+        states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no
+        note line under P-edge (unit_section skips a note that fills to nothing)."""
+        note = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["units"]["P-edge"]["note"]
+        v6 = facts.fill(note, {"manifest_version": 6})
+        self.assertTrue(v6.startswith("P-edge-0004 (lower case): the service's owner states"), v6)
+        self.assertIn("by design", v6)
+        self.assertIn("the frozen v6 manifest", v6)
+        self.assertIn("the next manifest revision corrects it", v6)
+        for version in (4, 5, 7):
+            self.assertEqual(facts.fill(note, {"manifest_version": version}).strip(), "")
+        self.assertIn('note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""',
+                      inspect.getsource(sections.unit_section))
 
 if __name__ == "__main__":
     unittest.main()

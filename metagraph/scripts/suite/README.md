@@ -4049,7 +4049,8 @@ never committed.
 
     doc/make_doc.py RUN_DIR --out DIR [--chapters R,T,...] [--sample] [--no-pdf] [--recorded]
                     [--units FILE] [--prose-dir DIR] [--checks-dir DIR] [--by-design PATH]
-                    [--policy FILE] [--declared FILE] [--xelatex PATH] [--name doc] [--scaffold-prose]
+                    [--policy FILE] [--also-policy FILE ...] [--declared FILE] [--identity FILE]
+                    [--xelatex PATH] [--name doc] [--scaffold-prose]
 
 After the owner's review of the chapter R sample (round 2, 2026-10-15) the document has this shape: the cover carries the
 run verdict and the deploy gate as two boxes of equal weight (a gated run: the gate verdict and its counts; an ungated
@@ -4493,6 +4494,96 @@ branch for a v6 run.
   then keeps the line's own error codes; run_direct's previous_entry, time_limited unknown; the bench panel's
   raw_body), as the other readers already did. One shared reader in suite_common (keeping today's lookup order,
   run_dir/rel then run_dir/arms/<arm>/rel) replaces the ten copies after the open gr/suite-* lanes land.
+
+## The v6 results document: a delta on v5 (2026-10-17)
+The owner (2026-10-17): v6 is very close to v5, so its document is v5's with only what v6 changes (v6 = v5 + the
+/pattern budgets of 110,000 ms, the 25 direct-local warm-ups P-warm-0001..0025, the MCP property marks and the
+budget_stress tags). Every change keeps the v5 document's chapters byte-identical (the validation below).
+- The version switches: the prose's `[[manifest_version = 5 ? v5 text | v4 text]]` conditionals read
+  `[[manifest_version >= 5 ? ...]]` (facts.fill compares a number with `>=`; `=` stays an equality), so a v6 run
+  takes every v5 branch, the text unchanged. Chapter N's version note names the run's own version
+  (`{manifest_version}`) and, for v6, what v6 adds in that chapter (the budget, the eight warm-ups before its
+  /pattern searches, N-nearmiss-0030's budget_stress tag, N-usecase-0005's property-level mark, the moves in the run
+  order).
+- Chapter P's family P-warm (the 25 direct-local warm-ups of /pattern targets) has its family prose and unit line,
+  modelled on R-warm's: the targets with their warm-ups' ids, the generic checks under the target's 110,000 ms
+  budget, the budget_stress tag, and the warm-ups' order, re-runs and footnoted members from the facts. make_doc
+  no longer refuses a v6 run. compare classes a scenario without MCP executions `missing`; the document reads that
+  as "a planned execution not recorded" only where the run's plan schedules the scenario on the MCP arm
+  (`reader.Run.planned_on`, None-safe for a run without a plan), so the warm-ups, which the plan runs on
+  direct-local alone, are not footnoted for their absent MCP column (it reads "not exercised: 25 –", the legend's
+  "no execution: the plan had none").
+- The /pattern budget in chapters P, M, N, Q, X and L: the 13 sentences that state it (every request names
+  `time_budget_ms` ..., a 503 deadline at the ... ms budget) read `[[manifest_version >= 6 ? 110,000 | 60,000]]`;
+  P's "(the host's default, which the service sends too)" reads, for v6, "(above the host's default of 60,000; the
+  MCP arguments name it too)". Kept: P-exact's smoke run that "ran past its 60,000 ms budget" (history), the
+  /resolve and /traverse budgets and caps of chapters R and T (60,000 ms, their host maximum) and the ingress
+  figures. Each file's `_assumes` names 110,000 with its source; V6DeltaTest renders the six files for v5 and v6.
+- The deployed service's identity, which the MCP runner does not record: `make_doc.py --identity FILE` (a JSON
+  file: run, service_commit, railway_deployment_id, source, and host_release, mcp_runner_commit, manifest, which
+  reader.Run checks against the run's release, the runner's git head and the manifest's content sha, refusing a
+  file that names another run or contradicts the record). I.4 and appendix F's MCP runner row print it as "the
+  service's deployed revision, taken from <the source's first clause> and not recorded by the runner: service
+  commit ..., Railway deployment ..." (the commit shortened in I.4, in full in F); without the option the text is
+  v5's ("not recorded by this run").
+- P-edge-0004 (lower case): the P-edge unit's note, printed under its property line for manifest v6 only
+  (`[[manifest_version = 6 ? ...]]`), says that the service's owner states the MCP's /pattern answer leaves out the
+  entry's pattern text by design, that the frozen v6 manifest still marks its `entry_fields` not implemented via
+  MCP, and that the next manifest revision corrects the class. sections.unit_section prints no note line for a note
+  that fills to nothing, so the v5 document is unchanged.
+- No local file path in the document (an internal audience beyond this machine; hosts, staging names and ids stay,
+  never a secret): latex.public_paths rewrites a path inside the suite's tree from `metagraph/scripts/suite/`, a
+  path under a home directory without the home and its hidden directories, a temporary one as its file name, and
+  appendix F applies it to the by-design table's path, the re-evaluation's recorded path, the table warnings and
+  the manifest's ground-truth sources (the index records' `~/.cache/...` report directory); I.4 to its table
+  warnings, the cover to gate.py's error. The v5 document's doc.tex changes in those two appendix F rows only.
+- The gates of a v6 document (the coordinator's instruction, beside the brief): the deploy gate is
+  gate/policy_v6_rtp_mcp.json, passed as `--policy` (without it make_doc takes the first policy of gate/ pinning
+  the manifest, policy_v6_rt_mcp.json); `--also-policy gate/policy_v6_rt_mcp.json` (repeatable) judges a further
+  policy offline and prints it in I.4's table as "other gate policy", with its verdict and counts, beside the deploy
+  gate, which it does not replace. The v6 document is built with
+
+      doc/make_doc.py runs/20261017T082918Z_refseq97-81c620ef --out DIR --policy gate/policy_v6_rtp_mcp.json \
+          --also-policy gate/policy_v6_rt_mcp.json --identity identity-v6-baseline.json
+- A layout fix the v6 build needed (not a brief item): a detail block's "property tested?" cell with items a
+  property-level mark sets aside ("yes (1 of 1); 1 marked not shown via MCP") wraps in a 30 mm top-aligned box;
+  D-P-scope-0004's MCP rows, footnoted in v6, ran 44 pt past the margin. No v5 detail row has such a cell.
+- A wording fix the v6 run needed (not a brief item): I.1's and I.4's inconclusive executions by reason count the
+  one inconclusive by a scenario-level mark (D-P-scope-0004's MCP r0, marks_cover_repeat) as "by a scenario-level
+  mark (every property check marked as not shown via MCP)", never as "the service's ... (a host state)".
+- An accuracy fix (the coordinator, 2026-10-18; not a brief item): a manifest scenario-level mark
+  (build_manifest.scenario_level_marks: property-level marks that covered every property check of a scenario with
+  an MCP tool mapping, each part "not implemented yet via MCP: <reason> (<check>)" or "service-side by design: ...")
+  is answer-side. blocks.mcp_class classes it `answer_lacks_field` ("not implemented yet via MCP (the answer lacks a
+  checked field)") and blocks.short_reason words it "the request is expressible through the tools, but the MCP
+  answer lacks absence_scope, the field entry_fields checks" (the field from the check's arguments), never "cannot
+  be expressed through the tools", which stays for the request-side marks (support, bounds.max_query_bp, a raw body)
+  and the table's not-expressible cases. v6's P-scope-0004 / -0006 read so; no v5 scenario has such a mark.
+- An accuracy fix (the coordinator, 2026-10-18; not a brief item): a relation the comparator could not judge on the
+  MCP arm (`not_evaluated`, its detail "a raw answer is missing") because one of its scenarios stands not
+  implemented via MCP and has no MCP execution reads "not judged via MCP: P-scope-0004 is not run via MCP (not
+  implemented yet via MCP)" in the detail blocks' relations line and, in the mcp column of the pairs tables and
+  appendix C, "not judged: P-scope-0004 not run (not implemented yet via MCP)", with the no-execution dash
+  (cells.relation_unrun / relation_unrun_text); any other not-evaluated relation keeps the comparator's words. Chapter P's P-scope sentence says, when both suffix scenarios stand not exercised (v6), that neither is
+  run via MCP and the two relations are not judged there. The rule is general, so it also corrects v5's document
+  where the same case printed the comparator's words: chapter C's relations line under C-caps-0003
+  (REL-same_answer-0004 / -0005: C-caps-0001 and -0002 are not run via MCP) and appendix C's three C-caps rows;
+  every other v5 chapter stays byte-identical.
+
+### Validation (offline; no host was contacted; the run directories were only read)
+- The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef) re-rendered with this generator (4c4d0c3ad): nine
+  chapter files (all but C), doc.sty, the three plot files and doc.aux / .toc / .out byte-identical to build5
+  (gr/suite-doc 895397620); chapter C differs in the one relations line the relation fix corrects (C-caps-0001 /
+  -0002 not run via MCP), doc.tex in appendix C's three C-caps rows (the same fix), the README pin and appendix F's
+  two path rows; 174 pages, no missing character, no undefined reference, the known 1.1 pt overfull box, no local
+  path in the PDF text.
+- The v6 baseline (runs/20261017T082918Z_refseq97-81c620ef) built with the command above (4c4d0c3ad): 169 pages, no missing
+  character, no undefined reference, no LaTeX warning, the same single 1.1 pt overfull box (T-edge-0011), no local
+  path in the PDF text; the cover's GATE PASS (policy_v6_rtp_mcp: 2068 judged, 1950 passed, 0 problems) and I.4's
+  policy_v6_rt_mcp row (689 judged, 635 passed, 0 problems) equal the acceptance note's offline verdicts. The builds,
+  the chapter-by-chapter delta against v5 with each difference's source and the numbers checked against the run's
+  data are in `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/` (DELTA.md).
+- Tests: the full suite (SUITE_TRUTH_CACHE as in round 2) at 4c4d0c3ad, 889 tests OK, none skipped (780 s).
 
 ## Glossary
 

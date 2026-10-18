@@ -9,6 +9,7 @@ Everything is read from the run directory and the suite directory; nothing is wr
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -112,7 +113,8 @@ def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
 
 
 class Run(object):
-    def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None):
+    def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None,
+                 identity=None, also_policies=None):
         self.dir = os.path.abspath(run_dir)
         if not os.path.isdir(self.dir):
             raise RunError("not a directory: %s" % run_dir)
@@ -165,6 +167,7 @@ class Run(object):
         # execution; the target's line carries them as warm_up_reruns): timing evidence, never an outcome
         self.reruns = [r for r in (self.run.get("reruns_for_resume") or []) if isinstance(r, dict)]
         self.mcp_run = sc.read_json(os.path.join(self.dir, "arms", "mcp", "run.json")) or {}
+        self.identity = self._load_identity(identity)
         self.orchestrator = sc.read_json(os.path.join(self.dir, "orchestrator.json")) or {}
         judged = cmp.judging_checks(self.dir, reevaluated) or {}
         self.judged = judged
@@ -175,6 +178,10 @@ class Run(object):
         self._marks = {}
         self.missing, self.plan_source = gate_mod.missing_planned(self.dir, self.manifest, self.rows)
         self.missing_set = set((k[0], k[1]) for k in self.missing)
+        # the (scenario, arm) pairs the run's plan schedules, None without a plan: a scenario the plan runs on some
+        # arms only (v6's direct-local warm-ups P-warm, timing class long) has no execution to miss on the others
+        self.planned_pairs = (set((k[0], k[1]) for k in gate_mod.run_plan(self.dir, self.manifest)[0])
+                              if self.plan_source else None)
         self.table, self.table_meta = self._load_table(by_design, reevaluated)
         self.cases = report.report_cases(self.comp, self.dir) or self.table
         self.declared = self._load_declared(declared)
@@ -191,6 +198,17 @@ class Run(object):
             except Exception as e:  # a run the gate cannot judge: the document says why, never a crash
                 self.gate = None
                 self.gate_error = "%s: %s" % (type(e).__name__, e)
+        # further gate policies judged offline beside the deploy gate's (make_doc --also-policy: the v6 document shows
+        # policy_v6_rt_mcp beside the deploy gate policy_v6_rtp_mcp); each {path, policy, verdict, error}
+        self.also_gates = []
+        for path in also_policies or []:
+            entry = {"path": os.path.abspath(path), "policy": None, "verdict": None, "error": None}
+            try:
+                entry["policy"] = gate_mod.load_policy(path)
+                entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated)
+            except Exception as e:  # a policy the gate cannot read or judge: the document says why, never a crash
+                entry["error"] = "%s: %s" % (type(e).__name__, e)
+            self.also_gates.append(entry)
         self.lines = {}
         for r in self.rows:
             self.lines.setdefault((r.get("scenario"), r.get("arm")), []).append(r)
@@ -267,6 +285,32 @@ class Run(object):
                 return data
         return None
 
+    def _load_identity(self, path):
+        """The deployed service's identity from an input file the run did not record (make_doc --identity: the
+        service commit and the deployment id as the deployment log states them), or None. Refused (RunError) when
+        the file names another run or contradicts what the run recorded: its release, the MCP runner's git head,
+        the manifest's content sha256."""
+        if not path:
+            return None
+        data = sc.read_json(path)
+        if not isinstance(data, dict) or not data.get("service_commit"):
+            raise RunError("%s: not an identity file (no service_commit)" % path)
+        problems = []
+        if data.get("run") != self.run_id():
+            problems.append("it names run %s" % data.get("run"))
+        release = self.run.get("release")
+        if data.get("host_release") and release and data["host_release"] != release:
+            problems.append("host_release %s, the run recorded %s" % (data["host_release"], release))
+        head = self.mcp_run.get("git_head")
+        if data.get("mcp_runner_commit") and head and data["mcp_runner_commit"] != head:
+            problems.append("mcp_runner_commit %s, the MCP runner recorded %s" % (data["mcp_runner_commit"], head))
+        content = re.search(r"\b[0-9a-f]{64}\b", str(data.get("manifest") or ""))
+        if content and self.manifest.get("content_sha256") and content.group(0) != self.manifest["content_sha256"]:
+            problems.append("manifest content %s, the run's is %s" % (content.group(0), self.manifest["content_sha256"]))
+        if problems:
+            raise RunError("%s does not describe this run (%s): %s" % (path, self.run_id(), "; ".join(problems)))
+        return data
+
     def _load_policy(self, policy):
         """(policy, path): the given policy file, else the first policy of the suite's gate directory pinning the
         run's manifest (gate/policy_*.json with manifest.content_sha256 equal to the manifest's), else None."""
@@ -305,6 +349,10 @@ class Run(object):
 
     def comp_arm(self, sid, arm):
         return (self.comp_entry(sid).get("arms") or {}).get(arm) or {}
+
+    def planned_on(self, sid, arm):
+        """Whether the run's plan schedules the scenario on the arm (True when the run has no plan to consult)."""
+        return self.planned_pairs is None or (sid, arm) in self.planned_pairs
 
     def planned_missing(self, sid, arm):
         return (sid, arm) in self.missing_set

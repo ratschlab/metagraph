@@ -457,6 +457,10 @@ def inconclusive_by_reason_text(run):
         for reason, n in sorted(d.items(), key=lambda kv: (-kv[1], kv[0])):
             if reason == "checks":
                 words.append("%d by the checks" % n)
+            elif reason == getattr(sc, "SCENARIO_LEVEL_MARK", None):
+                # the manifest's marks cover every property check of the execution (the v6 delta: D-P-scope-0004's
+                # MCP r0, marks_cover_repeat): the mark's reading, never a host state
+                words.append("%d by a scenario-level mark (every property check marked as not shown via MCP)" % n)
             else:
                 words.append("%d by the service's %s (a host state)" % (n, reason))
         parts.append("%s %s" % (arm, ", ".join(words)))
@@ -844,9 +848,11 @@ def standing_vs_outcome_reading(ctx, sids):
 SERVICE_VERSION_KEYS = ("service_version", "service_commit", "service_git_head", "service_revision", "deployed_version")
 
 
-def service_version_text(run):
-    """The service's deployed revision as the MCP runner recorded it, or the statement that this run did not record
-    it (READ-021: never a nearby commit in its place)."""
+def service_version_text(run, full=False):
+    """The service's deployed revision as the MCP runner recorded it, else as an identity input of this document
+    states it (make_doc --identity, the v6 delta: taken from the deployment log, labelled as not recorded by the
+    runner; the commit shortened unless `full`), or the statement that this run did not record it (READ-021: never
+    a nearby commit in its place)."""
     mcp_run = run.mcp_run or {}
     for key in SERVICE_VERSION_KEYS:
         if mcp_run.get(key):
@@ -856,6 +862,15 @@ def service_version_text(run):
     for key in ("service_version", "version", "release", "commit"):
         if isinstance(doc.get(key), (str, int)) and doc.get(key):
             return "the service's deployed revision as its capabilities document states it: %s" % doc[key]
+    ident = getattr(run, "identity", None)
+    if isinstance(ident, dict) and ident.get("service_commit"):
+        commit = str(ident["service_commit"])
+        parts = ["service commit %s" % (commit if full or len(commit) <= 12 else commit[:12] + "…")]
+        if ident.get("railway_deployment_id"):
+            parts.append("Railway deployment %s" % ident["railway_deployment_id"])
+        source = str(ident.get("source") or "an input file of this document").split(";")[0].strip()
+        return "the service's deployed revision, taken from %s and not recorded by the runner: %s" % (
+            source, ", ".join(parts))
     return ("the service's deployed revision is not recorded by this run: the MCP requests cannot be attributed to a "
             "service revision, and a later run cannot be shown to have met the same service code")
 
@@ -1004,7 +1019,7 @@ def gate_summary(ctx):
         return word, how, counts_text, problems_text
     how = ("a stale gate.json in the run (%s)" % stale_gate_text(run)) if run.gate_stale else "no gate.json in the run"
     if run.gate_error:
-        how += ", and gate.py could not judge it offline: %s" % latex.cut_text(str(run.gate_error), 200)
+        how += ", and gate.py could not judge it offline: %s" % latex.cut_text(latex.public_paths(str(run.gate_error)), 200)
     elif run.policy is None:
         how += ", and no policy in the suite's gate directory pins this manifest, so none was judged offline"
     return "not evaluated", how, None, None
@@ -1802,7 +1817,7 @@ def provenance_table(ctx):
             text += " (\\textbf{not} the table the re-evaluation replayed: appendix F)"
         rows.append(("by-design table", text))
     elif table.get("warnings"):
-        rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 300)))
+        rows.append(("by-design table", "none read: %s" % esc(latex.public_paths("; ".join(table["warnings"])), 300)))
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
         rows.append(("access path %s" % esc(arm), "%s executions, %s to %s, runner %s" % (
@@ -1818,6 +1833,8 @@ def provenance_table(ctx):
             (", %s" % esc(loop.get("state"))) if loop.get("state") else "",
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
     rows.append(("comparison", comparison_lines_text(run, short=True)))
+    for entry in getattr(run, "also_gates", None) or []:
+        rows.append(("other gate policy", esc(also_gate_text(entry))))
     if run.reruns:
         rows.append(("warm-ups run again", reruns_text(run)))
     lf = run.load or {}
@@ -1827,6 +1844,25 @@ def provenance_table(ctx):
     rows.append(("host load", "%d samples; sra\\_all CPU mean %s\\%%, load1 mean %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("load_mean"), 1), caveat)))
     return _kv_table(rows)
+
+
+def also_gate_text(entry):
+    """A further gate policy judged offline for this document beside the deploy gate (make_doc --also-policy), plain
+    text: the policy, its verdict and counts, and that it is not the deploy gate."""
+    name = os.path.basename(entry.get("path") or "") or "–"
+    if entry.get("error") or not isinstance(entry.get("verdict"), dict):
+        return "%s: not judged (%s)" % (name, latex.cut_text(latex.public_paths(str(entry.get("error") or "–")), 200))
+    gate = entry["verdict"]
+    pol = gate.get("policy") or {}
+    counts = gate.get("counts") or {}
+    problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
+    return ("%s, %s version %s (sha256 %s… of the canonical JSON), access paths %s: %s, %d problem%s; %s executions "
+            "judged, %s passed, %s required; judged offline by gate.py for this document beside the deploy gate, "
+            "which it does not replace" % (
+                name, pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
+                ", ".join((entry.get("policy") or {}).get("arms") or []) or "–",
+                "GATE PASS" if gate.get("passed") else "GATE FAIL", len(problems), "" if len(problems) == 1 else "s",
+                counts.get("judged", "–"), counts.get("passed", "–"), counts.get("required", "–")))
 
 
 def comparison_lines_text(run, short=False):
@@ -2286,7 +2322,7 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     note = None
     if cls == "none":
         return "%s\\ no execution" % glyph, None
-    if cls == "not_expressible":
+    if cls in ("not_expressible", "answer_lacks_field"):
         case = st.agreement.get("case")
         reason = blocks.short_reason(run, sid, case, ctx.short_reasons())
         return "%s\\ %s\\newline %s; see B" % (glyph, blocks.class_word_tex(cls, st), reason), None
@@ -2317,6 +2353,19 @@ EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the clas
                "execution · not expressible through MCP · answered by the service in the host's place · answered "
                "after service normalization · host refusal relayed through the service · answered by the host "
                "through the service")
+
+
+def _edge_legend_extra(ctx, members):
+    """The class words beyond EDGE_LEGEND's that a member's MCP cell prints (an answer-side scenario-level mark: not
+    implemented yet via MCP, the answer lacking a checked field), so that the legend names every class shown."""
+    run = ctx.run
+    extra = []
+    for sid in members:
+        st = ctx.state(sid)["mcp"]
+        cls, _ = blocks.mcp_class(blocks.class_lines(st), run.scenario(sid), st.agreement, run.cases)
+        if cls == "answer_lacks_field" and blocks.MCP_CLASS_WORD[cls] not in extra:
+            extra.append(blocks.MCP_CLASS_WORD[cls])
+    return "".join(" · " + w for w in extra)
 
 
 def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
@@ -2361,6 +2410,11 @@ def _relation_rows(ctx, relations):
                 cs.append("\\gnone")
                 continue
             o = a.get("outcome")
+            unrun = cells.relation_unrun(run, rel, arm, o)
+            if unrun:
+                # not judged: a scenario of the relation is not run via MCP (not "a raw answer is missing")
+                cs.append("\\gnone {\\scriptsize %s}" % cells.relation_unrun_text(unrun, short=True))
+                continue
             glyph = cells.GLYPH.get(o, "\\ginc") if o in cells.GLYPH else "\\ginc"
             detail = a.get("detail")
             if o == "pass" or not detail:
@@ -2411,10 +2465,12 @@ def unit_section(ctx, chapter, uid):
     members = list(u["members"])
     prop, note = _unit_prose(ctx, chapter, uid)
     prop_tex = inline(ctx.fill(prop)) if prop else latex.placeholder("(unit property: to be written)")
-    if note:
-        # the note is filled on the unit's own values too (facts.unit_facts: its members under `x`), so that it
-        # can state a member's gate relation from the policy (READ-318: N-usecase-defect)
-        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(ctx.fill(note, facts.unit_facts(ctx, uid)))
+    # the note is filled on the unit's own values too (facts.unit_facts: its members under `x`), so that it can
+    # state a member's gate relation from the policy (READ-318: N-usecase-defect); a note whose conditional leaves
+    # nothing for this run (P-edge's v6-only note) prints nothing
+    note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""
+    if note_text:
+        prop_tex += "\\newline{\\color{black!60}\\itshape %s}" % inline(note_text)
     layout = u["unit_type"]
     key = cells.LAYOUT_KEY.get(layout)
     legend = cells.TIMING_LEGEND.get(layout)
@@ -2484,7 +2540,8 @@ def unit_section(ctx, chapter, uid):
             mcp_cell, note = _mcp_edge_cell(ctx, sid, st["mcp"], fns[sid], with_times=False)
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
                           esc_wrap(_variant(meta[sid])), expected] + cs + [mcp_cell], note))
-        out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + (("; " + rk) if rk else ""))
+        out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + _edge_legend_extra(ctx, members)
+                                    + (("; " + rk) if rk else ""))
         states = [ctx.state(sid) for sid in members]
         # the unit's line (the wall max per arm) is labelled as the unit's where the unit shares its family's id,
         # so that it is not read as a repeat of the family's line with p50 / p90 (VERIFY-T L1, VERIFY-PLXM L3)
@@ -2502,7 +2559,7 @@ def unit_section(ctx, chapter, uid):
                           esc_wrap(_variant(meta[sid])),
                           blocks.expected_text(run.scenario(sid), run.is_property)] + cs + [mcp_cell], note))
         out += latex.list_table(rows, units_ids(ctx, members), cells.TIMING_LEGEND["list"] + "; " + EDGE_LEGEND
-                                + (("; " + rk) if rk else ""))
+                                + _edge_legend_extra(ctx, members) + (("; " + rk) if rk else ""))
     else:  # pairs
         rows = []
         for sid in members:
@@ -3482,8 +3539,11 @@ def relations_appendix(ctx):
         per_arm = []
         for arm in ARMS:
             a = (crel.get("arms") or {}).get(arm) or {}
+            unrun = cells.relation_unrun(run, rel, arm, a.get("outcome")) if a else []
             if not a:
                 per_arm.append("\\gnone")
+            elif unrun:
+                per_arm.append("\\gnone {\\scriptsize %s}" % cells.relation_unrun_text(unrun, short=True))
             else:
                 per_arm.append("%s {\\scriptsize %s}" % (cells.GLYPH.get(a.get("outcome"), "\\ginc"),
                                                         esc(a.get("detail"), 90)))
@@ -3616,21 +3676,21 @@ def environment_table(ctx):
     if table.get("path"):
         text = "version %s, %s cases, service commit %s, generated %s; sha256 %s; %s" % (
             esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)),
-            _date(table.get("generated_utc")), tt(table.get("sha256") or "–"), tt(table.get("path")))
+            _date(table.get("generated_utc")), tt(table.get("sha256") or "–"), tt(latex.public_paths(table.get("path"))))
         if table.get("replayed"):
             recorded = ((run.reeval or {}).get("by_design") or {}).get("path")
             text += "; the table the re-evaluation replayed (reevaluated.json by\\_design), found by its sha256%s" % (
-                (" at this path (the re-evaluation recorded %s)" % tt(recorded))
+                (" at this path (the re-evaluation recorded %s)" % tt(latex.public_paths(recorded)))
                 if recorded and recorded != table.get("path") else " at the recorded path")
         elif table.get("replayed_sha256"):
             text += "; \\textbf{WARNING}: not the table the re-evaluation replayed (sha256 %s, %s cases): %s" % (
                 tt(table["replayed_sha256"]), esc(table.get("replayed_cases", "–")),
-                esc("; ".join(table.get("warnings") or []) or "the replayed table was not found", 400))
+                esc(latex.public_paths("; ".join(table.get("warnings") or []) or "the replayed table was not found"), 400))
         elif table.get("warnings"):
-            text += "; " + esc("; ".join(table["warnings"]), 400)
+            text += "; " + esc(latex.public_paths("; ".join(table["warnings"])), 400)
         rows.append(("by-design table", text))
     elif table.get("warnings"):
-        rows.append(("by-design table", "none read: %s" % esc("; ".join(table["warnings"]), 400)))
+        rows.append(("by-design table", "none read: %s" % esc(latex.public_paths("; ".join(table["warnings"])), 400)))
     mcp_run = run.mcp_run or {}
     for arm, info in sorted((r.get("arms") or {}).items()):
         info = info or {}
@@ -3647,7 +3707,7 @@ def environment_table(ctx):
         rows.append(("MCP runner", "git head %s (the client that asked, not the service's revision); base %s; admin "
                                    "key %s; %s" % (
                                        tt(_short(mcp_run.get("git_head"), 12)), tt(mcp_run.get("base") or "–"),
-                                       esc(mcp_run.get("admin_key") or "–"), esc(service_version_text(run)))))
+                                       esc(mcp_run.get("admin_key") or "–"), esc(service_version_text(run, full=True)))))
     sessions = _sessions_text(run)
     if sessions:
         rows.append(("mode", sessions))
@@ -3676,7 +3736,7 @@ def environment_table(ctx):
         value = gt[key]
         if isinstance(value, (list, dict)):
             value = "%d entries" % len(value)
-        rows.append((esc(key.replace("_", " ")), esc_wrap(value, 220)))
+        rows.append((esc(key.replace("_", " ")), esc_wrap(latex.public_paths(value), 220)))
     return _kv_table(rows)
 
 

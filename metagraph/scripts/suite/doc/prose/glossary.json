@@ -142,7 +142,7 @@
   },
   {
    "term": "property-level mark (manifest v5)",
-   "definition": "[[manifest_version = 5 ? A mark of this run's manifest. | Not part of this run's manifest (version {manifest_version}): a mark of a later manifest version, exercised by no scenario of this run and read into none of its results; defined here so that the term is not misread where a reason or a plan names it.]] A mark of one check of a scenario (`mcp.not_implemented_checks`, `mcp.by_design_checks`): on the MCP path a marked check that reads not exposed is set aside, neither compared nor counted untested, while the rest of the scenario stays tested; a marked check that reads anything else is judged as any check. Setting a check aside changes how the comparison and the gate treat it and supplies no evidence about it on that path.",
+   "definition": "[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest (version {manifest_version}): a mark of a later manifest version, exercised by no scenario of this run and read into none of its results; defined here so that the term is not misread where a reason or a plan names it.]] A mark of one check of a scenario (`mcp.not_implemented_checks`, `mcp.by_design_checks`): on the MCP path a marked check that reads not exposed is set aside, neither compared nor counted untested, while the rest of the scenario stays tested; a marked check that reads anything else is judged as any check. Setting a check aside changes how the comparison and the gate treat it and supplies no evidence about it on that path.",
    "see": [
     "service-side by design"
    ]
