@@ -89,10 +89,11 @@ except ImportError:          # Windows: the threads' lock only (stated in the mo
 
 from . import budget as _B
 from . import coords
-from ._codec import CodecError, GraphletFormatError, parse_int
+from ._codec import parse_int
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .parser import (_check_transport, _replace_atomically, _write_all, dump, from_response, j_object, parse,
-                     seed_envelope, utf8_bytes)
+from .parser import (_as_text, _check_transport, _frame, _replace_atomically, _write_all,
+                     _write_user_file, dump, from_response, j_object, parse, seed_envelope,
+                     utf8_bytes)
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
 
@@ -207,41 +208,19 @@ def set_delivery(g, delivery):
                                                             delivery=delivery))
 
 
-def _check_frame(body):
-    """The checks of a body that need no parse: it ends with a line feed, its first line
-    is an MGT H record of this version, its last a Z record counting its lines. -> the H
-    record's fields. GraphletFormatError otherwise."""
-    if not body.endswith('\n'):
-        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
-    first = body.find('\n')
-    head = body[:first].split(' ')
-    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt' or head[2] != '1':
-        raise GraphletFormatError(1, 'expected the H record of MGT v1')
-    last = body.rfind('\n', 0, len(body) - 1) + 1
-    z = body[last:-1].split(' ')
-    n = body.count('\n')
-    try:
-        if len(z) != 2 or z[0] != 'Z' or parse_int(z[1]) != n:
-            raise GraphletFormatError(n, 'the Z record does not count the body\'s %d lines' % n)
-        parse_int(head[11])
-    except CodecError as e:
-        raise GraphletFormatError(n, str(e)) from None
-    return head
-
-
 def _unparsed_head(result, response):
     """(the body as text, its H record's fields, the index identity it states) of
-    results[i], read WITHOUT a parse -- after the checks that need none (graphlet_bytes and
-    graphlet_lines against the body, the H record, the Z line counting its lines): what
+    results[i], read WITHOUT a parse -- after the checks that need none (UTF-8,
+    graphlet_bytes and graphlet_lines against the body, its frame: parser._frame()): what
     put_unparsed() stores, and what an unparsed replay or continuation checks against the
-    entry it derives from before storing anything."""
+    entry it derives from before storing anything. A body with a J line (a saved file,
+    not a server body) is a ValueError here, before anything is stored."""
     body = result.get('graphlet')
     if body is None:
         raise ValueError('this result carries no graphlet')
-    if isinstance(body, (bytes, bytearray)):
-        body = bytes(body).decode('utf-8')
+    body = _as_text(body)
     _check_transport(body, result)
-    head = _check_frame(body)
+    head = _frame(body)[0]
     ident = {'ns': None if head[13] == '*' else head[13],
              'fp': None if head[14] == '*' else head[14],
              'meta_fp': None if head[15] == '*' else head[15],
@@ -281,6 +260,9 @@ _HASH_CHUNK = 1 << 20
 
 
 def _write_atomic(path, data):
+    """The spool's writer (entries, bodies, tombstones): private (mkstemp, 0600), flushed
+    to the device and renamed into place. A file for the user is written by
+    parser._write_user_file() instead."""
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.tmp-', dir=d)
     # one write, without the 128 KiB buffer a buffered file holds (parser._write_all()),
@@ -698,7 +680,7 @@ class GraphletStore:
         if e is None:
             raise self._unknown(handle)
         now = self.clock()
-        if now - e.accessed > self.ttl_disk_s and not self._fresher_on_disk(e, now):
+        if self._past_disk_ttl(e, now):
             self._expire(handle)
             raise self._unknown(handle)
         # the disk TTL counts from the last use, also across restarts: the entry file is
@@ -745,6 +727,12 @@ class GraphletStore:
         self._index(e)
         self._persisted[handle] = e.accessed
         return e
+
+    def _past_disk_ttl(self, e, now):
+        """Whether entry |e| has outlived the disk TTL: unused for ttl_disk_s here and in
+        the entry file (another process's use counts). get() and sweep() expire such an
+        entry through _expire(), which decides whether a tombstone may be written."""
+        return now - e.accessed > self.ttl_disk_s and not self._fresher_on_disk(e, now)
 
     def _fresher_on_disk(self, e, now):
         """Whether the entry file records a use within the disk TTL that this process
@@ -1058,15 +1046,24 @@ class GraphletStore:
         raise self._unknown(handle)
 
     def _expire(self, handle, *, gc=True):
-        """Expire |handle|: a tombstone keeps its request, its entry file goes, and with |gc|
-        its body when no entry names it any more (a sweep collects the bodies of all it
-        expired at once)."""
+        """Expire |handle| -> its entry, or None when there is nothing to expire: a
+        tombstone keeps its request, its entry file goes, and with |gc| its body when no
+        entry names it any more (a sweep collects the bodies of all it expired at once).
+        A handle whose entry file is gone was freed or expired by another process sharing
+        the spool: it is forgotten here and no tombstone is written -- a freed handle is
+        not replayable, and an expired one keeps the tombstone (and the expiry time) the
+        other process wrote. Under the spool lock, so a free() in another process cannot
+        fall between the check and the tombstone; on a spool without a process lock
+        (_SpoolLock.unlocked) the check narrows that race but does not close it. The
+        freeing process collected the body; a sweep collects orphans too."""
         with self._lock:
             e = self._unindex(handle)
             if e is None:
                 return None               # dropped meanwhile (another thread's GC)
             self._drop_ram(handle)
             self._persisted.pop(handle, None)
+            if not os.path.exists(self._entry_path(handle)):
+                return None
             tomb = {'handle': handle, 'request': e.request, 'index': e.index,
                     'expired': self.clock()}
             _write_atomic(self._tomb_path(handle), json.dumps(tomb).encode('utf-8'))
@@ -1084,18 +1081,21 @@ class GraphletStore:
         spool does not grow without bound. The bodies the expired entries named go when no
         entry file names them any more -- one scan of the entry files for all of them, not
         one per expired entry -- and so does every body no entry file names that is older
-        than _ORPHAN_GRACE_S (otherwise such a body would be kept for good)."""
+        than _ORPHAN_GRACE_S (otherwise such a body would be kept for good). |expired| names
+        the handles this sweep expired: one whose entry file another process removed is
+        forgotten, not expired again (_expire())."""
         now = self.clock()
         ram = [h for h, (_, _, used) in self._ram.items() if now - used > self.ttl_ram_s]
         for h in ram:
             self._drop_ram(h)
-        expired = [h for h, e in self._entries.items() if now - e.accessed > self.ttl_disk_s
-                   and not self._fresher_on_disk(e, now)]
+        due = [h for h, e in self._entries.items() if self._past_disk_ttl(e, now)]
+        expired = []
         with self._lock:
             digests = []
-            for h in expired:
+            for h in due:
                 e = self._expire(h, gc=False)
                 if e is not None:
+                    expired.append(h)
                     digests.append(e.digest)
             self._gc_bodies(digests, orphans=True)
         removed = []
@@ -1202,23 +1202,18 @@ class GraphletStore:
                 jb = e.j_bound
                 b.charge(jb >> 8, 4 * (jb + 49))
         body = self.body_text(handle)
-        head = _check_frame(body)
-        first = body.find('\n')
-        if body.startswith('J ', first + 1):
-            raise ValueError('the stored body carries a J line')
+        head, first, last, lines = _frame(body)
         # the O record, rewritten in place when the entry records another delivery: the
         # text is one join of slices of the body around it, never a copy of the body
         # after its H line first
         o_at = o_end = new_o = None
         if e.delivery is not None:
             o_at, o_end, new_o = _o_with_delivery(body, first + 1, e.delivery)
-        last = body.rfind('\n', 0, len(body) - 1) + 1
         want_j = has_env or e.view is not None or e.derived_from is not None
         if not want_j:
             if new_o is None:
                 return body
             return ''.join((body[:o_at], new_o, body[o_end:]))
-        lines = parse_int(body[last:-1].split(' ')[1])
         j = seed_envelope(e.envelope, parse_int(head[11]))
         j['results'] = [{k: v for k, v in (e.seed_summary or {}).items()
                          if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}]
@@ -1236,12 +1231,13 @@ class GraphletStore:
         return ''.join(pieces)
 
     def save_body(self, handle, path, *, budget=None):
-        """standalone_text() written atomically to |path| (no parse) -> bytes written."""
+        """standalone_text() written atomically to |path| (no parse) -> bytes written: a
+        user's file, by the writer and with the permissions of save()
+        (parser._write_user_file())."""
         b = _B.resolve(budget)
         if b is None:
             data = self._standalone_text(handle, None).encode('utf-8')
-            _write_atomic(os.path.abspath(path), data)
-            return len(data)
+            return _write_user_file(os.path.abspath(path), data, '.mgt-')
         with b.scope('save_body'):
             text = self._standalone_text(handle, b)
             # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
@@ -1249,8 +1245,7 @@ class GraphletStore:
             # its account on 28 of 34 retrievals
             b.charge(0, 2 * (len(text) + 49))
             data = text.encode('utf-8')
-            _write_atomic(os.path.abspath(path), data)
-            return len(data)
+            return _write_user_file(os.path.abspath(path), data, '.mgt-')
 
     def load(self, path, request=None, *, parse_budget=None, graph=None, graph_path=None):
         """A saved .mgt file -> a new handle (its J line restores envelope and view).

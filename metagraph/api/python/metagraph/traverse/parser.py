@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import re
-import tempfile
+import secrets
 from array import array
 
 from . import budget as _B
@@ -71,7 +71,14 @@ _O_DELIVERY = {'i': 'inline', 's': 'spooled', 'p': 'paged'}
 _REGIMES = ('basic', 'primary', 'canonical')
 _TOKEN_RE = re.compile(r'[!-~]+\Z')          # printable ASCII without space
 _NS_RE = re.compile(r'[A-Za-z0-9._-]+\Z')
-_NAME_RE = re.compile(r'[A-Za-z0-9_.\[\]-]+\Z')   # counter / extra names
+_NAME_RE = re.compile(r'[A-Za-z0-9_.\[\]-]+\Z')   # counter names
+# a K record's extra field names as the server writes them (traverse.cpp's K writer): an
+# open [a-z_] token set (DESIGN §14.1), never a fixed field's name (it drops those from the
+# extras), never twice (they come from one JSON object). A K record the writer cannot write
+# is refused, so the limitation's renderers (export.limitation_json, ops.limitation_dict)
+# never meet a name clash they would settle differently
+_K_EXTRA_RE = re.compile(r'[a-z_]+\Z')
+_K_FIXED = frozenset(('kind', 'knob', 'limit', 'observed', 'complete_to_bp', 'effect'))
 
 
 # which fields a record wrote as '*' (check_rules): one shared frozenset per combination
@@ -312,8 +319,12 @@ class _Reader:
         if f[7] != '.':
             for item in f[7].split(','):
                 name, eq, val = item.partition('=')
-                if not eq or not _NAME_RE.match(name):
+                if not eq or not _K_EXTRA_RE.match(name):
                     raise self.err('K extra item %s' % _tok(item))
+                if name in _K_FIXED or any(name == n for n, _ in extra):
+                    raise self.err('K extra field %s: %s' % (
+                        _tok(name), 'a fixed field\'s name' if name in _K_FIXED
+                        else 'given twice'))
                 extra.append((name, decode_kvalue(val)))
         return Limitation(arm, f[2], f[3], decode_kvalue(f[4]), decode_kvalue(f[5]),
                           _opt(f[6], parse_int), extra, pct_unescape(f[8]))
@@ -1248,6 +1259,51 @@ def _check_transport(body, result):
                                   % (want, body.count('\n')))
 
 
+def _as_text(body):
+    """A body given as bytes, decoded (GraphletFormatError when it is not UTF-8, as a
+    parse says); a str as it is."""
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            return bytes(body).decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
+    return body
+
+
+def _frame(body):
+    """The checks of a server body that need no parse -> (its H record's fields, where its
+    H line ends, where its Z line begins, the lines it has): it ends with a line feed, its
+    first line is an H record of this MGT version with an integer seed_index, its last a Z
+    record counting its lines -- GraphletFormatError otherwise (a body cut, or not MGT v1:
+    what a parse refuses too) -- and no J line follows H: ValueError (a saved file, not a
+    server body), tested last, so that a cut body is reported as cut. The one copy of these
+    checks: standalone_text(), the store's unparsed put and its copy without a parse."""
+    if not body.endswith('\n'):
+        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
+    first = body.find('\n')
+    head = body[:first].split(' ')
+    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt' or head[2] != str(FORMAT_VERSION):
+        raise GraphletFormatError(1, 'expected the H record of MGT v%d' % FORMAT_VERSION)
+    try:
+        parse_int(head[11])
+    except CodecError as e:
+        raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
+    last = body.rfind('\n', 0, len(body) - 1) + 1
+    z = body[last:-1].split(' ')
+    n = body.count('\n')
+    try:
+        counted = len(z) == 2 and z[0] == 'Z' and parse_int(z[1]) == n
+    except CodecError:
+        counted = False
+    if not counted:
+        raise GraphletFormatError(n, 'expected the Z record counting the body\'s %d lines' % n)
+    # tested in place: a slice of the rest of the body only to read its first two
+    # characters would copy the whole body once more
+    if body.startswith('J ', first + 1):
+        raise ValueError('the body already carries a J line: a saved file, not a server body')
+    return head, first, last, n
+
+
 def from_response(result, response, *, budget=None):
     """results[i] of a detail: graphlet response + the response (the envelope) ->
     Graphlet with the summary attached. A derivation failure ({seed, error}) has no
@@ -1285,42 +1341,18 @@ def standalone_text(body, result, response):
     the body: for a server body (canonical, T37) it is byte for byte
     dump(from_response(result, response), envelope=True), at the cost of a copy, so that a
     large retrieval can be saved or spooled without building its model. The body is checked
-    against graphlet_bytes and graphlet_lines, and for its H and Z records, but NOT
-    validated: load() or parse() of the text does that (a body that is not canonical gives a
-    text that is not what dump() would write). Raises ValueError for a body that already
-    carries a J line (not a server body) and for a response with a reserved top-level name,
-    GraphletFormatError for a body cut in transport or without its H / Z record."""
+    against graphlet_bytes and graphlet_lines, and for its frame (_frame(): MGT v1, H, a Z
+    record counting its lines), but NOT validated: load() or parse() of the text does that
+    (a body that is not canonical gives a text that is not what dump() would write). Raises
+    ValueError for a body that already carries a J line (not a server body) and for a
+    response with a reserved top-level name, GraphletFormatError for a body that is not
+    UTF-8, cut in transport, or without its frame."""
     _refuse_reserved(response)
-    if isinstance(body, (bytes, bytearray)):
-        try:
-            body = bytes(body).decode('utf-8')
-        except UnicodeDecodeError as e:
-            raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
+    body = _as_text(body)
     _check_transport(body, result)
-    if not body.endswith('\n'):
-        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
-    first = body.find('\n')
-    head = body[:first].split(' ')
-    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt':
-        raise GraphletFormatError(1, 'expected the H record')
-    try:
-        seed_index = parse_int(head[11])
-    except CodecError as e:
-        raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
-    # tested in place: a slice of the rest of the body only to read its first two
-    # characters would copy the whole body once more, held until the splice
-    if body.startswith('J ', first + 1):
-        raise ValueError('the body already carries a J line: a saved file, not a server body')
-    last = body.rfind('\n', 0, len(body) - 1) + 1
-    z = body[last:-1].split(' ')
-    if len(z) != 2 or z[0] != 'Z':
-        raise GraphletFormatError(body.count('\n'), 'expected the Z record')
-    try:
-        lines = parse_int(z[1])
-    except CodecError as e:
-        raise GraphletFormatError(body.count('\n'), 'Z: %s' % e) from None
+    head, first, last, lines = _frame(body)
     envelope = seed_envelope({k: v for k, v in response.items() if k != 'results'},
-                             seed_index)
+                             parse_int(head[11]))
     envelope['results'] = [{k: v for k, v in result.items()
                             if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}]
     j = json.dumps(envelope, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
@@ -1331,8 +1363,9 @@ def standalone_text(body, result, response):
 
 def save(g, path, *, budget=None):
     """Write the standalone .mgt file: H, J (envelope with this seed only), body.
-    Atomic: a reader never sees a partial file. budget= (local limits): the text is made
-    in full before the file is opened, so a stop writes no file."""
+    Atomic: a reader never sees a partial file; it keeps the permissions of the file it
+    replaces, else the umask's (_write_user_file()). budget= (local limits): the text is
+    made in full before the file is opened, so a stop writes no file."""
     b = _B.resolve(budget)
     if b is not None:
         with b.scope('save', ('export_mgt',)):
@@ -1346,9 +1379,48 @@ def save(g, path, *, budget=None):
 
 
 def _write_text(text, path):
-    data = text.encode('utf-8')
+    return _write_user_file(path, text.encode('utf-8'), '.mgt-')
+
+
+def _create_beside(path, prefix):
+    """A new temporary file beside |path|, to be renamed over it once written -> (fd, its
+    path): named |prefix| and a random part (O_EXCL), with the permissions open(path, 'wb')
+    would give |path| -- those of the file it replaces, else the umask's. The one rule of
+    the files the library writes for its user (save(), the store's save_body(),
+    graphlet_export in every format, with or without local limits); only the spool's own
+    files are private (store._write_atomic(): mkstemp, 0600)."""
     d = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(prefix='.mgt-', dir=d)
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except OSError:
+        mode = None
+    while True:
+        tmp = os.path.join(d, prefix + secrets.token_hex(6))
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            break
+        except FileExistsError:
+            continue
+    if mode is not None:
+        try:
+            os.fchmod(fd, mode)
+        except BaseException:
+            os.close(fd)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    return fd, tmp
+
+
+def _write_user_file(path, data, prefix):
+    """Write the bytes |data| to the user's file |path| atomically -> len(data): into a new
+    file beside it (_create_beside(): the permissions of the file it replaces, else the
+    umask's), renamed over |path| once complete; a failure leaves |path| as it was and no
+    temporary file. The one writer of the files the library writes for its user. Not
+    flushed to the device (fsync), as open(path, 'wb') is not: the spool's writer is."""
+    fd, tmp = _create_beside(path, prefix)
     _replace_atomically(tmp, path, lambda: _write_all(fd, data))
     return len(data)
 

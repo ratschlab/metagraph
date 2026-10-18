@@ -176,5 +176,69 @@ class TestStandaloneText(unittest.TestCase):
                 self.assertEqual(new, f.read())
 
 
+
+def _frame_cases(body):
+    """(name, a broken server body, the exception class every no-parse path raises): the
+    frame's rules as the parse enforces them -- MGT v1, a Z record counting the lines, a
+    final line feed, UTF-8 -- and no J line in a server body."""
+    first = body.find('\n')
+    head = body[:first].split(' ')
+    v2 = ' '.join(head[:2] + ['2'] + head[3:]) + body[first:]
+    last = body.rfind('\n', 0, len(body) - 1) + 1
+    n = body.count('\n')
+    z_high = body[:last] + 'Z %d\n' % (n + 1)
+    z_text = body[:last] + 'Z many\n'
+    # a J line after H, the Z record counting it: a saved file's frame, not a server body's
+    with_j = body[:first + 1] + 'J {}\n' + body[first + 1:last] + 'Z %d\n' % (n + 1)
+    return [('version 2', v2, GraphletFormatError),
+            ('Z one too high', z_high, GraphletFormatError),
+            ('Z not an integer', z_text, GraphletFormatError),
+            ('no final line feed', body[:-1], GraphletFormatError),
+            ('not UTF-8', body.encode('utf-8')[:first] + b'\xff' + body.encode('utf-8')[first:],
+             GraphletFormatError),
+            ('a J line', with_j, ValueError)]
+
+
+class TestOneFrameCheck(unittest.TestCase):
+    """The checks of a body that need no parse are one rule on every no-parse path:
+    parser.standalone_text (without the transport counts, which would catch some of these
+    first), the store's unparsed put and the identity an unparsed replay or continuation
+    reads."""
+
+    def test_a_broken_body_is_refused_alike_on_every_path(self):
+        from metagraph.traverse.store import unparsed_identity
+        resp = _with_usage(1)
+        r = resp['results'][0]
+        nocount = {k: v for k, v in r.items() if k not in ('graphlet_bytes', 'graphlet_lines')}
+        with tempfile.TemporaryDirectory() as d:
+            store = GraphletStore(d)
+            for name, body, cls in _frame_cases(r['graphlet']):
+                result = dict(nocount, graphlet=body)
+                paths = (('standalone_text', lambda: standalone_text(body, result, resp)),
+                         ('put_unparsed', lambda: store.put_unparsed(result, resp, None)),
+                         ('unparsed_identity', lambda: unparsed_identity(result, resp)))
+                for path, call in paths:
+                    with self.subTest(body=name, path=path):
+                        with self.assertRaises(ValueError) as e:
+                            call()
+                        self.assertIs(cls, type(e.exception))
+            self.assertEqual([], store.list())
+
+    def test_the_store_splices_as_the_parser_on_every_fixture(self):
+        n = 0
+        with tempfile.TemporaryDirectory() as d:
+            store = GraphletStore(d)
+            for f, resp in _responses():
+                for i, r in enumerate(resp.get('results', [])):
+                    if 'graphlet' not in r:
+                        continue
+                    with self.subTest(file=os.path.basename(f), seed=i):
+                        h = store.put_unparsed(r, resp, None)
+                        self.assertEqual(standalone_text(r['graphlet'], r, resp),
+                                         store.standalone_text(h))
+                        store.free(h)
+                        n += 1
+        self.assertGreater(n, 20)
+
 if __name__ == '__main__':
     unittest.main()

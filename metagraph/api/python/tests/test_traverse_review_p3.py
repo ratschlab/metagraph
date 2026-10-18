@@ -65,6 +65,7 @@ from metagraph.traverse import (  # noqa: E402
 )
 from metagraph.traverse import budget as B  # noqa: E402
 from metagraph.traverse import mcp_tools  # noqa: E402
+from metagraph.traverse import parser  # noqa: E402
 from metagraph.traverse import store as S  # noqa: E402
 from metagraph.traverse.mcp_tools import GraphletTools, ToolLimits  # noqa: E402
 from metagraph.traverse.model import Label  # noqa: E402
@@ -652,7 +653,7 @@ class TestG15AtomicExport(unittest.TestCase):
         self.addCleanup(shutil.rmtree, d, True)
         st = GraphletStore(d)
         h = st.put(T.doc_json('switch_chain', 'graphlet'), T.doc_json('switch_chain', 'request'))
-        real = mcp_tools._write_all
+        real = parser._write_all
 
         def half_then_enospc(fd, data, *a, **k):
             real(fd, data[:len(data) // 2])
@@ -666,7 +667,7 @@ class TestG15AtomicExport(unittest.TestCase):
                     with open(path, 'rb') as f:
                         full = f.read()
                     self.assertEqual(first['bytes'], len(full))
-                    with mock.patch.object(mcp_tools, '_write_all', half_then_enospc):
+                    with mock.patch.object(parser, '_write_all', half_then_enospc):
                         again = tools.graphlet_export(h, format=fmt)
                     if fmt == 'json' and label == 'limits':
                         # written by json.dump through a buffered file, not _write_all
@@ -692,6 +693,104 @@ class TestG15AtomicExport(unittest.TestCase):
         os.chmod(path, 0o640)
         tools.graphlet_export(h, format='fasta')
         self.assertEqual(0o640, os.stat(path).st_mode & 0o777)
+
+    def _store_and_umask(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        old = os.umask(0o022)
+        self.addCleanup(os.umask, old)
+        st = GraphletStore(d)
+        h = st.put(T.doc_json('switch_chain', 'graphlet'), T.doc_json('switch_chain', 'request'))
+        return st, h
+
+    def _user_writers(self, st, h):
+        """(name, write() -> the path written) of every way the library writes a file for
+        its user: graphlet_export in each format and graphlet_save, without and with local
+        limits, Graphlet.save() and the store's save()."""
+        out = []
+        for label, tools in (('unbudgeted', GraphletTools(st)),
+                             ('limits', GraphletTools(st, local_limits=ToolLimits()))):
+            for fmt in ('mgt', 'fasta', 'gfa', 'json'):
+                out.append(('graphlet_export %s %s' % (fmt, label),
+                            lambda t=tools, f=fmt: t.graphlet_export(h, format=f)['path']))
+            out.append(('graphlet_save ' + label,
+                        lambda t=tools, n=label: t.graphlet_save(h, 'saved-%s.mgt' % n)['path']))
+        root = GraphletTools(st)._export_root()
+        model = os.path.join(root, 'model.mgt')
+        out.append(('Graphlet.save', lambda: (st.graphlet(h).save(model), model)[1]))
+        kept = os.path.join(root, 'store.mgt')
+        out.append(('GraphletStore.save', lambda: (st.save(h, kept), kept)[1]))
+        return out
+
+    def test_every_file_written_for_the_user_follows_one_rule(self):
+        """One rule for every file the library writes for its user, whatever the writer and
+        whether a local budget applied: the mode open(path, 'wb') would give it -- the
+        umask's for a new file, the replaced file's otherwise. Only the library's private
+        spool is 0600."""
+        st, h = self._store_and_umask()
+        saved = {}
+        for name, write in self._user_writers(st, h):
+            with self.subTest(name):
+                path = write()
+                self.assertEqual(0o644, os.stat(path).st_mode & 0o777)
+                os.chmod(path, 0o640)
+                self.assertEqual(path, write())
+                self.assertEqual(0o640, os.stat(path).st_mode & 0o777)
+                if path.endswith('.mgt'):
+                    with open(path, 'rb') as f:
+                        saved[name] = f.read()
+                os.unlink(path)
+        # every route to a saved .mgt file writes the same bytes
+        self.assertEqual(6, len(saved))
+        self.assertEqual(1, len(set(saved.values())), sorted(saved))
+        # the spool stays private: its bodies, entries and cursor key
+        spool = [os.path.join(st.spool_dir, sub, n) for sub in ('bodies', 'entries')
+                 for n in os.listdir(os.path.join(st.spool_dir, sub)) if not n.startswith('.')]
+        spool.append(os.path.join(st.spool_dir, 'cursor.key'))
+        self.assertGreaterEqual(len(spool), 3)
+        for f in spool:
+            if os.path.exists(f):
+                self.assertEqual(0o600, os.stat(f).st_mode & 0o777, f)
+
+    def test_a_failed_save_leaves_the_earlier_file(self):
+        """A save or export that fails while writing leaves the earlier file as it was and
+        no temporary file beside it -- through every writer (the one writer of user files)."""
+        st, h = self._store_and_umask()
+        real = parser._write_all
+
+        injected = []
+        real_chunk = mcp_tools._ChargedWriter.write
+
+        def half_then_enospc(fd, data, *a, **k):
+            injected.append(1)
+            real(fd, data[:len(data) // 2])
+            raise OSError(28, 'No space left on device')
+
+        def chunk_then_enospc(w, chunk):
+            # the budgeted JSON export streams through a buffered temporary file
+            # (_write_json_charged), created and replaced as the one writer does
+            injected.append(1)
+            real_chunk(w, chunk[:len(chunk) // 2])
+            raise OSError(28, 'No space left on device')
+        for name, write in self._user_writers(st, h):
+            with self.subTest(name):
+                path = write()
+                with open(path, 'rb') as f:
+                    full = f.read()
+                del injected[:]
+                with mock.patch.object(parser, '_write_all', half_then_enospc), \
+                        mock.patch.object(mcp_tools._ChargedWriter, 'write', chunk_then_enospc):
+                    try:
+                        write()
+                    except (OSError, KeyError):
+                        pass                # a model's save raises; a tool answers io_error
+                # the failure was injected, so the earlier file below survived a real failure
+                self.assertTrue(injected, '%s: no write failure was injected' % name)
+                with open(path, 'rb') as f:
+                    self.assertEqual(full, f.read())
+                d = os.path.dirname(path)
+                self.assertEqual([], [n for n in os.listdir(d) if n.startswith('.')])
+                os.unlink(path)
 
 
 # ======================================================================= change_cost overrides
@@ -1171,19 +1270,24 @@ class TestL12Cuts(unittest.TestCase):
                         self.assertEqual(want[2], info[2])
 
     def test_budgeted_cuts_are_the_same_and_priced_alike(self):
+        # at every depth a comparison can cut at: 0, 1, the certified depth and each
+        # segment boundary +-1 (compare_cost() prices each side's cuts with _price_cuts())
         for g in self.graphlets():
-            for side in g.arms:
-                depth = g.arms[side].complete_to_bp
-                b = LocalBudget()
-                with b.scope('cuts'):
-                    got = ops._cuts(g, side, depth, {}, b)
-                self.assertEqual([(x, m, i) for x, m, i in ops._cuts(g, side, depth, {})],
-                                 [(x, m, i) for x, m, i in got])
-                t = LocalBudget()
-                with t.scope('cuts'):
-                    ops._price_cuts(t, g, side, depth)
-                self.assertEqual(b.used_work, t.used_work)
-                self.assertEqual(b.peak_bytes, t.peak_bytes)
+            for side, a in g.arms.items():
+                depths = {0, 1, a.complete_to_bp}
+                for s in a.segments:
+                    depths.update((s.from_bp, s.end_bp, s.end_bp + 1, max(0, s.end_bp - 1)))
+                for depth in sorted(depths):
+                    b = LocalBudget()
+                    with b.scope('cuts'):
+                        got = ops._cuts(g, side, depth, {}, b)
+                    self.assertEqual([(x, m, i) for x, m, i in ops._cuts(g, side, depth, {})],
+                                     [(x, m, i) for x, m, i in got])
+                    t = LocalBudget()
+                    with t.scope('cuts'):
+                        ops._price_cuts(t, g, side, depth)
+                    self.assertEqual((b.used_work, b.peak_bytes), (t.used_work, t.peak_bytes),
+                                     (side, depth))
 
     def test_scale(self):
         for n in (2000, 4000):

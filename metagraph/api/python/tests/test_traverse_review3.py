@@ -1133,6 +1133,108 @@ class _SameIndex(_Caps):
         return copy.deepcopy(self.resp)
 
 
+class _Answers(_SameIndex):
+    """_SameIndex answering every request with |answer| (a response) instead."""
+
+    def __init__(self, name, answer):
+        super().__init__(name)
+        self.answer = answer
+
+    def traverse_raw(self, req):
+        self.requests.append(req)
+        return copy.deepcopy(self.answer)
+
+
+class TestTheContinuationAnswersAsTheFetch(unittest.TestCase):
+    """traverse_continue runs the retrieve-check-store step of traverse_fetch and answers
+    its failures alike: a response with no result is empty_response (not a failed seed), a
+    failed seed carries the server's outcome and limitations, and a continuation whose
+    parse stops on its local budget checks its WHOLE receipt -- parent, notes, loss and
+    branch budgets included -- before it stores the entry (else the stored handle could be
+    answered result_too_large) and keeps loss_budget_labels as the parsed answer does."""
+
+    NAME = 'budgetchain_r80'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = GraphletStore(self.tmp.name)
+        resp = response3(self.NAME)
+        g = from_response(resp['results'][0], resp)
+        self.h = self.store.put_parsed(g, resp['results'][0]['graphlet'],
+                                       {'seeds': [{'sequence': 'ACGT'}]}, source='x')
+
+    def entries(self):
+        return sorted(m['handle'] for m in self.store.list())
+
+    def stopping(self, client):
+        # the continuation's parse stops on this local budget
+        from metagraph.traverse.mcp_tools import ToolLimits
+        from metagraph.traverse import LocalLimits
+        return GraphletTools(self.store, {'x': client},
+                             local_limits=ToolLimits(parse=LocalLimits(500, 1024)))
+
+    def test_an_unparsed_continuation_keeps_its_loss_budget_labels(self):
+        parsed = GraphletTools(self.store, {'x': _SameIndex(self.NAME)}).traverse_continue(
+            self.h, 'right', 1, max_bytes=1 << 20)
+        self.assertIn('loss_budget_labels', parsed)
+        out = self.stopping(_SameIndex(self.NAME)).traverse_continue(
+            self.h, 'right', 1, max_bytes=1 << 20)
+        self.assertIs(False, out.get('parsed'), out)
+        self.assertEqual(parsed['loss_budget_labels'], out.get('loss_budget_labels'))
+        for k in ('parent', 'notes', 'loss_budget'):
+            self.assertEqual(parsed[k], out[k])
+
+    def test_an_unparsed_continuation_checks_its_whole_receipt(self):
+        tools = self.stopping(_SameIndex(self.NAME))
+        full = tools.traverse_continue(self.h, 'right', 1, max_bytes=1 << 20)
+        self.store.free(full['handle'])
+        made = refused = 0
+        for limit in range(MIN_MAX_BYTES, _size(full) + 64, 3):
+            before = self.entries()
+            out = tools.traverse_continue(self.h, 'right', 1, max_bytes=limit)
+            with self.subTest(limit=limit):
+                if 'handle' in out:
+                    made += 1
+                    self.assertLessEqual(_size(out), limit)
+                    self.assertEqual(full['notes'], out['notes'])
+                    self.assertEqual(full['parent'], out['parent'])
+                    self.store.free(out['handle'])
+                else:
+                    refused += 1
+                    # refused before anything is stored, never result_too_large after
+                    self.assertEqual('receipt_too_large', out.get('error'), out)
+                    self.assertEqual(before, self.entries())
+        self.assertGreater(made, 0)
+        self.assertGreater(refused, 0)
+
+    def test_a_response_without_a_result_is_empty_response(self):
+        client = _Answers(self.NAME, {'release': '', 'results': []})
+        tools = GraphletTools(self.store, {'x': client})
+        before = self.entries()
+        fetched = tools.traverse_fetch(index='x', seed={'sequence': 'ACGTACGT'})
+        continued = tools.traverse_continue(self.h, 'right', 1, max_bytes=1 << 20)
+        self.assertEqual('empty_response', fetched.get('error'), fetched)
+        self.assertEqual('empty_response', continued.get('error'), continued)
+        self.assertEqual(before, self.entries())
+
+    def test_a_failed_seed_is_answered_alike(self):
+        failed = {'seed': {'seed_id': 's'}, 'error': 'no carrier',
+                  'outcome': {'walks': 'failed'},
+                  'limitations': [{'kind': 'derivation', 'knob': 'bounds.time_budget_ms',
+                                   'limit': 20, 'observed': 12032,
+                                   'effect': 'no result: elapsed ms'}]}
+        client = _Answers(self.NAME, {'release': '', 'results': [failed]})
+        tools = GraphletTools(self.store, {'x': client})
+        fetched = tools.traverse_fetch(index='x', seed={'sequence': 'ACGTACGT'})
+        continued = tools.traverse_continue(self.h, 'right', 1, max_bytes=1 << 20)
+        want = {'error': 'seed_failed', 'message': 'no carrier',
+                'outcome': failed['outcome'], 'limitations': failed['limitations']}
+        self.assertEqual(want, fetched)
+        self.assertEqual(dict(want, parent=continued.get('parent')), continued)
+        self.assertEqual(self.h, continued['parent']['handle'])
+
+
 class TestRound3CContinueReceiptsFitWideWalks(unittest.TestCase):
     """traverse_continue states the per-label loss list only where a loss budget applies,
     as the first optional field cut (fields_cut): as an essential part of every constrain

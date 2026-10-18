@@ -427,7 +427,11 @@ class LocalBudget:
     def scope(self, op, levers=()):
         """Enter an operation: the outermost one names the stop and starts a new memory
         account (nothing a previous call held is held now); a nested one (walks() calling
-        claims(), an export spelling walks) only counts its depth."""
+        claims(), an export spelling walks) only counts its depth. A scope the caller
+        holds open around several operations must not outlive the models charged in it:
+        uses() and first() remember a derivation by its owner's id() until the outermost
+        scope ends, so a model freed inside the scope and a new one at the same address
+        would be charged nothing for what the first one paid."""
         if self._depth == 0:
             self.op = op
             self.sub_op = None
@@ -502,7 +506,7 @@ class LocalBudget:
     def uses(self, key, work, nbytes=0):
         """Charge a derivation the call uses at its (cold) price, once per outermost call
         however often the call's parts use it: |key| names it (an arm's id and the
-        derivation's name)."""
+        derivation's name; the arm must live as long as the scope, scope())."""
         if key not in self._used:
             self.charge(work, nbytes)
             self._used.add(key)

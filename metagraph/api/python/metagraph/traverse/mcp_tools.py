@@ -99,8 +99,6 @@ import inspect
 import io
 import json
 import os
-import secrets
-import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -115,7 +113,7 @@ from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
 )
-from .parser import _replace_atomically, _write_all, utf8_bytes
+from .parser import _create_beside, _replace_atomically, _write_user_file, utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle, unparsed_identity
 
 __all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names',
@@ -356,6 +354,25 @@ class _Receipt(dict):
             if _size(out) <= limit:
                 break
         return out
+
+
+def _first_result(response):
+    """results[0] of a traversal response (traverse_fetch, traverse_continue): a response
+    without a result is empty_response, not a failed seed."""
+    results = response.get('results') or []
+    if not results:
+        raise ToolError('empty_response', 'the server returned no result')
+    return results[0]
+
+
+def _seed_failed(result, **extra):
+    """The answer of a result without a graphlet (a seed the server could not derive): its
+    message, outcome and limitations -- why it failed -- then |extra| (a continuation's
+    parent, a fetch's coordinates_note)."""
+    out = {'error': 'seed_failed', 'message': result.get('error'),
+           'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
+    out.update(extra)
+    return out
 
 
 def _check_receipt(receipt, limit, lever='raise max_bytes'):
@@ -714,36 +731,40 @@ class GraphletTools:
         return _LocalCall(b, limits, clamped, TOOL_CLASS[tool], req)
 
     def _parse_budget(self, call=None):
-        """The budget of a parse the store runs inside a tool call |call|: the store's own
-        parse limits when it has them (None here), else the tools' parse class RAISED,
-        field by field, by the agent's budget argument up to the parse class's ceiling --
-        never lowered by it, and never the call's budget itself (the parse is reported as
-        local.parsed, not charged to the operation, DESIGN §5.4). An agent told to raise its
-        budget for a stopped parse can then do so with the call's budget argument: under
-        the parse defaults alone, raise_local_budget could never help."""
+        """(the budget of a parse the store runs inside a tool call |call|, the names of
+        the fields held to the ceiling): the store's own parse limits when it has them
+        (None here), else the tools' parse class RAISED, field by field, by the agent's
+        budget argument -- never lowered by it, and never the call's budget itself (the
+        parse is reported as local.parsed, not charged to the operation, DESIGN §5.4) --
+        then held to the parse class's ceiling as a call's budget is to its class's
+        (LocalLimits.clamped(): a default left unlimited or above the ceiling takes the
+        ceiling's value; the cut is stated as local.parsed.clamped). An agent told to raise
+        its budget for a stopped parse can then do so with the call's budget argument:
+        under the parse defaults alone, raise_local_budget could never help."""
         L = self.local_limits
         if L is None or getattr(self.store, 'parse_limits', None) is not None:
-            return None
+            return None, []
         req = None if call is None else call.request
-        if req is None:
-            return LocalBudget(L.parse)
-        top = L.parse_ceiling
-        fields = []
-        for f in ('work_units', 'memory_mb', 'deadline_s'):
-            mine, want, cap = getattr(L.parse, f), getattr(req, f), getattr(top, f)
-            if mine is not None and want is not None and want > mine:
-                mine = want if cap is None else max(mine, min(want, cap))
-            fields.append(mine)
-        return LocalBudget(LocalLimits(*fields))
+        fields = [getattr(L.parse, f) for f in ('work_units', 'memory_mb', 'deadline_s')]
+        if req is not None:
+            for i, f in enumerate(('work_units', 'memory_mb', 'deadline_s')):
+                want = getattr(req, f)
+                if fields[i] is not None and want is not None and want > fields[i]:
+                    fields[i] = want
+        limits, cut = LocalLimits(*fields).clamped(L.parse_ceiling)
+        return LocalBudget(limits), cut
 
-    def _note_parse(self, pb=None):
+    def _note_parse(self, pb=None, clamped=()):
         """local.parsed: the store's last parse in this call -- its usage and the limits
-        it ran under (which are the parse's, not the call's local.limits)."""
+        it ran under (which are the parse's, not the call's local.limits), and |clamped|,
+        the fields held to the parse class's ceiling, where there are any."""
         call = _CALL.get()
         got = getattr(self.store, 'last_parse', None)
         if call is not None and got is not None:
             lim = pb.limits if pb is not None else getattr(self.store, 'parse_limits', None)
             call.parsed = dict(got, limits=lim.as_dict()) if lim is not None else dict(got)
+            if clamped:
+                call.parsed['clamped'] = list(clamped)
 
     def _parse_stop(self, e, pb, what='The stored body is parsed on demand'):
         """A parse on demand that stopped: the stop names the limits it ran under, and a
@@ -864,7 +885,7 @@ class GraphletTools:
         there is local_budget_exceeded, the entry and its body kept."""
         call = _CALL.get()
         if call is not None:
-            pb = self._parse_budget(call)
+            pb, clamped = self._parse_budget(call)
             try:
                 got = self.store.view(_handle(handle), parse_budget=pb)
             except LocalBudgetExceeded as e:
@@ -872,7 +893,7 @@ class GraphletTools:
                     raise                   # the call's own (a stored view's selection)
                 raise self._parse_stop(e, pb)
             finally:
-                self._note_parse(pb)
+                self._note_parse(pb, clamped)
             if isinstance(got, ops.GraphletView):
                 return got.backing, got
             return got, None
@@ -1245,19 +1266,13 @@ class GraphletTools:
             req = _with_graph(req, client)
             identity = self._check_same_index(client, ident, allow_unverified_index, req)
         response = self._backend(client.traverse_raw, req)
-        results = response.get('results') or []
-        if not results:
-            raise ToolError('empty_response', 'the server returned no result')
-        result = results[0]
+        result = _first_result(response)
         # coordinates the automatic rule asked for under a memory budget, in a seed that
         # stopped on it: how to walk further without them (the client's note)
         coord_note = drop_coordinates_note([result], stated) or coord_note
         if 'graphlet' not in result:
-            out = {'error': 'seed_failed', 'message': result.get('error'),
-                   'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
-            if coord_note is not None:
-                out['coordinates_note'] = coord_note
-            return out
+            return _seed_failed(result, **({} if coord_note is None
+                                           else {'coordinates_note': coord_note}))
         nbytes = result.get('graphlet_bytes')
         if nbytes is None:
             nbytes = len(utf8_bytes(result['graphlet']))
@@ -1359,10 +1374,15 @@ class GraphletTools:
                 out['summary_stop'] = e.stop.as_dict()
 
     def _keep_unparsed(self, e, name, req, result, response, nbytes, spooled, keep,
-                       identity, limit, parent=None, derived_from=None, coord_note=None):
+                       identity, limit, parent=None, derived_from=None, coord_note=None,
+                       extra=None, extra_optional=None):
         """The answer of a fetch (or continuation) whose parse its budget stopped: the
         body stored as an unparsed entry when it is to be kept, the server's own per-seed
-        summary (no parse needed) and the stop; nothing local is derived from it."""
+        summary (no parse needed) and the stop; nothing local is derived from it.
+        |extra|: the caller's essential fields (a continuation's parent, notes and budget
+        statements), |extra_optional|: its optional ones, cut first (loss_budget_labels) --
+        both in the receipt checked before the entry is stored, so that the answer that
+        carries them can always be returned."""
         call = _CALL.get()
         stop = e.stop.as_dict()
         if call is not None:
@@ -1385,14 +1405,23 @@ class GraphletTools:
             out['stop'] = stop
         if coord_note is not None:
             out['coordinates_note'] = coord_note
-        optional = ('server_summary', 'hint', 'graphlet_bytes', 'stop', 'coordinates_note')
+        extra = extra or {}
+        extra_optional = extra_optional or {}
+        optional = tuple(extra_optional) + ('server_summary', 'hint', 'graphlet_bytes', 'stop',
+                                            'coordinates_note')
         if not (spooled or keep):
+            out.update(extra)
+            out.update(extra_optional)
             return out
         receipt = dict(out, handle='g_' + '0' * 12)
+        receipt.update(extra)
+        receipt.update(extra_optional)
         _check_receipt(_Receipt(receipt, optional), limit)
         out['handle'] = self.store.put_unparsed(
             result, response, req, source=name, delivery='spooled' if spooled else None,
             parent=parent, derived_from=derived_from)
+        out.update(extra)
+        out.update(extra_optional)
         return _Receipt(out, optional)
 
     def _replay_request(self, handle):
@@ -1507,9 +1536,9 @@ class GraphletTools:
                                       'identity': identity}, **stated), optional),
                        max_bytes or self.max_bytes)
         response = self._backend(client.traverse_raw, req)
-        result = (response.get('results') or [{}])[0]
+        result = _first_result(response)
         if 'graphlet' not in result:
-            return {'error': 'seed_failed', 'message': result.get('error'), 'parent': parent}
+            return _seed_failed(result, parent=parent)
         from .parser import from_response
         try:
             g2 = from_response(result, response)
@@ -1524,12 +1553,11 @@ class GraphletTools:
             identity = _weakest(identity, _same_index(
                 ident, unparsed_identity(result, response), 'the continuation',
                 allow_unverified_index))
-            got = self._keep_unparsed(e, name, dict(req), result, response, nbytes, False,
-                                      True, identity, max_bytes or self.max_bytes,
-                                      parent=parent, derived_from=handle)
-            got['parent'] = parent
-            got.update(stated)
-            return got
+            return self._keep_unparsed(
+                e, name, dict(req), result, response, nbytes, False, True, identity,
+                max_bytes or self.max_bytes, parent=parent, derived_from=handle,
+                extra=dict({'parent': parent}, **stated),
+                extra_optional={} if per_label is None else {'loss_budget_labels': per_label})
         identity = _weakest(identity, _same_index(ident, self._identity_of(g2),
                                                   'the continuation', allow_unverified_index))
         # again with what answered: a weaker identity states more
@@ -2248,7 +2276,7 @@ class GraphletTools:
         # default <handle>.<ext> is the same for every export of a handle) before a byte is
         # written, and a failed write (a full disk, a quota) would leave a truncated file
         # there -- a FASTA or GFA cut at a line still reads as complete
-        n = _write_export(path, text.encode('utf-8'))
+        n = _write_user_file(path, text.encode('utf-8'), '.export-')
         return _Receipt({'path': path, 'bytes': n, 'records': records},
                         ('records', 'bytes'))
 
@@ -2623,51 +2651,19 @@ _JSON_BUFFER = io.DEFAULT_BUFFER_SIZE
 
 
 def _atomic_open(path):
-    d = os.path.dirname(path)
-    fd, tmp = tempfile.mkstemp(prefix='.export-', dir=d)
+    """The buffered temporary file of a JSON export beside |path| -> (file, its path):
+    created as every export file is (parser._create_beside())."""
+    fd, tmp = _create_beside(path, '.export-')
     return os.fdopen(fd, 'wb', buffering=_JSON_BUFFER), tmp
-
-
-def _write_export(path, data):
-    """Write the bytes |data| to |path| atomically -> len(data): into a new file beside it
-    (".export-" and a random name), renamed over |path| once complete; a failure leaves
-    |path| as it was (an earlier export intact) and no temporary file. The unbudgeted
-    export's writer: the file gets the permissions open(path, 'wb') gave it -- those of
-    the file it replaces, else the umask's -- where mkstemp() would make it private."""
-    d = os.path.dirname(path)
-    try:
-        mode = os.stat(path).st_mode & 0o7777
-    except OSError:
-        mode = None
-    while True:
-        tmp = os.path.join(d, '.export-' + secrets.token_hex(6))
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-            break
-        except FileExistsError:
-            continue
-
-    def fill():
-        if mode is not None:
-            try:
-                os.fchmod(fd, mode)
-            except BaseException:
-                os.close(fd)              # _write_all() closes it otherwise
-                raise
-        _write_all(fd, data)
-    _replace_atomically(tmp, path, fill)
-    return len(data)
 
 
 def _write_text_charged(path, text, b):
     """Write |text| to |path| through a temporary file renamed on completion, charged
     (its encoding and its bytes) before it is written: a stop writes no file. Written
-    without a buffer (parser._write_all()), which the charge leaves out."""
+    without a buffer (parser._write_all()), which the charge leaves out; the file's
+    permissions as without local limits (parser._write_user_file())."""
     b.charge(len(text) >> 8, 2 * (len(text) + 49))
-    data = text.encode('utf-8')
-    fd, tmp = tempfile.mkstemp(prefix='.export-', dir=os.path.dirname(path))
-    _replace_atomically(tmp, path, lambda: _write_all(fd, data))
-    return len(data)
+    return _write_user_file(path, text.encode('utf-8'), '.export-')
 
 
 class _ChargedWriter:
