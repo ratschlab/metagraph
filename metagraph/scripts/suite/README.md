@@ -3948,8 +3948,8 @@ never committed.
 
     doc/make_doc.py RUN_DIR --out DIR [--chapters R,T,...] [--sample] [--no-pdf] [--recorded]
                     [--units FILE] [--prose-dir DIR] [--checks-dir DIR] [--by-design PATH]
-                    [--policy FILE] [--declared FILE] [--identity FILE] [--xelatex PATH] [--name doc]
-                    [--scaffold-prose]
+                    [--policy FILE] [--also-policy FILE ...] [--declared FILE] [--identity FILE]
+                    [--xelatex PATH] [--name doc] [--scaffold-prose]
 
 After the owner's review of the chapter R sample (round 2, 2026-10-15) the document has this shape: the cover carries the
 run verdict and the deploy gate as two boxes of equal weight (a gated run: the gate verdict and its counts; an ungated
@@ -4422,6 +4422,14 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   appendix F applies it to the by-design table's path, the re-evaluation's recorded path, the table warnings and
   the manifest's ground-truth sources (the index records' `~/.cache/...` report directory); I.4 to its table
   warnings, the cover to gate.py's error. The v5 document's doc.tex changes in those two appendix F rows only.
+- The gates of a v6 document (the coordinator's instruction, beside the brief): the deploy gate is
+  gate/policy_v6_rtp_mcp.json, passed as `--policy` (without it make_doc takes the first policy of gate/ pinning
+  the manifest, policy_v6_rt_mcp.json); `--also-policy gate/policy_v6_rt_mcp.json` (repeatable) judges a further
+  policy offline and prints it in I.4's table as "other gate policy", with its verdict and counts, beside the deploy
+  gate, which it does not replace. The v6 document is built with
+
+      doc/make_doc.py runs/20261017T082918Z_refseq97-81c620ef --out DIR --policy gate/policy_v6_rtp_mcp.json \
+          --also-policy gate/policy_v6_rt_mcp.json --identity identity-v6-baseline.json
 
 ## Glossary
 

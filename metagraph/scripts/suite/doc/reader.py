@@ -109,7 +109,7 @@ def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
 
 class Run(object):
     def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None,
-                 identity=None):
+                 identity=None, also_policies=None):
         self.dir = os.path.abspath(run_dir)
         if not os.path.isdir(self.dir):
             raise RunError("not a directory: %s" % run_dir)
@@ -190,6 +190,17 @@ class Run(object):
             except Exception as e:  # a run the gate cannot judge: the document says why, never a crash
                 self.gate = None
                 self.gate_error = "%s: %s" % (type(e).__name__, e)
+        # further gate policies judged offline beside the deploy gate's (make_doc --also-policy: the v6 document shows
+        # policy_v6_rt_mcp beside the deploy gate policy_v6_rtp_mcp); each {path, policy, verdict, error}
+        self.also_gates = []
+        for path in also_policies or []:
+            entry = {"path": os.path.abspath(path), "policy": None, "verdict": None, "error": None}
+            try:
+                entry["policy"] = gate_mod.load_policy(path)
+                entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated)
+            except Exception as e:  # a policy the gate cannot read or judge: the document says why, never a crash
+                entry["error"] = "%s: %s" % (type(e).__name__, e)
+            self.also_gates.append(entry)
         self.lines = {}
         for r in self.rows:
             self.lines.setdefault((r.get("scenario"), r.get("arm")), []).append(r)

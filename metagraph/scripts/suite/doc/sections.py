@@ -1829,6 +1829,8 @@ def provenance_table(ctx):
             (", %s" % esc(loop.get("state"))) if loop.get("state") else "",
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
     rows.append(("comparison", comparison_lines_text(run, short=True)))
+    for entry in getattr(run, "also_gates", None) or []:
+        rows.append(("other gate policy", esc(also_gate_text(entry))))
     if run.reruns:
         rows.append(("warm-ups run again", reruns_text(run)))
     lf = run.load or {}
@@ -1838,6 +1840,25 @@ def provenance_table(ctx):
     rows.append(("host load", "%d samples; sra\\_all CPU mean %s\\%%, load1 mean %s%s" % (
         lf.get("n", 0), fmt_n(lf.get("sra_mean")), fmt_n(lf.get("load_mean"), 1), caveat)))
     return _kv_table(rows)
+
+
+def also_gate_text(entry):
+    """A further gate policy judged offline for this document beside the deploy gate (make_doc --also-policy), plain
+    text: the policy, its verdict and counts, and that it is not the deploy gate."""
+    name = os.path.basename(entry.get("path") or "") or "–"
+    if entry.get("error") or not isinstance(entry.get("verdict"), dict):
+        return "%s: not judged (%s)" % (name, latex.cut_text(latex.public_paths(str(entry.get("error") or "–")), 200))
+    gate = entry["verdict"]
+    pol = gate.get("policy") or {}
+    counts = gate.get("counts") or {}
+    problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
+    return ("%s, %s version %s (sha256 %s… of the canonical JSON), access paths %s: %s, %d problem%s; %s executions "
+            "judged, %s passed, %s required; judged offline by gate.py for this document beside the deploy gate, "
+            "which it does not replace" % (
+                name, pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
+                ", ".join((entry.get("policy") or {}).get("arms") or []) or "–",
+                "GATE PASS" if gate.get("passed") else "GATE FAIL", len(problems), "" if len(problems) == 1 else "s",
+                counts.get("judged", "–"), counts.get("passed", "–"), counts.get("required", "–")))
 
 
 def comparison_lines_text(run, short=False):

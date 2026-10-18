@@ -5749,6 +5749,23 @@ class V6DeltaTest(unittest.TestCase):
             self.assertEqual(pp(keep), keep)
         self.assertIsNone(pp(None))
 
+    def test_also_policy_row(self):
+        """The coordinator's instruction for the v6 document: a further gate policy (make_doc --also-policy: the
+        resolve/traverse policy_v6_rt_mcp beside the deploy gate policy_v6_rtp_mcp) is judged offline and named in
+        I.4 with its verdict, never in the deploy gate's place; a policy that cannot be judged says why."""
+        entry = {"path": "/x/gate/policy_v6_rt_mcp.json", "policy": {"arms": ["mcp", "direct-local"]}, "error": None,
+                 "verdict": {"passed": True, "problems": [], "counts": {"judged": 689, "passed": 635, "required": 689},
+                             "policy": {"name": "v6-rt-mcp", "policy_version": 1, "sha256": "1ed3f31501c5" + "0" * 52}}}
+        self.assertEqual(sections.also_gate_text(entry),
+                         "policy_v6_rt_mcp.json, v6-rt-mcp version 1 (sha256 1ed3f31501c5… of the canonical JSON), "
+                         "access paths mcp, direct-local: GATE PASS, 0 problems; 689 executions judged, 635 passed, "
+                         "689 required; judged offline by gate.py for this document beside the deploy gate, which it "
+                         "does not replace")
+        self.assertEqual(sections.also_gate_text({"path": "/x/p.json", "error": "ValueError: bad", "verdict": None}),
+                         "p.json: not judged (ValueError: bad)")
+        self.assertIn("other gate policy", inspect.getsource(sections.provenance_table)
+                      if hasattr(sections, "provenance_table") else inspect.getsource(sections))
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no
