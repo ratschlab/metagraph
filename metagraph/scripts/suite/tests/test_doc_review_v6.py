@@ -389,5 +389,16 @@ class LongPeptideCoverageTest(unittest.TestCase):
                       "DNA", text)
 
 
+class RecordBoundaryTest(unittest.TestCase):
+    """V6-206: k - L + 1 is an interior-window rule; both record boundaries limit the contexts, the unit tests
+    starts."""
+
+    def test_prose(self):
+        text = prose("P")["families"]["P-scope"]["prose"]
+        self.assertNotIn("A record start is the one place", text)
+        self.assertIn("a record boundary leaves fewer (a window at a record's end too), and this unit exercises record "
+                      "starts alone", text)
+
+
 if __name__ == "__main__":
     unittest.main()
