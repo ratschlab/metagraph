@@ -1935,8 +1935,10 @@ def limitations_table(ctx):
     dec = declared_counts(run)
     if isinstance(run.declared, dict):
         rows.append(["owner-declared exemptions",
-                     "%d exclusions, %d checks not required, %d relations excluded" % (
-                         dec["exclusions"], dec["not_required"], dec["relations_excluded"]),
+                     "%d exclusion%s, %d check%s not required, %d relation%s excluded" % (
+                         dec["exclusions"], "" if dec["exclusions"] == 1 else "s", dec["not_required"],
+                         "" if dec["not_required"] == 1 else "s", dec["relations_excluded"],
+                         "" if dec["relations_excluded"] == 1 else "s"),
                      "\\hyperref[app:G]{G}"])
     else:
         rows.append(["owner-declared exemptions", "none given for this manifest", ""])

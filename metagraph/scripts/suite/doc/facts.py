@@ -110,6 +110,9 @@ class _Formatter(string.Formatter):
         if isinstance(value, _Missing):
             return str(value)
         n = cells._num(value)
+        if n is None and spec in ("s", "v") and isinstance(value, str) and re.fullmatch(r"\d[\d,]*", value.strip()):
+            # a count the closing values carry as text ('1'): its plural follows the number, not the type
+            n = int(value.strip().replace(",", ""))
         if spec == "s":
             return "" if n == 1 else "s"
         if spec == "v":

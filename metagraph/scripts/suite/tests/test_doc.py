@@ -5916,6 +5916,20 @@ class V6DeltaTest(unittest.TestCase):
         self.assertIn("they read inconclusive (the check not exposed",
                       facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0}))
 
+    def test_verify_round_plurals_and_limits(self):
+        """The delta verifier's L5 / L6 (2026-10-18): a count carried as text takes its plural from the number; the
+        closing section's Timing 4 limits name the population of the unpaired count and word one pair in the
+        singular; I.4's declared counts follow their numbers."""
+        self.assertEqual(facts.fill("the {n} call{n:s}", {"n": "1"}), "the 1 call")
+        self.assertEqual(facts.fill("the {n} call{n:s}", {"n": "12"}), "the 12 calls")
+        closing = sc.read_json(os.path.join(PROSE_DIR, "closing.json"))
+        text = " ".join(closing["sections"]["C4"]["paragraphs"])
+        self.assertNotIn("the long scenarios not run on direct-remote among them", text)
+        filled = facts.fill(text, {"scenarios_without_warm_pair": "104", "warm_pairs_left_out_after_interrupted": "1"})
+        self.assertIn("Of the scenarios run on both direct access paths, 104 have no host-warm pair of the two, and 1 "
+                      "pair warm after an interrupted execution is left out.", filled)
+        self.assertIn('"" if dec["relations_excluded"] == 1 else "s"', inspect.getsource(sections))
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no
