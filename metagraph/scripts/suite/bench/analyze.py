@@ -105,19 +105,9 @@ def load_run(run_dir):
 
 
 def answer_body(run_dir, line):
-    rel = line.get("raw")
-    if not rel:
-        return None
-    arm = line.get("arm") or ""
-    for path in (os.path.join(run_dir, "arms", arm, rel), os.path.join(run_dir, rel)):
-        if os.path.exists(path):
-            try:
-                doc = sc.read_gz_json(path)
-            except (OSError, ValueError, EOFError):
-                return None
-            answer = (doc or {}).get("answer")
-            return answer.get("body") if isinstance(answer, dict) else None
-    return None
+    """The answer body of a recorded execution (its raw file under the run directory: suite_common.raw_record_body),
+    None when unreadable."""
+    return sc.raw_record_body(line, run_dir=run_dir)
 
 
 def classify(run, step, line):

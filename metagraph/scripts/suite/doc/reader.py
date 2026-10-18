@@ -400,18 +400,7 @@ class Run(object):
         cache = self.__dict__.setdefault("_raw_cache", {})
         if rel in cache:
             return cache[rel]
-        answer = None
-        try:
-            doc = sc.read_gz_json(os.path.join(self.dir, rel)) if hasattr(sc, "read_gz_json") else None
-            if doc is None:
-                import gzip
-                import json
-                with gzip.open(os.path.join(self.dir, rel), "rt", encoding="utf-8") as fh:
-                    doc = json.load(fh)
-            answer = doc.get("answer") if isinstance(doc, dict) else None
-        except (OSError, ValueError, EOFError, AttributeError):
-            answer = None
-        cache[rel] = answer if isinstance(answer, dict) else None
+        cache[rel] = sc.raw_record_answer(line, run_dir=self.dir)
         return cache[rel]
 
     def policy_file_sha256(self):

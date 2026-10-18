@@ -4493,7 +4493,8 @@ branch for a v6 run.
   whose answer is none reads as no body at the three sites that crashed on it (compare.direct_error_parts, which
   then keeps the line's own error codes; run_direct's previous_entry, time_limited unknown; the bench panel's
   raw_body), as the other readers already did. One shared reader in suite_common (keeping today's lookup order,
-  run_dir/rel then run_dir/arms/<arm>/rel) replaces the ten copies after the open gr/suite-* lanes land.
+  run_dir/rel then run_dir/arms/<arm>/rel) replaces the ten copies after the open gr/suite-* lanes land. Done on
+  gr/v7-harness (below, item 4).
 
 ## The v6 results document: a delta on v5 (2026-10-17)
 The owner (2026-10-17): v6 is very close to v5, so its document is v5's with only what v6 changes (v6 = v5 + the
@@ -4690,6 +4691,26 @@ the commit only; a Railway deployment id is neither stated nor read (a fixture t
   service_commit contradicts the recorded one.
 - Older runs (v5, v6 baselines) record no identity: run.json gains `service_identity` with `recorded` false, the gate
   notes it, and the document keeps "not recorded by this run" (or the input file).
+
+### One reader of an execution's raw record (item 4; SD-093 option 2)
+The ten copies that resolved a line's `raw`, gunzipped it, swallowed the read errors and dug out the record, its
+answer or its body (compare._raw_doc, load_answer and direct_error_parts; reevaluate.raw_doc and raw_answer;
+merge_run.host_state_inconclusive and renormalisation; run_direct.Runner.previous_entry; bench/analyze.answer_body and
+bench/make_panel.raw_body), and the results document's eleventh (doc/reader.Run.raw_answer), call one reader in
+suite_common: raw_record_path(line, run_dir=None, arm_dir=None) resolves the path in today's lookup order (an absolute
+path as it is; under a run directory run_dir/<raw>, then run_dir/arms/<the line's arm>/<raw>; under an arm directory
+arm_dir/<raw>, then the run directory two levels up for a merged 'arms/...' path; the first that exists),
+read_raw_record (a dict, else the default: no `raw`, no file, a truncated .gz, a cut JSON, a record that is no object;
+`any_json` returns whatever JSON the file holds, which renormalisation counts as read, as before), raw_record_answer
+(`answer`, a dict) and raw_record_body (`answer.body` as it is). Each caller keeps its own guard (no run directory, no
+read) and return shape. What changes, only where today's readers would have read no file or crashed: a caller that
+probed one place now also probes the other layout's (compare and the document under run_dir also try
+run_dir/arms/<arm>/<raw>; renormalisation and previous_entry under the arm directory also try the run directory for an
+'arms/...' path); bench/analyze probes run_dir/<raw> before run_dir/arms/<arm>/<raw> (no run directory has a top-level
+raw/ in either layout, so the file is the same); a record that is no object reads as none where a copy raised
+(analyze's `(doc or {}).get`, the document's AttributeError catch). A test holds that no module but suite_common opens
+a raw record (tests/test_common RawRecordReader). run_direct.py and suite_common.py are snapshot files: the change
+reaches new runs (a run's snapshot pairs the two); recorded runs keep theirs.
 
 ## Glossary
 

@@ -82,6 +82,8 @@ ARM_ORDER = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
 # checks_identity's error for a recorded set without a snapshot (--strict-identity and the gate)
 UNPINNED = ("the run has no snapshot (scripts/SNAPSHOT.json): the checks that judged its arms are not pinned "
             "(re-evaluate it to gate its answers)")
+# a raw record renormalisation could not read (suite_common.read_raw_record's default)
+_UNREAD = object()
 # the outcomes a check-derived outcome may replace, by strictness
 _STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
 
@@ -126,16 +128,10 @@ def host_state_inconclusive(row, scenario=None, run_dir=None, refs=None):
     why = row.get("inconclusive_reason")   # the runner's (e334715b) or the re-evaluation's class of it
     if why is not None:
         return why in sc.UNDECIDABLE or str(why) in sc.MCP_HOST_STATE_CODES
-    doc = None
-    raw = row.get("raw")
-    if run_dir and isinstance(raw, str) and raw:
-        try:
-            doc = sc.read_gz_json(raw if os.path.isabs(raw) else os.path.join(run_dir, raw))
-        except (OSError, ValueError, EOFError):
-            doc = None
+    doc = sc.read_raw_record(row, run_dir=run_dir) if run_dir else None
     if refs is None and run_dir:
         refs = sc.run_references(run_dir)
-    code, state, _ = sc.host_state_of_record(scenario, row, doc if isinstance(doc, dict) else None, refs)
+    code, state, _ = sc.host_state_of_record(scenario, row, doc, refs)
     return code is not None and state in ("host_state", "undecidable")
 
 
@@ -561,13 +557,9 @@ def renormalisation(arm_dir, rows=None):
     raw = {"read": 0, "answer_recorded": 0}
     if os.path.basename(os.path.normpath(arm_dir)) == "mcp":
         for r in rows:
-            rel = r.get("raw")
-            if not isinstance(rel, str) or not rel:
-                continue
-            path = rel if os.path.isabs(rel) else os.path.join(arm_dir, rel)
-            try:
-                doc = sc.read_gz_json(path)
-            except (OSError, ValueError, EOFError):
+            # every record read counts, an object or not (suite_common.read_raw_record any_json)
+            doc = sc.read_raw_record(r, arm_dir=arm_dir, any_json=True, default=_UNREAD)
+            if doc is _UNREAD:
                 continue
             raw["read"] += 1
             if isinstance(doc, dict) and "answer_recorded" in doc:
