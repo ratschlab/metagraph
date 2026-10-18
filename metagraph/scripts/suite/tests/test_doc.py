@@ -1109,7 +1109,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
         self.assertEqual(lines, sorted(lines[:1]) + sorted(lines[1:], key=lambda l: self.runobj.order.index(l.split(",")[0])))
         with open(os.path.join(self.out, "plot_phases.csv"), encoding="utf-8") as fh:
             phases = fh.read().splitlines()
-        self.assertEqual(phases[0], "phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms")
+        self.assertEqual(phases[0], "phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms,n_negative")
         main = self.tex()
         self.assertIn("table[x=dl_ms,y=mcp_ms,col sep=comma]{plot_paired_dl_mcp.csv}", main)
         self.assertNotIn("stacked", main)
@@ -1418,9 +1418,10 @@ class VerifyRoundTwoTest(unittest.TestCase):
         for key in ("submit_ms", "backend_ms", "paging_ms"):
             if key in ph:
                 self.assertEqual(len(pop[key]), ph[key]["n"], key)
-        for name, p10, p25, p50, p75, p90, n, n_zero in sections.phase_quantiles(ctx):
+        # V6-006 (the external review of the v6 document): the values below 0 ms are counted apart too
+        for name, p10, p25, p50, p75, p90, n, n_zero, n_negative in sections.phase_quantiles(ctx):
             key = dict((v_, k) for k, v_ in sections.PHASES)[name]
-            self.assertEqual(n + n_zero, len(pop[key]))
+            self.assertEqual(n + n_zero + n_negative, len(pop[key]))
             self.assertTrue(p10 > 0)
         self.assertEqual(v["phase_paging_zero_n"], str(sum(1 for x in pop["paging_ms"] if x == 0)) if pop["paging_ms"] else None)
         # N-2: a two-line tick label (the phase, then its n; `n 10 of 13` where zeros are left out), centred

@@ -3096,18 +3096,60 @@ def phase_population(ctx):
 
 
 def phase_quantiles(ctx):
-    """[(phase, p10, p25, p50, p75, p90, n, n_zero)] over phase_population: the quantiles of the positive values
-    (a log scale cannot hold a zero), n the positive ones, n_zero the zeros left out."""
+    """[(phase, p10, p25, p50, p75, p90, n, n_zero, n_negative)] over phase_population: the quantiles of the
+    positive values (a log scale holds neither a zero nor a negative value), n the positive ones, n_zero and
+    n_negative the values left out (the external review of the v6 document, V6-006: v6's terminal lag has eight
+    values below 0 ms and no zero)."""
     values = phase_population(ctx)
     out = []
     for k, name in PHASES:
         vals = [x for x in values[k] if x > 0]
         zeros = sum(1 for x in values[k] if x == 0)
+        negative = sum(1 for x in values[k] if x < 0)
         if len(vals) < 2:
             continue
         out.append((name, cells.percentile(vals, 10), cells.percentile(vals, 25), cells.percentile(vals, 50),
-                    cells.percentile(vals, 75), cells.percentile(vals, 90), len(vals), zeros))
+                    cells.percentile(vals, 75), cells.percentile(vals, 90), len(vals), zeros, negative))
     return out
+
+
+def phase_omitted(ctx):
+    """[(phase, n, zeros, negative, min negative, max negative)] for each phase whose box leaves values out."""
+    values = phase_population(ctx)
+    out = []
+    for k, name in PHASES:
+        zeros = sum(1 for x in values[k] if x == 0)
+        neg = [x for x in values[k] if x < 0]
+        if zeros or neg:
+            out.append((name, len(values[k]), zeros, len(neg), min(neg) if neg else None, max(neg) if neg else None))
+    return out
+
+
+def phase_omitted_text(ctx):
+    """The caption's account of the values a log-scale box leaves out, per phase, from the plotted arrays: 'paging
+    is 0 ms where the results came with the terminal status in 132 of 580 and terminal lag below 0 ms in 8 of 580
+    (-10.6 to -0.8 ms)'; '' when no box leaves a value out."""
+    parts = []
+    for name, n, zeros, neg, lo, hi in phase_omitted(ctx):
+        bits = []
+        if zeros:
+            bits.append("0 ms%s in %d of %d" % (" where the results came with the terminal status" if name == "paging"
+                                                 else "", zeros, n))
+        if neg:
+            bits.append("below 0 ms in %d of %d (%s ms)" % (neg, n, fmt_n(lo, 1) if lo == hi else "%s to %s" % (
+                fmt_n(lo, 1), fmt_n(hi, 1))))
+        parts.append("%s is %s" % (name, " and ".join(bits)))
+    return facts._join(parts)
+
+
+def phase_omitted_short(ctx):
+    """'paging without its 132 zeros, terminal lag without its 8 values below 0 ms' (Timing 3's method)."""
+    parts = []
+    for name, n, zeros, neg, lo, hi in phase_omitted(ctx):
+        bits = (["its %d zero%s" % (zeros, "" if zeros == 1 else "s")] if zeros else []) + (
+            ["its %d value%s below 0 ms" % (neg, "" if neg == 1 else "s")] if neg else [])
+        parts.append("%s without %s" % (name, " and ".join(bits)))
+    return ", ".join(parts)
 
 
 def plot_data(ctx):
@@ -3121,9 +3163,9 @@ def plot_data(ctx):
     rows = ["scenario,chapter,dl_ms,dr_ms"] + ["%s,%s,%.3f,%.3f" % (sid, ch, dl, dr) for sid, ch, dl, dr, mc in pairs
                                               if dl is not None and dr is not None]
     files[PLOT_FILES["paired_dl_dr"]] = "\n".join(rows) + "\n"
-    rows = ["phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms"] + [
-        "%s,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f" % (name.replace(" ", "_"), n, n_zero, p10, p25, p50, p75, p90)
-        for name, p10, p25, p50, p75, p90, n, n_zero in phase_quantiles(ctx)]
+    rows = ["phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms,n_negative"] + [
+        "%s,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%d" % (name.replace(" ", "_"), n, n_zero, p10, p25, p50, p75, p90, n_neg)
+        for name, p10, p25, p50, p75, p90, n, n_zero, n_neg in phase_quantiles(ctx)]
     files[PLOT_FILES["phases"]] = "\n".join(rows) + "\n"
     return files
 
@@ -3249,6 +3291,9 @@ def closing_values(ctx):
     paging = phase_pop.get("paging_ms") or []
     v["phase_paging_zero_n"] = str(sum(1 for x in paging if x == 0)) if paging else None
     v["phase_paging_nonzero_n"] = str(sum(1 for x in paging if x > 0)) if paging else None
+    # every phase's values the log-scale box leaves out (zeros, values below 0 ms), from the plotted arrays (V6-006)
+    v["phase_omitted_text"] = phase_omitted_text(ctx)   # '' (a false condition) when every value is positive
+    v["phase_omitted_short"] = phase_omitted_short(ctx)
     v["load_caveat_line"] = load_caveat_line(run)
     diffs = [p[4] - p[2] for p in both]
     v["paired_dl_mcp_delta_p50"] = fmt_delta(cells.percentile(diffs, 50)) if diffs else None

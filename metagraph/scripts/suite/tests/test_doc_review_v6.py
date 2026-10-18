@@ -17,6 +17,7 @@ import suite_common as sc  # noqa: E402
 import blocks  # noqa: E402,F401
 import cells  # noqa: E402,F401
 import facts  # noqa: E402
+import latex  # noqa: E402
 import sections  # noqa: E402
 
 PROSE_DIR = os.path.join(DOC, "prose")
@@ -512,6 +513,33 @@ class UnitHeadingTest(unittest.TestCase):
         self.assertIn("\\unskip\\nobreak\\hfil\\penalty50\\hskip1.5em\\hbox{}\\nobreak\\hfil\\mbox{", line)
         self.assertIn("\\parfillskip=0pt", line)
         self.assertNotIn("#2\\hfill{", line)
+
+
+class PhasePopulationTest(unittest.TestCase):
+    """V6-006: every phase box's left-out values (zeros, values below 0 ms) are counted from the plotted arrays and
+    stated, and the tick label's n reconciles with the population."""
+
+    def _ctx(self, values):
+        ctx = _Stub()
+        orig = sections.phase_population
+        self.addCleanup(setattr, sections, "phase_population", orig)
+        sections.phase_population = lambda c: values
+        return ctx
+
+    def test_omitted(self):
+        values = {"submit_ms": [1.0, 2.0, 3.0], "queue_ms": [1.0, 2.0], "backend_ms": [5.0, 6.0],
+                  "terminal_lag_ms": [-10.6, -0.8, 100.0, 200.0, 300.0], "paging_ms": [0, 0, 10.0, 20.0]}
+        ctx = self._ctx(values)
+        self.assertEqual(sections.phase_omitted_text(ctx),
+                         "terminal lag is below 0 ms in 2 of 5 (-10.6 to -0.8 ms) and paging is 0 ms where the results "
+                         "came with the terminal status in 2 of 4")
+        self.assertEqual(sections.phase_omitted_short(ctx),
+                         "terminal lag without its 2 values below 0 ms, paging without its 2 zeros")
+        boxes = dict((b[0], b) for b in sections.phase_quantiles(ctx))
+        self.assertEqual(boxes["terminal lag"][6:], (3, 0, 2))
+        self.assertIn("(n 3 of 5)", latex.phase_boxplot([boxes["terminal lag"]], "fig:x"))
+        values["terminal_lag_ms"] = [-8.7, 100.0, 200.0]
+        self.assertIn("below 0 ms in 1 of 3 (-8.7 ms)", sections.phase_omitted_text(ctx))
 
 
 if __name__ == "__main__":

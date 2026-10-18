@@ -490,8 +490,8 @@ def phase_boxplot(boxes, label):
     lines, the phase and its n (`n 425 of 547` for a phase whose zeros the log scale leaves out: the caption says
     why), centred under its box, so that neighbouring labels never overlap (re-verification N-2)."""
     def _label(b):
-        zeros = b[7] if len(b) > 7 else 0
-        return "{%s\\\\(n %d%s)}" % (b[0], b[6], (" of %d" % (b[6] + zeros)) if zeros else "")
+        left_out = sum(b[7:9]) if len(b) > 7 else 0   # the zeros and the values below 0 ms (V6-006)
+        return "{%s\\\\(n %d%s)}" % (b[0], b[6], (" of %d" % (b[6] + left_out)) if left_out else "")
     lines = ["\\begin{tikzpicture}",
              "\\begin{axis}[width=0.95\\textwidth,height=0.38\\textwidth,ymode=log,boxplot/draw direction=y,"
              "ylabel={ms},tick label style={font=\\footnotesize},label style={font=\\footnotesize},"
