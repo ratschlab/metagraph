@@ -4742,6 +4742,53 @@ block's strands ("either" / "context") are other fields.
   excluded instead of 10), 91 exclusions (manifest_not_implemented 48, no marks_cover_repeat), direct-local unchanged
   (686 / 793).
 
+### The v7 manifests and policies
+- `manifest/suite_v7.json` and `manifest/suite_smoke_v7.json`, built on this tree with `SUITE_TRUTH_CACHE=<the record
+  cache v4 was built from> build_manifest.py --no-fetch` from the capabilities snapshot of release refseq97-6f945db4
+  (deterministic: two builds, one content): manifest_version 7, 725 scenarios, 767 executions per arm, content_sha256
+  e89708cb795e098225d76ac8a69e75a116f9029549a8613c96325e8ee6a36238, relations
+  39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86 (v5's and v6's); smoke 14 scenarios, content_sha256
+  1ef0a151aecf8e5ea58f644165561d1e41ec0328ecf115a40d3f48feb5544ced. The field-by-field diff v6 -> v7: ids, order and
+  relations equal; 454 scenarios changed, 271 byte-identical: `expect[budget_respected].args.reserve_ms` 250 added on
+  the 454 POST /pattern scenarios that state the check (item 2); `mcp.not_implemented_checks` removed on the 14
+  absence_scope and 7 strands scenarios (item 5) and on P-edge-0004, which gains `mcp.by_design_checks`
+  [{entry_fields, pattern.lowercase}] (item 1); P-scope-0004 / -0006's `mcp` back from the scenario-level mark to
+  pattern_search with their arguments and exposes (item 5); no other field, no scenario of another route. counts:
+  mcp_not_implemented 53 -> 51, the rest v6's; mcp_exposure_baseline.scenarios_with_exposes 510 -> 512. The smoke
+  diff: reserve_ms on its 6 /pattern scenarios and P-exact-0001's mark gone.
+- `gate/declared_v7_rt.json` names v7's content and declares v6's one entry (REL-subset-0007 on mcp).
+- `gate/policy_v7_rt_mcp.json` (canonical sha256 2bbed2e85b71...) and `gate/policy_v7_rtp_mcp.json` (8a8c9a1c8d7e...),
+  generated as v6's (`gate_policy.py manifest/suite_v7.json --name v7-rt-mcp --arms mcp,direct-local --declared
+  gate/declared_v7_rt.json --out gate/policy_v7_rt_mcp.json`; the rtp one with `--name v7-rtp-mcp --routes "POST
+  /resolve,POST /traverse,GET /traverse/capabilities,POST /pattern"`). The rt policy equals v6's (and so v5's) but
+  for its pins: 241 selected / 36 excluded, required on mcp 205 scenarios / 416 executions, on direct-local 237 /
+  273, 5 relations, and its 237 scenarios byte-identical to v6's with their indexes (test_builder_v7 FrozenV7). The rtp
+  policy equals v6's but for its pins and item 5's consequences: the same 721 selected in the same order; required on
+  mcp 630 / 1,280 (v6 628 / 1,275: P-scope-0004 and -0006 r0, r1; D-P-scope-0004 r0), on direct-local 686 / 793 as in
+  v6; 91 exclusions (manifest_not_implemented 48, no marks_cover_repeat); 19 relations required with REL-subset-0002 /
+  -0003 on both arms, 8 excluded. P-edge-0004's class (item 1) and the reserve argument (item 2) change neither policy
+  (the gate applies the manifest's marks itself; the policies hold no check arguments).
+- run_suite.sh keeps its defaults (v5); a v7 run names `--manifest manifest/suite_v7.json --gate
+  gate/policy_v7_rtp_mcp.json` and, from the LIVE line, `--expect-service-commit SHA`. Its MCP arm needs the service
+  bundle that carries the identity and absence_scope / strands per database (otherwise the rtp gate blocks on the 22
+  entry_fields properties read not exposed and on the missing identity).
+
+### Validation of v7 (offline; no host was contacted; the run directories were only read)
+- Copies of the v5 baseline (20261015T161813Z_refseq97-81c620ef), the v6 baseline (20261017T082918Z_refseq97-81c620ef)
+  and a v6-rtp gate run (20261017T192446Z_refseq97-81c620ef), each re-evaluated (reevaluate, merge --strict-identity,
+  compare, gate) with the code of 48e04d825 and of every commit of this lane: 0 changes of any field of the
+  re-evaluated lines and of the comparison; the v5 copy GATE PASS under policy_v5_rt_mcp (689 judged, 635 passed, 0
+  problems), the v6 copies GATE PASS under policy_v6_rt_mcp (689 / 635) and policy_v6_rtp_mcp (2,068 / 1,950), 0
+  problems; run.json gains `service_identity` (recorded false) and each verdict one note ("the MCP arm records no
+  service identity ... not checked"). The recorded sets (merge, compare, gate without re-evaluation) likewise.
+- The raw-record readers (item 4) on the same three runs: every reader at its call form on every line, base and head,
+  77,517 calls, 0 differences.
+- With the deployed commit given (--expect-service-commit 60e737f7...), the v6 baseline's copy is blocked by one
+  identity problem: its runner recorded no service identity.
+- 964 tests pass, none skipped (with SUITE_TRUTH_CACHE, the record cache v4 was built from; 930 at 48e04d825); each
+  new rule's test fails on the code before it. manifest/suite_v6.json recomputes to 49907dbb...; every manifest,
+  declared file and policy of v1-v6 and service_by_design.json are byte-identical to 48e04d825's.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

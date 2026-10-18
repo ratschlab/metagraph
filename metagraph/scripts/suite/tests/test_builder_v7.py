@@ -24,6 +24,10 @@ from test_builder_v5 import built, have_cache  # noqa: E402
 from test_builder_v6 import by_id, leaf_diffs  # noqa: E402
 
 PATTERN_TEXT_BY_DESIGN = {"P-edge-0004": "pattern.lowercase"}
+# the frozen v7 (manifest/suite_v7.json, suite_smoke_v7.json; the relations are v5's and v6's)
+V7_CONTENT = "e89708cb795e098225d76ac8a69e75a116f9029549a8613c96325e8ee6a36238"
+V7_SMOKE_CONTENT = "1ef0a151aecf8e5ea58f644165561d1e41ec0328ecf115a40d3f48feb5544ced"
+RELATIONS = "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"
 # the /pattern scenarios of v6 with a budget_respected expectation (every one that allows a 200: 429 + the 25 warm-ups)
 N_PATTERN_BUDGET = 454
 # the snapshot's pattern_capabilities finalize_reserve_ms (truth/staging_capabilities/, release refseq97-6f945db4)
@@ -102,9 +106,19 @@ class PatternTextByDesign(unittest.TestCase):
 
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_built_v7_against_the_frozen_v6(self):
-        """The v7 the builder makes differs from the frozen v6 in the approved changes only: P-edge-0004's MCP mark
-        and budget_respected's reserve_ms on every /pattern scenario that states the check."""
-        m, v6 = built(version=7), read("suite_v6.json")
+        self.against_v6(built(version=7))
+
+    def test_frozen_v7_against_v6(self):
+        m = read("suite_v7.json")
+        self.assertEqual((m["content_sha256"], m["relations_sha256"]), (V7_CONTENT, RELATIONS))
+        self.assertEqual(sc.manifest_problems(m), [])
+        self.against_v6(m)
+
+    def against_v6(self, m):
+        """|m| (v7) differs from the frozen v6 in the approved changes only: P-edge-0004's MCP mark (item 1),
+        budget_respected's reserve_ms on every /pattern scenario that states the check (item 2), and the marks of
+        absence_scope and strands gone, P-scope-0004 / -0006 run on MCP (item 5)."""
+        v6 = read("suite_v6.json")
         self.assertEqual(m["manifest_version"], 7)
         s6, s7 = by_id(v6), by_id(m)
         self.assertEqual([x["id"] for x in m["scenarios"]], [x["id"] for x in v6["scenarios"]])
@@ -202,3 +216,46 @@ class PerDatabaseFields(unittest.TestCase):
                          {})
         self.assertNotIn("not_implemented_checks", v7[0]["mcp"])
         self.assertEqual(areas.mark_pattern_mcp_fields(v6), {"A": ["entry_fields"]})
+
+
+class FrozenV7(unittest.TestCase):
+    """The frozen v7: what the builder makes, its smoke selection, the deploy gate's scenarios v6's."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_frozen_v7_is_what_the_builder_makes(self):
+        m = built(version=7)
+        self.assertEqual(m["content_sha256"], V7_CONTENT)
+        self.assertEqual(m["relations_sha256"], RELATIONS)
+        self.assertEqual(bm.smoke_of(m)["content_sha256"], V7_SMOKE_CONTENT)
+        import manifest_lib as ml
+        self.assertEqual(ml.canonical_json(m["scenarios"]), ml.canonical_json(read("suite_v7.json")["scenarios"]))
+
+    def test_smoke_v7(self):
+        sm6, sm7 = read("suite_smoke_v6.json"), read("suite_smoke_v7.json")
+        self.assertEqual(sm7["content_sha256"], V7_SMOKE_CONTENT)
+        self.assertEqual(sc.manifest_problems(sm7), [])
+        self.assertEqual([s["id"] for s in sm6["scenarios"]], [s["id"] for s in sm7["scenarios"]])
+        self.assertEqual(sm7["relations"], sm6["relations"])
+        self.assertIn("smoke-v5 (full content_sha256 %s)" % V7_CONTENT, sm7["selection"])
+        for a, b in zip(sm6["scenarios"], sm7["scenarios"]):
+            paths = sorted(set(p.split("[")[0] + ("" if "[" not in p else p[p.index("]") + 1:])
+                               for p, _, _ in leaf_diffs(a, b)))
+            if a["route"] == "POST /pattern":
+                want = [".expect.args.reserve_ms"] + ([".mcp.not_implemented_checks"]
+                                                      if a["id"] in ABSENCE_SCOPE + STRANDS else [])
+                self.assertEqual(paths, want, a["id"])
+            else:
+                self.assertEqual(paths, [], a["id"])
+
+    def test_gate_scenarios(self):
+        """The rt gate's 237 scenarios (resolve / traverse / capabilities) are byte-identical to v6's (and so v5's)
+        with their warm repeats; every scenario keeps its manifest index."""
+        import manifest_lib as ml
+        v6, v7 = read("suite_v6.json"), read("suite_v7.json")
+        policy = sc.read_json(os.path.join(SUITE, "gate", "policy_v7_rt_mcp.json"))
+        s6, s7 = by_id(v6), by_id(v7)
+        selected = sorted(set(r["scenario"] for r in policy["required"]))
+        self.assertEqual(len(selected), 237)
+        for sid in selected:
+            self.assertEqual(ml.canonical_json(s6[sid]), ml.canonical_json(s7[sid]), sid)
+        self.assertEqual([x["id"] for x in v6["scenarios"]], [x["id"] for x in v7["scenarios"]])

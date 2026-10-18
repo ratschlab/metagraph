@@ -449,6 +449,75 @@ class PolicyTest(GateCase):
                                          "direct-local": {"scenarios": 237, "executions": 273}})
         self.assertNotIn("POST /pattern", c["by_route"])
 
+    def test_shipped_v7_policies(self):
+        """The v7 gates (the owner, 2026-10-18), generated as v6's were (declared_v7_rt.json: v6's one entry,
+        REL-subset-0007 on mcp): each regenerated exactly; the rt policy equals v6's but for its pins (the manifest's
+        file, content and version, the name, the declared file and its sha256, generated_utc), so its selection and
+        required executions are v6's; the rtp policy equals v6's but for its pins and what follows from v7's
+        absence_scope / strands via MCP (item 5): P-scope-0004 / -0006 and D-P-scope-0004 r0 required on mcp, REL-
+        subset-0002 / -0003 on both arms. P-edge-0004's by-design mark (item 1) leaves the policies as they were (the
+        gate applies the manifest's marks itself)."""
+        m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v7.json"))
+        self.assertEqual((m["manifest_version"], m["content_sha256"], m["relations_sha256"]),
+                         (7, "e89708cb795e098225d76ac8a69e75a116f9029549a8613c96325e8ee6a36238",
+                          "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"))
+        declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v7_rt.json"))
+        self.assertEqual(declared["manifest"], {"file": "manifest/suite_v7.json", "content_sha256": m["content_sha256"]})
+        d6 = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
+        self.assertEqual([declared[k] for k in ("exclusions", "not_required", "relations_excluded")],
+                         [d6[k] for k in ("exclusions", "not_required", "relations_excluded")])
+
+        def pinned(p):
+            q = json.loads(json.dumps(p))
+            q.pop("generated_utc", None)
+            q.pop("name")
+            q["manifest"] = dict((k, v) for k, v in q["manifest"].items()
+                                 if k not in ("file", "content_sha256", "manifest_version"))
+            q["declared"] = dict((k, v) for k, v in q["declared"].items() if k not in ("file", "sha256"))
+            return q
+        shipped = {}
+        for kind, routes in (("rt", None), ("rtp", list(gate_policy.DEFAULT_ROUTES) + ["POST /pattern"])):
+            shipped[kind] = sc.read_json(os.path.join(SUITE, "gate", "policy_v7_%s_mcp.json" % kind))
+            kw = {"routes": routes} if routes else {}
+            fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v7.json",
+                                             name="v7-%s-mcp" % kind, declared_file="gate/declared_v7_rt.json",
+                                             declared=declared, **kw)
+            a, b = dict(shipped[kind]), dict(fresh)
+            a.pop("generated_utc")
+            b.pop("generated_utc")
+            self.assertEqual(a, b, kind)
+            self.assertEqual((shipped[kind]["name"], shipped[kind]["manifest"]["file"],
+                              shipped[kind]["manifest"]["manifest_version"], shipped[kind]["declared"]["file"]),
+                             ("v7-%s-mcp" % kind, "manifest/suite_v7.json", 7, "gate/declared_v7_rt.json"))
+        v6rt = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rt_mcp.json"))
+        self.assertEqual(pinned(shipped["rt"]), pinned(v6rt))
+        v6rtp = sc.read_json(os.path.join(SUITE, "gate", "policy_v6_rtp_mcp.json"))
+        p7, p6 = pinned(shipped["rtp"]), pinned(v6rtp)
+        self.assertEqual(p7["selection"], p6["selection"])
+        self.assertEqual(p7["by_design_table"]["sha256"][:8], "d4b8636c")
+        moved = ("P-scope-0004", "P-scope-0006", "D-P-scope-0004")
+        self.assertEqual([x for x in p7["exclusions"] if x["scenario"] not in moved],
+                         [x for x in p6["exclusions"] if x["scenario"] not in moved])
+        self.assertEqual([x["scenario"] for x in p6["exclusions"] if x["scenario"] in moved], list(moved))
+        self.assertEqual([x for x in p7["exclusions"] if x["scenario"] in moved], [])
+        req6 = dict(((x["scenario"], x["arm"]), x["repeats"]) for x in p6["required"])
+        req7 = dict(((x["scenario"], x["arm"]), x["repeats"]) for x in p7["required"])
+        self.assertEqual(dict((k, v) for k, v in req7.items() if k[0] not in moved or k[1] != "mcp"),
+                         dict((k, v) for k, v in req6.items() if k[0] not in moved or k[1] != "mcp"))
+        self.assertEqual([req7.get((s, "mcp")) for s in moved], [[0, 1], [0, 1], [0, 1, 2]])
+        self.assertEqual([req6.get((s, "mcp")) for s in moved], [None, None, [1, 2]])
+        rel7 = dict((r["relation"], r["arms"]) for r in p7["relations"])
+        self.assertEqual((rel7["REL-subset-0002"], rel7["REL-subset-0003"]), (["direct-local", "mcp"],) * 2)
+        self.assertEqual([r for r in p7["relations"] if r["relation"] not in ("REL-subset-0002", "REL-subset-0003")],
+                         [r for r in p6["relations"] if r["relation"] not in ("REL-subset-0002", "REL-subset-0003")])
+        c = shipped["rtp"]["counts"]
+        self.assertEqual(c["required"], {"mcp": {"scenarios": 630, "executions": 1280},
+                                         "direct-local": {"scenarios": 686, "executions": 793}})
+        self.assertEqual((c["selected"], c["excluded"], c["relations_required"], c["relations_excluded"]),
+                         (721, 91, 19, 8))
+        self.assertEqual(c["exclusions_by_rule"], {"advanced_path": 1, "budget_stress": 35,
+                                                   "manifest_not_implemented": 48, "table_not_expressible": 47})
+
     def test_shipped_v6_rtp_policy(self):
         """The v6 gate with POST /pattern (the owner's decision 2 of 2026-10-16, if the v6 baseline shows it
         decisive): gate_policy.py with the rt policy's inputs (arms mcp and direct-local, declared_v6_rt.json, the
