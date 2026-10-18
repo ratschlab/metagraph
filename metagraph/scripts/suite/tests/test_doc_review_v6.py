@@ -477,5 +477,18 @@ class FootnoteColourTest(unittest.TestCase):
         self.assertNotIn("a red superscript digit", str(prose("overview")))
 
 
+class PairsLegendTest(unittest.TestCase):
+    """V6-307: an ordinary pairs table's legend defines every timing row its cells print (be included) and no digest
+    mark it cannot print; the repeated (chapter D) legend keeps the marks."""
+
+    def test_legends(self):
+        legend = cells.TIMING_LEGEND["pairs"]
+        self.assertIn("be the host call as the service timed it, in the same repeat order (MCP only)", legend)
+        self.assertNotIn("≠", legend)
+        _, repeated = cells.repeats_texts(3)
+        self.assertIn("= and ≠", repeated)
+        self.assertIn("be the host call as the service timed it", repeated)
+
+
 if __name__ == "__main__":
     unittest.main()

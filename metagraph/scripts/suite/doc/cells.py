@@ -713,9 +713,12 @@ TIMING_LEGEND = {
     "list": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
             "warm); [ ] the host's own server time; be the host call as the service timed it; c a i: host-cold, "
             "aged, warm after an interrupted execution",
+    # a pairs table of tests run once per access path (the repeated ones take repeats_texts): be defined as under the
+    # other layouts, the digest marks left out, a test of one repeat printing none (the external review of the v6
+    # document, V6-307)
     "pairs": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
-             "warm); [ ] the host's own server time; c a i: host-cold, aged, warm after an interrupted execution; = "
-             "and ≠ on a repeated test: equal / different answer digests",
+             "warm); [ ] the host's own server time; be the host call as the service timed it, in the same repeat "
+             "order (MCP only); c a i: host-cold, aged, warm after an interrupted execution",
     "replicates": "times: a / b = the median / the maximum of the group's walls, one wall per test (each test's "
                   "first host-warm execution, else its only one), never cold / warm; n counts the group's tests; "
                   "[ ] the median server time",
