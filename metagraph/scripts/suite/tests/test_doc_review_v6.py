@@ -400,5 +400,15 @@ class RecordBoundaryTest(unittest.TestCase):
                       "starts alone", text)
 
 
+class ExpectedStopTest(unittest.TestCase):
+    """V6-209: chapter M's purpose separates a budget stop that keeps a witness check from deciding (inconclusive)
+    from a test whose property is the stated stop (a pass)."""
+
+    def test_prose(self):
+        text = prose("M")["purpose"][0]
+        self.assertNotIn("a search the budget ended counts as inconclusive, never as a pass", text)
+        self.assertIn("a test whose property is a correctly stated stop", text)
+
+
 if __name__ == "__main__":
     unittest.main()
