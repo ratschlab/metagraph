@@ -440,5 +440,16 @@ class DemonstratedStopTest(unittest.TestCase):
         self.assertTrue(not_shown.startswith("*What remains unsupported.*"), not_shown[:80])
 
 
+class WarmedTwinMarkerTest(unittest.TestCase):
+    """V6-107: R-budget explains why a stop run right after its warming twin can carry the host-cold marker."""
+
+    def test_prose(self):
+        text = prose("R")["families"]["R-budget"]["prose"]
+        v6 = facts.fill(text, {"manifest_version": 6, "n_warm_up_direct_pairs": 0})
+        self.assertIn("the marker tracks the earlier executions of the same scenario (I.2), not every read of those "
+                      "rows", v6)
+        self.assertNotIn("the marker tracks", facts.fill(text, {"manifest_version": 4}))
+
+
 if __name__ == "__main__":
     unittest.main()
