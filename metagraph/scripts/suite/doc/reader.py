@@ -20,6 +20,7 @@ if SUITE_DIR not in sys.path:
 
 import compare as cmp  # noqa: E402
 import gate as gate_mod  # noqa: E402
+import merge_run  # noqa: E402
 import report  # noqa: E402
 import suite_common as sc  # noqa: E402
 
@@ -167,6 +168,11 @@ class Run(object):
         # execution; the target's line carries them as warm_up_reruns): timing evidence, never an outcome
         self.reruns = [r for r in (self.run.get("reruns_for_resume") or []) if isinstance(r, dict)]
         self.mcp_run = sc.read_json(os.path.join(self.dir, "arms", "mcp", "run.json")) or {}
+        # the deployed service's identity as the MCP runner recorded it (merge_run.service_identity: the merged
+        # run.json's block, else the arm's records, for a run merged before the block existed)
+        recorded = self.run.get("service_identity")
+        self.service_identity = recorded if isinstance(recorded, dict) else (
+            merge_run.service_identity(self.dir, {"mcp": self.mcp_run}) if self.mcp_run else None)
         self.identity = self._load_identity(identity)
         self.orchestrator = sc.read_json(os.path.join(self.dir, "orchestrator.json")) or {}
         judged = cmp.judging_checks(self.dir, reevaluated) or {}
@@ -289,7 +295,8 @@ class Run(object):
         """The deployed service's identity from an input file the run did not record (make_doc --identity: the
         service commit and the deployment id as the deployment log states them), or None. Refused (RunError) when
         the file names another run or contradicts what the run recorded: its release, the MCP runner's git head,
-        the manifest's content sha256."""
+        the manifest's content sha256, the service commit the MCP runner recorded (service_identity). The document
+        prints the recorded commit where the run has one, the file's only as a fallback (sections.service_version_text)."""
         if not path:
             return None
         data = sc.read_json(path)
@@ -304,6 +311,9 @@ class Run(object):
         head = self.mcp_run.get("git_head")
         if data.get("mcp_runner_commit") and head and data["mcp_runner_commit"] != head:
             problems.append("mcp_runner_commit %s, the MCP runner recorded %s" % (data["mcp_runner_commit"], head))
+        rec = [c for c in ((self.service_identity or {}).get("service_commits") or {})]
+        if rec and not any(gate_mod.commit_matches(c, data["service_commit"]) for c in rec):
+            problems.append("service_commit %s, the MCP runner recorded %s" % (data["service_commit"], ", ".join(rec)))
         content = re.search(r"\b[0-9a-f]{64}\b", str(data.get("manifest") or ""))
         if content and self.manifest.get("content_sha256") and content.group(0) != self.manifest["content_sha256"]:
             problems.append("manifest content %s, the run's is %s" % (content.group(0), self.manifest["content_sha256"]))

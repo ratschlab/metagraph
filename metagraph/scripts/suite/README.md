@@ -4658,6 +4658,39 @@ check_budget_respected itself reads no reserve (its /pattern rule is a 200's ela
 503 window is _budget_503's). Not done (not asked): a stated limits.finalize_reserve_ms other than reserve_ms is not
 flagged as a problem of its own (/resolve's invariants do that for its fixed reserve).
 
+### The service identity, suite side (item 3)
+The service lane's runner (async's suite_mcp_runner.py at 684bb327, another repository; not changed here) records the
+deployed service's commit: every arms/mcp/mcp_runs.jsonl line, run.json's top level and each invocations[] entry
+state `service_commit` (read from the service before the invocation: GET /health, the `deployment` block of GET
+/traverse/capabilities, outside service_document_sha256), `identity_changed` (the commit read after the invocation
+differs: true / false; null when either read failed) and `identity_error` (the failed read). The owner (2026-10-18):
+the commit only; a Railway deployment id is neither stated nor read (a fixture that has one is ignored).
+- **The merge** (merge_run.service_identity / identity_summary, over mcp_runs.jsonl, else run.json invocations[], else
+  run.json alone) writes run.json `service_identity`: `recorded` (any of the three fields stated: false for a runner
+  before them), `service_commits` {commit: invocations that read it; run.json's top-level commit counted 0 times when
+  no invocation states it}, `service_commit` (the one commit, else null), `identity_changed` (true when any invocation
+  or the top says so; false when every invocation says false; else null), `invocations`, `without_identity`,
+  `without_commit`, `changed`, `unconfirmed` (identity_changed null), `identity_errors` and `source`; null without an
+  MCP arm. A change during an invocation or more than one commit is a warning of the merge (the gate judges).
+- **The gate** (gate.service_identity_problems, identity problems on arm mcp; gate.json `service_identity` {expected,
+  recorded}) takes the deployed commit as `--expect-service-commit SHA` (7 to 40 hex digits; an abbreviation matches
+  by prefix, gate.commit_matches), which run_suite.sh passes on from its own `--expect-service-commit` (the run's and
+  the re-evaluation's gate; refused without a gate) and which run-gate passes from the LIVE line. Given a commit: an
+  invocation that read another commit blocks, one that read none (service_commit absent or null: not confirmed) blocks,
+  a run that records no identity at all (an older runner) blocks (the gate cannot confirm what it judged), and a run
+  without an MCP arm blocks where the policy's arms name it. In any case identity_changed true blocks, and so does
+  more than one commit over the invocations without a commit given (the run met more than one deployment; given one,
+  each other commit blocks as differing). Notes: identity_changed null (one read failed; the commit read stands or
+  blocks as above), without a commit given an older run ("records no service identity ... not checked"), invocations
+  without a commit beside others, and the recorded commit not compared.
+- **The results document** (sections.service_version_text) prints the recorded commit, labelled "as the MCP runner
+  recorded it (read from the service before each MCP invocation)", with a change, an unread commit or a failed read
+  stated; the make_doc --identity file only as a fallback, "taken from <source> and not recorded by the runner"; a
+  Railway deployment id only from that file, labelled as taken from it. reader.Run refuses an identity file whose
+  service_commit contradicts the recorded one.
+- Older runs (v5, v6 baselines) record no identity: run.json gains `service_identity` with `recorded` false, the gate
+  notes it, and the document keeps "not recorded by this run" (or the input file).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

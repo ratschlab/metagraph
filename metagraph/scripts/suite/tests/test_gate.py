@@ -1857,3 +1857,165 @@ class PropertyMarksTest(GateCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServiceIdentityTest(GateCase):
+    """The deployed service's identity (manifest v7, item 3; async's runner 684bb327 records it): every
+    mcp_runs.jsonl line, run.json's top level and each invocations[] entry state service_commit (read from the service
+    before the invocation), identity_changed (the read after it differs: true / false; null when a read failed) and
+    identity_error. merge_run carries the summary into run.json (service_identity); the gate, given the deployed commit
+    (--expect-service-commit), blocks a differing or missing commit and a run that records none; identity_changed true
+    blocks in any case; identity_changed null with the commit confirmed, and an older run without a commit given, are
+    notes. A Railway deployment id a fixture states is ignored (the owner, 2026-10-18)."""
+    SHA = "60e737f75ff696c170841c983c0464d1157425c9"
+    OTHER = "1009f77c7aa58a4c1a0c6e4b10f0e0b1a2b3c4d5"
+
+    def run_with(self, records, top=None, name="run", lines=True):
+        """A passing MCP-only run whose MCP arm records |records| per invocation (mcp_runs.jsonl with |lines|, else
+        run.json invocations[]) and |top| on run.json's top level (default: the last record's fields)."""
+        d = make_run(self.run_dir(name), self.m, mcp_lines(self.m))
+        path = os.path.join(d, "arms", "mcp", "run.json")
+        run = sc.read_json(path)
+        top = dict(records[-1]) if top is None and records else (top or {})
+        run.update(top)
+        if lines:
+            for r in records:
+                sc.append_jsonl(os.path.join(d, "arms", "mcp", "mcp_runs.jsonl"), dict(r, arm="mcp"))
+        else:
+            run["invocations"] = [dict(r) for r in records]
+        sc.write_json_atomic(path, run)
+        merge_run.merge(d)
+        sc.write_json_atomic(os.path.join(d, "compare.json"), cmp.compare(d, TABLE))
+        return d
+
+    def rec(self, commit=None, changed=False, error=None, **extra):
+        r = {"service_commit": commit if commit is not None else self.SHA, "identity_changed": changed,
+             "identity_error": error}
+        r.update(extra)
+        return r
+
+    def judge(self, d, expected=None):
+        return gate.judge(d, policy_of(self.m), expect_service_commit=expected)
+
+    def identity_problems(self, v):
+        return [p["detail"] for p in self.problems(v, "identity")]
+
+    def test_merge_carries_the_identity(self):
+        d = self.run_with([self.rec(), self.rec(railway_deployment_id="fa013db1")])
+        ident = sc.read_json(os.path.join(d, "run.json"))["service_identity"]
+        self.assertEqual(ident, {"recorded": True, "source": "arms/mcp/mcp_runs.jsonl", "service_commit": self.SHA,
+                                 "service_commits": {self.SHA: 2}, "identity_changed": False, "invocations": 2,
+                                 "identity_errors": [], "without_identity": 0, "without_commit": 0, "changed": 0,
+                                 "unconfirmed": 0})
+        self.assertNotIn("railway", json.dumps(ident))
+        # from run.json invocations[] when there is no mcp_runs.jsonl; a change and a failed read counted
+        d = self.run_with([self.rec(), self.rec(changed=True), self.rec(changed=None, error="after: timeout")],
+                          name="inv", lines=False)
+        merged = sc.read_json(os.path.join(d, "run.json"))
+        ident = merged["service_identity"]
+        self.assertEqual((ident["source"], ident["invocations"], ident["changed"], ident["unconfirmed"],
+                          ident["identity_changed"], ident["identity_errors"]),
+                         ("arms/mcp/run.json invocations", 3, 1, 1, True, ["after: timeout"]))
+        self.assertIn("the service's commit changed during 1 MCP invocation(s) (identity_changed true)",
+                      merged["warnings"])
+        # an older run: no field anywhere, recorded false; without an MCP arm: None
+        d = make_run(self.run_dir("old"), self.m, mcp_lines(self.m))
+        self.assertFalse(sc.read_json(os.path.join(d, "run.json"))["service_identity"]["recorded"])
+        self.assertIsNone(merge_run.service_identity(d, {}))
+
+    def test_older_run(self):
+        d = make_run(self.run_dir(), self.m, mcp_lines(self.m))
+        v = self.judge(d)
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertIn("the MCP arm records no service identity (a runner before the identity fields): not checked",
+                      v["notes"])
+        v = self.judge(d, self.SHA)
+        self.assertFalse(v["passed"])
+        self.assertEqual(len(self.identity_problems(v)), 1)
+        self.assertIn("records no service identity", self.identity_problems(v)[0])
+        self.assertIn("the gate cannot confirm what it judged against the deployed commit %s" % self.SHA,
+                      self.identity_problems(v)[0])
+
+    def test_the_deployed_commit(self):
+        d = self.run_with([self.rec(), self.rec()])
+        for expected in (self.SHA, self.SHA[:7], self.SHA[:12].upper()):
+            v = self.judge(d, expected)
+            self.assertTrue(v["passed"], gate.render(v))
+            self.assertIn("the MCP arm recorded the deployed service commit %s on its 2 invocation(s) "
+                          "(arms/mcp/mcp_runs.jsonl)" % expected, v["notes"])
+            self.assertEqual(v["service_identity"]["expected"], expected)
+        v = self.judge(d)
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertTrue(any("no deployed commit given (--expect-service-commit): not compared" in n for n in v["notes"]))
+        v = self.judge(d, self.OTHER)
+        self.assertEqual(self.identity_problems(v), [
+            "the MCP arm recorded the service commit %s (2 invocation(s)), not the deployed commit %s "
+            "(--expect-service-commit)" % (self.SHA, self.OTHER)])
+        self.assertEqual(self.problems(v, "identity")[0]["arm"], "mcp")
+
+    def test_a_commit_not_read(self):
+        # one invocation's read failed: service_commit null (identity not confirmed) blocks when a commit is given
+        d = self.run_with([self.rec(), self.rec(commit="", changed=None, error="before: connection refused")])
+        v = self.judge(d, self.SHA)
+        self.assertIn("1 of 2 MCP invocation(s) record no service_commit (arms/mcp/mcp_runs.jsonl) (identity_error: "
+                      "before: connection refused): the identity is not confirmed against the deployed commit %s "
+                      "(--expect-service-commit)" % self.SHA, self.identity_problems(v))
+        v = self.judge(d)
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertTrue(any(n.startswith("1 of 2 MCP invocation(s) record no service_commit") for n in v["notes"]))
+
+    def test_identity_changed(self):
+        d = self.run_with([self.rec(), self.rec(changed=True)])
+        for expected in (None, self.SHA):
+            v = self.judge(d, expected)
+            self.assertEqual(self.identity_problems(v), [
+                "the service's commit changed during 1 MCP invocation(s) (identity_changed true, "
+                "arms/mcp/mcp_runs.jsonl): the run met more than one deployment"], expected)
+
+    def test_identity_changed_null_with_the_commit_confirmed(self):
+        d = self.run_with([self.rec(), self.rec(changed=None, error="after: HTTP 502")])
+        v = self.judge(d, self.SHA)
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertIn("1 MCP invocation(s) record identity_changed null (one of the two reads failed; identity_error: "
+                      "after: HTTP 502): the commit read before each is judged above", v["notes"])
+
+    def test_two_commits(self):
+        d = self.run_with([self.rec(), self.rec(commit=self.OTHER)])
+        v = self.judge(d)
+        self.assertEqual(self.identity_problems(v), [
+            "the MCP invocations recorded 2 service commits (%s on 1, %s on 1): the run met more than one deployment"
+            % (self.SHA, self.OTHER)])
+        v = self.judge(d, self.SHA)
+        self.assertEqual(self.identity_problems(v), [
+            "the MCP arm recorded the service commit %s (1 invocation(s)), not the deployed commit %s "
+            "(--expect-service-commit)" % (self.OTHER, self.SHA)])
+        # run.json's top level read a commit no invocation states: it counts as recorded (0 invocations)
+        d = self.run_with([self.rec()], top=self.rec(commit=self.OTHER), name="top")
+        v = self.judge(d, self.SHA)
+        self.assertIn("the MCP arm recorded the service commit %s (0 invocation(s)), not the deployed commit %s "
+                      "(--expect-service-commit)" % (self.OTHER, self.SHA), self.identity_problems(v))
+
+    def test_the_rule_without_an_mcp_arm(self):
+        self.assertEqual(gate.service_identity_problems(None, self.SHA, ["direct-local", "mcp"])[0],
+                         ["no MCP arm recorded: the service identity cannot be confirmed against the deployed commit %s "
+                          "(--expect-service-commit)" % self.SHA])
+        self.assertEqual(gate.service_identity_problems(None, self.SHA, ["direct-local"]),
+                         ([], ["the policy's arms include no MCP arm: the service identity is not judged"]))
+        self.assertEqual(gate.service_identity_problems(None, None, ["mcp"]), ([], []))
+        self.assertTrue(gate.commit_matches(self.SHA, self.SHA[:7]))
+        self.assertFalse(gate.commit_matches(self.SHA, self.SHA[:6]))
+        self.assertFalse(gate.commit_matches(self.SHA[:8], self.OTHER))
+
+    def test_command_line(self):
+        d = self.run_with([self.rec()])
+        pol = os.path.join(self.tmp, "policy.json")
+        sc.write_json_atomic(pol, policy_of(self.m))
+        out = os.path.join(self.tmp, "v.json")
+        for args, rc in ((["--expect-service-commit", self.SHA], 0), (["--expect-service-commit", self.OTHER], 1),
+                         (["--expect-service-commit", "abc"], 2), (["--expect-service-commit", "z" * 40], 2)):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                got = gate.main([d, pol, "--out", out] + args)
+            self.assertEqual(got, rc, args)
+            if rc != 2:
+                self.assertEqual(sc.read_json(out)["service_identity"]["expected"], args[1])

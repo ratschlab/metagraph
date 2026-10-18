@@ -165,6 +165,45 @@ class IdsPlanAndGate(SuiteCase):
             p = self.run_suite(host, "--manifest", self.mpath, "--gate", self.write("x.json", "{}"))
             self.assertEqual(p.returncode, 2)
 
+    def test_expect_service_commit(self):
+        """The service identity (v7, item 3): --expect-service-commit SHA (run-gate's LIVE line) reaches gate.py on
+        the run's and the re-evaluation's path; every MCP invocation recorded that commit: exit 0; another commit:
+        exit 1, named; a malformed value, or none of a gate to give it to, refused before anything runs (exit 2)."""
+        make_manifest(self.mpath, mcp_scenarios())
+        pol = self.policy(mcp_scenarios())
+        sha = "60e737f75ff696c170841c983c0464d1157425c9"
+        with FakeHost() as host:
+            base = ("--manifest", self.mpath, "--mcp-cmd", self.mcp_cmd(), "--skip-local", "--skip-remote", "--gate",
+                    pol, "--by-design", "")
+            p = self.run_suite(host, *base, "--expect-service-commit", sha[:12], FAKE_MCP_SERVICE_COMMIT=sha)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run_dir = p.stdout.strip().splitlines()[-1]
+            verdict = sc.read_json(os.path.join(run_dir, "gate.json"))
+            self.assertEqual(verdict["service_identity"]["expected"], sha[:12])
+            recorded = verdict["service_identity"]["recorded"]
+            self.assertEqual(list(recorded["service_commits"]), [sha])
+            self.assertEqual(recorded["service_commits"][sha], recorded["invocations"])
+            self.assertEqual(recorded["source"], "arms/mcp/mcp_runs.jsonl")
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "run.json"))["service_identity"]["service_commit"], sha)
+            p = self.run_suite(host, *base, "--expect-service-commit", "1234567", FAKE_MCP_SERVICE_COMMIT=sha)
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertIn("not the deployed commit 1234567 (--expect-service-commit)", p.stderr)
+            # a runner before the identity fields: blocked when a commit is given
+            p = self.run_suite(host, *base, "--expect-service-commit", sha)
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertIn("records no service identity", p.stderr)
+            # the re-evaluation's path passes it on as well
+            p = self.run_suite(host, "--reevaluate", run_dir, "--gate", pol, "--by-design", "",
+                               "--expect-service-commit", "1234567")
+            self.assertEqual(p.returncode, 1, p.stderr)
+            self.assertEqual(sc.read_json(os.path.join(run_dir, "gate.reevaluated.json"))["service_identity"]
+                             ["expected"], "1234567")
+            for args in (base + ("--expect-service-commit", "not-a-sha"), base[:6] + base[8:] + ("--expect-service-commit", sha),
+                         ("--reevaluate", run_dir, "--expect-service-commit", sha)):
+                p = self.run_suite(host, *args)
+                self.assertEqual(p.returncode, 2, (args, p.stderr))
+                self.assertIn("--expect-service-commit", p.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
