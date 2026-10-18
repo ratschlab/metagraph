@@ -290,6 +290,7 @@ class JunctionPremiseTest(unittest.TestCase):
         text = str(prose("R"))
         self.assertIn("looks up every k-mer of the 170 bp query in the whole of each fetched record", text)
         self.assertIn("no junction k-mer occurs elsewhere in either record", text)
+        self.assertIn("every query k-mer looked up in the whole record", prose("R")["units"]["R-junction"]["property"])
         src = inspect.getsource(areas._record_runs)
         self.assertIn("if q[i:i + K] in rec.seq:", src)   # the whole record, not the window's neighbourhood
         for version in (5, 6):
