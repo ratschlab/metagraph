@@ -4683,7 +4683,9 @@ the commit only; a Railway deployment id is neither stated nor read (a fixture t
   more than one commit over the invocations without a commit given (the run met more than one deployment; given one,
   each other commit blocks as differing). Notes: identity_changed null (one read failed; the commit read stands or
   blocks as above), without a commit given an older run ("records no service identity ... not checked"), invocations
-  without a commit beside others, and the recorded commit not compared.
+  without a commit beside others, and the recorded commit not compared. A run resumed across a deploy blocks: the
+  superseded invocations' lines stay in mcp_runs.jsonl with the earlier commit (conservative: the run met two builds).
+  The commits are compared as recorded (the runner always records the full sha).
 - **The results document** (sections.service_version_text) prints the recorded commit, labelled "as the MCP runner
   recorded it (read from the service before each MCP invocation)", with a change, an unread commit or a failed read
   stated; the make_doc --identity file only as a fallback, "taken from <source> and not recorded by the runner"; a
@@ -4721,14 +4723,19 @@ host's answer states none. The entry's own absence_scope (the service's merged {
 block's strands ("either" / "context") are other fields.
 - **The checks** (checks.MCP_PATTERN_DATABASE_FIELDS, _mcp_database_values): on the MCP arm, entry_fields reads these
   two fields from the entry's by_database[] items (each database's own non-null value), else their by_graph[] items,
-  and the entry's own by_graph[]; with neither list, the entry's own value where it has the host's type (a normaliser
-  that flattens the one database's keys onto the entry, as it does predicate and load_ms; the merged absence_scope
-  object or a strands string is no host statement). Every stated value is held to the expectation: a present but
-  different one fails ("absence_scope = 'any_offset' (by_database[0]), expected 'suffix_only'"), none stated is not
-  exposed, with the same detail as before ("field not in the answer: absence_scope"). A direct arm reads the entry as
-  before. The recorded v5 / v6 MCP answers carry neither field and their manifests keep the marks, so they judge
-  exactly as before. The runner's normaliser must keep by_database[] (with by_graph[]) on the entry, or flatten a
-  single database's two values onto it; otherwise the checks read them not exposed.
+  and the entry's own by_graph[]; with neither list, the entry's own value. The LIVE PATH is the last one: the MCP
+  runner's normaliser (scripts/bench/suite_mcp_normalise.py, DB_ANSWER_FIELDS, from runner fcf7ae49) puts the one
+  database's host string and list onto the host-shaped entry, never copies the service's merged absence_scope object,
+  and leaves a chunked database's per-graph values out (listed as left out: "several answers: per graph in by_graph";
+  refseq33m-experimental is one graph); the by_database[] / by_graph[] reading serves a normaliser that keeps the
+  per-database view (none does today). On the entry a value of another type is a wrong value and fails, never "not
+  exposed" (the v7 verification's low 1). Every stated value is held to the expectation: a present but different one
+  fails ("absence_scope = 'any_offset' (by_database[0]), expected 'suffix_only'"), none stated is not exposed, with
+  the same detail as before ("field not in the answer: absence_scope"). A direct arm reads the entry as before. The
+  recorded v5 / v6 MCP answers carry neither field and their manifests keep the marks, so they judge exactly as
+  before (with runner fcf7ae49 and a service carrying the fields, a v6 run's entry_fields would compare them too: a
+  mark sets aside only a not-exposed reading; the v7 verifier injected the direct values into the 88 recorded MCP
+  executions and every one passes). An older runner drops the fields, and the v7 rtp gate then blocks on them.
 - **The manifest**: areas.MCP_PATTERN_ENTRY_CARRIED_V7 (absence_scope, strands) is left out of what the MCP's answer
   cannot carry for v7 (mark_pattern_mcp_fields(carried=)), so v6's not-implemented marks of entry_fields on
   P-exact-0001..0008, P-scope-0001 / -0002 / -0003 / -0005 / -0007..0012, N-usecase-0005, D-P-exact-0001 and

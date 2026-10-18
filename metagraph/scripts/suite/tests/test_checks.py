@@ -544,9 +544,10 @@ class PatternChecks(unittest.TestCase):
         """Manifest v7 (the service bundle of 2026-10-18): the MCP's /pattern answer states the host's absence_scope (a
         string) and strands (a list) per database, by_database[], or per graph, by_graph[], where a database has
         several answers (its own value null); entry_fields reads them there on the MCP arm, every stated value held to
-        the expectation: a present but different value fails, none stated is not exposed (as before), and the
-        entry's own absence_scope object (the service's merged {scope, tasks_failed}) or the predicate block's strands
-        is never read for them. A direct arm reads the entry as before."""
+        the expectation: a present but different value fails, none stated is not exposed (as before); without the
+        two lists, the entry's own value is read (the runner's normaliser puts the host values there and never copies
+        the service's merged absence_scope object), so a value of another type there fails as a wrong value; the
+        predicate block's strands is another field. A direct arm reads the entry as before."""
         def ans(by_database=None, by_graph=None, **kw):
             e = dict({"id": "w", "kind": "dna", "length": 25, "scope": "suffix",
                       "counts": {"contexts": {"relation": "exact", "value": 0}},
@@ -585,11 +586,13 @@ class PatternChecks(unittest.TestCase):
         for a in (ans([db()]), ans([db(absence_scope=None, by_graph=[{"graph": "g1"}])]), ans(), ans([])):
             self.assertEqual(outcome(sc, a, "entry_fields", "mcp", **scope),
                              ("not_exposed", "field not in the answer: absence_scope"))
-        # the entry's own absence_scope object and the predicate block's strands are other fields
+        # on the entry itself (the normalised answer) a value of another type is a wrong value, never "not exposed"
+        # (the v7 re-verification's low 1): the normaliser copies only the host's string and list there
         self.assertEqual(outcome(sc, ans(absence_scope={"scope": "suffix", "tasks_failed": 0}), "entry_fields", "mcp",
-                                 **scope), ("not_exposed", "field not in the answer: absence_scope"))
-        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", **strands)[0], "not_exposed")
-        # a normaliser that flattens the one database's keys onto the entry: read there (the host's types only)
+                                 **scope)[0], "fail")
+        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", **strands)[0], "fail")
+        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", absent=["strands"])[0], "fail")
+        # the normaliser's live path: the one database's values on the entry
         self.assertEqual(outcome(sc, ans(absence_scope="suffix_only", strands=["+"]), "entry_fields", "mcp",
                                  **scope)[0], "pass")
         self.assertEqual(outcome(sc, ans(strands=["-"]), "entry_fields", "mcp", **strands)[0], "fail")

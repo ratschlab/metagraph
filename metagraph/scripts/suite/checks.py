@@ -458,9 +458,10 @@ MCP_PATTERN_DATABASE_FIELDS = {"absence_scope": str, "strands": list}
 def _mcp_database_values(e: dict, head: str) -> List[Tuple[str, Any]]:
     """[(where, value)] an MCP /pattern entry |e| states for the host field |head| of MCP_PATTERN_DATABASE_FIELDS: each
     by_database[] item's own value (not null), else its by_graph[] items' (not null), and the entry's own by_graph[]
-    items'; with neither list, the entry's own value where it has the host's type (a normaliser that flattens the one
-    database's keys onto the entry, as it does predicate and load_ms; the service's merged absence_scope object is not
-    the host's string). [] when nothing states it (the field not exposed)."""
+    items'; with neither list, the entry's own value (the live path: the runner's normaliser, fcf7ae49 on, puts the one
+    database's host values onto the host-shaped entry, as it does predicate and load_ms, and never copies the service's
+    merged absence_scope object; a value of another type there is a wrong value, held to the expectation, never "not
+    exposed"). [] when nothing states it (the field not exposed)."""
     out: List[Tuple[str, Any]] = []
 
     def graphs(x: dict, where: str) -> None:
@@ -477,7 +478,7 @@ def _mcp_database_values(e: dict, head: str) -> List[Tuple[str, Any]]:
             graphs(b, "by_database[%d]." % i)
     graphs(e, "")
     if not out and not isinstance(dbs, list) and not isinstance(e.get("by_graph"), list) and \
-            isinstance(e.get(head), MCP_PATTERN_DATABASE_FIELDS[head]):
+            e.get(head) is not None:
         out.append(("the entry", e[head]))
     return out
 
