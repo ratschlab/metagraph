@@ -690,5 +690,11 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertEqual(facts.fill(note, {"x": {"N-hard-0022": {"footnoted": False}}}).count("detail block"), 0)
 
 
+    def test_l3_recorded_check_text_glossed(self):
+        text = prose("T")["families"]["T-budget"]["prose"]
+        self.assertIn("(the check's own words, recorded with the run: a seed phase the budget \"does not govern\" is "
+                      "one the budget does not stop", text)
+
+
 if __name__ == "__main__":
     unittest.main()
