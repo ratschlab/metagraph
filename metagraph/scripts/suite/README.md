@@ -435,7 +435,7 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   inconclusive > pass (an outcome outside the vocabulary is a fail), and `inconclusive` when there is no check,
   every check is not exposed, or every PROPERTY check could not test anything (not exposed) although the generic
   checks passed (the verification's H3: an MCP P-exact-0001 without counts is no pass); a scenario without a
-  property check (a refusal: its status, code and text are the claim) is judged by its generic checks. Both
+  property check (a refusal, whose status, code and text are the claim; a warm-up, which asks what every answer must hold) is judged by its generic checks. Both
   direct runners use it; merge_run applies it to the MCP arm's lines (above). `deterministic` is left out of a
   scenario's first repeat (nothing to compare yet), so that repeat's outcome rests on the other checks.
 - `budget_respected` (lane S1b, the integrator's decision 2; lane S3 after the verification of lane S1b, X1:
@@ -4613,13 +4613,46 @@ the text was wrong for v5 too:
   none skipped (744 s). The changed lines against the verifier's builds:
   `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/CHANGED-LINES.md`.
 
+### The external review of the v6 document (2026-10-18)
+An external review of the v6 baseline document (30 findings V6-001 to V6-307, 12 major, 18 minor; and 13 comments of
+the earlier readability review only partly resolved, each mapped to one of them) was assessed against the PDF, its
+LaTeX, the generator and the run data, and every finding was fixed by a general rule, the v5 document changing
+wherever the same text was wrong there (dispositions, evidence and builds:
+`~/.cache/metagraph-traverse-plans/2026-10-18/doc-v6-review/`, REVIEW-INDEX.md and review-issues.json; tests:
+tests/test_doc_review_v6.py). In short:
+- The gate (V6-001): the decision defines the required population, the route selection less the policy's automatic
+  exclusions (gate_policy.py's rules: budget_stress, the requests the MCP tools cannot express, the advanced path, an
+  MCP repeat the marks cover) and the owner's exemptions, with the scenarios and executions required per gated access
+  path (v6: 686 / 793 on direct-local, 628 / 1275 on mcp); the judged executions split by outcome (1950 passed, 118
+  service-side by design); a blocking execution is one "the policy requires on that access path and repeat";
+  appendix F carries the ledger of the automatic exclusions, I.4 a row for them.
+- Wording at the evidence's strength: "fully checked" excludes a check a property-level mark sets aside, named per
+  chapter (V6-201); an exception summary names the scenario's own request and the recorded cause per access path,
+  the index groups the tests by cause (V6-302); a warm-up's allowed 503 reads "no property of its own declared", the
+  status being a refusal's claim only (V6-204); no causal claim on the warm-ups (V6-203); the admission-only
+  sentence names the cap and refusal tests (V6-202); the defect pin's failure is not by itself a repair (V6-304);
+  a seed-only traverse answer is a limit of budget_respected, not of the contract (V6-002); the junctions' header
+  runs rest on a whole-record look-up (V6-101); annotate mode's witness is no all-successor evidence (V6-102);
+  T-strand names the refusal it observed (facts' seed_refusal; V6-103); N-zero per query length (V6-305); the
+  completeness indicators against an independent enumeration (V6-008); the assumed human non-carrier (V6-301);
+  primer counts are contexts (V6-303); long peptides' positive recovery (V6-205); record boundaries (V6-206); a
+  correctly stated stop passes (V6-209); time-limited against work-limit stops (V6-306); a demonstrated stop under
+  the neutral heading "Coverage and remaining limits" (V6-106); the host-cold marker of a warmed stop (V6-107).
+- Presentation: I.1 leads with the result, the attention caption names ids by ranges, I.2's budget scope is one
+  full-width block per route, the tint and attention rules are appendix F's (V6-003); make_doc writes evidence.json
+  beside the PDF, every input with its path and sha256 (V6-004); a detail block names the manifest's repeat count
+  apart from the recorded executions (V6-105); the phase plot states every value a log scale leaves out (v6's eight
+  terminal-lag values below 0 ms; V6-006); appendix C prints the relations' arguments in full (V6-007); a unit
+  heading's key never runs into its title (doc.sty's \unithead; V6-108); the pairs legend defines be (V6-307);
+  M-planted's title names t and m (V6-208); one description of the dark-grey footnote digit (V6-005).
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
 
 Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d60e4eb5d0…`), by-design table version 1 (service commit `22d034ba`). Definitions follow `checks.py`, `compare.py`, `report.py`, `gate.py` and the SPECs they cite (SPEC-labeled-traversal-core section 4 for /resolve). Where a figure is the run's (the warm window of 60 s, the Logan thresholds of 400 % `sra_all` CPU and load1 48, k = 31) the document states the run's own value.
 
-- **agreement depth** — Of an agreeing MCP pair, how much was compared: fully checked (every property check the scenario expects was evaluated on both arms and agreed), partial (the MCP answer exposed only some of them; counted apart when the aggregate is not a pass), generic checks only (none of them), a refusal (both arms refused alike), on failure (both arms failed alike). The chapter lines of the results document count the fully checked pairs. *See:* MCP agreement class.
+- **agreement depth** — Of an agreeing MCP pair, how much was compared: fully checked (every property check the scenario expects was evaluated on both arms and agreed, except a check a property-level mark of the manifest sets aside, which is not compared and stays unverified via MCP; the document's chapter lines name the pairs that omit one), partial (the MCP answer exposed only some of them; counted apart when the aggregate is not a pass), generic checks only (none of them), a refusal (both arms refused alike), on failure (both arms failed alike). The chapter lines of the results document count the fully checked pairs. *See:* MCP agreement class.
 - **answer digest** — The sha256 of the canonical JSON of the normalised answer without its headers and without every key named timing (and, for a capabilities document, without its measured and observed figures); the determinism check and the direct agreement read it. *See:* normalised answer, direct agreement class.
 - **answer-triggered case** — A by-design case matched by the MCP answer itself rather than named by the scenario (e.g. the host's /pattern 503 deadline relayed by the service as a failed search): the execution is by design, verified when a direct execution matched the case's host side. *See:* by-design table.
 - **area, chapter** — The ten groups of scenarios by what they test, one letter each (R resolve, T traverse, P patterns up to k, L patterns longer than k, X peptides, M mismatches, Q predicates and motif, C capabilities and protocol, N negatives and near-misses, D determinism); Part II has one chapter per area. *See:* family, unit.
