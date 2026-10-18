@@ -660,7 +660,10 @@ _DELIVERY_MBPS = (10.0, 50.0)
 # The finalisation reserves (ms): /resolve's is the host's constant (SPEC-labeled-traversal-core §4.5; capabilities
 # resolve.time_budget.finalize_reserve_ms, finalize_reserve_configurable false), so a reserve the answer states is
 # checked against it, never believed (suite_common's rule: never from the failing answer); /pattern's is the host's
-# configured one (SPEC-pattern-search §10.2, --pattern-finalize-ms, default 250), which only the answer states here
+# configured one (SPEC-pattern-search §10.2, --pattern-finalize-ms, default 250): from manifest v7 the scenario states
+# it, budget_respected's args.reserve_ms (the builder takes it from the capabilities snapshot it reads), and every
+# work-time bound reads it there (_scenario_pattern_reserve); a manifest without it (v5, v6) is judged as before, by
+# the reserve the answer states (limits.finalize_reserve_ms), else _PATTERN_RESERVE_MS
 _RESOLVE_RESERVE_MS = 250.0
 _PATTERN_RESERVE_MS = 250.0
 
@@ -678,16 +681,31 @@ def _limit(sc: dict, body: dict, name: str) -> Any:
     return req.get(name)
 
 
+def _scenario_pattern_reserve(sc: dict) -> Optional[float]:
+    """The host's /pattern finalisation reserve (ms) the scenario states: its budget_respected expectation's
+    args.reserve_ms (manifest v7: the capabilities snapshot's pattern finalize_reserve_ms), else None (v5, v6)."""
+    for e in sc.get("expect") or []:
+        if isinstance(e, dict) and e.get("check") == "budget_respected" and isinstance(e.get("args"), dict):
+            v = _number(e["args"].get("reserve_ms"))
+            if v is not None:
+                return v
+    return None
+
+
 def _pattern_work_time(sc: dict, body: dict) -> Optional[float]:
     """A lower bound of the work time of SPEC-pattern-search §7.6, time_budget_ms - finalize_reserve_ms - E: E is
     taken at twice its formula at the default (slowest) delivery rates, with every result the answer withholds
     counted at a generous size (_RESULT_BYTES), so an elapsed time below this bound is a time stop or a time
-    limitation that came before the work time had passed. None without a budget."""
+    limitation that came before the work time had passed. The reserve is the host's the scenario states
+    (_scenario_pattern_reserve: budget_respected's reserve_ms, manifest v7), else the one the answer states
+    (limits.finalize_reserve_ms), else _PATTERN_RESERVE_MS. None without a budget."""
     budget = _effective_budget(sc, body)
     if budget is None:
         return None
-    reserve = _number((body.get("limits") or {}).get("finalize_reserve_ms"))
-    reserve = _PATTERN_RESERVE_MS if reserve is None else reserve
+    reserve = _scenario_pattern_reserve(sc)
+    if reserve is None:
+        reserve = _number((body.get("limits") or {}).get("finalize_reserve_ms"))
+        reserve = _PATTERN_RESERVE_MS if reserve is None else reserve
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     labelled = (req.get("output") or {}).get("labels") in ("all", "predicate_only") or req.get("predicate") is not None
     per = _RESULT_BYTES["labelled" if labelled else "plain"]
@@ -5171,7 +5189,7 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "predicate_either_mirror": ((), ("pattern", "label", "min")),
     "motif": ((), ("pattern", "selected", "decided_by_in", "label_present")),
     "clamped": (("field", "requested", "effective"), ("where",)),
-    "budget_respected": ((), ("rule", "cap_ms")),
+    "budget_respected": ((), ("rule", "cap_ms", "reserve_ms")),
     "counts_consistent": ((), ("pattern",)),
     "invariants": ((), ()),
     "resolve_runs": (("label",), ("full", "prefix_if_stopped", "unless_stopped", "covers", "run_end_in",
@@ -5206,6 +5224,10 @@ def validate_expectation(exp: dict) -> List[str]:
     req, opt = CHECK_ARGS[name]
     probs = ["%s: argument %s missing" % (name, x) for x in req if x not in args]
     probs += ["%s: unknown argument %s" % (name, x) for x in args if x not in req and x not in opt and x != "any_status"]
+    if name == "budget_respected" and "reserve_ms" in args and _number(args["reserve_ms"]) is None:
+        probs.append("budget_respected: reserve_ms %s is no number" % json.dumps(args["reserve_ms"]))
+    elif name == "budget_respected" and "reserve_ms" in args and args["reserve_ms"] < 0:
+        probs.append("budget_respected: reserve_ms %s is below 0" % json.dumps(args["reserve_ms"]))
     if name == "count_relation":
         rels = args.get("relation")
         rels = set(rels if isinstance(rels, list) else [rels]) if rels is not None else None

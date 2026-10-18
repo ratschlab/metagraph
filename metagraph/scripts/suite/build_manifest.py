@@ -26,7 +26,9 @@ v7 (the owner, 2026-10-18) is v6 with exactly these changes: P-edge-0004's entry
 pattern text the MCP's /pattern answer leaves out by design (the service owner's statement, 2026-10-17), is classed
 service-side by design at property level (mcp.by_design_checks under the table's pattern.lowercase,
 areas.MCP_PATTERN_ENTRY_BY_DESIGN) instead of not implemented yet via MCP; v6 is built again, byte for byte, with
---manifest-version 6 (build(manifest_version=6)).
+--manifest-version 6 (build(manifest_version=6)); and every /pattern scenario's budget_respected states the host's
+finalisation reserve, reserve_ms, the snapshot's pattern_capabilities finalize_reserve_ms
+(areas.state_pattern_reserve), which checks._pattern_work_time reads instead of the reserve the answer states.
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -177,6 +179,9 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     scenarios = place_warm_ups(scenarios + areas.pattern_warm_ups(scenarios))
     keep_off_warm_repeat(scenarios)
     keep_gate_warm_repeats(scenarios, reference)
+    if manifest_version >= 7:
+        # v7: the host's /pattern finalisation reserve in budget_respected's arguments (the warm-ups' included)
+        areas.state_pattern_reserve(scenarios, caps["pattern_capabilities"])
     exposure = None
     if exposure_file:
         with open(exposure_file) as f:

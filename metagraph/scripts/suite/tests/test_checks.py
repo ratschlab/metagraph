@@ -1329,7 +1329,8 @@ class BudgetChecks(unittest.TestCase):
                                          client={"wall_ms": 600100.0})[2]["outcome"], "inconclusive")
         self.assertEqual(checks.evaluate(sc(700000, 600000, "POST /pattern"), pat, "direct-local",
                                          client={"wall_ms": 599000.0})[2]["outcome"], "fail")
-        self.assertEqual(checks.CHECK_ARGS["budget_respected"], ((), ("rule", "cap_ms")))
+        # v7 adds the host's /pattern finalisation reserve (BudgetReaders.test_pattern_reserve_stated_by_the_scenario)
+        self.assertEqual(checks.CHECK_ARGS["budget_respected"], ((), ("rule", "cap_ms", "reserve_ms")))
 
     def test_pattern_and_resolve(self):
         sc = self.sc("POST /pattern", {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 300})
@@ -4254,6 +4255,48 @@ class BudgetReaders(unittest.TestCase):
                              echo)
         self.assertIsNone(checks._pattern_work_time({"route": "POST /pattern", "request": {}},
                                                     {"limits": {"time_budget_ms": "10000"}, "patterns": []}))
+
+    def test_pattern_reserve_stated_by_the_scenario(self):
+        """Manifest v7 (the owner's decision on SD-021): the host's /pattern finalisation reserve is configurable, so
+        the scenario states it, budget_respected's args.reserve_ms (from the capabilities snapshot), and every
+        work-time bound reads it there, never the reserve the judged answer states; without it (v5, v6) the answer's
+        limits.finalize_reserve_ms, else 250, as before."""
+        def scen(reserve=None):
+            args = {"rule": "r"} if reserve is None else {"rule": "r", "reserve_ms": reserve}
+            return {"route": "POST /pattern", "truth": {},
+                    "request": {"patterns": [{"dna": "A" * 25, "id": "w"}], "time_budget_ms": 10000},
+                    "expect": [{"check": "status", "args": {"http": 200}}, {"check": "budget_respected", "args": args}]}
+        stated = {"limits": {"time_budget_ms": 10000, "finalize_reserve_ms": 1000}, "patterns": []}
+        self.assertEqual(checks._pattern_work_time(scen(), stated), 9000)          # v5 / v6: the answer's
+        self.assertEqual(checks._pattern_work_time(scen(250), stated), 9750)       # v7: the scenario's
+        self.assertEqual(checks._pattern_work_time(scen(600.0), {"limits": {"time_budget_ms": 10000}, "patterns": []}),
+                         9400)
+        self.assertEqual(checks._pattern_work_time(scen(), {"limits": {"time_budget_ms": 10000}, "patterns": []}),
+                         9750)                                                     # neither: 250
+        for bad in ("250", None, True):   # no number: not a stated reserve (the builder refuses it, test below)
+            self.assertIsNone(checks._scenario_pattern_reserve(scen(bad)), bad)
+            self.assertEqual(checks._pattern_work_time(scen(bad), stated), 9000, bad)
+        self.assertIsNone(checks._scenario_pattern_reserve({"route": "POST /pattern"}))
+        # end to end: a time stop at 9,700 ms of a 10,000 ms budget whose answer states a reserve of 1,000 ms passes
+        # the answer's own bound (9,000 ms) and fails the host's (9,750 ms) the scenario states
+        sc = scen(250)
+        sc["expect"].append({"check": "deterministic", "args": {}})
+        ans = ok_answer({"patterns": [{"id": "w", "stop": {"phase": "discovery", "reason": "time"},
+                                       "determinism": "time_limited"}],
+                         "limits": {"time_budget_ms": 10000, "finalize_reserve_ms": 1000},
+                         "timing": {"elapsed_ms": 9700.0}})
+        res = dict((r["check"], r) for r in checks.evaluate(sc, ans, "direct-local", previous=["0" * 64]))
+        self.assertEqual(res["deterministic"]["outcome"], "fail", res["deterministic"])
+        self.assertIn("before the work time (at least 9750 ms", res["deterministic"]["detail"])
+        v6 = scen()
+        v6["expect"].append({"check": "deterministic", "args": {}})
+        res = dict((r["check"], r) for r in checks.evaluate(v6, ans, "direct-local", previous=["0" * 64]))
+        self.assertEqual(res["deterministic"]["outcome"], "inconclusive", res["deterministic"])
+        # the argument is validated: a number of at least 0
+        self.assertEqual(checks.validate_expectation({"check": "budget_respected", "args": {"reserve_ms": 250}}), [])
+        for bad, text in (("250", "is no number"), (True, "is no number"), (-1, "is below 0")):
+            probs = checks.validate_expectation({"check": "budget_respected", "args": {"reserve_ms": bad}})
+            self.assertTrue(any(text in p for p in probs), (bad, probs))
 
     def test_effective_budget(self):
         for route, req, echo in (("POST /pattern", {"time_budget_ms": 5000}, {"limits": {"time_budget_ms": 4000}}),

@@ -1,8 +1,9 @@
 """Offline tests of manifest v7 (the owner, 2026-10-18): v6 with exactly the approved changes. Item 1: P-edge-0004's
 entry_fields check, which reads the pattern text the MCP's /pattern answer leaves out by design (the service owner's
 statement, 2026-10-17), is classed service-side by design at property level (mcp.by_design_checks under the table's
-pattern.lowercase) instead of not implemented yet via MCP. The tests that build skip without the record cache
-(SUITE_TRUTH_CACHE or truth/cache)."""
+pattern.lowercase) instead of not implemented yet via MCP. Item 2: every /pattern scenario's budget_respected states
+the host's finalisation reserve (reserve_ms, the capabilities snapshot's pattern finalize_reserve_ms). The tests that
+build skip without the record cache (SUITE_TRUTH_CACHE or truth/cache)."""
 import copy
 import json
 import os
@@ -21,6 +22,10 @@ from test_builder_v5 import built, have_cache  # noqa: E402
 from test_builder_v6 import by_id, leaf_diffs  # noqa: E402
 
 PATTERN_TEXT_BY_DESIGN = {"P-edge-0004": "pattern.lowercase"}
+# the /pattern scenarios of v6 with a budget_respected expectation (every one that allows a 200: 429 + the 25 warm-ups)
+N_PATTERN_BUDGET = 454
+# the snapshot's pattern_capabilities finalize_reserve_ms (truth/staging_capabilities/, release refseq97-6f945db4)
+SNAPSHOT_RESERVE_MS = 250
 
 
 def read(name):
@@ -90,16 +95,24 @@ class PatternTextByDesign(unittest.TestCase):
 
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_built_v7_against_the_frozen_v6(self):
-        """The v7 the builder makes differs from the frozen v6 in the approved changes only: P-edge-0004's MCP mark."""
+        """The v7 the builder makes differs from the frozen v6 in the approved changes only: P-edge-0004's MCP mark
+        and budget_respected's reserve_ms on every /pattern scenario that states the check."""
         m, v6 = built(version=7), read("suite_v6.json")
         self.assertEqual(m["manifest_version"], 7)
         s6, s7 = by_id(v6), by_id(m)
         self.assertEqual([x["id"] for x in m["scenarios"]], [x["id"] for x in v6["scenarios"]])
         self.assertEqual(m["relations"], v6["relations"])
-        changed = {}
+        changed, reserve = {}, []
         for sid, s in s6.items():
             for path, old, new in leaf_diffs(s, s7[sid]):
+                k = next((i for i, e in enumerate(s["expect"]) if e["check"] == "budget_respected"), None)
+                if (path, old, new) == (".expect[%s].args.reserve_ms" % k, None, SNAPSHOT_RESERVE_MS):
+                    reserve.append(sid)
+                    continue
                 changed.setdefault(sid, []).append((path, old, new))
+        self.assertEqual(sorted(reserve), sorted(x["id"] for x in v6["scenarios"] if x["route"] == "POST /pattern"
+                                                 and any(e["check"] == "budget_respected" for e in x["expect"])))
+        self.assertEqual(len(reserve), N_PATTERN_BUDGET)
         self.assertEqual(sorted(changed), sorted(PATTERN_TEXT_BY_DESIGN))
         for sid, case in PATTERN_TEXT_BY_DESIGN.items():
             self.assertEqual(changed[sid], [
@@ -110,3 +123,29 @@ class PatternTextByDesign(unittest.TestCase):
             self.assertIn(case, s7[sid]["mcp"]["by_design"])
         c6, c7 = json.loads(json.dumps(v6["counts"])), json.loads(json.dumps(m["counts"]))
         self.assertEqual(c7, c6)
+
+
+class PatternReserve(unittest.TestCase):
+    """Item 2 (the owner's decision on SD-021): the builder states the host's /pattern finalisation reserve in the
+    check arguments (budget_respected's reserve_ms), from the capabilities snapshot it reads."""
+
+    def test_state_pattern_reserve(self):
+        shared = {"rule": "r"}
+        pat = {"id": "P", "route": "POST /pattern", "expect": [{"check": "status", "args": {"http": 200}},
+                                                             {"check": "budget_respected", "args": shared}]}
+        res = {"id": "R", "route": "POST /resolve", "expect": [{"check": "budget_respected", "args": shared}]}
+        refusal = {"id": "Q", "route": "POST /pattern", "expect": [{"check": "status", "args": {"http": 400}}]}
+        scen = [pat, res, refusal]
+        self.assertEqual(areas.state_pattern_reserve(scen, {"finalize_reserve_ms": 250}), ["P"])
+        self.assertEqual(pat["expect"][1], {"check": "budget_respected", "args": {"rule": "r", "reserve_ms": 250}})
+        self.assertEqual(shared, {"rule": "r"})   # the builder's shared args are not mutated
+        self.assertEqual(res["expect"], [{"check": "budget_respected", "args": {"rule": "r"}}])
+        self.assertEqual(refusal["expect"], [{"check": "status", "args": {"http": 400}}])
+        for caps in ({}, {"finalize_reserve_ms": None}, {"finalize_reserve_ms": "250"}, {"finalize_reserve_ms": True},
+                     {"finalize_reserve_ms": -1}):
+            with self.assertRaises(SystemExit):
+                areas.state_pattern_reserve([dict(pat)], caps)
+
+    def test_snapshot_reserve(self):
+        caps = bm.load_capabilities(bm.DEFAULT_CAPABILITIES)
+        self.assertEqual(caps["pattern_capabilities"]["finalize_reserve_ms"], SNAPSHOT_RESERVE_MS)

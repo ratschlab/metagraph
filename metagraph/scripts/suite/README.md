@@ -4488,7 +4488,7 @@ branch for a v6 run.
   answer states (`limits.finalize_reserve_ms`, else 250) when it bounds the work time; the host's is configurable
   (`--pattern-finalize-ms`) and checks.evaluate sees no host document. The NEXT manifest states it in the check
   arguments (`reserve_ms` taken from the capabilities snapshot by the builder); checks.evaluate's API does not
-  change. The frozen v5 and v6 keep the answer's reading.
+  change. The frozen v5 and v6 keep the answer's reading. Done in manifest v7 (below, item 2).
 - The readers of an execution's raw record (SD-093): a truncated .gz, a cut JSON, a record that is no object or
   whose answer is none reads as no body at the three sites that crashed on it (compare.direct_error_parts, which
   then keeps the line's own error codes; run_direct's previous_entry, time_limited unknown; the bench panel's
@@ -4639,6 +4639,24 @@ field the MCP's answer cannot carry is left out by design, each under a case the
 any other (another unexposed field beside it, no case named) keeps v6's not-implemented mark. In v7 that is
 P-edge-0004 alone (the only scenario reading the pattern text). Nothing else of the scenario changes: its request,
 expectations, exposes and repeats are v6's.
+
+### The /pattern finalisation reserve in the check arguments (item 2)
+The host's /pattern finalisation reserve is configurable (SPEC-pattern-search §10.2, `--pattern-finalize-ms`), and
+checks.evaluate sees no host document (its API stays as it is). v5 and v6 bound a /pattern work time (SPEC §7.6:
+time_budget_ms - reserve - E, checks._pattern_work_time, the bound of every stated time stop or time limitation the
+stated-reason rules hold: invariants, the count checks, the entry and slot checks, deterministic) with the reserve the
+judged answer states (`limits.finalize_reserve_ms`, else 250), so an answer could widen its own window. v7 states the
+host's reserve in the check arguments: every POST /pattern scenario's budget_respected expectation carries
+`reserve_ms`, the capabilities snapshot's `pattern_capabilities.finalize_reserve_ms` (250 in truth/staging_capabilities/,
+release refseq97-6f945db4), added by areas.state_pattern_reserve after the warm-ups are placed (454 scenarios: the 429
+that allow a 200 and the 25 warm-ups; the 26 refusal-only /pattern scenarios state no budget_respected); the builder
+refuses a snapshot without the number. checks._scenario_pattern_reserve reads it from the scenario (its
+budget_respected expectation), and _pattern_work_time takes it before the answer's statement; without the argument
+(every v5 / v6 scenario) the reading is the old one, so a v5 or v6 run judges exactly as before. checks.validate_expectation
+refuses a reserve_ms that is no number or below 0 (CHECK_ARGS budget_respected: rule, cap_ms, reserve_ms).
+check_budget_respected itself reads no reserve (its /pattern rule is a 200's elapsed time against the budget; the late
+503 window is _budget_503's). Not done (not asked): a stated limits.finalize_reserve_ms other than reserve_ms is not
+flagged as a problem of its own (/resolve's invariants do that for its fixed reserve).
 
 ## Glossary
 

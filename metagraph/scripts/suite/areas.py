@@ -3399,6 +3399,35 @@ def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
     return out
 
 
+# v7 (the owner's decision on SD-021, README "Open items (the harness, 2026-10-17)"): the host's /pattern finalisation
+# reserve is configurable (--pattern-finalize-ms), and checks.evaluate sees no host document, so the manifest states it
+# in the check arguments: budget_respected's args.reserve_ms on every /pattern scenario, the pattern_capabilities
+# document's finalize_reserve_ms of the snapshot the builder reads. checks._pattern_work_time (the work-time bound of
+# every stated time stop or time limitation) reads it from the scenario, never from the answer it judges.
+def state_pattern_reserve(scenarios: List[dict], pattern_caps: dict) -> List[str]:
+    """Adds reserve_ms, the snapshot's /pattern finalisation reserve (|pattern_caps|' finalize_reserve_ms, a
+    number of at least 0, else SystemExit), to the args of every budget_respected expectation of a POST /pattern
+    scenario (a new expectation object: the args the builder shares between scenarios stay as they are); returns the
+    ids changed."""
+    reserve = (pattern_caps or {}).get("finalize_reserve_ms")
+    if not isinstance(reserve, (int, float)) or isinstance(reserve, bool) or reserve < 0:
+        raise SystemExit("the capabilities snapshot's pattern_capabilities states no finalize_reserve_ms (got %s): "
+                         "manifest v7 states the host's /pattern reserve in budget_respected's arguments" % (
+                             json.dumps(reserve),))
+    out = []
+    for s in scenarios:
+        if s.get("route") != "POST /pattern":
+            continue
+        changed = False
+        for i, e in enumerate(s["expect"]):
+            if e.get("check") == "budget_respected":
+                s["expect"][i] = dict(e, args=dict(e.get("args") or {}, reserve_ms=reserve))
+                changed = True
+        if changed:
+            out.append(s["id"])
+    return out
+
+
 # v7 (the service owner's statement, 2026-10-17): the MCP's /pattern answer leaves out the entry's pattern text BY
 # DESIGN, not for want of a feature. A check that reads nothing else of what the answer leaves out is classed
 # service-side by design at property level (mcp.by_design_checks [{check, case}], lane V5's manifest-side mechanism:
