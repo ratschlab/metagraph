@@ -367,5 +367,15 @@ class GroundTruthWordingTest(unittest.TestCase):
         self.assertIn("none(A) rests on A's presence alone", q["units"]["Q-pred-forms"]["property"])
 
 
+class PrimerCountTest(unittest.TestCase):
+    """V6-303: the forward-only primer counts are counts of matching contexts, not of records or gene copies."""
+
+    def test_prose(self):
+        text = prose("N")["families"]["N-usecase"]["prose"]
+        self.assertNotIn("the records holding the gene on the other strand", text)
+        self.assertIn("counts the matching contexts on the strand asked, not records and not verified copies of the "
+                      "gene", text)
+
+
 if __name__ == "__main__":
     unittest.main()
