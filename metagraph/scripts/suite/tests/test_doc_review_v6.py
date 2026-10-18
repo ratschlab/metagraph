@@ -263,5 +263,22 @@ class DefectPinTest(unittest.TestCase):
         self.assertIn("is diagnosed like any failure", note)
 
 
+class SeedPhaseBudgetTest(unittest.TestCase):
+    """V6-002: the catalogue's budget_respected never places the seed phase outside the /traverse budget; a seed-only
+    answer is a limit of the check (a coverage gap), and the 503 contract is /pattern's and /resolve's."""
+
+    def test_catalogue(self):
+        b = prose("checks")["checks"]["budget_respected"]
+        text = str(b)
+        self.assertNotIn("which the budget does not govern", text)
+        self.assertIn("a coverage gap of the suite, not an exemption of the server", b["inconclusive"])
+        self.assertIn("on /pattern and /resolve past the budget the answer is a 503", b["asserts"])
+        row = [r for r in b["decision_table"]["rows"] if r[0] == "a /traverse answer with no walked seed"][0]
+        self.assertIn("no check of this suite judges its termination", row[3])
+        note = prose("N")["details"]["N-hard-0022"]["note"]
+        self.assertNotIn("phases the budget does not cover", note)
+        self.assertIn("read on the seed's own clock, which starts with the seed phase", note)
+
+
 if __name__ == "__main__":
     unittest.main()
