@@ -1345,7 +1345,7 @@ def chapter_facts(ctx, ch):
         e = run.comp_entry(sid)
         d = (run.depth or {}).get(sid)
         if (e.get("mcp_agreement") or {}).get("class") == "agree" and d and d.get("class") != "full":
-            nct = blocks.not_compared_text(d)
+            nct = blocks.not_compared_text(d, list(run.check_marks(sid)) if hasattr(run, "check_marks") else [])
             v["mcp_agree_partial_example"] = "%s (%s%s)" % (
                 sid, blocks.DEPTH_WORD.get(str(d.get("class")), str(d.get("class"))), ("; " + nct) if nct else "")
             break

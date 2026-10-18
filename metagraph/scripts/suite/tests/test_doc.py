@@ -6011,6 +6011,18 @@ class V6DeltaTest(unittest.TestCase):
         run = _Stub(scenario=lambda sid: {"mcp": {}})
         self.assertEqual(blocks.limit_appendix(run, "P-edge-0004", st), "B")
 
+    def test_marked_checks_set_aside_not_uncompared(self):
+        """The delta verifier's L9 (2026-10-18): a check the manifest's property-level marks set aside on the MCP arm
+        reads "set aside by the marks", neither compared nor skipped, in the reading line's example and the classes
+        line; an unmarked check not compared keeps "not compared"."""
+        depth = {"class": "partial", "not_compared": ["entry_fields", "answer_fields"]}
+        self.assertEqual(blocks.not_compared_text(depth), "not compared: entry_fields, answer_fields")
+        self.assertEqual(blocks.not_compared_text(depth, ["entry_fields"]),
+                         "not compared: answer_fields; set aside by the marks: entry_fields")
+        gap = blocks.agreement_gap_text({"class": "partial", "not_compared": ["entry_fields"]}, ["entry_fields"])
+        self.assertIn("entry_fields is set aside by the manifest's marks on the MCP access path", gap)
+        self.assertNotIn("not compared", gap)
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no

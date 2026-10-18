@@ -998,20 +998,26 @@ def partly_compared_items(depth):
     return out
 
 
-def not_compared_text(depth):
+def not_compared_text(depth, marked=()):
     """'not compared: a, b; not compared on r0: c (compared on r1)' for the depth's checks no repeat compared and
-    those a repeat skipped; '' when neither. Plain text."""
+    those a repeat skipped; '' when neither. A check the manifest's property-level marks set aside on the MCP arm
+    (`marked`, run.check_marks) is neither compared nor skipped (I.3): 'set aside by the marks: entry_fields' (the
+    delta verifier's L9). Plain text."""
     parts = []
     nc = [str(c) for c in (depth.get("not_compared") or [])]
+    aside = [c for c in nc if c in set(marked or ())]
+    nc = [c for c in nc if c not in aside]
     if nc:
         parts.append("not compared: %s" % latex.cut_text(", ".join(nc), 120))
+    if aside:
+        parts.append("set aside by the marks: %s" % latex.cut_text(", ".join(aside), 120))
     for name, skipped, compared in partly_compared_items(depth):
         parts.append("not compared on %s: %s (compared on %s)" % (
             _repeats_text(skipped), name, _repeats_text(compared) if compared else "no other repeat"))
     return "; ".join(parts)
 
 
-def depth_text(depth, gap_said=False):
+def depth_text(depth, gap_said=False, marked=()):
     """An agreement's depth in words over the MCP repeats compare compared, the excluded repeats named with their
     reason (the owner's second review, point 2; reader.depth_over_compared_repeats): 'fully checked on r1; r0 was
     an inconclusive host-state outcome', 'fully checked on r0 and r1', 'partially checked on r0 (not compared:
@@ -1030,7 +1036,7 @@ def depth_text(depth, gap_said=False):
         text = DEPTH_WORD.get(cls, cls.replace("_", " "))
         if reps:
             text += " on " + _repeats_text(reps)
-    nct = "" if gap_said else not_compared_text(depth)
+    nct = "" if gap_said else not_compared_text(depth, marked)
     if nct:
         text += " (%s)" % nct
     for e in depth.get("repeats_excluded") or []:
@@ -1039,7 +1045,7 @@ def depth_text(depth, gap_said=False):
     return text
 
 
-def agreement_gap_text(depth):
+def agreement_gap_text(depth, marked=()):
     """What an MCP agreement short of fully checked leaves out, in the reader's terms (READ-110): the property
     checks no repeat compared (not decided on both access paths on any repeat: the agreement does not establish
     them), the checks one repeat left undecided while another repeat decided them on both (the agreement
@@ -1055,6 +1061,13 @@ def agreement_gap_text(depth):
                 "agreement establishes no property")
     head = "the two access paths agree on the checks both evaluated"
     clauses = []
+    aside = [c for c in nc if c in set(marked or ())]
+    nc = [c for c in nc if c not in aside]
+    if aside:
+        # a check the manifest's marks set aside on the MCP arm is neither compared nor skipped (L9)
+        clauses.append("%s %s set aside by the manifest's marks on the MCP access path: the agreement does not "
+                       "establish %s" % (latex.cut_text(", ".join(aside), 120), "is" if len(aside) == 1 else "are",
+                                         "that property" if len(aside) == 1 else "those properties"))
     if nc:
         clauses.append("%s %s not compared on any repeat (not decided on both access paths): the agreement does not "
                        "establish %s" % (latex.cut_text(", ".join(nc), 120), "was" if len(nc) == 1 else "were",
@@ -1102,12 +1115,14 @@ def _classes_text(run, sid, states):
         if mcls == "agree" and depth and depth.get("class") != "full":
             # the agreement establishes less than the property: say what it leaves out first, the internal class
             # and the depth after it (READ-110)
-            text = "mcp: " + esc(agreement_gap_text(depth)) + " (class agree"
+            marked = list(run.check_marks(sid)) if hasattr(run, "check_marks") else []
+            text = "mcp: " + esc(agreement_gap_text(depth, marked)) + " (class agree"
             if ma.get("checks_compared") is not None:
                 text += ", %s check(s) compared" % esc(ma["checks_compared"])
             # the gap sentence names the checks not compared except for a generic-only or refusal agreement, whose
             # depth keeps its own clause (the re-verification L-f: the clause said once)
-            text += "; %s)" % esc(depth_text(depth, gap_said=depth.get("class") not in ("generic_only", "refusal")))
+            text += "; %s)" % esc(depth_text(depth, gap_said=depth.get("class") not in ("generic_only", "refusal"),
+                                             marked=marked))
         elif mcls == "missing" and not cells.planned_on(run, sid, "mcp"):
             # compare's class for a scenario with no MCP execution, where the plan runs it on the direct access
             # paths alone (v6's warm-ups): no execution was planned, so nothing is missing (the verifier's M1)
@@ -1122,7 +1137,8 @@ def _classes_text(run, sid, states):
             if ma.get("checks_compared") is not None and mcls in ("agree", "disagree"):
                 text += "; %s check(s) compared" % esc(ma["checks_compared"])
             if depth:
-                text += "; " + esc(depth_text(depth))
+                text += "; " + esc(depth_text(depth, marked=list(run.check_marks(sid)) if hasattr(run, "check_marks")
+                                              else []))
         if ma.get("differing_checks"):
             text += "; differing checks: %s" % esc(", ".join(str(c) for c in ma["differing_checks"]), 160)
         if mcls == "service_by_design" and ma.get("verified") is False:
