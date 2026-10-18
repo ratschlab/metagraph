@@ -4124,7 +4124,10 @@ def evidence_manifest(ctx):
                  "verdict": None if not gate else ("GATE PASS" if gate.get("passed") else "GATE FAIL"),
                  "judged_offline_for_this_document": bool(run.gate_offline), "policy": pol, "also_policies": also,
                  "declared": None if not dec else {"path": latex.public_paths(dec_path) if dec_path else dec.get(
-                     "_file"), "sha256": _file_sha256(dec_path) if dec_path else None}},
+                     "_file"), "sha256_file": _file_sha256(dec_path) if dec_path else None,
+                     # the policy pins the declared file by the sha256 of its canonical JSON (gate_policy.py)
+                     "sha256_canonical": hashlib.sha256(sc.canonical_json(dict(
+                         (k, v) for k, v in dec.items() if k != "_file"))).hexdigest()}},
         "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
         if table.get("path") else None,
         "service_identity": None if not ident else {
