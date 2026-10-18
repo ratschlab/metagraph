@@ -682,5 +682,13 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertIn("a plain absence that says nothing of the strand (chapter T)", graph)
 
 
+    def test_l2_r2_004_telomere_note(self):
+        note = prose("N")["units"]["N-hard-repeat"]["note"]
+        self.assertNotIn("not the seed phase", note)
+        self.assertIn("read on the seed's own clock, which starts with the seed phase", note)
+        self.assertIn("[[x[N-hard-0022][footnoted] ?", note)
+        self.assertEqual(facts.fill(note, {"x": {"N-hard-0022": {"footnoted": False}}}).count("detail block"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
