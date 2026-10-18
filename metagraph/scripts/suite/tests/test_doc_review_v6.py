@@ -566,5 +566,60 @@ class RelationArgumentsTest(unittest.TestCase):
                       prose("overview")["appendix_C"]["paragraphs"][0])
 
 
+class EvidenceManifestTest(unittest.TestCase):
+    """V6-004: the build writes evidence.json beside doc.tex (every input the document read, with its path in the
+    suite's tree and its sha256, the gate's record and policies, the declared file, the by-design table), with no
+    local path; appendix F names it and gate_problems.json as files of the build directory."""
+
+    def test_written(self):
+        import json
+        import shutil
+        import tempfile
+        import compare as cmp
+        import make_doc
+        import merge_run
+        import reader
+        import units as units_mod
+        from test_compare_report import CASES, build_run
+        from test_doc import FAKE_MAPPING
+        tmp = tempfile.mkdtemp()
+        try:
+            run_dir = os.path.join(tmp, "run")
+            os.makedirs(run_dir)
+            build_run(run_dir)
+            merge_run.merge(run_dir)
+            sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": 5})))
+            mapping = os.path.join(tmp, "units.json")
+            with open(mapping, "w") as fh:
+                json.dump(FAKE_MAPPING, fh)
+            prose_dir = os.path.join(tmp, "prose")
+            run = reader.Run(run_dir)
+            make_doc.scaffold_prose(prose_dir, units_mod.resolve(run.manifest, FAKE_MAPPING), run)
+            out = os.path.join(tmp, "out")
+            self.assertEqual(make_doc.main([run_dir, "--out", out, "--no-pdf", "--units", mapping, "--prose-dir",
+                                            prose_dir]), 0)
+            with open(os.path.join(out, "evidence.json"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertNotIn(tmp, text)
+            self.assertNotIn(os.path.realpath(tmp), text)
+            ev = json.loads(text)
+            self.assertEqual(ev["document"]["run_id"], run.run_id())
+            self.assertEqual(ev["document"]["set"], "recorded")
+            paths = dict((i["path"], i) for i in ev["inputs"])
+            self.assertEqual(paths["executions.jsonl"]["role"], "read by this document")
+            self.assertEqual(paths["executions.jsonl"]["sha256"],
+                             reader.sha256_of(os.path.join(run_dir, "executions.jsonl")))
+            self.assertIn("manifest.json", paths)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_appendix_text(self):
+        lead = prose("overview")["appendix_F"]["paragraphs"][0]
+        self.assertNotIn("written beside this document", lead)
+        self.assertIn("`evidence.json`, every input this document read", lead)
+        import inspect
+        self.assertNotIn("beside this document", inspect.getsource(sections.gate_action_table))
+
+
 if __name__ == "__main__":
     unittest.main()

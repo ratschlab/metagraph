@@ -5,6 +5,7 @@ section (observations, plots, tables) and the appendices. Every function returns
 `reader.Run`, a `units.Units` and the prose dicts.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -4066,6 +4067,72 @@ def environment_table(ctx):
 
 
 GATE_PROBLEMS_FILE = "gate_problems.json"
+# the inputs this document read, each with its path in the suite's tree and its sha256, written beside doc.tex and
+# doc.pdf (the external review of the v6 document, V6-004: a recipient of the PDF can retrieve and check every
+# record behind its decision; deterministic, no clock)
+EVIDENCE_FILE = "evidence.json"
+EVIDENCE_RUN_FILES = ("manifest.json", "run.json", "run.reevaluated.json", "executions.jsonl",
+                      "executions.reevaluated.jsonl", "compare.json", "compare.reevaluated.json", "reevaluated.json",
+                      "plan.json", "orchestrator.json", "samples.jsonl", "gate.json", "gate.reevaluated.json",
+                      "arms/direct-local/run.json", "arms/direct-remote/run.json", "arms/mcp/run.json")
+
+
+def _file_sha256(path):
+    try:
+        return reader.sha256_of(path)
+    except (OSError, TypeError):
+        return None
+
+
+def evidence_manifest(ctx):
+    """{document, run_directory, inputs, gate, by_design_table, service_identity} of this build (V6-004): every run
+    file the document read (the set it read marked), the gate's record and policies, the declared file, the
+    by-design table, the deployed service's identity as given; paths in the suite's tree (latex.public_paths)."""
+    run = ctx.run
+    inputs = []
+    for name in EVIDENCE_RUN_FILES:
+        path = os.path.join(run.dir, name)
+        if os.path.exists(path):
+            # the set this document did not read (the recorded one beside a re-evaluation, or the reverse), and a
+            # recorded gate verdict the document judged again offline, are listed as present, not read
+            other = (name in ("executions.jsonl", "compare.json", "run.json", "gate.json") and run.reevaluated) or \
+                (name.endswith(".reevaluated.jsonl") or name.endswith(".reevaluated.json")) and not run.reevaluated
+            if name.startswith("gate") and run.gate_offline:
+                other = True
+            inputs.append({"path": name, "sha256": _file_sha256(path), "role": "present, not read" if other
+                           else "read by this document"})
+    gate = run.gate if isinstance(run.gate, dict) else None
+    pol = None
+    if run.policy_path:
+        pol = {"path": latex.public_paths(run.policy_path), "sha256_file": _file_sha256(run.policy_path),
+               "sha256_canonical": ((gate or {}).get("policy") or {}).get("sha256")}
+    also = [{"path": latex.public_paths(e.get("path")), "sha256_file": _file_sha256(e.get("path")),
+             "verdict": None if not isinstance(e.get("verdict"), dict) else
+             ("PASS" if e["verdict"].get("passed") else "FAIL")} for e in (getattr(run, "also_gates", None) or [])]
+    dec = run.declared if isinstance(run.declared, dict) else None
+    dec_path = os.path.join(reader.SUITE_DIR, "gate", dec["_file"]) if dec and dec.get("_file") else None
+    table = run.table_meta or {}
+    ident = run.identity if isinstance(getattr(run, "identity", None), dict) else None
+    return {
+        "document": {"run_id": run.run_id(), "set": "re-evaluated" if run.reevaluated else "recorded",
+                     "generator": "metagraph/scripts/suite/doc/make_doc.py",
+                     "generator_commit": reader.git_commit_of(HERE, os.path.dirname(HERE)),
+                     "checks": checks_commit_text(run), "chapters": list(ctx.chapters)},
+        "run_directory": latex.public_paths(run.dir),
+        "inputs": inputs,
+        "gate": {"record": GATE_PROBLEMS_FILE if gate else None,
+                 "verdict": None if not gate else ("GATE PASS" if gate.get("passed") else "GATE FAIL"),
+                 "judged_offline_for_this_document": bool(run.gate_offline), "policy": pol, "also_policies": also,
+                 "declared": None if not dec else {"path": latex.public_paths(dec_path) if dec_path else dec.get(
+                     "_file"), "sha256": _file_sha256(dec_path) if dec_path else None}},
+        "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
+        if table.get("path") else None,
+        "service_identity": None if not ident else {
+            "source": ident.get("source"), "service_commit": ident.get("service_commit"),
+            "railway_deployment_id": ident.get("railway_deployment_id"),
+            "sha256_canonical": hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8")).hexdigest()},
+    }
 
 
 def gate_action_table(ctx, problems):
@@ -4115,7 +4182,8 @@ def gate_action_table(ctx, problems):
     return latex.plain_table(latex.spec_p([30, 26, 50, 68]),
                              ["group", "problems (by the gate's kind)", "scope", "what it implies and what clears it"],
                              rows, "the gate's problems by what they ask of the owner; the full texts follow, and every "
-                                   "problem in full is in {\\upshape %s} beside this document" % tt(GATE_PROBLEMS_FILE),
+                                   "problem in full is in {\\upshape %s} of this document's build directory" % tt(
+                                       GATE_PROBLEMS_FILE),
                              needspace=12)
 
 
@@ -4385,6 +4453,7 @@ def appendices(ctx):
     out += latex.section("E\\qd %s" % titles["E"], "app:E")
     out += index(ctx)
     out += latex.section("F\\qd %s" % titles["F"], "app:F")
+    ctx.data_files[EVIDENCE_FILE] = json.dumps(evidence_manifest(ctx), indent=1, sort_keys=True) + "\n"
     out += appendix_lead(ctx, "appendix_F")
     out += "\\parhead{Environment}\n" + environment_table(ctx)
     out += reruns_table(ctx)
