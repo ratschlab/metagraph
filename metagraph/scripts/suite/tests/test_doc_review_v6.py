@@ -348,5 +348,24 @@ class ZeroEqualsAbsentTest(unittest.TestCase):
         self.assertNotIn("in no record of the index", text)
 
 
+class GroundTruthWordingTest(unittest.TestCase):
+    """V6-008: the overview keeps the server's completeness statement apart from an independent enumeration.
+    V6-301: chapter Q names exactly the expectations that depend on the assumed human non-carrier."""
+
+    def test_overview_completeness(self):
+        text = prose("overview")["sections"]["methods"]["paragraphs"][2]
+        self.assertNotIn("which no check of this suite establishes other than through a complete list", text)
+        self.assertIn("enumerates no matching result of the index independently", text)
+        self.assertIn("lower bounds on recovery", text)
+
+    def test_q_assumption(self):
+        q = prose("Q")
+        fam = q["families"]["Q-pred"]["prose"]
+        self.assertIn("The assumption decides the expectations of `all(A, human)`, `at_least` 2 of (A, human) and "
+                      "`and(any A, not any human)`; `none(A)` is expected false from A's known presence alone", fam)
+        self.assertNotIn("the human column (hsa) does not;", str(q))
+        self.assertIn("none(A) rests on A's presence alone", q["units"]["Q-pred-forms"]["property"])
+
+
 if __name__ == "__main__":
     unittest.main()
