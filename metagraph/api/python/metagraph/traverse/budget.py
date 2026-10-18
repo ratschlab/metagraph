@@ -399,7 +399,9 @@ class _OncePerCall:
     def uses_of(self, owner, name, work, nbytes=0, *, depth=None):
         """Charge |owner|'s derivation |name| (at |depth|) at its (cold) price, once per
         outermost call however often the call's parts use it; True when this use charged
-        it. A stop raises before the key is remembered."""
+        it. A stop raises before the key is remembered. |owner| is held until the
+        outermost scope ends; a charge made outside any scope (the library makes none)
+        holds it until the next outermost call starts."""
         used, held = self._keys()
         k = id(owner)
         key = (k, name) if depth is None else (k, name, depth)

@@ -3937,7 +3937,8 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
         phases['keys:' + tag] = t.work - w0
     if mode == 'prefix_subset':
         unpriced.append('omissions')
-    else:
+    elif mode not in ('claims', 'labels'):
+        # claims and labels price their difference rows above (_charge_differences())
         unpriced.append('differences')
     return result(False, unpriced, est_w, est_m)
 
