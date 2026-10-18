@@ -400,7 +400,9 @@ def unshown_reason(run, sid, line, arm, short=False):
     if props:
         if short:
             return "%s could not decide" % props[0].get("check")
-        return "%s inconclusive: %s" % (props[0].get("check"), _clause(props[0].get("detail"), 110))
+        # every property check the execution left undecided (the verification of the review's fixes, L6)
+        return "; ".join("%s inconclusive: %s" % (c.get("check"), _clause(c.get("detail"), 110 if len(props) == 1
+                                                                            else 80)) for c in props)
     if short:
         hidden = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "not_exposed"
                   and run.is_property(c.get("check"))]
@@ -420,8 +422,17 @@ def unshown_reasons_text(run, sid, states):
         if not st.present:
             continue
         by_reason = []
+        marked = set(run.check_marks(sid)) if hasattr(run, "check_marks") else set()
         for l in st.lines:
             why = unshown_reason(run, sid, l, arm)
+            if not why and l.get("outcome") == "pass":
+                # a passing repeat whose property check the MCP answer did not expose, unless the manifest's marks
+                # set that check aside (L6: v5's D-P-scope-0004 r1, r2 pass on deterministic alone)
+                hidden = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") ==
+                          "not_exposed" and run.is_property(c.get("check")) and c.get("check") not in marked]
+                if hidden:
+                    why = "; ".join("%s not exposed via MCP: %s" % (c.get("check"), _cut(c.get("detail"), 100))
+                                    for c in hidden)
             if not why:
                 continue
             for r in by_reason:

@@ -722,5 +722,22 @@ class VerifyRoundTest(unittest.TestCase):
                       "is an exact 0 or a complete empty list)", text)
 
 
+    def test_l6_every_unshown_check(self):
+        run = _Stub(is_property=lambda name: name not in ("status", "invariants", "budget_respected"),
+                    budget_ms=lambda sid: 110000, check_marks=lambda sid: {})
+        two = {"outcome": "inconclusive", "http": 200, "repeat": 0, "checks": [
+            {"check": "contains_source_context", "outcome": "inconclusive", "detail": "0 of 1 returned"},
+            {"check": "count_relation", "outcome": "inconclusive", "detail": "contexts at_least 3 after the stop"}]}
+        passing = {"outcome": "pass", "http": 200, "repeat": 1, "checks": [
+            {"check": "deterministic", "outcome": "pass"},
+            {"check": "entry_fields", "outcome": "not_exposed", "detail": "field not in the answer: absence_scope"}]}
+        states = {"direct-local": _Arm([], False), "direct-remote": _Arm([], False), "mcp": _Arm([two, passing])}
+        text = facts.unshown_reasons_text(run, "S", states)
+        self.assertIn("mcp r0: contains_source_context inconclusive: 0 of 1 returned; count_relation inconclusive", text)
+        self.assertIn("mcp r1: entry_fields not exposed via MCP: field not in the answer: absence_scope", text)
+        run.check_marks = lambda sid: {"entry_fields": {}}
+        self.assertNotIn("r1", facts.unshown_reasons_text(run, "S", states))
+
+
 if __name__ == "__main__":
     unittest.main()
