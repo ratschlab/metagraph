@@ -106,5 +106,32 @@ class GatePopulationTest(unittest.TestCase):
         self.assertIn("{gate_auto_text}", prose("overview")["sections"]["provenance"]["exemptions"][0])
 
 
+class FullyCheckedTest(unittest.TestCase):
+    """V6-201: 'fully checked' holds over the property checks no property-level mark sets aside; the chapter's MCP
+    sentence names the agreeing pairs that omit a marked check, which stays unverified via MCP."""
+
+    def test_definition(self):
+        ctx = _Stub(units=_Stub(by_scenario={}))
+        self.assertEqual(facts.mcp_full_definition(ctx, []), "every property check evaluated on both")
+        self.assertEqual(facts.mcp_full_definition(ctx, ["T-labels-0003", "T-labels-0005", "T-labels-0006"]),
+                         "every property check evaluated on both, except a check a property-level mark of the manifest "
+                         "sets aside, not compared and unverified via MCP (on three of them: T-labels-0003, -0005 and "
+                         "-0006)")
+        many = ["P-exact-%04d" % i for i in range(1, 9)] + ["P-scope-0001", "P-edge-0004"]
+        self.assertTrue(facts.mcp_full_definition(ctx, many).endswith(
+            "(on ten of them: P-exact 8, P-scope 1, P-edge 1)"))
+
+    def test_prose(self):
+        for ch in ("R", "T", "P", "L", "X", "M", "Q", "N", "D"):
+            text = str(prose(ch))
+            self.assertEqual(text.count("{mcp_full_def}"), 2, ch)
+            self.assertNotIn("(every property check evaluated on both)", text, ch)
+        depth = prose("overview")["sections"]["reading"]["paragraphs"][3]
+        self.assertIn("except a check a property-level mark of the manifest sets aside: that check is not compared "
+                      "and stays unverified via MCP", depth)
+        gloss = [e for e in prose("glossary")["entries"] if e["term"] == "agreement class, depth"][0]["definition"]
+        self.assertIn("but a check a property-level mark of the manifest sets aside", gloss)
+
+
 if __name__ == "__main__":
     unittest.main()

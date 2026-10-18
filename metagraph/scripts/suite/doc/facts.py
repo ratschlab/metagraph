@@ -1187,6 +1187,32 @@ def _claim(ctx, fid, fv, claim, wanted, held, unsupported, items=None):
                       "words": " / ".join(words) or "no execution"})
 
 
+MCP_FULL_DEF = "every property check evaluated on both"
+
+
+def mcp_full_definition(ctx, marked):
+    """What 'fully checked' covers in a chapter's MCP sentence (V6-201): every property check evaluated on both, or,
+    where agreeing pairs omit a check the manifest's property-level marks set aside, that exception with their count
+    by family; the marked check is not compared and stays unverified via MCP."""
+    if not marked:
+        return MCP_FULL_DEF
+    if len(marked) <= 3:
+        which = _ids_short(marked)
+    else:
+        fams = []
+        for sid in marked:
+            fid = sid.rsplit("-", 1)[0]
+            for f in fams:
+                if f[0] == fid:
+                    f[1] += 1
+                    break
+            else:
+                fams.append([fid, 1])
+        which = ", ".join("%s %d" % (f, k) for f, k in fams)
+    return ("%s, except a check a property-level mark of the manifest sets aside, not compared and unverified via MCP "
+            "(on %s of them: %s)" % (MCP_FULL_DEF, number_word(len(marked)), which))
+
+
 def chapter_facts(ctx, ch):
     """A chapter's values for its `summary` and `coverage_gap` prose: the counts by standing and by agreement, the
     timing of the summary's sources, the findings, the time limitations, the claims held and unsupported, the
@@ -1214,6 +1240,7 @@ def chapter_facts(ctx, ch):
     direct, mcp = {}, {}
     full, verified, unverified = 0, 0, 0
     fewer = []  # the fully checked pairs whose comparison left a repeat out (a host-state outcome)
+    full_marked = []  # the fully checked pairs with a property check a property-level mark sets aside (V6-201)
     for sid in sids:
         e = run.comp_entry(sid)
         dc = (e.get("direct_agreement") or {}).get("class")
@@ -1232,6 +1259,8 @@ def chapter_facts(ctx, ch):
             full += 1
             if d.get("repeats_excluded"):
                 fewer.append(sid)
+            if hasattr(run, "check_marks") and run.check_marks(sid):
+                full_marked.append(sid)
     for key in ("identical", "same_checks", "timing", "not_comparable", "disagree"):
         v["n_direct_%s" % key] = direct.get(key, 0)
     words = {"identical": "identical pair{s}", "timing": "differing by a time limitation alone",
@@ -1246,6 +1275,11 @@ def chapter_facts(ctx, ch):
     v["n_mcp_agree"] = mcp.get("agree", 0)
     v["n_mcp_full"] = full
     v["mcp_all_full"] = full == mcp.get("agree", 0)
+    # fully checked holds over the property checks the manifest's property-level marks do not set aside (the
+    # external review of the v6 document, V6-201): the pairs that omit a marked check, counted by family, so that
+    # the chapter's definition never claims the marked check was evaluated via MCP
+    v["n_mcp_full_marked"] = len(full_marked)
+    v["mcp_full_def"] = mcp_full_definition(ctx, full_marked)
     # the fully checked pairs compared on fewer repeats than recorded, each with the repeats compared and the
     # excluded one's reason (reader.depth_over_compared_repeats; the owner's second review, point 2)
     v["n_mcp_full_fewer_repeats"] = len(fewer)

@@ -163,7 +163,7 @@
   },
   {
    "term": "agreement class, depth",
-   "definition": "The direct paths per scenario: identical (same digest), same checks, timing (a time limitation alone), not comparable, disagree. mcp against the reference path, check by check: agree, not comparable, disagree; not implemented and by design apart. Depth of an agreement, judged over the MCP repeats compared (a repeat inconclusive by a host state is left out and named): fully checked (every expected property check on both paths, on every compared repeat), partial, generic checks only, a refusal. An agreement compares answers with one another and is no second proof of the property; a disagreement fails the run.",
+   "definition": "The direct paths per scenario: identical (same digest), same checks, timing (a time limitation alone), not comparable, disagree. mcp against the reference path, check by check: agree, not comparable, disagree; not implemented and by design apart. Depth of an agreement, judged over the MCP repeats compared (a repeat inconclusive by a host state is left out and named): fully checked (every expected property check on both paths, on every compared repeat, but a check a property-level mark of the manifest sets aside, which is not compared and stays unverified via MCP), partial, generic checks only, a refusal. An agreement compares answers with one another and is no second proof of the property; a disagreement fails the run.",
    "see": [
     "access path (arm)"
    ]
