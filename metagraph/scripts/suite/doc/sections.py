@@ -652,7 +652,8 @@ def gate_scope(run):
 GATE_RULE_WORDS = (
     ("budget_stress", "tagged budget_stress: a property that depends on the host's load, which no budget makes "
                       "decisive"),
-    ("manifest_not_implemented", "the manifest marks the request not implemented via MCP"),
+    ("manifest_not_implemented", "the manifest marks the scenario not implemented via MCP (its request, or the field "
+                                 "its check reads)"),
     ("table_not_expressible", "a by-design case the scenario names states the request not expressible via MCP"),
     ("advanced_path", "traverse_fetch arguments on the advanced strategy path, which the deployment does not enable"),
     ("marks_cover_repeat", "on this MCP repeat the manifest's property-level marks set aside every property check "
@@ -714,12 +715,14 @@ def gate_auto_text(run):
         return ""
     kinds = {}
     for (rules, arms, repeats), sids in pop["groups"]:
-        k = kinds.setdefault(_gate_auto_kind(rules), {"n": 0, "arms": [], "repeats": set()})
+        k = kinds.setdefault(_gate_auto_kind(rules), {"n": 0, "arms": [], "repeats": set(), "sids": []})
         k["n"] += len(sids)
+        k["sids"].extend(sids)
         for a in arms:
             if a not in k["arms"]:
                 k["arms"].append(a)
         k["repeats"].update(repeats)
+    answer_side = set(answer_side_mark_ids(run)) if hasattr(run, "scenario") and hasattr(run, "order") else set()
     words = {"budget": ("budget-stress test", "budget-stress tests"),
              "mcp": ("request the MCP tools cannot express", "requests the MCP tools cannot express"),
              "advanced": ("request on the advanced strategy path", "requests on the advanced strategy path"),
@@ -734,6 +737,19 @@ def gate_auto_text(run):
         k = kinds[kind]
         w = words.get(kind, (kind, kind))
         arms = [a for a in sc.ARMS if a in k["arms"]] + [a for a in k["arms"] if a not in sc.ARMS]
+        # the verification of the review's fixes, M1: a scenario-level answer-side mark (v6's P-scope-0004 / -0006)
+        # is expressible through the tools, its answer lacking the field its check reads: the group is worded by its
+        # rules and those scenarios are named apart, never counted among the requests the tools cannot express
+        answer = [s for s in k["sids"] if s in answer_side] if kind == "mcp" else []
+        if answer:
+            n_req = k["n"] - len(answer)
+            parts.append("%d that the manifest or the by-design table marks not implemented or not expressible via "
+                         "MCP, on %s (%d request%s the tools cannot express; %s, whose MCP answer lacks the field "
+                         "%s check%s read%s)" % (
+                             k["n"], " and ".join(arms) or "every access path", n_req, "" if n_req == 1 else "s",
+                             facts._ids_short(answer), "its" if len(answer) == 1 else "their",
+                             "" if len(answer) == 1 else "s", "s" if len(answer) == 1 else ""))
+            continue
         parts.append("%d %s on %s%s" % (k["n"], w[0] if k["n"] == 1 else w[1], " and ".join(arms) or "every access "
                                         "path", (" (repeat%s %s only)" % ("" if len(k["repeats"]) == 1 else "s",
                                                                          ", ".join(str(r) for r in

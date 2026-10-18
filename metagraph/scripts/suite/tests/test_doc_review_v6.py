@@ -85,6 +85,23 @@ class GatePopulationTest(unittest.TestCase):
         self.assertIn(text, decision)
         self.assertIn("removed by the policy's automatic exclusions", sections.gate_inconclusive_clause(run))
 
+    def test_answer_side_named_apart(self):
+        """The verification's M1: an answer-side scenario-level mark is expressible through the tools; the group is
+        worded by its rules and such a scenario named apart, never counted as a request the tools cannot express."""
+        run = self._run()
+        run.policy["exclusions"].append({"scenario": "T-d", "arms": ["mcp"], "rules": ["manifest_not_implemented"],
+                                         "reason": "answer"})
+        run.scenario = lambda sid: {}
+        orig = sections.answer_side_mark_ids
+        self.addCleanup(setattr, sections, "answer_side_mark_ids", orig)
+        sections.answer_side_mark_ids = lambda r: ["T-d"]
+        text = sections.gate_auto_text(run)
+        self.assertIn("2 that the manifest or the by-design table marks not implemented or not expressible via MCP, "
+                      "on mcp (1 request the tools cannot express; T-d, whose MCP answer lacks the field its check "
+                      "reads)", text)
+        self.assertIn("(its request, or the field its check reads)", dict(sections.GATE_RULE_WORDS)[
+            "manifest_not_implemented"])
+
     def test_judged_outcomes(self):
         """The judged executions by outcome, as gate.judge counts them: T-b (budget_stress), T-c via MCP, T-d's MCP
         repeat 0, T-a's declared MCP repeat 1 and T-e (outside the selection) are not judged."""
