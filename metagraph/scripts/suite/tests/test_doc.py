@@ -5930,6 +5930,39 @@ class V6DeltaTest(unittest.TestCase):
                       "pair warm after an interrupted execution is left out.", filled)
         self.assertIn('"" if dec["relations_excluded"] == 1 else "s"', inspect.getsource(sections))
 
+    def test_unplanned_absence_is_no_execution(self):
+        """The delta verifier's M1 (2026-10-18): an arm the run's plan does not schedule for a test (v6's direct-local
+        warm-ups on direct-remote and mcp) reads "no execution planned" in the coverage line, the agreement row and
+        the classes line, never "not recorded" or compare's bare "missing"; a planned execution not recorded keeps
+        its words."""
+        def st(present, planned_missing=False):
+            a = cells.ArmState("mcp")
+            a.present = present
+            a.missing_planned = planned_missing
+            a.not_planned = not present and not planned_missing
+            if present:
+                a.glyph_key, a.worst, a.lines = "pass", "pass", [{"outcome": "pass"}]
+            return a
+        states = {"W-1": {"mcp": st(False)}, "W-2": {"mcp": st(False)}, "X-1": {"mcp": st(False, True)}}
+        text = cells.coverage_text(states, "mcp")
+        self.assertIn("no execution planned 2\\,\\gnone{}", text)
+        self.assertIn("not recorded 1\\,", text)
+
+        class Run(object):
+            depth = {}
+
+            def comp_entry(self, sid):
+                return {"mcp_agreement": {"class": "missing"}}
+
+            def planned_on(self, sid, arm):
+                return arm == "direct-local"
+
+        self.assertEqual(blocks._classes_text(Run(), "W-1", {"mcp": st(False)}),
+                         ["mcp: no MCP execution planned (the plan runs this test on direct-local alone)"])
+        ctx = _Stub(run=Run())
+        self.assertIn(", 2 with no MCP execution planned", sections._agreement_counts(ctx, ["W-1", "W-2"])[1])
+        self.assertNotIn("missing", sections._agreement_counts(ctx, ["W-1", "W-2"])[1])
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no

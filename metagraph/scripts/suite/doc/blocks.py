@@ -1095,6 +1095,12 @@ def _classes_text(run, sid, states):
             # the gap sentence names the checks not compared except for a generic-only or refusal agreement, whose
             # depth keeps its own clause (the re-verification L-f: the clause said once)
             text += "; %s)" % esc(depth_text(depth, gap_said=depth.get("class") not in ("generic_only", "refusal")))
+        elif mcls == "missing" and not cells.planned_on(run, sid, "mcp"):
+            # compare's class for a scenario with no MCP execution, where the plan runs it on the direct access
+            # paths alone (v6's warm-ups): no execution was planned, so nothing is missing (the verifier's M1)
+            planned = [a for a in cells.ARMS if a != "mcp" and cells.planned_on(run, sid, a)]
+            text = "mcp: no MCP execution planned%s" % (
+                (" (the plan runs this test on %s alone)" % esc(" and ".join(planned))) if planned else "")
         else:
             text = "mcp: %s" % (esc(mcls.replace("_", " ")) if mcls != "not_implemented_mcp"
                                 else cells.attn("not implemented via MCP"))

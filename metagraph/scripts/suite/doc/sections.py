@@ -2000,6 +2000,9 @@ def _agreement_counts(ctx, sids):
         mc = (e.get("mcp_agreement") or {}).get("class")
         if dc:
             direct[dc] = direct.get(dc, 0) + 1
+        if mc == "missing" and not cells.planned_on(run, sid, "mcp"):
+            # no MCP execution because the plan runs the test on the direct access paths alone: not missing (M1)
+            mc = "not_planned"
         if mc:
             mcp[mc] = mcp.get(mc, 0) + 1
             if mc == "service_by_design":
@@ -2021,6 +2024,8 @@ def _agreement_counts(ctx, sids):
                 cells.attn_marked("%d not implemented" % n_ni) if n_ni else "0 not implemented",
                 mcp.get("service_by_design", 0), verified, unverified, mcp.get("not_comparable", 0),
                 mcp.get("disagree", 0), (", %d missing" % mcp["missing"]) if mcp.get("missing") else "")
+    if mcp.get("not_planned"):
+        mtext += ", %d with no MCP execution planned" % mcp["not_planned"]
     return esc(dtext), esc(mtext)
 
 

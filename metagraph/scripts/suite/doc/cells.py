@@ -302,6 +302,7 @@ class ArmState(object):
         self.lines = []
         self.present = False
         self.missing_planned = False
+        self.not_planned = False  # absent, and the run's plan does not schedule it (reader.Run.planned_on)
         self.outcomes = []
         self.worst = None
         self.glyph_key = None
@@ -404,6 +405,8 @@ def _arm_state(run, sid, arm):
         planned_on = getattr(run, "planned_on", None)
         st.missing_planned = run.planned_missing(sid, arm) or (arm == "mcp" and ma.get("class") == "missing" and (
             planned_on is None or planned_on(sid, arm)))
+        st.not_planned = (not st.missing_planned and getattr(run, "planned_pairs", None) is not None
+                          and planned_on is not None and not planned_on(sid, arm))
         if st.missing_planned:
             st.clean = False
             st.reasons.append("a planned execution was not recorded")
@@ -452,6 +455,13 @@ def _arm_state(run, sid, arm):
         st.clean = False
         st.reasons.insert(0, WORD.get(st.worst, str(st.worst)))
     return st
+
+
+def planned_on(run, sid, arm):
+    """Whether the run's plan schedules the scenario on the arm (reader.Run.planned_on); True for a run object
+    without the method (a fixture or a run without a plan reads as before)."""
+    fn = getattr(run, "planned_on", None)
+    return True if fn is None else bool(fn(sid, arm))
 
 
 def relation_unrun(run, rel, arm, outcome):
@@ -626,9 +636,12 @@ def coverage_text(states, arm):
     rest = [m for m in members if m not in exercised and m not in partly]
     ni = [m for m in rest if m.present and m.glyph_key == "not_implemented_mcp"]
     bd = [m for m in rest if m.present and m.glyph_key == "service_by_design"]
+    # an absent execution the plan did not schedule (v6's direct-local warm-ups on the other arms) is no execution,
+    # not a planned one not recorded (the verifier's M1); a planned one is `missing_planned` and footnoted
+    unplanned = [m for m in rest if not m.present and getattr(m, "not_planned", False)]
     other = {}
     for m in rest:
-        if m in ni or m in bd:
+        if m in ni or m in bd or m in unplanned:
             continue
         other[m.glyph_key] = other.get(m.glyph_key, 0) + 1
     text = "exercised %d/%d" % (len(exercised) + len(partly), n)
@@ -643,6 +656,8 @@ def coverage_text(states, arm):
     other_text = " ".join("%d\\,%s{}" % (other[k], GLYPH.get(k, "\\gnone")) for k in GLYPH_ORDER if other.get(k))
     if other_text:
         text += "; not recorded %s" % other_text
+    if unplanned:
+        text += "; no execution planned %d\\,\\gnone{}" % len(unplanned)
     marked = sum(1 for m in members if getattr(m, "ni_marked", False))
     if marked:
         text += "; " + attn(PROPERTY_NI_COUNT % marked)
