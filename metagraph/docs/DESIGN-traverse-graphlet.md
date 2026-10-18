@@ -204,7 +204,9 @@ C <n> <loss_used> <branches_used> <labels SETEXPR against the leaf's end set> [<
                                        #   right arm: the LAST n bases of  seed + natural(right flank)
                                        #   left arm:  the FIRST n bases of natural(left flank) + seed
                                        # (n <= |seed| + flank length; a continuation may cross into the seed).
-                                       # <sequence> present only when G carries no bases.
+                                       # <sequence> present only when G carries no bases, or where the derived
+                                       # spelling would not reproduce the walker's; a C without it and n beyond
+                                       # |seed| + flank is refused (the writer leaves it out only within them).
 R <segment> <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev_run|*> <structural_successors|*> <branches> <loss> [<needed_budget>]
                                        # run id = ordinal (ArmResult::runs order, so end_labels[].run / label_summary.runs /
                                        # prev_run keep their meaning). <segment> = anchor (§4). <end> = two-letter code (ended

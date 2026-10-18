@@ -667,6 +667,11 @@ def _resolve_arm(rd, g, raw):
                         raise CodecError('C sequence of %d bases for n %d' % (len(seq), n_bp))
                 elif seg.walk is None and n_bp > 0:
                     raise CodecError('C carries its sequence when G carries no bases')
+                elif n_bp > g.seed.length_bp + seg.end_bp:
+                    # derived from seed + flank, so within them: the bound under which the
+                    # server's writer leaves the sequence out (beyond it, it writes it)
+                    raise CodecError('C n %d beyond the seed and its flank (%d + %d) without '
+                                     'its sequence' % (n_bp, g.seed.length_bp, seg.end_bp))
                 seg.leaf.continuation = LeafContinuation(
                     n_bp, parse_num(c[2]), parse_int(c[3]),
                     rd._ids(decode_setexpr(c[4], list(seg.end), len(g.labels)), len(g.labels)), seq)
