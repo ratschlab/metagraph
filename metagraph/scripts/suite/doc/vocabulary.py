@@ -48,7 +48,7 @@ EXECUTION_OUTCOMES = (
      "glyph": "\\gfail", "word": "fail", "decided": "by the checks",
      "meaning": "a check failed (its claim did not hold, a required field was missing on a direct access path, a "
                 "stated stop or hiding could not have happened, or a check could not run as a check)",
-     "consequence": "a functional failure: the verdict is FAIL and the gate fails"},
+     "consequence": "a functional failure: the verdict is FAIL, and the gate fails where the policy requires the execution"},
     {"key": "error", "legend": 'no HTTP answer (a transport failure, a client time-out, an undecodable body); the evaluation itself (checks.evaluate) raised on a direct access path; a recorded outcome outside the vocabulary',
      "glyph": "\\gerr", "word": "error", "decided": "by the runner, without the checks",
      "meaning": "no HTTP answer to check: a transport failure, a client time-out or an undecodable body; where the "
@@ -65,7 +65,7 @@ EXECUTION_OUTCOMES = (
                 "its budget or run past it beyond its pieces. The HTTP status may be a 503 that carried no results: "
                 "finding is the suite's category for a resource-budget breach, apart from the functional-check "
                 "failures",
-     "consequence": "the verdict reads FINDINGS; on a gated access path it fails the gate"},
+     "consequence": "the verdict reads FINDINGS; where the policy requires the execution it fails the gate"},
     {"key": "inconclusive", "legend": 'the answer could not show the property (an allowed 503 deadline without results, a shortened list, a walk a stated limit stopped, a stop that did not happen, nothing to compare, no field exposed via MCP, a host state): never a pass, never a failure',
      "glyph": "\\ginc", "word": "inconclusive", "decided": "by the checks",
      "meaning": "the answer could not show the property: an allowed 503 deadline (no results; the SPEC allows it "
@@ -73,7 +73,7 @@ EXECUTION_OUTCOMES = (
                 "limit stopped first, a stop that was the property and did not happen, nothing to compare, no "
                 "property field exposed via MCP, or a host state (the service ended the call by its own limit). "
                 "Also when no check could test anything",
-     "consequence": "never a pass and never a failure; on a gated access path it blocks the gate"},
+     "consequence": "never a pass and never a failure; where the policy requires the execution it blocks the gate"},
     {"key": "not_implemented_mcp", "legend": "not exercised via MCP: the tools cannot express the request (the manifest's mark or a table case): a known limit, not a failure and not coverage",
      "glyph": "\\gni", "word": "not implemented via MCP",
      "decided": "by the runner, without the checks",

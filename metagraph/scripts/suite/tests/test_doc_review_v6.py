@@ -758,5 +758,17 @@ class VerifyRoundTest(unittest.TestCase):
                           str(prose(ch)), ch)
 
 
+    def test_r2_001_gate_rule(self):
+        import vocabulary
+        gate = [e for e in prose("glossary")["entries"] if "The release decision: a strict judgement" in e["definition"]][0]
+        self.assertNotIn("any non-pass on a gated path", gate["definition"])
+        self.assertIn("each of which must pass its checks or match its verified by-design case", gate["definition"])
+        for o in vocabulary.EXECUTION_OUTCOMES:
+            if o["key"] in ("fail", "finding", "inconclusive"):
+                self.assertIn("where the policy requires the execution", o["consequence"], o["key"])
+        self.assertIn("on any required execution (selected, on a gated access path, neither excluded by the policy's "
+                      "rules nor declared exempt)", prose("overview")["appendix_F"]["rules"][1])
+
+
 if __name__ == "__main__":
     unittest.main()
