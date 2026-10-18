@@ -716,5 +716,11 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertIn("is not in the repository (runs/ is git-ignored)", lead)
 
 
+    def test_l7_exact_count_not_absence(self):
+        text = prose("overview")["sections"]["methods"]["paragraphs"][2]
+        self.assertIn("which a client may read as complete within the searched scope (an absence there only when it "
+                      "is an exact 0 or a complete empty list)", text)
+
+
 if __name__ == "__main__":
     unittest.main()
