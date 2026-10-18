@@ -215,7 +215,7 @@
     "repeats": "two times with a slash are the repeats in order, the unit once: on mcp the cold call, then the warm one; on a direct path repeat 0, then repeat 1",
     "server": "the bracketed line is the host's own server time per execution; a dash when the answer carries none (a refusal, a 503)",
     "backend": "be is the host call as the service timed it (mcp only); the rest of the wall is the service's submit, queue, terminal lag and paging",
-    "footnote": "a dark-grey superscript digit points to the detail block after the table (numbering restarts per chapter); it sits on the offending cells only",
+    "footnote": "a dark-grey superscript digit numbers the detail block after the table (numbering restarts per chapter); it sits on the offending cells only",
     "mark": "a small letter after a time is the host-cache state when it is not the usual one (c cold, a aged, i warm after an interrupted execution, left out of the aggregates); after a glyph: m mixed repeats, t s n the direct classes, u an unverified by-design pair",
     "ids": "the ids line names the members in column order, the common prefix once; the index (appendix E) gives every id's page",
     "summary": "the legend line under every table says what the slash means there; the family's summary line counts its tests per access path by standing and gives the wall p50 / p90 (median / 90th percentile) per access path, host-cold and host-warm apart"

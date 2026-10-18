@@ -1675,7 +1675,7 @@ ANNOTATION_DEFAULT = {
               "none (a refusal, a 503)",
     "backend": "be: the host call as the service timed it (mcp only); the gap to the wall is the service's own "
                "cost",
-    "footnote": "a dark-grey superscript digit points to the detail block after the table (numbering restarts per "
+    "footnote": "a dark-grey superscript digit numbers the detail block after the table (numbering restarts per "
                 "chapter); it sits on the offending cells only",
     "mark": "a small letter after a time is the host-cache state when it is not the usual one (c cold, a aged, i "
             "warm after an interrupted execution); after a glyph: m mixed repeats, t s n the direct classes, "
