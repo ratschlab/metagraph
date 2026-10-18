@@ -336,5 +336,17 @@ class StrandRefusalStageTest(unittest.TestCase):
         self.assertIn('"graph" if "not fully present in the graph" in text', src)
 
 
+class ZeroEqualsAbsentTest(unittest.TestCase):
+    """V6-305: N-zero reads exact 0 per query length (a context for k bases, a path for a longer query) and a
+    shortened graph_runs as an absence from the graph, never from the records or from biology."""
+
+    def test_prose(self):
+        text = prose("N")["families"]["N-zero"]["prose"]
+        self.assertNotIn("no retained k-mer holds the pattern", text)
+        self.assertIn("no path of the graph spells the whole query on that strand", text)
+        self.assertIn("some k-mer of the query is absent from the graph", text)
+        self.assertNotIn("in no record of the index", text)
+
+
 if __name__ == "__main__":
     unittest.main()
