@@ -154,24 +154,14 @@ def reruns(path):
 
 
 def raw_doc(arm_dir, line):
-    """The recorded raw file of an execution line (a dict), or None."""
-    raw = line.get("raw")
-    if not isinstance(raw, str) or not raw:
-        return None
-    path = raw if os.path.isabs(raw) else os.path.join(arm_dir, raw)
-    if not os.path.exists(path) and raw.startswith("arms/"):
-        path = os.path.join(os.path.dirname(os.path.dirname(arm_dir)), raw)
-    try:
-        doc = sc.read_gz_json(path)
-    except (OSError, ValueError, EOFError):
-        return None
-    return doc if isinstance(doc, dict) else None
+    """The recorded raw file of an execution line (a dict), or None (suite_common.read_raw_record under the arm's
+    directory)."""
+    return sc.read_raw_record(line, arm_dir=arm_dir)
 
 
 def raw_answer(arm_dir, line):
     """The recorded normalised answer of an execution line, or None (no raw file, or none kept in it)."""
-    answer = (raw_doc(arm_dir, line) or {}).get("answer")
-    return answer if isinstance(answer, dict) else None
+    return sc.raw_record_answer(line, arm_dir=arm_dir)
 
 
 # the MCP tool's own error object behind an answer's error (compare.tool_error: the runner's raw_error)

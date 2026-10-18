@@ -20,6 +20,7 @@ import compare as cmp  # noqa: E402
 import facts  # noqa: E402
 import gate as gate_mod  # noqa: E402
 import latex  # noqa: E402
+import merge_run  # noqa: E402
 import reader  # noqa: E402
 import report  # noqa: E402
 import suite_common as sc  # noqa: E402
@@ -852,11 +853,52 @@ def standing_vs_outcome_reading(ctx, sids):
 SERVICE_VERSION_KEYS = ("service_version", "service_commit", "service_git_head", "service_revision", "deployed_version")
 
 
+def _commit_text(commit, full):
+    commit = str(commit)
+    return commit if full or len(commit) <= 12 else commit[:12] + "…"
+
+
+def recorded_service_identity(run):
+    """The service identity the MCP runner recorded (merge_run.service_identity: the run's `service_identity`, else
+    summarised from the MCP arm's run.json), None when the run has no MCP arm."""
+    ident = getattr(run, "service_identity", None)
+    if isinstance(ident, dict):
+        return ident
+    mcp_run = getattr(run, "mcp_run", None)
+    if isinstance(mcp_run, dict) and mcp_run:
+        return merge_run.identity_summary(mcp_run, [mcp_run], "arms/mcp/run.json")
+    return None
+
+
 def service_version_text(run, full=False):
-    """The service's deployed revision as the MCP runner recorded it, else as an identity input of this document
-    states it (make_doc --identity, the v6 delta: taken from the deployment log, labelled as not recorded by the
-    runner; the commit shortened unless `full`), or the statement that this run did not record it (READ-021: never
-    a nearby commit in its place)."""
+    """The service's deployed revision as the MCP runner recorded it (the commit it read from the service before each
+    invocation, run.json service_identity; whether it changed or a read failed), else as the service's capabilities
+    document or an identity input of this document states it (make_doc --identity, the v6 delta: taken from the
+    deployment log, labelled as not recorded by the runner), or the statement that this run did not record it
+    (READ-021: never a nearby commit in its place). A Railway deployment id comes only from the identity input,
+    labelled as taken from it (the service states its commit only); the commit is shortened unless `full`."""
+    ident = getattr(run, "identity", None)
+    ident = ident if isinstance(ident, dict) and ident.get("service_commit") else None
+    source = str((ident or {}).get("source") or "an input file of this document").split(";")[0].strip()
+    recorded = recorded_service_identity(run) or {}
+    commits = recorded.get("service_commits") or {}
+    if commits:
+        parts = ["service commit %s" % ", ".join(_commit_text(c, full) for c in commits)]
+        if len(commits) > 1:
+            parts[0] += " (%s)" % ", ".join("%s on %d invocation(s)" % (_commit_text(c, full), k)
+                                           for c, k in commits.items())
+        if recorded.get("identity_changed") is True:
+            parts.append("changed during %d invocation(s)" % max(1, recorded.get("changed") or 0))
+        if recorded.get("without_commit"):
+            parts.append("not read on %d of %d invocation(s)" % (recorded["without_commit"], recorded["invocations"]))
+        if recorded.get("unconfirmed"):
+            parts.append("read once only on %d invocation(s) (a read failed)" % recorded["unconfirmed"])
+        text = "the service's deployed revision as the MCP runner recorded it (read from the service before each MCP " \
+               "invocation): %s" % ", ".join(parts)
+        if ident and ident.get("railway_deployment_id"):
+            text += "; Railway deployment %s, taken from %s (not recorded by the run)" % (
+                ident["railway_deployment_id"], source)
+        return text
     mcp_run = run.mcp_run or {}
     for key in SERVICE_VERSION_KEYS:
         if mcp_run.get(key):
@@ -866,13 +908,10 @@ def service_version_text(run, full=False):
     for key in ("service_version", "version", "release", "commit"):
         if isinstance(doc.get(key), (str, int)) and doc.get(key):
             return "the service's deployed revision as its capabilities document states it: %s" % doc[key]
-    ident = getattr(run, "identity", None)
-    if isinstance(ident, dict) and ident.get("service_commit"):
-        commit = str(ident["service_commit"])
-        parts = ["service commit %s" % (commit if full or len(commit) <= 12 else commit[:12] + "…")]
+    if ident:
+        parts = ["service commit %s" % _commit_text(ident["service_commit"], full)]
         if ident.get("railway_deployment_id"):
             parts.append("Railway deployment %s" % ident["railway_deployment_id"])
-        source = str(ident.get("source") or "an input file of this document").split(";")[0].strip()
         return "the service's deployed revision, taken from %s and not recorded by the runner: %s" % (
             source, ", ".join(parts))
     return ("the service's deployed revision is not recorded by this run: the MCP requests cannot be attributed to a "

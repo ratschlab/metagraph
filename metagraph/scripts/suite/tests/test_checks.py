@@ -532,11 +532,81 @@ class PatternChecks(unittest.TestCase):
                          ("fail", "field not in the answer: absence_scope"))
         self.assertEqual(outcome(sc, ans(scope="any_offset"), "entry_fields", **args)[1],
                          "scope = 'any_offset', expected 'suffix'")
-        # present and absent alike: a stated absent field fails before a missing present one is reported
-        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", present=["pattern"],
+        # present and absent alike: a stated absent field fails before a missing present one is reported (v7: the
+        # host's strands is a list; a value of another type on the MCP entry is no host statement,
+        # PerDatabaseFields)
+        self.assertEqual(outcome(sc, ans(strands=["+"]), "entry_fields", "mcp", present=["pattern"],
                                  absent=["strands"])[0], "fail")
         self.assertEqual(outcome(sc, ans(), "entry_fields", "mcp", present=["pattern"], absent=["strands"]),
                          ("not_exposed", "field not in the answer: pattern"))
+
+    def test_per_database_fields_on_the_mcp_arm(self):
+        """Manifest v7 (the service bundle of 2026-10-18): the MCP's /pattern answer states the host's absence_scope (a
+        string) and strands (a list) per database, by_database[], or per graph, by_graph[], where a database has
+        several answers (its own value null); entry_fields reads them there on the MCP arm, every stated value held to
+        the expectation: a present but different value fails, none stated is not exposed (as before); without the
+        two lists, the entry's own value is read (the runner's normaliser puts the host values there and never copies
+        the service's merged absence_scope object), so a value of another type there fails as a wrong value; the
+        predicate block's strands is another field. A direct arm reads the entry as before."""
+        def ans(by_database=None, by_graph=None, **kw):
+            e = dict({"id": "w", "kind": "dna", "length": 25, "scope": "suffix",
+                      "counts": {"contexts": {"relation": "exact", "value": 0}},
+                      "predicate": {"strands": "either"}}, **kw)
+            if by_database is not None:
+                e["by_database"] = by_database
+            if by_graph is not None:
+                e["by_graph"] = by_graph
+            return {"http": 200, "error": None, "body": {"mode": "count", "patterns": [e]}}
+        sc = {"route": "POST /pattern", "truth": {}, "request": {"patterns": [{"dna": "A" * 25, "id": "w"}]}}
+        scope = {"pattern": 0, "equals": {"absence_scope": "suffix_only", "scope": "suffix"}}
+        strands = {"pattern": 0, "equals": {"strands": ["+"]}}
+        db = lambda **kw: dict({"database": "refseq33m-experimental"}, **kw)  # noqa: E731
+        # a database with one answer
+        self.assertEqual(outcome(sc, ans([db(absence_scope="suffix_only", strands=["+"])]), "entry_fields", "mcp",
+                                 **scope), ("pass", "entry fields as expected"))
+        self.assertEqual(outcome(sc, ans([db(absence_scope="suffix_only", strands=["+"])]), "entry_fields", "mcp",
+                                 **strands)[0], "pass")
+        self.assertEqual(outcome(sc, ans([db(absence_scope="any_offset")]), "entry_fields", "mcp", **scope),
+                         ("fail", "absence_scope = 'any_offset' (by_database[0]), expected 'suffix_only'"))
+        self.assertEqual(outcome(sc, ans([db(strands=["+", "-"])]), "entry_fields", "mcp", **strands),
+                         ("fail", "strands = ['+', '-'] (by_database[0]), expected ['+']"))
+        # a chunked database: null at the database, each graph's value in by_graph[] (every one held to it)
+        chunked = [db(absence_scope=None, strands=None, by_graph=[{"graph": "g1", "absence_scope": "suffix_only",
+                                                                   "strands": ["+"]},
+                                                                  {"graph": "g2", "absence_scope": "suffix_only",
+                                                                   "strands": ["+"]}])]
+        self.assertEqual(outcome(sc, ans(chunked), "entry_fields", "mcp", **scope)[0], "pass")
+        self.assertEqual(outcome(sc, ans(chunked), "entry_fields", "mcp", **strands)[0], "pass")
+        chunked[0]["by_graph"][1]["strands"] = ["forward", "reverse"]
+        self.assertEqual(outcome(sc, ans(chunked), "entry_fields", "mcp", **strands),
+                         ("fail", "strands = ['forward', 'reverse'] (by_database[0].by_graph[1]), expected ['+']"))
+        self.assertEqual(outcome(sc, ans(by_graph=[{"absence_scope": "suffix_only"}]), "entry_fields", "mcp",
+                                 **scope)[0], "pass")
+        # a key the host's answer does not state (absent or null everywhere): not exposed, as before
+        for a in (ans([db()]), ans([db(absence_scope=None, by_graph=[{"graph": "g1"}])]), ans(), ans([])):
+            self.assertEqual(outcome(sc, a, "entry_fields", "mcp", **scope),
+                             ("not_exposed", "field not in the answer: absence_scope"))
+        # on the entry itself (the normalised answer) a value of another type is a wrong value, never "not exposed"
+        # (the v7 re-verification's low 1): the normaliser copies only the host's string and list there
+        self.assertEqual(outcome(sc, ans(absence_scope={"scope": "suffix", "tasks_failed": 0}), "entry_fields", "mcp",
+                                 **scope)[0], "fail")
+        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", **strands)[0], "fail")
+        self.assertEqual(outcome(sc, ans(strands="both"), "entry_fields", "mcp", absent=["strands"])[0], "fail")
+        # the normaliser's live path: the one database's values on the entry
+        self.assertEqual(outcome(sc, ans(absence_scope="suffix_only", strands=["+"]), "entry_fields", "mcp",
+                                 **scope)[0], "pass")
+        self.assertEqual(outcome(sc, ans(strands=["-"]), "entry_fields", "mcp", **strands)[0], "fail")
+        # present / absent read the same statements; a carried wrong field beside a missing one still fails first
+        self.assertEqual(outcome(sc, ans([db(strands=["+"])]), "entry_fields", "mcp", absent=["strands"]),
+                         ("fail", "strands present (by_database[0]), expected absent"))
+        self.assertEqual(outcome(sc, ans([db(strands=["+"])]), "entry_fields", "mcp", present=["strands"])[0], "pass")
+        self.assertEqual(outcome(sc, ans([db()]), "entry_fields", "mcp", present=["strands"])[0], "not_exposed")
+        self.assertEqual(outcome(sc, ans([db()], scope="any_offset"), "entry_fields", "mcp", **scope),
+                         ("fail", "scope = 'any_offset', expected 'suffix'"))
+        # a direct arm reads the entry itself (by_database is no field of the host's answer)
+        self.assertEqual(outcome(sc, ans([db(absence_scope="suffix_only")]), "entry_fields", **scope),
+                         ("fail", "field not in the answer: absence_scope"))
+        self.assertEqual(outcome(sc, ans(absence_scope="suffix_only"), "entry_fields", **scope)[0], "pass")
 
     def test_invariants_refuse_a_mutated_answer(self):
         req, ans = fixture("mismatch_neighbours")
@@ -1329,7 +1399,8 @@ class BudgetChecks(unittest.TestCase):
                                          client={"wall_ms": 600100.0})[2]["outcome"], "inconclusive")
         self.assertEqual(checks.evaluate(sc(700000, 600000, "POST /pattern"), pat, "direct-local",
                                          client={"wall_ms": 599000.0})[2]["outcome"], "fail")
-        self.assertEqual(checks.CHECK_ARGS["budget_respected"], ((), ("rule", "cap_ms")))
+        # v7 adds the host's /pattern finalisation reserve (BudgetReaders.test_pattern_reserve_stated_by_the_scenario)
+        self.assertEqual(checks.CHECK_ARGS["budget_respected"], ((), ("rule", "cap_ms", "reserve_ms")))
 
     def test_pattern_and_resolve(self):
         sc = self.sc("POST /pattern", {"patterns": [{"dna": "A" * 25}], "time_budget_ms": 300})
@@ -4254,6 +4325,48 @@ class BudgetReaders(unittest.TestCase):
                              echo)
         self.assertIsNone(checks._pattern_work_time({"route": "POST /pattern", "request": {}},
                                                     {"limits": {"time_budget_ms": "10000"}, "patterns": []}))
+
+    def test_pattern_reserve_stated_by_the_scenario(self):
+        """Manifest v7 (the owner's decision on SD-021): the host's /pattern finalisation reserve is configurable, so
+        the scenario states it, budget_respected's args.reserve_ms (from the capabilities snapshot), and every
+        work-time bound reads it there, never the reserve the judged answer states; without it (v5, v6) the answer's
+        limits.finalize_reserve_ms, else 250, as before."""
+        def scen(reserve=None):
+            args = {"rule": "r"} if reserve is None else {"rule": "r", "reserve_ms": reserve}
+            return {"route": "POST /pattern", "truth": {},
+                    "request": {"patterns": [{"dna": "A" * 25, "id": "w"}], "time_budget_ms": 10000},
+                    "expect": [{"check": "status", "args": {"http": 200}}, {"check": "budget_respected", "args": args}]}
+        stated = {"limits": {"time_budget_ms": 10000, "finalize_reserve_ms": 1000}, "patterns": []}
+        self.assertEqual(checks._pattern_work_time(scen(), stated), 9000)          # v5 / v6: the answer's
+        self.assertEqual(checks._pattern_work_time(scen(250), stated), 9750)       # v7: the scenario's
+        self.assertEqual(checks._pattern_work_time(scen(600.0), {"limits": {"time_budget_ms": 10000}, "patterns": []}),
+                         9400)
+        self.assertEqual(checks._pattern_work_time(scen(), {"limits": {"time_budget_ms": 10000}, "patterns": []}),
+                         9750)                                                     # neither: 250
+        for bad in ("250", None, True):   # no number: not a stated reserve (the builder refuses it, test below)
+            self.assertIsNone(checks._scenario_pattern_reserve(scen(bad)), bad)
+            self.assertEqual(checks._pattern_work_time(scen(bad), stated), 9000, bad)
+        self.assertIsNone(checks._scenario_pattern_reserve({"route": "POST /pattern"}))
+        # end to end: a time stop at 9,700 ms of a 10,000 ms budget whose answer states a reserve of 1,000 ms passes
+        # the answer's own bound (9,000 ms) and fails the host's (9,750 ms) the scenario states
+        sc = scen(250)
+        sc["expect"].append({"check": "deterministic", "args": {}})
+        ans = ok_answer({"patterns": [{"id": "w", "stop": {"phase": "discovery", "reason": "time"},
+                                       "determinism": "time_limited"}],
+                         "limits": {"time_budget_ms": 10000, "finalize_reserve_ms": 1000},
+                         "timing": {"elapsed_ms": 9700.0}})
+        res = dict((r["check"], r) for r in checks.evaluate(sc, ans, "direct-local", previous=["0" * 64]))
+        self.assertEqual(res["deterministic"]["outcome"], "fail", res["deterministic"])
+        self.assertIn("before the work time (at least 9750 ms", res["deterministic"]["detail"])
+        v6 = scen()
+        v6["expect"].append({"check": "deterministic", "args": {}})
+        res = dict((r["check"], r) for r in checks.evaluate(v6, ans, "direct-local", previous=["0" * 64]))
+        self.assertEqual(res["deterministic"]["outcome"], "inconclusive", res["deterministic"])
+        # the argument is validated: a number of at least 0
+        self.assertEqual(checks.validate_expectation({"check": "budget_respected", "args": {"reserve_ms": 250}}), [])
+        for bad, text in (("250", "is no number"), (True, "is no number"), (-1, "is below 0")):
+            probs = checks.validate_expectation({"check": "budget_respected", "args": {"reserve_ms": bad}})
+            self.assertTrue(any(text in p for p in probs), (bad, probs))
 
     def test_effective_budget(self):
         for route, req, echo in (("POST /pattern", {"time_budget_ms": 5000}, {"limits": {"time_budget_ms": 4000}}),

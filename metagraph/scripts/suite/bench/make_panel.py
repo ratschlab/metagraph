@@ -143,18 +143,7 @@ def load_context(path):
 
 def raw_body(run_dir, line):
     """The answer body of a recorded execution (its raw file, relative to the run directory), None when unreadable."""
-    rel = line.get("raw")
-    if not rel:
-        return None
-    for path in (os.path.join(run_dir, rel), os.path.join(run_dir, "arms", line.get("arm") or "", rel)):
-        if os.path.exists(path):
-            try:
-                doc = sc.read_gz_json(path)
-            except (OSError, ValueError, EOFError):
-                return None
-            answer = doc.get("answer") if isinstance(doc, dict) else None   # a record that is no object: no body
-            return answer.get("body") if isinstance(answer, dict) else None
-    return None
+    return sc.raw_record_body(line, run_dir=run_dir)
 
 
 # ---------------------------------------------------------------------------------------------------------------

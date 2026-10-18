@@ -4425,6 +4425,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("cannot be attributed to a service revision", values["service_version_line"])
         with_version = _Stub(mcp_run={"service_commit": "abc123"})
         self.assertEqual(sections.service_version_text(with_version),
+                         "the service's deployed revision as the MCP runner recorded it (read from the service before "
+                         "each MCP invocation): service commit abc123")
+        with_legacy = _Stub(mcp_run={"service_version": "abc123"})   # a key of an earlier runner's
+        self.assertEqual(sections.service_version_text(with_legacy),
                          "the service's deployed revision as the MCP runner recorded it: abc123")
         env = sections.environment_table(ctx)
         self.assertIn("the client that asked, not the service's revision", env)
@@ -5771,6 +5775,69 @@ class V6DeltaTest(unittest.TestCase):
             sc.write_json_atomic(path, dict(ident, run=run_id, manifest="v6, content " + "0" * 64))
             with self.assertRaises(reader.RunError):
                 reader.Run(run_dir, identity=path)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_service_identity_recorded(self):
+        """Manifest v7, item 3: the commit the MCP runner recorded (run.json service_identity, read from the service
+        before each invocation) is printed, labelled as recorded; the identity input only as a fallback, its Railway
+        deployment id (the service states its commit only) labelled as taken from it; an input whose commit
+        contradicts the recorded one is refused."""
+        sha = "60e737f75ff696c170841c983c0464d1157425c9"
+        recorded = merge_run.identity_summary({}, [{"service_commit": sha, "identity_changed": False,
+                                                    "identity_error": None}] * 2, "arms/mcp/mcp_runs.jsonl")
+        ident = {"run": "R", "service_commit": sha, "railway_deployment_id": "fa013db1-70f0-4dc9-bca1-275c7eefa053",
+                 "source": "the deployment log (deploy 3)"}
+        run = _Stub(mcp_run={"git_head": "9d76035e"}, service_identity=recorded, identity=None)
+        self.assertEqual(sections.service_version_text(run),
+                         "the service's deployed revision as the MCP runner recorded it (read from the service before "
+                         "each MCP invocation): service commit 60e737f75ff6…")
+        self.assertIn("service commit %s" % sha, sections.service_version_text(run, full=True))
+        run.identity = ident
+        self.assertEqual(sections.service_version_text(run),
+                         "the service's deployed revision as the MCP runner recorded it (read from the service before "
+                         "each MCP invocation): service commit 60e737f75ff6…; Railway deployment "
+                         "fa013db1-70f0-4dc9-bca1-275c7eefa053, taken from the deployment log (deploy 3) (not recorded "
+                         "by the run)")
+        # a change, a read that failed, a second commit: stated
+        odd = merge_run.identity_summary({}, [{"service_commit": sha, "identity_changed": True},
+                                              {"service_commit": "1009f77c7aa5", "identity_changed": None,
+                                               "identity_error": "after: timeout"},
+                                              {"service_commit": None, "identity_changed": None}], "x")
+        text = sections.service_version_text(_Stub(mcp_run={}, service_identity=odd, identity=None))
+        for part in ("service commit 60e737f75ff6…, 1009f77c7aa5 (60e737f75ff6… on 1 invocation(s), 1009f77c7aa5 on 1 "
+                     "invocation(s))", "changed during 1 invocation(s)", "not read on 1 of 3 invocation(s)",
+                     "read once only on 2 invocation(s) (a read failed)"):
+            self.assertIn(part, text)
+        # nothing recorded: the input file is the fallback, saying so (test_service_identity_input)
+        older = merge_run.identity_summary({}, [{}], "arms/mcp/run.json")
+        self.assertIn("taken from the deployment log (deploy 3) and not recorded by the runner",
+                      sections.service_version_text(_Stub(mcp_run={}, service_identity=older, identity=ident)))
+        tmp = tempfile.mkdtemp()
+        try:
+            run_dir = os.path.join(tmp, "run")
+            os.makedirs(run_dir)
+            build_run(run_dir)
+            path = os.path.join(run_dir, "arms", "mcp", "run.json")
+            mcp = sc.read_json(path)
+            mcp.update(service_commit=sha, identity_changed=False, identity_error=None)
+            sc.write_json_atomic(path, mcp)
+            sc.append_jsonl(os.path.join(run_dir, "arms", "mcp", "mcp_runs.jsonl"),
+                            {"service_commit": sha, "identity_changed": False, "identity_error": None})
+            merge_run.merge(run_dir)
+            sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": 5})))
+            r = reader.Run(run_dir)
+            self.assertEqual(r.service_identity["service_commits"], {sha: 1})
+            self.assertTrue(sections.service_version_text(r).startswith(
+                "the service's deployed revision as the MCP runner recorded it (read from the service"))
+            ipath = os.path.join(tmp, "identity.json")
+            sc.write_json_atomic(ipath, dict(ident, run=r.run_id()))
+            self.assertIn("Railway deployment fa013db1", sections.service_version_text(reader.Run(run_dir,
+                                                                                                  identity=ipath)))
+            sc.write_json_atomic(ipath, dict(ident, run=r.run_id(), service_commit="1009f77c7aa5"))
+            with self.assertRaises(reader.RunError) as cm:
+                reader.Run(run_dir, identity=ipath)
+            self.assertIn("service_commit 1009f77c7aa5, the MCP runner recorded %s" % sha, str(cm.exception))
         finally:
             shutil.rmtree(tmp)
 

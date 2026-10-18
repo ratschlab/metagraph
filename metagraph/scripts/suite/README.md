@@ -4488,12 +4488,13 @@ branch for a v6 run.
   answer states (`limits.finalize_reserve_ms`, else 250) when it bounds the work time; the host's is configurable
   (`--pattern-finalize-ms`) and checks.evaluate sees no host document. The NEXT manifest states it in the check
   arguments (`reserve_ms` taken from the capabilities snapshot by the builder); checks.evaluate's API does not
-  change. The frozen v5 and v6 keep the answer's reading.
+  change. The frozen v5 and v6 keep the answer's reading. Done in manifest v7 (below, item 2).
 - The readers of an execution's raw record (SD-093): a truncated .gz, a cut JSON, a record that is no object or
   whose answer is none reads as no body at the three sites that crashed on it (compare.direct_error_parts, which
   then keeps the line's own error codes; run_direct's previous_entry, time_limited unknown; the bench panel's
   raw_body), as the other readers already did. One shared reader in suite_common (keeping today's lookup order,
-  run_dir/rel then run_dir/arms/<arm>/rel) replaces the ten copies after the open gr/suite-* lanes land.
+  run_dir/rel then run_dir/arms/<arm>/rel) replaces the ten copies after the open gr/suite-* lanes land. Done on
+  gr/v7-harness (below, item 4).
 
 ## The v6 results document: a delta on v5 (2026-10-17)
 The owner (2026-10-17): v6 is very close to v5, so its document is v5's with only what v6 changes (v6 = v5 + the
@@ -4612,6 +4613,188 @@ the text was wrong for v5 too:
   LaTeX warning, the known 1.1 pt overfull box alone and no local path. The full suite at 868134d6a: 937 tests OK,
   none skipped (744 s). The changed lines against the verifier's builds:
   `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/CHANGED-LINES.md`.
+
+## Manifest v7 (2026-10-18)
+v7 = v6 plus exactly the owner's approved changes, each below; v6 (content 49907dbb...), v5 and every frozen policy
+stay byte-identical. build_manifest.py builds v7 by default (MANIFEST_VERSION 7) and the frozen v6 again, byte for
+byte, with `--manifest-version 6` (build(manifest_version=6): test_frozen_v6_is_what_the_builder_makes); the v7
+steps run only for version 7.
+
+### P-edge-0004's pattern text: service-side by design (item 1)
+The service owner (2026-10-17): the MCP's /pattern answer leaves out the entry's pattern text BY DESIGN. v6 marked
+P-edge-0004's entry_fields check (it reads the host's upper-cased echo of the lower-case pattern) not implemented yet
+via MCP (mcp.not_implemented_checks). v7 classes it service-side by design by the suite's manifest-side mechanism for
+that class at property level, `mcp.by_design_checks` [{check, case}] (lane V5; "Property-level marks" above):
+`{"check": "entry_fields", "case": "pattern.lowercase"}`, the table's case the scenario already names (mcp.by_design)
+for the service's handling of the pattern text (it checks the text in either case and upper-cases it before it is
+stored and sent, so the host never sees the caller's text from the MCP arm). Why not T-edge-0008's route: T-edge-0008
+is modelled through the table, its case traverse.duplicate_seeds stating an explains_checks entry
+{check, detail_matches} that explains the not_exposed answer_fields reading (verified as a by-design pair); the same
+here needs an explains_checks entry on pattern.lowercase, a change of service_by_design.json, the service's own file,
+which the suite does not edit. The mark sets the not_exposed reading aside on the MCP arm exactly as the not-implemented
+mark did (suite_common.checks_marked_aside reads both marks alike), the check stays required on the direct arms, and the
+comparison, the report and the results document list it under "Service-side by design (property)" instead of "Not
+implemented yet via MCP (property)" (compare's marked_checks mark by_design). The rule is areas.MCP_PATTERN_ENTRY_BY_DESIGN
+(field -> the cases a scenario may name for it) with areas.pattern_by_design_case: an entry_fields check whose every
+field the MCP's answer cannot carry is left out by design, each under a case the scenario names, is marked by design;
+any other (another unexposed field beside it, no case named) keeps v6's not-implemented mark. In v7 that is
+P-edge-0004 alone (the only scenario reading the pattern text). Nothing else of the scenario changes: its request,
+expectations, exposes and repeats are v6's.
+
+### The /pattern finalisation reserve in the check arguments (item 2)
+The host's /pattern finalisation reserve is configurable (SPEC-pattern-search §10.2, `--pattern-finalize-ms`), and
+checks.evaluate sees no host document (its API stays as it is). v5 and v6 bound a /pattern work time (SPEC §7.6:
+time_budget_ms - reserve - E, checks._pattern_work_time, the bound of every stated time stop or time limitation the
+stated-reason rules hold: invariants, the count checks, the entry and slot checks, deterministic) with the reserve the
+judged answer states (`limits.finalize_reserve_ms`, else 250), so an answer could widen its own window. v7 states the
+host's reserve in the check arguments: every POST /pattern scenario's budget_respected expectation carries
+`reserve_ms`, the capabilities snapshot's `pattern_capabilities.finalize_reserve_ms` (250 in truth/staging_capabilities/,
+release refseq97-6f945db4), added by areas.state_pattern_reserve after the warm-ups are placed (454 scenarios: the 429
+that allow a 200 and the 25 warm-ups; the 26 refusal-only /pattern scenarios state no budget_respected); the builder
+refuses a snapshot without the number. checks._scenario_pattern_reserve reads it from the scenario (its
+budget_respected expectation), and _pattern_work_time takes it before the answer's statement; without the argument
+(every v5 / v6 scenario) the reading is the old one, so a v5 or v6 run judges exactly as before. checks.validate_expectation
+refuses a reserve_ms that is no number or below 0 (CHECK_ARGS budget_respected: rule, cap_ms, reserve_ms).
+check_budget_respected itself reads no reserve (its /pattern rule is a 200's elapsed time against the budget; the late
+503 window is _budget_503's). Not done (not asked): a stated limits.finalize_reserve_ms other than reserve_ms is not
+flagged as a problem of its own (/resolve's invariants do that for its fixed reserve).
+
+### The service identity, suite side (item 3)
+The service lane's runner (async's suite_mcp_runner.py at 684bb327, another repository; not changed here) records the
+deployed service's commit: every arms/mcp/mcp_runs.jsonl line, run.json's top level and each invocations[] entry
+state `service_commit` (read from the service before the invocation: GET /health, the `deployment` block of GET
+/traverse/capabilities, outside service_document_sha256), `identity_changed` (the commit read after the invocation
+differs: true / false; null when either read failed) and `identity_error` (the failed read). The owner (2026-10-18):
+the commit only; a Railway deployment id is neither stated nor read (a fixture that has one is ignored).
+- **The merge** (merge_run.service_identity / identity_summary, over mcp_runs.jsonl, else run.json invocations[], else
+  run.json alone) writes run.json `service_identity`: `recorded` (any of the three fields stated: false for a runner
+  before them), `service_commits` {commit: invocations that read it; run.json's top-level commit counted 0 times when
+  no invocation states it}, `service_commit` (the one commit, else null), `identity_changed` (true when any invocation
+  or the top says so; false when every invocation says false; else null), `invocations`, `without_identity`,
+  `without_commit`, `changed`, `unconfirmed` (identity_changed null), `identity_errors` and `source`; null without an
+  MCP arm. A change during an invocation or more than one commit is a warning of the merge (the gate judges).
+- **The gate** (gate.service_identity_problems, identity problems on arm mcp; gate.json `service_identity` {expected,
+  recorded}) takes the deployed commit as `--expect-service-commit SHA` (7 to 40 hex digits; an abbreviation matches
+  by prefix, gate.commit_matches), which run_suite.sh passes on from its own `--expect-service-commit` (the run's and
+  the re-evaluation's gate; refused without a gate) and which run-gate passes from the LIVE line. Given a commit: an
+  invocation that read another commit blocks, one that read none (service_commit absent or null: not confirmed) blocks,
+  a run that records no identity at all (an older runner) blocks (the gate cannot confirm what it judged), and a run
+  without an MCP arm blocks where the policy's arms name it. In any case identity_changed true blocks, and so does
+  more than one commit over the invocations without a commit given (the run met more than one deployment; given one,
+  each other commit blocks as differing). Notes: identity_changed null (one read failed; the commit read stands or
+  blocks as above), without a commit given an older run ("records no service identity ... not checked"), invocations
+  without a commit beside others, and the recorded commit not compared. A run resumed across a deploy blocks: the
+  superseded invocations' lines stay in mcp_runs.jsonl with the earlier commit (conservative: the run met two builds).
+  The commits are compared as recorded (the runner always records the full sha).
+- **The results document** (sections.service_version_text) prints the recorded commit, labelled "as the MCP runner
+  recorded it (read from the service before each MCP invocation)", with a change, an unread commit or a failed read
+  stated; the make_doc --identity file only as a fallback, "taken from <source> and not recorded by the runner"; a
+  Railway deployment id only from that file, labelled as taken from it. reader.Run refuses an identity file whose
+  service_commit contradicts the recorded one.
+- Older runs (v5, v6 baselines) record no identity: run.json gains `service_identity` with `recorded` false, the gate
+  notes it, and the document keeps "not recorded by this run" (or the input file).
+
+### One reader of an execution's raw record (item 4; SD-093 option 2)
+The ten copies that resolved a line's `raw`, gunzipped it, swallowed the read errors and dug out the record, its
+answer or its body (compare._raw_doc, load_answer and direct_error_parts; reevaluate.raw_doc and raw_answer;
+merge_run.host_state_inconclusive and renormalisation; run_direct.Runner.previous_entry; bench/analyze.answer_body and
+bench/make_panel.raw_body), and the results document's eleventh (doc/reader.Run.raw_answer), call one reader in
+suite_common: raw_record_path(line, run_dir=None, arm_dir=None) resolves the path in today's lookup order (an absolute
+path as it is; under a run directory run_dir/<raw>, then run_dir/arms/<the line's arm>/<raw>; under an arm directory
+arm_dir/<raw>, then the run directory two levels up for a merged 'arms/...' path; the first that exists),
+read_raw_record (a dict, else the default: no `raw`, no file, a truncated .gz, a cut JSON, a record that is no object;
+`any_json` returns whatever JSON the file holds, which renormalisation counts as read, as before), raw_record_answer
+(`answer`, a dict) and raw_record_body (`answer.body` as it is). Each caller keeps its own guard (no run directory, no
+read) and return shape. What changes, only where today's readers would have read no file or crashed: a caller that
+probed one place now also probes the other layout's (compare and the document under run_dir also try
+run_dir/arms/<arm>/<raw>; renormalisation and previous_entry under the arm directory also try the run directory for an
+'arms/...' path); bench/analyze probes run_dir/<raw> before run_dir/arms/<arm>/<raw> (no run directory has a top-level
+raw/ in either layout, so the file is the same); a record that is no object reads as none where a copy raised
+(analyze's `(doc or {}).get`, the document's AttributeError catch). A test holds that no module but suite_common opens
+a raw record (tests/test_common RawRecordReader). run_direct.py and suite_common.py are snapshot files: the change
+reaches new runs (a run's snapshot pairs the two); recorded runs keep theirs.
+
+### absence_scope and strands via MCP (item 5; the owner's scope addition of 2026-10-18)
+With the service bundle that carries the identity, the MCP's /pattern answer states per by_database[] entry the
+host answer's `absence_scope` (verbatim, a string: "any_offset", "suffix_only", "long") and `strands` (the host's list
+verbatim: ["+","-"], ["+"], ["-"], ["="] for a palindrome; some fixtures ["forward","reverse"]); for a database with
+several answers (graph chunks) both are null there and each graph's values sit in by_graph[]; a key is absent when the
+host's answer states none. The entry's own absence_scope (the service's merged {scope, tasks_failed}) and the predicate
+block's strands ("either" / "context") are other fields.
+- **The checks** (checks.MCP_PATTERN_DATABASE_FIELDS, _mcp_database_values): on the MCP arm, entry_fields reads these
+  two fields from the entry's by_database[] items (each database's own non-null value), else their by_graph[] items,
+  and the entry's own by_graph[]; with neither list, the entry's own value. The LIVE PATH is the last one: the MCP
+  runner's normaliser (scripts/bench/suite_mcp_normalise.py, DB_ANSWER_FIELDS, from runner fcf7ae49) puts the one
+  database's host string and list onto the host-shaped entry, never copies the service's merged absence_scope object,
+  and leaves a chunked database's per-graph values out (listed as left out: "several answers: per graph in by_graph";
+  refseq33m-experimental is one graph); the by_database[] / by_graph[] reading serves a normaliser that keeps the
+  per-database view (none does today). On the entry a value of another type is a wrong value and fails, never "not
+  exposed" (the v7 verification's low 1). Every stated value is held to the expectation: a present but different one
+  fails ("absence_scope = 'any_offset' (by_database[0]), expected 'suffix_only'"), none stated is not exposed, with
+  the same detail as before ("field not in the answer: absence_scope"). A direct arm reads the entry as before. The
+  recorded v5 / v6 MCP answers carry neither field and their manifests keep the marks, so they judge exactly as
+  before (with runner fcf7ae49 and a service carrying the fields, a v6 run's entry_fields would compare them too: a
+  mark sets aside only a not-exposed reading; the v7 verifier injected the direct values into the 88 recorded MCP
+  executions and every one passes). An older runner drops the fields, and the v7 rtp gate then blocks on them.
+- **The manifest**: areas.MCP_PATTERN_ENTRY_CARRIED_V7 (absence_scope, strands) is left out of what the MCP's answer
+  cannot carry for v7 (mark_pattern_mcp_fields(carried=)), so v6's not-implemented marks of entry_fields on
+  P-exact-0001..0008, P-scope-0001 / -0002 / -0003 / -0005 / -0007..0012, N-usecase-0005, D-P-exact-0001 and
+  D-P-scope-0004 are gone, and P-scope-0004 / -0006 (absence_scope their only property check, scenario-level marks in
+  v6) get back v5's MCP mapping (pattern_search with their arguments at 110,000 ms, exposes counts_consistent,
+  invariants, status). P-edge-0004 (item 1) is the one /pattern mark left. counts.mcp_not_implemented 53 -> 51,
+  mcp_exposure_baseline.scenarios_with_exposes 510 -> 512.
+- **The policies follow from the marks**: the rt policy is v6's but for its pins; the rtp policy requires on mcp 630
+  scenarios / 1,280 executions (v6 628 / 1,275: P-scope-0004 and -0006 r0 and r1, D-P-scope-0004 r0, which
+  marks_cover_repeat no longer excludes), REL-subset-0002 / -0003 on both arms (19 relations required, as before; 8
+  excluded instead of 10), 91 exclusions (manifest_not_implemented 48, no marks_cover_repeat), direct-local unchanged
+  (686 / 793).
+
+### The v7 manifests and policies
+- `manifest/suite_v7.json` and `manifest/suite_smoke_v7.json`, built on this tree with `SUITE_TRUTH_CACHE=<the record
+  cache v4 was built from> build_manifest.py --no-fetch` from the capabilities snapshot of release refseq97-6f945db4
+  (deterministic: two builds, one content): manifest_version 7, 725 scenarios, 767 executions per arm, content_sha256
+  e89708cb795e098225d76ac8a69e75a116f9029549a8613c96325e8ee6a36238, relations
+  39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86 (v5's and v6's); smoke 14 scenarios, content_sha256
+  1ef0a151aecf8e5ea58f644165561d1e41ec0328ecf115a40d3f48feb5544ced. The field-by-field diff v6 -> v7: ids, order and
+  relations equal; 454 scenarios changed, 271 byte-identical: `expect[budget_respected].args.reserve_ms` 250 added on
+  the 454 POST /pattern scenarios that state the check (item 2); `mcp.not_implemented_checks` removed on the 14
+  absence_scope and 7 strands scenarios (item 5) and on P-edge-0004, which gains `mcp.by_design_checks`
+  [{entry_fields, pattern.lowercase}] (item 1); P-scope-0004 / -0006's `mcp` back from the scenario-level mark to
+  pattern_search with their arguments and exposes (item 5); no other field, no scenario of another route. counts:
+  mcp_not_implemented 53 -> 51, the rest v6's; mcp_exposure_baseline.scenarios_with_exposes 510 -> 512. The smoke
+  diff: reserve_ms on its 6 /pattern scenarios and P-exact-0001's mark gone.
+- `gate/declared_v7_rt.json` names v7's content and declares v6's one entry (REL-subset-0007 on mcp).
+- `gate/policy_v7_rt_mcp.json` (canonical sha256 2bbed2e85b71...) and `gate/policy_v7_rtp_mcp.json` (8a8c9a1c8d7e...),
+  generated as v6's (`gate_policy.py manifest/suite_v7.json --name v7-rt-mcp --arms mcp,direct-local --declared
+  gate/declared_v7_rt.json --out gate/policy_v7_rt_mcp.json`; the rtp one with `--name v7-rtp-mcp --routes "POST
+  /resolve,POST /traverse,GET /traverse/capabilities,POST /pattern"`). The rt policy equals v6's (and so v5's) but
+  for its pins: 241 selected / 36 excluded, required on mcp 205 scenarios / 416 executions, on direct-local 237 /
+  273, 5 relations, and its 237 scenarios byte-identical to v6's with their indexes (test_builder_v7 FrozenV7). The rtp
+  policy equals v6's but for its pins and item 5's consequences: the same 721 selected in the same order; required on
+  mcp 630 / 1,280 (v6 628 / 1,275: P-scope-0004 and -0006 r0, r1; D-P-scope-0004 r0), on direct-local 686 / 793 as in
+  v6; 91 exclusions (manifest_not_implemented 48, no marks_cover_repeat); 19 relations required with REL-subset-0002 /
+  -0003 on both arms, 8 excluded. P-edge-0004's class (item 1) and the reserve argument (item 2) change neither policy
+  (the gate applies the manifest's marks itself; the policies hold no check arguments).
+- run_suite.sh keeps its defaults (v5); a v7 run names `--manifest manifest/suite_v7.json --gate
+  gate/policy_v7_rtp_mcp.json` and, from the LIVE line, `--expect-service-commit SHA`. Its MCP arm needs the service
+  bundle that carries the identity and absence_scope / strands per database (otherwise the rtp gate blocks on the 22
+  entry_fields properties read not exposed and on the missing identity).
+
+### Validation of v7 (offline; no host was contacted; the run directories were only read)
+- Copies of the v5 baseline (20261015T161813Z_refseq97-81c620ef), the v6 baseline (20261017T082918Z_refseq97-81c620ef)
+  and a v6-rtp gate run (20261017T192446Z_refseq97-81c620ef), each re-evaluated (reevaluate, merge --strict-identity,
+  compare, gate) with the code of 48e04d825 and of every commit of this lane: 0 changes of any field of the
+  re-evaluated lines and of the comparison; the v5 copy GATE PASS under policy_v5_rt_mcp (689 judged, 635 passed, 0
+  problems), the v6 copies GATE PASS under policy_v6_rt_mcp (689 / 635) and policy_v6_rtp_mcp (2,068 / 1,950), 0
+  problems; run.json gains `service_identity` (recorded false) and each verdict one note ("the MCP arm records no
+  service identity ... not checked"). The recorded sets (merge, compare, gate without re-evaluation) likewise.
+- The raw-record readers (item 4) on the same three runs: every reader at its call form on every line, base and head,
+  77,517 calls, 0 differences.
+- With the deployed commit given (--expect-service-commit 60e737f7...), the v6 baseline's copy is blocked by one
+  identity problem: its runner recorded no service identity.
+- 964 tests pass, none skipped (with SUITE_TRUTH_CACHE, the record cache v4 was built from; 930 at 48e04d825); each
+  new rule's test fails on the code before it. manifest/suite_v6.json recomputes to 49907dbb...; every manifest,
+  declared file and policy of v1-v6 and service_by_design.json are byte-identical to 48e04d825's.
 
 ## Glossary
 

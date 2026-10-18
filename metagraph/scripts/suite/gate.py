@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The strict deploy gate of a suite run, and the run's persisted plan.
 
-    gate.py RUN_DIR POLICY [--reevaluated] [--out FILE] [--max-lines N]
+    gate.py RUN_DIR POLICY [--reevaluated] [--out FILE] [--max-lines N] [--expect-service-commit SHA]
     gate.py plan RUN_DIR --manifest M --arms A,B [--areas P,M] [--limit N] [--ids LIST] [--warm-every N] [--mode M]
     gate.py ids FILE --manifest M          print FILE's scenario ids, comma-separated in manifest order
     gate.py policy-ids POLICY [--arms A]  print the ids the policy's arms run (its selection less their exclusions)
@@ -35,7 +35,13 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   executed), the set's comparison was judged with the checks recorded for the set (SNAPSHOT.json, a re-evaluated
   set's reevaluated.json: compared_with_checks_problems) and read the very lines the gate judges (its
   executions_sha256), and the
-  comparison read the by-design table the policy's exclusions were derived from;
+  comparison read the by-design table the policy's exclusions were derived from; the deployed service's identity
+  (service_identity_problems, over merge_run.service_identity, the commit the MCP runner read before each
+  invocation): given the deployed commit (--expect-service-commit SHA, run-gate's LIVE line), every MCP invocation
+  read that commit (a differing one, or none: not confirmed, blocks; a run recording no identity at all blocks), and
+  in any case the commit did not change during an invocation (identity_changed true) or between invocations (more
+  than one commit); identity_changed null with the commit confirmed, and without a given commit a run recording no
+  identity (an older runner), are notes;
 - missing: every planned execution and every execution the policy requires is recorded;
 - outcome: no execution of the policy's arms and selection is fail, error, finding, inconclusive (ANY inconclusive:
   the owner's strict gate), not_implemented_mcp (what the MCP cannot express is excluded in the policy), or
@@ -67,6 +73,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 
@@ -542,8 +549,87 @@ def configuration_problems(run_dir, rows, policy, reevaluated=False, notes=None)
     return out
 
 
-def judge(run_dir, policy, reevaluated=False):
-    """The gate's verdict on a merged (and compared) run directory: {passed, problems, notes, counts}."""
+# the deployed commit the gate may be given (--expect-service-commit): a git sha, abbreviated to 7 hex digits or more
+COMMIT_RE = re.compile(r"\A[0-9a-fA-F]{7,40}\Z")
+
+
+def commit_matches(recorded, expected):
+    """Whether a recorded service commit is the expected one: equal ignoring case, or one an abbreviation (a prefix of
+    at least 7 hex digits) of the other."""
+    a, b = str(recorded or "").strip().lower(), str(expected or "").strip().lower()
+    if len(a) < 7 or len(b) < 7:
+        return False
+    return a.startswith(b) or b.startswith(a)
+
+
+def service_identity_problems(identity, expected=None, policy_arms=()):
+    """([problem detail], [note]) of the deployed service's identity the MCP arm recorded (|identity|:
+    merge_run.service_identity, None without an MCP arm) against the deployed commit |expected| (None: not given).
+    Given a commit: a run without an MCP arm (the policy's arms naming it), a run recording no identity at all (a
+    runner before the fields), an invocation without a commit (identity not confirmed) and a commit other than the
+    expected one each block. In any case the commit changing during an invocation (identity_changed true) or between
+    invocations (more than one commit) blocks. identity_changed null (one of the two reads failed; the commit read
+    stands or blocks as above), invocations without a commit beside others with one (no commit given), a recorded
+    identity not compared (no commit given) and a run recording none (no commit given) are notes."""
+    problems, notes = [], []
+    want = (" the deployed commit %s (--expect-service-commit)" % expected) if expected else ""
+    if identity is None:
+        if expected and "mcp" in policy_arms:
+            problems.append("no MCP arm recorded: the service identity cannot be confirmed against%s" % want)
+        elif expected:
+            notes.append("the policy's arms include no MCP arm: the service identity is not judged")
+        return problems, notes
+    src = identity.get("source") or "arms/mcp"
+    n = identity.get("invocations") or 0
+    if not identity.get("recorded"):
+        if expected:
+            problems.append("the MCP arm records no service identity (no service_commit or identity_changed in %s: a "
+                            "runner before the identity fields): the gate cannot confirm what it judged against%s"
+                            % (src, want))
+        else:
+            notes.append("the MCP arm records no service identity (a runner before the identity fields): not checked")
+        return problems, notes
+    commits = identity.get("service_commits") or {}
+    errors = identity.get("identity_errors") or []
+    err_text = (" (identity_error: %s)" % "; ".join(errors)) if errors else ""
+    if identity.get("without_commit"):
+        text = "%d of %d MCP invocation(s) record no service_commit (%s)%s" % (
+            identity["without_commit"], n, src, err_text)
+        if expected:
+            problems.append("%s: the identity is not confirmed against%s" % (text, want))
+        else:
+            notes.append(text)
+    if expected:
+        for commit, count in commits.items():
+            if not commit_matches(commit, expected):
+                problems.append("the MCP arm recorded the service commit %s (%d invocation(s)), not%s" % (
+                    commit, count, want))
+    elif len(commits) > 1:
+        problems.append("the MCP invocations recorded %d service commits (%s): the run met more than one deployment"
+                        % (len(commits), ", ".join("%s on %d" % kv for kv in commits.items())))
+    if identity.get("identity_changed") is True:
+        problems.append("the service's commit changed during %d MCP invocation(s) (identity_changed true, %s): the run "
+                        "met more than one deployment" % (max(1, identity.get("changed") or 0), src))
+    if identity.get("unconfirmed"):
+        notes.append("%d MCP invocation(s) record identity_changed null (one of the two reads failed%s): the commit "
+                     "read before each %s" % (identity["unconfirmed"],
+                                              ("; identity_error: %s" % "; ".join(errors)) if errors else "",
+                                              "is judged above" if expected else "was not compared"))
+    if not problems:
+        if expected:
+            notes.append("the MCP arm recorded the deployed service commit %s on its %d invocation(s) (%s)" % (
+                expected, n, src))
+        elif commits:
+            notes.append("the MCP arm recorded the service commit %s (%s); no deployed commit given "
+                         "(--expect-service-commit): not compared" % (
+                             ", ".join("%s on %d invocation(s)" % kv for kv in commits.items()), src))
+    return problems, notes
+
+
+def judge(run_dir, policy, reevaluated=False, expect_service_commit=None):
+    """The gate's verdict on a merged (and compared) run directory: {passed, problems, notes, counts}; with
+    |expect_service_commit| (the deployed commit), the service identity the MCP arm recorded is held to it
+    (service_identity_problems)."""
     problems, notes = [], []
     name_of = lambda n: sc.reevaluated_name(n, reevaluated)  # noqa: E731
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
@@ -584,6 +670,10 @@ def judge(run_dir, policy, reevaluated=False):
                 i, json.dumps(p.get("manifest"), sort_keys=True))))
     arms = list(policy.get("arms") or [])
     problems.extend(host_identity_problems(policy, arm_runs))
+    service = merge_run.service_identity(run_dir, arm_runs)
+    sp, sn = service_identity_problems(service, expect_service_commit, arms)
+    problems.extend(_problem("identity", x, arm="mcp") for x in sp)
+    notes.extend(sn)
     selected = set(policy["selection"].get("scenarios") or [])
     problems.extend(configuration_problems(run_dir, rows, policy, reevaluated, notes))
 
@@ -798,7 +888,8 @@ def judge(run_dir, policy, reevaluated=False):
             "policy": {"name": policy.get("name"), "policy_version": policy.get("policy_version"),
                        "sha256": policy_sha256(policy)},
             "run_dir": os.path.abspath(run_dir), "reevaluated": reevaluated, "judged_utc": sc.iso_utc(time.time()),
-            "inputs": inputs_digest(run_dir, reevaluated)}
+            "inputs": inputs_digest(run_dir, reevaluated),
+            "service_identity": {"expected": expect_service_commit, "recorded": service}}
 
 
 def uncompared_properties(sid, recorded, ref_arm, scenario, is_property):
@@ -1041,7 +1132,13 @@ def main(argv=None):
     ap.add_argument("--out", default=None, help="the verdict's JSON (default RUN_DIR/gate.json, "
                                                 "gate.reevaluated.json with --reevaluated)")
     ap.add_argument("--max-lines", type=int, default=400)
+    ap.add_argument("--expect-service-commit", metavar="SHA", default=None,
+                    help="the deployed service commit (run-gate's LIVE line): every MCP invocation must have read it")
     a = ap.parse_args(argv)
+    if a.expect_service_commit is not None and not COMMIT_RE.match(a.expect_service_commit):
+        sys.stderr.write("gate.py: --expect-service-commit %r is not a git commit (7 to 40 hex digits)\n"
+                         % a.expect_service_commit)
+        return 2
     try:
         policy = load_policy(a.policy)
     except (OSError, ValueError) as e:
@@ -1050,7 +1147,7 @@ def main(argv=None):
     if not os.path.isdir(a.run_dir):
         sys.stderr.write("gate.py: %s is not a run directory\n" % a.run_dir)
         return 2
-    verdict = judge(a.run_dir, policy, a.reevaluated)
+    verdict = judge(a.run_dir, policy, a.reevaluated, a.expect_service_commit)
     verdict["policy"]["path"] = os.path.abspath(a.policy)
     sc.write_json_atomic(a.out or os.path.join(a.run_dir, gate_file(a.reevaluated)), verdict)
     sys.stdout.write(render(verdict, a.max_lines))

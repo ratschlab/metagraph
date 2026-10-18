@@ -609,3 +609,87 @@ class DeadlineFloor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RawRecordReader(unittest.TestCase):
+    """SD-093 (option 2): one reader of an execution's raw record for every caller (suite_common.raw_record_path,
+    read_raw_record, raw_record_answer, raw_record_body), today's lookup order: an absolute path as it is; under a run
+    directory run_dir/<raw>, then run_dir/arms/<arm>/<raw>; under an arm directory arm_dir/<raw>, then the run
+    directory for a merged 'arms/...' path. An unreadable record (missing, a truncated .gz, a cut JSON) or one that is
+    no object reads as none."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.run = os.path.join(self.tmp, "run")
+        self.arm = os.path.join(self.run, "arms", "mcp")
+        os.makedirs(os.path.join(self.arm, "raw"))
+        self.rec = {"scenario": "S", "answer": {"http": 200, "body": {"x": 1}}}
+        sc.write_gz_json(os.path.join(self.arm, "raw", "S.mcp.0.json.gz"), self.rec)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_lookup(self):
+        arm_line = {"arm": "mcp", "raw": "raw/S.mcp.0.json.gz"}
+        merged = {"arm": "mcp", "raw": "arms/mcp/raw/S.mcp.0.json.gz"}
+        absolute = {"arm": "mcp", "raw": os.path.join(self.arm, "raw", "S.mcp.0.json.gz")}
+        want = os.path.join(self.arm, "raw", "S.mcp.0.json.gz")
+        for line, where in ((merged, {"run_dir": self.run}), (arm_line, {"run_dir": self.run}),
+                            (arm_line, {"arm_dir": self.arm}), (merged, {"arm_dir": self.arm}),
+                            (absolute, {"run_dir": self.run}), (absolute, {"arm_dir": self.arm}), (absolute, {})):
+            self.assertEqual(os.path.realpath(sc.raw_record_path(line, **where)), os.path.realpath(want), (line, where))
+            self.assertEqual(sc.read_raw_record(line, **where), self.rec, (line, where))
+            self.assertEqual(sc.raw_record_answer(line, **where), self.rec["answer"])
+            self.assertEqual(sc.raw_record_body(line, **where), {"x": 1})
+        # a top-level raw/ under the run directory (the comparison's test layout) comes first
+        os.makedirs(os.path.join(self.run, "raw"))
+        top = dict(self.rec, scenario="top")
+        sc.write_gz_json(os.path.join(self.run, "raw", "S.mcp.0.json.gz"), top)
+        self.assertEqual(sc.read_raw_record(arm_line, run_dir=self.run), top)
+        self.assertEqual(sc.read_raw_record(arm_line, arm_dir=self.arm), self.rec)
+        # nothing to read: no raw, not a string, no file, no directory given for a relative path
+        for line, where in (({}, {"run_dir": self.run}), ({"raw": 5}, {"run_dir": self.run}), (None, {}),
+                            ({"raw": "raw/none.json.gz", "arm": "mcp"}, {"run_dir": self.run}),
+                            (arm_line, {})):
+            self.assertIsNone(sc.raw_record_path(line, **where), line)
+            self.assertIsNone(sc.read_raw_record(line, **where), line)
+            self.assertIsNone(sc.raw_record_answer(line, **where), line)
+            self.assertIsNone(sc.raw_record_body(line, **where), line)
+
+    def test_unreadable_and_odd_records(self):
+        path = os.path.join(self.arm, "raw", "S.mcp.0.json.gz")
+        line = {"arm": "mcp", "raw": "raw/S.mcp.0.json.gz"}
+        with open(path, "rb") as fh:
+            data = fh.read()
+        sentinel = object()
+        for content, any_json in ((data[:len(data) // 2], sentinel),          # a truncated .gz: EOFError
+                                  (gzip.compress(b'{"answer": '), sentinel),    # a cut JSON: ValueError
+                                  (b"not gzip at all", sentinel),               # no gzip: OSError
+                                  (gzip.compress(b"[1, 2]"), [1, 2]),           # a record that is no object
+                                  (gzip.compress(b"null"), None),
+                                  (gzip.compress(b'{"answer": [1]}'), {"answer": [1]})):
+            with open(path, "wb") as fh:
+                fh.write(content)
+            self.assertIsNone(sc.raw_record_answer(line, arm_dir=self.arm), content)
+            self.assertIsNone(sc.raw_record_body(line, arm_dir=self.arm), content)
+            got = sc.read_raw_record(line, arm_dir=self.arm, any_json=True, default=sentinel)
+            self.assertEqual(got, any_json, content)
+            if not isinstance(any_json, dict):
+                self.assertIsNone(sc.read_raw_record(line, arm_dir=self.arm), content)
+
+    def test_one_reader(self):
+        """Every reader of a raw record goes through suite_common (SD-093): no other module of the suite opens one
+        with read_gz_json."""
+        import re
+        suite = os.path.dirname(HERE)
+        found = []
+        for sub in ("", "bench", "doc"):
+            folder = os.path.join(suite, sub)
+            for name in sorted(os.listdir(folder)):
+                if not name.endswith(".py") or name == "suite_common.py":
+                    continue
+                with open(os.path.join(folder, name)) as fh:
+                    if re.search(r"\bread_gz_json\(", fh.read()):
+                        found.append(os.path.join(sub, name))
+        self.assertEqual(found, [])

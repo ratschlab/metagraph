@@ -816,23 +816,15 @@ def direct_error_parts(line, run_dir):
         top.add(err["code"])
     if err.get("text"):
         texts.add(err["text"])
-    raw = line.get("raw")
-    if raw and run_dir:
-        path = os.path.join(run_dir, raw)
-        if os.path.exists(path):
-            try:
-                doc = sc.read_gz_json(path)
-            except (OSError, ValueError, EOFError):   # a truncated .gz or a cut JSON: no body (SD-093)
-                doc = None
-            answer = doc.get("answer") if isinstance(doc, dict) else None
-            body = answer.get("body") if isinstance(answer, dict) else None
-            if isinstance(body, dict):
-                for p in body.get("patterns") or []:
-                    if isinstance(p, dict) and isinstance(p.get("error"), dict):
-                        if p["error"].get("code"):
-                            slots.add(p["error"]["code"])
-                        if p["error"].get("message"):
-                            texts.add(p["error"]["message"])
+    # the raw record (suite_common.raw_record_body: an unreadable or cut one, or one that is no object, has no body)
+    body = sc.raw_record_body(line, run_dir=run_dir) if run_dir else None
+    if isinstance(body, dict):
+        for p in body.get("patterns") or []:
+            if isinstance(p, dict) and isinstance(p.get("error"), dict):
+                if p["error"].get("code"):
+                    slots.add(p["error"]["code"])
+                if p["error"].get("message"):
+                    texts.add(p["error"]["message"])
     return top, slots, texts
 
 
@@ -843,14 +835,8 @@ def direct_errors(line, run_dir):
 
 
 def _raw_doc(line, run_dir):
-    raw = (line or {}).get("raw")
-    if not raw or not run_dir or not os.path.exists(os.path.join(run_dir, raw)):
-        return None
-    try:
-        obj = sc.read_gz_json(os.path.join(run_dir, raw))
-    except (OSError, ValueError, EOFError):
-        return None
-    return obj if isinstance(obj, dict) else None
+    """The raw record of a merged line under |run_dir| (suite_common.read_raw_record), or None."""
+    return sc.read_raw_record(line, run_dir=run_dir) if run_dir else None
 
 
 def mcp_error(line, run_dir):
@@ -2715,16 +2701,9 @@ def cold_warm(lines):
 # it, and the other types read not_evaluated.
 
 def load_answer(line, run_dir):
-    """The normalised answer of an execution from its raw file (both runners keep it under `answer`)."""
-    raw = line.get("raw") if line else None
-    if not raw or not run_dir:
-        return None
-    try:
-        obj = sc.read_gz_json(os.path.join(run_dir, raw))
-    except (OSError, ValueError, EOFError):
-        return None
-    ans = obj.get("answer") if isinstance(obj, dict) else None
-    return ans if isinstance(ans, dict) else None
+    """The normalised answer of an execution from its raw file (both runners keep it under `answer`;
+    suite_common.raw_record_answer)."""
+    return sc.raw_record_answer(line, run_dir=run_dir) if run_dir else None
 
 
 class RelationMissing(Exception):

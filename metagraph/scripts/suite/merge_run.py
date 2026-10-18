@@ -52,6 +52,14 @@ The host's identity (release_identity): the releases and index_fps the direct ar
 closing GETs, in order (run.json `release_identity`, `mixed_releases`); more than one release or index_fp (a deploy
 during the run, or between an interrupt and its resume) is a warning, and an error with --strict-identity.
 
+The deployed service's identity (service_identity): the service commit the MCP runner read from the service before
+each invocation and whether it changed by the read after it (async's runner 684bb327: every mcp_runs.jsonl line,
+run.json's top level and each invocations[] entry state service_commit, identity_changed true / false, null when
+either read failed, and identity_error naming the failed read), summarised in run.json `service_identity` (None
+without an MCP arm; `recorded` false for a runner before the fields). A commit that changed is a warning here; the gate
+judges the identity (gate.service_identity_problems, against the deployed commit it is given). A Railway deployment id
+is not read (the owner, 2026-10-18: the service states its commit only).
+
 The checks' identity (checks_identity, of the recorded set): run_suite.sh judges every arm with the run's snapshot
 RUN_DIR/scripts (SNAPSHOT.json: the sha256 of its files); run_direct.py records per session the sha256 of the checks
 and suite_common it imported; async's runner records per invocation (run.json invocations[]) its checks_dir, and
@@ -74,6 +82,8 @@ ARM_ORDER = {"direct-local": 0, "direct-remote": 1, "mcp": 2}
 # checks_identity's error for a recorded set without a snapshot (--strict-identity and the gate)
 UNPINNED = ("the run has no snapshot (scripts/SNAPSHOT.json): the checks that judged its arms are not pinned "
             "(re-evaluate it to gate its answers)")
+# a raw record renormalisation could not read (suite_common.read_raw_record's default)
+_UNREAD = object()
 # the outcomes a check-derived outcome may replace, by strictness
 _STRICTNESS = {"pass": 0, "inconclusive": 1, "finding": 2, "fail": 3}
 
@@ -118,16 +128,10 @@ def host_state_inconclusive(row, scenario=None, run_dir=None, refs=None):
     why = row.get("inconclusive_reason")   # the runner's (e334715b) or the re-evaluation's class of it
     if why is not None:
         return why in sc.UNDECIDABLE or str(why) in sc.MCP_HOST_STATE_CODES
-    doc = None
-    raw = row.get("raw")
-    if run_dir and isinstance(raw, str) and raw:
-        try:
-            doc = sc.read_gz_json(raw if os.path.isabs(raw) else os.path.join(run_dir, raw))
-        except (OSError, ValueError, EOFError):
-            doc = None
+    doc = sc.read_raw_record(row, run_dir=run_dir) if run_dir else None
     if refs is None and run_dir:
         refs = sc.run_references(run_dir)
-    code, state, _ = sc.host_state_of_record(scenario, row, doc if isinstance(doc, dict) else None, refs)
+    code, state, _ = sc.host_state_of_record(scenario, row, doc, refs)
     return code is not None and state in ("host_state", "undecidable")
 
 
@@ -349,6 +353,80 @@ def observed_host_identity(arm, run, key="index_fp"):
     return set(v if isinstance(v, str) else json.dumps(v, sort_keys=True) for v in values if v)
 
 
+# What the MCP runner records of the deployed service per invocation (async's runner 684bb327; the owner, 2026-10-18:
+# the commit only, no deployment id): the commit read before the invocation, whether the read after it differs (true /
+# false; null when either read failed) and the failed read's error
+SERVICE_IDENTITY_FIELDS = ("service_commit", "identity_changed", "identity_error")
+# the identity errors a summary keeps (the first distinct ones)
+IDENTITY_ERRORS_KEPT = 5
+
+
+def _commit(value):
+    """A recorded service commit (a non-empty string, stripped), else None (absent, null, empty, another type)."""
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def identity_summary(top, records, source):
+    """The service identity of an MCP arm from its run.json's top level |top| and its per-invocation records
+    |records| (mcp_runs.jsonl lines, else run.json invocations[]; [top] when it has neither): `recorded` (a record or
+    the top states any of SERVICE_IDENTITY_FIELDS), `service_commits` {commit: invocations that read it} (the top's
+    commit counted 0 times when no invocation states it), `service_commit` (the one commit, else None),
+    `identity_changed` (true when any invocation or the top states true; false when every invocation states false;
+    else null), `invocations`, `without_identity` (records stating none of the fields: a runner before them),
+    `without_commit` (records without a commit, those included), `changed` (records stating identity_changed true),
+    `unconfirmed` (records stating identity_changed null: a read failed), `identity_errors` (the first distinct
+    ones) and `source`."""
+    top = top if isinstance(top, dict) else {}
+    records = [r for r in records if isinstance(r, dict)]
+    commits, errors = {}, []
+    n = {"without_identity": 0, "without_commit": 0, "changed": 0, "unconfirmed": 0}
+    for r in records:
+        if not any(k in r for k in SERVICE_IDENTITY_FIELDS):
+            n["without_identity"] += 1
+        c = _commit(r.get("service_commit"))
+        if c is None:
+            n["without_commit"] += 1
+        else:
+            commits[c] = commits.get(c, 0) + 1
+        if r.get("identity_changed") is True:
+            n["changed"] += 1
+        elif "identity_changed" in r and r.get("identity_changed") is None:
+            n["unconfirmed"] += 1
+        e = r.get("identity_error")
+        if e not in (None, "") and str(e) not in errors and len(errors) < IDENTITY_ERRORS_KEPT:
+            errors.append(str(e))
+    tc = _commit(top.get("service_commit"))
+    if tc is not None and tc not in commits:
+        commits[tc] = 0
+    if n["changed"] or top.get("identity_changed") is True:
+        changed = True
+    elif records and all(r.get("identity_changed") is False for r in records):
+        changed = False
+    else:
+        changed = None
+    recorded = any(k in x for x in records + [top] for k in SERVICE_IDENTITY_FIELDS)
+    return dict({"recorded": recorded, "source": source, "service_commit": next(iter(commits)) if len(commits) == 1
+                 else None, "service_commits": commits, "identity_changed": changed if recorded else None,
+                 "invocations": len(records), "identity_errors": errors}, **n)
+
+
+def service_identity(run_dir, arm_runs):
+    """The deployed service's identity as the MCP arm recorded it (identity_summary over arms/mcp/mcp_runs.jsonl, else
+    its run.json invocations[], else its run.json alone), None for a run without an MCP arm."""
+    run = arm_runs.get("mcp")
+    if run is None:
+        return None
+    lines, _ = sc.read_jsonl(os.path.join(run_dir, "arms", "mcp", "mcp_runs.jsonl"))
+    lines = [r for r in lines if isinstance(r, dict)]
+    invocations = [r for r in (run.get("invocations") or []) if isinstance(r, dict)] \
+        if isinstance(run.get("invocations"), list) else []
+    if lines:
+        return identity_summary(run, lines, "arms/mcp/mcp_runs.jsonl")
+    if invocations:
+        return identity_summary(run, invocations, "arms/mcp/run.json invocations")
+    return identity_summary(run, [run], "arms/mcp/run.json")
+
+
 def checks_identity(run_dir, arm_runs):
     """Which checks judged the recorded executions of each arm, against the run's snapshot (suite_common.SNAPSHOT_FILE
     under RUN_DIR/scripts): {snapshot: {created_utc, files} or None, arms: {arm: what each session or invocation
@@ -479,13 +557,9 @@ def renormalisation(arm_dir, rows=None):
     raw = {"read": 0, "answer_recorded": 0}
     if os.path.basename(os.path.normpath(arm_dir)) == "mcp":
         for r in rows:
-            rel = r.get("raw")
-            if not isinstance(rel, str) or not rel:
-                continue
-            path = rel if os.path.isabs(rel) else os.path.join(arm_dir, rel)
-            try:
-                doc = sc.read_gz_json(path)
-            except (OSError, ValueError, EOFError):
+            # every record read counts, an object or not (suite_common.read_raw_record any_json)
+            doc = sc.read_raw_record(r, arm_dir=arm_dir, any_json=True, default=_UNREAD)
+            if doc is _UNREAD:
                 continue
             raw["read"] += 1
             if isinstance(doc, dict) and "answer_recorded" in doc:
@@ -641,6 +715,13 @@ def merge(run_dir, reevaluated=False):
                     instances.add(sess[key])
     if len(instances) > 1:
         warnings.append("the server restarted during the run (server_instance %s)" % ", ".join(sorted(instances)))
+    service = service_identity(run_dir, arm_runs)
+    if service and service["identity_changed"]:
+        warnings.append("the service's commit changed during %d MCP invocation(s) (identity_changed true)"
+                        % max(1, service["changed"]))
+    if service and len(service["service_commits"]) > 1:
+        warnings.append("the MCP invocations read %d service commits (%s)" % (
+            len(service["service_commits"]), ", ".join("%s %d" % kv for kv in service["service_commits"].items())))
     for name, run in arm_runs.items():
         for w in run.get("warnings", []) or []:
             warnings.append("arms/%s: %s" % (name, w))
@@ -685,6 +766,7 @@ def merge(run_dir, reevaluated=False):
         "release_identity": releases,
         "mixed_releases": bool(releases["changed"]),
         "checks_identity": checks,
+        "service_identity": service,
         "renormalisation": renormalised,
         "warnings": warnings,
     }

@@ -89,7 +89,7 @@ class ManifestV6(unittest.TestCase):
         cls.s5, cls.s6 = by_id(cls.v5), by_id(cls.v6)
 
     def test_versions_and_digests(self):
-        self.assertEqual(bm.MANIFEST_VERSION, 6)
+        self.assertIn(6, bm.BUILDABLE_VERSIONS)   # the builder makes v7 by default and v6 again (manifest_version=6)
         self.assertEqual(bm.SMOKE_TAG, "smoke-v5")   # v6 keeps v5's smoke selection and its tag (the gate's scenarios)
         self.assertEqual((self.v5["manifest_version"], self.v5["content_sha256"]), (5, V5_CONTENT))
         self.assertEqual((self.v6["manifest_version"], self.v6["content_sha256"]), (6, V6_CONTENT))
@@ -361,7 +361,8 @@ class ManifestV6(unittest.TestCase):
 
     @unittest.skipUnless(have_cache(), "no record cache")
     def test_frozen_v6_is_what_the_builder_makes(self):
-        m = built()
+        m = built(version=6)
+        self.assertEqual(m["manifest_version"], 6)
         self.assertEqual(m["content_sha256"], V6_CONTENT)
         self.assertEqual(m["relations_sha256"], RELATIONS)
         self.assertEqual(bm.smoke_of(m)["content_sha256"], V6_SMOKE_CONTENT)

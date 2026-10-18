@@ -7,9 +7,10 @@
 #                [--areas P,M] [--ids FILE] [--limit N] [--skip-local | --local] [--skip-remote | --remote]
 #                [--resume RUN_DIR] [--compare EARLIER_RUN_DIR] [--by-design PATH] [--pause S] [--max-requests N]
 #                [--warm-every N] [--checks auto|checks|stub] [--allow-stub | --no-allow-stub] [--no-pdf]
-#                [--gate POLICY | --no-gate]
+#                [--gate POLICY | --no-gate] [--expect-service-commit SHA]
 #   run_suite.sh --reevaluate RUN_DIR [--reeval-checks DIR] [--reeval-mcp-auth anonymous|api_key]
 #                [--compare EARLIER_RUN_DIR] [--by-design PATH] [--no-pdf] [--gate POLICY]
+#                [--expect-service-commit SHA]
 #
 # --ids FILE: only these scenarios (ids separated by commas, blanks or new lines, '#' comments; an id the manifest
 # lacks is refused), in manifest order, with --areas / --limit applied on top. --resume without --ids, --areas,
@@ -28,7 +29,10 @@
 # differing manifest identities as an error (merge_run.py --strict-identity), gate.py judges the run after the
 # comparison (RUN_DIR/gate.json, which the report shows) and the exit status is the gate's: 0 PASS, 1 FAIL (2: the
 # policy unreadable). With --reevaluate it judges the re-evaluated set (gate.reevaluated.json). Without --gate the
-# exit status is the orchestration's, as before: a FAIL in the report still exits 0.
+# exit status is the orchestration's, as before: a FAIL in the report still exits 0. --expect-service-commit SHA (the
+# deployed service commit, run-gate's LIVE line; 7 to 40 hex digits) is passed to gate.py, which then requires every
+# MCP invocation to have read that commit from the service (gate.service_identity_problems); it applies to this
+# invocation's gate only (a resume names it again) and needs --gate (or the run's restored gate).
 #
 # --reevaluate RUN_DIR: offline, no lock and no request to any host: judges the run's recorded answers again with
 # checks.py of this directory (or of --reeval-checks DIR) (reevaluate.py), then merge_run / compare / report
@@ -157,6 +161,7 @@ mex_rsync() {
 MANIFEST=""; SMOKE=0; AREAS=""; LIMIT=""; SKIP_LOCAL=0; SKIP_REMOTE=0; MCP_RUN=""; MCP_CMD=""; COMPARE=""
 RESUME=""; BY_DESIGN=""; NO_PDF=0; PAUSE="1"; MAX_REQUESTS=""; MODE=""; ALLOW_STUB=0; WARM_EVERY=10; NO_MCP=0
 MCP_GIVEN=0; CHECKS_MODE=""; REEVALUATE=""; REEVAL_CHECKS=""; REEVAL_MCP_AUTH=""; IDS_FILE=""; IDS=""; GATE=""
+EXPECT_COMMIT=""
 WARM_GIVEN=0; RESUME_SELECTION=0; PAUSE_GIVEN=0; GIVEN=""
 # the run's flags this invocation names ('' none; else the option, a negation included): they apply to it only
 LOCAL_SET=""; REMOTE_SET=""; STUB_SET=""; GATE_SET=""
@@ -181,6 +186,7 @@ while [[ $# -gt 0 ]]; do
     --ids) IDS_FILE="$2"; shift 2 ;;
     --gate) set_once GATE_SET gate; GATE="$2"; shift 2 ;;
     --no-gate) set_once GATE_SET no-gate; GATE=""; shift ;;
+    --expect-service-commit) EXPECT_COMMIT="$2"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
     --skip-local) set_once LOCAL_SET skip-local; SKIP_LOCAL=1; shift ;;
     --local) set_once LOCAL_SET local; SKIP_LOCAL=0; shift ;;
@@ -210,6 +216,10 @@ done
 [[ -z "$COMPARE" || -d "$COMPARE" ]] || die "--compare $COMPARE is not a directory"
 [[ -z "$CHECKS_MODE" || "$CHECKS_MODE" =~ ^(auto|checks|stub)$ ]] || die "--checks takes auto, checks or stub"
 [[ -z "$IDS_FILE" || -f "$IDS_FILE" ]] || die "--ids $IDS_FILE is not a file"
+[[ -z "$EXPECT_COMMIT" || "$EXPECT_COMMIT" =~ ^[0-9a-fA-F]{7,40}$ ]] \
+  || die "--expect-service-commit $EXPECT_COMMIT is not a git commit (7 to 40 hex digits)"
+GATE_ARGS=()
+[[ -z "$EXPECT_COMMIT" ]] || GATE_ARGS+=(--expect-service-commit "$EXPECT_COMMIT")
 check_gate() {
   [[ -f "$GATE" ]] || die "--gate $GATE is not a file"
   GATE="$(cd "$(dirname "$GATE")" && pwd)/$(basename "$GATE")"
@@ -220,6 +230,7 @@ check_gate() {
 # --- the offline re-evaluation of a recorded run (lane S4): no lock, no ssh, no request to any host ----------
 if [[ -n "$REEVALUATE" ]]; then
   [[ -d "$REEVALUATE/arms" ]] || die "--reevaluate $REEVALUATE has no arms/ directory"
+  [[ -z "$EXPECT_COMMIT" || -n "$GATE" ]] || die "--expect-service-commit is the gate's input: pass --gate POLICY"
   [[ -z "$REEVAL_CHECKS" || -f "$REEVAL_CHECKS/checks.py" ]] || die "--reeval-checks $REEVAL_CHECKS has no checks.py"
   REEVALUATE="$(cd "$REEVALUATE" && pwd)"
   RE_ARGS=("$REEVALUATE")
@@ -239,7 +250,7 @@ if [[ -n "$REEVALUATE" ]]; then
   "$PY" "$HERE/compare.py" "${CMP_ARGS[@]}"
   GATE_RC=0
   if [[ -n "$GATE" ]]; then
-    "$PY" "$HERE/gate.py" "$REEVALUATE" "$GATE" --reevaluated >&2 || GATE_RC=$?
+    "$PY" "$HERE/gate.py" "$REEVALUATE" "$GATE" --reevaluated ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} >&2 || GATE_RC=$?
     [[ $MERGE_RC == 0 || $GATE_RC != 0 ]] || GATE_RC=1
   fi
   REP_ARGS=("$REEVALUATE" --reevaluated)
@@ -359,6 +370,7 @@ else
   # A new run is named after the lock is taken (the release GET below): review N4.
   RUN_ID=""; RUN_DIR=""
 fi
+[[ -z "$EXPECT_COMMIT" || -n "$GATE" ]] || die "--expect-service-commit is the gate's input: pass --gate POLICY"
 MODE="${MODE:-paired}"
 [[ "$MODE" == paired || "$MODE" == sequential ]] || die "unknown mode $MODE"
 # The smoke load rule: at most ~40 requests per smoke invocation (a resumed smoke run's included).
@@ -1272,7 +1284,7 @@ fi
 "$PY" "$HERE/compare.py" "${CMP_ARGS[@]}"
 GATE_RC=0
 if [[ -n "$GATE" ]]; then
-  "$PY" "$HERE/gate.py" "$RUN_DIR" "$GATE" >&2 || GATE_RC=$?
+  "$PY" "$HERE/gate.py" "$RUN_DIR" "$GATE" ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} >&2 || GATE_RC=$?
   [[ $MERGE_RC == 0 || $GATE_RC != 0 ]] || GATE_RC=1
 fi
 REP_ARGS=("$RUN_DIR")

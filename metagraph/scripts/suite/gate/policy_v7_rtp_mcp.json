@@ -1,0 +1,12018 @@
+{
+ "advanced_path": false,
+ "arms": [
+  "direct-local",
+  "mcp"
+ ],
+ "by_design_table": {
+  "cases": 133,
+  "service_commit": "22d034ba5c3de328757f0095c9d48420315ae413",
+  "sha256": "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44",
+  "version": 1
+ },
+ "counts": {
+  "by_area": {
+   "C": 8,
+   "D": 21,
+   "L": 48,
+   "M": 62,
+   "N": 135,
+   "P": 122,
+   "Q": 32,
+   "R": 90,
+   "T": 103,
+   "X": 100
+  },
+  "by_route": {
+   "GET /traverse/capabilities": 1,
+   "POST /pattern": 480,
+   "POST /resolve": 127,
+   "POST /traverse": 113
+  },
+  "excluded": 91,
+  "exclusions_by_rule": {
+   "advanced_path": 1,
+   "budget_stress": 35,
+   "manifest_not_implemented": 48,
+   "table_not_expressible": 47
+  },
+  "properties_not_required": 0,
+  "relations_excluded": 8,
+  "relations_required": 19,
+  "required": {
+   "direct-local": {
+    "executions": 793,
+    "scenarios": 686
+   },
+   "mcp": {
+    "executions": 1280,
+    "scenarios": 630
+   }
+  },
+  "selected": 721
+ },
+ "declared": {
+  "declared_version": 1,
+  "file": "gate/declared_v7_rt.json",
+  "sha256": "78919245c5c35f529d1aef4f314bae6eb0cf772b4287ea3ea94f85d57c14bad5"
+ },
+ "exclusions": [
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (support); it names resolve.not_expressible.support, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-trace-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (support); it names resolve.not_expressible.support, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-trace-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-twin-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-budget-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-twin-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-budget-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (support); it names resolve.not_expressible.support, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-trace-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-edge-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (bounds.max_query_bp); it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-edge-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (bogus)",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "R-edge-0015"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (graph); it names resolve.not_expressible.graph, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-edge-0016"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (graphs)",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "R-edge-0017"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (non-object body); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-edge-0018"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "R-edge-0019"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a 10,000 bp column-label walk under the load: 60 s of cold reads (v3's and v4's four successive 15 s calls, chained) reached 2,731 / 6,398 bp, so whether one 60,000 ms call completes depends on the load: no budget makes it decisive; T-walk-0006, its window walked 1,000 bp, is the gate's",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "T-longwalk-0001"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a 10,000 bp column-label walk under the load: 60 s of cold reads (v3's and v4's four successive 15 s calls, chained) reached 1,431 / 1,643 bp, so whether one 60,000 ms call completes depends on the load: no budget makes it decisive; T-walk-0012, its window walked 500 bp, is the gate's",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "T-longwalk-0002"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a 10,000 bp column-label walk under the load: 60 s of cold reads (v3's and v4's four successive 15 s calls, chained) reached 8,147 / 8,748 bp, so whether one 60,000 ms call completes depends on the load: no budget makes it decisive; T-walk-0018, its window walked 5,000 bp, is the gate's",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "T-longwalk-0003"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a 10,000 bp column-label walk under the load: 60 s of cold reads (v3's and v4's four successive 15 s calls, chained) reached 2,244 / 2,255 bp, so whether one 60,000 ms call completes depends on the load: no budget makes it decisive; T-walk-0036, its window walked 1,000 bp, is the gate's",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "T-longwalk-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.labels.mode); it names traverse.not_expressible.advanced_strategy, which the by-design table states not expressible via MCP; it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-labels-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.labels.mode); it names traverse.not_expressible.advanced_strategy, which the by-design table states not expressible via MCP; it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-labels-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "its traverse_fetch arguments need the advanced strategy path (overrides.labels.max_seed_labels), which the deployment does not enable",
+   "rules": [
+    "advanced_path"
+   ],
+   "scenario": "T-labels-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.output.coordinates); it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-coords-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.output.coordinates); it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-coords-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.output.coordinates); it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-coords-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (attempt_id); it names traverse.not_expressible.attempt_fields, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-attempts-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (attempt_id); it names traverse.not_expressible.attempt_fields, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-attempts-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (not_after_ms); it names traverse.not_expressible.attempt_fields, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-attempts-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (graph); it names traverse.not_expressible.graph, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-edge-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (graphs)",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "T-edge-0005"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (non-object body); it names traverse.not_expressible.non_object_body, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-edge-0006"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.bogus); it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-edge-0009"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.branching.max_label_branches); it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-edge-0011"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (strategy.branching.tip_window_bp); it names traverse.not_expressible.strategy_keys, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "T-edge-0015"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (stop_at_threshold); it names pattern.not_expressible.stop_at_threshold, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-modes-0005"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_steps); it names pattern.not_expressible.max_steps, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-caps-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_steps); it names pattern.not_expressible.max_steps, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-caps-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (bogus); it names pattern.unknown_field, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-edge-0005"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (budget_split); it names pattern.not_expressible.budget_split, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-edge-0007"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (graphs); it names pattern.not_expressible.graphs, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-edge-0008"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "P-edge-0012"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0025"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a 12-mer in any_offset scope, count (heavy): not decisive at any budget in the v5 baseline: its one 200 was a time-limited at_least at 59.9 s, and 5 of its 6 executions were 503 deadlines at 60.17 to 60.52 s, the work overrunning the 250 ms finalisation reserve (SPEC-pattern-search §6 / §7.6 allow that on any host)",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-heavy-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_annotation_work); it names pattern.not_expressible.max_annotation_work, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "L-caps-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_annotation_work); it names pattern.not_expressible.max_annotation_work, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "L-caps-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_memory_mb); it names pattern.not_expressible.max_memory_mb, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "L-memory-0001"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0001"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0002"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0003"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0004"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0005"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0006"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0007"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0008"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0009"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0010"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a decapeptide at max_mismatches 1 (7.8 M steps): in the v5 baseline its cold MCP call ended in a relayed 503 deadline and its direct-local cold run was time-limited at 60 s with 17 % of the steps done (projected 345 s); only the warm MCP repeat completed (19 s): no budget below the ingress's ~120 s cut makes it decisive on a cold host",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "M-protein-0001"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0024"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a decapeptide at max_mismatches 1: not one of its four executions in the v5 baseline finished within 60 s, the warm MCP repeat included (time-limited at 59.9 s): its completion depends on the host's cache and load at any budget the ingress admits",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "M-protein-0002"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0011"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a decapeptide at max_mismatches 1 (7.8 M steps): in the v5 baseline its cold MCP call did 5 % of the steps in 60 s (projected 1,180 s), its direct-local cold run ended in a 503 deadline, and even the warm MCP repeat took 56.7 s",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "M-protein-0003"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0012"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0013"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0014"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0015"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a decapeptide at max_mismatches 1 (3.1 M steps): in the v5 baseline its cold MCP call did 19 % of the steps in 60 s (projected 317 s) and its direct-local cold run 47 % (projected 126 s); only warm runs completed",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "M-protein-0007"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_steps); it names pattern.not_expressible.max_steps, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "M-order-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_steps); it names pattern.not_expressible.max_steps, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "M-order-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_mismatches (value 1.5: the MCP coerces or refuses it))",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "M-refusal-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_mismatches (value \"1\": the MCP coerces or refuses it))",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "M-refusal-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_mismatches (value null: the MCP coerces or refuses it))",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "M-refusal-0005"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_mismatches (value true: the MCP coerces or refuses it))",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "M-refusal-0006"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0016"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0017"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0018"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0019"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0020"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0021"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a near-miss decapeptide at max_mismatches 1, mode partial (1.3 M steps): in the v5 baseline its cold MCP call did 49 % of the steps in 60 s (projected 122 s, past a 110 s budget); its direct and warm runs, after that call, completed in 1 to 12 s",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "N-nearmiss-0030"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0022"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "a warm-up's first run meets the cold host by design (it reads the rows its target reads, so that the target's MCP call meets them warm): whether it completes within the budget depends on the host's cache and load, not on the deployment",
+   "rules": [
+    "budget_stress"
+   ],
+   "scenario": "P-warm-0023"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (the host's /traverse/capabilities document (the MCP capabilities tool answers the service's view, not the host's document))",
+   "rules": [
+    "manifest_not_implemented"
+   ],
+   "scenario": "C-caps-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0005"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (non-object body); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0006"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (protocol (raw body, headers or method)); it names capabilities.not_expressible.protocol, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "C-protocol-0007"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-twin-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "it names resolve.not_expressible.bounds_max_query_bp, which the by-design table states not expressible via MCP",
+   "rules": [
+    "table_not_expressible"
+   ],
+   "scenario": "R-twin-0005"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "the manifest marks it not implemented via MCP (max_steps); it names pattern.not_expressible.max_steps, which the by-design table states not expressible via MCP",
+   "rules": [
+    "manifest_not_implemented",
+    "table_not_expressible"
+   ],
+   "scenario": "D-M-order-0003"
+  }
+ ],
+ "generated_by": "gate_policy.py",
+ "generated_utc": "2026-10-18T07:03:37.873Z",
+ "manifest": {
+  "content_sha256": "e89708cb795e098225d76ac8a69e75a116f9029549a8613c96325e8ee6a36238",
+  "file": "manifest/suite_v7.json",
+  "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
+  "manifest_version": 7,
+  "relations_sha256": "39660cfa0fb98cc47ac923fad3aa33419a84a3d92d662154cf2d4164752f4a86"
+ },
+ "name": "v7-rtp-mcp",
+ "policy": "suite deploy gate (gate.py)",
+ "policy_version": 1,
+ "properties": {
+  "not_required": [],
+  "required": "every property check the scenario expects (checks.is_property)"
+ },
+ "relations": [
+  {
+   "a": "M-refusal-0012",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "M-twin-0001",
+   "relation": "REL-same_answer-0001",
+   "type": "same_answer"
+  },
+  {
+   "a": "M-twin-0001",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "M-twin-0002",
+   "relation": "REL-subset-0001",
+   "type": "subset"
+  },
+  {
+   "a": "P-edge-0004",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "P-twin-0001",
+   "relation": "REL-same_answer-0002",
+   "type": "same_answer"
+  },
+  {
+   "a": "R-edge-0007",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "R-twin-0001",
+   "relation": "REL-same_answer-0003",
+   "type": "same_answer"
+  },
+  {
+   "a": "R-budget-0001",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0002",
+   "relation": "REL-prefix_equals-0001",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "R-twin-0003",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0002",
+   "relation": "REL-prefix_equals-0002",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "R-budget-0002",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0004",
+   "relation": "REL-prefix_equals-0003",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "R-twin-0005",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "R-twin-0004",
+   "relation": "REL-prefix_equals-0004",
+   "type": "prefix_equals"
+  },
+  {
+   "a": "N-zero-0001",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "N-zero-0002",
+   "relation": "REL-zero_equals_absent-0001",
+   "type": "zero_equals_absent"
+  },
+  {
+   "a": "N-zero-0003",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "N-zero-0004",
+   "relation": "REL-zero_equals_absent-0002",
+   "type": "zero_equals_absent"
+  },
+  {
+   "a": "N-zero-0005",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "N-zero-0006",
+   "relation": "REL-zero_equals_absent-0003",
+   "type": "zero_equals_absent"
+  },
+  {
+   "a": "N-zero-0007",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "N-zero-0008",
+   "relation": "REL-zero_equals_absent-0004",
+   "type": "zero_equals_absent"
+  },
+  {
+   "a": "N-zero-0009",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "N-zero-0010",
+   "relation": "REL-zero_equals_absent-0005",
+   "type": "zero_equals_absent"
+  },
+  {
+   "a": "P-scope-0004",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "P-scope-0003",
+   "relation": "REL-subset-0002",
+   "type": "subset"
+  },
+  {
+   "a": "P-scope-0006",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "P-scope-0005",
+   "relation": "REL-subset-0003",
+   "type": "subset"
+  },
+  {
+   "a": "P-twin-0002",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "P-iupac-0001",
+   "relation": "REL-subset-0004",
+   "type": "subset"
+  },
+  {
+   "a": "P-twin-0003",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "P-iupac-0003",
+   "relation": "REL-subset-0005",
+   "type": "subset"
+  },
+  {
+   "a": "P-twin-0004",
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "b": "P-iupac-0005",
+   "relation": "REL-subset-0006",
+   "type": "subset"
+  },
+  {
+   "a": "P-modes-0002",
+   "arms": [
+    "direct-local"
+   ],
+   "b": "P-modes-0004",
+   "relation": "REL-subset-0007",
+   "type": "subset"
+  }
+ ],
+ "relations_excluded": [
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "R-budget-0001, R-twin-0002 excluded on mcp",
+   "relation": "REL-prefix_equals-0001"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "R-twin-0003, R-twin-0002 excluded on mcp",
+   "relation": "REL-prefix_equals-0002"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "R-budget-0002, R-twin-0004 excluded on mcp",
+   "relation": "REL-prefix_equals-0003"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "R-twin-0005, R-twin-0004 excluded on mcp",
+   "relation": "REL-prefix_equals-0004"
+  },
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "service-side by design (round 2, the owner's decision 4 of 2026-10-16): its side b, P-modes-0004, sends max_contexts 10,001, which the service refuses at submit by the by-design table's case pattern.max_contexts_above_10000 (pattern_out_of_bounds on caps.max_contexts; the host clamps the value to 10,000 and answers, the service never lowers it), so P-modes-0002's partial list can never be held within P-modes-0004's on the MCP arm (the v5 baseline: inconclusive, http 200 / 400). P-modes-0004's own MCP execution stays required as the named by-design case, and the relation stays required on direct-local, where both sides answer.",
+   "relation": "REL-subset-0007",
+   "rules": [
+    "declared"
+   ]
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "C-caps-0003 not in the selection",
+   "relation": "REL-same_answer-0004"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "C-caps-0002, C-caps-0003 not in the selection",
+   "relation": "REL-same_answer-0005"
+  },
+  {
+   "arms": [
+    "direct-local",
+    "mcp"
+   ],
+   "reason": "C-caps-0002 not in the selection",
+   "relation": "REL-same_answer-0006"
+  }
+ ],
+ "require_agreement": false,
+ "required": [
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0027"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0027"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-pos-0028"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-pos-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-multi-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-multi-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-junction-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-junction-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-junction-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-junction-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-junction-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-discover-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-discover-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-trace-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-trace-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-budget-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-budget-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-trace-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-edge-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-edge-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-rc-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-rc-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-rc-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-rc-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-order-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-order-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0027"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0027"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0028"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0029"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0029"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0030"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0030"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0031"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0031"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0032"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0032"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0033"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0033"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0034"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0034"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0035"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0035"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-walk-0036"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-walk-0036"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-derived-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-derived-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-end-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-end-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-repeat-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-repeat-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-repeat-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-repeat-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-repeat-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-repeat-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-labels-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-labels-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-labels-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-labels-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-labels-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-exhaustive-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-exhaustive-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-exhaustive-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-exhaustive-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-exhaustive-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-exhaustive-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-coords-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-coords-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-coords-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-budget-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-budget-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-budget-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-budget-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-budget-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-attempts-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-attempts-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-attempts-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-edge-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-edge-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-seeds-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-seeds-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-graphlet-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-graphlet-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-graphlet-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-graphlet-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-caps-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-caps-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-quorum-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-quorum-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-strand-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-strand-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-caps-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-caps-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-caps-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-caps-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-caps-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-caps-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-quorum-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-quorum-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "T-seeds-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "T-seeds-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-exact-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-exact-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-placed-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-placed-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-scope-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-scope-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-iupac-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-iupac-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-modes-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-modes-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-modes-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-modes-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-modes-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-modes-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-modes-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-modes-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-modes-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-modes-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-modes-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-negative-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-negative-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-negative-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-negative-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-negative-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-negative-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-negative-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-negative-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-negative-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-negative-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-negative-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-negative-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-floor-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-floor-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-floor-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-floor-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-floor-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-floor-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-floor-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-floor-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-floor-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-floor-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-caps-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-caps-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-caps-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-caps-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-caps-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-caps-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-edge-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-edge-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-more-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-more-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-more-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-more-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-heavy-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-heavy-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-paths-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-paths-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-verified-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-verified-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-verified-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-verified-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-verified-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-verified-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-supported-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-supported-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-anchors-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-anchors-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-anchors-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-anchors-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-anchors-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-anchors-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-caps-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-caps-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-caps-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-caps-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-caps-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-caps-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-memory-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-long-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-long-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "L-repeat-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-repeat-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-repeat-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "L-repeat-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0027"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0027"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0028"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0029"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0029"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0030"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0030"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0031"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0031"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0032"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0032"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0033"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0033"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0034"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0034"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0035"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0035"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0036"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0036"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0037"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0037"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0038"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0038"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0039"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0039"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0040"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0040"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0041"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0041"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0042"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0042"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0043"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0043"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0044"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0044"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0045"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0045"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide10-0046"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide10-0046"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0027"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0027"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-peptide-long-0028"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-peptide-long-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-table1-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-table1-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-table1-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-table1-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-table1-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-table1-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-stop-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-stop-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-junction-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-junction-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-junction-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-junction-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-junction-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-junction-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-junction-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-junction-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-edge-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-edge-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-edge-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-edge-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-edge-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "X-edge-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "X-edge-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-planted-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-planted-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-below-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-below-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-below-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-below-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-below-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-below-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-below-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-below-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-below-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-below-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-below-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-below-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-iupac-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-iupac-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-iupac-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-iupac-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-iupac-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-iupac-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-iupac-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-iupac-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-protein-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-protein-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-protein-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-protein-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-protein-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-protein-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-suffix-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-suffix-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-suffix-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-suffix-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-protein-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-protein-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-order-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-order-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-order-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-order-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-floor-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-floor-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-floor-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-floor-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-floor-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-floor-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-refusal-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-refusal-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-pred-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-pred-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-strands-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-strands-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-strands-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-strands-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-strands-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-strands-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-more-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-more-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-more-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-more-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-more-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-more-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-supported-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-supported-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-supported-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-supported-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-supported-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-supported-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-supported-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-supported-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-motif-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-motif-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-motif-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-motif-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-motif-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-motif-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-motif-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-motif-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-motif-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-motif-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-budget-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-budget-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-budget-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-budget-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "Q-budget-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "Q-budget-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-negative-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-negative-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0027"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0027"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0029"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0029"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0032"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0032"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0033"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0033"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0034"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0034"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0035"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0035"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0036"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0036"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0037"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0037"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0038"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0038"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0039"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0039"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0040"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0040"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0041"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0041"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0026"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0026"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0028"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0028"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss-0031"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss-0031"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-warm-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-warm-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-hard-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-hard-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0015"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0015"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0016"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0016"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0017"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0017"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0019"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0019"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0021"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0021"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0023"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0023"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0018"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0018"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0020"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0020"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0022"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0022"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-realrep-0024"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-realrep-0024"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0011"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0011"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0012"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0012"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-usecase-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-usecase-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss2-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss2-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss2-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss2-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-nearmiss2-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-nearmiss2-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-caps-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-protocol-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-protocol-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-protocol-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-protocol-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "C-protocol-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-protocol-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "C-protocol-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-twin-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-twin-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "M-twin-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "M-twin-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "R-twin-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "R-twin-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0007"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0007"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0008"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0008"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "N-zero-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0009"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "N-zero-0009"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-twin-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-twin-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0
+   ],
+   "scenario": "P-twin-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1
+   ],
+   "scenario": "P-twin-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-exact-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-exact-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-exact-0014"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-exact-0014"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-placed-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-placed-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-scope-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-scope-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-iupac-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-iupac-0005"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-negative-0004"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-P-negative-0004"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0013"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0013"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0025"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-pos-0025"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-junction-0003"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-R-junction-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-L-paths-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-L-paths-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-L-verified-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-L-verified-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-L-supported-0010"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-L-supported-0010"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-below-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-below-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-iupac-0002"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-iupac-0002"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-order-0003"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-T-walk-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-T-walk-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-T-derived-0006"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-T-derived-0006"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-Q-pred-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-Q-pred-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-Q-more-0001"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-Q-more-0001"
+  },
+  {
+   "arm": "direct-local",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-planted-0005"
+  },
+  {
+   "arm": "mcp",
+   "repeats": [
+    0,
+    1,
+    2
+   ],
+   "scenario": "D-M-planted-0005"
+  }
+ ],
+ "selection": {
+  "routes": [
+   "POST /resolve",
+   "POST /traverse",
+   "GET /traverse/capabilities",
+   "POST /pattern"
+  ],
+  "rule": "route",
+  "scenarios": [
+   "R-pos-0001",
+   "R-pos-0002",
+   "R-pos-0003",
+   "R-pos-0004",
+   "R-pos-0005",
+   "R-pos-0006",
+   "R-pos-0007",
+   "R-pos-0008",
+   "R-pos-0009",
+   "R-pos-0010",
+   "R-pos-0011",
+   "R-pos-0012",
+   "R-pos-0013",
+   "R-pos-0014",
+   "R-pos-0015",
+   "R-pos-0016",
+   "R-pos-0017",
+   "R-pos-0018",
+   "R-pos-0019",
+   "R-pos-0020",
+   "R-pos-0021",
+   "R-pos-0022",
+   "R-pos-0023",
+   "R-pos-0024",
+   "R-pos-0025",
+   "R-pos-0026",
+   "R-pos-0027",
+   "R-pos-0028",
+   "R-multi-0001",
+   "R-multi-0002",
+   "R-multi-0003",
+   "R-multi-0004",
+   "R-multi-0005",
+   "R-multi-0006",
+   "R-junction-0001",
+   "R-junction-0002",
+   "R-junction-0003",
+   "R-junction-0004",
+   "R-discover-0001",
+   "R-discover-0002",
+   "R-discover-0003",
+   "R-discover-0004",
+   "R-discover-0005",
+   "R-discover-0006",
+   "R-trace-0001",
+   "R-trace-0002",
+   "R-twin-0002",
+   "R-budget-0001",
+   "R-twin-0004",
+   "R-budget-0002",
+   "R-trace-0003",
+   "R-edge-0001",
+   "R-edge-0002",
+   "R-edge-0003",
+   "R-edge-0004",
+   "R-edge-0005",
+   "R-edge-0006",
+   "R-edge-0007",
+   "R-edge-0008",
+   "R-edge-0009",
+   "R-edge-0010",
+   "R-edge-0011",
+   "R-edge-0012",
+   "R-edge-0013",
+   "R-edge-0014",
+   "R-edge-0015",
+   "R-edge-0016",
+   "R-edge-0017",
+   "R-edge-0018",
+   "R-edge-0019",
+   "R-edge-0020",
+   "R-edge-0021",
+   "R-edge-0022",
+   "R-edge-0023",
+   "R-edge-0024",
+   "R-edge-0025",
+   "R-rc-0001",
+   "R-rc-0002",
+   "R-order-0001",
+   "T-walk-0001",
+   "T-walk-0002",
+   "T-walk-0003",
+   "T-walk-0004",
+   "T-walk-0005",
+   "T-walk-0006",
+   "T-longwalk-0001",
+   "T-walk-0007",
+   "T-walk-0008",
+   "R-warm-0007",
+   "T-walk-0009",
+   "T-walk-0010",
+   "T-walk-0011",
+   "T-walk-0012",
+   "T-longwalk-0002",
+   "T-walk-0013",
+   "T-walk-0014",
+   "T-walk-0015",
+   "T-walk-0016",
+   "T-walk-0017",
+   "T-walk-0018",
+   "T-longwalk-0003",
+   "T-walk-0019",
+   "T-walk-0020",
+   "T-walk-0021",
+   "T-walk-0022",
+   "T-walk-0023",
+   "T-walk-0024",
+   "T-walk-0025",
+   "T-walk-0026",
+   "T-walk-0027",
+   "T-walk-0028",
+   "T-walk-0029",
+   "T-walk-0030",
+   "T-walk-0031",
+   "T-walk-0032",
+   "T-walk-0033",
+   "T-walk-0034",
+   "T-walk-0035",
+   "T-walk-0036",
+   "T-longwalk-0004",
+   "T-derived-0001",
+   "T-derived-0002",
+   "T-derived-0003",
+   "T-derived-0004",
+   "T-derived-0005",
+   "T-derived-0006",
+   "T-end-0001",
+   "T-end-0002",
+   "T-end-0003",
+   "T-end-0004",
+   "T-end-0005",
+   "T-end-0006",
+   "R-warm-0001",
+   "T-repeat-0001",
+   "R-warm-0002",
+   "R-warm-0008",
+   "T-repeat-0002",
+   "R-warm-0003",
+   "T-repeat-0003",
+   "R-warm-0004",
+   "T-repeat-0004",
+   "T-labels-0001",
+   "T-labels-0002",
+   "R-warm-0005",
+   "T-labels-0003",
+   "T-labels-0004",
+   "T-labels-0005",
+   "T-labels-0006",
+   "T-labels-0007",
+   "T-exhaustive-0001",
+   "T-exhaustive-0002",
+   "T-exhaustive-0003",
+   "T-coords-0001",
+   "T-coords-0002",
+   "T-coords-0003",
+   "T-budget-0001",
+   "T-budget-0002",
+   "T-budget-0003",
+   "T-budget-0004",
+   "T-attempts-0002",
+   "T-attempts-0003",
+   "T-attempts-0001",
+   "T-edge-0001",
+   "T-edge-0002",
+   "T-edge-0003",
+   "T-edge-0004",
+   "T-edge-0005",
+   "T-edge-0006",
+   "T-edge-0007",
+   "T-edge-0008",
+   "T-edge-0009",
+   "T-edge-0010",
+   "T-edge-0011",
+   "T-edge-0012",
+   "T-edge-0013",
+   "T-edge-0014",
+   "T-edge-0015",
+   "T-edge-0016",
+   "T-seeds-0001",
+   "T-graphlet-0001",
+   "T-graphlet-0002",
+   "T-caps-0001",
+   "T-quorum-0001",
+   "T-strand-0001",
+   "T-caps-0002",
+   "T-caps-0003",
+   "T-caps-0004",
+   "T-quorum-0002",
+   "T-seeds-0002",
+   "P-exact-0001",
+   "P-exact-0002",
+   "P-exact-0003",
+   "P-exact-0004",
+   "P-exact-0005",
+   "P-exact-0006",
+   "P-exact-0007",
+   "P-exact-0008",
+   "P-exact-0009",
+   "P-exact-0010",
+   "P-exact-0011",
+   "P-exact-0012",
+   "P-exact-0013",
+   "P-exact-0014",
+   "P-exact-0015",
+   "P-exact-0016",
+   "P-exact-0017",
+   "P-exact-0018",
+   "P-exact-0019",
+   "P-exact-0020",
+   "P-exact-0021",
+   "P-exact-0022",
+   "P-exact-0023",
+   "P-placed-0001",
+   "P-placed-0002",
+   "P-placed-0003",
+   "P-placed-0004",
+   "P-placed-0005",
+   "P-placed-0006",
+   "P-placed-0007",
+   "P-placed-0008",
+   "P-placed-0009",
+   "P-placed-0010",
+   "P-placed-0011",
+   "P-placed-0012",
+   "P-placed-0013",
+   "P-scope-0001",
+   "P-scope-0002",
+   "P-scope-0003",
+   "P-scope-0004",
+   "P-scope-0005",
+   "P-scope-0006",
+   "P-scope-0007",
+   "P-scope-0008",
+   "P-scope-0009",
+   "P-scope-0010",
+   "P-scope-0011",
+   "P-scope-0012",
+   "P-iupac-0001",
+   "P-iupac-0002",
+   "P-iupac-0003",
+   "P-iupac-0004",
+   "P-iupac-0005",
+   "P-iupac-0006",
+   "P-iupac-0007",
+   "P-iupac-0008",
+   "P-modes-0001",
+   "P-modes-0002",
+   "P-modes-0003",
+   "P-modes-0004",
+   "P-modes-0005",
+   "P-modes-0006",
+   "P-negative-0001",
+   "P-negative-0002",
+   "P-negative-0003",
+   "P-negative-0004",
+   "P-negative-0005",
+   "P-negative-0006",
+   "P-floor-0001",
+   "P-floor-0002",
+   "P-floor-0003",
+   "P-floor-0004",
+   "P-floor-0005",
+   "P-caps-0001",
+   "P-caps-0002",
+   "P-caps-0003",
+   "P-caps-0004",
+   "P-edge-0001",
+   "P-edge-0002",
+   "P-edge-0003",
+   "P-edge-0004",
+   "P-edge-0005",
+   "P-edge-0006",
+   "P-edge-0007",
+   "P-edge-0008",
+   "P-edge-0009",
+   "P-edge-0010",
+   "P-edge-0011",
+   "P-edge-0012",
+   "P-more-0001",
+   "P-more-0002",
+   "P-warm-0025",
+   "P-heavy-0001",
+   "P-heavy-0002",
+   "L-paths-0001",
+   "L-paths-0002",
+   "L-paths-0003",
+   "L-paths-0004",
+   "L-paths-0005",
+   "L-paths-0006",
+   "L-paths-0007",
+   "L-paths-0008",
+   "L-paths-0009",
+   "L-paths-0010",
+   "L-paths-0011",
+   "L-paths-0012",
+   "L-paths-0013",
+   "L-paths-0014",
+   "L-paths-0015",
+   "L-verified-0001",
+   "L-verified-0002",
+   "L-verified-0003",
+   "L-verified-0004",
+   "L-verified-0005",
+   "L-verified-0006",
+   "L-supported-0001",
+   "L-supported-0002",
+   "L-supported-0003",
+   "L-supported-0004",
+   "L-supported-0005",
+   "L-supported-0006",
+   "L-supported-0007",
+   "L-supported-0008",
+   "L-supported-0009",
+   "L-supported-0010",
+   "L-anchors-0001",
+   "L-anchors-0002",
+   "L-anchors-0003",
+   "L-caps-0001",
+   "L-caps-0002",
+   "L-caps-0003",
+   "L-caps-0004",
+   "L-memory-0001",
+   "L-long-0001",
+   "L-long-0002",
+   "L-long-0003",
+   "L-long-0004",
+   "L-long-0005",
+   "L-long-0006",
+   "L-long-0007",
+   "L-repeat-0001",
+   "L-repeat-0002",
+   "X-peptide10-0001",
+   "X-peptide10-0002",
+   "X-peptide10-0003",
+   "X-peptide10-0004",
+   "X-peptide10-0005",
+   "X-peptide10-0006",
+   "X-peptide10-0007",
+   "X-peptide10-0008",
+   "X-peptide10-0009",
+   "X-peptide10-0010",
+   "X-peptide10-0011",
+   "X-peptide10-0012",
+   "X-peptide10-0013",
+   "X-peptide10-0014",
+   "X-peptide10-0015",
+   "X-peptide10-0016",
+   "X-peptide10-0017",
+   "X-peptide10-0018",
+   "X-peptide10-0019",
+   "X-peptide10-0020",
+   "X-peptide10-0021",
+   "X-peptide10-0022",
+   "X-peptide10-0023",
+   "X-peptide10-0024",
+   "X-peptide10-0025",
+   "X-peptide10-0026",
+   "X-peptide10-0027",
+   "X-peptide10-0028",
+   "X-peptide10-0029",
+   "X-peptide10-0030",
+   "X-peptide10-0031",
+   "X-peptide10-0032",
+   "X-peptide10-0033",
+   "X-peptide10-0034",
+   "X-peptide10-0035",
+   "X-peptide10-0036",
+   "X-peptide10-0037",
+   "X-peptide10-0038",
+   "X-peptide10-0039",
+   "X-peptide10-0040",
+   "X-peptide10-0041",
+   "X-peptide10-0042",
+   "X-peptide10-0043",
+   "X-peptide10-0044",
+   "X-peptide10-0045",
+   "X-peptide10-0046",
+   "X-peptide-long-0001",
+   "X-peptide-long-0002",
+   "X-peptide-long-0003",
+   "X-peptide-long-0004",
+   "X-peptide-long-0005",
+   "X-peptide-long-0006",
+   "X-peptide-long-0007",
+   "X-peptide-long-0008",
+   "X-peptide-long-0009",
+   "X-peptide-long-0010",
+   "X-peptide-long-0011",
+   "X-peptide-long-0012",
+   "X-peptide-long-0013",
+   "X-peptide-long-0014",
+   "X-peptide-long-0015",
+   "X-peptide-long-0016",
+   "X-peptide-long-0017",
+   "X-peptide-long-0018",
+   "X-peptide-long-0019",
+   "X-peptide-long-0020",
+   "X-peptide-long-0021",
+   "X-peptide-long-0022",
+   "X-peptide-long-0023",
+   "X-peptide-long-0024",
+   "X-peptide-long-0025",
+   "X-peptide-long-0026",
+   "X-peptide-long-0027",
+   "X-peptide-long-0028",
+   "X-table1-0001",
+   "X-table1-0002",
+   "X-table1-0003",
+   "X-table1-0004",
+   "X-table1-0005",
+   "X-table1-0006",
+   "X-stop-0001",
+   "X-stop-0002",
+   "X-stop-0003",
+   "X-stop-0004",
+   "X-stop-0005",
+   "X-stop-0006",
+   "X-stop-0007",
+   "X-stop-0008",
+   "X-stop-0009",
+   "X-junction-0001",
+   "X-junction-0002",
+   "X-junction-0003",
+   "X-junction-0004",
+   "X-edge-0001",
+   "X-edge-0002",
+   "X-edge-0003",
+   "X-edge-0004",
+   "X-edge-0005",
+   "X-edge-0006",
+   "X-edge-0007",
+   "M-planted-0001",
+   "M-planted-0002",
+   "M-planted-0003",
+   "M-planted-0004",
+   "M-planted-0005",
+   "M-planted-0006",
+   "P-warm-0001",
+   "M-planted-0007",
+   "P-warm-0002",
+   "M-planted-0008",
+   "P-warm-0003",
+   "M-planted-0009",
+   "M-planted-0010",
+   "M-planted-0011",
+   "M-planted-0012",
+   "P-warm-0004",
+   "M-planted-0013",
+   "P-warm-0005",
+   "M-planted-0014",
+   "P-warm-0006",
+   "M-planted-0015",
+   "P-warm-0007",
+   "M-planted-0016",
+   "P-warm-0008",
+   "M-planted-0017",
+   "P-warm-0009",
+   "M-planted-0018",
+   "M-planted-0019",
+   "M-planted-0020",
+   "M-planted-0021",
+   "M-planted-0022",
+   "M-below-0001",
+   "M-below-0002",
+   "M-below-0003",
+   "M-below-0004",
+   "M-below-0005",
+   "M-below-0006",
+   "M-iupac-0001",
+   "M-iupac-0002",
+   "M-iupac-0003",
+   "M-iupac-0004",
+   "P-warm-0010",
+   "M-protein-0001",
+   "P-warm-0024",
+   "M-protein-0002",
+   "P-warm-0011",
+   "M-protein-0003",
+   "P-warm-0012",
+   "M-protein-0004",
+   "P-warm-0013",
+   "M-protein-0005",
+   "P-warm-0014",
+   "M-protein-0006",
+   "P-warm-0015",
+   "M-protein-0007",
+   "M-suffix-0001",
+   "M-suffix-0002",
+   "M-protein-0010",
+   "M-order-0001",
+   "M-order-0002",
+   "M-order-0003",
+   "M-floor-0001",
+   "M-floor-0002",
+   "M-floor-0003",
+   "M-refusal-0001",
+   "M-refusal-0002",
+   "M-refusal-0003",
+   "M-refusal-0004",
+   "M-refusal-0005",
+   "M-refusal-0006",
+   "M-refusal-0007",
+   "M-refusal-0008",
+   "M-refusal-0009",
+   "M-refusal-0010",
+   "M-refusal-0011",
+   "M-refusal-0012",
+   "Q-pred-0001",
+   "Q-pred-0002",
+   "Q-pred-0003",
+   "Q-pred-0004",
+   "Q-pred-0005",
+   "Q-pred-0006",
+   "Q-pred-0007",
+   "Q-pred-0008",
+   "Q-pred-0009",
+   "Q-pred-0010",
+   "Q-pred-0011",
+   "Q-pred-0012",
+   "Q-pred-0013",
+   "Q-pred-0014",
+   "Q-strands-0001",
+   "Q-strands-0002",
+   "Q-strands-0003",
+   "Q-more-0001",
+   "Q-more-0002",
+   "Q-more-0003",
+   "Q-supported-0001",
+   "Q-supported-0002",
+   "Q-supported-0003",
+   "Q-supported-0004",
+   "Q-motif-0001",
+   "Q-motif-0002",
+   "Q-motif-0003",
+   "Q-motif-0004",
+   "Q-motif-0005",
+   "Q-budget-0001",
+   "Q-budget-0002",
+   "Q-budget-0003",
+   "N-negative-0007",
+   "N-negative-0009",
+   "N-negative-0001",
+   "N-negative-0002",
+   "N-negative-0003",
+   "N-negative-0004",
+   "N-negative-0005",
+   "N-negative-0006",
+   "N-negative-0008",
+   "N-negative-0010",
+   "N-negative-0011",
+   "N-negative-0012",
+   "N-negative-0013",
+   "N-negative-0014",
+   "N-negative-0015",
+   "N-negative-0016",
+   "N-negative-0017",
+   "N-negative-0018",
+   "N-negative-0019",
+   "N-negative-0020",
+   "N-nearmiss-0001",
+   "N-nearmiss-0002",
+   "N-nearmiss-0003",
+   "N-nearmiss-0004",
+   "N-nearmiss-0005",
+   "P-warm-0016",
+   "N-nearmiss-0006",
+   "N-nearmiss-0007",
+   "N-nearmiss-0008",
+   "N-nearmiss-0009",
+   "N-nearmiss-0010",
+   "N-nearmiss-0011",
+   "N-nearmiss-0012",
+   "P-warm-0017",
+   "N-nearmiss-0013",
+   "N-nearmiss-0014",
+   "N-nearmiss-0015",
+   "N-nearmiss-0016",
+   "N-nearmiss-0017",
+   "N-nearmiss-0018",
+   "N-nearmiss-0019",
+   "P-warm-0018",
+   "N-nearmiss-0020",
+   "N-nearmiss-0021",
+   "N-nearmiss-0022",
+   "N-nearmiss-0023",
+   "N-nearmiss-0024",
+   "P-warm-0019",
+   "N-nearmiss-0027",
+   "P-warm-0020",
+   "N-nearmiss-0029",
+   "P-warm-0021",
+   "N-nearmiss-0030",
+   "P-warm-0022",
+   "N-nearmiss-0032",
+   "N-nearmiss-0033",
+   "N-nearmiss-0034",
+   "N-nearmiss-0035",
+   "N-nearmiss-0036",
+   "N-nearmiss-0037",
+   "N-nearmiss-0038",
+   "N-nearmiss-0039",
+   "N-nearmiss-0040",
+   "N-nearmiss-0041",
+   "N-nearmiss-0025",
+   "N-nearmiss-0026",
+   "N-nearmiss-0028",
+   "N-nearmiss-0031",
+   "N-hard-0001",
+   "N-hard-0002",
+   "N-hard-0003",
+   "N-hard-0004",
+   "N-hard-0005",
+   "N-hard-0006",
+   "N-hard-0007",
+   "N-hard-0008",
+   "N-hard-0009",
+   "N-hard-0010",
+   "N-hard-0011",
+   "N-hard-0012",
+   "N-hard-0013",
+   "N-hard-0014",
+   "N-hard-0015",
+   "N-hard-0016",
+   "N-hard-0017",
+   "N-hard-0019",
+   "N-hard-0021",
+   "R-warm-0006",
+   "N-hard-0022",
+   "N-realrep-0002",
+   "N-realrep-0003",
+   "N-realrep-0005",
+   "N-realrep-0006",
+   "N-hard-0018",
+   "N-hard-0020",
+   "N-realrep-0001",
+   "N-realrep-0004",
+   "N-realrep-0007",
+   "N-realrep-0009",
+   "N-realrep-0011",
+   "N-realrep-0013",
+   "N-realrep-0015",
+   "N-realrep-0008",
+   "N-realrep-0010",
+   "N-realrep-0012",
+   "N-realrep-0014",
+   "N-realrep-0016",
+   "N-realrep-0017",
+   "N-realrep-0019",
+   "N-realrep-0021",
+   "N-realrep-0023",
+   "N-realrep-0025",
+   "N-realrep-0018",
+   "N-realrep-0020",
+   "N-realrep-0022",
+   "N-realrep-0024",
+   "N-usecase-0001",
+   "N-usecase-0002",
+   "N-usecase-0003",
+   "P-warm-0023",
+   "N-usecase-0008",
+   "N-usecase-0010",
+   "N-usecase-0004",
+   "N-usecase-0005",
+   "N-usecase-0006",
+   "N-usecase-0007",
+   "N-usecase-0009",
+   "N-usecase-0011",
+   "N-usecase-0012",
+   "N-usecase-0013",
+   "N-usecase-0014",
+   "N-nearmiss2-0001",
+   "N-nearmiss2-0002",
+   "N-nearmiss2-0003",
+   "C-caps-0001",
+   "C-protocol-0001",
+   "C-protocol-0002",
+   "C-protocol-0003",
+   "C-protocol-0004",
+   "C-protocol-0005",
+   "C-protocol-0006",
+   "C-protocol-0007",
+   "M-twin-0001",
+   "M-twin-0002",
+   "R-twin-0001",
+   "R-twin-0003",
+   "R-twin-0005",
+   "P-twin-0001",
+   "N-zero-0001",
+   "N-zero-0002",
+   "N-zero-0003",
+   "N-zero-0004",
+   "N-zero-0005",
+   "N-zero-0006",
+   "N-zero-0007",
+   "N-zero-0008",
+   "N-zero-0010",
+   "N-zero-0009",
+   "P-twin-0002",
+   "P-twin-0003",
+   "P-twin-0004",
+   "D-P-exact-0001",
+   "D-P-exact-0014",
+   "D-P-placed-0004",
+   "D-P-scope-0004",
+   "D-P-iupac-0005",
+   "D-P-negative-0004",
+   "D-R-pos-0001",
+   "D-R-pos-0013",
+   "D-R-pos-0025",
+   "D-R-junction-0003",
+   "D-L-paths-0001",
+   "D-L-verified-0001",
+   "D-L-supported-0010",
+   "D-M-below-0001",
+   "D-M-iupac-0002",
+   "D-M-order-0003",
+   "D-T-walk-0001",
+   "D-T-derived-0006",
+   "D-Q-pred-0001",
+   "D-Q-more-0001",
+   "D-M-planted-0005"
+  ]
+ },
+ "warm_every": 10
+}
