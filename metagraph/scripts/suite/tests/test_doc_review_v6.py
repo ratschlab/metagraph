@@ -461,5 +461,21 @@ class PlantedTitleTest(unittest.TestCase):
             self.assertIn('"unit_title": "planted substitutions t and max_mismatches m"', text, v)
 
 
+class FootnoteColourTest(unittest.TestCase):
+    """V6-005: every legend describes the footnote digit as rendered (doc.sty's fnink, dark grey), never as red."""
+
+    def test_one_description(self):
+        import inspect
+        sty = open(os.path.join(DOC, "templates", "doc.sty"), encoding="utf-8").read()
+        self.assertIn("\\definecolor{fnink}{HTML}{37474F}", sty)
+        reading = prose("overview")["sections"]["reading"]
+        self.assertIn("a dark-grey superscript digit", reading["annotations"]["footnote"])
+        mark = [m for m in reading["marks"] if m.get("mark") == "superscript digit"][0]
+        self.assertIn("dark grey, not red", mark["meaning"])
+        src = inspect.getsource(sections)
+        self.assertNotIn("a red superscript digit", src)
+        self.assertNotIn("a red superscript digit", str(prose("overview")))
+
+
 if __name__ == "__main__":
     unittest.main()
