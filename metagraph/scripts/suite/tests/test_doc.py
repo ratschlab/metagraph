@@ -35,6 +35,7 @@ import make_doc  # noqa: E402
 import reader  # noqa: E402
 import sections  # noqa: E402
 import units as units_mod  # noqa: E402
+import vocabulary  # noqa: E402
 
 V4_MANIFEST = os.path.join(SUITE, "manifest", "suite_v4.json")
 V4_MAPPING = os.path.join(DOC, "units", "suite_v4.json")
@@ -5962,6 +5963,37 @@ class V6DeltaTest(unittest.TestCase):
         ctx = _Stub(run=Run())
         self.assertIn(", 2 with no MCP execution planned", sections._agreement_counts(ctx, ["W-1", "W-2"])[1])
         self.assertNotIn("missing", sections._agreement_counts(ctx, ["W-1", "W-2"])[1])
+
+    def test_answer_side_definitions(self):
+        """The delta verifier's M2 (2026-10-18): where the manifest has an answer-side scenario-level mark, chapter
+        P's coverage sentence counts those tests apart from the ones the tools cannot express, and the definitions
+        of not implemented via MCP (I.3's legend, the attention kind, appendix F's vocabulary, the glossary,
+        appendix G's lead) name the case; a run without one prints the definitions as before."""
+        gap = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["coverage_gap"][0]
+        vals = {"n_mcp_not_exercised": 9, "n_mcp_answer_lacks": 2, "n_mcp_not_exercised_tools": 7,
+                "mcp_not_exercised_tools_by_family": "modes 1, caps 2, edge inputs 4",
+                "mcp_not_exercised_by_family": "scope and strands 2, modes 1, caps 2, edge inputs 4",
+                "mcp_answer_lacks_ids": "P-scope-0004, P-scope-0006", "mcp_answer_lacks_fields": "absence_scope"}
+        v6 = facts.fill(gap, vals)
+        self.assertIn("!!Nine tests are not run via MCP!!: !!seven!! the tools cannot express, having no argument for "
+                      "what they send (modes 1, caps 2, edge inputs 4; appendix B)", v6)
+        self.assertIn("and !!two!! whose MCP answer lacks the field their property check reads (P-scope-0004, "
+                      "P-scope-0006: absence_scope; not implemented yet via MCP", v6)
+        v5 = facts.fill(gap, dict(vals, n_mcp_answer_lacks=0, n_mcp_not_exercised=7))
+        self.assertIn("!!Seven tests are carried by the direct access paths alone!!, the tools having no argument", v5)
+        legend = dict((w, m) for g, w, m in vocabulary.legend_rows(True))["not implemented via MCP"]
+        self.assertIn("or, by the manifest's scenario-level mark, the MCP answer lacks every field", legend)
+        self.assertNotIn("scenario-level", dict((w, m) for g, w, m in vocabulary.legend_rows())["not implemented via MCP"])
+        self.assertIn("by the manifest's scenario-level mark, the MCP answer lacks every field its property checks read",
+                      sections.attention_legend_sentence(True))
+        self.assertNotIn("scenario-level mark, the MCP answer", sections.attention_legend_sentence())
+        meaning = dict((k, m) for k, d, m, c in vocabulary.outcome_table_rows(True))["not_implemented_mcp"]
+        self.assertIn("the request is expressible but the MCP answer lacks every field", meaning)
+        entry = [e for e in sc.read_json(os.path.join(PROSE_DIR, "glossary.json"))["entries"]
+                 if e["term"] == "not exercised via MCP (not implemented)"][0]["definition"]
+        self.assertIn("Or, by the manifest's scenario-level mark (P-scope-0004: absence_scope), the request is expressible",
+                      facts.fill(entry, {"answer_side_mark": True, "answer_side_mark_text": "P-scope-0004: absence_scope"}))
+        self.assertIn("a protocol body). The cell says", facts.fill(entry, {"answer_side_mark": False}))
 
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner

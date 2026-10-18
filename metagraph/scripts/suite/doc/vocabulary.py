@@ -131,18 +131,34 @@ def execution_outcome(key):
     return None
 
 
-def legend_rows():
+# A run whose manifest has an answer-side scenario-level mark (blocks.scenario_mark_parts: the request is expressible,
+# the MCP answer lacks every field the test's property checks read; v6's P-scope-0004 / -0006) widens the definition
+# of not implemented via MCP by this clause; a run without one keeps the definition as it was (the delta verifier's
+# M2, 2026-10-18).
+ANSWER_SIDE_LEGEND = ("not exercised via MCP: the tools cannot express the request (the manifest's mark or a table "
+                      "case), or, by the manifest's scenario-level mark, the MCP answer lacks every field the test's "
+                      "property checks read: a known limit, not a failure and not coverage")
+ANSWER_SIDE_MEANING = ("the request cannot be asked through the MCP tools: the manifest marks it, or a by-design case of "
+                       "that agreement names the missing argument; or, by the manifest's scenario-level mark, the "
+                       "request is expressible but the MCP answer lacks every field the test's property checks read; "
+                       "the service's own refusal, when one was recorded, is kept with the line")
+
+
+def legend_rows(answer_side=False):
     """[(glyph macro, word, meaning)] for the reading guide's glyph legend: the execution outcomes in the tables'
-    glyph order and the one glyph for no execution."""
-    rows = [(e["glyph"], e["word"], e["legend"]) for e in EXECUTION_OUTCOMES]
+    glyph order and the one glyph for no execution; `answer_side`: the run has an answer-side scenario-level mark."""
+    rows = [(e["glyph"], e["word"], ANSWER_SIDE_LEGEND if (answer_side and e["key"] == "not_implemented_mcp")
+             else e["legend"]) for e in EXECUTION_OUTCOMES]
     rows.append(("\\gnone", "no execution", "the plan had none (a long scenario on direct-remote); a planned "
                                               "execution not recorded is footnoted"))
     return rows
 
 
-def outcome_table_rows():
-    """[(key, decided, meaning, consequence)] for appendix F's execution-outcome table."""
-    return [(e["key"], e["decided"], e["meaning"], e["consequence"]) for e in EXECUTION_OUTCOMES]
+def outcome_table_rows(answer_side=False):
+    """[(key, decided, meaning, consequence)] for appendix F's execution-outcome table (`answer_side` as for
+    legend_rows)."""
+    return [(e["key"], e["decided"], ANSWER_SIDE_MEANING if (answer_side and e["key"] == "not_implemented_mcp")
+             else e["meaning"], e["consequence"]) for e in EXECUTION_OUTCOMES]
 
 
 def _sentence(text):

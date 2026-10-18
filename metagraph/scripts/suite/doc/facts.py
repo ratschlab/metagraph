@@ -1276,6 +1276,28 @@ def chapter_facts(ctx, ch):
         parts.append(text)
     # the counts of the tests not exercised via MCP, red wherever printed (the owner's decision of 2026-10-16)
     v["mcp_not_exercised_by_family"] = cells.attn_marked(", ".join(parts))
+    # the not-exercised tests split by why (the delta verifier's M2): an answer-side scenario-level mark (the request
+    # expressible, the MCP answer lacking the field the property checks read: blocks.answer_mark_text) apart from
+    # the requests the tools cannot express; `n_mcp_answer_lacks` is 0 for a manifest without such a mark
+    lacks, tools_parts = [], []
+    for fid in fams:
+        fv = fam[fid]
+        ids = [sid for sid in fv["x"] if fv["x"][sid]["mcp"]["standing"] == "not exercised"]
+        mine = [sid for sid in ids if fv["x"][sid]["mcp"]["class"] == "answer_lacks_field"]
+        lacks += mine
+        if len(ids) > len(mine):
+            tools_parts.append("%s %d" % (fv["title"], len(ids) - len(mine)))
+    fields = []
+    for sid in lacks:
+        for _, check, _, _ in blocks.scenario_mark_parts(run.scenario(sid)):
+            for f in blocks.mark_fields(run.scenario(sid), check) or [check]:
+                if f not in fields:
+                    fields.append(f)
+    v["n_mcp_answer_lacks"] = len(lacks)
+    v["mcp_answer_lacks_ids"] = ", ".join(lacks) or "none"
+    v["mcp_answer_lacks_fields"] = ", ".join(fields) or "none"
+    v["n_mcp_not_exercised_tools"] = sum(fam[fid]["n_mcp_not_exercised"] for fid in fams) - len(lacks)
+    v["mcp_not_exercised_tools_by_family"] = cells.attn_marked(", ".join(tools_parts))
     n_exec, n_tests, text = _findings(ctx, sids)
     v["n_finding_executions"], v["n_finding_tests"], v["findings_text"] = n_exec, n_tests, text
     totals = run.summary().get("totals") or {}
@@ -1373,6 +1395,11 @@ ATTENTION_DEFINITION = {
                        "request), or one of whose MCP executions had a property check set aside by the manifest's "
                        "property-level mark not implemented via MCP",
 }
+# the not-implemented definition where the run has an answer-side scenario-level mark (the delta verifier's M2)
+ATTENTION_NOT_IMPLEMENTED_ANSWER_SIDE = (
+    "a test whose MCP access path stands not implemented via MCP (the tools cannot express the request, or, by the "
+    "manifest's scenario-level mark, the MCP answer lacks every field its property checks read), or one of whose MCP "
+    "executions had a property check set aside by the manifest's property-level mark not implemented via MCP")
 _SERVICE_DEADLINES = ("resolve_timeout", "traversal_resolve_deadline")
 
 

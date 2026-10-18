@@ -225,6 +225,10 @@ class Context(object):
                 "relation_example_subset": relation_example_text(run, "subset"),
                 "relation_example_equivalence": relation_example_text(run, "same_answer"),
                 "vocab": vocabulary.glossary_texts(),
+                # an answer-side scenario-level mark in the manifest (the delta verifier's M2): the glossary's and
+                # appendix G's definitions of not implemented via MCP name it
+                "answer_side_mark": bool(answer_side_mark_ids(run)),
+                "answer_side_mark_text": answer_side_mark_text(run),
                 # the annotated matrix's column note (annotated_matrix fills both from the unit it picks)
                 "annotated_dimension": "the varied value", "annotated_record_key": False}
 
@@ -1497,7 +1501,7 @@ def legend_table(ctx=None):
     # the property-level mark exists only under a manifest with property-level marks (v5): no row otherwise
     if ctx is not None and not _has_property_marks(ctx.run):
         marks = [e for e in marks if e.get("mark") != "property-level mark"]
-    glyph_rows = _glyph_rows()
+    glyph_rows = _glyph_rows(ctx)
     if marks:
         mark_rows = [[MARK_EXAMPLE[e["mark"]], esc(e.get("on") or ""), inline(e.get("meaning") or "")]
                      for e in marks]
@@ -1521,10 +1525,30 @@ def _legend_tables(glyph_rows, mark_rows):
     return glyphs + marks_t
 
 
-def _glyph_rows():
+def answer_side_mark_ids(run):
+    """The run's scenarios with an answer-side scenario-level mark (blocks.scenario_mark_parts): the request is
+    expressible, the MCP answer lacks every field the property checks read (v6's P-scope-0004 / -0006)."""
+    return [sid for sid in run.order if blocks.scenario_mark_parts(run.scenario(sid))]
+
+
+def answer_side_mark_text(run):
+    """'P-scope-0004, P-scope-0006: absence_scope': the answer-side scenario-level marks with the fields they name."""
+    ids = answer_side_mark_ids(run)
+    fields = []
+    for sid in ids:
+        for _, check, _, _ in blocks.scenario_mark_parts(run.scenario(sid)):
+            for f in blocks.mark_fields(run.scenario(sid), check) or [check]:
+                if f not in fields:
+                    fields.append(f)
+    return ("%s: %s" % (", ".join(ids), ", ".join(fields))) if ids else ""
+
+
+def _glyph_rows(ctx=None):
     """The glyph legend's rows from the shared vocabulary; the not-implemented word in the attention red, as the
-    glyph and its counts are (the owner's decision of 2026-10-16)."""
-    return [[g, cells.attn(esc(w)) if g == "\\gni" else esc(w), inline(m)] for g, w, m in vocabulary.legend_rows()]
+    glyph and its counts are (the owner's decision of 2026-10-16); the not-implemented definition widened where the
+    run has an answer-side scenario-level mark."""
+    side = bool(ctx is not None and answer_side_mark_ids(ctx.run))
+    return [[g, cells.attn(esc(w)) if g == "\\gni" else esc(w), inline(m)] for g, w, m in vocabulary.legend_rows(side)]
 
 
 def _legend_builtin(glyph_rows=None):
@@ -1557,12 +1581,15 @@ def times_legend_sentence():
                 fmt_t(cells.TIME_TINT_YELLOW_MS), fmt_t(cells.TIME_TINT_RED_MS + 1000)))
 
 
-def attention_legend_sentence():
+def attention_legend_sentence(answer_side=False):
     """The legend's one definition of each attention kind (the owner's decision of 2026-10-16: red means needs
-    attention), from facts.ATTENTION_DEFINITION, the kinds' words in red as the contents and I.1 print them."""
+    attention), from facts.ATTENTION_DEFINITION, the kinds' words in red as the contents and I.1 print them;
+    `answer_side`: the run has an answer-side scenario-level mark (the not-implemented definition widened)."""
     defs = []
     for k, one, many in facts.ATTENTION_KINDS:
         d = facts.ATTENTION_DEFINITION[k]
+        if k == "not_implemented" and answer_side:
+            d = facts.ATTENTION_NOT_IMPLEMENTED_ANSWER_SIDE
         if k == "time_budget":
             d = d % fmt_t(cells.TIME_TINT_RED_MS)
         defs.append("%s: %s" % (cells.attn(esc(many)), esc(d)))
@@ -1593,7 +1620,7 @@ def grammar_lines(ctx):
            "code and the class in words (refused before host execution, not expressible through MCP, answered after "
            "service normalization, host refusal relayed through the service), derived from the evidence, never from prose}"
            "\n\\bline{times}{%s}" % times_legend_sentence() +
-           "\n\\bline{attention}{%s}" % attention_legend_sentence() +
+           "\n\\bline{attention}{%s}" % attention_legend_sentence(bool(ctx is not None and answer_side_mark_ids(ctx.run))) +
            "\n\\par\\endgroup\n\n")
     return out
 
@@ -3632,9 +3659,10 @@ def index(ctx):
     return out
 
 
-def classes_tables():
+def classes_tables(answer_side=False):
     """The vocabulary of appendix F, rendered from the shared definitions (doc/vocabulary.py): the three layers of
-    an outcome (the check item, the execution, the displayed standing), then the two agreement classes."""
+    an outcome (the check item, the execution, the displayed standing), then the two agreement classes;
+    `answer_side`: the run has an answer-side scenario-level mark (the not-implemented meaning widened)."""
     out = ("\\noindent{\\small %s}\\par\\smallskip\n" % inline(vocabulary.CLASSIFICATIONS))
     out += ("\\noindent{\\small An outcome has three layers. \\textbf{A check item} (one check of one execution) "
             "answers one of five words; \\textbf{the execution's outcome} follows from its items by precedence, "
@@ -3643,7 +3671,8 @@ def classes_tables():
     spec = latex.spec_p([30, 144])
     out += latex.plain_table(spec, ["check item", "meaning"], [[tt(k), inline(v)] for k, v in vocabulary.CHECK_OUTCOMES])
     out += latex.plain_table(latex.spec_p([30, 32, 78, 34]), ["execution outcome", "decided", "meaning", "consequence"],
-                             [[tt(k), esc(d), inline(m), inline(c)] for k, d, m, c in vocabulary.outcome_table_rows()])
+                             [[tt(k), esc(d), inline(m), inline(c)] for k, d, m, c in vocabulary.outcome_table_rows(
+                                 answer_side)])
     out += "\\noindent{\\small %s}\\par\\smallskip\n" % inline(vocabulary.STANDING)
     out += latex.plain_table(spec, ["direct agreement class", "meaning"],
                              [[tt(k), esc(v)] for k, v in vocabulary.DIRECT_CLASSES])
@@ -4067,7 +4096,7 @@ def appendices(ctx):
     out += "\\parhead{Environment}\n" + environment_table(ctx)
     out += reruns_table(ctx)
     out += appendix_rules(ctx)
-    out += "\\parhead{Vocabulary}\n" + classes_tables()
+    out += "\\parhead{Vocabulary}\n" + classes_tables(bool(answer_side_mark_ids(ctx.run)))
     out += "\\parhead{The deploy gate}\n" + gate_problems(ctx)
     out += latex.section("G\\qd %s" % titles["G"], "app:G")
     out += appendix_lead(ctx, "appendix_G")

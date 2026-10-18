@@ -128,7 +128,7 @@
   },
   {
    "term": "not exercised via MCP (not implemented)",
-   "definition": "The request cannot be asked through the MCP tools: the manifest marks it, or a by-design case names the missing argument (support, `bounds.max_query_bp`, graph, a protocol body). The cell says not exercised, never ok; the service's own refusal, when recorded, is under the row or in appendix B. A known limit, not coverage and no evidence for the property.",
+   "definition": "The request cannot be asked through the MCP tools: the manifest marks it, or a by-design case names the missing argument (support, `bounds.max_query_bp`, graph, a protocol body). [[answer_side_mark ? Or, by the manifest's scenario-level mark ({answer_side_mark_text}), the request is expressible but the MCP answer lacks every field the test's property checks read.]] The cell says not exercised, never ok; the service's own refusal, when recorded, is under the row or in appendix B. A known limit, not coverage and no evidence for the property.",
    "see": [
     "service-side by design"
    ]
