@@ -5784,6 +5784,44 @@ class V6DeltaTest(unittest.TestCase):
                          "traversal_resolve_deadline (a host state), 1 by a scenario-level mark (every property "
                          "check marked as not shown via MCP)")
 
+    def test_answer_side_scenario_mark(self):
+        """The coordinator's accuracy fix (2026-10-18): a manifest scenario-level mark (build_manifest.
+        scenario_level_marks: property-level marks covering every property check, answer-side) reads as an
+        expressible request whose MCP answer lacks the checked field, not implemented yet via MCP (the field named
+        from the mark's check), never "cannot be expressed through the tools"; a request-side mark (a field the
+        tools have no argument for) keeps the not-expressible wording."""
+        mark = ("not implemented yet via MCP: the MCP's /pattern answer does not carry the entry's absence_scope (the "
+                "service states the request's scope instead) (entry_fields)")
+        scen = {"id": "P-scope-0004", "mcp": {"not_implemented": mark},
+                "expect": [{"check": "status", "args": {"http": 200}},
+                           {"check": "entry_fields", "args": {"equals": {"absence_scope": "suffix_only"}}}]}
+        self.assertEqual(blocks.scenario_mark_parts(scen), [("not_implemented", "entry_fields", mark[29:-15], None)])
+        self.assertEqual(blocks.answer_mark_text(scen), "the request is expressible through the tools, but the MCP "
+                                                        "answer lacks absence_scope, the field entry_fields checks")
+        line = {"scenario": "P-scope-0004", "arm": "mcp", "repeat": 0, "outcome": "not_implemented_mcp", "http": None}
+        cls, evidence = blocks.mcp_class([line], scen, {"class": "not_implemented_mcp", "by": "manifest"}, {})
+        self.assertEqual(cls, "answer_lacks_field")
+        self.assertIn("no MCP call made: the request is expressible", evidence)
+        self.assertEqual(blocks.MCP_CLASS_WORD[cls], "not implemented yet via MCP (the answer lacks a checked field)")
+        run = _Stub(scenario=lambda sid: scen, cases={})
+        reason = blocks.short_reason(run, "P-scope-0004", None)
+        self.assertNotIn("cannot be expressed", reason)
+        self.assertIn("absence\\_scope", reason)
+        # two parts, one of them service-side by design, in the mark's order
+        both = dict(scen, mcp={"not_implemented": "service-side by design: the table's case c.x; the MCP answer "
+                                                  "cannot carry deterministic; " + mark})
+        self.assertEqual([p[:2] for p in blocks.scenario_mark_parts(both)],
+                         [("by_design", "deterministic"), ("not_implemented", "entry_fields")])
+        self.assertIn("what deterministic checks (service-side by design: the table's case c.x)",
+                      blocks.answer_mark_text(both))
+        # a request-side mark keeps its wording and class
+        req = {"id": "R-x", "mcp": {"not_implemented": "support"}, "expect": []}
+        self.assertEqual(blocks.scenario_mark_parts(req), [])
+        self.assertIsNone(blocks.answer_mark_text(req))
+        self.assertEqual(blocks.mcp_class([dict(line, scenario="R-x")], req, {}, {})[0], "not_expressible")
+        self.assertEqual(blocks.short_reason(_Stub(scenario=lambda sid: req, cases={}), "R-x", None),
+                         "the request's support cannot be expressed through the tools")
+
     def test_p_edge_0004_note(self):
         """Item 5: the P-edge unit's note on P-edge-0004 prints for the frozen v6 manifest only (the service's owner
         states the omission is by design; the next manifest revision corrects the class), so a v5 build prints no

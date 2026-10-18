@@ -4436,6 +4436,14 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
 - A wording fix the v6 run needed (not a brief item): I.1's and I.4's inconclusive executions by reason count the
   one inconclusive by a scenario-level mark (D-P-scope-0004's MCP r0, marks_cover_repeat) as "by a scenario-level
   mark (every property check marked as not shown via MCP)", never as "the service's ... (a host state)".
+- An accuracy fix (the coordinator, 2026-10-18; not a brief item): a manifest scenario-level mark
+  (build_manifest.scenario_level_marks: property-level marks that covered every property check of a scenario with
+  an MCP tool mapping, each part "not implemented yet via MCP: <reason> (<check>)" or "service-side by design: ...")
+  is answer-side. blocks.mcp_class classes it `answer_lacks_field` ("not implemented yet via MCP (the answer lacks a
+  checked field)") and blocks.short_reason words it "the request is expressible through the tools, but the MCP
+  answer lacks absence_scope, the field entry_fields checks" (the field from the check's arguments), never "cannot
+  be expressed through the tools", which stays for the request-side marks (support, bounds.max_query_bp, a raw body)
+  and the table's not-expressible cases. v6's P-scope-0004 / -0006 read so; no v5 scenario has such a mark.
 
 ### Validation (offline; no host was contacted; the run directories were only read)
 - The v5 baseline (runs/20261015T161813Z_refseq97-81c620ef) re-rendered with this generator: every chapter file,

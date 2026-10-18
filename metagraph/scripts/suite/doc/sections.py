@@ -2322,7 +2322,7 @@ def _mcp_edge_cell(ctx, sid, st, footnote, with_times):
     note = None
     if cls == "none":
         return "%s\\ no execution" % glyph, None
-    if cls == "not_expressible":
+    if cls in ("not_expressible", "answer_lacks_field"):
         case = st.agreement.get("case")
         reason = blocks.short_reason(run, sid, case, ctx.short_reasons())
         return "%s\\ %s\\newline %s; see B" % (glyph, blocks.class_word_tex(cls, st), reason), None
@@ -2353,6 +2353,19 @@ EDGE_LEGEND = ("mcp column: the recorded status and the service's code; the clas
                "execution · not expressible through MCP · answered by the service in the host's place · answered "
                "after service normalization · host refusal relayed through the service · answered by the host "
                "through the service")
+
+
+def _edge_legend_extra(ctx, members):
+    """The class words beyond EDGE_LEGEND's that a member's MCP cell prints (an answer-side scenario-level mark: not
+    implemented yet via MCP, the answer lacking a checked field), so that the legend names every class shown."""
+    run = ctx.run
+    extra = []
+    for sid in members:
+        st = ctx.state(sid)["mcp"]
+        cls, _ = blocks.mcp_class(blocks.class_lines(st), run.scenario(sid), st.agreement, run.cases)
+        if cls == "answer_lacks_field" and blocks.MCP_CLASS_WORD[cls] not in extra:
+            extra.append(blocks.MCP_CLASS_WORD[cls])
+    return "".join(" · " + w for w in extra)
 
 
 def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
@@ -2522,7 +2535,8 @@ def unit_section(ctx, chapter, uid):
             mcp_cell, note = _mcp_edge_cell(ctx, sid, st["mcp"], fns[sid], with_times=False)
             rows.append(([latex.sid(sid, detail=True) if fns[sid] else latex.breakable_id(sid),
                           esc_wrap(_variant(meta[sid])), expected] + cs + [mcp_cell], note))
-        out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + (("; " + rk) if rk else ""))
+        out += latex.refusals_table(rows, units_ids(ctx, members), EDGE_LEGEND + _edge_legend_extra(ctx, members)
+                                    + (("; " + rk) if rk else ""))
         states = [ctx.state(sid) for sid in members]
         # the unit's line (the wall max per arm) is labelled as the unit's where the unit shares its family's id,
         # so that it is not read as a repeat of the family's line with p50 / p90 (VERIFY-T L1, VERIFY-PLXM L3)
@@ -2540,7 +2554,7 @@ def unit_section(ctx, chapter, uid):
                           esc_wrap(_variant(meta[sid])),
                           blocks.expected_text(run.scenario(sid), run.is_property)] + cs + [mcp_cell], note))
         out += latex.list_table(rows, units_ids(ctx, members), cells.TIMING_LEGEND["list"] + "; " + EDGE_LEGEND
-                                + (("; " + rk) if rk else ""))
+                                + _edge_legend_extra(ctx, members) + (("; " + rk) if rk else ""))
     else:  # pairs
         rows = []
         for sid in members:
