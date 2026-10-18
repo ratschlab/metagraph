@@ -4487,7 +4487,9 @@ class ReadabilityReviewTest(unittest.TestCase):
         finding_gap = dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["finding"]
         self.assertIn("which carried no answer", finding_gap)
         self.assertNotIn("while the request was answered", finding_gap)
-        self.assertIn("a late 503 deadline that is a finding", dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["unverified"])
+        # V6-302 (the external review of the v6 document): the entry names each test's recorded reason, never a menu
+        self.assertIn("for the recorded reason named after each test",
+                      dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["unverified"])
         # the detail block: requested, observed, unverified first, then the technical record; the artifacts keyed once
         block = blocks.detail_block(self.runobj, "R-001", st, 1, self.units, property_text="the claim in words")
         self.assertIn("\\bline{requested}{the claim in words}", block)

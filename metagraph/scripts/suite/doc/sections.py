@@ -2408,10 +2408,8 @@ EXCEPTION_GROUPS = (
      "or a 503 deadline delivered more than max(1 s, the budget) late on the client's clock, which carried no "
      "answer; the FINDING line of the detail block quotes the rule and the overrun"),
     ("unverified", "the property not shown on some access path",
-     "an execution could not show the property there (an allowed 503 deadline without results, a late 503 deadline "
-     "that is a finding, a walk a stated limit stopped, a host state, a check that could not decide); the detail "
-     "block names the check and the stated limit, and the property table below says whether another access path or "
-     "repeat showed it"),
+     "an execution could not show the property there, for the recorded reason named after each test; the detail "
+     "block says whether another access path or repeat showed it"),
     ("mcp_limit", "not comparable through the MCP tools",
      "no check was evaluated on both access paths (the MCP answer exposes none of the fields the checks read), so "
      "nothing is known about the property through the tools"),
@@ -2491,6 +2489,14 @@ def exception_index(ctx, chapter):
         n_block = sum(1 for x in sids if x in blocking)
         gate_text_ = ("%d of them among the tests that block the deploy gate" % n_block
                       if gated else "the gate was not judged")
+        if key == "unverified":
+            # each test with its own recorded reason per access path, never a menu of possible causes (the
+            # external review of the v6 document, V6-302)
+            listed = "; ".join("%s: %s: %s" % (esc(arms), esc(why), ", ".join(latex.sid(x, detail=True) for x in ids))
+                               for (arms, why), ids in facts.unshown_index_groups(ctx.run, sids, ctx.state))
+            out += "\\item \\textbf{%s} (%d test%s; %s): %s — %s\n" % (
+                esc(title), len(sids), "" if len(sids) == 1 else "s", esc(gate_text_), esc(gap), listed)
+            continue
         out += "\\item \\textbf{%s} (%d test%s; %s): %s — %s\n" % (
             esc(title), len(sids), "" if len(sids) == 1 else "s", esc(gate_text_),
             ", ".join(latex.sid(x, detail=True) for x in sids), esc(gap))
@@ -2608,7 +2614,10 @@ def _unit_blocks(ctx, chapter, uid, members, unit_note=False):
     READ-320)."""
     out = ""
     prop, _ = _unit_prose(ctx, chapter, uid)
-    property_text = ctx.fill(prop) if prop else None
+    # the unit's property line states what the unit's members request together: a block's `requested` reads it only
+    # for a unit of one test, else the scenario's own title and checks (the external review of the v6 document,
+    # V6-302: a block never describes its neighbours' requests)
+    property_text = ctx.fill(prop) if prop and len(members) == 1 else None
     details = (ctx.prose.get(chapter) or {}).get("details") or {}
     for sid in members:
         n = ctx.footnotes[chapter].get(sid)

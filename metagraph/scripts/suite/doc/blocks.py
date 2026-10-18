@@ -1216,14 +1216,26 @@ def estimate_lines(body_lines, chars_per_line=150):
 SHORT_BLOCK_LINES = 28
 
 
-def interpretation(run, sid, states, property_text=None):
-    """The first lines of a detail block in the reader's terms (READ-114): what was requested (the unit's
-    property line, else the scenario's title), what each access path did (facts.exec_phrase, one phrase per
-    path) and what remains unverified (the property checks no execution of the test passed, or the statement that
-    every one was shown somewhere); plain LaTeX."""
+def interpretation(run, sid, states, property_text=None, title=None):
+    """The first lines of a detail block in the reader's terms (READ-114): what was requested (the property line of
+    a unit of one test, else this scenario's own title, the chapter's reader-facing `title` where it has one, with
+    the property checks it names: V6-302), what each access path did (facts.exec_phrase, one phrase per path) and
+    what remains unverified (the property checks no execution of the test passed, or the statement that every one
+    was shown somewhere, then the access paths and repeats that did not show one, with the recorded reason);
+    plain LaTeX."""
     import facts  # the facts module imports this one: a lazy import
     sc_ = run.scenario(sid)
-    requested = inline(property_text) if property_text else esc(sc_.get("title"), 200)
+    props = []
+    for e in sc_.get("expect") or []:
+        name = e.get("check") if isinstance(e, dict) else None
+        if name and run.is_property(name) and name not in props:
+            props.append(name)
+    if property_text:
+        requested = inline(property_text)
+    else:
+        requested = inline(title) if title else esc(sc_.get("title"), 200)
+        if props:
+            requested += " (property check%s %s)" % ("" if len(props) == 1 else "s", ", ".join(tt(n) for n in props))
     observed = []
     for arm in cells.ARMS:
         st = states[arm]
@@ -1252,11 +1264,6 @@ def interpretation(run, sid, states, property_text=None):
         if st.ne:
             text += " (DISAGREES with the reference access path)"
         observed.append("%s: %s" % (esc(arm), latex.join_units(esc(text))))
-    props = []
-    for e in sc_.get("expect") or []:
-        name = e.get("check") if isinstance(e, dict) else None
-        if name and run.is_property(name) and name not in props:
-            props.append(name)
     unshown = [name for name in props if not any(
         c.get("check") == name and c.get("outcome") == "pass" for arm in cells.ARMS for l in states[arm].lines
         for c in (l.get("checks") or []) if isinstance(c, dict))]
@@ -1272,8 +1279,18 @@ def interpretation(run, sid, states, property_text=None):
             ", ".join(tt(n) for n in unshown),
             ("; the other property check%s passed on %s" % ("" if len(props) - len(unshown) == 1 else "s",
                                                              esc(", ".join(shown_on)))) if shown_on else "")
+        gaps = facts.unshown_reasons_text(run, sid, states)
+        if gaps:
+            unverified += "; the recorded reasons: %s" % esc(gaps)
     else:
-        unverified = "none of the property checks: each passed on some access path or repeat (the block explains the exception)"
+        # the access paths and repeats that did not show the property, each with its recorded reason (V6-302: the
+        # aggregate 'none' never hides the gap the block exists for)
+        gaps = facts.unshown_reasons_text(run, sid, states)
+        if gaps:
+            unverified = ("on every access path: none, each property check passed on some access path or repeat; "
+                          "not shown on %s" % esc(gaps))
+        else:
+            unverified = "none: each property check passed on every execution that evaluated it"
     return (latex.bline("requested", requested), latex.bline("observed", "; ".join(observed) or "no execution"),
             latex.bline("unverified", unverified))
 
@@ -1294,6 +1311,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     `note`: a `reading` line after the interpretation, the chapter prose's explanation of this block (READ-319,
     READ-320: what a budget governs beside a longer wall, repeatability apart from an unexposed property)."""
     sc_ = run.scenario(sid)
+    title_text = title
     title = inline(title) if title else esc(sc_.get("title"), 200)
     meta = [esc(sc_.get("route") or "")]
     if sc_.get("timing_class"):
@@ -1304,7 +1322,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     if rep:
         meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
     body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
-    body.extend(interpretation(run, sid, states, property_text))
+    body.extend(interpretation(run, sid, states, property_text, title=title_text))
     if note:
         body.append(latex.bline("reading", inline(note)))
     # its own paragraph, so that the label does not run on at the end of the unverified line (READ-114; the

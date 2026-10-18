@@ -333,6 +333,11 @@ def exec_phrase(run, sid, line, arm, wall=None):
         checks = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
         if checks:
             return "inconclusive (%s: %s)" % (checks[0].get("check"), _clause(checks[0].get("detail"), 120))
+        hidden = not_exposed_text(run, line)
+        if hidden:
+            # the MCP answer lacks the field the property check reads (the external review of the v6 document,
+            # V6-302: the phrase names the cause, never a bare word)
+            return "inconclusive (%s)" % hidden
         return "inconclusive"
     if outcome == "fail":
         failed = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
@@ -346,6 +351,123 @@ def exec_phrase(run, sid, line, arm, wall=None):
     if outcome == "service_by_design":
         return "by design (http %s%s)" % (http, (" " + code) if code else "")
     return str(cells.WORD.get(outcome, outcome))
+
+
+def not_exposed_text(run, line):
+    """'capabilities_doc not exposed via MCP: field not in the answer: features' for the property checks of an
+    execution its answer did not expose (outcome not_exposed), '' when none (V6-302)."""
+    items = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "not_exposed"
+             and run.is_property(c.get("check"))]
+    if not items:
+        return ""
+    return "; ".join("%s not exposed via MCP: %s" % (c.get("check"), _cut(c.get("detail"), 100)) for c in items)
+
+
+def unshown_reason(run, sid, line, arm, short=False):
+    """Why one execution did not show the test's property, without its time (the detail block's unverified line,
+    V6-302): the scenario-level mark, a host state, a 503 deadline (allowed or late), another refusal, a failure, the
+    property check that could not decide (with its evidence clause; `short`: the check alone, the exception index's
+    grouping key) or that the MCP answer did not expose; '' for an execution that showed it."""
+    outcome = line.get("outcome")
+    code, _ = _err(line)
+    http = line.get("http")
+    if outcome == "finding":
+        if _late_ms(run, sid, line) is not None:
+            return "a 503 deadline past the budget (a finding, no answer)"
+        props = [c for c in (line.get("checks") or []) if isinstance(c, dict) and run.is_property(c.get("check"))]
+        if props and not any(c.get("outcome") == "pass" for c in props):
+            return "a finding without a passing property check"
+        return ""
+    if outcome == "fail":
+        failed = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
+        if failed and short:
+            return "FAIL (%s)" % failed[0].get("check")
+        return "FAIL (%s: %s)" % (failed[0].get("check"), _cut(failed[0].get("detail"), 100)) if failed else "FAIL"
+    if outcome == "error":
+        return "ERROR (no HTTP answer to check)"
+    if outcome != "inconclusive":
+        return ""
+    if arm == "mcp" and line.get("inconclusive_reason") == sc.SCENARIO_LEVEL_MARK:
+        return "every property check marked as not shown via MCP (a scenario-level mark)"
+    if _overridden(line, arm == "mcp"):
+        return "the service's %s (a host state)" % line["inconclusive_reason"]
+    if http == 503 and code == "deadline":
+        return "an allowed 503 deadline (no answer to check)"
+    if http is not None and http != 200:
+        return "http %s%s (allowed: no answer to check)" % (http, (" " + code) if code else "")
+    items = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
+    props = [c for c in items if run.is_property(c.get("check"))] or items
+    if props:
+        if short:
+            return "%s could not decide" % props[0].get("check")
+        return "%s inconclusive: %s" % (props[0].get("check"), _clause(props[0].get("detail"), 110))
+    if short:
+        hidden = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "not_exposed"
+                  and run.is_property(c.get("check"))]
+        if hidden:
+            fields = [str(c.get("detail") or "").split("field not in the answer: ", 1)[-1] for c in hidden]
+            return "%s not exposed via MCP (the answer lacks %s)" % (
+                ", ".join(str(c.get("check")) for c in hidden), ", ".join(_cut(f, 40) for f in fields))
+    return not_exposed_text(run, line) or "no check could decide"
+
+
+def unshown_reasons_text(run, sid, states):
+    """Per access path the reasons the test's property was not shown there (unshown_reason), repeats alike
+    grouped: 'mcp r0, r1: capabilities_doc not exposed via MCP: field not in the answer: features' (V6-302)."""
+    parts = []
+    for arm in ARMS:
+        st = states[arm]
+        if not st.present:
+            continue
+        by_reason = []
+        for l in st.lines:
+            why = unshown_reason(run, sid, l, arm)
+            if not why:
+                continue
+            for r in by_reason:
+                if r[0] == why:
+                    r[1].append(l.get("repeat"))
+                    break
+            else:
+                by_reason.append([why, [l.get("repeat")]])
+        for why, reps in by_reason:
+            many = len(st.lines) > 1
+            parts.append("%s%s: %s" % (arm, (" " + ", ".join("r%s" % r for r in reps)) if many else "", why))
+    return "; ".join(parts)
+
+
+def unshown_index_groups(run, sids, state_of):
+    """The exception index's 'property not shown' entry (V6-302): the tests grouped by their recorded reason and
+    the access paths it struck, [((access paths, reason), [ids])], e.g. (('mcp', 'capabilities_doc not exposed via
+    MCP (the answer lacks features)'), ['C-caps-0003'])."""
+    groups = []
+    for sid in sids:
+        states = state_of(sid)
+        by_reason = []
+        for arm in ARMS:
+            st = states[arm]
+            if not st.present:
+                continue
+            for l in st.lines:
+                why = unshown_reason(run, sid, l, arm, short=True)
+                if not why:
+                    continue
+                for r in by_reason:
+                    if r[0] == why:
+                        if arm not in r[1]:
+                            r[1].append(arm)
+                        break
+                else:
+                    by_reason.append([why, [arm]])
+        for why, arms in by_reason:
+            key = (_join(arms), why)
+            for g in groups:
+                if g[0] == key:
+                    g[1].append(sid)
+                    break
+            else:
+                groups.append([key, [sid]])
+    return [(key, ids) for key, ids in groups]
 
 
 def _status_text(line):

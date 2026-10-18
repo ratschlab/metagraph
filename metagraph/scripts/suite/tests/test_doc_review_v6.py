@@ -133,5 +133,60 @@ class FullyCheckedTest(unittest.TestCase):
         self.assertIn("but a check a property-level mark of the manifest sets aside", gloss)
 
 
+class _Arm(object):
+    def __init__(self, lines, present=True):
+        self.lines, self.present = lines, present
+
+
+class ExceptionSummaryTest(unittest.TestCase):
+    """V6-302: an exception summary names the actual request, the unverified property per access path and the
+    recorded cause; never a menu of possible causes, never the whole unit's request."""
+
+    def setUp(self):
+        self.run = _Stub(is_property=lambda name: name not in ("status", "invariants", "budget_respected"),
+                         budget_ms=lambda sid: 110000)
+
+    def _states(self, **arms):
+        return dict((arm, _Arm(arms.get(arm.replace("-", "_"), []), bool(arms.get(arm.replace("-", "_")))))
+                    for arm in ("direct-local", "direct-remote", "mcp"))
+
+    def test_reasons(self):
+        hidden = {"outcome": "inconclusive", "http": 200, "repeat": 0, "checks": [
+            {"check": "capabilities_doc", "outcome": "not_exposed", "detail": "field not in the answer: features"}]}
+        late503 = {"outcome": "inconclusive", "http": 503, "error": {"code": "deadline"}, "repeat": 0,
+                   "wall_ms": 110200, "checks": []}
+        walk = {"outcome": "inconclusive", "http": 200, "repeat": 0, "checks": [
+            {"check": "walk_in_record", "outcome": "inconclusive",
+             "detail": "left: the record followed for 3618 of 10000 bp, stopped by resource_limit"}]}
+        self.assertEqual(facts.unshown_reason(self.run, "C", hidden, "mcp", short=True),
+                         "capabilities_doc not exposed via MCP (the answer lacks features)")
+        self.assertEqual(facts.unshown_reason(self.run, "C", hidden, "mcp"),
+                         "capabilities_doc not exposed via MCP: field not in the answer: features")
+        self.assertEqual(facts.unshown_reason(self.run, "P", dict(late503), "direct-local"),
+                         "an allowed 503 deadline (no answer to check)")
+        self.assertEqual(facts.unshown_reason(self.run, "T", walk, "direct-local", short=True),
+                         "walk_in_record could not decide")
+        self.assertEqual(facts.unshown_reason(self.run, "T", {"outcome": "pass", "checks": []}, "mcp"), "")
+        self.assertEqual(facts.exec_phrase(self.run, "C", hidden, "mcp", wall="0.3 s"),
+                         "inconclusive (capabilities_doc not exposed via MCP: field not in the answer: features)")
+        states = {"C": self._states(mcp=[hidden, dict(hidden, repeat=1)]),
+                  "T": self._states(direct_local=[walk], direct_remote=[walk]),
+                  "T2": self._states(direct_local=[walk], direct_remote=[walk])}
+        self.assertEqual(facts.unshown_index_groups(self.run, ["C", "T", "T2"], states.get),
+                         [(("mcp", "capabilities_doc not exposed via MCP (the answer lacks features)"), ["C"]),
+                          (("direct-local and direct-remote", "walk_in_record could not decide"), ["T", "T2"])])
+        self.assertEqual(facts.unshown_reasons_text(self.run, "C", states["C"]),
+                         "mcp r0, r1: capabilities_doc not exposed via MCP: field not in the answer: features")
+
+    def test_requested_is_the_scenario(self):
+        """The unit's property line is a block's `requested` only for a unit of one test."""
+        import inspect
+        src = inspect.getsource(sections._unit_blocks)
+        self.assertIn("property_text = ctx.fill(prop) if prop and len(members) == 1 else None", src)
+        src = inspect.getsource(blocks.interpretation)
+        self.assertIn('requested += " (property check%s %s)"', src)
+        self.assertIn("on every access path: none, each property check passed on some access path or repeat; ", src)
+
+
 if __name__ == "__main__":
     unittest.main()
