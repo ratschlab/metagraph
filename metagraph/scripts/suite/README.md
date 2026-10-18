@@ -3948,7 +3948,8 @@ never committed.
 
     doc/make_doc.py RUN_DIR --out DIR [--chapters R,T,...] [--sample] [--no-pdf] [--recorded]
                     [--units FILE] [--prose-dir DIR] [--checks-dir DIR] [--by-design PATH]
-                    [--policy FILE] [--declared FILE] [--xelatex PATH] [--name doc] [--scaffold-prose]
+                    [--policy FILE] [--declared FILE] [--identity FILE] [--xelatex PATH] [--name doc]
+                    [--scaffold-prose]
 
 After the owner's review of the chapter R sample (round 2, 2026-10-15) the document has this shape: the cover carries the
 run verdict and the deploy gate as two boxes of equal weight (a gated run: the gate verdict and its counts; an ungated
@@ -4403,6 +4404,13 @@ budget_stress tags). Every change keeps the v5 document's chapters byte-identica
   MCP arguments name it too)". Kept: P-exact's smoke run that "ran past its 60,000 ms budget" (history), the
   /resolve and /traverse budgets and caps of chapters R and T (60,000 ms, their host maximum) and the ingress
   figures. Each file's `_assumes` names 110,000 with its source; V6DeltaTest renders the six files for v5 and v6.
+- The deployed service's identity, which the MCP runner does not record: `make_doc.py --identity FILE` (a JSON
+  file: run, service_commit, railway_deployment_id, source, and host_release, mcp_runner_commit, manifest, which
+  reader.Run checks against the run's release, the runner's git head and the manifest's content sha, refusing a
+  file that names another run or contradicts the record). I.4 and appendix F's MCP runner row print it as "the
+  service's deployed revision, taken from <the source's first clause> and not recorded by the runner: service
+  commit ..., Railway deployment ..." (the commit shortened in I.4, in full in F); without the option the text is
+  v5's ("not recorded by this run").
 
 ## Glossary
 

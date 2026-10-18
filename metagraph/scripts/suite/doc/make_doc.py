@@ -3,7 +3,7 @@
 
     make_doc.py RUN_DIR --out DIR [--chapters R,T,...] [--sample] [--no-pdf] [--recorded]
                 [--units FILE] [--prose-dir DIR] [--checks-dir DIR] [--by-design PATH]
-                [--policy FILE] [--declared FILE] [--xelatex PATH] [--scaffold-prose]
+                [--policy FILE] [--declared FILE] [--identity FILE] [--xelatex PATH] [--scaffold-prose]
 
 Reads the run directory (manifest, the re-evaluated executions and compare.json when present, else the recorded
 ones, run.json, reevaluated.json, samples, gate.json, arms/mcp/run.json), the unit metadata (the manifest's `doc`
@@ -15,7 +15,10 @@ deterministic (no clock in the output; the README's commit is read from the chec
 
 --chapters picks the chapters of Part II (the appendices and the index follow); --sample is --chapters R with the
 cover note "Chapter R sample; whole-run summary shown for context";
---recorded reads the recorded set instead of the re-evaluated one; --scaffold-prose writes the placeholder
+--recorded reads the recorded set instead of the re-evaluated one; --identity names the deployed service's identity
+the run did not record (a JSON file: run, service_commit, railway_deployment_id, source, and host_release,
+mcp_runner_commit, manifest checked against the run), printed in I.4 and appendix F as taken from its source and
+not recorded by the runner; --scaffold-prose writes the placeholder
 entries the prose files lack (existing text untouched) and exits.
 
 Exit 0 built (or --no-pdf), 1 LaTeX failed (the log's first error echoed), 2 usage / missing inputs (a scenario
@@ -231,13 +234,15 @@ def main(argv=None):
     ap.add_argument("--by-design", default=None)
     ap.add_argument("--policy", default=None)
     ap.add_argument("--declared", default=None)
+    ap.add_argument("--identity", default=None, help="the deployed service's identity (a JSON file the run did not "
+                    "record, e.g. from the deployment log)")
     ap.add_argument("--xelatex", default=None)
     ap.add_argument("--name", default="doc", help="the base name of the .tex and .pdf (default doc)")
     ap.add_argument("--scaffold-prose", action="store_true", help="write the missing prose placeholders and exit")
     args = ap.parse_args(argv)
     try:
         run = reader.Run(args.run_dir, recorded=args.recorded, by_design=args.by_design, checks_dir=args.checks_dir,
-                         declared=args.declared, policy=args.policy)
+                         declared=args.declared, policy=args.policy, identity=args.identity)
         mapping = None
         needs_mapping = any(not isinstance(s.get("doc"), dict) for s in run.scenarios.values())
         if needs_mapping:

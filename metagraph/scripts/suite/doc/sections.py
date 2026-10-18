@@ -844,9 +844,11 @@ def standing_vs_outcome_reading(ctx, sids):
 SERVICE_VERSION_KEYS = ("service_version", "service_commit", "service_git_head", "service_revision", "deployed_version")
 
 
-def service_version_text(run):
-    """The service's deployed revision as the MCP runner recorded it, or the statement that this run did not record
-    it (READ-021: never a nearby commit in its place)."""
+def service_version_text(run, full=False):
+    """The service's deployed revision as the MCP runner recorded it, else as an identity input of this document
+    states it (make_doc --identity, the v6 delta: taken from the deployment log, labelled as not recorded by the
+    runner; the commit shortened unless `full`), or the statement that this run did not record it (READ-021: never
+    a nearby commit in its place)."""
     mcp_run = run.mcp_run or {}
     for key in SERVICE_VERSION_KEYS:
         if mcp_run.get(key):
@@ -856,6 +858,15 @@ def service_version_text(run):
     for key in ("service_version", "version", "release", "commit"):
         if isinstance(doc.get(key), (str, int)) and doc.get(key):
             return "the service's deployed revision as its capabilities document states it: %s" % doc[key]
+    ident = getattr(run, "identity", None)
+    if isinstance(ident, dict) and ident.get("service_commit"):
+        commit = str(ident["service_commit"])
+        parts = ["service commit %s" % (commit if full or len(commit) <= 12 else commit[:12] + "…")]
+        if ident.get("railway_deployment_id"):
+            parts.append("Railway deployment %s" % ident["railway_deployment_id"])
+        source = str(ident.get("source") or "an input file of this document").split(";")[0].strip()
+        return "the service's deployed revision, taken from %s and not recorded by the runner: %s" % (
+            source, ", ".join(parts))
     return ("the service's deployed revision is not recorded by this run: the MCP requests cannot be attributed to a "
             "service revision, and a later run cannot be shown to have met the same service code")
 
@@ -3647,7 +3658,7 @@ def environment_table(ctx):
         rows.append(("MCP runner", "git head %s (the client that asked, not the service's revision); base %s; admin "
                                    "key %s; %s" % (
                                        tt(_short(mcp_run.get("git_head"), 12)), tt(mcp_run.get("base") or "–"),
-                                       esc(mcp_run.get("admin_key") or "–"), esc(service_version_text(run)))))
+                                       esc(mcp_run.get("admin_key") or "–"), esc(service_version_text(run, full=True)))))
     sessions = _sessions_text(run)
     if sessions:
         rows.append(("mode", sessions))

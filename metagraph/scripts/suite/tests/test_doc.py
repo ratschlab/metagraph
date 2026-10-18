@@ -5684,5 +5684,41 @@ class V6DeltaTest(unittest.TestCase):
             self.assertNotIn("60,000", rest, "%s: a 60,000 ms /pattern budget left in the v6 text" % ch)
             self.assertIn("60,000", v5_text, ch)
 
+    def test_service_identity_input(self):
+        """Item 4: the deployed service's identity from an input file (make_doc --identity), labelled as taken from
+        its source (the deployment log) and not recorded by the runner: short in I.4, in full in appendix F; a run
+        whose runner recorded none and no input keeps the statement that it is not recorded; a file naming another
+        run, or contradicting what the run recorded, is refused."""
+        ident = {"run": "R", "service_commit": "60e737f75ff696c170841c983c0464d1157425c9",
+                 "railway_deployment_id": "fa013db1-70f0-4dc9-bca1-275c7eefa053",
+                 "source": "the deployment log (deploy 2); the MCP runner records no service commit"}
+        run = _Stub(mcp_run={"git_head": "9d76035e"}, identity=ident)
+        short = sections.service_version_text(run)
+        self.assertEqual(short, "the service's deployed revision, taken from the deployment log (deploy 2) and not "
+                                "recorded by the runner: service commit 60e737f75ff6…, Railway deployment "
+                                "fa013db1-70f0-4dc9-bca1-275c7eefa053")
+        self.assertIn("service commit 60e737f75ff696c170841c983c0464d1157425c9,",
+                      sections.service_version_text(run, full=True))
+        self.assertIn("is not recorded by this run", sections.service_version_text(_Stub(mcp_run={}, identity=None)))
+        tmp = tempfile.mkdtemp()
+        try:
+            run_dir = os.path.join(tmp, "run")
+            os.makedirs(run_dir)
+            build_run(run_dir)
+            merge_run.merge(run_dir)
+            sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (CASES, {"cases": 5})))
+            run_id = reader.Run(run_dir).run_id()
+            path = os.path.join(tmp, "identity.json")
+            sc.write_json_atomic(path, dict(ident, run=run_id))
+            self.assertEqual(reader.Run(run_dir, identity=path).identity["service_commit"], ident["service_commit"])
+            sc.write_json_atomic(path, dict(ident, run="another-run"))
+            with self.assertRaises(reader.RunError):
+                reader.Run(run_dir, identity=path)
+            sc.write_json_atomic(path, dict(ident, run=run_id, manifest="v6, content " + "0" * 64))
+            with self.assertRaises(reader.RunError):
+                reader.Run(run_dir, identity=path)
+        finally:
+            shutil.rmtree(tmp)
+
 if __name__ == "__main__":
     unittest.main()
