@@ -280,5 +280,27 @@ class SeedPhaseBudgetTest(unittest.TestCase):
         self.assertIn("read on the seed's own clock, which starts with the seed phase", note)
 
 
+class JunctionPremiseTest(unittest.TestCase):
+    """V6-101: the junction's exact header runs rest on the builder's whole-record look-up (areas._record_runs),
+    which the prose states; the local continuations explain the runs, they do not define them."""
+
+    def test_prose_and_builder(self):
+        import inspect
+        import areas
+        text = str(prose("R"))
+        self.assertIn("looks up every k-mer of the 170 bp query in the whole of each fetched record", text)
+        self.assertIn("no junction k-mer occurs elsewhere in either record", text)
+        src = inspect.getsource(areas._record_runs)
+        self.assertIn("if q[i:i + K] in rec.seq:", src)   # the whole record, not the window's neighbourhood
+        for version in (5, 6):
+            m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v%d.json" % version))
+            for s in m["scenarios"]:
+                if not s["id"].startswith("R-junction"):
+                    continue
+                t = s.get("truth") or {}
+                runs = [e["args"]["runs"] for e in s["expect"] if e["check"] == "resolve_runs" and "runs" in e["args"]]
+                self.assertEqual(runs, [[[0, t["a_run_end"]]], [[t["b_run_start"], 170]]], s["id"])
+
+
 if __name__ == "__main__":
     unittest.main()
