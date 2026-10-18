@@ -225,5 +225,17 @@ class WarmUpTimeoutTest(unittest.TestCase):
         self.assertIn("(no property check: the refusal's status, code and text are the claim)", req)
 
 
+class WarmUpCausalTest(unittest.TestCase):
+    """V6-203: the P-warm prose states the warm-up's intent and the gate exclusion, and that the run does not
+    isolate what decides completion; it never rules out the deployment."""
+
+    def test_prose(self):
+        text = prose("P")["families"]["P-warm"]["prose"]
+        self.assertNotIn("not on the deployment", text)
+        self.assertIn("this run does not isolate what decides whether it completes within the budget", text)
+        self.assertIn("host-cold is the suite's execution-order label, not a measured cache state", text)
+        self.assertIn("Searches meant to read, before a /pattern scenario", text)
+
+
 if __name__ == "__main__":
     unittest.main()
