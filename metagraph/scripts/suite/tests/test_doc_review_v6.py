@@ -377,5 +377,17 @@ class PrimerCountTest(unittest.TestCase):
                       "gene", text)
 
 
+class LongPeptideCoverageTest(unittest.TestCase):
+    """V6-205: the coverage gap concerns positive recovery of long peptides; X-junction's paths searches are the
+    negative control, named apart."""
+
+    def test_prose(self):
+        text = str(prose("X"))
+        self.assertNotIn("Peptides longer than k are tested as supported paths with a predicate alone, never as", text)
+        self.assertIn("Positive recovery of a peptide whose coding DNA (three bases per residue) is longer than k", text)
+        self.assertIn("X-junction searches its 20-residue windows as `paths`, but for the absence of the spliced source "
+                      "DNA", text)
+
+
 if __name__ == "__main__":
     unittest.main()
