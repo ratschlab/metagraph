@@ -248,7 +248,8 @@ def candidates(ctx: Any, built: List[dict]) -> List[dict]:
     out.append(_cand("one_arm.3", "one_arm", seed, "walk", {"bounds": {"max_extension_bp": 100}, "direction": "left"},
                      t, "T-walk-0017", "hsa chr17 region header, left: MCP cold 3214 ms; l w4 s7 sp3; 1 label",
                      {"arms": ["left"], "walks": {"left": 4}, "merges": {"left": 0}, "labels": 1}))
-    # cut label lists: a small explicit cap (64 labels or fewer per node: no hint), and many labels (hint)
+    # cut label lists: a small explicit cap, and many labels; a qualified compare of a cut-list graphlet carries the
+    # service's hint whatever the cap (graphlet_service_checks.check_hint: each side's own cap, not a fixed 64)
     seed, t = src("T-derived-0001")
     out.append(_cand("cut_lists.1", "cut_lists", seed, "walk",
                      {"bounds": {"max_extension_bp": 1000}, "labels": {"max_labels_per_node": 2}}, t,

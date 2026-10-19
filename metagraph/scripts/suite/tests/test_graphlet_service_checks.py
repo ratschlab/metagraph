@@ -1,6 +1,7 @@
 """The service's own behaviour in area G checked positively (graphlet_service_checks.py; DESIGN-v8 §5, D-R6) and the
 declared per-way differences verified as by-design pairs against the table (D-R12): walk_display, label_evidence and
-qualified_cause on cut-list graphlets, hint above 64 labels per node, in_service false plus download over 8 MiB,
+qualified_cause on cut-list graphlets, hint on a qualified compare whose label lists were cut (each side's cap from its
+strategy, not a fixed 64), in_service false plus download over 8 MiB,
 max_bytes 262,145 refused on W3 and answered locally, a wrong token forbidden, a malformed handle bad_handle,
 library_commit; the area G case schema of the by-design table (compare.graphlet_case_problems)."""
 
@@ -37,11 +38,16 @@ CAP_CASE = {"id": "graphlet.max_bytes_above_service_cap", "areas": ["G"], "agree
             "source": ["test"]}
 
 
-def compare_answer(handle_a="g_0000000000aa", handle_b="g_0000000000bb", counts=None, comparable="qualified"):
+# the library's note on a cut-list side (metagraph.traverse.ops, the compare's lower-bound notes)
+LABEL_LISTS_NOTE = "label_lists (labels.max_labels_per_node): 3 recorded lists cut, the oracle is a lower bound"
+
+
+def compare_answer(handle_a="g_0000000000aa", handle_b="g_0000000000bb", counts=None, comparable="qualified",
+                   notes=None):
     return {"a": handle_a, "b": handle_b, "mode": "claims", "comparable": comparable, "reason": "lower bound",
             "equal": None, "depth_used": {"left": 100}, "counts": counts or {"only_in_a": 0, "only_in_b": 0,
                                                                              "differ": 0},
-            "notes": [], "support": ["kmer", "kmer"], "scopes": [{}, {}], "total": 0, "rows": []}
+            "notes": list(notes or []), "support": ["kmer", "kmer"], "scopes": [{}, {}], "total": 0, "rows": []}
 
 
 class ServiceBase(unittest.TestCase):
@@ -106,19 +112,25 @@ class WalkDisplay(ServiceBase):
 
 
 class CompareFields(ServiceBase):
-    def scenarios(self, cut_b=True, labels_b=70):
+    def scenarios(self, cut_b=True, labels_b=70, cap_a=64, labels_a=10, cut_a=False):
         op = {"id": "cmp", "tool": "graphlet_compare",
               "args": {"b": {"graphlet": SID_B}, "mode": "claims", "max_bytes": 262144}, "ways": FOUR}
-        a = gf.scenario(sid=SID, ops=[op], facts={"cut_lists": False, "max_labels_per_node": 10})
+        a = gf.scenario(sid=SID, ops=[op], facts={"cut_lists": cut_a, "max_labels_per_node": labels_a})
+        if cap_a is None:
+            del a["request"]["strategy"]["labels"]["max_labels_per_node"]
+        else:
+            a["request"]["strategy"]["labels"]["max_labels_per_node"] = cap_a
         b = gf.scenario(sid=SID_B, ops=[], facts={"cut_lists": cut_b, "max_labels_per_node": labels_b})
         b["request"]["strategy"]["labels"]["max_labels_per_node"] = 32
         return [a, b], op
 
-    def run_with(self, sf, counts=None, cut_b=True, labels_b=70):
-        scens, op = self.scenarios(cut_b, labels_b)
+    def run_with(self, sf, counts=None, cut_b=True, labels_b=70, comparable="qualified", notes=(LABEL_LISTS_NOTE,),
+                 **sides):
+        scens, op = self.scenarios(cut_b, labels_b, **sides)
         self.make(scens)
-        lib = compare_answer(counts=counts)
-        self.put(SID, op, {"*": lib, "W3": compare_answer(UUID, UUID_B, counts=counts)}, sf=sf)
+        lib = compare_answer(counts=counts, comparable=comparable, notes=notes)
+        self.put(SID, op, {"*": lib, "W3": compare_answer(UUID, UUID_B, counts=counts, comparable=comparable,
+                                                          notes=notes)}, sf=sf)
         return self.result()
 
     def test_a_cut_list_graphlet_with_every_field(self):
@@ -157,14 +169,80 @@ class CompareFields(ServiceBase):
         self.assertEqual(c["outcome"], "fail")
         self.assertIn("does not state the cap 64", c["detail"])
 
-    def test_hint_iff_more_than_64_labels_per_node(self):
-        res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" %
-                             gs.NO_DIFFERENCE})
-        self.assertIn("70 labels per node at most, hint absent", self.check(res, "hint")["detail"])
+    FIELDS = {"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" % gs.NO_DIFFERENCE}
+
+    def hint(self, res):
+        return self.check(res, "hint")
+
+    def test_hint_on_a_qualified_compare_with_cut_lists(self):
+        res = self.run_with(self.FIELDS)
+        c = self.hint(res)
+        self.assertEqual(c["outcome"], "fail")
+        self.assertIn("verdict qualified, label lists cut on %s (%s cap 64, %s cap 32), hint absent" % (
+            SID_B, SID, SID_B), c["detail"])
         self.run_.cleanup()
-        res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" %
-                             gs.NO_DIFFERENCE, "hint": "h"}, labels_b=64)
-        self.assertIn("64 labels per node at most, hint present", self.check(res, "hint")["detail"])
+        # the old fixed 64 aside: 64 labels on a node of b, whose cap is 32, and its lists cut: a hint
+        res = self.run_with(dict(self.FIELDS, hint="h"), labels_b=64)
+        self.assertEqual(self.hint(res)["outcome"], "pass", self.hint(res))
+
+    def test_no_hint_unless_the_verdict_is_qualified(self):
+        for verdict in (True, False, "unknown"):
+            res = self.run_with({}, comparable=verdict)
+            self.assertEqual(self.hint(res)["outcome"], "pass", (verdict, self.hint(res)))
+            self.run_.cleanup()
+            res = self.run_with({"hint": "h"}, comparable=verdict)
+            c = self.hint(res)
+            self.assertEqual(c["outcome"], "fail", verdict)
+            self.assertIn("hint present", c["detail"])
+            self.run_.cleanup()
+
+    def test_no_hint_without_the_label_lists_note(self):
+        # the library names label_lists only when no other lower bound is noted: the service adds no label fields
+        notes = ("inexact_counts (labels.counts): the oracle is a lower bound",)
+        res = self.run_with({}, notes=notes)
+        self.assertEqual(self.hint(res)["outcome"], "pass", self.hint(res))
+        self.run_.cleanup()
+        res = self.run_with({"hint": "h"}, notes=notes)
+        self.assertIn("no label_lists note, hint present", self.hint(res)["detail"])
+
+    def test_the_cap_is_each_sides_strategy(self):
+        # neither side's lists stated cut: b's 40 labels on a node are above its cap 32 (cut), not above 64
+        res = self.run_with(dict(self.FIELDS, hint="h"), cut_b=None, labels_b=40)
+        self.assertEqual(self.hint(res)["outcome"], "pass", self.hint(res))
+        self.run_.cleanup()
+        res = self.run_with(self.FIELDS, cut_b=None, labels_b=40)
+        self.assertIn("label lists cut on %s" % SID_B, self.hint(res)["detail"])
+        self.run_.cleanup()
+        # a's 100 labels are within its cap 128 and b is not cut: no hint, although 100 is above 64
+        res = self.run_with({}, cut_b=False, labels_b=10, cap_a=128, labels_a=100, cut_a=None)
+        self.assertEqual(self.hint(res)["outcome"], "pass", self.hint(res))
+        self.run_.cleanup()
+        res = self.run_with({"hint": "h"}, cut_b=False, labels_b=10, cap_a=128, labels_a=100, cut_a=None)
+        self.assertIn("label lists not cut (%s cap 128, %s cap 32), hint present" % (SID, SID_B),
+                      self.hint(res)["detail"])
+        self.run_.cleanup()
+        # a strategy without a cap: the engine's default 64
+        res = self.run_with({"hint": "h"}, cut_b=False, labels_b=10, cap_a=None, labels_a=65, cut_a=None)
+        self.assertEqual(self.hint(res)["outcome"], "pass", self.hint(res))
+
+    def test_unknown_facts_are_inconclusive_only_where_they_matter(self):
+        res = self.run_with({}, cut_b=None, labels_b=None)
+        c = self.hint(res)
+        self.assertEqual(c["outcome"], "inconclusive")
+        self.assertIn("cut label lists unknown", c["detail"])
+        self.run_.cleanup()
+        # not qualified: the facts are not needed
+        res = self.run_with({}, cut_b=None, labels_b=None, comparable=True)
+        self.assertEqual(self.hint(res)["outcome"], "pass")
+
+    def test_side_cut_lists(self):
+        f = gs.side_cut_lists
+        self.assertTrue(f({"cut_lists": True, "max_labels_per_node": 3, "cap": 64}))
+        self.assertTrue(f({"cut_lists": None, "max_labels_per_node": 33, "cap": 32}))
+        self.assertFalse(f({"cut_lists": None, "max_labels_per_node": 32, "cap": 32}))
+        self.assertFalse(f({"cut_lists": False, "max_labels_per_node": None, "cap": 32}))
+        self.assertTrue(f({"cut_lists": None, "max_labels_per_node": 65, "cap": None}))
+        self.assertIsNone(f({"cut_lists": None, "max_labels_per_node": None, "cap": 32}))
 
 
 class InService(ServiceBase):
