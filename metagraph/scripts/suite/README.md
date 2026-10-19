@@ -4831,12 +4831,17 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   (graphlet_oracle.cut_problem, the one cut rule) on the fields it names only, an empty value included, two cut
   rows on their common leading part, every other field equal (VERIFY-C VC1); every way an op runs in is reached by a
   compared pair (VC7); a record without answer or error, and a paging "all" listing with paging_complete false,
-  leave the op inconclusive (VC6);
+  leave the op inconclusive (VC6); every runner-side code of FORMAT v2.3 B2 (no_graphlet aside, a failed seed's
+  answer compared by code) is inconclusive, never compared (VERIFY-C-R2 VR1); a row the library cut where W3's is
+  whole is accepted and noted in chapter G (VR7);
   errors by code and structured fields (no message, hint; no result_too_large bytes). A deliberate cut (op field
   `cut_of`: the uncut op) is judged per way against that way's uncut answer: it must show a cut (a marker,
   paging_complete false, fewer rows than total; else "not cut", a failure: VC4); a key it lacks optional or named in
   its fields_cut; a field a row names cut by lane O's rule; the page's rows and the tool's optional lists leading
-  parts; every other value equal.
+  parts; every other value equal. Only a ceiling's refusal (result_too_large, receipt_too_large, too_large,
+  body_too_large) is a way's cut; op_busy, op_timeout, op_memory leave the op inconclusive (VR2). A slice of
+  graphlet_sequence is cut by its own form: truncated and next_from, its sequence a leading part, its `to` no
+  greater (VR6).
   Outcomes per op: agree, disagree (naming the pairs), service_by_design, inconclusive, precondition_failed; the
   scenario fails on a failed pre-check or a disagreement. graphlet_list / graphlet_free are a smoke outside the
   counts; the drift lane is compared with W4, report-only; W5's checked and consistency-only pointers give the
