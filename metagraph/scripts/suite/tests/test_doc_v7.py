@@ -228,14 +228,20 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertEqual(pos, {("M-1", "direct-local", 0): "inside", ("W-1", "direct-local", 0): "inside",
                                ("B-1", "mcp", 0): "across"})
         self.assertEqual(round(ep["drop"]["to_gib"]), 51)
-        self.assertTrue(ep["drop"]["no_restart"])
+        self.assertTrue(ep["drop"]["in_flight_completed"])
         text = self._text(run)
         self.assertIn("stood at its memory limit of 128~GiB from 02:20:00 to 02:30:00 UTC", text)
         for head in ("\\emph{Observation.}", "\\emph{What ran then.}", "\\emph{Limits.}"):
             self.assertIn(head, text)
         self.assertLess(text.index("not a finding of the service"), text.index("Observation."))
-        self.assertIn("At the end of the window its memory fell from 128 to 51~GiB within 2~s (cached index pages "
-                      "released, no restart: the request in flight completed)", text)
+        # V7-001: observations, not a cause
+        self.assertIn("At the end of the window, reported container memory fell from 128 to 51~GiB within 2~s; the "
+                      "in-flight request completed. These observations do not establish the cause of the drop.", text)
+        for claim in ("cached index pages", "no restart", "restarted"):
+            self.assertNotIn(claim, text)
+        self.assertIn("The latency comparisons use the same test's other executions; they do not isolate the cause "
+                      "of the slowdown.", text)
+        self.assertNotIn("not measured", text)
         # V1: the budget_stress 503 inside the window is placed there and named as the one that did not pass
         self.assertIn("3 executions ran in the window (chapters P and M; one ran past its end): 2 passed, and one did "
                       "not: W-1 direct-local r0 (a 503 deadline at 110.8~s wall, inconclusive)", text)

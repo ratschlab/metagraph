@@ -3590,8 +3590,9 @@ def memory_episodes(run):
     or a gap of more than MEMORY_GAP_S, ends it) of at least MEMORY_EPISODE_MIN_SAMPLES samples; [] when none (every
     run before the v7 baseline's 02:41-03:05Z at 128 GiB). Each: its start and end (seconds, fraction kept), samples,
     limit and peak, the disk read meanwhile (GiB), a drop at its end (a fall of MEMORY_DROP_SHARE of the limit or more
-    to the next sample) with the evidence against a restart, the memory ten minutes after, and every execution whose
-    [start, end] overlaps it, placed: 'into' (started before it), 'inside', 'across' (ran past its end)."""
+    to the next sample) with whether the requests in flight across it completed (observations, never a cause), the
+    memory ten minutes after, and every execution whose [start, end] overlaps it, placed: 'into' (started before it),
+    'inside', 'across' (ran past its end)."""
     ss = _mem_samples(run)
     runs_, cur = [], []
     for i, (t, s) in enumerate(ss):
@@ -3606,7 +3607,6 @@ def memory_episodes(run):
             cur = []
     if cur:
         runs_.append(cur)
-    instance = (getattr(run, "run", None) or {}).get("server_instance")
     out = []
     for high in runs_:
         if len(high) < MEMORY_EPISODE_MIN_SAMPLES:
@@ -3630,16 +3630,13 @@ def memory_episodes(run):
         if i1 + 1 < len(ss):
             tn, sn = ss[i1 + 1]
             if s1["mem_bytes"] - sn["mem_bytes"] >= MEMORY_DROP_SHARE * limit:
-                b1, bn = cells._num(s1.get("blk_read")), cells._num(sn.get("blk_read"))
+                # observations only, never a cause (the share review of the v7 document, V7-001): the fall and
+                # whether the requests in flight across it completed with an answer
                 flight = [l for l, _ in rows if _span(l)[0] <= t1 and _span(l)[1] >= tn]
-                # no restart: one server instance for the whole run, the disk-read counter kept counting, and every
-                # request in flight across the fall completed with an answer the checks judged
                 ep["drop"] = {"from_gib": _gib(s1["mem_bytes"]), "to_gib": _gib(sn["mem_bytes"]), "s": tn - t1,
                               "at": tn, "in_flight": flight,
-                              "no_restart": bool(isinstance(instance, str) and instance and b1 is not None
-                                                 and bn is not None and bn >= b1 and flight
-                                                 and all(l.get("outcome") not in ("error",) and l.get("http") == 200
-                                                         for l in flight))}
+                              "in_flight_completed": bool(flight) and all(
+                                  l.get("outcome") != "error" and l.get("http") == 200 for l in flight)}
         out.append(ep)
     return out
 
@@ -3875,12 +3872,20 @@ def memory_episode_text(ctx):
                     ("; it read %s GiB from disk meanwhile" % fmt_n(ep["read_gib"])) if ep["read_gib"] else ""))
         d = ep["drop"]
         if d:
-            text += (". At the end of the window its memory fell from %s to %s GiB within %s s%s" % (
-                fmt_n(d["from_gib"]), fmt_n(d["to_gib"]), fmt_n(d["s"]),
-                " (cached index pages released, no restart: the request in flight completed)" if d["no_restart"]
-                else " (whether the container restarted is not established)"))
+            n_fl = len(d["in_flight"])
+            flight = ""
+            if d["in_flight_completed"]:
+                flight = "; the in-flight request completed" if n_fl == 1 else \
+                    "; the %d in-flight requests completed" % n_fl
+            elif n_fl:
+                flight = "; in flight across it: %s" % "; ".join("%s (%s)" % (_exec_name(l), _stop_word(l))
+                                                               for l in d["in_flight"])
+            text += (". At the end of the window, reported container memory fell from %s to %s GiB within %s s%s. "
+                     "These observations do not establish the cause of the drop" % (
+                         fmt_n(d["from_gib"]), fmt_n(d["to_gib"]), fmt_n(d["s"]), flight))
         if ep["after_gib"] is not None:
-            text += "; it was at %s GiB ten minutes after the window" % fmt_n(ep["after_gib"], 1)
+            text += "%s %s GiB ten minutes after the window" % (". It was at" if d else "; it was at",
+                                                              fmt_n(ep["after_gib"], 1))
         obs.append(text)
     first = _gib(ss[0][1]["mem_bytes"]) if ss else None
     observation = "*Observation.* %s.%s" % (". In a second window, ".join(o[0].upper() + o[1:] if i == 0 else o
@@ -4048,8 +4053,8 @@ def memory_episode_text(ctx):
         place_par.append(text + ".")
     has_prev = getattr(run, "previous", None) is not None
     limits = ("*Limits.* The samples show how much memory the container used, not what used it or why: the run does "
-              "not isolate the cause. That a search in the window was slower is read against the same test's other "
-              "executions%s, not measured." % (" and the previous edition's run" if has_prev else ""))
+              "not isolate the cause. The latency comparisons use the same test's other executions%s; they do not "
+              "isolate the cause of the slowdown." % (" and the previous run" if has_prev else ""))
     lead = ("The container's memory is an operational note about the host, not a finding of the service.")
     return "\\parhead{The host's memory}\n" + paragraphs(
         [lead, observation, "*What ran then.* " + " ".join(ran)] + [" ".join(x) for x in (late_par, rest_par, place_par)
