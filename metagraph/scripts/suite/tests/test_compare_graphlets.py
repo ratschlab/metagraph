@@ -557,6 +557,18 @@ class FiveWay(unittest.TestCase):
         self.assertFalse(cg.same_library_env(r1, r2))
         self.assertTrue(cg.same_library_env(r1, copy.deepcopy(r1)))
 
+    def test_vc7_every_way_is_reached_by_a_pair(self):
+        self.assertEqual(cg.op_pairs(["W1", "W2", "W3", "W4", "W5"]),
+                         [("W1", "W2", "transport"), ("W1", "W4", "fetch path"), ("W3", "W4", "service wrapper")])
+        self.assertEqual(cg.op_pairs(["W1", "W3"]), [("W1", "W3", "service wrapper (no W4)")])
+        self.assertEqual(cg.op_pairs(["W2", "W3", "W4"]), [("W3", "W4", "service wrapper"), ("W2", "W4", "library ways")])
+        # the verifier's P4: ways W1 and W3, W3 answers no rows against W1's two
+        op = dict(self.op, ways=["W1", "W3"])
+        self.make(ops=[op])
+        self.five(op=op, ways=("W1", "W3"), w3=dict(gf.walks_answer(rows=[]), handle=UUID), w5=False)
+        e = self.op_entry()
+        self.assertEqual((e["outcome"], e["disagreeing"]), ("disagree", ["W1-W3"]))
+
     def test_vc6_empty_records_and_incomplete_listings(self):
         self.make(ways=["W1", "W2", "W3", "W4"])
         for way in ("W1", "W2", "W3", "W4"):

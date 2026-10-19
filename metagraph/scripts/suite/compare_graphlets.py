@@ -756,6 +756,36 @@ def compare_cut(way, rec, ref, optional):
     return {"way": way, "outcome": "agree", "detail": "a cut of %s's uncut answer (%s)" % (way, evidence)}
 
 
+# the order in which a way left unconnected by PAIRS is joined to the others (VERIFY-C VC7)
+ANCHOR_ORDER = ("W1", "W4", "W2", "W3")
+
+
+def op_pairs(ways):
+    """The pairs an op compares (W5 aside): PAIRS among its ways, then, for every way those leave unconnected (an op
+    with W3 but no W4, W2 or W4 without W1), a pair with the first way of ANCHOR_ORDER outside its group, so every
+    way the op runs in is compared with another (VERIFY-C VC7); a pair with W3 is "service wrapper", else "library
+    ways"."""
+    listed = [w for w in ANCHOR_ORDER if w in ways]
+    group = dict((w, w) for w in listed)
+
+    def find(w):
+        while group[w] != w:
+            w = group[w]
+        return w
+    out = []
+    for a, b, what in PAIRS:
+        if a in group and b in group:
+            out.append((a, b, what))
+            group[find(b)] = find(a)
+    for w in listed[1:]:
+        if find(w) != find(listed[0]):
+            anchor = next(x for x in listed if find(x) != find(w))
+            a, b = sorted((anchor, w), key=lambda x: WAYS.index(x))
+            out.append((a, b, "service wrapper (no W4)" if "W3" in (a, b) else "library ways"))
+            group[find(w)] = find(anchor)
+    return out
+
+
 def compare_op(scenario, op, recs, precheck, manifest):
     """The entry of one op call (module docstring)."""
     sid, oid, tool = scenario.get("id"), op.get("id"), op.get("tool")
@@ -796,7 +826,7 @@ def compare_op(scenario, op, recs, precheck, manifest):
         optional = OPTIONAL_KEYS.get(tool, frozenset())
         entry["cuts"] = [compare_cut(w, r, recs.get(w, {}).get((sid, cut_of)), optional)
                          for w, r in sorted(present.items()) if w != "W5"]
-    for a, b, what in PAIRS:
+    for a, b, what in op_pairs(ways):
         if a not in ways or b not in ways:
             continue
         if a not in present or b not in present:
