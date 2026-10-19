@@ -113,9 +113,10 @@ checked (VO7); refusals are expected errors with their code [L].
       from_label, cost, loss, branches, reason [S §7.1 runs[], §7.5.2 R], qualifier [S §7.5.1], path_id of a run
       ending at a leaf [S §7.5.6], kind boundary of a zero-length run [D §5.1], route_bp where R's stamp is the
       displayed one [S §7.1; PB2], evidence_from [D §5.1][R] (null for a boundary claim, PB1), total and filtered
-      (labels [D §5], route_consistent: merge_entered / route_only [D §6, §5.1][R], min_bp [P §2.11][R]) | c/o:
-      other kinds, end_class, support, exact, path_id of inner runs, route_bp where R and T differ (PB2), filtered
-      with min_bp > 0 (PB3), labels=[], coordinate columns, hint, caveat; annotate claims (D §5.2.1 witness rule)
+      (labels [D §5], route_consistent: merge_entered where the SPEC §7.1 stamp is above 0, T at a leaf, R inside
+      [D §6, S §7.1; F2, VO-B2], min_bp [P §2.11][R]) | c/o: other kinds, end_class, support, exact, path_id of
+      inner runs, route_bp where R and T differ (PB2), the selection where R's and the displayed stamp disagree,
+      filtered with min_bp > 0 (PB3), labels=[], coordinate columns, hint, caveat; annotate claims (D §5.2.1)
   graphlet_labels name= (phase B): the label's runs per arm (left first) in run id order: arm, from_bp, to_bp [S
       §7.1], end (the qualifier's text or the enum [S §7.5.6]), evidence_from [D §5.1][R] (the formula also for a
       zero-length run, PB4), merged_into [S §7.5.2 R m, D §4], route [D §5 routes][R]; name, ref, total; unknown /
