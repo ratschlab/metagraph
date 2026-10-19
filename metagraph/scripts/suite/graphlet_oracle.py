@@ -535,7 +535,8 @@ def cut_problem(cut_value: Any, full_value: Any, cut_fields: Sequence[str] = (),
       of the full value, every other key the same value (json_equal).
     - A string: a prefix of the full one. A list: a prefix; for a field named in |unordered|, a sub-multiset; in
       |position_ordered| (events sorted by position only, SPEC §7.1), a sub-multiset in non-decreasing at_bp that
-      keeps the smallest positions. A scalar is never cut (INVENTORY §1.2): equal.
+      keeps the smallest positions. A scalar is never cut (INVENTORY §1.2): equal. A cut may be empty (a string
+      cut to "", a list to []): the tool's row cut shortens a field as far as the page needs, to nothing if need be.
     |unordered| / |position_ordered| name fields of an object, or, for a bare list, use "" for the list itself."""
     def order(key: str) -> str:
         return "unordered" if key in unordered else "position" if key in position_ordered else "ordered"
