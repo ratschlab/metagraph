@@ -4805,8 +4805,9 @@ Nothing here touches staging; every test is offline.
   seed_index written `*`, J and Z left out: a server body, its standalone file and one seed at two batch positions
   share it; unmasked it is the library's parser.body_digest), `envelope_digest` (the J envelope without the top-level
   `timing` and `usage`, results[*].`timing`, FORMAT v2 E1's results[*].annotation lookahead counters
-  `direct_reads` and `keys_mapped`, and VERIFY-L VL16's results[*].seed.seed_id (the caller's own seed name);
-  strategy settings such as output.timing and annotation.batch_kmers stay),
+  `direct_reads` and `keys_mapped`, and VERIFY-L VL16's results[*].seed.seed_id (the caller's own seed name) and
+  results[*].seed.seed_id_mismatch (whether that name differs from the recomputed id); strategy settings such as
+  output.timing and annotation.batch_kmers stay),
   `digests` (FORMAT's `doc` block). A broken frame (no final LF, no H of MGT v1 first, J anywhere but line 2, no Z
   counting the lines) is a ValueError, never a digest.
 - `graphlet_select.py`: run-time selectors, pure and stdlib (async vendors it): `resolve(value, answers)` replaces

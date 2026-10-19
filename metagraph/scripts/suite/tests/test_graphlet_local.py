@@ -143,8 +143,11 @@ class GraphletDocTests(unittest.TestCase):
         annotation = dict(r.get("annotation") or {}, direct_reads=7, keys_mapped=12345)
         self.assertEqual(digest_of(resp, dict(r, annotation=annotation)), base)
         self.assertNotEqual(digest_of(resp, dict(r, annotation=dict(annotation, rows_requested=1))), base)
-        # VL16: the caller's seed name is request metadata; the validated id is not
+        # VL16: the caller's seed name and its mismatch flag are request metadata; the validated id is not
         self.assertEqual(digest_of(resp, dict(r, seed=dict(r["seed"], seed_id="service-name"))), base)
+        self.assertEqual(digest_of(resp, dict(r, seed=dict(r["seed"], seed_id="service-name",
+                                                           seed_id_mismatch=True))), base)
+        self.assertIn("seed_id_mismatch", r["seed"])
         self.assertNotEqual(digest_of(resp, dict(r, seed=dict(r["seed"], validated_seed_id="0" * 16))), base)
         strategy_ann = json.loads(json.dumps(resp["strategy"]))
         strategy_ann["annotation"] = {"batch_kmers": 7}
