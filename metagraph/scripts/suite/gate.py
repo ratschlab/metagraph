@@ -707,6 +707,10 @@ def graphlet_problems(run_dir, policy, manifest, notes, reuse=False):
         notes.append("the library's answer keys (compare_graphlets.ANSWER_KEYS) differ from the table the policy was "
                      "generated with (%s vs %s)" % (str(comp.get("whitelist_sha256"))[:12],
                                                    str(block["whitelist_sha256"])[:12]))
+    for r in comp.get("run_level") or []:
+        # lane O's run-level record: W1 lines no op can be found for, so area G cannot be whole (blocks)
+        out.append(_problem("graphlet", "%s's run-level record: %s: %s" % (r.get("way"), r.get("declared"),
+                                                                          str(r.get("note"))[:240])))
     aside = dict(((x.get("scenario"), x.get("op")), x) for x in block.get("not_required") or [])
     counts = dict((k, 0) for k in ("required", "judged", "agree", "service_by_design", "not_required"))
     scen = comp.get("scenarios") or {}

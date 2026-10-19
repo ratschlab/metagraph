@@ -710,6 +710,23 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(e["outcome"], "inconclusive")
         self.assertIn("W5 could not judge the call", e["reason"])
 
+    def test_a_run_level_w5_record(self):
+        self.make()
+        self.five()
+        self.run_.append(os.path.join("arms", "oracle", "graphlet_ops.jsonl"),
+                         {"run_id": "test", "scenario": None, "way": "W5", "op": None, "tool": None,
+                          "run_level": True, "args_resolved": None, "answer": None,
+                          "error": {"code": "unreadable_w1_lines", "fields": {"lines": 2}},
+                          "oracle": {"checked": {}, "declared": "unreadable_w1",
+                                     "note": "2 torn W1 line(s) name no scenario and op"}})
+        res = cg.compute(self.run_.dir, write=False)
+        self.assertEqual(res["run_level"][0]["declared"], "unreadable_w1")
+        self.assertEqual(res["summary"]["unplanned_records"], 0)
+        import report
+        word, reason = report.graphlet_verdict(res)
+        self.assertEqual(word, "INCONCLUSIVE")
+        self.assertIn("W5's run-level record: unreadable_w1: 2 torn W1 line(s)", reason)
+
     def test_lane_os_compare_on_the_vo4_cases(self):
         import graphlet_oracle as go
         if not callable(getattr(go, "compare", None)):

@@ -38,7 +38,9 @@ Per op call, in this order:
    a field a row names cut by lane O's rule; the page's rows and the tool's optional lists leading parts; every other
    value equal; the library ways' cut answers must still be equal (one handle length, one ceiling).
 Outcomes per op: agree; disagree, naming the pairs; inconclusive (a way missing, a selector failed everywhere, a
-manifest problem); precondition_failed (the scenario's preconditions failed: no op is compared). The scenario: fail
+manifest problem, a fitting error on an op without cut_of: the plan failed to fit); precondition_failed (the
+scenario's preconditions failed: no op is compared). A run-level W5 record (lane O: torn W1 lines that name no
+scenario and op) makes area G inconclusive (`run_level`). The scenario: fail
 (a pre-check failed, or an op disagrees), else precondition_failed, else inconclusive, else pass. graphlet_list /
 graphlet_free are a smoke outside the five-way report (D-R15): each way answered, nothing compared. The drift lane
 (arms/drift-lib) is compared with W4 and listed, report-only.
@@ -1070,16 +1072,23 @@ def compare_run(run_dir, manifest=None, checks_mod=None, extra=None):
                     if k not in gaps.setdefault(op.get("tool"), []):
                         gaps[op.get("tool")].append(k)
         scenarios[sid] = {"title": scen.get("title"), "precheck": pre_by.get(sid), "ops": ops}
+    run_level = []
     for way in WAYS:
-        for key in recs.get(way, {}):
-            if key not in planned:
+        for key, r in recs.get(way, {}).items():
+            if r.get("run_level"):
+                # lane O's run-level W5 record (torn W1 lines that name no scenario and op): area G inconclusive
+                oracle = r.get("oracle") if isinstance(r.get("oracle"), dict) else {}
+                run_level.append({"way": way, "declared": oracle.get("declared"), "note": oracle.get("note"),
+                                  "error": r.get("error")})
+            elif key not in planned:
                 unplanned.append({"way": way, "scenario": key[0], "op": key[1]})
     out = {"compare_version": COMPARE_VERSION, "generated_utc": sc.iso_utc(time.time()),
            "manifest": sc.manifest_identity(manifest), "inputs": input_digests(run_dir, recs),
            "prechecks_sha256": hashlib.sha256(sc.canonical_json(prechecks)).hexdigest(),
            "whitelist_sha256": whitelist_sha256(), "warnings": warnings,
            "scenarios": scenarios, "unplanned_records": unplanned[:200],
-           "summary": {"whitelist_gaps": gaps, "unplanned_records": len(unplanned)},
+           "run_level": run_level,
+           "summary": {"whitelist_gaps": gaps, "unplanned_records": len(unplanned), "run_level": len(run_level)},
            "coverage": coverage(recs), "drift": drift(recs)}
     for fn in extra or ():
         fn(out, run_dir, manifest, recs, prechecks)

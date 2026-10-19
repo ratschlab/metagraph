@@ -1411,9 +1411,13 @@ def graphlet_verdict(g):
                              if by_outcome.get(k)) or "none",
         ("; failed: %s" % ", ".join(failed)) if failed else
         (("; not passed: %s" % ", ".join(open_)) if open_ else ""))
+    run_level = g.get("run_level") or []
+    if run_level:
+        reason += "; %s" % "; ".join("%s's run-level record: %s: %s" % (r.get("way"), r.get("declared"), r.get("note"))
+                                     for r in run_level)
     if sc_.get("fail") or failed:
         return "FAIL", reason
-    if sc_.get("inconclusive") or sc_.get("precondition_failed") or open_:
+    if sc_.get("inconclusive") or sc_.get("precondition_failed") or open_ or run_level:
         return "INCONCLUSIVE", reason
     if not sum(sc_.values()):
         return "EMPTY", reason

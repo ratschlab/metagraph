@@ -244,6 +244,18 @@ class Judge(GateG):
         self.assertFalse(v["passed"])
         self.assertTrue(any("W1-W2" in p["detail"] for p in self.kinds(v, "graphlet")))
 
+    def test_a_run_level_w5_record_blocks(self):
+        self.build()
+        self.g.append(os.path.join("arms", "oracle", "graphlet_ops.jsonl"),
+                      {"scenario": None, "way": "W5", "op": None, "tool": None, "run_level": True,
+                       "args_resolved": None, "answer": None,
+                       "error": {"code": "unreadable_w1_lines", "fields": {"lines": 1}},
+                       "oracle": {"checked": {}, "declared": "unreadable_w1",
+                                  "note": "1 torn W1 line(s) name no scenario and op"}})
+        v = self.judge()
+        self.assertTrue(any(p["detail"].startswith("W5's run-level record: unreadable_w1") for p in
+                            self.kinds(v, "graphlet")), gate.render(v))
+
     def test_a_comparison_of_another_manifest_is_an_identity_problem(self):
         self.build()
         cg.compute(self.d)
