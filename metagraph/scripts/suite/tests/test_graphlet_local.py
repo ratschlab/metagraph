@@ -726,6 +726,7 @@ class PagingTests(unittest.TestCase):
             plan = {"scenarios": [{"id": sid, "graphlet": {"ops": o}} for sid, o in sorted(ops.items())]}
             recs = run_offline(os.path.join(tmp, "run"), plan, ways="W4")["W4"]
             by = dict((r["op"], r) for r in recs)
+            cut_rows = 0
             for name in sorted(self.LISTS):
                 with self.subTest(name):
                     big = comparable(by[name + "@big"])["answer"]
@@ -734,6 +735,8 @@ class PagingTests(unittest.TestCase):
                     used = []
                     for size in self.SIZES:
                         r = by["%s@%d" % (name, size)]
+                        if not r["error"] and r["answer"].get("row_truncated"):
+                            cut_rows += self.check_cut_rows(comparable(r)["answer"], big)
                         if r["error"] or r["pages"] < 2 or r["answer"].get("row_truncated"):
                             continue
                         used.append(size)
@@ -749,8 +752,33 @@ class PagingTests(unittest.TestCase):
             cuts = [by["compare@%d" % size]["answer"].get("fields_cut") for size in self.SIZES
                     if by["compare@%d" % size]["answer"]]
             self.assertIn(["evidence"], cuts)
+            self.assertGreater(cut_rows, 5)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def check_cut_rows(self, small, big):
+        """FORMAT v2 A3: an answer with cut rows has every row of the uncut answer, in order; a row marked _cut_fields
+        is the uncut row with each named field cut (a string's head, a list's head: mcp_tools._shrink), the rest
+        equal; an unmarked row is the uncut row. -> the number of marked rows."""
+        self.assertEqual(len(small["rows"]), len(big["rows"]))
+        self.assertTrue(small["cut_fields"])
+        marked = 0
+        for row, whole in zip(small["rows"], big["rows"]):
+            row = dict(row)
+            fields = row.pop("_cut_fields", None)
+            if fields is None:
+                self.assertEqual(row, whole)
+                continue
+            marked += 1
+            self.assertLessEqual(set(fields), set(small["cut_fields"]))
+            for k, v in row.items():
+                if k in fields:
+                    self.assertEqual(v, whole[k][:len(v)], k)
+                    self.assertLess(len(v), len(whole[k]), k)
+                else:
+                    self.assertEqual(v, whole[k], k)
+        self.assertGreater(marked, 0)
+        return marked
 
     def test_sequence_pages_equal_one_slice(self):
         tmp = tempfile.mkdtemp(prefix="graphlet-local-")

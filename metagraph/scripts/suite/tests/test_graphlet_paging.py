@@ -80,8 +80,15 @@ class AssembleTests(unittest.TestCase):
         pages = [{"rows": [{"s": "AC"}], "total": 2, "row_truncated": True, "cut_fields": ["s"], "next_cursor": "c"},
                  {"rows": [{"s": "G"}], "total": 2}]
         out = gp.assemble("graphlet_walks", pages, True)
-        self.assertEqual((out["row_truncated"], out["cut_fields"], out["rows"]), (True, ["s"], [{"s": "AC"},
-                                                                                                 {"s": "G"}]))
+        # A3: the top level merged, each row of the cut page marked with that page's own cut_fields
+        self.assertEqual((out["row_truncated"], out["cut_fields"], out["rows"]),
+                         (True, ["s"], [{"s": "AC", "_cut_fields": ["s"]}, {"s": "G"}]))
+        self.assertEqual(pages[0]["rows"], [{"s": "AC"}])   # the pages are not changed
+        pages.append({"rows": [{"s": "T", "l": [1]}], "total": 3, "row_truncated": True, "cut_fields": ["l", "s"]})
+        pages[1]["next_cursor"] = "c2"
+        out = gp.assemble("graphlet_walks", pages, True)
+        self.assertEqual(out["cut_fields"], ["s", "l"])
+        self.assertEqual([r.get("_cut_fields") for r in out["rows"]], [["s"], None, ["l", "s"]])
 
     def test_conflicting_pages_refused(self):
         pages = [{"handle": "h", "rows": [1], "total": 2, "next_cursor": "c"}, {"handle": "k", "rows": [2], "total": 2}]

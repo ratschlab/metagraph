@@ -46,6 +46,10 @@ SEQUENCE_TOOL = "graphlet_sequence"
 END_FIELDS = ("total", "total_at_least", "complete", "filtered", "filtered_so_far", "local", "stop")
 # fields of one page's fitting, merged over the pages
 PAGE_FIELDS = ("next_cursor", "fields_cut", "row_truncated", "cut_fields")
+# A3: the marker on each row of a page whose one row was cut to fit the page alone (_page :1068-1079: row_truncated
+# and cut_fields; _shrink :2713-2733: a string loses its tail, a list its second half, scalars never): that page's own
+# cut_fields, so that a reader knows which assembled row is a cut of the uncut row
+ROW_CUT_MARKER = "_cut_fields"
 # an error's text, kept in the raw page only (FORMAT v2 B2: errors by code and structured fields)
 ERROR_TEXT = ("error", "message", "hint")
 # "all" stops here: a cursor that never ends is a library defect, recorded as paging_runaway
@@ -110,8 +114,8 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
     from the first page, except: the END_FIELDS from the last page; `evidence` from the last page that states it (an
     interrupted page's carries limitations.local, the completing page's not); compare's base fields that a page cut
     (fields_cut) taken from any page that carries them, fields_cut then naming only those no page carried;
-    `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged;
-    next_cursor removed. graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
+    `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged,
+    and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor removed. graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
     next_from removed and `truncated` too when the loop reached the end (|complete|). A base field two pages state
     differently (the evidence but for that mark) is an AssemblyError: a listing's pages describe one answer. The pages
     are not changed."""
@@ -141,7 +145,11 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
     for i, p in enumerate(pages):
         if not isinstance(p, dict) or not isinstance(p.get(field), list):
             raise AssemblyError("page %d of %s has no %s list" % (i, tool, field))
-        rows.extend(p[field])
+        if p.get("row_truncated"):
+            mark = list(p.get("cut_fields") or [])
+            rows.extend(dict(r, **{ROW_CUT_MARKER: mark}) if isinstance(r, dict) else r for r in p[field])
+        else:
+            rows.extend(p[field])
         for k, v in p.items():
             if i and k in first and k not in END_FIELDS + PAGE_FIELDS + (field,) and (
                     unmarked(v) != unmarked(first[k]) if k == "evidence" else v != first[k]):

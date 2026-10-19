@@ -4844,7 +4844,8 @@ Nothing here touches staging; every test is offline.
   checked against the source by a test); rows concatenated, other fields from the first page, the fields that say how a listing ended from the
   last, `evidence` from the last page that states it (a page its budget stopped marks it `limitations.local`),
   compare's per-page `fields_cut` merged (a field is cut only if every page cut it), `row_truncated` /
-  `cut_fields` merged, next_cursor removed; graphlet_sequence concatenates `sequence`, takes `to` from the last page
+  `cut_fields` merged and every row of a page that cut its row marked `"_cut_fields": [that page's cut_fields]`
+  (FORMAT v2 A3: W5 and the compare stage judge such a row as a cut of the uncut one), next_cursor removed; graphlet_sequence concatenates `sequence`, takes `to` from the last page
   and drops next_from (and `truncated` when the loop reached the end). Pages that state a base field differently are
   `assembly_error`.
 - Records add `paging_complete` and, for graphlet_export / graphlet_save, `file` {bytes, sha256 of the text with
