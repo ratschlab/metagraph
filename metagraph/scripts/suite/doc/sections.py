@@ -4006,8 +4006,9 @@ def memory_episode_text(ctx):
                        key=lambda x: (ctx.units.chapters.index(x) if x in ctx.units.chapters else 99, x))
         bad = [l for l, _ in rows if l.get("outcome") != "pass"]
         lead = "In the window of %s to %s, " % (ep["start"], ep["end"]) if several else ""
-        text = "%s%d execution%s ran in the window (chapter%s %s)" % (
-            lead, len(rows), "" if len(rows) == 1 else "s", "" if len(areas) == 1 else "s", facts._join(areas))
+        text = "%s%d execution%s ran%s (chapter%s %s)" % (
+            lead, len(rows), "" if len(rows) == 1 else "s", "" if several else " in the window",
+            "" if len(areas) == 1 else "s", facts._join(areas))
         into = [l for l, pos in rows if pos == "into"]
         across = [l for l, pos in rows if pos == "across"]
         if into or across:
@@ -4792,7 +4793,8 @@ def closing(ctx):
                              "not the latency of successful searches); the server columns count only the answers "
                              "that carry timing.elapsed\\_ms, so their n is smaller and the columns are not paired")
     if wai:
-        out += ("%d execution(s) ran warm after an interrupted execution and are counted in neither bucket.\n\n" % wai)
+        out += ("%d execution%s ran warm after an interrupted execution and %s counted in neither bucket.\n\n" % (
+            wai, "" if wai == 1 else "s", "is" if wai == 1 else "are"))
     return out
 
 
@@ -5639,7 +5641,8 @@ def gate_note_tex(note):
     """One gate note as appendix F prints it: a long path and a full commit sha may break (the v7 baseline's identity
     note named the 40-hex commit and ran 22 pt past the margin), no local path (as the record), the text cut at 300
     characters with its end kept."""
-    return "{\\small\\color{black!60}note: %s}\\par\n" % _break_hex(esc_wrap(latex.public_paths(str(note)), 300))
+    return "{\\small\\color{black!60}note: %s}\\par\n" % _break_hex(esc_wrap(latex.public_paths(
+        plural_counts(str(note))), 300))
 
 
 def mcp_limits(ctx):

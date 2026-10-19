@@ -149,6 +149,9 @@ class V7RealRunTest(unittest.TestCase):
         self.assertNotIn(SUITE, tex.replace("\\allowbreak{}", ""))
         self.assertIn("mcp\\_runs", tex.replace("\\allowbreak{}", ""))
         self.assertTrue(tex.startswith("{\\small\\color{black!60}note: "))
+        # W7: counts in their number
+        self.assertIn("plan: 3015 executions from plan.json", sections.gate_note_tex("plan: 3015 execution(s) from "
+                                                                                     "plan.json"))
         self.assertEqual(sections._break_hex("abc 0123456789abcdef0123456789abcdef"),
                          "abc 01234567\\allowbreak{}89abcdef\\allowbreak{}01234567\\allowbreak{}89abcdef")
 
@@ -307,7 +310,8 @@ class MemoryEpisodeTest(unittest.TestCase):
         text = self._text(self._run(two=True))
         self.assertIn("In a second window, the engine's container (eng) stood at its memory limit of 128~GiB from "
                       "02:45:00 to 02:46:00 UTC", text)
-        self.assertIn("In the window of 02:20:00 to 02:30:00, 3 executions ran in the window", text)
+        self.assertIn("In the window of 02:20:00 to 02:30:00, 3 executions ran (chapters P and M", text)
+        self.assertNotIn("ran in the window", text)
 
     def test_service_log_note(self):
         run = self._run()
