@@ -2100,22 +2100,83 @@ def _arguments_refused(tool: str, args: dict, ctx: dict) -> Optional[dict]:
     """Arguments the tools refuse, or that W5 cannot judge, before any derivation:
     - `budget` on a server without local limits: bad_argument (library-defined, INVENTORY §1.1); with local limits a
       budget's stops are the tool's (DESIGN §5.4: deterministic, but library-defined): no claim (local_limits);
-    - a `cursor`: W5 cannot read it (INVENTORY §1.2: opaque, bound to the handle, the tool and the arguments other
-      than cursor, max_bytes and n). Where the run step found its source op and that op's tool or bound arguments
-      differ (context cursor_bound_elsewhere), the tool must refuse it: bad_cursor (library-defined, INVENTORY §1.2);
-      else a page resumed from it is the tool's: no claim (cursor_page)."""
+    (a `cursor` is judged in answer(), _cursor_record: its label selectors resolve against the document)."""
     if args.get("budget") is not None and tool not in NOT_APPLICABLE:
         if not ctx.get("local_limits"):
             return _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_argument",
                            note="budget on a server without local limits (library-defined, INVENTORY §1.1)")
         return _declared("local_limits", "a budget under local limits: its stops are the tool's (DESIGN §5.4)")
-    if args.get("cursor") is not None:
-        if ctx.get("cursor_bound_elsewhere"):
-            return _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_cursor",
-                           note="a cursor of another listing (its source op's tool or arguments differ: library-defined, "
-                                "INVENTORY §1.2)")
-        return _declared("cursor_page", "a page resumed from an opaque cursor (INVENTORY §1.2): the tool's")
     return None
+
+
+# the documented defaults of the arguments a cursor binds (DESIGN §6's tool signatures; INVENTORY §2)
+_DEFAULTS: Dict[str, dict] = {
+    "graphlet_summary": {"arm": None, "detail": "summary", "budget": None},
+    "graphlet_walks": {"rank": "support", "min_bp": 0, "label": None, "spell": "none", "tail_bp": 60,
+                       "route_consistent": True, "coordinates": False, "budget": None},
+    "graphlet_walk": {"budget": None},
+    "graphlet_support": {"step": None, "budget": None},
+    "graphlet_labels": {"arm": None, "rank": "direct_bp", "min_direct_bp": 0, "at_bp": None, "name": None,
+                        "coordinates": False, "budget": None},
+    "graphlet_splits": {"min_labels_before": 2, "budget": None},
+    "graphlet_claims": {"min_bp": 0, "route_consistent": True, "labels": None, "budget": None},
+    "graphlet_compare": {"arm": None, "mode": "claims", "budget": None},
+}
+_MISSING = object()
+
+
+def _bound_args(d: "_Doc", tool: str, args: dict) -> Optional[dict]:
+    """The arguments a cursor binds, normalised as the tool reads them (INVENTORY §1.2: all but cursor, max_bytes and
+    n): arm short forms named (INVENTORY §1.5), label selectors resolved to labels (DESIGN §5 Graphlet.label: a
+    label named by name, ref or id is one label), the documented defaults filled in (DESIGN §6). None where a
+    selector does not resolve."""
+    out = dict(_DEFAULTS.get(tool, {}))
+    for k, v in args.items():
+        if k in ("cursor", "max_bytes", "n", "access_token"):
+            continue
+        out[k] = v
+    if isinstance(out.get("arm"), str):
+        out["arm"] = _ARM_NAMES.get(out["arm"], out["arm"])
+    try:
+        for key in ("label", "name"):
+            if out.get(key) is not None:
+                out[key] = d.resolve(out[key])
+        if out.get("labels") is not None:
+            sel = out["labels"] if isinstance(out["labels"], list) else [out["labels"]]
+            out["labels"] = sorted({d.resolve(x) for x in sel})
+    except _Refused:
+        return None
+    return out
+
+
+def _cursor_record(d: "_Doc", tool: str, args: dict, ctx: dict) -> dict:
+    """A call that resumes a listing from a cursor (INVENTORY §1.2: opaque to W5, bound to the handle, the tool and
+    the normalised arguments other than cursor, max_bytes and n). Its source (context cursor_source: the tool and
+    arguments of the op that left it, found by the run step) decides: another tool, or an argument both name with
+    another value after normalising (_bound_args), and the tool must refuse it: bad_cursor (library-defined,
+    INVENTORY §1.2). Otherwise W5 makes no claim (cursor_page): a resumed page is the tool's, and an argument one
+    call names without a documented default cannot be compared."""
+    bad = _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_cursor",
+                  note="a cursor of another listing (library-defined, INVENTORY §1.2)")
+    if ctx.get("cursor_bound_elsewhere"):
+        return bad
+    src = ctx.get("cursor_source")
+    if not isinstance(src, dict) or not isinstance(src.get("args"), dict):
+        return _declared("cursor_page", "a page resumed from an opaque cursor without a known source (INVENTORY §1.2)")
+    if src.get("tool") != tool:
+        return bad
+    a, b = _bound_args(d, tool, src["args"]), _bound_args(d, tool, args)
+    if a is None or b is None:
+        return _declared("cursor_page", "a cursor whose label selectors do not resolve: the tool's")
+    differs = False
+    for k in set(a) | set(b):
+        va, vb = a.get(k, _MISSING), b.get(k, _MISSING)
+        if va is _MISSING or vb is _MISSING:
+            return _declared("cursor_page", "%s: named by one call only, no documented default" % k)
+        differs = differs or not same(va, vb)
+    if differs:
+        return bad
+    return _declared("cursor_page", "a page resumed from the same listing: the tool's (INVENTORY §1.2)")
 
 
 def _path_refused(args: dict, spool: bool = False) -> Optional[dict]:
@@ -2183,6 +2244,8 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional
     if twin:
         return _declared("twin_mismatch", twin)
     d = _Doc(full_answer, mgt_text, ctx.get("seed_index", 0))
+    if (args_resolved or {}).get("cursor") is not None:
+        return _cursor_record(d, tool, args_resolved, ctx)
     try:
         return _TOOLS[tool](d, args, ctx)
     except _Refused as e:
@@ -2468,25 +2531,16 @@ def _target(hv: Any, sid: str, tools: Dict[Tuple[Any, Any], Any], scenarios: set
     return (name, False) if name in scenarios else (None, False)
 
 
-_UNBOUND = ("cursor", "max_bytes", "n")   # INVENTORY §1.2: a cursor binds the handle, the tool and the other arguments
-
-
-def _cursor_elsewhere(rec: dict, w1: List[dict]) -> bool:
-    """Whether a call's cursor comes from another listing: its source is the one earlier op of the scenario whose
-    listing W1 did not read to its end (paging_complete false: the op that left a next_cursor for a selector), and
-    that op's tool or bound arguments (all but cursor, max_bytes and n, INVENTORY §1.2) differ. False when the
-    source is not that one op (none, or several: W5 then makes no claim)."""
+def _cursor_source(rec: dict, w1: List[dict]) -> Optional[dict]:
+    """The op a call's cursor comes from: the one earlier op of the scenario whose listing W1 did not read to its end
+    (paging_complete false: the op that left a next_cursor for a selector); None when there is not exactly one."""
     earlier = []
     for r in w1:
         if r is rec:
             break
         if r.get("scenario") == rec.get("scenario") and r.get("paging_complete") is False and r.get("args_resolved"):
             earlier.append(r)
-    if len(earlier) != 1:
-        return False
-    src = earlier[0]
-    bound = lambda a: {k: v for k, v in (a or {}).items() if k not in _UNBOUND}   # noqa: E731
-    return src.get("tool") != rec.get("tool") or bound(src["args_resolved"]) != bound(rec["args_resolved"])
+    return earlier[0] if len(earlier) == 1 else None
 
 
 def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> List[dict]:
@@ -2526,7 +2580,9 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
         else:
             ctx = _context(rec, view, envelope, full)
             if (rec.get("args_resolved") or {}).get("cursor") is not None:
-                ctx["cursor_bound_elsewhere"] = _cursor_elsewhere(rec, w1)
+                src = _cursor_source(rec, w1)
+                if src is not None:
+                    ctx["cursor_source"] = {"tool": src.get("tool"), "args": src.get("args_resolved")}
             r = answer(tool, rec["args_resolved"], full, text, ctx)
         line["answer"], line["oracle"] = r["answer"], r["oracle"]
         line["elapsed_ms"] = round((time.time() - started) * 1000.0, 3)

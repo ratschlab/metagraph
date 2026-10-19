@@ -536,6 +536,17 @@ class OracleVsLibrary(unittest.TestCase):
             op = dict(lib_args, arm="right", n=1, cursor="<cursor>")
             rec = O.answer("graphlet_walks", op, f2, text2, {"seed_index": i2, "cursor_bound_elsewhere": True})
             self.assertEqual(O.compare(rec, lib)["outcome"], "agree", (lib_args, lib))
+        # R2B-1, the verifier's four probes: the source op (walks, arm right, rank id, n 1) and its cursor reused;
+        # the library resumes where the arguments differ only in form (arm r, spell none named, n), refuses rank length
+        src = {"tool": "graphlet_walks", "args": {"handle": "<handle>", "arm": "right", "rank": "id", "n": 1}}
+        for extra, want in [({"arm": "r"}, "not_checked"), ({"arm": "right", "spell": "none"}, "not_checked"),
+                            ({"arm": "right", "n": 3}, "not_checked"), ({"arm": "right", "rank": "length"}, "agree")]:
+            args = dict({"rank": "id", "n": 1}, **extra)
+            lib = self.tools.graphlet_walks(handle=h2, max_bytes=WIDE, cursor=page["next_cursor"], **args)
+            self.assertEqual("error" in lib, want == "agree", (extra, lib))
+            rec = O.answer("graphlet_walks", dict(args, handle="<handle>", cursor="<cursor>"), f2, text2,
+                           {"seed_index": i2, "cursor_source": src})
+            self.assertEqual(O.compare(rec, lib)["outcome"], want, extra)
         lib = self.tools.graphlet_labels(handle=h2, cursor=page["next_cursor"], max_bytes=WIDE)
         rec = O.answer("graphlet_labels", {"cursor": "<cursor>"}, f2, text2, {"seed_index": i2,
                                                                             "cursor_bound_elsewhere": True})

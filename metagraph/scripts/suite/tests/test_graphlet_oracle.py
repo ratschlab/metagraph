@@ -686,6 +686,22 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(code("graphlet_walks", {"arm": "left", "cursor": "<cursor>"})["declared"], "cursor_page")
         o = code("graphlet_walks", {"arm": "left", "cursor": "<cursor>"}, cursor_bound_elsewhere=True)
         self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_cursor"))
+        # R2B-1: the cursor's source op decides on normalised arguments (arm short forms, labels resolved, DESIGN
+        # §6's defaults): only another tool or another value is bad_cursor; the rest makes no claim
+        src = {"tool": "graphlet_walks", "args": {"handle": "<handle>", "arm": "right", "rank": "id", "n": 1}}
+        for extra, want in [({"arm": "r"}, "cursor_page"), ({"arm": "right", "spell": "none"}, "cursor_page"),
+                            ({"arm": "right", "n": 3}, "cursor_page"), ({"arm": "right", "rank": "length"}, "bad_cursor"),
+                            ({"arm": "right", "min_bp": 1}, "bad_cursor"), ({"arm": "left"}, "bad_cursor")]:
+            args = dict({"handle": "<handle>", "rank": "id", "n": 1, "cursor": "<cursor>"}, **extra)
+            o = code("graphlet_walks", args, cursor_source=src)
+            self.assertEqual(o.get("expected_error") or o["declared"], want, extra)
+        self.assertEqual(code("graphlet_labels", {"cursor": "<cursor>"}, cursor_source=src)["expected_error"], "bad_cursor")
+        by_name = {"tool": "graphlet_walks", "args": {"arm": "right", "label": "acc1"}}
+        self.assertEqual(code("graphlet_walks", {"arm": "right", "label": {"ref": "h:0:0"}, "cursor": "<cursor>"},
+                              cursor_source=by_name)["declared"], "cursor_page")       # one label, named two ways
+        no_arm = {"tool": "graphlet_walks", "args": {"rank": "id"}}
+        self.assertEqual(code("graphlet_walks", {"arm": "right", "rank": "id", "cursor": "<cursor>"},
+                              cursor_source=no_arm)["declared"], "cursor_page")      # arm has no documented default
         for why in ("cursor_page", "path_unknown", "local_limits"):
             self.assertEqual(O.compare(O._declared(why), {"rows": []})["outcome"], "not_checked")
 
