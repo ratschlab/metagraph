@@ -3151,7 +3151,7 @@ def _utc_s(text):
 def memory_episode(run):
     """The window in which the engine's container stood at its memory limit (samples.jsonl: mem_bytes at
     MEMORY_LIMIT_SHARE of mem_limit_bytes or more, at least MEMORY_EPISODE_MIN_SAMPLES samples; the v7 baseline's
-    02:41-03:05Z at 128 GiB), with the memory at the run's start and ten minutes after, the disk read meanwhile, and
+    02:41-03:05Z at 128 GiB), with the memory at the run's start and ten minutes after, the disk read meanwhile (GiB), and
     the time-budget issues of the run read against it; None when no such window (every earlier run)."""
     samples = [s for s in (getattr(run, "samples", None) or []) if isinstance(s, dict)
                and cells._num(s.get("mem_bytes")) is not None and cells._num(s.get("mem_limit_bytes"))]
@@ -3170,7 +3170,9 @@ def memory_episode(run):
           "peak_gib": max(s["mem_bytes"] for s in samples) / float(1 << 30),
           "first_gib": samples[0]["mem_bytes"] / float(1 << 30),
           "after_gib": after[0]["mem_bytes"] / float(1 << 30) if after else None,
-          "read_gb": (blk[-1] - blk[0]) / 1e9 if len(blk) > 1 else None,
+          # docker stats' block reads are decimal bytes (the sampler parses "63GB" as 63e9); printed in GiB as every
+          # other memory figure of the document (RV8)
+          "read_gib": (blk[-1] - blk[0]) / float(1 << 30) if len(blk) > 1 else None,
           "inside": {}, "before": {}, "stops": [], "stress": [], "other": []}
     tags = dict((sid, (run.scenario(sid).get("tags") or [])) for sid in run.order)
     seen = {}
@@ -3235,39 +3237,48 @@ def memory_episode_text(ctx):
         for l, server, backend in v:
             before.append("%s %s r%s (a host search of %s, %s from the service's call to the host's answer)" % (
                 sid, l.get("arm"), l.get("repeat"), _secs(server), _secs(backend)))
-    text = ("*The host's memory.* The engine's container (%s) stood at its memory limit of %s GiB from %s to %s UTC (%d "
-            "samples at %d %% of it or more, peak %s GiB)%s; it started the run at %s GiB%s. Of the %d tests with a "
-            "time-budget issue (I.1), %d are tagged budget_stress" % (
-                ep["container"], fmt_n(ep["limit_gib"]), ep["start"], ep["end"], ep["n"],
-                int(MEMORY_LIMIT_SHARE * 100), fmt_n(ep["peak_gib"], 1),
-                (", reading %s GB from disk meanwhile" % fmt_n(ep["read_gb"])) if ep["read_gb"] else "",
-                fmt_n(ep["first_gib"]), (" and was at %s GiB ten minutes after the window" % fmt_n(ep["after_gib"], 1))
-                if ep["after_gib"] is not None else "", ep["n_tests"], len(ep["stress"])))
-    if ep["stops"]:
-        text += ("; %d ended by a time budget they state, as their tests intend or allow (%s)" % (
-            len(ep["stops"]), facts.ids_ranges(ep["stops"])))
+    # laid out as the other timing sections, Observation / What ran then / Limits (the reader review of the v7
+    # document, RV8); every memory figure in GiB
+    observation = (
+        "*Observation.* The engine's container (%s) stood at its memory limit of %s GiB from %s to %s UTC (%d samples "
+        "at %d %% of it or more, peak %s GiB). It started the run at %s GiB%s%s." % (
+            ep["container"], fmt_n(ep["limit_gib"]), ep["start"], ep["end"], ep["n"], int(MEMORY_LIMIT_SHARE * 100),
+            fmt_n(ep["peak_gib"], 1), fmt_n(ep["first_gib"]),
+            (" and was at %s GiB ten minutes after the window" % fmt_n(ep["after_gib"], 1))
+            if ep["after_gib"] is not None else "",
+            ("; it read %s GiB from disk during the window" % fmt_n(ep["read_gib"])) if ep["read_gib"] else ""))
+    ran = "*What ran then.* Of the %d tests with a time-budget issue (I.1)" % ep["n_tests"]
     if inside:
-        text += "; %d ran inside the window: %s" % (len(inside), "; ".join(inside))
+        ran += ", %d ran inside the window: %s" % (len(inside), "; ".join(inside))
+    else:
+        ran += ", none ran inside the window"
     if before:
+        ran += ". Just before it, with the memory rising: %s" % "; ".join(before)
         # an observation of the service's own log, which the run does not record, from the identity input
-        # (make_doc --identity: `service_log` {source, text}; the v7 baseline's two CIRCUIT_SLOW_NOT_DOWN lines)
+        # (make_doc --identity: `service_log` {source, text}, the text in plain words; its source is evidence.json's)
         ident = getattr(ctx.run, "identity", None)
         log = ident.get("service_log") if isinstance(ident, dict) and isinstance(ident.get("service_log"), dict) \
             else None
         if log and log.get("text"):
-            text += ("; just before it, with the memory rising, %s; the service's log (checked separately, not part "
-                     "of the run's files: %s) shows the host answering slowly at those times: %s" % (
-                         "; ".join(before), str(log.get("source") or "–"), str(log["text"])))
+            ran += (". The service's own log recorded %s (checked separately; not part of the run's files)" %
+                    str(log["text"]).rstrip("."))
         else:
-            text += ("; just before it, with the memory rising, %s: likely the same episode, not established" %
-                     "; ".join(before))
+            ran += ": likely the same episode, not established"
+    rest = []
+    if ep["stress"]:
+        rest.append("%d are tagged budget_stress" % len(ep["stress"]))
+    if ep["stops"]:
+        rest.append("%d ended by a time budget they state, as their tests intend or allow (%s)" % (
+            len(ep["stops"]), facts.ids_ranges(ep["stops"])))
     if ep["other"]:
-        text += "; %d otherwise (%s)" % (len(ep["other"]), facts.ids_ranges(ep["other"]))
-    text += (". %s The run does not isolate the cause: the container's memory is an operational note about the host, "
-             "not a finding of the service." % (
-                 "Every one of these executions passed." if ep["outcomes"] == ["pass"] else
-                 "Their outcomes: %s." % ", ".join(ep["outcomes"])))
-    return paragraphs([text])
+        rest.append("%d otherwise (%s)" % (len(ep["other"]), facts.ids_ranges(ep["other"])))
+    if rest:
+        ran += ". Of the other %d, %s" % (ep["n_tests"] - len(set(ep["inside"]) | set(ep["before"])), "; ".join(rest))
+    ran += ". %s" % ("Every one of these executions passed." if ep["outcomes"] == ["pass"] else
+                     "Their outcomes: %s." % ", ".join(ep["outcomes"]))
+    limits = ("*Limits.* The run does not isolate the cause: the container's memory is an operational note about the "
+              "host, not a finding of the service.")
+    return "\\parhead{The host's memory}\n" + paragraphs([observation, ran, limits])
 
 
 def chapter(ctx, ch):
@@ -4398,10 +4409,14 @@ def _identity_evidence(run, ident):
     beside it (its source and canonical sha256: e.g. the v7 baseline's service-log note); else the input's (the v6
     baseline: unchanged); else none."""
     def input_part(i):
-        return {"source": i.get("source"), "service_commit": i.get("service_commit"),
-                "railway_deployment_id": i.get("railway_deployment_id"),
-                "sha256_canonical": hashlib.sha256(json.dumps(i, sort_keys=True, separators=(",", ":")).encode(
-                    "utf-8")).hexdigest()}
+        part = {"source": i.get("source"), "service_commit": i.get("service_commit"),
+                "railway_deployment_id": i.get("railway_deployment_id")}
+        if isinstance(i.get("service_log"), dict):
+            # the service's log as the input states it, with its source (the document's body names neither the
+            # log's file nor its internal states; RV8)
+            part["service_log"] = i["service_log"]
+        return dict(part, sha256_canonical=hashlib.sha256(json.dumps(i, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8")).hexdigest())
     rec = _recorded_identity_evidence(run)
     if rec and ident:
         rec = dict(rec, input=input_part(ident))

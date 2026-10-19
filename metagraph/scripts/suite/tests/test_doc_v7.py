@@ -163,14 +163,26 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertIn("M-1 (96~s server time on 1 execution; outside the window 0.5~s)", text)
         self.assertIn("likely the same episode, not established", text)
         self.assertIn("not a finding of the service", text)
+        # RV8: Observation / What ran then / Limits, every memory figure in GiB (the disk read too)
+        for head in ("\\emph{Observation.}", "\\emph{What ran then.}", "\\emph{Limits.}"):
+            self.assertIn(head, text)
+        self.assertLess(text.index("Observation."), text.index("What ran then."))
+        self.assertLess(text.index("What ran then."), text.index("Limits."))
+        self.assertIn("from disk during the window", text)
+        self.assertNotIn("GB from disk", text.replace("GiB", ""))
 
     def test_service_log_note(self):
         run = self._run()
-        run.identity = {"service_commit": "abc", "service_log": {"source": "a lane", "text": "two slow lines"}}
+        run.identity = {"service_commit": "abc", "service_log": {"source": "a lane's CIRCUIT_X", "text": "two slow answers"}}
         text = sections.memory_episode_text(_Stub(run=run))
-        self.assertIn("the service's log (checked separately, not part of the run's files: a lane) shows the host "
-                      "answering slowly at those times: two slow lines", text)
+        # RV8: the log in plain words; its source (a file, an internal state) only in evidence.json
+        self.assertIn("The service's own log recorded two slow answers (checked separately; not part of the run's "
+                      "files)", text)
+        self.assertNotIn("a lane", text)
+        self.assertNotIn("CIRCUIT", text)
         self.assertNotIn("likely the same episode", text)
+        ev = sections._identity_evidence(_Stub(service_identity={"recorded": False}, mcp_run={}), run.identity)
+        self.assertEqual(ev["service_log"]["source"], "a lane's CIRCUIT_X")
 
     def test_identity_evidence(self):
         rec = {"recorded": True, "service_commits": {"abc": 2}, "service_commit": "abc", "identity_changed": False,
