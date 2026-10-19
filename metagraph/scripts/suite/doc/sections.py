@@ -3249,8 +3249,18 @@ def memory_episode_text(ctx):
     if inside:
         text += "; %d ran inside the window: %s" % (len(inside), "; ".join(inside))
     if before:
-        text += ("; just before it, with the memory rising, %s: likely the same episode, not established" %
-                 "; ".join(before))
+        # an observation of the service's own log, which the run does not record, from the identity input
+        # (make_doc --identity: `service_log` {source, text}; the v7 baseline's two CIRCUIT_SLOW_NOT_DOWN lines)
+        ident = getattr(ctx.run, "identity", None)
+        log = ident.get("service_log") if isinstance(ident, dict) and isinstance(ident.get("service_log"), dict) \
+            else None
+        if log and log.get("text"):
+            text += ("; just before it, with the memory rising, %s; the service's log (checked separately, not part "
+                     "of the run's files: %s) shows the host answering slowly at those times: %s" % (
+                         "; ".join(before), str(log.get("source") or "–"), str(log["text"])))
+        else:
+            text += ("; just before it, with the memory rising, %s: likely the same episode, not established" %
+                     "; ".join(before))
     if ep["other"]:
         text += "; %d otherwise (%s)" % (len(ep["other"]), facts.ids_ranges(ep["other"]))
     text += (". %s The run does not isolate the cause: the container's memory is an operational note about the host, "
@@ -4383,6 +4393,21 @@ def _file_sha256(path):
         return None
 
 
+def _identity_evidence(run, ident):
+    """evidence.json's service identity: the recorded one where the runner recorded a commit, with an identity input
+    beside it (its source and canonical sha256: e.g. the v7 baseline's service-log note); else the input's (the v6
+    baseline: unchanged); else none."""
+    def input_part(i):
+        return {"source": i.get("source"), "service_commit": i.get("service_commit"),
+                "railway_deployment_id": i.get("railway_deployment_id"),
+                "sha256_canonical": hashlib.sha256(json.dumps(i, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8")).hexdigest()}
+    rec = _recorded_identity_evidence(run)
+    if rec and ident:
+        rec = dict(rec, input=input_part(ident))
+    return rec if rec else (input_part(ident) if ident else None)
+
+
 def _recorded_identity_evidence(run):
     """The deployed service's identity as the MCP runner recorded it (manifest v7's runner: run.json
     service_identity), for evidence.json when no identity input was given; None when the run records no commit."""
@@ -4447,11 +4472,7 @@ def evidence_manifest(ctx):
                          (k, v) for k, v in dec.items() if k != "_file"))).hexdigest()}},
         "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
         if table.get("path") else None,
-        "service_identity": {
-            "source": ident.get("source"), "service_commit": ident.get("service_commit"),
-            "railway_deployment_id": ident.get("railway_deployment_id"),
-            "sha256_canonical": hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8")).hexdigest()} if ident else _recorded_identity_evidence(run),
+        "service_identity": _identity_evidence(run, ident),
     }
 
 

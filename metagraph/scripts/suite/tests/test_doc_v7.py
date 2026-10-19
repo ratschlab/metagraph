@@ -164,6 +164,25 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertIn("likely the same episode, not established", text)
         self.assertIn("not a finding of the service", text)
 
+    def test_service_log_note(self):
+        run = self._run()
+        run.identity = {"service_commit": "abc", "service_log": {"source": "a lane", "text": "two slow lines"}}
+        text = sections.memory_episode_text(_Stub(run=run))
+        self.assertIn("the service's log (checked separately, not part of the run's files: a lane) shows the host "
+                      "answering slowly at those times: two slow lines", text)
+        self.assertNotIn("likely the same episode", text)
+
+    def test_identity_evidence(self):
+        rec = {"recorded": True, "service_commits": {"abc": 2}, "service_commit": "abc", "identity_changed": False,
+               "invocations": 2}
+        ev = sections._identity_evidence(_Stub(service_identity=rec), {"source": "s", "service_commit": "abc"})
+        self.assertEqual(ev["service_commit"], "abc")
+        self.assertEqual(ev["input"]["source"], "s")
+        ev6 = sections._identity_evidence(_Stub(service_identity={"recorded": False}, mcp_run={}),
+                                          {"source": "log", "service_commit": "def"})
+        self.assertEqual(ev6["service_commit"], "def")
+        self.assertNotIn("input", ev6)
+
     def test_no_episode(self):
         self.assertIsNone(sections.memory_episode(self._run(peak=100)))
         self.assertEqual(sections.memory_episode_text(_Stub(run=self._run(peak=100))), "")
