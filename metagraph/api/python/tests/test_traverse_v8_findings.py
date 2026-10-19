@@ -179,6 +179,111 @@ class TestVF1AQualifiedAnswerFitsAsBefore(unittest.TestCase):
             self.assertLessEqual(len(R[k].encode('utf-8')), len(R['same']), k)
 
 
+class TestVF4EveryRuleAnswersItsPhrase(unittest.TestCase):
+    """VF4 (VERIFY-F): each qualification answers its own phrase with its whole text in
+    the notes; missing bases without index_fp state both rules once; every answer over
+    the committed pairs keeps its reason a bounded fixed phrase that no note repeats."""
+
+    def assert_once(self, c):
+        self.assertNotIn(c.reason, c.notes)
+        self.assertEqual(len(c.notes), len(set(c.notes)), c.notes)
+
+    def test_each_qualification(self):
+        cases = (
+            # (a, b, mode, phrase, a note fragment)
+            (_coords('rep0_column'), _coords('rep0_cut1'), 'claims', R['overstated'],
+             'a: trace_record_boundaries (labels.seed_label_kind): reported evidence may '
+             'be overstated'),
+            (_coords('rep0_kmer_null'), _coords('rep0_lower_bound'), 'claims',
+             R['lower_bound'], 'b: greedy_losses (branching.max_label_branches): the '
+             'oracle is a lower bound'),
+            (_coords('rep0_cut1'), _coords('rep0_kmer_null'), 'walks', R['scopes'],
+             'left arm: completeness scopes differ (per_path vs united_history)'),
+        )
+        for a, b, mode, phrase, note in cases:
+            c = a.compare(b, mode=mode)
+            self.assertEqual(('qualified', phrase), (c.comparable, c.reason))
+            self.assertTrue(any(n.startswith(note) for n in c.notes), (phrase, c.notes))
+            self.assert_once(c)
+
+    def test_the_displayed_parents(self):
+        old, new = _level5('merge'), T.graphlet('merge')
+        for g in (old, new):
+            g.index_fp = 'f' * 64
+        c = old.compare(new, mode='claims')
+        self.assertEqual(('qualified', R['parents']), (c.comparable, c.reason))
+        self.assertTrue(any(n.startswith('the displayed parent at a merge may follow '
+                                         'different rules') for n in c.notes), c.notes)
+        self.assert_once(c)
+
+    def test_label_evidence_incomplete_by_the_outcome_alone(self):
+        a, b = T.graphlet('merge'), T.graphlet('merge')
+        for g in (a, b):
+            g.index_fp = 'f' * 64
+        b.limitations = []
+        b.outcome.label_evidence = 'qualified'
+        c = a.compare(b, mode='labels')
+        self.assertEqual(('qualified', R['incomplete']), (c.comparable, c.reason))
+        self.assertIn('b: label_evidence qualified', c.notes)
+        self.assert_once(c)
+
+    def test_an_inexact_restriction(self):
+        # test_traverse_review3's construction: a merge partition without b.fa
+        from test_traverse_review3 import truncated
+        g = T.graphlet('merge')
+        g.index_fp = 'f' * 64
+        t = truncated(g, 50)
+        a = g.arms['right']
+        m = next(x for x in a.segments if len(x.parents) > 1 and x.from_bp == 62)
+        for part in m.partition:
+            for i in range(len(part) - 1, -1, -1):
+                if g.labels[part[i]].name == 'b.fa':
+                    del part[i]
+        g.cache.clear()
+        a.cache.clear()
+        c = t.compare(g, mode='claims')
+        self.assertEqual(('qualified', R['inexact']), (c.comparable, c.reason))
+        self.assertTrue(any('could not be reconstructed exactly' in n for n in c.notes))
+        self.assert_once(c)
+
+    def test_no_bases_without_index_fp(self):
+        from test_traverse_regressions import without_bases
+        merge = T.graphlet('merge')
+        self.assertIsNone(merge.index_fp)
+        for mode in ('claims', 'walks', 'prefix_subset'):
+            c = merge.compare(without_bases(merge), mode=mode)
+            self.assertEqual(('unknown', R['bases']), (c.comparable, c.reason), mode)
+            # both rules stated once: the identity unverifiable, then which side has no
+            # bases and what to do
+            self.assertEqual(1, c.notes.count(R['unverifiable_both']), c.notes)
+            self.assertEqual(1, sum(n.startswith('b carries no bases: mode %s' % mode)
+                                    for n in c.notes), c.notes)
+            self.assert_once(c)
+
+    def test_every_committed_pair(self):
+        import traverse_golden as TG
+        fixed = set(R.values()) | {'the %s arm was not retrieved in b' % s
+                                   for s in ('left', 'right', 'seed')} | {'no arm in common'}
+        items = TG.items_of(TG.golden_files() + TG.coordinate_files())
+        by = {}
+        for key, r, resp in items:
+            by.setdefault(from_response(r, resp).seed.sequence, []).append((r, resp))
+        n = 0
+        for xs in by.values():
+            for (ra, pa), (rb, pb) in zip(xs, xs[1:]):
+                for mode in MODES:
+                    a, b = from_response(ra, pa), from_response(rb, pb)
+                    for x, y in ((a, b), (b, a)):
+                        c = x.compare(y, mode=mode)
+                        n += 1
+                        self.assertIn(c.reason, fixed)
+                        self.assertLessEqual(len(c.reason.encode('utf-8')), 80)
+                        if c.comparable == 'qualified':
+                            self.assertLessEqual(len(c.reason), len(R['same']))
+                        self.assert_once(c)
+        self.assertGreater(n, 100)
+
+
 class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):
     """G2 (VO8): graphlet_walks(spell='tail', tail_bp=0) answered the whole flank on the
     right arm (s[-0:]) and nothing on the left. DESIGN §6 takes tail_bp (default 60, no
@@ -214,7 +319,8 @@ class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):
                     if n == 0:
                         self.assertEqual({''}, set(got.values()), (name, side))
 
-    def test_a_negative_tail_is_refused(self):
+    def test_guard_a_negative_tail_stays_refused(self):
+        # a guard, not the defect: _int refused it before the fix as well
         h = self.store.put_graphlet(T.graphlet('fork'))
         out = self.tools.graphlet_walks(h, 'right', spell='tail', tail_bp=-1)
         self.assertEqual('bad_argument', out.get('error'), out)
