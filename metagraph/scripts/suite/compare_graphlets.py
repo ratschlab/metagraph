@@ -28,8 +28,10 @@ Per op call, in this order:
 6. errors by code and structured fields (never message or hint text; result_too_large's `bytes` depends on the
    handle's length); a fitting error (FIT_ERRORS) is not comparable against W5 (FORMAT v2 F3), compared as usual
    between W1..W4;
-   a row the service's ceiling cut (marked _cut_fields, FORMAT v2 A3) is judged, against a library way, as a cut of
-   that way's row (cut_aware_difference), since W3's longer handle moves the cut; library ways compare strictly;
+   on a pair with W3 a row marked _cut_fields (FORMAT v2 A3), on either side, is judged by lane O's cut rule on the
+   fields it names only (cut_aware_difference: a string's leading part, a list's leading whole items, never empty for
+   a non-empty value; both rows cut: their common leading part), every other field equal; W3's longer handle moves
+   the cut; library ways compare strictly;
 7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in the suite's words, in each
    way against that way's uncut answer (is_cut): the same uncut answer (the uncut op's own comparison), every string
    or list of the cut answer a prefix of the uncut one, every key it lacks an optional one (OPTIONAL_KEYS, or named
@@ -403,15 +405,75 @@ def _rows_cut(ans):
         isinstance(r, dict) and r.get(ROW_CUT) for r in ans["rows"])
 
 
+def oracle_is_cut_of():
+    """Lane O's cut rule (graphlet_oracle.is_cut_of(whole, cut, order), its private _is_cut_of until it is public):
+    a string's leading part, a list's leading whole items (VC1: the one rule of a cut field), or None without the
+    module."""
+    if graphlet_oracle is None:
+        return None
+    fn = getattr(graphlet_oracle, "is_cut_of", None) or getattr(graphlet_oracle, "_is_cut_of", None)
+    return fn if callable(fn) else None
+
+
+def field_cut_problem(whole, cut, fn):
+    """Why |cut| is no cut of |whole| for a field a row names cut ('' when it is): lane O's rule (a string's leading
+    part, a list's leading whole items, never a nested prefix inside an item), and never an empty value for a
+    non-empty one (the coordinator's VC1: empty-for-full is no cut)."""
+    if isinstance(whole, (str, list)) and isinstance(cut, (str, list)) and whole and not cut:
+        return "empty for a non-empty value"
+    if not fn(whole, cut, "ordered"):
+        return "not a leading part (a string's leading part, a list's leading whole items)"
+    return ""
+
+
+def row_cut_difference(x, y, pointer, fn):
+    """The first difference of two rows of which at least one carries _cut_fields (FORMAT v2 A3), or None: a field
+    named cut on one side only must be a cut of the other side's (field_cut_problem); a field named on both sides is
+    compared on their common leading part (the shorter a cut of the longer); every field named on neither side
+    equal; each side's own _cut_fields marker left out. -> (pointer, x's value, y's value, why) or None."""
+    nx = set(x.get(ROW_CUT) or []) if isinstance(x, dict) else set()
+    ny = set(y.get(ROW_CUT) or []) if isinstance(y, dict) else set()
+    if not isinstance(x, dict) or not isinstance(y, dict):
+        d = gp.first_difference(x, y, pointer)
+        return d and d + ("",)
+    for k in sorted((set(x) | set(y)) - {ROW_CUT}, key=str):
+        p = pointer + "/" + gp.pointer_escape(k)
+        vx, vy = x.get(k, gp.MISSING), y.get(k, gp.MISSING)
+        if vx is gp.MISSING or vy is gp.MISSING:
+            return p, vx, vy, "a field on one side only"
+        if k in nx and k in ny:
+            if isinstance(vx, (str, list)) and type(vx) is type(vy):
+                longer, shorter = (vx, vy) if len(vx) >= len(vy) else (vy, vx)
+                why = field_cut_problem(longer, shorter, fn)
+            else:
+                why = "a cut field that is no string or list"
+            if why:
+                return p, vx, vy, "both rows cut %s: %s" % (k, why)
+        elif k in nx or k in ny:
+            whole, cut = (vy, vx) if k in nx else (vx, vy)
+            why = field_cut_problem(whole, cut, fn)
+            if why:
+                return p, vx, vy, "the row %s cut %s: %s" % ("a" if k in nx else "b", k, why)
+        else:
+            d = gp.first_difference(vx, vy, p)
+            if d:
+                return d + ("a field no row names cut",)
+    return None
+
+
 def cut_aware_difference(a, b):
     """The first difference of two ways' canonical answers when a row of either is marked cut (FORMAT v2 A3), else
-    None-or-difference as first_difference: (pointer, value in a, value in b[, why]). The page markers
-    (row_truncated, cut_fields) are left to the rows; a row marked _cut_fields on one side only must be a cut of the
-    other side's row (is_cut: its strings and lists prefixes); every other row, and everything else, equal. For pairs
-    whose ceilings or handle lengths differ (W3 against a library way: INVENTORY §1.2, page boundaries and cuts
-    depend on the handle's length), never between library ways, which cut identically."""
+    first_difference's: (pointer, value in a, value in b[, why]). The page markers (row_truncated, cut_fields) are
+    left to the rows; rows are compared one by one, a row carrying _cut_fields by row_cut_difference: only the fields
+    it names may be a cut (lane O's rule, in either direction), every other field equal. For pairs whose ceilings or
+    handle lengths differ (W3 against a library way: INVENTORY §1.2, the cut moves with the handle's length), never
+    between library ways, which cut identically. Without lane O's rule a cut row is not compared: ("", ..., why)
+    with why starting "uncomparable"."""
     if not (_rows_cut(a) or _rows_cut(b)):
         return gp.first_difference(a, b)
+    fn = oracle_is_cut_of()
+    if fn is None:
+        return "/rows", gp.MISSING, gp.MISSING, "uncomparable: graphlet_oracle's cut rule (lane O) is not available"
     rest_a = dict((k, v) for k, v in a.items() if k not in PAGE_CUT_MARKERS + ("rows",))
     rest_b = dict((k, v) for k, v in b.items() if k not in PAGE_CUT_MARKERS + ("rows",))
     d = gp.first_difference(rest_a, rest_b)
@@ -422,17 +484,10 @@ def cut_aware_difference(a, b):
         i = min(len(ra), len(rb))
         return "/rows/%d" % i, ra[i] if i < len(ra) else gp.MISSING, rb[i] if i < len(rb) else gp.MISSING
     for i, (x, y) in enumerate(zip(ra, rb)):
-        cx = isinstance(x, dict) and bool(x.get(ROW_CUT))
-        cy = isinstance(y, dict) and bool(y.get(ROW_CUT))
-        if cx != cy:
-            cut, whole = (x, y) if cx else (y, x)
-            r = is_cut(cut, whole, frozenset(), "/rows/%d" % i)
-            if r:
-                pa, pb = gp.pointer_get(a, r[0]), gp.pointer_get(b, r[0])
-                return (r[0], pa[1] if pa[0] else gp.MISSING, pb[1] if pb[0] else gp.MISSING,
-                        "the row %s cut is no cut of the other's: %s" % ("a" if cx else "b", r[1]))
-            continue
-        d = gp.first_difference(x, y, "/rows/%d" % i)
+        if (isinstance(x, dict) and x.get(ROW_CUT)) or (isinstance(y, dict) and y.get(ROW_CUT)):
+            d = row_cut_difference(x, y, "/rows/%d" % i, fn)
+        else:
+            d = gp.first_difference(x, y, "/rows/%d" % i)
         if d:
             return d
     return None
@@ -524,8 +579,10 @@ def compare_records(a, ra, b, rb, what):
                                     dict((k, v) for k, v in vb.items() if k != "answer"))
     else:
         d = gp.first_difference(va, vb)
+    if d and len(d) > 3 and str(d[3]).startswith("uncomparable"):
+        return _pair(a, b, what, "not_compared", d[3], kind="oracle_unavailable")
     if d:
-        return _pair(a, b, what, "disagree", d[3] if len(d) > 3 else None, d[:3],
+        return _pair(a, b, what, "disagree", (d[3] or None) if len(d) > 3 else None, d[:3],
                      kind="error" if "error" in va else "answer", views=(va, vb))
     return _pair(a, b, what, "agree")
 

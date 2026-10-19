@@ -213,7 +213,7 @@ class Cut(unittest.TestCase):
         bad["rows"][0]["sequence"] = "ACT"
         d = cg.cut_aware_difference(uncut, bad)
         self.assertEqual((d[0], d[1], d[2]), ("/rows/0/sequence", "ACGTACGT", "ACT"))
-        self.assertIn("no cut of the other's", d[3])
+        self.assertIn("not a leading part", d[3])
         scalar = copy.deepcopy(cut)
         scalar["rows"][0]["walk"] = 2
         self.assertEqual(cg.cut_aware_difference(uncut, scalar)[0], "/rows/0/walk")
@@ -227,6 +227,104 @@ class Cut(unittest.TestCase):
         cut = {"a": "<handle>", "fields_cut": ["evidence", "export"], "total": 2, "row_truncated": True,
                "cut_fields": ["prefix", "labels"], "rows": [{"key": "k", "prefix": "ACG", "labels": [1, 2]}]}
         self.assertIsNone(cg.is_cut(cut, uncut))   # evidence / export named in fields_cut
+
+
+class CutRows(unittest.TestCase):
+    """VC1: the cut-row rule on pairs with W3 is lane O's, on the fields a row names in _cut_fields only (the verifier's
+    probes P1, P1b, P1c, P3 as negatives)."""
+
+    LABELS = [{"name": "NC_000962.3", "ref": "c:0"}, {"name": "NC_000913.3", "ref": "c:1"}]
+
+    def setUp(self):
+        import graphlet_oracle
+        self.saved = cg.graphlet_oracle
+        cg.graphlet_oracle = graphlet_oracle
+
+    def tearDown(self):
+        cg.graphlet_oracle = self.saved
+
+    def pair(self, w3, lib):
+        ra = {"tool": "graphlet_walks", "args_resolved": {"arm": "left"}, "answer": w3}
+        rb = {"tool": "graphlet_walks", "args_resolved": {"arm": "left"}, "answer": lib}
+        return cg.compare_records("W3", ra, "W4", rb, "service wrapper")
+
+    def answers(self):
+        lib = gf.walks_answer()
+        lib["rows"][0]["labels_full"] = copy.deepcopy(self.LABELS)
+        lib["rows"][0]["sequence"] = "ACGTACGT"
+        w3 = copy.deepcopy(lib)
+        w3["handle"] = UUID
+        return lib, w3
+
+    def test_a_named_field_cut_to_a_leading_part(self):
+        lib, w3 = self.answers()
+        w3["rows"][0].update(labels_full=self.LABELS[:1], sequence="ACGT", _cut_fields=["labels_full", "sequence"])
+        w3.update(row_truncated=True, cut_fields=["labels_full", "sequence"])
+        self.assertEqual(self.pair(w3, lib)["outcome"], "agree")
+        # the same rule in the other direction: a library-side cut against a whole W3 row
+        lib2, w32 = self.answers()
+        lib2["rows"][0].update(sequence="ACGTA", _cut_fields=["sequence"])
+        self.assertEqual(self.pair(w32, lib2)["outcome"], "agree")
+        # both rows cut: compared on their common leading part
+        lib3, w33 = self.answers()
+        lib3["rows"][0].update(sequence="ACGTAC", _cut_fields=["sequence"])
+        w33["rows"][0].update(sequence="ACG", _cut_fields=["sequence"])
+        self.assertEqual(self.pair(w33, lib3)["outcome"], "agree")
+
+    def test_p1_an_unnamed_field_cut(self):
+        lib, w3 = self.answers()
+        w3["rows"][0].update(end="dead", labels_full=self.LABELS[:1], _cut_fields=["labels_full"])
+        p = self.pair(w3, lib)
+        self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/end"))
+        self.assertIn("a field no row names cut", p["detail"])
+
+    def test_p1b_a_nested_prefix_inside_a_cut_list(self):
+        lib, w3 = self.answers()
+        w3["rows"][0].update(labels_full=[{"name": "NC_0", "ref": "c:0"}], _cut_fields=["labels_full"])
+        p = self.pair(w3, lib)
+        self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/labels_full"))
+        self.assertIn("not a leading part", p["detail"])
+
+    def test_p1c_a_field_emptied_that_the_row_does_not_name(self):
+        lib, w3 = self.answers()
+        w3["rows"][0].update(sequence="ACGT", labels_full=[], _cut_fields=["sequence"])
+        p = self.pair(w3, lib)
+        self.assertEqual(p["outcome"], "disagree")
+        self.assertTrue(p["pointer"].startswith("/answer/rows/0/labels_full"), p)
+        self.assertIn("a field no row names cut", p["detail"])
+
+    def test_p3_a_library_side_cut_to_empty(self):
+        lib, w3 = self.answers()
+        lib["rows"][0].update(labels_full=[], _cut_fields=["labels_full"])
+        p = self.pair(w3, lib)
+        self.assertEqual(p["outcome"], "disagree")
+        self.assertIn("empty for a non-empty value", p["detail"])
+
+    def test_p2_both_cut_and_one_side_emptied(self):
+        lib, w3 = self.answers()
+        lib["rows"][0].update(labels_full=self.LABELS[:1], _cut_fields=["labels_full"])
+        w3["rows"][0].update(labels_full=[], _cut_fields=["labels_full"])
+        p = self.pair(w3, lib)
+        self.assertEqual(p["outcome"], "disagree")
+        self.assertIn("both rows cut labels_full: empty for a non-empty value", p["detail"])
+
+    def test_a_scalar_named_cut_and_library_pairs_strict(self):
+        lib, w3 = self.answers()
+        w3["rows"][0].update(length_bp=12, _cut_fields=["length_bp"])
+        self.assertEqual(self.pair(w3, lib)["outcome"], "disagree")
+        lib2, _ = self.answers()
+        cut = copy.deepcopy(lib2)
+        cut["rows"][0].update(sequence="ACGT", _cut_fields=["sequence"])
+        ra = {"tool": "graphlet_walks", "args_resolved": {}, "answer": cut}
+        rb = {"tool": "graphlet_walks", "args_resolved": {}, "answer": lib2}
+        self.assertEqual(cg.compare_records("W1", ra, "W2", rb, "transport")["outcome"], "disagree")
+
+    def test_without_lane_os_rule_a_cut_row_is_not_compared(self):
+        lib, w3 = self.answers()
+        w3["rows"][0].update(sequence="ACGT", _cut_fields=["sequence"])
+        cg.graphlet_oracle = None
+        p = self.pair(w3, lib)
+        self.assertEqual((p["outcome"], p["kind"]), ("not_compared", "oracle_unavailable"))
 
 
 class FiveWay(unittest.TestCase):
@@ -664,7 +762,7 @@ class FiveWay(unittest.TestCase):
         self.five(answer=lib, w3=bad, w5=False)
         p = next(p for p in self.op_entry()["pairs"] if p["pair"] == "W3-W4")
         self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/sequence"))
-        self.assertIn("no cut of the other's", p["detail"])
+        self.assertIn("not a leading part", p["detail"])
 
     def test_a_cut_without_its_uncut_reference_is_inconclusive(self):
         cut_op = dict(self.op, id="walks-page", cut_of="walks-all")
