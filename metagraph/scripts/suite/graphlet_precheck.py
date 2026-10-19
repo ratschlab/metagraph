@@ -45,7 +45,9 @@ Where the inputs live (FORMAT-v8 §3 names the records; the rest is lane C's rea
   pin             graphlet.library_commit of the scenario (FORMAT v2 D1, covered by the manifest's content_sha256);
                   the job's library_commit is held to it too.
 A failed seed (FORMAT v2 D3: preconditions {"no_graphlet": true}) passes its body, envelope and twin checks when no
-way has a document and the twin walked no arm either.
+way has a document and the twin walked no arm either. A direct-only scenario (graphlet.ways.default without W3 and W4:
+a strategy the MCP cannot express on staging, the owner's decision of 2026-10-19) has no W4 document and no echo: its
+body and envelope checks compare W1 and W2, its strategy check is the twin's, its library_commit not_exposed.
 The suite imports nothing of metagraph.traverse here: the digests a record states are graphlet_doc's (lane L's MGT
 document reader), recomputed from a kept document to hold the record to it; the record-level reading that names a
 difference (body_records, envelope_of, first_difference) is this module's own.
@@ -69,6 +71,8 @@ except ImportError:   # pragma: no cover - before lane L's commit lands
 
 WAYS = ("W1", "W2", "W3", "W4", "W5")
 LIBRARY_WAYS = ("W1", "W2", "W4")
+# a direct-only scenario's library ways (no MCP job, so no W4 document): body and envelope are W1 = W2
+DIRECT_ONLY_LIBRARY_WAYS = ("W1", "W2")
 # FORMAT-v8 §3: the directory of each way under arms/ (drift: the report-only lane of the branch head's library)
 WAY_DIRS = {"W1": "dl-lib", "W2": "dr-lib", "W3": "mcp", "W4": "mcp-lib", "W5": "oracle", "drift": "drift-lib"}
 WAY_NAMES = {"W1": "dl+lib", "W2": "dr+lib", "W3": "mcp", "W4": "mcp+lib", "W5": "oracle", "drift": "drift"}
@@ -381,11 +385,25 @@ def _has_records(recs, sid, way):
     return any(s == sid for (s, _) in recs.get(way, {}))
 
 
-def digest_check(run_dir, recs, sid, key, docs, differ):
-    """The body or envelope identity across W1, W2 and W4 (|key| body_digest / envelope_digest; |differ|(text_a,
-    text_b) names the first difference of two kept documents)."""
+def direct_only(scenario):
+    """Whether the scenario is direct-only (the owner's decision of 2026-10-19: a strategy the MCP cannot express on
+    staging): its graphlet.ways.default names neither W3 nor W4, so no MCP job, no W4 document, no echo."""
+    ways = ((scenario.get("graphlet") or {}).get("ways") or {}).get("default")
+    return isinstance(ways, list) and "W3" not in ways and "W4" not in ways
+
+
+def library_ways(scenario):
+    """The library ways whose documents the body and envelope checks compare: W1, W2, W4; W1, W2 for a direct-only
+    scenario."""
+    return DIRECT_ONLY_LIBRARY_WAYS if direct_only(scenario) else LIBRARY_WAYS
+
+
+def digest_check(run_dir, recs, sid, key, docs, differ, ways=LIBRARY_WAYS):
+    """The body or envelope identity across the library ways |ways| (W1, W2 and W4; W1 and W2 for a direct-only
+    scenario) (|key| body_digest / envelope_digest; |differ|(text_a, text_b) names the first difference of two kept
+    documents)."""
     digests, missing, several = {}, [], []
-    for way in LIBRARY_WAYS:
+    for way in ways:
         got = _way_digests(recs, sid, way, key)
         if not got:
             missing.append(way)
@@ -394,7 +412,7 @@ def digest_check(run_dir, recs, sid, key, docs, differ):
         digests[way] = got[0] if got else None
     # the documents kept, against the digests their records state (graphlet_doc where it loads)
     recomputed = {}
-    for way in LIBRARY_WAYS:
+    for way in ways:
         d = lane_l_digests(docs.get(way))
         if d is not None:
             recomputed[way] = d[0] if key == "body_digest" else d[1]
@@ -402,7 +420,7 @@ def digest_check(run_dir, recs, sid, key, docs, differ):
              for w, v in sorted(recomputed.items()) if digests.get(w) and v != digests[w]]
     if several or stale:
         return _check("fail", "; ".join(several + stale), digests=digests)
-    present = [w for w in LIBRARY_WAYS if digests.get(w)]
+    present = [w for w in ways if digests.get(w)]
     if len(set(digests[w] for w in present)) > 1:
         ref = present[0]
         other = next(w for w in present if digests[w] != digests[ref])
@@ -421,11 +439,11 @@ def digest_check(run_dir, recs, sid, key, docs, differ):
         return _check("fail", detail, digests=digests, pair=pair, difference=diff)
     if missing:
         return _check("inconclusive", "no %s recorded by %s" % (key, ", ".join(missing)), digests=digests)
-    return _check("pass", "%s %s on W1, W2, W4" % (key, digests["W1"][:12]), digests=digests)
+    return _check("pass", "%s %s on %s" % (key, digests["W1"][:12], ", ".join(ways)), digests=digests)
 
 
-def body_check(run_dir, recs, sid, docs):
-    return digest_check(run_dir, recs, sid, "body_digest", docs, first_body_difference)
+def body_check(run_dir, recs, sid, docs, ways=LIBRARY_WAYS):
+    return digest_check(run_dir, recs, sid, "body_digest", docs, first_body_difference, ways)
 
 
 def envelope_view(env):
@@ -448,16 +466,16 @@ def _envelope_differ(ref, other):
     return differ
 
 
-def envelope_check(run_dir, recs, sid, docs):
-    bare = [w for w in LIBRARY_WAYS if docs.get(w) is not None and envelope_of(docs[w]) is None]
+def envelope_check(run_dir, recs, sid, docs, ways=LIBRARY_WAYS):
+    bare = [w for w in ways if docs.get(w) is not None and envelope_of(docs[w]) is None]
     if bare:
         # DESIGN-v8 §2 (D-R1): the envelope travels with the body; without it summary and compare differ by construction
         return _check("fail", "%s's document carries no J line (the engine's envelope)" % ", ".join(bare))
-    digests = dict((w, (_way_digests(recs, sid, w, "envelope_digest") or [None])[0]) for w in LIBRARY_WAYS)
-    present = [w for w in LIBRARY_WAYS if digests.get(w)]
+    digests = dict((w, (_way_digests(recs, sid, w, "envelope_digest") or [None])[0]) for w in ways)
+    present = [w for w in ways if digests.get(w)]
     ref = present[0] if present else "W1"
-    other = next((w for w in present if digests[w] != digests[ref]), "W4")
-    return digest_check(run_dir, recs, sid, "envelope_digest", docs, _envelope_differ(ref, other))
+    other = next((w for w in present if digests[w] != digests[ref]), ways[-1])
+    return digest_check(run_dir, recs, sid, "envelope_digest", docs, _envelope_differ(ref, other), ways)
 
 
 def _arm_shape(arm):
@@ -586,6 +604,13 @@ def strategy_check(run_dir, scenario):
         d = first_difference(twin, want)
         if d:
             drifts.append({"what": "twin", "path": _dotted(d[0]), "twin": compact(d[1]), "request": compact(d[2])})
+    if direct_only(scenario):
+        # no MCP job: the twin's strategy is the whole check (the owner's decision of 2026-10-19)
+        if drifts:
+            return _check("fail", "the twin's strategy drifts from request.strategy at %s (twin %s, request %s)" % (
+                drifts[0]["path"], drifts[0]["twin"], drifts[0]["request"]), drifts=drifts)
+        return _check("pass", "a direct-only scenario: no MCP echo expected; the twin's strategy is request.strategy "
+                              "with output.detail full")
     echo, where = mcp_echo(run_dir, sid)
     if echo is None:
         if drifts:
@@ -855,10 +880,10 @@ def scenario_outcome(checks):
     return "pass", None
 
 
-def failed_seed_checks(run_dir, recs, sid, docs):
+def failed_seed_checks(run_dir, recs, sid, docs, ways=LIBRARY_WAYS):
     """The body, envelope and twin checks of a failed seed (FORMAT v2 D3): no way has a document or states a digest,
     and the twin found no graphlet either (its result states no arms)."""
-    kept = [w for w in LIBRARY_WAYS if docs.get(w) is not None or _way_digests(recs, sid, w, "body_digest")]
+    kept = [w for w in ways if docs.get(w) is not None or _way_digests(recs, sid, w, "body_digest")]
     ident = _check("fail", "a failed seed, yet %s has a document" % ", ".join(kept)) if kept else \
         _check("pass", "a failed seed: no way has a document")
     full, why = read_twin(run_dir, sid)
@@ -875,11 +900,12 @@ def failed_seed_checks(run_dir, recs, sid, docs):
 def precheck_scenario(run_dir, scenario, recs, manifest, checks_mod, deployed=None):
     """The pre-check record of one area G scenario (FORMAT-v8 §5)."""
     sid = scenario.get("id")
-    docs = dict((w, read_doc(run_dir, w, sid)) for w in LIBRARY_WAYS)
+    ways = library_ways(scenario)
+    docs = dict((w, read_doc(run_dir, w, sid)) for w in ways)
     if no_graphlet(scenario) and docs.get("W1") is None:
-        body, envelope, twin = failed_seed_checks(run_dir, recs, sid, docs)
+        body, envelope, twin = failed_seed_checks(run_dir, recs, sid, docs, ways)
     else:
-        body, envelope = body_check(run_dir, recs, sid, docs), envelope_check(run_dir, recs, sid, docs)
+        body, envelope = body_check(run_dir, recs, sid, docs, ways), envelope_check(run_dir, recs, sid, docs, ways)
         twin = twin_check(run_dir, sid, docs, checks_mod)
     checks = {
         "body": body,
@@ -892,7 +918,9 @@ def precheck_scenario(run_dir, scenario, recs, manifest, checks_mod, deployed=No
     outcome, finding = scenario_outcome(checks)
     rec = {"scenario": sid, "outcome": outcome, "finding": finding,
            "documents": dict((w, os.path.relpath(doc_path(run_dir, w, sid), run_dir) if doc_path(run_dir, w, sid)
-                              else None) for w in LIBRARY_WAYS)}
+                              else None) for w in ways)}
+    if direct_only(scenario):
+        rec["direct_only"] = True
     rec.update(checks)
     return rec
 

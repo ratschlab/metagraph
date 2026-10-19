@@ -255,6 +255,71 @@ class Strategy(PrecheckBase):
         self.assertEqual(rec["drifts"][0]["what"], "twin")
 
 
+class DirectOnly(PrecheckBase):
+    """A direct-only scenario (the owner's decision of 2026-10-19: a strategy the MCP cannot express on staging; ways
+    W1, W2, W5): no W4 document and no echo expected; body and envelope W1 = W2; the twin unchanged."""
+
+    REASON = "not expressible via MCP on staging (advanced strategy path off)"
+
+    def direct_run(self, w2_text=None):
+        self.run_.cleanup()
+        ops = [{"id": "walks-len", "tool": "graphlet_walks", "args": {"arm": "left", "rank": "length"},
+                "paging": "all", "ways": ["W1", "W2", "W5"], "not_exposed": {"W3": self.REASON, "W4": self.REASON}}]
+        scen = gf.scenario(ops=ops, ways=["W1", "W2", "W5"])
+        scen["mcp"] = {"not_implemented": "strategy.labels.mode"}
+        self.run_ = gf.GRun(scenarios=[scen])
+        texts = {"W1": self.run_.fixture.doc(0), "W2": w2_text or self.run_.fixture.doc(3)}
+        digests = self.run_.documents("G-merge-0001", texts)
+        self.run_.write_twin("G-merge-0001")
+        for way in ("W1", "W2"):
+            self.run_.record(way, "G-merge-0001", "walks-len", "graphlet_walks", ops[0]["args"],
+                             answer=gf.walks_answer(), doc=digests[way])
+        return scen
+
+    def test_passes_without_w4_and_echo(self):
+        scen = self.direct_run()
+        self.assertTrue(gp.direct_only(scen))
+        rec = self.check()
+        self.assertEqual(rec["body"]["outcome"], "pass", rec["body"])
+        self.assertIn("on W1, W2", rec["body"]["detail"])
+        self.assertEqual(rec["envelope"]["outcome"], "pass", rec["envelope"])
+        self.assertEqual(rec["strategy"]["outcome"], "pass", rec["strategy"])
+        self.assertIn("no MCP echo expected", rec["strategy"]["detail"])
+        self.assertEqual(rec["twin"]["outcome"], "pass", rec["twin"])
+        self.assertEqual(rec["library_commit"]["outcome"], "not_exposed")
+        self.assertEqual(rec["outcome"], "pass")
+        self.assertTrue(rec["direct_only"])
+        self.assertEqual(sorted(rec["documents"]), ["W1", "W2"])
+
+    def test_w1_and_w2_must_agree_and_the_twin_still_counts(self):
+        self.direct_run()
+        recs = gp.prechecks(self.run_.dir)
+        self.assertEqual(recs[0]["outcome"], "pass")
+        # a W2 body that differs: the body check fails as a determinism finding, naming W1-W2
+        alt = self.run_.fixture.doc(0).split("\n")
+        i = next(k for k, line in enumerate(alt) if line.startswith("G "))
+        alt[i] = alt[i] + "A"
+        self.direct_run(w2_text="\n".join(alt))
+        rec = self.check()
+        self.assertEqual(rec["body"]["outcome"], "fail", rec["body"])
+        self.assertEqual(rec["body"]["pair"], "W1-W2")
+        self.assertEqual((rec["outcome"], rec["finding"]), ("fail", "determinism"))
+        # a twin strategy drift still fails a direct-only scenario
+        scen = copy.deepcopy(self.run_.scenarios[0])
+        scen["graphlet"]["twin"]["strategy"]["direction"] = "left"
+        self.assertEqual(gp.strategy_check(self.run_.dir, scen)["outcome"], "fail")
+
+    def test_compare_states_w4_not_exposed(self):
+        import compare_graphlets as cg
+        self.direct_run()
+        res, _ = cg.compare_run(self.run_.dir)
+        e = res["scenarios"]["G-merge-0001"]["ops"]["walks-len"]
+        self.assertEqual(e["ways"]["W3"], "not_exposed")
+        self.assertEqual(e["ways"]["W4"], "not_exposed")
+        self.assertEqual(e["not_exposed"], {"W3": self.REASON, "W4": self.REASON})
+        self.assertEqual([p["pair"] for p in e["pairs"] if p["pair"] != "W1-W5"][:1], ["W1-W2"])
+
+
 class TwinWithoutMemoryBudget(PrecheckBase):
     """F-D4 (the coordinator, 2026-10-19): the full twin is sent without bounds.max_memory_mb (SPEC-core §7.1
     R21 (4): full detail under a memory budget keeps a merge's arrival order); exactly that key may be missing."""

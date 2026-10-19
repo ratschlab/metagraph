@@ -887,6 +887,11 @@ def compare_op(scenario, op, recs, precheck, manifest):
         entry["ways"]["W3"] = "not_exposed"
         if why is None:
             entry["problems"].append("W3 is left out without the owner's reason (not_exposed)")
+        w4 = (op.get("not_exposed") or {}).get("W4") if isinstance(op.get("not_exposed"), dict) else None
+        if "W4" not in ways and isinstance(w4, str) and w4.strip():
+            # a direct-only scenario (no MCP job, so no W4 document): stated, never missing
+            entry["not_exposed"]["W4"] = w4.strip()
+            entry["ways"]["W4"] = "not_exposed"
     if ((precheck or {}).get("preconditions") or {}).get("outcome") == "precondition_failed":
         for w in ways:
             entry["ways"][w] = "not_compared"
