@@ -45,6 +45,53 @@ def library_tools(local_limits=False):
     return tools, handles, tmp, mcp_tools
 
 
+@unittest.skipIf(sys.version_info < (3, 10), "the traversal library needs Python 3.10 or later")
+class RealExportRecords(unittest.TestCase):
+    """F-D1 (lane D, 2026-10-19): file.raw is relative to the WAY directory (FORMAT v2.1 B3), as run_graphlet_local
+    writes it; read at arms/<way dir>/raw/<file.raw> every export and save file of a real run was "not kept"."""
+
+    def test_the_files_of_real_records_are_found_and_agree(self):
+        import shutil
+        import run_graphlet_local as rgl
+        tmp = tempfile.mkdtemp(prefix="lane_d_files_")
+        try:
+            ops = [{"id": "exp-fasta", "tool": "graphlet_export",
+                    "args": {"format": "fasta", "arm": None, "walks": None, "what": None}, "paging": "none"},
+                   {"id": "exp-json", "tool": "graphlet_export",
+                    "args": {"format": "json", "arm": None, "walks": None, "what": None}, "paging": "none"},
+                   {"id": "exp-mgt", "tool": "graphlet_export",
+                    "args": {"format": "mgt", "arm": None, "walks": None, "what": None}, "paging": "none"},
+                   {"id": "save", "tool": "graphlet_save", "args": {"path": "G.saved.mgt"}, "paging": "none"}]
+            plan = os.path.join(tmp, "plan.json")
+            with open(plan, "w") as fh:
+                json.dump({"scenarios": [{"id": "G", "graphlet": {"ops": ops}}]}, fh)
+            doc = os.path.join(gf.MINI, "mini_ndm1_rc__switch1.graphlet.json.gz")
+            self.assertEqual(rgl.main(["--plan", plan, "--doc", "G=" + doc, "--library-root", gf.LIB, "--out", tmp,
+                                       "--ways", "W1,W4", "--run-id", "f-d1", "--quiet"]), 0)
+            recs = {}
+            for way in ("W1", "W4"):
+                with open(os.path.join(tmp, "arms", gp.WAY_DIRS[way], gp.OPS_FILE)) as fh:
+                    recs[way] = dict(((r["scenario"], r["op"]), r) for r in map(json.loads, fh))
+            for way, by in recs.items():
+                for key, rec in by.items():
+                    self.assertTrue(rec["file"]["raw"].startswith("raw/"), rec["file"])   # the writer's convention
+                    path = cg.file_path(tmp, way, rec)
+                    self.assertTrue(os.path.exists(path), path)
+                    self.assertEqual(os.path.dirname(os.path.relpath(path, tmp)),
+                                     os.path.join("arms", gp.WAY_DIRS[way], "raw"))
+            cg.attach_files(tmp, recs)
+            for key in recs["W1"]:
+                v1, v4 = recs["W1"][key]["_file_view"], recs["W4"][key]["_file_view"]
+                self.assertNotIn("not_kept", v1, key)
+                self.assertIsNotNone(recs["W1"][key]["_file_text"], key)
+                self.assertEqual(v1, v4, key)   # one document, one library: the same file content on both ways
+            # and a file.raw that leaves the way directory is refused
+            bad = dict(recs["W1"][("G", "exp-fasta")], file={"raw": "../escape.fa"})
+            self.assertIsNone(cg.file_path(tmp, "W1", bad))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class Whitelist(unittest.TestCase):
     """ANSWER_KEYS against the library's answers: every key a tool answers is in its row of the table."""
 
@@ -1094,7 +1141,7 @@ class FiveWay(unittest.TestCase):
     def put_files(self, op, text, answer, w3=None, texts=None, ways=("W1", "W2", "W3", "W4"), raw_gz=False):
         """Records an export op on |ways| with its file kept (FORMAT v2 B3): |text| on every way unless |texts|."""
         for way in ways:
-            raw = "%s.%s.file%s" % (SID, op["id"], ".gz" if raw_gz else "")
+            raw = "raw/%s.%s.file%s" % (SID, op["id"], ".gz" if raw_gz else "")
             f = self.run_.write_file(way, raw, (texts or {}).get(way, text))
             ans = copy.deepcopy(w3 if way == "W3" and w3 is not None else answer)
             self.run_.record(way, SID, op["id"], op["tool"], op["args"], answer=ans, file=f)
@@ -1205,10 +1252,10 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(cg.stale(self.run_.dir, changed), ["by_design_table", "code"])
         # an export file the records name
         exp = {"id": "fasta", "tool": "graphlet_export", "args": {"format": "fasta"}}
-        f = self.run_.write_file("W1", "x.fa", ">a\nAC\n")
+        f = self.run_.write_file("W1", "raw/x.fa", ">a\nAC\n")
         self.run_.record("W1", SID, "fasta", "graphlet_export", exp["args"], answer={"records": 1}, file=f)
         before = cg.input_digests(self.run_.dir)
-        self.run_.write_file("W1", "x.fa", ">a\nAG\n")
+        self.run_.write_file("W1", "raw/x.fa", ">a\nAG\n")
         after = cg.input_digests(self.run_.dir)
         self.assertNotEqual(before["files"], after["files"])
         self.assertEqual(before["code"], after["code"])

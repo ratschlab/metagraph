@@ -267,12 +267,14 @@ def canonical_args(args):
 
 
 def file_path(run_dir, way, rec):
-    """Where a record's file text is kept (FORMAT v2 B3: arms/<way dir>/raw/<file.raw>), or None."""
+    """Where a record's file text is kept, or None: arms/<way dir>/<file.raw>, file.raw being relative to the way's
+    directory (FORMAT v2.1 B3: "raw/G-x.exp-json.file.json.gz", as run_graphlet_local writes it and as executions'
+    `raw` is relative to the arm's directory)."""
     f = rec.get("file") if isinstance(rec.get("file"), dict) else None
     raw = f.get("raw") if f else None
     if not isinstance(raw, str) or not raw or os.path.isabs(raw) or ".." in raw.split("/"):
         return None
-    return os.path.join(run_dir, "arms", gp.WAY_DIRS[way], "raw", raw)
+    return os.path.join(run_dir, "arms", gp.WAY_DIRS[way], raw)
 
 
 def file_view(rec, text):
@@ -320,7 +322,7 @@ def attach_files(run_dir, recs):
             text = gp._read_text(path) if path and os.path.exists(path) else None
             rec["_file_text"] = text
             rec["_file_view"] = file_view(rec, text) if text is not None else {
-                "not_kept": "arms/%s/raw/%s" % (gp.WAY_DIRS[way], (rec["file"] or {}).get("raw"))}
+                "not_kept": "arms/%s/%s" % (gp.WAY_DIRS[way], (rec["file"] or {}).get("raw"))}
 
 
 def same_library_env(ra, rb):
@@ -1093,7 +1095,7 @@ def _tree_digest(run_dir, rel_dirs):
 def input_digests(run_dir, recs=None):
     """{name: sha256 or None} of everything a graphlet comparison reads (VERIFY-C VC3): the manifest; every way's
     records; the job record and the MCP runner's identity records (graphlet_jobs.jsonl, mcp_runs.jsonl, run.json);
-    every kept document and twin (arms/*/docs); every export or save file the records name (arms/*/raw/<file.raw>);
+    every kept document and twin (arms/*/docs); every export or save file the records name (arms/<way dir>/<file.raw>);
     the by-design table the run reads; and the code (CODE_FILES, as this tree holds them)."""
     import compare as cmp
     names = ["manifest.json"] + ["arms/%s/%s" % (gp.WAY_DIRS[w], gp.OPS_FILE) for w in WAYS + ("drift",)] + \

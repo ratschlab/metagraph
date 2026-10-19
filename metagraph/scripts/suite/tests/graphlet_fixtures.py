@@ -242,8 +242,9 @@ class GRun(object):
                          "library_commit": library_commit})
 
     def write_file(self, way, raw, text):
-        """Keeps a file's text where a record's file.raw names it (FORMAT v2 B3) and returns its `file` block."""
-        path = self.path("arms", WAY_DIRS[way], "raw", raw)
+        """Keeps a file's text where a record's file.raw names it (FORMAT v2.1 B3: relative to the way's directory,
+        "raw/<name>") and returns its `file` block."""
+        path = self.path("arms", WAY_DIRS[way], raw)
         if raw.endswith(".gz"):
             with gzip.open(path, "wb") as fh:
                 fh.write(text.encode("utf-8"))
