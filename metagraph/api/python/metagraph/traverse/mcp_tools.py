@@ -1610,7 +1610,9 @@ class GraphletTools:
     def graphlet_walks(self, handle, arm, rank='support', n=10, min_bp=0, label=None,
                        spell='none', tail_bp=60, route_consistent=True, cursor=None,
                        max_bytes=None, budget=None, coordinates=False):
-        """The arm's walks ranked, a page at a time. coordinates=true (a retrieval with
+        """The arm's walks ranked, a page at a time. spell='tail' spells each walk's
+        tail_bp outermost bases (the last on the right arm, the first on the left; 0: an
+        empty tail), spell='full' the whole walk. coordinates=true (a retrieval with
         record coordinates; no_coordinates otherwise): each row also gives, per label of
         labels_full shown, the occurrences of its run reaching the leaf (ref, the first 4
         [start, end], total, truncated, lower_bound when true)."""
@@ -1642,7 +1644,9 @@ class GraphletTools:
             if spell != 'none' and w.sequence is not None:
                 s = w.sequence
                 if spell == 'tail':
-                    s = s[-tail_bp:] if a.side == 'right' else s[:tail_bp]
+                    # the tail_bp outermost bases: the last on the right arm, the first on
+                    # the left (never s[-0:], the whole flank: a tail of 0 is empty)
+                    s = s[max(0, len(s) - tail_bp):] if a.side == 'right' else s[:tail_bp]
                 row['sequence'] = s
             if coordinates and w.coordinates is not None:
                 row['coordinates'] = [

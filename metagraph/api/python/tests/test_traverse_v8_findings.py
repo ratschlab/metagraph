@@ -90,5 +90,46 @@ class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
         self.assertEqual((True, 'same index and seed'), (c.comparable, c.reason))
 
 
+class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):
+    """G2 (VO8): graphlet_walks(spell='tail', tail_bp=0) answered the whole flank on the
+    right arm (s[-0:]) and nothing on the left. DESIGN §6 takes tail_bp (default 60, no
+    lower bound but the library's >= 0): the tail is the walk's tail_bp outermost bases
+    (the last on the right arm, the first on the left), so 0 is an empty tail on both."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = GraphletStore(self.tmp.name)
+        self.tools = GraphletTools(self.store)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def rows(self, h, side, **kw):
+        out = self.tools.graphlet_walks(h, side, rank='id', n=100, max_bytes=1 << 20, **kw)
+        self.assertNotIn('error', out, out)
+        return out['rows']
+
+    def test_tails_on_both_arms(self):
+        for name in ('fork', 'linear', 'merge'):
+            g = T.graphlet(name)
+            h = self.store.put_graphlet(g)
+            for side in g.arms:
+                full = {r['walk']: r['sequence'] for r in self.rows(h, side, spell='full')}
+                self.assertTrue(all(full.values()), (name, side))
+                for n in (0, 1, 4, 10 ** 6):
+                    got = {r['walk']: r['sequence']
+                           for r in self.rows(h, side, spell='tail', tail_bp=n)}
+                    want = {w: (s[len(s) - min(n, len(s)):] if side == 'right'
+                                else s[:n]) for w, s in full.items()}
+                    self.assertEqual(want, got, (name, side, n))
+                    if n == 0:
+                        self.assertEqual({''}, set(got.values()), (name, side))
+
+    def test_a_negative_tail_is_refused(self):
+        h = self.store.put_graphlet(T.graphlet('fork'))
+        out = self.tools.graphlet_walks(h, 'right', spell='tail', tail_bp=-1)
+        self.assertEqual('bad_argument', out.get('error'), out)
+
+
 if __name__ == '__main__':
     unittest.main()
