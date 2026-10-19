@@ -37,7 +37,8 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
   (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
   twin pre-check), no_input (the run step found no twin or document), unresolved_handle (a handle symbol naming no
   scenario or op), selector_error (W1's arguments did not resolve), unreadable_w1 (a torn W1 line): W5 could not
-  judge (compare: inconclusive, which blocks); and expected_error: the arguments name no answer, the tool must
+  judge (compare: inconclusive, which blocks); and expected_error: the arguments name no answer, or the full twin
+  states the seed failed (SPEC §7.1: no graphlet; every op that reads one expects no_graphlet), the tool must
   refuse; then
   `expected_error` is the code W5 expects (null: any code), the note gives why and the clause (most codes are the
   library's vocabulary, so "library-defined").
@@ -1618,11 +1619,46 @@ _TOOLS: Dict[str, Callable[[_Doc, dict, dict], dict]] = {
 }
 
 
-def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: str, context: Optional[dict] = None) -> dict:
-    """W5's record for one op (FORMAT-v8 §4); see the module docstring."""
+C_FAILED_SEED = "SPEC §7.1 (§7.0, §7.5): a seed whose permitted set could not be derived, or that a request budget " \
+                "failed, has the failed shape {seed, outcome, error} with no arms and no graphlet; the code " \
+                "no_graphlet is the runners' (FORMAT v2 B2)"
+
+
+def _short(text: Any, n: int = 120) -> str:
+    text = str(text)
+    return text if len(text) <= n else text[:n] + "..."
+
+
+def _failed_error(full_answer: dict, seed_index: int) -> Any:
+    res = full_answer.get("results")
+    r = res[seed_index] if isinstance(res, list) and seed_index < len(res) else full_answer
+    return r.get("error")
+
+
+def seed_failed(full_answer: Optional[dict], seed_index: int = 0) -> bool:
+    """Whether the full twin states the seed failed (SPEC §7.1: the result carries `error`, no arms)."""
+    if not isinstance(full_answer, dict):
+        return False
+    res = full_answer.get("results")
+    r = res[seed_index] if isinstance(res, list) and seed_index < len(res) else full_answer
+    return isinstance(r, dict) and "error" in r
+
+
+def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional[str],
+           context: Optional[dict] = None) -> dict:
+    """W5's record for one op (FORMAT-v8 §4); see the module docstring. On a seed the twin states failed, an op
+    that reads the graphlet expects no_graphlet (there is none; |mgt_text| may be None)."""
     ctx = dict(context or {})
     args = {k: v for k, v in (args_resolved or {}).items() if k not in ("handle", "access_token", "cursor",
                                                                         "max_bytes", "budget")}
+    if seed_failed(full_answer, ctx.get("seed_index", 0)) and (tool in _TOOLS or tool in PHASE_B or
+                                                               tool == "graphlet_compare"):
+        why = "the seed failed (%s): no graphlet" % _short(_failed_error(full_answer, ctx.get("seed_index", 0)))
+        if tool == "graphlet_load":   # reads a file, not the graphlet: whatever the tool answers for no such file
+            return _record(None, {}, ["/*"], declared="expected_error", expected_error=None,
+                           note="%s (%s; the code is library-defined)" % (why, C_FAILED_SEED))
+        return _record(None, {}, ["/*"], declared="expected_error", expected_error="no_graphlet",
+                       note="%s (%s)" % (why, C_FAILED_SEED))
     if tool in PHASE_B or (tool == "graphlet_labels" and args.get("name") is not None):
         return _declared("not_implemented_phase_b", "%s: DESIGN-v8 §8 phase B" % tool)
     if tool in NOT_APPLICABLE:
@@ -1953,7 +1989,7 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
             r = _declared("no_input", "W1 recorded no arguments (%s)" % ((rec.get("error") or {}).get("code")))
         elif target is None:
             r = _declared("unresolved_handle", "the handle symbol %r names no scenario or op of this run" % (hv,))
-        elif full is None or text is None:
+        elif full is None or (text is None and not seed_failed(full)):
             r = _declared("no_input", "missing %s for scenario %s" % (
                 " and ".join(k for k, v in (("the full twin", full), ("the MGT document", text)) if v is None), target))
         else:
