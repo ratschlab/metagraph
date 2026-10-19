@@ -43,7 +43,7 @@ AREA = "G"
 MAXB = 262144                      # the service's max_bytes ceiling: every W3 whole-list call is designed to fit it
 CUT_PAGE = 2048                    # a paging pass's page (the tools' default ceiling; byte-bound pages)
 ROW_PAGE = 4096                    # a paging pass over rows with label lists (walk segments, claims, compare)
-SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async adds it to service_by_design.json (FORMAT v2)
+SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async's case (service_by_design.json, 2026-10-20)
 ALL_WAYS = ["W1", "W2", "W3", "W4", "W5"]
 DIRECT_ONLY_WAYS = ["W1", "W2", "W5"]
 LIBRARY_WAYS = ["W1", "W2", "W4", "W5"]
@@ -904,7 +904,50 @@ def plan_failed(p: Plan, other: str) -> None:
     p.add(_op("cmp", "graphlet_compare", C(other)))
 
 
-BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async adds it with the six-call plan (DESIGN-v8 §4)
+BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async's case (service_by_design.json, 2026-10-20)
+BIG_BODY_SUMMARY_CASE = BIG_BODY_CASE + ".summary"         # graphlet_summary answered from the stored row
+IN_SERVICE_MAX_BODY_BYTES = 8 * 1024 * 1024
+LIBRARY_MAX_BYTES = 16 * 1024 * 1024                       # the cap case's upper bound (the library's own limit)
+# the tools each case covers (async's BY-DESIGN-G-CASES.json graphlet.tools)
+CAP_CASE_TOOLS = ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_compare")
+BIG_BODY_TOOLS = ("graphlet_walks", "graphlet_walk", "graphlet_sequence", "graphlet_labels", "graphlet_compare",
+                  "graphlet_export")
+
+
+def by_design_case(o: dict, facts: dict) -> Optional[str]:
+    """The by-design case an op W3 runs falls under (async's three area G cases), None when none applies:
+    max_bytes above the service's 262,144 (the cap's refusal comes first: the route refuses it before the handle, the
+    token or the body is looked at); else, on a body over the in-service ceiling (facts over_8mib), graphlet_summary
+    the .summary case (answered from the row) and the refusing tools the body case (graphlet_export only for fasta /
+    gfa / json: format mgt is answered on every way)."""
+    ways = o.get("ways") or ALL_WAYS
+    if "W3" not in ways:
+        return None
+    mb = o["args"].get("max_bytes")
+    if isinstance(mb, bool) or not isinstance(mb, (int, type(None))):
+        return None                    # a selector or a wrong type: no case's args match
+    if mb is not None and MAXB < mb <= LIBRARY_MAX_BYTES and o["tool"] in CAP_CASE_TOOLS:
+        return SERVICE_CAP_CASE
+    if mb is not None and not 64 <= mb <= MAXB:
+        return None
+    if facts.get("over_8mib"):
+        if o["tool"] == "graphlet_summary":
+            return BIG_BODY_SUMMARY_CASE
+        if o["tool"] in BIG_BODY_TOOLS and not (o["tool"] == "graphlet_export" and o["args"].get("format") == "mgt"):
+            return BIG_BODY_CASE
+    return None
+
+
+def link_by_design(ops: List[dict], facts: dict) -> None:
+    """Every op names the by-design case that applies to it (by_design_case), and no other."""
+    for o in ops:
+        if o.get("probe"):
+            continue
+        cid = by_design_case(o, facts)
+        if cid:
+            o["by_design"] = cid
+        else:
+            o.pop("by_design", None)
 
 
 def plan_big(p: Plan) -> None:
@@ -912,6 +955,8 @@ def plan_big(p: Plan) -> None:
     the stored record (in_service false, download) and every other tool but graphlet_export(mgt) body_too_large,
     while the library ways answer: each call a by-design pair (BIG_BODY_CASE), the export the body itself."""
     a = p.arms()[0]
+    # the summary sends max_bytes 262,144: the row's stored summary next to the presigned link may not fit 2,048
+    # (async's .summary case: else summary_trimmed)
     for o in (_op("sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": MAXB}),
               _op("walks-id-%s" % a, "graphlet_walks", W(a), paging="all"),
               _op("walk-0-%s" % a, "graphlet_walk", {"arm": a, "walk": ref("walks-id-%s" % a, "/rows/0/walk"),
@@ -919,8 +964,7 @@ def plan_big(p: Plan) -> None:
               _op("labels-all-direct", "graphlet_labels", L(), paging="all"),
               _op("seq-0-%s" % a, "graphlet_sequence", S(a, walk=ref("walks-id-%s" % a, "/rows/0/walk")),
                   paging="all")):
-        o["by_design"] = BIG_BODY_CASE
-        p.add(o)
+        p.add(o)                       # the cases: link_by_design (summary: .summary; the others: the body case)
     p.add(_op("exp-mgt", "graphlet_export", E(format="mgt")))
 
 
@@ -965,6 +1009,7 @@ def op_plan(sid: str, slot: str, facts: dict, rich: bool, pairs: Optional[List[T
         for partner, full in pairs or []:
             plan_compare(p, partner, full, "cmp" if partner != sid else "self")
         add_extras(p, extras)
+    link_by_design(p.ops, facts)
     if direct_only:
         kept = []
         for o in p.ops:
@@ -1091,6 +1136,9 @@ def facts_of(c: dict, corpus: dict) -> dict:
     if c["extra"].get("output", {}).get("coordinates"):
         f["coordinates"] = True
     f.setdefault("radius", (c["overrides"].get("bounds") or {}).get("max_extension_bp"))
+    sf = ((corpus.get("candidates") or {}).get(c["cid"]) or {}).get("service_facts") or {}
+    if sf.get("body_over_8mib") or (f.get("body_bytes") or 0) > IN_SERVICE_MAX_BODY_BYTES:
+        f["over_8mib"] = True
     if not f.get("arms"):
         d = c["overrides"].get("direction") or "both"
         f["arms"] = ["left", "right"] if d == "both" else [d]
@@ -1357,12 +1405,15 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
         if not g.get("preconditions"):
             pending.append("%s: preconditions (the rehearsal freezes them)" % sid)
         seen = set()
+        # over the in-service ceiling: the rehearsal's service facts, else the slot's expectation (facts_of)
+        big = (g.get("facts") or {}).get("body_over_8mib")
+        gf = dict(g, _facts={"over_8mib": bool(big if big is not None else g.get("slot") == "over_8mib")})
         for o in g.get("ops") or []:
             oid = o.get("id")
             if oid in seen:
                 problems.append("%s: duplicate op %s" % (sid, oid))
             seen.add(oid)
-            problems += ["%s/%s: %s" % (sid, oid, m) for m in op_problems(o, g, ids, seen)]
+            problems += ["%s/%s: %s" % (sid, oid, m) for m in op_problems(o, gf, ids, seen)]
             bd = o.get("by_design")
             if bd and cases is not None and bd not in cases:
                 pending.append("%s/%s: by-design case %s not in service_by_design.json yet (async adds it)" % (
@@ -1411,6 +1462,14 @@ def op_problems(o: dict, g: dict, ids: set, before: set) -> List[str]:
         out.append("cut_of %r is not an earlier op" % o["cut_of"])
     if o.get("probe") and o.get("ways") != ["W3"]:
         out.append("a probe runs on W3 only")
+    mb = args.get("max_bytes")
+    if o.get("probe") and isinstance(mb, int) and mb > MAXB:
+        # the service refuses max_bytes above 262,144 before it checks the token or the handle
+        out.append("a probe sends max_bytes %d above %d: the cap's refusal would answer, not the probe's" % (mb, MAXB))
+    if not o.get("probe"):
+        want = by_design_case(o, g.get("_facts") or {})
+        if (o.get("by_design") or None) != want:
+            out.append("by_design %r, the case that applies %r" % (o.get("by_design"), want))
     t = o.get("timeout_s")
     if not isinstance(t, (int, float)) or isinstance(t, bool) or t <= 0:
         out.append("timeout_s %r" % (t,))

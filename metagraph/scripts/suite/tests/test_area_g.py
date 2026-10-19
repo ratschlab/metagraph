@@ -314,6 +314,79 @@ class ByDesignTable(unittest.TestCase):
                          sorted(p for p in area_g.validate_g(g, set(cases))[1] if "by-design case" not in p))
 
 
+class ByDesignLinks(unittest.TestCase):
+    """Every op links the by-design case that applies to it (async's three, 2026-10-20) and no other; the probes stay
+    within the service's 262,144 (its cap refusal comes before the token check); the summary of a body over the
+    in-service ceiling sends max_bytes 262,144 (the .summary case; v9 slot, the rule set in the generator)."""
+
+    BIG = {"over_8mib": True, "arms": ["left", "right"]}
+
+    def test_a_body_over_the_ceiling(self):
+        ops = area_g.op_plan("G-big-0001", "over_8mib", dict(self.BIG), False)
+        by = dict((o["id"], o.get("by_design")) for o in ops)
+        summary = next(o for o in ops if o["tool"] == "graphlet_summary")
+        self.assertEqual(summary["args"]["max_bytes"], area_g.MAXB)
+        self.assertEqual(summary["by_design"], area_g.BIG_BODY_CASE + ".summary")
+        for o in ops:
+            if o["tool"] == "graphlet_export" and o["args"].get("format") == "mgt":
+                self.assertIsNone(by[o["id"]], o["id"])      # answered on every way
+            elif o["tool"] != "graphlet_summary":
+                self.assertEqual(by[o["id"]], area_g.BIG_BODY_CASE, o["id"])
+        g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {"over_8mib": True}}
+        for o in ops:
+            o["timeout_s"] = 20.0
+            self.assertFalse([m for m in area_g.op_problems(o, g, set(), set(by)) if "by_design" in m], o["id"])
+
+    def test_the_rule(self):
+        case = area_g.by_design_case
+        walks = area_g._op("w", "graphlet_walks", area_g.W("left", max_bytes=area_g.MAXB + 1))
+        self.assertEqual(case(walks, {}), area_g.SERVICE_CAP_CASE)
+        self.assertEqual(case(walks, {"over_8mib": True}), area_g.SERVICE_CAP_CASE)   # the cap's refusal first
+        self.assertIsNone(case(area_g._op("w", "graphlet_walks", area_g.W("left", max_bytes=area_g.MAXB)), {}))
+        self.assertIsNone(case(area_g._op("w", "graphlet_walks", area_g.W("left", max_bytes=16 * 2 ** 20 + 1)), {}))
+        seq = area_g._op("s", "graphlet_sequence", area_g.S("left", walk=0, max_bytes=area_g.MAXB + 1))
+        self.assertIsNone(case(seq, {}))              # the cap case does not name graphlet_sequence
+        for fmt, want in (("fasta", area_g.BIG_BODY_CASE), ("gfa", area_g.BIG_BODY_CASE),
+                          ("json", area_g.BIG_BODY_CASE), ("mgt", None)):
+            self.assertEqual(case(area_g._op("e", "graphlet_export", area_g.E(format=fmt)), {"over_8mib": True}),
+                             want, fmt)
+        cmp_ = area_g._op("c", "graphlet_compare", area_g.C("G-x-0001", mode="labels", max_bytes=2048))
+        self.assertEqual(case(cmp_, {"over_8mib": True}), area_g.BIG_BODY_CASE)
+        self.assertIsNone(case(cmp_, {}))
+        direct = dict(walks, ways=["W1", "W2"])
+        self.assertIsNone(case(direct, {}))           # no W3 call: nothing the service answers by design
+
+    def test_validation_names_a_missing_or_a_wrong_link(self):
+        g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {}}
+        cap = area_g._op("w", "graphlet_walks", area_g.W("left", max_bytes=area_g.MAXB + 1), timeout_s=20.0)
+        self.assertTrue(any("by_design None" in m for m in area_g.op_problems(cap, g, set(), set())))
+        cap["by_design"] = area_g.SERVICE_CAP_CASE
+        self.assertEqual(area_g.op_problems(cap, g, set(), set()), [])
+        plain = area_g._op("w", "graphlet_walks", area_g.W("left"), timeout_s=20.0, by_design=area_g.BIG_BODY_CASE)
+        self.assertTrue(any("by_design" in m for m in area_g.op_problems(plain, g, set(), set())))
+
+    def test_probes_stay_within_the_cap(self):
+        ops = area_g.op_plan("G-arms2-0001", "two_arms", {"arms": ["left", "right"]}, True, extras={"probes": True})
+        probes = [o for o in ops if o.get("probe")]
+        self.assertEqual(sorted(o["probe"] for o in probes), ["bad_handle", "wrong_token"])
+        for o in probes:
+            self.assertLessEqual(o["args"]["max_bytes"], area_g.MAXB, o["id"])
+            self.assertNotIn("by_design", o)
+        g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {}}
+        over = dict(probes[0], args=dict(probes[0]["args"], max_bytes=area_g.MAXB + 1), timeout_s=20.0)
+        self.assertTrue(any("cap's refusal" in m for m in area_g.op_problems(over, g, set(), set())))
+
+    def test_the_built_plans_link_every_case(self):
+        g, _ = provisional()
+        self.assertFalse([p for p in area_g.validate_g(g, None)[0] if "by_design" in p or "probe" in p])
+        named = [(s["id"], o["id"], o["by_design"]) for s in g for o in s["graphlet"]["ops"] if o.get("by_design")]
+        self.assertIn(area_g.SERVICE_CAP_CASE, set(n[2] for n in named))
+        for s in g:
+            for o in s["graphlet"]["ops"]:
+                if o.get("probe"):
+                    self.assertLessEqual(o["args"].get("max_bytes") or 0, area_g.MAXB)
+
+
 class OpProblems(unittest.TestCase):
     def test_validation_catches_plan_mistakes(self):
         g = {"ways": {"default": area_g.ALL_WAYS}}
