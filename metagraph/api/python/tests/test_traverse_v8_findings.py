@@ -55,9 +55,9 @@ class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
             c = g.compare(g, mode=mode)
             self.assertEqual(('unknown', None, 0), (c.comparable, c.equal, c.depth_used))
             self.assertEqual(DEPTH, c.reason, mode)
-            # the identity is still unverifiable, and said so once; the depth rule's
-            # phrase is its whole statement, not repeated in the notes
-            self.assertIn(R['unverifiable_both'], c.notes, mode)
+            # the identity is still unverifiable, said once in a short note; the depth
+            # rule's phrase is its whole statement, not repeated in the notes
+            self.assertIn('no index_fp on both', c.notes, mode)
             self.assertNotIn(DEPTH, c.notes, mode)
 
     def test_no_bins_with_index_fp(self):
@@ -97,7 +97,7 @@ class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
         from test_traverse_regressions import without_bases
         c = merge.compare(without_bases(merge), mode='claims')
         self.assertEqual(('unknown', R['bases']), (c.comparable, c.reason))
-        self.assertTrue(any(n.startswith('b carries no bases: mode claims') for n in c.notes),
+        self.assertTrue(any(n.startswith('b: no bases; mode claims') for n in c.notes),
                         c.notes)
         # qualified by a lower-bound side: the reason names the qualification, its whole
         # text in the notes only
@@ -255,8 +255,8 @@ class TestVF4EveryRuleAnswersItsPhrase(unittest.TestCase):
             self.assertEqual(('unknown', R['bases']), (c.comparable, c.reason), mode)
             # both rules stated once: the identity unverifiable, then which side has no
             # bases and what to do
-            self.assertEqual(1, c.notes.count(R['unverifiable_both']), c.notes)
-            self.assertEqual(1, sum(n.startswith('b carries no bases: mode %s' % mode)
+            self.assertEqual(1, c.notes.count('no index_fp on both'), c.notes)
+            self.assertEqual(1, sum(n.startswith('b: no bases; mode %s' % mode)
                                     for n in c.notes), c.notes)
             self.assert_once(c)
 
@@ -282,6 +282,39 @@ class TestVF4EveryRuleAnswersItsPhrase(unittest.TestCase):
                             self.assertLessEqual(len(c.reason), len(R['same']))
                         self.assert_once(c)
         self.assertGreater(n, 100)
+
+
+class TestR21NoAnswerLongerThanBeforeG1(unittest.TestCase):
+    """R2-1 (VERIFY-F-R2): no compare answer may be longer than before G1. Over the
+    verifier's probe set (traverse_golden.compare_page_shapes: 336 pairs, 4 modes, max_bytes
+    default, 950, 1024, 2048 and 4 MiB), against the pages of bf010a984 recorded in
+    golden/compare_shapes_bf010a984.json.gz (traverse_golden.py --compare-shapes --lib
+    <bf010a984>): every whole answer's bytes without its rows are at most what they were,
+    and no page is worse -- no new error, no fewer rows, no row newly truncated, no more
+    fields cut unless that makes a truncated row whole."""
+
+    def test_the_probe_set(self):
+        import traverse_golden as TG
+        import metagraph.traverse as MT
+        want = TG.read_json(os.path.join(TG.GOLDEN_DIR, 'compare_shapes_bf010a984.json.gz'))
+        got = TG.compare_page_shapes(MT)
+        self.assertEqual(sorted(want), sorted(got))
+        whole = str(TG.SHAPE_SIZES[-1])
+        longer, worse = [], []
+        for k in sorted(want):
+            (e0, r0, _, c0, t0, b0), (e1, r1, _, c1, t1, b1) = want[k], got[k]
+            if k.endswith(':' + whole):
+                if not e0 and not e1 and b1 > b0:
+                    longer.append((k, b0, b1))
+                continue
+            if e0 is None and e1:
+                worse.append((k, 'error', e1))
+            elif e0 is None:
+                if r1 < r0 or (t1 and not t0) or (
+                        len(c1 or ()) > len(c0 or ()) and not (t0 and not t1)):
+                    worse.append((k, want[k], got[k]))
+        self.assertEqual([], longer[:10], '%d answers longer' % len(longer))
+        self.assertEqual([], worse[:10], '%d pages worse' % len(worse))
 
 
 class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):

@@ -624,10 +624,12 @@ for s in segments in id order:                                   # parents prece
    (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`, and so
    does no common certified depth (`complete_to_bp` 0 on a side). The verdict is the weakest any rule gives
    (`unknown` is weaker than `unverifiable`), and of the rules giving it the first in order decides (no common depth
-   before missing bases). `reason` is the deciding rule's fixed phrase (at most 80 bytes); `notes` state every other
-   rule that applied, and the deciding rule only where its phrase says less, so nothing is said twice. Above
-   64 labels, "qualified" can come from the per-node label limit (`max_labels_per_node`), which the docs of
-   `compare()` state. Record coordinates are noted, never compared or clipped by `compare()`.
+   before missing bases). `reason` is the deciding rule's fixed phrase (at most 80 bytes; a statement with values, a
+   namespace, release or label name, where it fits); `notes` state every other rule that applied (a missing
+   `index_fp` a weaker verdict decided over as a short note), and the deciding rule only where its reason says less,
+   so nothing is said twice. Above 64 labels, "qualified" can come from the per-node label limit
+   (`max_labels_per_node`), which the docs of `compare()` state. Record coordinates are noted, never compared or
+   clipped by `compare()`.
 6. **The displayed parent at a merge** is the server's (§11); the library checks the rule as it stands
    (`derive.carried_labels`) and never re-ranks parents.
 
