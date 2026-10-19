@@ -443,6 +443,18 @@ class RecordSemantics(unittest.TestCase):
         for side in ("left", "right"):
             other["json"]["arms"][side]["limitations"][0]["observed"] = 0.7
         self.assertEqual(O.differences(j, other), [])
+        # a time resource stop (none among the twins): its scope, resource, phase, requested and actions are
+        # compared field by field, its used, remaining, effective and message are not
+        g, f, mgt = doc("fork")
+        f["results"][0]["resource_stop"] = {"scope": "locus", "resource": "time", "phase": "traversal",
+                                            "requested": 5.0, "effective": 5.0, "used": 5.3, "remaining": 0,
+                                            "actions": ["raise_time_budget"], "message": "m"}
+        r = O.answer("graphlet_summary", {"detail": "limitations"}, f, mgt)
+        other = copy.deepcopy(r["answer"])
+        other["resource_stop"] = dict(f["results"][0]["resource_stop"], used=9.9, remaining=1, message="x")
+        self.assertEqual(O.differences(r, other), [])
+        other["resource_stop"]["phase"] = "seed"
+        self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/resource_stop/phase"])
 
 
 class Normalisation(unittest.TestCase):

@@ -592,31 +592,30 @@ def _limitations(d: _Doc, side: Optional[str], ctx: dict) -> dict:
     """detail='limitations': every stated limitation in full, the seed's first, then the left arm's and the right
     arm's, each in its JSON order (SPEC §7.5.2 K), and the resource stop (SPEC §7.0)."""
     seed_level = list(d.result.get("limitations") or [])
-    rows = [dict(e) for e in seed_level] if side is None else []
+    # (the entry's pointer in the result, the row): seed-level entries carry no arm
+    src = [("/limitations/%d" % j, dict(e)) for j, e in enumerate(seed_level)] if side is None else []
     for s in d.sides:
         if side is None or s == side:
-            rows += [dict(e, arm=s) for e in d.arms[s].get("limitations") or []]
+            src += [("/arms/%s/limitations/%d" % (s, j), dict(e, arm=s))
+                    for j, e in enumerate(d.arms[s].get("limitations") or [])]
+    rows = [r for _, r in src]
     timed = set(_time_measured(d.result))
-    keep = [(j, e) for j, e in enumerate(seed_level)] if side is None else []
-    for s in d.sides:
-        if side is None or s == side:
-            keep += [(("/arms/%s/limitations/%d" % (s, j)), e) for j, e in enumerate(d.arms[s].get("limitations") or [])]
     cons_t = []
-    for i, (src, _) in enumerate(keep):
-        base = src if isinstance(src, str) else "/limitations/%d" % src
+    for i, (base, row) in enumerate(src):
         if base + "/observed" in timed:
-            rows[i].pop("observed", None)
+            row.pop("observed", None)
             cons_t.append("/rows/%d/observed" % i)
     rs = d.result.get("resource_stop")
+    c_rs = "SPEC §7.0 resource_stop (§7.5.2 Q), null without one"
+    clauses = {"/outcome": C_OUTCOME, "/resource_stop": c_rs}
     if isinstance(rs, dict) and any(t.startswith("/resource_stop/") for t in timed):
         rs = {k: v for k, v in rs.items() if "/resource_stop/" + k not in timed}
         cons_t += [t for t in timed if t.startswith("/resource_stop/")]
+        clauses = {"/outcome": C_OUTCOME, "/resource_stop/*": c_rs + "; a clock's amounts left out (SPEC §6.8)"}
     ans = {"outcome": d.result["outcome"], "resource_stop": rs, "total": len(rows), "rows": rows}
-    clauses = {"/outcome": C_OUTCOME, "/resource_stop": "SPEC §7.0 resource_stop (§7.5.2 Q), null without one; "
-                                                        "a clock's amounts left out (SPEC §6.8)",
-               "/total": "SPEC §7.0: every stated limitation (seed level and the arms asked)",
-               "/rows/*/arm": "SPEC §7.5.2 K arm (an arm's entry names its arm)",
-               "/rows/*/*": "SPEC §7.0 limitations: the stated entry (§7.5.2 K: the JSON entry itself)"}
+    clauses.update({"/total": "SPEC §7.0: every stated limitation (seed level and the arms asked)",
+                    "/rows/*/arm": "SPEC §7.5.2 K arm (an arm's entry names its arm)",
+                    "/rows/*/*": "SPEC §7.0 limitations: the stated entry (§7.5.2 K: the JSON entry itself)"})
     cons = ["/rows/*/informational", "/next_cursor"] + cons_t
     if side is not None and seed_level:
         # whether a seed-level entry belongs to an arm's listing is the tool's choice
