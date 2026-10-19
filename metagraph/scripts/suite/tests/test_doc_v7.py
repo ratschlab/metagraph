@@ -130,6 +130,9 @@ class V7RealRunTest(unittest.TestCase):
         filled = facts.fill(t, {"manifest_version": 7, "x": {"P-scope-0004": ok, "P-scope-0006": ok},
                                 "n_relations": 0}, unresolved=[])
         self.assertIn("kept the two off the MCP access path): via MCP both pass.", filled)
+        # V12: the service and the MCP runner provide the field; manifest v7 only checks it now
+        self.assertIn("the service states it per database and the MCP runner (git head {mcp_runner_head}) copies the "
+                      "host's values onto the entry, and manifest v7 checks it via MCP", str(prose("P")))
 
     def test_gate_note_breaks(self):
         # V6: the behaviour, not the source: a note with a 40-hex commit breaks every 8 hex digits, a local path is

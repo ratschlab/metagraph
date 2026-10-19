@@ -127,6 +127,7 @@
   "reevaluated": "flag: this document reads the re-evaluated set (reader.Run.reevaluated); a sentence about the re-evaluation prints only then",
   "findings_in_run": "the run's findings in words (sections.Context.placeholders: 'none in this run', or 'N executions in this run: ' and finding_kinds_text)",
   "failures_in_run": "the run's failed and errored executions in words ('none', '1 execution', 'N executions')",
+  "mcp_runner_head": "the MCP runner's git head, 8 hex digits (arms/mcp/run.json git_head), '–' when not recorded",
   "property_mark_kinds": "the kinds of property-level mark the manifest carries, in words (sections.Context.placeholders: 'not implemented via MCP', 'service-side by design', joined by '; '; empty without any)",
   "answer_side_mark_text": "those scenarios with the fields their marks name (sections.answer_side_mark_text), e.g. 'P-scope-0004, P-scope-0006: absence_scope'",
   "annotated_record_key": "whether the annotated matrix's variants carry a record key in brackets: the flag of the column note's record-key clause (sections.annotated_matrix; false outside that matrix)"

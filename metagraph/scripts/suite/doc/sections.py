@@ -240,6 +240,8 @@ class Context(object):
                 # an answer-side scenario-level mark in the manifest (the delta verifier's M2): the glossary's and
                 # appendix G's definitions of not implemented via MCP name it
                 "answer_side_mark": bool(answer_side_mark_ids(run)),
+                # the MCP runner's git head, short, for the prose that credits its normaliser (V12)
+                "mcp_runner_head": str((run.mcp_run or {}).get("git_head") or "–")[:8],
                 # whether this document reads a re-evaluated set: a sentence about the re-evaluation prints only then
                 # (the reader review of the v7 document, RV6; the fact verifier, V12)
                 "reevaluated": bool(run.reevaluated),
