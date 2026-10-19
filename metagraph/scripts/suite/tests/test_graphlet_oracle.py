@@ -438,7 +438,8 @@ class LabelWalkGoldens(unittest.TestCase):
         self.assertEqual([(x["arm"], x["from_bp"], x["to_bp"], x["merged_into"], x["route"]) for x in rows],
                          [("right", 0, 62, 6, [0, 1, 3, 4]), ("right", 0, 36, 3, [0, 2]),
                           ("right", 0, 100, None, [0, 1, 3, 5, 6])])
-        self.assertEqual([x["walks_below"] for x in rows], [1, 1, 1])
+        self.assertNotIn("walks_below", rows[0])            # DESIGN names leaves_below without defining it (VO-B3)
+        self.assertIn("/rows/*/walks_below", r["oracle"]["consistency_only"])
         self.assertEqual(rows[2]["end"], "max_extension_bp")
         self.assertIn("/rows/0/end", r["oracle"]["consistency_only"])      # a merge's close: no label_end event
         self.assertEqual(set(r["oracle"]["rederived"]) >= {"/rows/0/route", "/rows/0/evidence_from"}, True)

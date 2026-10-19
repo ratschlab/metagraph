@@ -118,9 +118,9 @@ checked (VO7); refusals are expected errors with their code [L].
       with min_bp > 0 (PB3), labels=[], coordinate columns, hint, caveat; annotate claims (D §5.2.1 witness rule)
   graphlet_labels name= (phase B): the label's runs per arm (left first) in run id order: arm, from_bp, to_bp [S
       §7.1], end (the qualifier's text or the enum [S §7.5.6]), evidence_from [D §5.1][R] (the formula also for a
-      zero-length run, PB4), merged_into [S §7.5.2 R m, D §4], walks_below (leaves reachable from the anchor) [D §5,
-      S §7.5.6], route [D §5 routes][R]; name, ref, total; unknown / ambiguous name [L] | c/o: the end of Lw and m
-      runs, coordinate columns; annotate (D §5.2.1 witness route)
+      zero-length run, PB4), merged_into [S §7.5.2 R m, D §4], route [D §5 routes][R]; name, ref, total; unknown /
+      ambiguous name [L] | c/o: walks_below (undefined, VO-B3), the end of Lw and m runs, coordinate columns;
+      annotate (D §5.2.1 witness route)
   graphlet_support (phase B): total, rows from_bp, to_bp, n_labels, n_labels_total, joined, left after the first row:
       constrain, each run's displayed evidence from its anchor, kept on the walk [D §5, §5.1][R] (G4: the
       library's presence profile is a defect);
@@ -386,14 +386,6 @@ class _Doc:
             out.append(self.segment(side, out[-1])["parents"][0])
         return out[::-1]
 
-    def children(self, side: str) -> Dict[int, List[int]]:
-        """Each segment's children (SPEC §7.5.6: derived from the parents)."""
-        out: Dict[int, List[int]] = {}
-        for sg in self.arms[side]["segments"]:
-            for p in sg.get("parents") or []:
-                out.setdefault(p, []).append(sg["id"])
-        return out
-
     def label_at(self, side: str, i: int, depth: int) -> int:
         """The INCOMING label of run |i|'s lineage at outward depth |depth|, before any switch committed there
         (DESIGN §5.1: walk R.prev_run back across switches while the run begins at or after the depth)."""
@@ -441,18 +433,6 @@ class _Doc:
             if k is None or k >= len(parents):
                 return None
             out.append(parents[k])
-
-    def leaves_below(self, side: str, sid: int) -> int:
-        """The leaves (segments with a path) reachable from segment |sid| through children (SPEC §7.5.6), itself
-        included."""
-        kids, leaves = self.children(side), {p["segments"][-1] for p in self.arms[side].get("paths") or []}
-        seen, todo = set(), [sid]
-        while todo:
-            x = todo.pop()
-            if x not in seen:
-                seen.add(x)
-                todo += kids.get(x, [])
-        return len(seen & leaves)
 
 
 # ---------------------------------------------------------------------------------------------- the record
@@ -1901,9 +1881,9 @@ def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
     """graphlet_labels(name=): the named label's runs (DESIGN §5 label_walks, §6 "that label's runs/routes incl.
     merge routes"), per arm (both, left first, when arm is None), in run id order: from_bp, to_bp and end (the
     engine's run, SPEC §7.1 runs[]; the end named as SPEC §7.5.6 names a label end), evidence_from (DESIGN §5.1,
-    re-derived, also for a zero-length run: PB4), merged_into (the merge that closed it, SPEC §7.5.2 R m),
-    walks_below (DESIGN §5's leaves below the run's anchor: reachable through children, SPEC §7.5.6) and route
-    (DESIGN §5 routes, re-derived). rank, min_direct_bp and at_bp do not apply (INVENTORY §2.9). Annotate: the
+    re-derived, also for a zero-length run: PB4), merged_into (the merge that closed it, SPEC §7.5.2 R m) and route
+    (DESIGN §5 routes, re-derived); walks_below is consistency-only (DESIGN names leaves_below without defining
+    it: VO-B3). rank, min_direct_bp and at_bp do not apply (INVENTORY §2.9). Annotate: the
     witness route of DESIGN §5.2.1, consistency-only."""
     lab = d.resolve(args["name"])
     side = d.arm(args.get("arm"), required=False)
@@ -1915,8 +1895,11 @@ def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
     ev, ecl, econ = _evidence(d, sides)
     base = {"name": d.labels[lab]["name"], "ref": d.labels[lab]["ref"]}
     c_base = {"/name": "the label named (" + C_LABEL + ")", "/ref": "the label named (" + C_LABEL + ")"}
+    # walks_below: DESIGN §5 gives only the name leaves_below; leaves reachable from the anchor and leaves whose
+    # displayed chain passes it differ (on 184 of 3,730 fixture runs), and no clause chooses (VO-B3, a DESIGN gap)
     cons = ["/rows/*/coordinates", "/rows/*/coordinates_total", "/rows/*/coordinates_truncated",
-            "/rows/*/coordinates_kind", "/rows/*/coordinates_lower_bound", "/next_cursor", "/coordinates"]
+            "/rows/*/coordinates_kind", "/rows/*/coordinates_lower_bound", "/next_cursor", "/coordinates",
+            "/rows/*/walks_below"]
     if not all(_constrain_runs(d, s) for s in sides):
         return _record(dict(base, evidence=ev), dict(ecl, **c_base), cons + econ + ["/total", "/rows"],
                        note="annotate: the witness route of DESIGN §5.2.1, consistency-only")
@@ -1931,7 +1914,6 @@ def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
             # a run, not a claim: DESIGN §5.1's formula, also for a zero-length run (the boundary-claim rule is the
             # claims'; finding PB4)
             row: dict = {"arm": s, "from_bp": run["from_bp"], "to_bp": run["to_bp"], "evidence_from": ef,
-                         "walks_below": d.leaves_below(s, run["segment"]),
                          "merged_into": _merged_into(d, s, run) if code == "m" else None}
             if "end_reason" in run and code not in ("Lw", "m"):
                 # SPEC §7.5.6: a label end's reason is the qualifier's text or the code's enum
@@ -1956,8 +1938,6 @@ def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
         "/rows/*/evidence_from": C_EVIDENCE + " (a run, not a claim: the formula also for a zero-length run, PB4)",
         "/rows/*/merged_into": "SPEC §7.5.2 R m and DESIGN §4: the merge segment created at to_bp with the run's "
                                "anchor among its parents; null when no merge closed the run",
-        "/rows/*/walks_below": "DESIGN §5 label_walks leaves_below: the leaves reachable from the run's anchor "
-                               "through children (SPEC §7.5.6)",
         "/rows/*/route": "DESIGN §5 routes (re-derived): root -> the run's anchor, at each merge the parent whose "
                          "partition (labels_via_parent, SPEC §7.1) holds the lineage's incoming label"})
     clauses.update(ecl)
