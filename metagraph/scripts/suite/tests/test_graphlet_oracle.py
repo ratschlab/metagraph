@@ -514,6 +514,18 @@ class SupportGoldens(unittest.TestCase):
             want = json.load(fh)["support_profile_displayed"]
         rows = O.answer("graphlet_support", {"arm": "right", "walk": 0}, f, mgt)["answer"]["rows"]
         self.assertEqual([[x["from_bp"], x["to_bp"], x["n_labels"]] for x in rows], [[a, b, len(c)] for a, b, c in want])
+        # which labels, not only how many (VO-B5): the per-base sets W5 derives, as refs, against the vector's
+        d = O._Doc(f, mgt)
+        sets = O._support_sets(d, "right", d.arms["right"]["paths"][0])
+        got = []
+        for b, cur in enumerate(sets):
+            refs = sorted(d.labels[x]["ref"] for x in cur)
+            if got and got[-1][2] == refs:
+                got[-1][1] = b + 1
+            else:
+                got.append([b, b + 1, refs])
+        self.assertEqual(got, [[a, b, sorted(c)] for a, b, c in want])
+        self.assertEqual([x["ref"] for x in rows[1]["joined"]], sorted(set(want[1][2]) - set(want[0][2])))
 
     def test_errors_and_annotate(self):
         self.assertEqual(rec("graphlet_support", {"arm": "right", "walk": 3}, "caps")["oracle"]["expected_error"],
