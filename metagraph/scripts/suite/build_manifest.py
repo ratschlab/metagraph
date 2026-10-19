@@ -37,7 +37,9 @@ MCP arm again.
 v8 (the owner's design of 2026-10-19, DESIGN-v8 / FORMAT-v8; not frozen) is v7's scenarios, unchanged and in v7's
 order, followed by area G (areas.gen_G, area_g.py): the graphlet processing tools run five ways on a corpus of
 graphlets, built from the corpus file the rehearsal writes (--corpus; provisional without one: the first candidate of
-every slot the MCP can express, preconditions pending) with the library pin --library-commit. The G block is appended
+every slot, preconditions pending) with the library pin --library-commit; the slots the MCP cannot express on staging
+(annotate, output.sequences false, trace with coordinates) are direct-only scenarios (W1, W2, W5; the owner's decision
+of 2026-10-19; --no-direct-only leaves them out). The G block is appended
 after every v7 layout step, so no v7 scenario moves and the deploy gate's warm repeats stay v7's; the relations are
 v7's. A v8 build is refused into manifest/ without --freeze (the owner freezes v8); `graphlets` (outside the content
 digest) states the corpus file, the pin and what the freeze still needs (pending). --rehearse G (rehearse_g.py) runs
@@ -156,7 +158,7 @@ def snapshot_digests(directory: str) -> dict:
 def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES,
           exposure_file: Optional[str] = DEFAULT_EXPOSURE, manifest_version: int = MANIFEST_VERSION,
           corpus_file: Optional[str] = None, library_commit: Optional[str] = None,
-          include_direct_only: bool = False) -> dict:
+          include_direct_only: bool = True) -> dict:
     if manifest_version not in BUILDABLE_VERSIONS:
         raise SystemExit("manifest version %r: this builder makes %s" % (
             manifest_version, " and ".join("v%d" % v for v in BUILDABLE_VERSIONS)))
@@ -269,8 +271,8 @@ def _corpus_identity(path: Optional[str], corpus: dict) -> dict:
     corpus."""
     if not path:
         return {"file": None, "provisional": True,
-                "rule": "no rehearsal yet: the first candidate of every slot the MCP can express, preconditions "
-                        "pending"}
+                "rule": "no rehearsal yet: the first candidate of every slot (direct-only ones by default), "
+                        "preconditions pending"}
     with open(path, "rb") as f:
         digest = hashlib.sha256(f.read()).hexdigest()
     rel = os.path.relpath(os.path.abspath(path), HERE)
@@ -896,8 +898,11 @@ def main(argv=None) -> int:
                          "exists, else the provisional corpus)")
     ap.add_argument("--library-commit", default=None,
                     help="v8: the library commit the manifest is frozen against (graphlet.library_commit)")
-    ap.add_argument("--include-direct-only", action="store_true",
-                    help="v8: build the area G slots the MCP cannot express as direct-only scenarios (W1, W2, W5)")
+    ap.add_argument("--include-direct-only", action="store_true", default=True,
+                    help="v8: the area G slots the MCP cannot express as direct-only scenarios (W1, W2, W5): the "
+                         "default (the owner, 2026-10-19)")
+    ap.add_argument("--no-direct-only", dest="include_direct_only", action="store_false",
+                    help="v8: leave the direct-only area G slots out")
     ap.add_argument("--freeze", action="store_true",
                     help="v8: allow the default outputs manifest/suite_v8.json / suite_smoke_v8.json (the owner's "
                          "freeze)")

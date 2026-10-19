@@ -102,10 +102,16 @@ REASON_COORDINATES = ("library-only argument: the service's graphlet_walks and g
 REASON_BUDGET = "library-only argument: the service's graphlet tools take no budget (INVENTORY §0)"
 REASON_EXPORT = ("library-only argument: the service's graphlet_export takes no path or other and offers no "
                  "what=compare (INVENTORY §0)")
-REASON_DIRECT_ONLY = ("the MCP cannot express this strategy on staging (service_settings.advanced_enabled false: "
-                      "traverse_fetch overrides set only bounds, direction, exhaustive, labels.max_labels_per_node and "
-                      "labels.seed_label_kind; traverse.not_expressible.*): a direct-only scenario, W1, W2 and W5 "
-                      "(the owner's decision pending)")
+# the owner's decision of 2026-10-19: annotate, output.sequences false and trace with coordinates are direct-only
+# scenarios (W1, W2, W5): staging's service runs without the advanced strategy path (service_settings.
+# advanced_enabled false: traverse_fetch overrides set only bounds, direction, exhaustive,
+# labels.max_labels_per_node and labels.seed_label_kind), so no MCP job can retrieve these graphlets
+REASON_DIRECT_ONLY = "not expressible via MCP on staging (advanced strategy path off)"
+# slots the owner moved to v9 (2026-10-19): two databases, and a body over 8 MiB (unreachable under the presets: the
+# rehearsal's trie candidates stopped at the preset's 1e8 work units with 305,290-byte bodies)
+V9_SLOTS = {"over_8mib": "v9 (the owner, 2026-10-19): a body over 8 MiB is unreachable under the presets (the "
+                         "rehearsal's trie candidates stopped at 1e8 work units, 305,290 bytes)",
+            "two_databases": "v9 (the owner, 2026-10-19)"}
 NOT_EXPOSED_TABLE = {
     "graphlet_support": OWNER_LIBRARY_ONLY, "graphlet_splits": OWNER_LIBRARY_ONLY,
     "graphlet_claims": OWNER_LIBRARY_ONLY, "graphlet_subtrie": OWNER_NOT_SERVED, "graphlet_save": OWNER_NOT_SERVED,
@@ -129,6 +135,7 @@ SLOTS = (
     ("failed_seed", "G-fail", "a failed seed (no graphlet: service no_graphlet)", False),
     ("long_walk", "G-long", "a walk with its seed over 16 kbp (sequence paging)", False),
     ("trace", "G-trace", "a trace retrieval (support trace, on_reconverge keep)", False),
+    ("coordinates", "G-coords", "a trace retrieval with record coordinates (direct-only)", False),
     ("annotate", "G-annot", "annotate mode", False),
     ("no_bases", "G-nobases", "output.sequences false (no_bases, compare unknown)", False),
     ("over_8mib", "G-big", "a body over 8 MiB (the service's in_service false; a by-design plan)", True),
@@ -315,11 +322,15 @@ def candidates(ctx: Any, built: List[dict]) -> List[dict]:
                          sid, "the trace preset at 100 bp (v7's 250 bp trace + coordinates took 1.7-4.6 s warm on "
                               "direct-local; the MCP cannot set output.coordinates)",
                          {"arms": ["left", "right"], "labels": 1}))
-    seed, t = src("T-coords-0002")
-    out.append(_cand("trace.3", "trace", seed, "trace", {"bounds": {"max_extension_bp": 100}}, t, "T-coords-0002",
-                     "trace + record coordinates (direct-only: output.coordinates is not expressible via MCP)",
-                     {"arms": ["left", "right"], "labels": 1, "coordinates": True},
-                     extra={"output": {"coordinates": True}}))
+    # trace with record coordinates (direct-only: output.coordinates is not expressible via MCP)
+    for i, sid in enumerate(("T-coords-0002", "T-coords-0003")):
+        seed, t = src(sid)
+        out.append(_cand("coordinates.%d" % (i + 1), "coordinates", seed, "trace",
+                         {"bounds": {"max_extension_bp": 100}}, t, sid,
+                         "trace + record coordinates at 100 bp (the rehearsal of 2026-10-19 ran the first as trace.3: "
+                         "every verdict passed on the direct arm)",
+                         {"arms": ["left", "right"], "labels": 1, "coordinates": True},
+                         extra={"output": {"coordinates": True}}))
     # annotate (direct-only)
     for i, (sid, ev, exp) in enumerate((
             ("T-labels-0001", "buc annotate: direct-local 1220 ms (warm); l w19 s31 sp12, r w13 s25 sp12; 23 labels",
@@ -906,7 +917,7 @@ def op_plan(sid: str, slot: str, facts: dict, rich: bool, pairs: Optional[List[T
             if o.get("probe") or o.get("by_design"):
                 continue   # W3's own behaviour: nothing to probe without an MCP job
             o["ways"] = [w for w in o.get("ways") or DIRECT_ONLY_WAYS if w in DIRECT_ONLY_WAYS]
-            o["not_exposed"] = {"W3": REASON_DIRECT_ONLY}
+            o["not_exposed"] = {"W3": REASON_DIRECT_ONLY, "W4": REASON_DIRECT_ONLY}
             kept.append(o)
         return kept
     return p.ops
@@ -971,8 +982,8 @@ def lane_of(o: dict) -> str:
 
 # ===================================================================================================== scenarios
 def default_corpus() -> dict:
-    """The provisional corpus (no rehearsal yet): the first candidate of every slot the MCP can express, conditional
-    slots out; preconditions pending."""
+    """The provisional corpus (no rehearsal yet): the first candidate of every slot (direct-only ones by default),
+    conditional and v9 slots out; preconditions pending."""
     return {"version": 1, "provisional": True, "slots": {}, "candidates": {}, "pairs": {}}
 
 
@@ -986,15 +997,19 @@ def load_corpus(path: Optional[str]) -> dict:
     return c
 
 
-def choose(cands: List[dict], corpus: dict, include_direct_only: bool = False) -> Dict[str, Optional[dict]]:
-    """{slot: the candidate chosen, or None}: the corpus's choice, else (provisional) the first candidate the MCP can
-    express (direct-only ones with |include_direct_only|), conditional slots none."""
+def choose(cands: List[dict], corpus: dict, include_direct_only: bool = True) -> Dict[str, Optional[dict]]:
+    """{slot: the candidate chosen, or None}: the corpus's choice, else (provisional) the first candidate of the slot
+    (a direct-only one unless |include_direct_only| is false: the owner's decision of 2026-10-19 makes them v8's),
+    conditional and v9 slots none."""
     by_slot: Dict[str, List[dict]] = {}
     for c in cands:
         by_slot.setdefault(c["slot"], []).append(c)
     out: Dict[str, Optional[dict]] = {}
     for slot, _stem, _title, conditional in SLOTS:
         pick = None
+        if slot in V9_SLOTS:
+            out[slot] = None
+            continue
         stated = (corpus.get("slots") or {}).get(slot)
         if isinstance(stated, dict) and "candidate" in stated:
             pick = next((c for c in by_slot.get(slot, []) if c["cid"] == stated["candidate"]), None)
@@ -1070,7 +1085,7 @@ def g_scenario(sid: str, title: str, c: dict, corpus: dict, library_commit: Opti
 
 
 def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,
-          include_direct_only: bool = False) -> List[dict]:
+          include_direct_only: bool = True) -> List[dict]:
     """The area G scenarios (module docstring): one per corpus slot, then the compare partners; ids G-<stem>-0001.
     |built| the scenarios built so far (v7's), whose T seeds the candidates reuse."""
     corpus = corpus if corpus is not None else default_corpus()
@@ -1081,9 +1096,9 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
     present = dict((slot, c) for slot, c in picks.items() if c is not None)
     for slot, c in picks.items():
         if c is None:
-            ctx.skip(AREA, ids[slot], "slot %s: %s" % (slot, ((corpus.get("slots") or {}).get(slot) or {}).get(
-                "why") or ("conditional on the rehearsal" if dict((s[0], s[3]) for s in SLOTS)[slot]
-                           else "no candidate the MCP can express (direct-only: the owner's decision pending)")))
+            ctx.skip(AREA, ids[slot], "slot %s: %s" % (slot, V9_SLOTS.get(slot) or ((corpus.get("slots") or {}).get(
+                slot) or {}).get("why") or ("conditional on the rehearsal" if dict((s[0], s[3]) for s in SLOTS)[slot]
+                                            else "direct-only, left out (--no-direct-only)")))
     # the pairs: partner scenarios (built from the slot's candidate) and where the compare ops go
     pair_specs = pair_plan(present, ids, corpus)
     extras = corpus_extras(present, ids, pair_specs)

@@ -83,7 +83,8 @@ class Candidates(unittest.TestCase):
     def test_direct_only_candidates_are_the_inexpressible_strategies(self):
         cands = area_g.candidates(FakeCtx(), v7_scenarios())
         direct = sorted(c["cid"] for c in cands if not area_g.expressible(c))
-        self.assertEqual(direct, ["annotate.1", "annotate.2", "no_bases.1", "no_bases.2", "trace.3"])
+        self.assertEqual(direct, ["annotate.1", "annotate.2", "coordinates.1", "coordinates.2", "no_bases.1",
+                                  "no_bases.2"])
         for c in cands:
             if area_g.expressible(c):
                 req = {"seeds": [c["seed"]], "strategy": area_g.candidate_strategy(c)}
@@ -110,26 +111,35 @@ class Scenarios(unittest.TestCase):
         ids = [s["id"] for s in g]
         self.assertEqual(ids, ["G-arms2-0001", "G-pair-radius-0001", "G-pair-seeds-0001", "G-merge-0001",
                                "G-pair-cap-0001", "G-arm1-0001", "G-cut-0001", "G-stop-0001", "G-depth0-0001",
-                               "G-linear-0001", "G-fail-0001", "G-trace-0001"])
+                               "G-linear-0001", "G-fail-0001", "G-trace-0001", "G-coords-0001", "G-annot-0001",
+                               "G-nobases-0001"])
         skipped = dict((x["scenario"], x["reason"]) for x in ctx.skipped)
-        for sid in ("G-annot-0001", "G-nobases-0001", "G-big-0001", "G-twodb-0001", "G-long-0001"):
+        for sid in ("G-big-0001", "G-twodb-0001", "G-long-0001"):
             self.assertIn(sid, skipped)
+        self.assertTrue(skipped["G-big-0001"].startswith("slot over_8mib: v9"))
         problems, pending = area_g.validate_g(g, set())
         self.assertEqual(problems, [])
         self.assertTrue(any("preconditions" in p for p in pending))
         self.assertTrue(any("library_commit" in p for p in pending))
         self.assertTrue(any(area_g.SERVICE_CAP_CASE in p for p in pending))
+        direct = ("G-coords-0001", "G-annot-0001", "G-nobases-0001")
         for s in g:
             st = s["request"]["strategy"]
-            self.assertEqual(st["output"], {"detail": "graphlet", "timing": True}, s["id"])
+            if s["id"] not in direct:
+                self.assertEqual(st["output"], {"detail": "graphlet", "timing": True}, s["id"])
+            self.assertEqual(st["output"]["detail"], "graphlet")
             self.assertEqual(len(s["request"]["seeds"]), 1)
             twin = copy.deepcopy(st)
             twin["output"]["detail"] = "full"
             del twin["bounds"]["max_memory_mb"]     # F-D4: the twin without the memory budget
             self.assertEqual(s["graphlet"]["twin"]["strategy"], twin)
             self.assertEqual(st["bounds"]["max_memory_mb"], 512)
-            self.assertEqual(s["mcp"]["tool"], "traverse_fetch")
-            self.assertEqual(s["graphlet"]["ways"]["default"], area_g.ALL_WAYS)
+            if s["id"] in direct:
+                self.assertIn("not_implemented", s["mcp"])
+                self.assertEqual(s["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
+            else:
+                self.assertEqual(s["mcp"]["tool"], "traverse_fetch")
+                self.assertEqual(s["graphlet"]["ways"]["default"], area_g.ALL_WAYS)
             self.assertEqual(s["area"], "G")
             if s["id"] != "G-fail-0001":
                 self.assertIn("rehearsal-pending", s["tags"])
@@ -156,7 +166,12 @@ class Scenarios(unittest.TestCase):
             for o in s["graphlet"]["ops"]:
                 self.assertNotIn("W3", o.get("ways") or [], (sid, o["id"]))
                 self.assertNotIn("W4", o.get("ways") or [], (sid, o["id"]))
-                self.assertEqual(o["not_exposed"]["W3"], area_g.REASON_DIRECT_ONLY)
+                self.assertEqual(o["not_exposed"], {"W3": area_g.REASON_DIRECT_ONLY, "W4": area_g.REASON_DIRECT_ONLY})
+        self.assertEqual(area_g.REASON_DIRECT_ONLY, "not expressible via MCP on staging (advanced strategy path off)")
+        coords = by_id["G-coords-0001"]
+        self.assertTrue(coords["request"]["strategy"]["output"]["coordinates"])
+        self.assertEqual(coords["request"]["strategy"]["support"], "trace")
+        self.assertIn("labels-name-coords", [o["id"] for o in coords["graphlet"]["ops"]])
         self.assertEqual(area_g.validate_g(g, set())[0], [])
         nob = by_id["G-nobases-0001"]
         self.assertFalse(nob["request"]["strategy"]["output"]["sequences"])
@@ -212,7 +227,7 @@ class Scenarios(unittest.TestCase):
                 if o["tool"] in area_g.LIBRARY_TOOL_ARGS:
                     self.assertNotIn("W3", ways)
                     self.assertIn(o["not_exposed"]["W3"], (area_g.OWNER_LIBRARY_ONLY, area_g.OWNER_NOT_SERVED,
-                                                           area_g.OWNER_SMOKE))
+                                                           area_g.OWNER_SMOKE, area_g.REASON_DIRECT_ONLY))
                 if "W3" in ways and not o.get("probe"):
                     self.assertEqual(set(o["args"]) - {"cursor"}, set(area_g.SERVICE_ARGS[o["tool"]]),
                                      (s["id"], o["id"]))
@@ -257,12 +272,13 @@ class CorpusFile(unittest.TestCase):
         self.assertNotIn("rehearsal-pending", s["tags"])
 
     def test_a_direct_only_choice_waits_for_the_owner(self):
+        # the owner's decision of 2026-10-19: direct-only slots are v8's by default; --no-direct-only leaves them out
         c = self.corpus()
         c["slots"]["annotate"] = {"candidate": "annotate.1", "why": "passed"}
         ids = [s["id"] for s in area_g.gen_G(FakeCtx(), v7_scenarios(), c, None)]
-        self.assertNotIn("G-annot-0001", ids)
-        ids = [s["id"] for s in area_g.gen_G(FakeCtx(), v7_scenarios(), c, None, include_direct_only=True)]
         self.assertIn("G-annot-0001", ids)
+        ids = [s["id"] for s in area_g.gen_G(FakeCtx(), v7_scenarios(), c, None, include_direct_only=False)]
+        self.assertNotIn("G-annot-0001", ids)
 
     def test_an_echo_that_differs_is_refused(self):
         c = self.corpus(**{"two_arms.2": {"strategy": {"bounds": {}}}})
