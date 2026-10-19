@@ -8,7 +8,9 @@ report.pdf via pandoc + xelatex (DESIGN §6).
 what the re-evaluation judged with and every execution whose outcome or checks it changed.
 
 Sections: verdict and environment (with the load caveat), outcomes per area and arm, every failure with its
-expectation and the observed value, agreement of the direct arms and of the MCP arm, timing per area and arm
+expectation and the observed value, agreement of the direct arms and of the MCP arm, chapter G (manifest v8's
+graphlet tools compared five ways: per tool, disagreements, pre-checks, service checks, correctness coverage; only
+for a manifest with graphlet scenarios), timing per area and arm
 (p50 / p90 / max; cold vs warm), overheads (front; MCP phases), resource use per area, and with --compare the
 deltas against the earlier run. Tables are plain pipe tables with ASCII-safe cells. compare.json is computed
 when missing (compare.py).
@@ -1354,6 +1356,220 @@ def relations_section(comp):
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# chapter G: the graphlet tools compared five ways (manifest v8; compare_graphlets.py, graphlet_service_checks.py)
+
+GRAPHLET_WAYS = (("W1", "dl+lib: direct-local's graphlet, the library at the deployed commit"),
+                 ("W2", "dr+lib: direct-remote's graphlet, the same library"),
+                 ("W3", "mcp: the service's graphlet tools (its vendored library)"),
+                 ("W4", "mcp+lib: the MCP's export, the library at the same commit"),
+                 ("W5", "oracle: the suite's own reading of the full twin and the MGT tokens, no library"))
+GRAPHLET_PRECHECKS = ("body", "envelope", "twin", "strategy", "preconditions", "library_commit")
+
+
+def graphlet_data(run_dir, manifest):
+    """The run's graphlet comparison (compare_graphlets.load_or_compute) when its manifest has graphlet scenarios
+    (area G), else None: a run of v4..v7 has no chapter G and its report is unchanged."""
+    import graphlet_precheck as gp
+    if not gp.graphlet_scenarios(manifest if isinstance(manifest, dict) else {}):
+        return None
+    import compare_graphlets as cg
+    try:
+        return cg.load_or_compute(run_dir, manifest)
+    except Exception as e:   # the chapter says so; the rest of the report stands
+        return {"error": "%s: %s" % (type(e).__name__, e)}
+
+
+def graphlet_verdict(g):
+    """(word, reason) of area G: FAIL (a scenario failed: a pre-check or a disagreement; a required service check
+    failed), INCONCLUSIVE (a scenario inconclusive or precondition_failed, a required service check not passed), PASS;
+    ERROR when the comparison could not be computed."""
+    if g.get("error"):
+        return "ERROR", "the graphlet comparison could not be computed: %s" % g["error"]
+    s = g.get("summary") or {}
+    sc_ = s.get("scenarios") or {}
+    ops = s.get("ops") or {}
+    req = set(g.get("required_service_checks") or [])
+    checks = [c for c in g.get("service_checks") or [] if c.get("check") in req]
+    failed = [c["check"] for c in checks if c.get("outcome") == "fail"]
+    open_ = [c["check"] for c in checks if c.get("outcome") != "pass" and c["check"] not in failed]
+    reason = "%d scenario(s): %s; op calls: %s%s" % (
+        sum(sc_.values()), ", ".join("%d %s" % (sc_.get(k, 0), k.replace("_", " ")) for k in
+                                     ("pass", "fail", "precondition_failed", "inconclusive") if sc_.get(k)) or "none",
+        ", ".join("%d %s" % (ops.get(k, 0), k.replace("_", " ")) for k in
+                  ("agree", "disagree", "service_by_design", "inconclusive", "precondition_failed") if ops.get(k))
+        or "none", ("; service checks failed: %s" % ", ".join(failed)) if failed else
+        (("; service checks not passed: %s" % ", ".join(open_)) if open_ else ""))
+    if sc_.get("fail") or failed:
+        return "FAIL", reason
+    if sc_.get("inconclusive") or sc_.get("precondition_failed") or open_:
+        return "INCONCLUSIVE", reason
+    if not sum(sc_.values()):
+        return "EMPTY", reason
+    return "PASS", reason
+
+
+def graphlet_headline(g):
+    word, reason = graphlet_verdict(g)
+    return "**Area G (graphlet tools, five ways): %s** (%s; chapter G)." % (md(word), md(reason))
+
+
+def _ways_text(per_way):
+    return ", ".join("%s %d" % (w, per_way[w]) for w in ("W1", "W2", "W3", "W4", "W5") if per_way.get(w)) or "-"
+
+
+def graphlet_section(g, max_items=200):
+    """Chapter G: per tool its calls, ways and outcomes; every disagreement with both answers compactly; the
+    pre-checks; the service checks; the correctness coverage (W5's checked fields against the consistency-only
+    ones); the by-design pairs, the drift lane and what the comparison noted."""
+    out = ["# G. Graphlet tools, compared five ways", ""]
+    if g.get("error"):
+        out.append("The graphlet comparison could not be computed: %s\n" % md(g["error"], 300))
+        return "\n".join(out)
+    out.append(graphlet_headline(g))
+    out.append("")
+    out.append("The ways: %s. Pairs: W1-W2 isolates the transport, W1-W4 the fetch path, W3-W4 the service's wrapper, "
+               "each against W5 the library against an independent reading (on W5's checked fields only). Answers "
+               "are compared whole, after the service's own fields are stripped, handles mapped to symbols and "
+               "cursors removed; errors by code and structured fields." % "; ".join(
+                   "%s %s" % (w, md(t)) for w, t in GRAPHLET_WAYS))
+    out.append("")
+    scen = g.get("scenarios") or {}
+    # G.1 per tool
+    per_tool, per_way = {}, {}
+    for sid, sv in scen.items():
+        for oid, e in (sv.get("ops") or {}).items():
+            t = per_way.setdefault(e.get("tool"), {})
+            for w, st in (e.get("ways") or {}).items():
+                if st in ("answered", "error", "selector_error"):
+                    t[w] = t.get(w, 0) + 1
+    pt = (g.get("summary") or {}).get("per_tool") or {}
+    rows = []
+    for tool in sorted(pt):
+        c = pt[tool]
+        rows.append([md(tool), str(c.get("calls", 0)), md(_ways_text(per_way.get(tool) or {})), str(c.get("agree", 0)),
+                     str(c.get("disagree", 0)), str(c.get("service_by_design", 0)), str(c.get("not_exposed", 0)),
+                     str(c.get("inconclusive", 0)), str(c.get("precondition_failed", 0)),
+                     str(c.get("smoke", 0))])
+    out.append("## G.1 Per tool\n")
+    out.append(table(["tool", "calls", "records per way", "agree", "disagree", "by design", "W3 not exposed",
+                      "inconclusive", "precondition failed", "smoke"], rows,
+                     align=["l", "r", "l", "r", "r", "r", "r", "r", "r", "r"]))
+    # G.2 disagreements
+    out.append("## G.2 Disagreements\n")
+    dis = [(sid, oid, e) for sid, sv in sorted(scen.items()) for oid, e in sorted((sv.get("ops") or {}).items())
+           if e.get("outcome") == "disagree"]
+    if not dis:
+        out.append("None.\n")
+    for sid, oid, e in dis[:max_items]:
+        out.append("- %s %s (%s): %s" % (md(sid), md(oid), md(e.get("tool")), md(", ".join(e.get("disagreeing")
+                                                                                      or []))))
+        for p in e.get("pairs") or []:
+            if p.get("outcome") != "disagree":
+                continue
+            a, _, b = p.get("pair", "-").partition("-")
+            out.append("    - %s (%s)%s%s" % (md(p.get("pair")), md(p.get("what")),
+                                             (": %s" % md(p.get("detail"), 200)) if p.get("detail") else "",
+                                             (" at %s: %s %s, %s %s" % (md(p["pointer"]), md(a), md(p.get(a), 100),
+                                                                        md(b), md(p.get(b), 100)))
+                                             if p.get("pointer") else ""))
+            for w in (a, b):
+                ans = (p.get("answers") or {}).get(w)
+                if ans:
+                    out.append("        - %s: %s" % (md(w), md(ans, 240)))
+        for c in e.get("cuts") or []:
+            if c.get("outcome") == "disagree":
+                out.append("    - %s-uncut: %s%s" % (md(c["way"]), md(c.get("detail"), 200),
+                                                    (" at %s" % md(c["pointer"])) if c.get("pointer") else ""))
+        for r in e.get("by_design") or []:
+            if not r.get("verified"):
+                out.append("    - by-design %s, %s side: %s" % (md(r.get("case")), md(r.get("side")),
+                                                                md(r.get("detail"), 240)))
+        if e.get("probe"):
+            out.append("    - probe %s: %s" % (md(e["probe"]), md(e.get("reason"), 200)))
+    if len(dis) > max_items:
+        out.append("- ... %d more (graphlet_compare.json)" % (len(dis) - max_items))
+    out.append("")
+    other = [(sid, oid, e) for sid, sv in sorted(scen.items()) for oid, e in sorted((sv.get("ops") or {}).items())
+             if e.get("outcome") in ("inconclusive", "precondition_failed")]
+    if other:
+        out.append("Inconclusive and precondition_failed op calls (each blocks the gate):\n")
+        for sid, oid, e in other[:max_items]:
+            out.append("- %s %s (%s): %s: %s" % (md(sid), md(oid), md(e.get("tool")), md(e.get("outcome")),
+                                                 md(e.get("reason"), 240)))
+        out.append("")
+    # G.3 pre-checks
+    out.append("## G.3 Pre-checks\n")
+    prow, pfail = [], []
+    for sid, sv in sorted(scen.items()):
+        pre = sv.get("precheck") or {}
+        prow.append([md(sid)] + [md((pre.get(k) or {}).get("outcome") or "-") for k in GRAPHLET_PRECHECKS]
+                    + [md(pre.get("outcome") or "-") + (" (%s)" % md(pre["finding"]) if pre.get("finding") else "")])
+        pfail.extend((sid, k, pre.get(k)) for k in GRAPHLET_PRECHECKS
+                     if (pre.get(k) or {}).get("outcome") not in ("pass", "not_exposed"))
+    out.append(table(["scenario"] + list(GRAPHLET_PRECHECKS) + ["scenario outcome"], prow,
+                     align=["l"] * (len(GRAPHLET_PRECHECKS) + 2)))
+    for sid, k, c in pfail[:max_items]:
+        out.append("- %s %s %s: %s" % (md(sid), md(k), md((c or {}).get("outcome")), md((c or {}).get("detail"), 300)))
+    if pfail:
+        out.append("")
+    # G.4 service checks
+    out.append("## G.4 The service's own behaviour (positive checks)\n")
+    req = set(g.get("required_service_checks") or [])
+    srow = [[md(c.get("check")), md(c.get("outcome")), str(c.get("calls", 0)), "yes" if c.get("check") in req else "no",
+             md(c.get("detail"), 200)] for c in g.get("service_checks") or []]
+    out.append(table(["check", "outcome", "calls", "required", "detail"], srow, align=["l", "l", "r", "l", "l"]))
+    # G.5 coverage
+    out.append("## G.5 Correctness coverage (W5)\n")
+    cov = g.get("coverage") or {}
+    out.append("W1 = W2 = W3 = W4 is consistency; W5 is the only correctness check. Per tool, the fields W5 checks, "
+               "with the SPEC / DESIGN clause each rests on, and the fields it leaves to consistency (list indices "
+               "written *).\n")
+    crow = []
+    for tool in sorted(cov):
+        for ptr, c in sorted((cov[tool].get("checked") or {}).items()):
+            crow.append([md(tool), md(ptr), "checked", md("; ".join(c.get("clauses") or [c.get("clause")]), 120),
+                         str(c.get("calls", 0))])
+        for ptr, n in sorted((cov[tool].get("consistency_only") or {}).items()):
+            crow.append([md(tool), md(ptr), "consistency only", "-", str(n)])
+    out.append(table(["tool", "field", "W5", "clause", "calls"], crow, align=["l", "l", "l", "l", "r"]))
+    no_w5 = sorted(t for t in pt if t not in cov)
+    if no_w5:
+        out.append("Tools W5 does not read in this run (consistency only): %s.\n" % md(", ".join(no_w5)))
+    # G.6 by design, drift, notes
+    bd = [(sid, oid, r) for sid, sv in sorted(scen.items()) for oid, e in sorted((sv.get("ops") or {}).items())
+          for r in e.get("by_design") or []]
+    if bd:
+        out.append("## G.6 Declared per-way differences (by-design pairs)\n")
+        out.append(table(["scenario", "op", "case", "verified", "detail"],
+                         [[md(sid), md(oid), md(r.get("case")), "yes" if r.get("verified") else "no (%s)" % md(
+                             r.get("side")), md(r.get("detail"), 200)] for sid, oid, r in bd[:max_items]],
+                         align=["l"] * 5))
+    d = g.get("drift") or {}
+    if d.get("calls"):
+        out.append("## G.7 Drift lane (report-only)\n")
+        out.append("%d call(s) of the branch head's library, %d compared with W4, %d differ.\n" % (
+            d.get("calls", 0), d.get("compared", 0), len(d.get("differ") or [])))
+        for x in (d.get("differ") or [])[:max_items]:
+            out.append("- %s %s (%s) at %s: W4 %s, drift %s" % (md(x.get("scenario")), md(x.get("op")),
+                                                                md(x.get("tool")), md(x.get("pointer")),
+                                                                md(x.get("W4"), 100), md(x.get("drift"), 100)))
+        out.append("")
+    notes = []
+    gaps = (g.get("summary") or {}).get("whitelist_gaps") or {}
+    if gaps:
+        notes.append("keys the library ways answer outside the frozen table (compare_graphlets.ANSWER_KEYS): %s" %
+                     "; ".join("%s: %s" % (t, ", ".join(k)) for t, k in sorted(gaps.items())))
+    if (g.get("summary") or {}).get("unplanned_records"):
+        notes.append("%d record(s) of op calls the manifest does not plan" % g["summary"]["unplanned_records"])
+    notes.extend(g.get("warnings") or [])
+    if notes:
+        out.append("Notes:\n")
+        out.extend("- %s" % md(n, 300) for n in notes)
+        out.append("")
+    return "\n".join(out)
+
+
 def timing_section(comp):
     s = comp["summary"]
     out = ["# Timing", "",
@@ -1684,6 +1900,9 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(gate_text)
     parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest,
                                  report_cases(comp, run_dir), gated=bool(gate_text)))
+    graphlets = graphlet_data(run_dir, manifest)
+    if graphlets is not None:
+        parts.append(graphlet_headline(graphlets) + "\n")
     if reevaluated:
         parts.append(reevaluation_section(run_dir, max_failures, run))
     parts.append(environment_section(run, comp, rows, samples))
@@ -1692,6 +1911,8 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(findings_section(rows, manifest, max_failures))
     parts.append(agreement_section(comp, depth, sum(1 for k in missing[0] if k[1] == "mcp"), manifest, rows))
     parts.append(relations_section(comp))
+    if graphlets is not None:
+        parts.append(graphlet_section(graphlets, max_failures))
     parts.append(timing_section(comp))
     again = reruns_section(run)
     if again:

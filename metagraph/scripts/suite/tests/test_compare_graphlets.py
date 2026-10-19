@@ -514,6 +514,7 @@ class FiveWay(unittest.TestCase):
         res = self.result()
         self.assertEqual(res["drift"]["compared"], 1)
         self.assertEqual(res["drift"]["differ"][0]["pointer"], "/answer/total")
+        self.assertEqual((res["drift"]["differ"][0]["W4"], res["drift"]["differ"][0]["drift"]), ("2", "9"))
         self.assertEqual(res["scenarios"][SID]["outcome"], "pass")   # report-only
 
     def test_compute_writes_and_load_or_compute_recomputes_when_stale(self):

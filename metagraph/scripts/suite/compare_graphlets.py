@@ -554,7 +554,7 @@ def drift(recs):
         if r4 is None:
             continue
         out["compared"] += 1
-        d = gp.first_difference(comparable_view("drift", rd), comparable_view("W4", r4))
+        d = gp.first_difference(comparable_view("W4", r4), comparable_view("drift", rd))
         if d:
             out["differ"].append({"scenario": key[0], "op": key[1], "tool": rd.get("tool"), "pointer": d[0] or "/",
                                   "W4": gp.compact(d[1]), "drift": gp.compact(d[2]),

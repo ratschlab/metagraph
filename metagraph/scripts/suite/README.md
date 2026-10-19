@@ -4796,6 +4796,67 @@ block's strands ("either" / "context") are other fields.
   new rule's test fails on the code before it. manifest/suite_v6.json recomputes to 49907dbb...; every manifest,
   declared file and policy of v1-v6 and service_by_design.json are byte-identical to 48e04d825's.
 
+## Manifest v8, area G: pre-checks, the five-way compare, service checks, gate and report (lane C, 2026-10-19)
+
+Design: `~/.cache/metagraph-traverse-plans/2026-10-19/v8/DESIGN-v8.md` (approved), the records: FORMAT-v8.md §3-§5.
+The graphlet tools are compared five ways per op call: W1 `dl+lib` (direct-local's graphlet, the library at the
+deployed commit), W2 `dr+lib` (direct-remote's), W3 `mcp` (the service's tools), W4 `mcp+lib` (the MCP's export, the
+library), W5 `oracle` (the suite's own reading, no library). Records: `arms/<way dir>/graphlet_ops.jsonl` with the way
+directories dl-lib, dr-lib, mcp (W3 in the MCP arm's directory), mcp-lib, oracle, drift-lib; `merge_run.arm_dirs`
+leaves those (and `precheck`) out, so the arms' identity checks never read them as arms.
+
+### Files
+- `graphlet_precheck.py RUN_DIR`: per graphlet scenario (a `graphlet` block) the six pre-checks into
+  `arms/precheck/graphlet_prechecks.jsonl`: body (W1/W2/W4's body digests one, else the pair and the first differing
+  record of the kept documents, H's seed_index masked, J and Z out), envelope (the J lines without the per-request
+  values, graphlet_doc.envelope_view; a kept document without J fails), twin (checks.graphlet_arms of W1's document
+  against the `detail: full` twin's arms, segments, paths, lengths and end reasons), strategy (the MCP echo
+  traverse_status.overrides against request.strategy, the twin's against it with output.detail full), preconditions
+  (arms, walks_min, segments_min, merges_min, labels_present, walk_bp_min, bases on W1's document:
+  precondition_failed) and library_commit (every W3 call against the deployed one and the manifest's pin). A failed
+  body, envelope or twin check fails the scenario as a determinism finding; what cannot be checked is inconclusive.
+  The digests are graphlet_doc's (lane L); the record-level reading that names a difference is this module's.
+- `compare_graphlets.py RUN_DIR`: `graphlet_compare.json` (and the pre-check records). Per op call: the ways (W3
+  left out is `not_exposed` with the owner's reason: the op's not_exposed.W3, else graphlet.not_exposed or the
+  manifest's graphlets.not_exposed by tool or tool.argument; without a reason a manifest problem), args_resolved
+  equal first, then the canonical answers by pairs W1-W2 (transport), W1-W4 (fetch path), W3-W4 (service wrapper) and
+  each against W5 on its checked pointers. Canonical: W3's service fields stripped by `ANSWER_KEYS` (the library's
+  per-tool answer keys, frozen here and held to the library's answers on the mini_refseq fixtures by
+  tests/test_compare_graphlets.py), handles to symbols (graphlet_compare's a and b by role, at the top only), cursors
+  removed, `local` compared only within one commit, interpreter and work model, an export's path and bytes left out;
+  errors by code and structured fields (no message, hint; no result_too_large bytes). A deliberate cut (op field
+  `cut_of`: the uncut op) is judged per way against that way's uncut answer: every string or list a prefix, every
+  key it lacks optional (OPTIONAL_KEYS or named in its fields_cut / cut_fields), every key it adds a cut marker.
+  Outcomes per op: agree, disagree (naming the pairs), service_by_design, inconclusive, precondition_failed; the
+  scenario fails on a failed pre-check or a disagreement. graphlet_list / graphlet_free are a smoke outside the
+  counts; the drift lane is compared with W4, report-only; W5's checked and consistency-only pointers give the
+  coverage table. `load_or_compute` recomputes a comparison whose inputs (manifest, records) changed.
+- `graphlet_service_checks.py`: two stages of the comparison. The positive service checks of DESIGN-v8 §5:
+  walk_display, label_evidence, qualified_cause (each side's cap stated, "no difference within the recorded
+  evidence" exactly when the library counts none), hint (more than 64 labels per node), in_service (over 8 MiB),
+  max_bytes_refused (262,145 refused on W3, answered by the library ways), forbidden and bad_handle (op field `probe`:
+  wrong_token / malformed_handle, W3 only), library_commit; each pass, fail naming the calls, or inconclusive (not
+  exercised). And by-design pairs: an op naming a case (`by_design`) whose `graphlet` block (compare.
+  graphlet_case_problems validates it at load: tools, path predicates over args_resolved, library and service
+  sides) holds is service_by_design; a pair that does not hold is a disagreement naming its side.
+- gate: a manifest whose selection holds graphlet scenarios gives the policy a `graphlets` block (every applicable
+  way of every op call, the pre-checks, the service checks the op plan exercises, the library_commit pin; declared
+  `graphlet_not_required` op calls with their reasons); `gate.py` judges it (kind graphlet; missing ways as
+  missing) and checks the deployed library's identity like the service's (`--expect-library-commit SHA`, the
+  library_commit the MCP runner reads per invocation, and the pin). Without the block and the flag nothing is judged or
+  stated: v4..v7 verdicts and policies are unchanged.
+- report: chapter G (per tool, disagreements with both answers compactly, pre-checks, service checks, correctness
+  coverage, by-design pairs, drift lane) and a headline beside the verdict, only for a manifest with graphlet
+  scenarios.
+
+### Validation (offline; the main tree's v7 baseline only read)
+- The v7 baseline re-judged with this lane's gate.py (policy_v7_rtp_mcp.json, --expect-service-commit 26a52cb6...):
+  GATE PASS, 2,073 judged / 1,955 passed, the verdict's text and JSON identical to the code before (judged_utc
+  aside); its report built in-process identical (the date and generation time aside); the run directory unchanged
+  (file list and mtimes). policy_v6_rtp_mcp, policy_v7_rt_mcp and policy_v7_rtp_mcp regenerate identical.
+- Where FORMAT-v8 leaves a place open (the kept documents, the twin, the echo, the pin, probes, cut_of, by_design,
+  export contents), the lane's reading is listed as a FORMAT question in its note.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
