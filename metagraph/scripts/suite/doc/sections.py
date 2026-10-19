@@ -786,13 +786,22 @@ def gate_auto_text(run):
                              facts._ids_short(answer), "its" if len(answer) == 1 else "their",
                              "" if len(answer) == 1 else "s", "s" if len(answer) == 1 else ""))
             continue
-        parts.append("%d %s on %s%s" % (k["n"], w[0] if k["n"] == 1 else w[1], " and ".join(arms) or "every access "
-                                        "path", (" (repeat%s %s only)" % ("" if len(k["repeats"]) == 1 else "s",
-                                                                         ", ".join(str(r) for r in
-                                                                                   sorted(k["repeats"]))))
-                     if k["repeats"] else ""))
+        parts.append("%d %s%s on %s%s" % (
+            k["n"], w[0] if k["n"] == 1 else w[1],
+            # the term glossed where a reader of I.1 first meets it (the reader review of the v7 document, RV9)
+            " (a test whose outcome depends on the host's load: excluded from the gate by rule, its outcome still "
+            "reported)" if kind == "budget" and k["n"] == 1 else
+            " (tests whose outcome depends on the host's load: excluded from the gate by rule, their outcomes still "
+            "reported)" if kind == "budget" else "",
+            " and ".join(arms) or "every access path",
+            (" (repeat%s %s only)" % ("" if len(k["repeats"]) == 1 else "s", ", ".join(str(r) for r in
+                                                                         sorted(k["repeats"]))))
+            if k["repeats"] else ""))
     n = len(pop["auto"])
-    return "%d entr%s%s" % (n, "y" if n == 1 else "ies", (": " + facts._join(parts)) if parts else "")
+    return "%d entr%s%s%s" % (n, "y" if n == 1 else "ies", (", each one test left out on the access paths its rule "
+                                                           "names" if n > 1 else ", one test left out on the access "
+                                                           "paths its rule names") if n else "",
+                              (": " + facts._join(parts)) if parts else "")
 
 
 def gate_required_text(run):
@@ -3412,6 +3421,10 @@ def attention_table(ctx):
     prop_text = ("; of the not implemented via MCP, by a property-level mark alone (the MCP access path not standing "
                  "\\gni, the cell carrying the mark): %s" % "; ".join(prop)) if prop else ""
     if totals.get("time_budget"):
+        # the kind glossed where a reader of I.1 first meets it in red (RV9)
+        prop_text += ("; time-budget issues: tests with an execution that hit or stated a time budget, or whose wall "
+                      "printed above %s; they include intended stops and slow passes (appendix F)" % esc(
+                          fmt_t(cells.TIME_TINT_RED_MS)))
         # the chapters whose time-budget counts include executions in the host's memory episodes (RV1)
         mem = memory_summary(ctx)
         chs = []

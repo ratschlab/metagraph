@@ -69,14 +69,17 @@ class GatePopulationTest(unittest.TestCase):
         self.assertEqual(pop["required"], [("direct-local", 3, 3), ("mcp", 2, 2)])
         self.assertEqual(len(pop["auto"]), 3, "the owner's declared entry is not an automatic exclusion")
         self.assertEqual(sections.gate_auto_text(run),
-                         "3 entries: 1 budget-stress test on direct-local and mcp, 1 request the MCP tools cannot "
+                         "3 entries, each one test left out on the access paths its rule names: 1 "
+                         "budget-stress test (a test whose outcome depends on the host's load: excluded from the gate "
+                         "by rule, its outcome still reported) on direct-local and mcp, 1 request the MCP tools cannot "
                          "express on mcp and 1 repeat whose property checks the marks all set aside on mcp (repeat 0 "
                          "only)")
         self.assertEqual(sections.gate_required_text(run),
                          "3 scenarios (3 executions) on direct-local and 2 scenarios (2 executions) on mcp")
         text = sections.gate_population_text(run)
         self.assertIn("Required means selected by route (the scenarios of POST /traverse (4 of the run's 5)", text)
-        self.assertIn("no decision of the owner (3 entries: ", text)
+        self.assertIn("no decision of the owner (3 entries, each one test left out on the access paths its rule "
+                      "names: ", text)
         self.assertIn("not declared exempt by the owner (1 exclusion; I.4, appendix G)", text)
         self.assertIn("5 executions in all. The gate certifies those executions, not the excluded ones", text)
         decision = sections.gate_decision_text(run)
