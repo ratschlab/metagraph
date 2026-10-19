@@ -76,6 +76,10 @@ PRECHECK_DIR = "precheck"
 PRECHECK_FILE = "graphlet_prechecks.jsonl"
 JOBS_FILE = "graphlet_jobs.jsonl"
 CHECKS = ("body", "envelope", "twin", "strategy", "preconditions", "library_commit")
+# the runners' own failures (FORMAT v2.3 B2, without no_graphlet, a failed seed's answer): compare_graphlets never
+# compares them (VERIFY-C-R2 VR1), and a W3 record of one may take its invocation's library_commit (VR3)
+RUNNER_ERRORS = ("no_document", "document_refused", "exception", "non_finite", "unknown_tool", "paging_runaway",
+                 "assembly_error", "timeout", "child_died")
 # the checks whose failure is a determinism finding (DESIGN-v8 §2, §3)
 DETERMINISM_CHECKS = ("body", "envelope", "twin")
 # a pre-check's outcomes (the suite's vocabulary; not_exposed: library_commit without a W3 call)
@@ -772,6 +776,7 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
     # commit of its invocation (VERIFY-C VC10): the scenario's job record, else the MCP runner's one deployed commit
     fallback = (job_commit, "the job record") if isinstance(job_commit, str) and job_commit.strip() else \
         (next(iter(commits)), "the invocation's identity") if len(commits) == 1 else (None, None)
+    probes = set(o["id"] for o in scenario_ops(scenario) if o.get("probe"))
     seen, missing, bad, unrecorded, borrowed = {}, [], [], [], []
     for op in w3_ops:
         r = recs.get("W3", {}).get((sid, op))
@@ -779,7 +784,11 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
             unrecorded.append(op)
             continue
         c = (r.get("library") or {}).get("commit") if isinstance(r.get("library"), dict) else None
-        if not c and fallback[0]:
+        code = (r.get("error") or {}).get("code") if isinstance(r.get("error"), dict) else None
+        # only a record no service answer reported a commit on may borrow it (VERIFY-C-R2 VR3): a runner-side
+        # error, a failed seed's no_graphlet, a probe's refusal; an answered call without one stays inconclusive
+        lendable = code in RUNNER_ERRORS + ("no_graphlet",) or (op in probes and code is not None)
+        if not c and fallback[0] and lendable:
             c = fallback[0]
             borrowed.append(op)
         if not c:

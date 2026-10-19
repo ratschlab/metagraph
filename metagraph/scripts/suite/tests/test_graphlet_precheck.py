@@ -369,6 +369,25 @@ class LibraryCommit(PrecheckBase):
         os.remove(os.path.join(self.run_.dir, "arms", "mcp", "mcp_runs.jsonl"))
         self.assertEqual(self.check("library_commit")["outcome"], "inconclusive")
 
+    def test_vr3_an_answered_call_without_a_commit_borrows_nothing(self):
+        self.run_.complete_scenario()
+        self.run_.record("W3", SID, "walks-len", "graphlet_walks", {"arm": "left"},
+                         answer=dict(gf.walks_answer(), handle="0d5b9b1a-1111-2222-3333-444455556666"), library={})
+        rec = self.check("library_commit")
+        self.assertEqual(rec["outcome"], "inconclusive", rec)
+        self.assertIn("1 W3 call(s) report no library_commit (walks-len)", rec["detail"])
+        # a probe's refusal may borrow it
+        ops = [{"id": "tok", "tool": "graphlet_summary", "args": {"max_bytes": 2048}, "ways": ["W3"],
+                "probe": "wrong_token"}]
+        self.run_.cleanup()
+        self.run_ = gf.GRun(scenarios=[gf.scenario(ops=ops)])
+        self.run_.complete_scenario(ops=[])
+        self.run_.record("W3", SID, "tok", "graphlet_summary", {"max_bytes": 2048},
+                         error={"code": "forbidden", "fields": {}}, library={})
+        rec = self.check("library_commit")
+        self.assertEqual(rec["outcome"], "pass", rec)
+        self.assertIn("took the invocation's identity's: tok", rec["detail"])
+
     def test_without_a_w3_op_it_is_not_exposed(self):
         self.run_.scenarios[0]["graphlet"]["ways"]["default"] = ["W1", "W2", "W4", "W5"]
         self.run_.manifest = gf.manifest(self.run_.scenarios)
