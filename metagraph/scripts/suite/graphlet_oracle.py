@@ -731,10 +731,19 @@ def _evidence(d: _Doc, sides: Sequence[str]) -> Tuple[dict, Dict[str, str], List
     clauses = {"/evidence/complete_to_bp": C_CTB, "/evidence/scope": C_SCOPE, "/evidence/outcome": C_OUTCOME,
                "/evidence/support": "SPEC §7.5.2 H support k|t (kmer, trace)",
                "/evidence/reconverge": "SPEC §7.5.2 H reconverge m|k (merge, keep)"}
+    cons = ["/evidence/coordinates", "/evidence/view", "/evidence/qualified", "/evidence/limitations"]
+    # DESIGN §6 states a necessary condition only ("exact requires complete label evidence and no cut lists"): where
+    # it fails, exact is false; where it holds, exact is the tool's (consistency-only)
+    cut = any((d.arms[s].get("labels_per_node") or {}).get("nodes_truncated", 0) > 0 for s in sides)
+    if (d.result.get("outcome") or {}).get("label_evidence") != "complete" or cut:
+        ev["exact"] = False
+        clauses["/evidence/exact"] = "DESIGN §6: exact requires complete label evidence and no cut lists " \
+                                     "(outcome.label_evidence, labels_per_node.nodes_truncated)"
+    else:
+        cons.append("/evidence/exact")
     # evidence.limitations is the tool's digest of the stated limitations (finding F1: it leaves out a scope entry
     # that observed 0 merges and adds the resource stop): DESIGN §6 names the key without defining it
-    return ev, clauses, ["/evidence/exact", "/evidence/coordinates", "/evidence/view", "/evidence/qualified",
-                         "/evidence/limitations"]
+    return ev, clauses, cons
 
 
 def _cut_rows(ans: dict, ctx: dict, consistency: List[str], key: str = "rows") -> List[str]:
@@ -955,7 +964,7 @@ def _graphlet_walks(d: _Doc, args: dict, ctx: dict) -> dict:
     return _record(ans, clauses, cons + econ, partial=partial)
 
 
-def _walk_rows(d: _Doc, side: str, p: dict, cap: Optional[int]) -> List[dict]:
+def _chain_rows(d: _Doc, side: str, p: dict, cap: Optional[int]) -> List[dict]:
     """One row per segment of the walk's first-parent chain (SPEC §7.5.6), the label lists cut to |cap|."""
     a = d.arms[side]
     segs = {s["id"]: s for s in a["segments"]}
@@ -1029,7 +1038,7 @@ def _graphlet_walk(d: _Doc, args: dict, ctx: dict) -> dict:
     if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < len(paths):
         raise _Refused("walk %r of %d" % (w, len(paths)))
     p = paths[w]
-    rows = _walk_rows(d, side, p, LIST_CAP)
+    rows = _chain_rows(d, side, p, LIST_CAP)
     cons_r, absent = _walk_row_extras(rows, "/rows", LIST_CAP)
     ans: dict = {"arm": side, "walk": w, "length_bp": p["length_bp"], "total": len(rows), "rows": rows}
     clauses = {"/arm": C_ARM_ECHO, "/walk": C_PATHS, "/length_bp": C_LENGTH,
@@ -1057,10 +1066,21 @@ def _graphlet_walk(d: _Doc, args: dict, ctx: dict) -> dict:
     return _record(ans, clauses, cons + econ, absent=absent, partial=partial, **_ends_order("/rows/*/ends"))
 
 
-def _alive_at(a: dict, label: int, at_bp: int) -> bool:
-    """A label is alive at outward base |at_bp| when one of its runs on the arm holds that base: from_bp <= at_bp <
-    to_bp (SPEC §7.1 runs[], half-open intervals of outward bases)."""
-    return any(r["label"] == label and r["from_bp"] <= at_bp < r["to_bp"] for r in a.get("runs") or [])
+def _holds_base(a: dict, label: int, at_bp: int, mode: str) -> Optional[bool]:
+    """Whether a label is present at outward base |at_bp| of the arm: constrain, one of its runs holds the base
+    (SPEC §7.1 runs[], half-open [from_bp, to_bp)); annotate, a recorded label set holds it (SPEC §7.4 label_sets,
+    [from_bp, to_bp) covering the nodes entered by steps from_bp + 1 .. to_bp). None where a cut set covers the base
+    without the label (a lower bound: SPEC §7.4)."""
+    if mode == "constrain":
+        return any(r["label"] == label and r["from_bp"] <= at_bp < r["to_bp"] for r in a.get("runs") or [])
+    unknown = False
+    for sg in a.get("segments") or []:
+        for ls in sg.get("label_sets") or []:
+            if ls["from_bp"] <= at_bp < ls["to_bp"]:
+                if label in (ls.get("labels") or []):
+                    return True
+                unknown = unknown or bool(ls.get("truncated"))
+    return None if unknown else False
 
 
 def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
@@ -1076,13 +1096,18 @@ def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
         raise _Refused("coordinates without name (INVENTORY §2.9: coordinates only with name=)")
     cons = ["/next_cursor"]
     rows = []
+    undecided = False
     for e in d.result.get("label_summary") or []:
         for s in sides:
             v = e.get(s)
             if not isinstance(v, dict) or v["direct_bp"] < min_direct:
                 continue
-            if at_bp is not None and d.mode == "constrain" and not _alive_at(d.arms[s], e["label"], at_bp):
-                continue
+            if at_bp is not None:
+                held = _holds_base(d.arms[s], e["label"], at_bp, d.mode)
+                if held is None:
+                    undecided = True
+                if not held:
+                    continue
             rows.append(dict(d.label(e["label"]), arm=s, direct_bp=v["direct_bp"], reach_bp=v["reach_bp"],
                              reentries=v["reentries"], runs=len(v.get("runs") or [])))
     rows.sort(key=lambda r: (-r[rank], r["ref"], r["arm"]))
@@ -1095,13 +1120,14 @@ def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
                "/rows/*/reach_bp": "SPEC §7.1 label_summary reach_bp (engine summarize)",
                "/rows/*/reentries": "SPEC §7.1 label_summary reentries",
                "/rows/*/runs": "SPEC §7.1 label_summary runs: their number"}
-    if at_bp is not None and d.mode != "constrain":
-        # annotate tracks no runs (SPEC §7.4): which labels are alive at a base is the tool's reading of P runs
+    if undecided:
+        # a cut label set covers the base: which labels are present there is a lower bound (SPEC §7.4)
         ans = {}
         cons += ["/total", "/rows/*"]
     else:
         if at_bp is not None:
-            clauses["/total"] += "; at_bp: a run of the label holds the base (SPEC §7.1 runs[] [from_bp, to_bp))"
+            clauses["/total"] += "; at_bp: the label is present at the base (a run holds it, SPEC §7.1; annotate: " \
+                                 "a recorded label set, SPEC §7.4)"
     partial = _cut_rows(ans, ctx, cons) if "rows" in ans else []
     ev, ecl, econ = _evidence(d, sides)
     ans["evidence"] = ev
@@ -1294,7 +1320,7 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
         walks, absent = [], {}
         for j, w in enumerate(ids):
             p = d.arms[side]["paths"][w]
-            rows = _walk_rows(d, side, p, None)
+            rows = _chain_rows(d, side, p, None)
             absent.update(_walk_row_extras(rows, "/walks/%d/segments" % j, None)[1])
             walks.append({"walk": w, "length_bp": p["length_bp"], "segments": rows})
         clauses = {"/arm": C_ARM_ECHO, "/walks/*/walk": C_PATHS, "/walks/*/length_bp": C_LENGTH}
