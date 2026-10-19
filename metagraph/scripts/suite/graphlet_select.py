@@ -3,12 +3,19 @@ earlier op of the same way answered, resolved in each way from that way's own an
 before the run and a selector that resolves differently in two ways is named by the compare stage (args_resolved).
 
     resolve(value, answers, where="args") -> the literal value to send
-        value:   a literal, {"ref": "<op id>", "path": "<RFC 6901 pointer>"}, or {"select": "<name>", "args": {...}},
-                 at any depth inside lists and objects (a literal object is walked; only these exact key sets are
-                 selectors: a label selector {"ref": "c:3"} has no "path" and stays a literal)
-        answers: {op id: the op's ASSEMBLED answer in this way (FORMAT-v8 §3: list rows concatenated over its pages),
-                 or None when the op failed, its own selector failed, or it does not run in this way}
+        value:   a literal, {"ref": "<op id>", "path": "<RFC 6901 pointer>"}, {"select": "<name>", "args": {...}},
+                 or {"cursor_of": "<op id>"}, at any depth inside lists and objects (a literal object is walked; only
+                 these exact key sets are selectors: a label selector {"ref": "c:3"} has no "path" and stays a literal)
+        answers: {op id: the op's ASSEMBLED answer in this way (FORMAT-v8 §3: list rows concatenated over its pages)
+                 as graphlet_paging.selector_view gives it, or None when the op failed, its own selector failed, or it
+                 does not run in this way}
     SELECTORS: {name: function(answers, **args)}; each defined in the suite's words in its docstring
+
+{"cursor_of": "<op id>"} (VERIFY-L VL5) is the next_cursor of the last page of op <op id>'s listing when its paging
+stopped before the end ("none" on a longer list, a `pages` cap): the cursor a plan reuses, for the cursor cases
+(the same arguments: the next page; other arguments: bad_cursor). The record's answer drops next_cursor (FORMAT §3);
+graphlet_paging.selector_view keeps that last cursor under CURSOR_KEY in the answer selectors read, and only
+cursor_of reads it. A listing followed to its end has no cursor left: SelectorError.
 
 A selector that cannot answer raises SelectorError with a message naming the argument, the op and the rule; the
 runner records it as the op's `selector_error` and makes no call. Pure: no I/O, no library import, stdlib only,
@@ -29,6 +36,9 @@ import re
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
 ARMS = ("left", "right")
+# where graphlet_paging.selector_view keeps a stopped listing's last next_cursor (graphlet_paging.SELECTOR_CURSOR_KEY,
+# the same string)
+CURSOR_KEY = "_next_cursor"
 LABEL_FORMS = ("selector", "ref", "name")
 _INDEX = re.compile(r"(0|[1-9][0-9]*)\Z")
 
@@ -48,6 +58,11 @@ def is_select(value: Any) -> bool:
     return isinstance(value, dict) and set(value) in ({"select"}, {"select", "args"})
 
 
+def is_cursor_of(value: Any) -> bool:
+    """{"cursor_of": "<op id>"}: exactly this key."""
+    return isinstance(value, dict) and set(value) == {"cursor_of"}
+
+
 def resolve(value: Any, answers: Mapping[str, Any], where: str = "args") -> Any:
     """|value| with every op reference and named selector replaced by what it selects from |answers| (a new object;
     |value| and |answers| are not changed). |where| names the argument in an error's message."""
@@ -60,6 +75,15 @@ def resolve(value: Any, answers: Mapping[str, Any], where: str = "args") -> Any:
             return copy.deepcopy(pointer(answer_of(answers, op), path))
         except SelectorError as e:
             raise SelectorError("%s: %s" % (where, e)) from None
+    if is_cursor_of(value):
+        op = value["cursor_of"]
+        try:
+            ans = answer_of(answers, op)
+            if not isinstance(ans, dict) or not isinstance(ans.get(CURSOR_KEY), str):
+                raise SelectorError("op %r's listing was followed to its end (or is no listing): no cursor left" % op)
+        except SelectorError as e:
+            raise SelectorError("%s: %s" % (where, e)) from None
+        return ans[CURSOR_KEY]
     if is_select(value):
         name, args = value["select"], value.get("args", {})
         if name not in SELECTORS:

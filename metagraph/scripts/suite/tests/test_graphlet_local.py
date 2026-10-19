@@ -263,9 +263,11 @@ def every_tool_plan():
         op("walks-p1", "graphlet_walks", walks("left", rank="support", spell="tail", max_bytes=1500),
            paging={"pages": 1}),
         op("walks-resume", "graphlet_walks", walks("left", rank="support", spell="tail", max_bytes=1500,
-                                                   cursor=ref("walks-p1", "/next_cursor"))),
+                                                   cursor={"cursor_of": "walks-p1"})),
         op("walks-reuse", "graphlet_walks", walks("left", rank="length", spell="tail", max_bytes=1500,
-                                                  cursor=ref("walks-p1", "/next_cursor")), "bad_cursor"),
+                                                  cursor={"cursor_of": "walks-p1"}), "bad_cursor"),
+        op("walks-done", "graphlet_walks", walks("left", rank="length", cursor={"cursor_of": "walks-sup-paged"}),
+           "selector"),
         op("walks-r", "graphlet_walks", walks("right", rank="loss", spell="full")),
         op("walks-label", "graphlet_walks", walks("left", label=TOP, route_consistent=False)),
         op("walks-bad-rank", "graphlet_walks", walks("left", rank="best"), "bad_argument"),
@@ -534,6 +536,7 @@ class EveryToolTests(unittest.TestCase):
         for r in self.recs["W1"]:
             if r["answer"] is not None:
                 self.assertNotIn("next_cursor", r["answer"])
+                self.assertNotIn("_next_cursor", r["answer"])
                 self.assertNotIn("next_from", r["answer"])
         # every page is kept raw, numbered from 0
         raw = os.path.join(self.out, "arms", "dl-lib", "raw")
@@ -554,6 +557,8 @@ class EveryToolTests(unittest.TestCase):
         self.assertEqual(by["walk-first"]["args_resolved"]["walk"], 0)
         self.assertEqual(by["walk-out"]["args_resolved"]["walk"], 12)
         self.assertIn("index 40", by["walk-sel"]["selector_error"])
+        self.assertIn("followed to its end", by["walks-done"]["selector_error"])
+        self.assertTrue(by["walks-done"]["selector_error"].startswith("args.cursor: "))
         self.assertTrue(by["walk-sel"]["selector_error"].startswith("args.walk: "))
         top = by["labels-tab"]["answer"]["rows"]
         left = [r for r in top if r["arm"] == "left"]

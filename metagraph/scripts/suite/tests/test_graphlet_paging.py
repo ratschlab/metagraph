@@ -62,6 +62,19 @@ class LoopTests(unittest.TestCase):
                          {"code": "paging_runaway", "fields": {"pages": gp.MAX_PAGES, "reason": "max_pages"}})
         self.assertIsNone(gp.loop_error("graphlet_walks", "all", many[:-1] + [{"rows": [0]}]))
 
+    def test_selector_view(self):
+        """VL5: a listing stopped with a cursor left keeps it for graphlet_select's cursor_of; nothing else does."""
+        answer = {"rows": [1], "total": 2}
+        self.assertEqual(gp.selector_view("graphlet_walks", answer, {"rows": [1], "next_cursor": "c"}),
+                         {"rows": [1], "total": 2, "_next_cursor": "c"})
+        self.assertEqual(answer, {"rows": [1], "total": 2})
+        self.assertIs(gp.selector_view("graphlet_walks", answer, {"rows": [1]}), answer)
+        self.assertEqual(gp.selector_view("graphlet_sequence", {"sequence": "A"}, {"sequence": "A", "next_from": 1}),
+                         {"sequence": "A"})
+        sys.path.insert(0, SUITE)
+        import graphlet_select
+        self.assertEqual(gp.SELECTOR_CURSOR_KEY, graphlet_select.CURSOR_KEY)
+
     def test_error_pages(self):
         page = {"error": "local_budget_exceeded", "message": "m", "hint": "h", "stop": {"resource": "work"},
                 "max_bytes": 64}

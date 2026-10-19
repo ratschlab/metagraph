@@ -4809,7 +4809,8 @@ Nothing here touches staging; every test is offline.
   `digests` (FORMAT's `doc` block). A broken frame (no final LF, no H of MGT v1 first, J anywhere but line 2, no Z counting the lines) is
   a ValueError, never a digest.
 - `graphlet_select.py`: run-time selectors, pure and stdlib (async vendors it): `resolve(value, answers)` replaces
-  `{ref, path}` (an RFC 6901 pointer into an earlier assembled answer) and `{select, args}` at any depth; a label
+  `{ref, path}` (an RFC 6901 pointer into an earlier assembled answer), `{select, args}` and `{cursor_of}` at any
+  depth; a label
   selector `{"ref": "c:3"}` (no `path`) stays a literal. Named: walk_through_merge, walk_with_continuation,
   slice_past_end, label_entered_at_merge, top_label, first_arm, second_arm_or_none, each defined in its docstring
   over the library's answer shapes. A failure is a `SelectorError` naming the argument, the op and the rule.
@@ -4862,8 +4863,9 @@ Nothing here touches staging; every test is offline.
   graphlet_export / graphlet_save, `file` {name, bytes, sha256, raw} (FORMAT v2 B3: the file's text kept gzipped at
   `raw`, relative to the way's directory, with handles and directories as symbols like the rest of the record;
   `bytes` the file's own size, `sha256` the kept text's); `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
-  exception (the library raised), unknown_tool, paging_runaway, assembly_error and the three document codes. A later
-  op's selectors also see a listing's last next_cursor when its paging stopped early.
+  exception (the library raised), unknown_tool, paging_runaway, assembly_error and the three document codes. A plan
+  names a cursor by `{"cursor_of": "<op id>"}` (graphlet_select, VERIFY-L VL5): the last next_cursor of that op's
+  listing when its paging stopped early, kept by `graphlet_paging.selector_view` in the answers selectors read.
 
 ## Glossary
 

@@ -13,6 +13,7 @@ I/O, no library import, stdlib only, Python 3.8+.
     assemble(tool, pages, complete, volatile=())
                                       -> the pages as one answer (AssemblyError when they do not make one)
     paging_complete(tool, last, answer) -> FORMAT v2 A4's record field: whether the listing was followed to its end
+    selector_view(tool, answer, last) -> the answer later selectors of the way read (graphlet_select's `answers`)
 
 The library's tools (metagraph/api/python/metagraph/traverse/mcp_tools.py) page every list as `rows` with a
 `next_cursor` (GraphletTools._page :989-1085, the page at :1008-1013; graphlet_compare by _page_cut :1087-1123, whose
@@ -26,6 +27,7 @@ than the ceiling is cut; the next page is the same call with start = next_from).
     error page: record error_record(page); else loop_error(tool, paging, pages, given): record that error;
     else answer = assemble(tool, pages, complete=next_call(tool, pages[-1]) is None)
          record["paging_complete"] = paging_complete(tool, pages[-1], answer)
+         answers[op id] = selector_view(tool, record answer, pages[-1])   # (None for an op with an error)
 
 (an op with an error has no answer and paging_complete null).
 """
@@ -61,6 +63,8 @@ PAGE_FIELDS = ("next_cursor", "cursor", "fields_cut", "row_truncated", "cut_fiel
 ROW_CUT_MARKER = "_cut_fields"
 # an error's text, kept in the raw page only (FORMAT v2 B2: errors by code and structured fields)
 ERROR_TEXT = ("error", "message", "hint")
+# graphlet_select.CURSOR_KEY (the same string): where selector_view keeps a stopped listing's last next_cursor
+SELECTOR_CURSOR_KEY = "_next_cursor"
 # "all" stops here: a listing that never ends is a defect, recorded as paging_runaway (loop_error)
 MAX_PAGES = 10000
 
@@ -246,3 +250,14 @@ def paging_complete(tool: str, last: Any, answer: Any) -> bool:
     next page (a `pages` cap, paging "none" on a longer list) or the assembled answer states complete false (a stop
     of its local budget the pages did not get past); true for an answer that is no listing."""
     return next_call(tool, last) is None and not (isinstance(answer, dict) and answer.get("complete") is False)
+
+
+def selector_view(tool: str, answer: Any, last: Any) -> Any:
+    """The answer the way's later selectors read for an op (graphlet_select.resolve's `answers`): the record's answer,
+    plus, when the op's listing stopped before its end with a cursor left (paging "none" on a longer list, a `pages`
+    cap), that last page's next_cursor under SELECTOR_CURSOR_KEY, which graphlet_select's {"cursor_of": op} reads
+    (VERIFY-L VL5). The record's answer itself never carries it (FORMAT §3)."""
+    nxt = next_call(tool, last)
+    if nxt is not None and nxt[0] == "cursor" and isinstance(answer, dict):
+        return dict(answer, **{SELECTOR_CURSOR_KEY: nxt[1]})
+    return answer

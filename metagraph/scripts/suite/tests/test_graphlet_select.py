@@ -150,6 +150,21 @@ class ResolveTests(unittest.TestCase):
                     gs.resolve({"x": value}, answers())
                 self.assertIn(text, str(cm.exception))
 
+    def test_cursor_of(self):
+        """VL5: the last next_cursor of a listing that stopped early (graphlet_paging.selector_view keeps it)."""
+        ans = answers()
+        ans["walks-p1"] = dict(ans["walks"], **{gs.CURSOR_KEY: "cur-1"})
+        self.assertEqual(gs.resolve({"cursor": {"cursor_of": "walks-p1"}}, ans), {"cursor": "cur-1"})
+        self.assertEqual(gs.resolve([{"cursor_of": "walks-p1"}], ans), ["cur-1"])
+        for op_id, text in (("walks", "followed to its end"), ("seq", "followed to its end"),
+                            ("failed", "has no answer"), ("nope", "no op 'nope'"), (["x"], "not ['x']")):
+            with self.subTest(op_id):
+                with self.assertRaises(SelectorError) as cm:
+                    gs.resolve({"cursor": {"cursor_of": op_id}}, ans)
+                self.assertIn(text, str(cm.exception))
+                self.assertTrue(str(cm.exception).startswith("args.cursor: "))
+        self.assertEqual(gs.resolve({"cursor_of": "x", "other": 1}, ans), {"cursor_of": "x", "other": 1})
+
     def test_select_with_a_resolved_argument(self):
         value = sel("slice_past_end", length_of="walks", walk={"ref": "walks", "path": "/rows/1/walk"}, part="end",
                     past=5)

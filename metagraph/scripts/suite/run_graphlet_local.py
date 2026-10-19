@@ -523,8 +523,8 @@ class Way(object):
                         "selector_error" if rec["selector_error"] else "error"] += 1
 
     def run_op(self, sid, op, answers):
-        """One op in this way -> (its record, the answer later selectors read: the record's answer, plus the last
-        page's next_cursor when the paging stopped before the end, or None)."""
+        """One op in this way -> (its record, the answer later selectors read: graphlet_paging.selector_view of the
+        record's answer, or None)."""
         started = time.time()
         tool = op["tool"]
         doc = self.document(sid)
@@ -599,10 +599,7 @@ class Way(object):
         rec["paging_complete"] = gp.paging_complete(tool, pages[-1], answer)
         if tool in FILE_TOOLS:
             rec["file"] = self.keep_file(sid, op["id"], answer)
-        view = rec["answer"]
-        if nxt is not None and nxt[0] == "cursor":
-            view = dict(view, next_cursor=nxt[1])
-        return rec, view
+        return rec, gp.selector_view(tool, rec["answer"], pages[-1])
 
     def keep_file(self, sid, op, answer):
         """FORMAT v2 B3: the file an export or save wrote -> {name, bytes, sha256, raw}. Its text is kept gzipped at
