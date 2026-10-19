@@ -39,8 +39,9 @@ Supervision (VERIFY-L VL3): every call waits for its reply with select() up to t
 --op-timeout, default 120 s). A call that does not answer in time is recorded `timeout` {timeout_s, page}, a process
 that ends during a call `child_died` {exit, page}; either way the process is killed and restarted, the documents
 loaded so far reloaded into it, and the next op runs (handles an op made are gone with the old process). An answer
-that is no JSON is that call's `exception` {type}. The child reads its requests from a duplicate of fd 0 and points
-fd 0 at /dev/null, as it points fd 1 at its log. A way whose process does not start, or restarts more than 20
+that is no JSON is that call's `exception` {type}, one holding a NaN or an infinity `non_finite` {pointer, page}
+(VL9: the records are strict JSON, as the service refuses such numbers with number_not_finite). The child reads its
+requests from a duplicate of fd 0 and points fd 0 at /dev/null, as it points fd 1 at its log. A way whose process does not start, or restarts more than 20
 times, is reported and the next way runs; the invocation then exits 1.
 
 Op execution (FORMAT §1-§2): per way, scenarios in manifest order, each scenario's ops in order; an op runs on a way
@@ -135,7 +136,12 @@ def child_main(argv):
     for line in requests:
         req = json.loads(line.decode("utf-8"))
         try:   # the answer serialised inside: one that is no JSON is that call's exception, not the way's end
-            data = json.dumps({"ok": True, "result": _child_do(state, req)}, ensure_ascii=False)
+            result = _child_do(state, req)
+            where = _non_finite(result.get("answer") if isinstance(result, dict) else None)
+            if where is not None:   # NaN / Infinity: no JSON a strict reader takes (VERIFY-L VL9)
+                data = json.dumps({"ok": False, "non_finite": where})
+            else:
+                data = json.dumps({"ok": True, "result": result}, ensure_ascii=False, allow_nan=False)
         except Exception as e:  # a library exception is the op's error (code exception), not the way's end
             data = json.dumps({"ok": False, "type": type(e).__name__, "error": str(e),
                                "traceback": traceback.format_exc(limit=12)}, ensure_ascii=False)
@@ -144,6 +150,18 @@ def child_main(argv):
         if req.get("cmd") == "quit":
             break
     return 0
+
+
+def _non_finite(obj, path=""):
+    """The RFC 6901 pointer of the first NaN or infinite number in |obj|, or None."""
+    if isinstance(obj, float) and (obj != obj or obj in (float("inf"), float("-inf"))):
+        return path
+    items = obj.items() if isinstance(obj, dict) else enumerate(obj) if isinstance(obj, list) else ()
+    for k, v in items:
+        got = _non_finite(v, "%s/%s" % (path, str(k).replace("~", "~0").replace("/", "~1")))
+        if got is not None:
+            return got
+    return None
 
 
 def _tool_limits(spec):
@@ -462,7 +480,7 @@ class Way(object):
     # -- records ----------------------------------------------------------------------------------------------
     @staticmethod
     def write_line(fh, obj):
-        fh.write(json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
+        fh.write(json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False) + "\n")
         fh.flush()
 
     def write_run(self, state):
@@ -714,6 +732,9 @@ class Way(object):
             rec["pages"] += 1
             if "supervised" in msg:   # the call in flight when the process hung or died (restarted since)
                 error = {"code": msg["supervised"], "fields": dict(msg["fields"], page=rec["pages"] - 1)}
+                break
+            if "non_finite" in msg:   # the answer holds a NaN or an infinity: never written as non-standard JSON
+                error = {"code": "non_finite", "fields": {"pointer": msg["non_finite"], "page": rec["pages"] - 1}}
                 break
             if not msg["ok"]:
                 error = {"code": "exception", "fields": {"type": msg["type"]}}

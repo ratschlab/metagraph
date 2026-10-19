@@ -755,7 +755,8 @@ class SupervisionTests(unittest.TestCase):
                    walks_op("ok2", "ok"), walks_op("set", "set", "exception"), walks_op("ok3", "ok"),
                    walks_op("die", "die", "child_died"), walks_op("ok4", "ok"),
                    walks_op("loop", "loop", "paging_runaway", paging="all"), walks_op("print", "print"),
-                   walks_op("stdin", "stdin"),
+                   walks_op("stdin", "stdin"), walks_op("nan", "nan", "non_finite"),
+                   walks_op("inf", "inf", "non_finite"),
                    op("sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048})]
             plan = {"scenarios": [{"id": "G-a", "graphlet": {"ops": ops}}, {"id": "G-b", "graphlet": {"ops": [
                 walks_op("b-ok", "ok")]}}]}
@@ -776,6 +777,14 @@ class SupervisionTests(unittest.TestCase):
                     self.assertEqual(got["loop"]["error"], {"code": "paging_runaway", "fields": {
                         "pages": 2, "reason": "repeats"}})
                     self.assertEqual(got["loop"]["pages"], 2)
+                    self.assertEqual(got["nan"]["error"], {"code": "non_finite", "fields": {"pointer": "/rows/1/cost",
+                                                                                            "page": 0}})
+                    self.assertEqual(got["inf"]["error"]["fields"]["pointer"], "/limits/loss")
+                    # VL9: the records are strict JSON (no NaN / Infinity)
+                    ops_path = os.path.join(out, "arms", rgl.WAY_DIRS[way], "graphlet_ops.jsonl")
+                    with open(ops_path, encoding="utf-8") as fh:
+                        for line in fh:
+                            json.loads(line, parse_constant=lambda c: self.fail("non-standard JSON %s" % c))
                     # after each restart the document is reloaded: the scenario's handle works again
                     for name in ("ok2", "ok4", "sum"):
                         self.assertEqual(got[name]["answer"]["handle"], "<handle>")
