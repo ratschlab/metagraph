@@ -270,6 +270,11 @@ def graphlet_case_problems(case):
                 out.append("graphlet.args: path predicates over args_resolved only (no field, service, host)")
     for name in ("library", "service"):
         out.extend(_graphlet_side_problems(name, g.get(name)))
+    lib, svc = g.get("library"), g.get("service")
+    if isinstance(lib, dict) and isinstance(svc, dict) and lib.get("answered") is True and \
+            svc.get("answered") is True and not svc.get("service_fields"):
+        # both sides answering would excuse every content difference: the case must name what W3 adds (VERIFY-C VC11)
+        out.append("graphlet: both sides answered and no service.service_fields to narrow the difference")
     return out
 
 

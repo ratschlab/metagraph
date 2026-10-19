@@ -732,8 +732,10 @@ def compare_w5(x, rx, r5):
     if diffs or outcome == "disagree":
         first = diffs[0] if diffs and isinstance(diffs[0], dict) else {"pointer": "/", "clause": detail}
         theirs = first["other"] if "other" in first else first["present"] if "present" in first else gp.MISSING
+        # an error where W5 answers, or an answer where W5 expects an error, is a difference of kind error
+        kind = "error" if (rx.get("error") or str(first.get("pointer") or "").startswith("/error")) else "oracle"
         return _pair(x, "W5", W5_WHAT, "disagree", "%d difference(s); %s" % (len(diffs), first.get("clause")),
-                     (first.get("pointer") or "/", theirs, first.get("oracle", gp.MISSING)), kind="oracle")
+                     (first.get("pointer") or "/", theirs, first.get("oracle", gp.MISSING)), kind=kind)
     oracle = r5.get("oracle") if isinstance(r5.get("oracle"), dict) else {}
     declared = oracle.get("declared")
     n = len(oracle.get("checked") or {}) if isinstance(oracle.get("checked"), dict) else 0

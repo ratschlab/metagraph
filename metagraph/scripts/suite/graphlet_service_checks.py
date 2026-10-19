@@ -52,6 +52,8 @@ NO_DIFFERENCE = "no difference within the recorded evidence"
 PROBES = {"wrong_token": ("forbidden", "forbidden"), "bad_handle": ("bad_handle", "bad_handle")}
 # the pairs a by-design case lets differ (the service side against the library and the oracle)
 BY_DESIGN_PAIRS = ("W3-W4", "W3-W5")
+# the kinds of disagreement a verified case excuses on those pairs (an answer or an error that differs)
+BY_DESIGN_KINDS = ("error", "answer")
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -416,10 +418,19 @@ def judge_by_design(entry, scen, op, recs, cases):
         elif op.get("tool") not in (g.get("tools") or []):
             res.update(side="request", detail="%s does not list the tool %s" % (cid, op.get("tool")))
         else:
-            ref = recs.get("W3", {}).get((sid, oid)) or recs.get("W1", {}).get((sid, oid)) or {}
-            ok, why = cmp.request_holds({"id": cid, "request": g.get("args")},
-                                        {"mcp": {"arguments": ref.get("args_resolved") or {}}}, None)
-            if not ok:
+            # the case's predicates hold on every way's arguments (VERIFY-C VC11), not on W3's alone
+            why = ""
+            for w in [x for x in gp.WAYS if x in ways and x != "W5"]:
+                ref = recs.get(w, {}).get((sid, oid))
+                if ref is None:
+                    continue
+                ok, why = cmp.request_holds({"id": cid, "request": g.get("args")},
+                                            {"mcp": {"arguments": ref.get("args_resolved") or {}}}, None)
+                if not ok:
+                    why = "%s on %s's args_resolved" % (why, w)
+                    break
+                why = ""
+            if why:
                 res.update(side="request", detail=why)
             else:
                 problems = []
@@ -441,7 +452,11 @@ def judge_by_design(entry, scen, op, recs, cases):
     entry["by_design"] = results
     if entry["outcome"] in ("precondition_failed",) or entry.get("smoke"):
         return entry
-    rest = [p for p in entry.get("disagreeing") or [] if p not in BY_DESIGN_PAIRS]
+    # a verified case excuses only the declared difference: a W3-W4 or W3-W5 disagreement of kind error / answer,
+    # never differing args_resolved or a selector (VERIFY-C VC11)
+    kinds = dict((p.get("pair"), p.get("kind")) for p in entry.get("pairs") or [] if p.get("outcome") == "disagree")
+    rest = [p for p in entry.get("disagreeing") or []
+            if not (p in BY_DESIGN_PAIRS and kinds.get(p) in BY_DESIGN_KINDS)]
     unverified = ["by-design %s: %s" % (r["case"], r["side"]) for r in results if not r["verified"]]
     if rest or unverified:
         entry["outcome"] = "disagree"

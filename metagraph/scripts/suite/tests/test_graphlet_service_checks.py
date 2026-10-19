@@ -311,6 +311,40 @@ class ByDesign(ServiceBase):
         e = self.result()["scenarios"][SID]["ops"]["walks-cap"]
         self.assertEqual((e["by_design"][0]["side"], e["outcome"]), ("table", "disagree"))
 
+    def test_vc11_only_the_declared_difference_is_excused(self):
+        self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
+        self.put(SID, self.OP, {"*": gf.walks_answer()}, errors={"W3": self.REFUSED})
+        # W3 resolved its arguments differently: never excused by the case
+        path = os.path.join(self.run_.dir, "arms", "mcp", "graphlet_ops.jsonl")
+        with open(path) as fh:
+            rows = [json.loads(x) for x in fh]
+        rows[-1]["args_resolved"]["rank"] = "length"
+        with open(path, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in rows))
+        e = self.result()["scenarios"][SID]["ops"]["walks-cap"]
+        self.assertEqual(e["outcome"], "disagree")
+        self.assertIn("W3-W4", e["disagreeing"])
+        # the predicates hold on every way: a library way that sent another max_bytes is the request side
+        self.run_.cleanup()
+        self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
+        self.put(SID, self.OP, {"*": gf.walks_answer()}, errors={"W3": self.REFUSED})
+        path = os.path.join(self.run_.dir, "arms", "dr-lib", "graphlet_ops.jsonl")
+        with open(path) as fh:
+            rows = [json.loads(x) for x in fh]
+        rows[-1]["args_resolved"]["max_bytes"] = 2048
+        with open(path, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in rows))
+        e = self.result()["scenarios"][SID]["ops"]["walks-cap"]
+        self.assertEqual(e["by_design"][0]["side"], "request")
+        self.assertIn("on W2's args_resolved", e["by_design"][0]["detail"])
+
+    def test_vc11_an_answered_answered_case_must_name_service_fields(self):
+        case = copy.deepcopy(CAP_CASE)
+        case["graphlet"].update(library={"answered": True}, service={"answered": True})
+        self.assertIn("both sides answered and no service.service_fields", "; ".join(cmp.table_problems([case])))
+        case["graphlet"]["service"]["service_fields"] = {"walk_display": "first_parent"}
+        self.assertEqual(cmp.table_problems([case]), [])
+
     def test_the_case_schema(self):
         self.assertEqual(cmp.table_problems([CAP_CASE]), [])
         bad = copy.deepcopy(CAP_CASE)
