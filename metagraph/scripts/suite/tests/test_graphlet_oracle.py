@@ -254,16 +254,28 @@ class HandGoldens(unittest.TestCase):
 
     def test_caps_continuation(self):
         """SPEC §7.1: the seed is the continuation's sequence and labels; the loss budget (1.0) lowered by the
-        largest terminal loss of the continued labels (hZ: 0.5); max_label_branches unlimited stays."""
+        largest terminal loss of the continued labels (hZ: 0.5); max_label_branches unlimited stays unlimited. The
+        loss_budget / branch_budget blocks are the tool's presentation (consistency-only); overrides make the
+        strategy consistency-only (their merge is library-defined)."""
         r = rec("traverse_continue", {"arm": "right", "walk": 0, "execute": False}, "caps")
         a = r["answer"]
         self.assertEqual(a["request"]["seeds"], [{"sequence": "CCGAGTGATATATCACCTTGCTA", "labels": ["hZ"]}])
-        self.assertEqual(a["loss_budget"], {"original": 1.0, "effective": 0.5, "largest_terminal_loss": 0.5})
-        self.assertEqual(a["request"]["strategy"], {"labels": {"loss_budget": 0.5}})
+        self.assertEqual(a["request"]["strategy"], {"labels": {"loss_budget": 0.5},
+                                                    "branching": {"max_label_branches": "unlimited"}})
         self.assertEqual(a["parent"], {"arm": "right", "walk": 0, "overlap_bp": 23})
-        self.assertNotIn("branch_budget", a)
-        self.assertEqual(rec("traverse_continue", {"arm": "right", "walk": 1, "execute": False}, "caps")["oracle"]
-                         ["declared"], "expected_error")
+        self.assertNotIn("loss_budget", a)
+        self.assertIn("/loss_budget", r["oracle"]["consistency_only"])
+        ov = rec("traverse_continue", {"arm": "right", "walk": 0, "execute": False,
+                                       "overrides": {"labels": {"loss_budget": 3.0}}}, "caps")
+        self.assertNotIn("strategy", ov["answer"]["request"])
+        self.assertIn("/request/strategy/*", ov["oracle"]["consistency_only"])
+        self.assertEqual(rec("traverse_continue", {"arm": "right", "walk": 0, "execute": False, "overrides": {"arm": 1}},
+                             "caps")["oracle"]["expected_error"], "bad_argument")
+        # fork: max_label_branches 0, a terminal branch count 0: 0; reset_branches keeps the original
+        f0 = rec("traverse_continue", {"arm": "left", "walk": 0, "execute": False}, "fork")["answer"]["request"]
+        self.assertEqual(f0["strategy"]["branching"], {"max_label_branches": 0})
+        no = rec("traverse_continue", {"arm": "right", "walk": 1, "execute": False}, "caps")["oracle"]
+        self.assertEqual((no["declared"], no["expected_error"]), ("expected_error", None))
         self.assertEqual(rec("traverse_continue", {"arm": "right", "walk": 0}, "caps")["oracle"]["declared"],
                          "not_applicable")
 

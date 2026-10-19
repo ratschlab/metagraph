@@ -38,6 +38,12 @@ SAME_SEED = [
     ["real/mini_refseq/mini_ndm1__annotate_exh#0", "real/mini_refseq/mini_ndm1__trace#0"],
     ["cli_bubbles_r60", "cli_bubbles_r100", "cli_bubbles_steps150"], ["cli_quorum_tuned", "cli_quorum_exhaustive"]]
 RADII = [("cli_bubbles_r60", "cli_bubbles_r100"), ("cli_bubbles_r60", "cli_bubbles_steps150")]
+# library defects W5 finds, fixed on gr/labeled-traversal by a separate lane (FORMAT v2 G): each must still reproduce
+# here until the fixed library is vendored, then its entry is removed (the test says so)
+KNOWN_LIBRARY_DEFECTS = {
+    "G2": ("graphlet_walks spell=tail tail_bp=0 gives the whole right flank (DESIGN §6: the last 0 outward bases)",
+           lambda tool, args: tool == "graphlet_walks" and args.get("spell") == "tail" and args.get("tail_bp") == 0),
+}
 
 
 def _calls(res):
@@ -48,7 +54,15 @@ def _calls(res):
            ("graphlet_labels", {"rank": "reach_bp", "n": 1000, "max_bytes": WIDE}),
            ("graphlet_labels", {"rank": "direct_bp", "n": 20}),           # one paging pass at the default 2048
            ("graphlet_export", {"format": "fasta"}), ("graphlet_export", {"format": "gfa"}),
-           ("graphlet_export", {"format": "json"}), ("graphlet_export", {"format": "mgt"}), ("graphlet_save", {})]
+           ("graphlet_export", {"format": "json"}), ("graphlet_export", {"format": "mgt"}), ("graphlet_save", {}),
+           # VO1, VO14: arguments the tools refuse or answer by their own rules
+           ("graphlet_labels", {"n": 0}), ("graphlet_labels", {"min_direct_bp": -1}),
+           ("graphlet_labels", {"coordinates": True}), ("graphlet_labels", {"n": True}),
+           ("graphlet_export", {"format": "fasta", "walks": [0]}), ("graphlet_summary", {"detail": "nope"}),
+           ("graphlet_export", {"format": "fasta", "what": "walk"}), ("graphlet_subtrie", {"labels": ["no-such"]})]
+    if len(sides) == 1:   # an arm this retrieval did not walk
+        other = "left" if sides == ["right"] else "right"
+        out += [("graphlet_walks", {"arm": other}), ("graphlet_summary", {"arm": other})]
     nl = len(res.get("label_dict") or [])
     out.append(("graphlet_subtrie", {"labels": [{"id": 0}]}))
     if nl > 1:
@@ -76,7 +90,18 @@ def _calls(res):
         for w in (range(n) if n <= 12 else sorted({0, n - 1, n // 2} | {p["id"] for p in a["paths"]
                                                                           if p.get("continuation")})):
             out.append(("graphlet_walk", {"arm": s, "walk": w, "max_bytes": WIDE}))
-        out += [("graphlet_walk", {"arm": s, "walk": 0}), ("graphlet_walk", {"arm": s, "walk": n})]
+        out += [("graphlet_walk", {"arm": s, "walk": 0}), ("graphlet_walk", {"arm": s, "walk": n}),
+                ("graphlet_walk", {"arm": s, "walk": -1}),
+                ("graphlet_walks", {"arm": s, "coordinates": True, "n": 1000, "max_bytes": WIDE}),
+                ("graphlet_walks", {"arm": s, "rank": "id", "n": 1000, "spell": "tail", "tail_bp": 0, "max_bytes": WIDE}),
+                ("graphlet_walks", {"arm": s, "rank": "id", "n": 1000, "spell": "tail", "tail_bp": 1, "max_bytes": WIDE}),
+                ("graphlet_walks", {"arm": s, "n": 0}), ("graphlet_walks", {"arm": s, "min_bp": True}),
+                ("graphlet_walks", {"arm": s, "route_consistent": "yes"}),
+                ("graphlet_walks", {"arm": s, "label": "no-such-label"}), ("graphlet_splits", {"arm": s, "n": 0}),
+                ("graphlet_export", {"format": "json", "what": "walk", "arm": s}),
+                ("graphlet_sequence", {"arm": s, "walk": 0, "segment": 0}), ("graphlet_sequence", {"arm": s}),
+                ("graphlet_sequence", {"arm": s, "walk": 0, "start": 5, "end": 2}),
+                ("graphlet_sequence", {"arm": s, "segment": 0, "with_seed": True})]
         out += [("graphlet_labels", {"arm": s, "rank": "direct_bp", "n": 1000, "max_bytes": WIDE}),
                 ("graphlet_labels", {"arm": s, "rank": "reach_bp", "n": 1000, "min_direct_bp": 1, "max_bytes": WIDE})]
         for at in (0, lens[-1] // 2, lens[-1] + 5):
@@ -95,8 +120,19 @@ def _calls(res):
                 ("graphlet_export", {"format": "fasta", "arm": s, "walks": [0]}),
                 ("graphlet_export", {"format": "json", "what": "walk", "arm": s, "walks": list(range(min(n, 3)))}),
                 ("graphlet_subtrie", {"labels": [{"id": 0}], "arm": s})]
+        for p in a["paths"]:
+            if p.get("continuation"):
+                out.append(("traverse_continue", {"arm": s, "walk": p["id"], "execute": False, "max_bytes": WIDE}))
+        conts = [p["id"] for p in a["paths"] if p.get("continuation")][:2]
+        for w in conts:
+            out += [("traverse_continue", {"arm": s, "walk": w, "execute": False, "max_bytes": WIDE,
+                                           "overrides": {"labels": {"loss_budget": 3.0}}}),
+                    ("traverse_continue", {"arm": s, "walk": w, "execute": False, "max_bytes": WIDE,
+                                           "overrides": {"bounds": {"max_extension_bp": 50}}}),
+                    ("traverse_continue", {"arm": s, "walk": w, "execute": False, "max_bytes": WIDE,
+                                           "reset_branches": True})]
         out += [("traverse_continue", {"arm": s, "walk": p["id"], "execute": False, "max_bytes": WIDE})
-                for p in a["paths"] if p.get("continuation")]
+                for p in a["paths"][:1] if not p.get("continuation")]
     return out
 
 
@@ -175,6 +211,7 @@ class OracleVsLibrary(unittest.TestCase):
 
     def test_every_checked_pointer_agrees(self):
         groups = collections.defaultdict(list)
+        defects = {}
         n_calls = n_checked = 0
         declared = collections.Counter()
         for name, (h, f, i, text) in self.docs.items():
@@ -198,7 +235,13 @@ class OracleVsLibrary(unittest.TestCase):
                     declared[rec["oracle"]["declared"]] += 1
                     if rec["oracle"]["declared"] == "twin_mismatch":
                         self.assertIn(name.split("#")[0], NOT_TWINS)
-                for d in O.differences(rec, lib):
+                diffs = O.differences(rec, lib)
+                known = [k for k, (_, hit) in KNOWN_LIBRARY_DEFECTS.items() if hit(tool, op)]
+                if known:
+                    defects.setdefault(known[0], 0)
+                    defects[known[0]] += bool(diffs)
+                    continue
+                for d in diffs:
                     groups[(tool, re.sub(r"/\d+", "/*", d["pointer"]))].append((name, args, d))
         report = []
         for (tool, ptr), items in sorted(groups.items()):
@@ -208,6 +251,9 @@ class OracleVsLibrary(unittest.TestCase):
                     name, json.dumps(args)[:120], json.dumps(d["oracle"])[:240],
                     "MISSING" if d.get("missing") else json.dumps(d.get("other", d.get("present")))[:240]))
         self.assertEqual(report, [], "W5 and the library disagree:\n" + "\n".join(report))
+        for k, (what, _) in KNOWN_LIBRARY_DEFECTS.items():
+            self.assertGreater(defects.get(k, 0), 0, "known library defect %s no longer reproduces (%s): the fixed "
+                                                    "library is here, remove it from KNOWN_LIBRARY_DEFECTS" % (k, what))
         self.assertGreater(n_calls, 3500)
         self.assertGreater(n_checked, 150000)
         self.assertEqual(declared["twin_mismatch"] > 0, True)

@@ -116,9 +116,37 @@ C_ARM_ECHO = "the arm asked (DESIGN §6), short forms l/r named left/right (INVE
 C_SPELL = "SPEC §7.5.4 natural orientation (right flank root -> leaf, left flank reversed) from the twin's sequences"
 
 
+C_BAD_ARM = "library-defined: an arm not retrieved, or none of two, is bad_arm (INVENTORY §1.5)"
+C_NO_BASES = "SPEC §7.1 sequences: false omits the strings; the code no_bases is library-defined (INVENTORY §2.12)"
+C_BAD_ARG = "library-defined: an argument outside the tool's domain is bad_argument (INVENTORY §1.1)"
+
+
 class _Refused(Exception):
     """The arguments name no answer (an arm not retrieved, a walk out of range, an unknown label, ...): the tool must
-    answer an error (DESIGN §6: errors are structured results)."""
+    answer an error (DESIGN §6: errors are structured results). |code| is the error code W5 expects (None: any code),
+    |clause| where the refusal and its code come from; most codes are the library's vocabulary ("library-defined")."""
+
+    def __init__(self, why: str, code: Optional[str] = "bad_argument", clause: str = C_BAD_ARG):
+        super().__init__(why)
+        self.code, self.clause = code, clause
+
+
+def _int_arg(args: dict, key: str, default: Any, low: int) -> Any:
+    """An integer argument (never a boolean) of at least |low|, or its default; else a refusal (library-defined
+    argument checks, INVENTORY §1.1, §2.6, §2.9, §2.10)."""
+    v = args.get(key, default)
+    if v is default and default is None:
+        return v
+    if not isinstance(v, int) or isinstance(v, bool) or v < low:
+        raise _Refused("%s %r: an integer >= %d" % (key, v, low))
+    return v
+
+
+def _bool_arg(args: dict, key: str, default: bool) -> bool:
+    v = args.get(key, default)
+    if not isinstance(v, bool):
+        raise _Refused("%s %r: a boolean" % (key, v))
+    return v
 
 
 # ---------------------------------------------------------------------------------------------- the document
@@ -202,20 +230,25 @@ class _Doc:
     def resolve(self, sel: Any) -> int:
         """A label selector -> its id (DESIGN §5 Graphlet.label: tagged {ref} | {name} | {id}; a bare string resolves
         when exactly one label matches it as a ref or as a name)."""
+        c_lab = "DESIGN §5 Graphlet.label (AmbiguousLabel), §6 unknown_label; the codes are library-defined " \
+                "(INVENTORY §1.1)"
+        hits: List[int] = []
         if isinstance(sel, dict) and len(sel) == 1:
             (key, val), = sel.items()
             if key == "id" and isinstance(val, int) and not isinstance(val, bool) and 0 <= val < len(self.labels):
                 return val
             if key in ("ref", "name"):
                 hits = [i for i, x in enumerate(self.labels) if x[key] == val]
-                if len(hits) == 1:
-                    return hits[0]
-            raise _Refused("label selector %r: no single label" % (sel,))
-        if isinstance(sel, str):
+            elif key != "id":
+                raise _Refused("label selector %r" % (sel,), None, c_lab)
+        elif isinstance(sel, str):
             hits = sorted({i for i, x in enumerate(self.labels) if sel in (x["ref"], x["name"])})
-            if len(hits) == 1:
-                return hits[0]
-        raise _Refused("label selector %r: no single label" % (sel,))
+        else:
+            raise _Refused("label selector %r" % (sel,), None, c_lab)
+        if len(hits) == 1:
+            return hits[0]
+        raise _Refused("label selector %r: %s" % (sel, "%d labels" % len(hits) if hits else "no label"),
+                       "ambiguous_label" if hits else "unknown_label", c_lab)
 
     def arm(self, arg: Any, required: bool) -> Optional[str]:
         """The arm an argument names (left/right/l/r); None names the only arm of a one-arm retrieval, or every arm
@@ -224,11 +257,11 @@ class _Doc:
             if len(self.sides) == 1:
                 return self.sides[0]
             if required:
-                raise _Refused("both arms are present: the tool needs one")
+                raise _Refused("both arms are present: the tool needs one", "bad_arm", C_BAD_ARM)
             return None
         side = _ARM_NAMES.get(arg) if isinstance(arg, str) else None
         if side is None or side not in self.arms:
-            raise _Refused("arm %r is not an arm of this retrieval" % (arg,))
+            raise _Refused("arm %r is not an arm of this retrieval" % (arg,), "bad_arm", C_BAD_ARM)
         return side
 
     def flanks(self, side: str) -> Optional[List[str]]:
@@ -286,7 +319,7 @@ def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[
         oracle["unordered"] = unord
     if absent:
         oracle["absent"] = dict(absent)
-    oracle.update({k: v for k, v in extra.items() if v is not None})
+    oracle.update({k: v for k, v in extra.items() if v is not None or k == "expected_error"})
     return {"answer": ans, "oracle": oracle}
 
 
@@ -326,6 +359,19 @@ def same(a: Any, b: Any) -> bool:
     if isinstance(a, list) and isinstance(b, list):
         return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
     return type(a) is type(b) and a == b
+
+
+def error_code(other: Any) -> Optional[str]:
+    """The error code of a tool answer ({"error": "<code>", ...}) or of a per-call record's error ({"code", "fields"},
+    FORMAT v2 B2); None when |other| is no error."""
+    if not isinstance(other, dict):
+        return None
+    e = other.get("error")
+    if isinstance(e, str):
+        return e
+    if isinstance(e, dict) and isinstance(e.get("code"), str):
+        return e["code"]
+    return None
 
 
 def _canon(v: Any) -> str:
@@ -373,9 +419,12 @@ def differences(record: dict, other: Optional[dict]) -> List[dict]:
     |other|; any other declaration checks nothing."""
     o = record["oracle"]
     if o.get("declared") == "expected_error":
-        if not (isinstance(other, dict) and "error" in other):
+        code = error_code(other)
+        if code is None:
             return [{"pointer": "/error", "clause": "DESIGN §6: errors are structured results (%s)" % o.get("note"),
-                     "oracle": "an error", "missing": True}]
+                     "oracle": o.get("expected_error") or "an error", "missing": True}]
+        if o.get("expected_error") and code != o["expected_error"]:
+            return [{"pointer": "/error/code", "clause": o.get("note"), "oracle": o["expected_error"], "other": code}]
         return []
     out = []
     for ptr, clause in o["checked"].items():
@@ -581,7 +630,7 @@ def _graphlet_summary(d: _Doc, args: dict, ctx: dict) -> dict:
     if detail == "limitations":
         return _limitations(d, side, ctx)
     if detail != "summary":
-        raise _Refused("detail %r" % (detail,))
+        raise _Refused("detail %r: summary or limitations (DESIGN §6)" % (detail,))
     summ, clauses, cons = _summary_part(d, sides)
     ev, ecl, econ = _evidence(d, sides)
     clauses.update(ecl)
@@ -648,15 +697,18 @@ def _graphlet_walks(d: _Doc, args: dict, ctx: dict) -> dict:
     a = d.arms[side]
     rank = args.get("rank", "support")
     spell = args.get("spell", "none")
-    tail_bp = args.get("tail_bp", 60)
-    min_bp = args.get("min_bp", 0)
-    rc = args.get("route_consistent", True)
     if rank not in ("support", "length", "loss", "id") or spell not in ("none", "tail", "full"):
         raise _Refused("rank %r / spell %r" % (rank, spell))
-    if not isinstance(min_bp, int) or min_bp < 0 or not isinstance(tail_bp, int) or tail_bp < 0:
-        raise _Refused("min_bp %r / tail_bp %r" % (min_bp, tail_bp))
-    if not isinstance(args.get("n", 10), int) or args.get("n", 10) < 1:
-        raise _Refused("n %r" % (args.get("n"),))
+    tail_bp = _int_arg(args, "tail_bp", 60, 0)
+    min_bp = _int_arg(args, "min_bp", 0, 0)
+    _int_arg(args, "n", 10, 1)
+    rc = _bool_arg(args, "route_consistent", True)
+    if _bool_arg(args, "coordinates", False) and not isinstance(d.result.get("coordinates"), dict):
+        # SPEC §7.1: a retrieval without record coordinates states coordinates: null (with its reason) or none
+        raise _Refused("coordinates=true on a retrieval without record coordinates (%s)" % (
+            d.result.get("coordinates_reason") or "not requested"), "no_coordinates",
+            "SPEC §7.1 record coordinates (null, coordinates_reason); the code no_coordinates is library-defined "
+            "(INVENTORY §2.6)")
     lab = d.resolve(args["label"]) if args.get("label") is not None else None
     constrain = d.mode == "constrain"
     runs = a.get("runs") or []
@@ -847,11 +899,13 @@ def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
     side = d.arm(args.get("arm"), required=False)
     sides = [side] if side else d.sides
     rank = args.get("rank", "direct_bp")
-    min_direct = args.get("min_direct_bp", 0)
-    at_bp = args.get("at_bp")
-    if rank not in ("direct_bp", "reach_bp") or not isinstance(min_direct, int) or \
-            (at_bp is not None and (not isinstance(at_bp, int) or at_bp < 0)) or args.get("coordinates"):
-        raise _Refused("rank %r / min_direct_bp %r / at_bp %r / coordinates without name" % (rank, min_direct, at_bp))
+    if rank not in ("direct_bp", "reach_bp"):
+        raise _Refused("rank %r" % (rank,))
+    _int_arg(args, "n", 20, 1)
+    min_direct = _int_arg(args, "min_direct_bp", 0, 0)
+    at_bp = _int_arg(args, "at_bp", None, 0)
+    if _bool_arg(args, "coordinates", False):
+        raise _Refused("coordinates without name (INVENTORY §2.9: coordinates only with name=)")
     cons = ["/next_cursor"]
     rows = []
     for e in d.result.get("label_summary") or []:
@@ -889,9 +943,8 @@ def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
 
 def _graphlet_splits(d: _Doc, args: dict, ctx: dict) -> dict:
     side = d.arm(args.get("arm"), required=True)
-    m = args.get("min_labels_before", 2)
-    if not isinstance(m, int) or m < 0:
-        raise _Refused("min_labels_before %r" % (m,))
+    m = _int_arg(args, "min_labels_before", 2, 0)
+    _int_arg(args, "n", 10, 1)
     rows = [{"at_bp": sp["at_bp"], "segment": sp["segment"], "kind": sp["kind"],
              "labels_before": sp["labels_before"],
              "branches": [{"char": b["char"], "labels": b["labels_distinct"]} for b in sp.get("branches") or []]}
@@ -929,13 +982,13 @@ def _graphlet_sequence(d: _Doc, args: dict, ctx: dict) -> dict:
             raise _Refused("walk %r" % (walk,))
         flanks = d.flanks(side)
         if flanks is None:
-            raise _Refused("no bases (sequences: false)")
+            raise _Refused("no bases (sequences: false)", "no_bases", C_NO_BASES)
         natural = d.molecule(side, flanks[walk]) if with_seed else flanks[walk]
     else:
         if not isinstance(segment, int) or not 0 <= segment < len(a["segments"]):
             raise _Refused("segment %r" % (segment,))
         if "sequence" not in a["segments"][segment]:
-            raise _Refused("no bases (sequences: false)")
+            raise _Refused("no bases (sequences: false)", "no_bases", C_NO_BASES)
         natural = a["segments"][segment]["sequence"]
     # walking order is the stored order of G bases: the natural order on the right arm, reversed on the left (SPEC
     # §7.5.4); SPEC defines it for flanks, not for a molecule with the seed
@@ -1064,6 +1117,10 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     if fmt == "json" and what == "compare":
         return _declared("properties_only", "export json what=compare is graphlet_compare's lists")
     if fmt == "json" and what == "walk":
+        if args.get("arm") is None or args.get("walks") is None:
+            raise _Refused("what=walk without arm and walks", "bad_argument",
+                           "DESIGN §6: what=walk with arm and walks writes their chains; the code is library-defined "
+                           "(INVENTORY §2.13)")
         side = d.arm(args.get("arm"), required=True)
         ids = _walk_ids(d, side, args.get("walks"))
         walks, absent = [], {}
@@ -1104,7 +1161,9 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
                                                        "/json/annotation/keys_mapped"] + timed)
     sides = [d.arm(args.get("arm"), required=False)] if args.get("arm") is not None else d.sides
     if args.get("walks") is not None and args.get("arm") is None and len(d.sides) > 1:
-        raise _Refused("walks without an arm on a two-arm retrieval")
+        # which walks a list of ids names on two arms is defined by no clause (the library writes records for it)
+        return _record({}, {}, cons + ["/records", "/fasta", "/gfa"], note="walks without an arm on two arms: "
+                                                                        "library-defined, consistency-only")
     if fmt == "gfa":
         if args.get("arm") is not None or args.get("walks") is not None:
             return _record({}, {}, cons + ["/records", "/gfa"])
@@ -1184,21 +1243,38 @@ def _graphlet_load(d: _Doc, args: dict, ctx: dict) -> dict:
     return _record({"summary": summ}, clauses, cons)
 
 
+_OVERRIDE_FORBIDDEN = ("self", "g", "arm", "leaves", "reset_branches")
+
+
 def _traverse_continue(d: _Doc, args: dict, ctx: dict) -> dict:
-    if args.get("execute", True):
+    """execute=False: the request a continuation of walk |walk| sends (SPEC §7.1 continuation; DESIGN §5.3). Checked:
+    the seed (the continuation's bases; its labels in constrain mode, none in annotate mode), the request's loss
+    budget lowered by the largest terminal loss of the continued labels, and its max_label_branches lowered by their
+    largest terminal branch count ("unlimited" kept; the original with reset_branches). Whether the tool also states
+    the loss_budget / branch_budget blocks is its presentation (INVENTORY §2.4: loss_budget?, branch_budget?), and how
+    `overrides` merge into the request is library-defined: with overrides the strategy is consistency-only."""
+    if _bool_arg(args, "execute", True):
         return _declared("not_applicable", "traverse_continue execute=true runs a backend request")
     side = d.arm(args.get("arm"), required=True)
+    reset = _bool_arg(args, "reset_branches", False)
+    ov = args.get("overrides")
+    if ov is not None and (not isinstance(ov, dict) or set(ov) & set(_OVERRIDE_FORBIDDEN)):
+        raise _Refused("overrides %r: an object that sets none of %s" % (ov, ", ".join(_OVERRIDE_FORBIDDEN)))
     w = args.get("walk")
     paths = d.arms[side]["paths"]
-    if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < len(paths) or not paths[w].get("continuation"):
-        raise _Refused("walk %r has no continuation" % (w,))
+    if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < len(paths):
+        raise _Refused("walk %r of %d" % (w, len(paths)))
     p = paths[w]
-    c = p["continuation"]
+    c = p.get("continuation")
+    if not c:
+        raise _Refused("walk %d has no continuation" % w, None,
+                       "SPEC §7.1: only a leaf ended by the radius, a resource reason or beam_pruned carries one; the "
+                       "code is library-defined")
     strategy = ctx.get("strategy") or d.envelope.get("strategy") or {}
     cont_labels = sorted(c.get("labels") or [])
     terminal = {e["label"]: e for e in p.get("end_labels") or []}
-    labels = (strategy.get("labels") or {})
-    branching = (strategy.get("branching") or {})
+    labels = strategy.get("labels") or {}
+    branching = strategy.get("branching") or {}
     seed: dict = {"sequence": c.get("sequence") or ""}
     absent = {}
     if d.mode == "constrain":
@@ -1212,36 +1288,32 @@ def _traverse_continue(d: _Doc, args: dict, ctx: dict) -> dict:
     clauses = {"/request/seeds/*/sequence": c_seed, "/request/seeds/*/labels": c_seed,
                "/parent/arm": C_ARM_ECHO, "/parent/walk": C_PATHS,
                "/parent/overlap_bp": "DESIGN §5.3: a new traversal with the overlap stated (the continuation's bases)"}
-    c_loss = "SPEC §7.1 continuation: reduce loss_budget by the LARGEST terminal loss of the continued labels (end_" \
-             "labels[].loss, T records; DESIGN §5.3)"
-    c_branch = "SPEC §7.1 continuation: max_label_branches lowered by the LARGEST terminal branch count of the " \
-               "continued labels, 'unlimited' kept (DESIGN §5.3)"
-    known = d.mode == "constrain" and all(i in terminal for i in cont_labels)
-    model = (labels.get("change_cost") or {}).get("model")
-    if known and isinstance(labels.get("loss_budget"), (int, float)) and model not in (None, "forbid"):
-        largest = max((terminal[i].get("loss") or 0.0 for i in cont_labels), default=0.0)
-        eff = labels["loss_budget"] - largest
-        ans["loss_budget"] = {"original": labels["loss_budget"], "effective": eff, "largest_terminal_loss": largest}
-        ans["request"]["strategy"] = {"labels": {"loss_budget": eff}}
-        clauses["/loss_budget/*"] = c_loss
-        clauses["/request/strategy/labels/loss_budget"] = c_loss
-    mlb = branching.get("max_label_branches")
     cons = ["/request/strategy/*", "/request/seeds/*/seed_id", "/parent/handle", "/notes", "/ceiling_bytes",
-            "/loss_budget_labels", "/fields_cut"]
-    if known and isinstance(mlb, int) and not isinstance(mlb, bool) and not args.get("reset_branches"):
-        largest_b = max((terminal[i].get("branches") or 0 for i in cont_labels), default=0)
-        eff_b = max(mlb - largest_b, 0)
-        ans["request"].setdefault("strategy", {})["branching"] = {"max_label_branches": eff_b}
-        clauses["/request/strategy/branching/max_label_branches"] = c_branch
-        if mlb > 0:
-            # the stated block where a branch allowance applies (DESIGN §5.3); an allowance of 0 has nothing to
-            # lower, and whether the tool states it then is its choice
-            ans["branch_budget"] = {"original": mlb, "effective": eff_b, "largest_terminal_branches": largest_b,
-                                    "reset": False}
-            clauses["/branch_budget/*"] = c_branch
-        else:
-            cons.append("/branch_budget")
-    return _record(ans, clauses, cons, absent=absent)
+            "/loss_budget", "/branch_budget", "/loss_budget_labels", "/fields_cut"]
+    known = d.mode == "constrain" and all(i in terminal for i in cont_labels) and not ov
+    if known:
+        st: dict = {}
+        lb = labels.get("loss_budget")
+        if isinstance(lb, (int, float)) and not isinstance(lb, bool):
+            largest = max((terminal[i].get("loss") or 0.0 for i in cont_labels), default=0.0)
+            st["labels"] = {"loss_budget": lb - largest}
+            clauses["/request/strategy/labels/loss_budget"] = \
+                "SPEC §7.1 continuation: loss_budget lowered by the LARGEST terminal loss of the continued labels " \
+                "(end_labels[].loss, the T records; DESIGN §5.3)"
+        mlb = branching.get("max_label_branches")
+        c_branch = "SPEC §7.1 continuation: max_label_branches lowered by the LARGEST terminal branch count of the " \
+                   "continued labels, 'unlimited' kept, the original with reset_branches (DESIGN §5.3)"
+        if mlb == "unlimited":
+            st["branching"] = {"max_label_branches": "unlimited"}
+        elif isinstance(mlb, int) and not isinstance(mlb, bool):
+            largest_b = max((terminal[i].get("branches") or 0 for i in cont_labels), default=0)
+            st["branching"] = {"max_label_branches": mlb if reset else max(mlb - largest_b, 0)}
+        if "branching" in st:
+            clauses["/request/strategy/branching/max_label_branches"] = c_branch
+        if st:
+            ans["request"]["strategy"] = st
+    return _record(ans, clauses, cons, absent=absent,
+                   note="overrides: their merge into the request is library-defined" if ov else None)
 
 
 _TOOLS: Dict[str, Callable[[_Doc, dict, dict], dict]] = {
@@ -1275,7 +1347,8 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: str, con
     try:
         return _TOOLS[tool](d, args, ctx)
     except _Refused as e:
-        return _record(None, {}, ["/*"], declared="expected_error", note=str(e))
+        return _record(None, {}, ["/*"], declared="expected_error", expected_error=e.code,
+                       note="%s (%s)" % (e, e.clause))
 
 
 # ---------------------------------------------------------------------------------------------- compare properties
