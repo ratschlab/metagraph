@@ -789,5 +789,53 @@ class VerifyRoundTest(unittest.TestCase):
         self.assertTrue(ref[1].startswith("*Rounding.* Times are rounded half up"))
 
 
+
+class VerifyRoundTwoLowsTest(unittest.TestCase):
+    """The verification of round 2 (VERIFY-R2.md): R1 .. R5 and the PDF title."""
+
+    def test_r1_finding_rule(self):
+        text = prose("overview")["sections"]["decision"]["findings"][0]
+        self.assertIn("either blocks the deploy gate where the policy requires the execution", text)
+        self.assertNotIn("on a gated access path.", text)
+
+    def test_r2_readme_glossary(self):
+        readme = open(os.path.join(SUITE, "README.md"), encoding="utf-8").read()
+        gate = [l for l in readme.splitlines() if l.startswith("- **deploy gate**")][0]
+        self.assertIn("each of which must pass its checks or match its verified by-design case", gate)
+        self.assertNotIn("inconclusive on a gated arm", gate)
+        policy = [l for l in readme.splitlines() if l.startswith("- **policy**")][0]
+        self.assertIn("a scenario tagged budget_stress", policy)
+
+    def test_r3_r4_sources(self):
+        import inspect
+        self.assertIn('text = latex.public_paths(str(p.get("detail") or "?"))', inspect.getsource(sections.gate_problems))
+        src = inspect.getsource(sections.gate_decision_short)
+        self.assertIn("the gate failed on %d problem%s over the executions the policy", src)
+
+    def test_r4_short_fail(self):
+        run = _Stub(gate={"passed": False, "problems": [{"kind": "identity", "detail": "x"}]},
+                    policy={"arms": ["mcp"], "selection": {"scenarios": ["A"]}, "exclusions": [], "required": []},
+                    order=["A"])
+        text = sections.gate_decision_short(run)
+        self.assertTrue(text.startswith("This run does not authorise a deploy: the gate failed on 1 problem over the "
+                                        "executions the policy requires (the table below)."), text)
+        self.assertNotIn("Required means", text)
+
+    def test_r5_without_detail_block(self):
+        depth = {"Q-1": {"class": "partial", "not_compared": ["answer_fields"]},
+                 "Q-2": {"class": "partial", "not_compared": ["answer_fields"]}}
+        run = _Stub(comp_entry=lambda sid: {"mcp_agreement": {"class": "agree"}}, depth=depth,
+                    check_marks=lambda sid: {})
+        out = facts._mcp_agree_short(run, ["Q-1", "Q-2"], footnoted=lambda sid: False)
+        self.assertIn("(Q-1, -2: not compared: answer_fields)", out["mcp_agree_short_text"])
+        out = facts._mcp_agree_short(run, ["Q-1", "Q-2"], footnoted=lambda sid: True)
+        self.assertIn("(the detail block names which)", out["mcp_agree_short_text"])
+
+    def test_pdf_title(self):
+        import inspect
+        import make_doc
+        self.assertIn("\\\\texorpdfstring{MetaGraph suite results", inspect.getsource(make_doc.build_tex))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -879,10 +879,16 @@ def gate_decision_short(run):
     """I.1's release decision without the population sentence, which I.1's population table carries (the second
     external review, R2-003); the long form (gate_decision_text) stays in appendix F."""
     gate = run.gate if isinstance(run.gate, dict) else None
-    if gate and gate.get("passed") and gate_population(run) is not None:
-        return ("The gate passed: every planned execution was recorded, every execution the policy requires passed or "
-                "matched the by-design case its scenario names, and nothing blocks. It certifies those required "
-                "executions (the table below), not the excluded ones and not the whole service.")
+    if gate and gate_population(run) is not None:
+        if gate.get("passed"):
+            return ("The gate passed: every planned execution was recorded, every execution the policy requires passed "
+                    "or matched the by-design case its scenario names, and nothing blocks. It certifies those required "
+                    "executions (the table below), not the excluded ones and not the whole service.")
+        # the failure in the same short form, the populations in the table (the verification of round 2, R4)
+        n = len([x for x in (gate.get("problems") or []) if isinstance(x, dict)])
+        return ("This run does not authorise a deploy: the gate failed on %d problem%s over the executions the policy "
+                "requires (the table below). The count is not a count of service defects: %s (the groups in appendix "
+                "F, each with the evidence that would clear it)." % (n, "" if n == 1 else "s", gate_groups_text(run)))
     return gate_decision_text(run)
 
 
@@ -4415,7 +4421,7 @@ def gate_problems(ctx):
                     if p.get("repeat") is not None:
                         repeats.setdefault(where, []).append(p["repeat"])
                     continue
-                text = str(p.get("detail") or "?")
+                text = latex.public_paths(str(p.get("detail") or "?"))   # no local path in F either (R3)
                 for d in details:
                     if d[0] == text:
                         d[1] += 1
