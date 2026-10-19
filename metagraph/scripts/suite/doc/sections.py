@@ -4456,7 +4456,12 @@ def gate_problems(ctx):
                                  ["problem kind", "scenario and access path, or the problem's text", "n"], rows,
                                  "every problem by the gate's kind (a text cut here is complete in {\\upshape %s})" % tt(GATE_PROBLEMS_FILE))
     for n in (gate.get("notes") or [])[:6]:
-        out += "{\\small\\color{black!60}note: %s}\\par\n" % esc(n, 300)
+        # a long path and a full commit sha may break (the v7 baseline's identity note named the 40-hex commit and
+        # ran 22 pt past the margin); no local path (as the record)
+        text = esc_wrap(latex.public_paths(str(n)), 300)
+        text = re.sub(r"[0-9a-f]{32,}", lambda m: "\\allowbreak{}".join(
+            m.group(0)[i:i + 8] for i in range(0, len(m.group(0)), 8)), text)
+        out += "{\\small\\color{black!60}note: %s}\\par\n" % text
     return out + "\n"
 
 

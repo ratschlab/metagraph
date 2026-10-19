@@ -106,6 +106,24 @@ class ByDesignMarksTest(unittest.TestCase):
 
 
 
+class V7RealRunTest(unittest.TestCase):
+    """What the v7 baseline's build showed: P-scope-0004 / -0006 pass via MCP (the sentence says so plainly), and a
+    gate note naming a 40-hex commit and a path breaks within the margin."""
+
+    def test_p_scope_both_pass(self):
+        t = prose("P")["families"]["P-scope"]["prose"]
+        ok = {"mcp": {"standing": "pass"}}
+        filled = facts.fill(t, {"manifest_version": 7, "x": {"P-scope-0004": ok, "P-scope-0006": ok},
+                                "n_relations": 0}, unresolved=[])
+        self.assertIn("kept the two off the MCP access path): via MCP both pass.", filled)
+
+    def test_gate_note_breaks(self):
+        import inspect
+        src = inspect.getsource(sections.gate_problems)
+        self.assertIn('re.sub(r"[0-9a-f]{32,}"', src)
+        self.assertIn("esc_wrap(latex.public_paths(str(n)), 300)", src)
+
+
 class RecordedIdentityEvidenceTest(unittest.TestCase):
     def test_recorded_identity_in_evidence(self):
         run = _Stub(service_identity={"recorded": True, "service_commits": {"abc1234": 3}, "service_commit": "abc1234",
