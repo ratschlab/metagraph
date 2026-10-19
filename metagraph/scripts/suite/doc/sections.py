@@ -4247,6 +4247,18 @@ def _file_sha256(path):
         return None
 
 
+def _recorded_identity_evidence(run):
+    """The deployed service's identity as the MCP runner recorded it (manifest v7's runner: run.json
+    service_identity), for evidence.json when no identity input was given; None when the run records no commit."""
+    rec = recorded_service_identity(run) or {}
+    if not rec.get("service_commits"):
+        return None
+    return {"source": "recorded by the MCP runner (run.json service_identity, read from the service before each "
+                      "invocation)", "service_commit": rec.get("service_commit"),
+            "service_commits": rec.get("service_commits"), "identity_changed": rec.get("identity_changed"),
+            "invocations": rec.get("invocations")}
+
+
 def evidence_manifest(ctx):
     """{document, run_directory, inputs, gate, by_design_table, service_identity} of this build (V6-004): every run
     file the document read (the set it read marked), the gate's record and policies, the declared file, the
@@ -4299,11 +4311,11 @@ def evidence_manifest(ctx):
                          (k, v) for k, v in dec.items() if k != "_file"))).hexdigest()}},
         "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
         if table.get("path") else None,
-        "service_identity": None if not ident else {
+        "service_identity": {
             "source": ident.get("source"), "service_commit": ident.get("service_commit"),
             "railway_deployment_id": ident.get("railway_deployment_id"),
             "sha256_canonical": hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8")).hexdigest()},
+                "utf-8")).hexdigest()} if ident else _recorded_identity_evidence(run),
     }
 
 

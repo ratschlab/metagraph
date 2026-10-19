@@ -105,5 +105,17 @@ class ByDesignMarksTest(unittest.TestCase):
                          "")
 
 
+
+class RecordedIdentityEvidenceTest(unittest.TestCase):
+    def test_recorded_identity_in_evidence(self):
+        run = _Stub(service_identity={"recorded": True, "service_commits": {"abc1234": 3}, "service_commit": "abc1234",
+                                      "identity_changed": False, "invocations": 3})
+        ev = sections._recorded_identity_evidence(run)
+        self.assertEqual(ev["service_commit"], "abc1234")
+        self.assertIn("recorded by the MCP runner", ev["source"])
+        self.assertIsNone(sections._recorded_identity_evidence(_Stub(service_identity={"recorded": False},
+                                                                     mcp_run={})))
+
+
 if __name__ == "__main__":
     unittest.main()
