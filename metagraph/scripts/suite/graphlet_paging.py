@@ -112,12 +112,13 @@ def unmarked(evidence: Any) -> Any:
 
 
 def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
-    """FORMAT v2 A2: the pages of one op as one answer. A list tool's `rows` concatenated in page order, every other field
-    from the first page, except: the END_FIELDS from the last page; `evidence` from the last page that states it (an
-    interrupted page's carries limitations.local, the completing page's not); compare's base fields that a page cut
-    (fields_cut) taken from any page that carries them, fields_cut then naming only those no page carried;
+    """FORMAT v2 A2: the pages of one op as one answer. A list tool's `rows` concatenated in page order, every other
+    field from the first page, except: the END_FIELDS from the last page; `evidence` from the last page that states it
+    (an interrupted page's carries limitations.local, the completing page's not); compare's base fields that a page
+    cut (fields_cut) taken from any page that carries them, fields_cut then naming only those no page carried;
     `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged,
-    and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor removed. graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
+    and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor removed.
+    graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
     next_from removed and `truncated` too when the loop reached the end (|complete|). A base field two pages state
     differently (the evidence but for that mark) is an AssemblyError: a listing's pages describe one answer. The pages
     are not changed."""
