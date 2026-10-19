@@ -32,11 +32,11 @@ Per op call, in this order:
    fields it names only (cut_aware_difference: a string's leading part, a list's leading whole items, never empty for
    a non-empty value; both rows cut: their common leading part), every other field equal; W3's longer handle moves
    the cut; library ways compare strictly;
-7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in the suite's words, in each
-   way against that way's uncut answer (is_cut): the same uncut answer (the uncut op's own comparison), every string
-   or list of the cut answer a prefix of the uncut one, every key it lacks an optional one (OPTIONAL_KEYS, or named
-   in its fields_cut / cut_fields), every key it adds a cut marker (CUT_MARKERS); the library ways' cut answers
-   must still be equal (one handle length, one ceiling).
+7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in each way against that way's
+   uncut answer (is_cut): it must show a cut (a marker, paging_complete false, fewer rows than total; else "not
+   cut", a failure); a key it lacks optional (OPTIONAL_KEYS) or named in its fields_cut; a key it adds a cut marker;
+   a field a row names cut by lane O's rule; the page's rows and the tool's optional lists leading parts; every other
+   value equal; the library ways' cut answers must still be equal (one handle length, one ceiling).
 Outcomes per op: agree; disagree, naming the pairs; inconclusive (a way missing, a selector failed everywhere, a
 manifest problem); precondition_failed (the scenario's preconditions failed: no op is compared). The scenario: fail
 (a pre-check failed, or an op disagrees), else precondition_failed, else inconclusive, else pass. graphlet_list /
@@ -363,13 +363,30 @@ def _file_unread(way, rec):
 # ---------------------------------------------------------------------------------------------------------------
 # a cut of an uncut answer, in the suite's words
 
-def is_cut(cut, uncut, optional=frozenset(), pointer=""):
-    """None when |cut| is a cut of |uncut|, else (pointer, why): every string a prefix, every list a prefix whose
-    items are cuts of the uncut items, every key the cut lacks optional (|optional|, or named in its fields_cut /
-    cut_fields / a row's _cut_fields at that level), every key it adds a cut marker (CUT_MARKERS), every other value
-    equal."""
+# a page's own list: a cut page holds a leading part of the whole list's rows
+PAGE_LIST = "rows"
+# the evidence of a cut (VERIFY-C VC4): one of these keys anywhere in the answer (next_cursor is removed by the
+# runners' assembly, so it is no evidence)
+CUT_EVIDENCE = frozenset(("fields_cut", "row_truncated", "cut_fields", "_cut_fields", "caveat_effects_cut",
+                          "caveats_truncated", "truncated", "next_from"))
+
+
+def is_cut(cut, uncut, optional=frozenset(), pointer="", fn=None):
+    """None when |cut| is a cut of |uncut|, else (pointer, why) (DESIGN-v8 §5, REVIEW D-R8, with VERIFY-C VC4's
+    restriction to what the answer names cut):
+    - a key the cut lacks: one of |optional| (the tool's optional keys, OPTIONAL_KEYS) or named in this object's
+      fields_cut;
+    - a key only the cut has: a cut marker (CUT_MARKERS);
+    - a field this object names cut (a row's _cut_fields, FORMAT v2 A3): lane O's rule (field_cut_problem: a
+      string's leading part, a list's leading whole items, never empty for a non-empty value);
+    - a page's rows and the tool's optional lists (summary top_labels, caveats): a leading part, each item a cut of
+      the uncut item (so a caveat may lack its optional effect);
+    - every other list: the same length, item by item; every other value, strings included, equal.
+    Without lane O's rule (|fn| None and graphlet_oracle absent) a named field is uncomparable."""
+    fn = fn or oracle_is_cut_of()
     if isinstance(cut, dict) and isinstance(uncut, dict):
-        named = set(x for k in ("fields_cut", "cut_fields", ROW_CUT) for x in (cut.get(k) or []) if isinstance(x, str))
+        dropped = set(x for x in (cut.get("fields_cut") or []) if isinstance(x, str))
+        shortened = set(x for x in (cut.get(ROW_CUT) or []) if isinstance(x, str))
         for k in sorted(set(cut) | set(uncut), key=str):
             p = pointer + "/" + gp.pointer_escape(k)
             if k not in uncut:
@@ -377,27 +394,67 @@ def is_cut(cut, uncut, optional=frozenset(), pointer=""):
                     continue
                 return p, "a key only the cut answer has, not a cut marker"
             if k not in cut:
-                if k in optional or k in named:
+                if k in optional or k in dropped:
                     continue
-                return p, "a key the cut answer lacks, not an optional one"
-            r = is_cut(cut[k], uncut[k], optional, p)
+                return p, "a key the cut answer lacks, neither optional nor named in its fields_cut"
+            if k in shortened:
+                if fn is None:
+                    return p, "uncomparable: graphlet_oracle's cut rule (lane O) is not available"
+                why = field_cut_problem(uncut[k], cut[k], fn)
+                if why:
+                    return p, "a field the row names cut: %s" % why
+                continue
+            if isinstance(cut[k], list) and isinstance(uncut[k], list) and (k == PAGE_LIST or k in optional):
+                if len(cut[k]) > len(uncut[k]):
+                    return p, "a list longer than the uncut one (%d > %d)" % (len(cut[k]), len(uncut[k]))
+                if k == PAGE_LIST and uncut[k] and not cut[k]:
+                    # a page holds at least its first row (a row larger than the page comes alone, cut: _page)
+                    return p, "a page without a row where the uncut list has %d" % len(uncut[k])
+                for i, (x, y) in enumerate(zip(cut[k], uncut[k])):
+                    r = is_cut(x, y, optional, "%s/%d" % (p, i), fn)
+                    if r:
+                        return r
+                continue
+            r = is_cut(cut[k], uncut[k], optional, p, fn)
             if r:
                 return r
         return None
     if isinstance(cut, list) and isinstance(uncut, list):
-        if len(cut) > len(uncut):
-            return pointer or "/", "a list longer than the uncut one (%d > %d)" % (len(cut), len(uncut))
+        if len(cut) != len(uncut):
+            return pointer or "/", "a list of another length (%d vs %d) that no cut names" % (len(cut), len(uncut))
         for i, (x, y) in enumerate(zip(cut, uncut)):
-            r = is_cut(x, y, optional, "%s/%d" % (pointer, i))
+            r = is_cut(x, y, optional, "%s/%d" % (pointer, i), fn)
             if r:
                 return r
         return None
-    if isinstance(cut, str) and isinstance(uncut, str):
-        return None if uncut.startswith(cut) else (pointer or "/", "a string that is not a prefix of the uncut one")
     if isinstance(cut, (dict, list)) or isinstance(uncut, (dict, list)):
         return pointer or "/", "a value of another type than the uncut one"
     return None if gp.leaf_equal(cut, uncut) else (pointer or "/", "a value other than the uncut one (%s vs %s)" % (
         gp.compact(cut, 60), gp.compact(uncut, 60)))
+
+
+def cut_evidence(rec, answer):
+    """What shows that a call was cut (VERIFY-C VC4), or None: a cut marker anywhere in its answer (CUT_EVIDENCE),
+    paging_complete false (FORMAT v2 A4), or fewer rows than its total."""
+    if rec.get("paging_complete") is False:
+        return "paging_complete false"
+    found = []
+
+    def walk(o):
+        if isinstance(o, dict):
+            found.extend(k for k in o if k in CUT_EVIDENCE and o[k] not in (None, False, [], ""))
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(answer)
+    if found:
+        return "the marker %s" % sorted(set(found))[0]
+    if isinstance(answer, dict) and isinstance(answer.get("rows"), list) and isinstance(answer.get("total"), int) \
+            and len(answer["rows"]) < answer["total"]:
+        return "%d of %d rows" % (len(answer["rows"]), answer["total"])
+    return None
 
 
 def _rows_cut(ans):
@@ -670,18 +727,26 @@ def compare_w5(x, rx, r5):
 
 
 def compare_cut(way, rec, ref, optional):
-    """The cut check of one way: |rec| a cut of the same way's uncut |ref| (FORMAT-v8 §5 cut_of)."""
+    """The cut check of one way: |rec| a cut of the same way's uncut |ref| (cut_of), which must show a cut
+    (cut_evidence: the scenario was designed to cut; without one it is "not cut", a failure, VERIFY-C VC4)."""
     if ref is None:
         return {"way": way, "outcome": "not_compared", "detail": "%s recorded no uncut reference" % way}
     if rec.get("error") or ref.get("error"):
         same = gp.first_difference(comparable_view(way, rec), comparable_view(way, ref)) is None
         return {"way": way, "outcome": "agree" if same else "disagree",
                 "detail": "the same error" if same else "an error on one of the cut and the uncut call"}
-    r = is_cut(canonical_answer(rec.get("tool"), library_part(way, rec)),
-               canonical_answer(ref.get("tool"), library_part(way, ref)), optional)
+    mine = canonical_answer(rec.get("tool"), library_part(way, rec))
+    evidence = cut_evidence(rec, mine)
+    if evidence is None:
+        return {"way": way, "outcome": "disagree", "detail": "not cut: the call was designed to cut (cut_of) and "
+                                                             "its answer shows no cut (no marker, its paging "
+                                                             "complete, every row)"}
+    r = is_cut(mine, canonical_answer(ref.get("tool"), library_part(way, ref)), optional)
+    if r and r[1].startswith("uncomparable"):
+        return {"way": way, "outcome": "not_compared", "detail": r[1]}
     if r:
         return {"way": way, "outcome": "disagree", "pointer": r[0], "detail": r[1]}
-    return {"way": way, "outcome": "agree", "detail": "a cut of %s's uncut answer" % way}
+    return {"way": way, "outcome": "agree", "detail": "a cut of %s's uncut answer (%s)" % (way, evidence)}
 
 
 def compare_op(scenario, op, recs, precheck, manifest):

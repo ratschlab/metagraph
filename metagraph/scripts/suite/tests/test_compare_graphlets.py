@@ -196,7 +196,7 @@ class Cut(unittest.TestCase):
         self.assertIn("longer", cg.is_cut(longer, self.UNCUT, opt)[1])
         other = copy.deepcopy(self.UNCUT)
         other["summary"]["caveats"][0]["effect"] = "long tex!"
-        self.assertIn("not a prefix", cg.is_cut(other, self.UNCUT, opt)[1])
+        self.assertIn("a value other than the uncut one", cg.is_cut(other, self.UNCUT, opt)[1])   # no cut names it
         scalar = copy.deepcopy(self.UNCUT)
         scalar["summary"]["top_labels"][0] = 9
         self.assertEqual(cg.is_cut(scalar, self.UNCUT, opt)[0], "/summary/top_labels/0")
@@ -225,8 +225,13 @@ class Cut(unittest.TestCase):
         uncut = {"a": "<handle>", "evidence": {"a": 1}, "export": "x", "total": 2,
                  "rows": [{"key": "k", "prefix": "ACGTACGT", "labels": [1, 2, 3, 4]}, {"key": "j"}]}
         cut = {"a": "<handle>", "fields_cut": ["evidence", "export"], "total": 2, "row_truncated": True,
-               "cut_fields": ["prefix", "labels"], "rows": [{"key": "k", "prefix": "ACG", "labels": [1, 2]}]}
-        self.assertIsNone(cg.is_cut(cut, uncut))   # evidence / export named in fields_cut
+               "cut_fields": ["prefix", "labels"],
+               "rows": [{"key": "k", "prefix": "ACG", "labels": [1, 2], "_cut_fields": ["prefix", "labels"]}]}
+        self.assertIsNone(cg.is_cut(cut, uncut))   # evidence / export named in fields_cut, the row's fields in A3's marker
+        # without the row's own marker (FORMAT v2 A3) its fields are not cut fields
+        bare = copy.deepcopy(cut)
+        del bare["rows"][0]["_cut_fields"]
+        self.assertEqual(cg.is_cut(bare, uncut)[0], "/rows/0/labels")
 
 
 class CutRows(unittest.TestCase):
@@ -763,6 +768,53 @@ class FiveWay(unittest.TestCase):
         p = next(p for p in self.op_entry()["pairs"] if p["pair"] == "W3-W4")
         self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/sequence"))
         self.assertIn("not a leading part", p["detail"])
+
+    def cut_scenario(self):
+        uncut_op = dict(self.op, id="walks-all", args=dict(self.op["args"], max_bytes=262144),
+                        ways=["W1", "W2", "W3", "W4"])
+        cut_op = dict(self.op, id="walks-page", args=dict(self.op["args"], max_bytes=512), paging="none",
+                      cut_of="walks-all", ways=["W1", "W2", "W3", "W4"])
+        self.make(ops=[uncut_op, cut_op])
+        full = gf.walks_answer()
+        self.five(op=uncut_op, answer=full, w5=False)
+        return cut_op, full
+
+    def test_vc4_a_cut_op_that_shows_no_cut_fails(self):
+        # P5: cut == uncut on every way
+        cut_op, full = self.cut_scenario()
+        self.five(op=cut_op, answer=full, w5=False)
+        e = self.op_entry(oid="walks-page")
+        self.assertEqual(e["outcome"], "disagree")
+        self.assertEqual(sorted(e["disagreeing"]), ["W1-uncut", "W2-uncut", "W3-uncut", "W4-uncut"])
+        self.assertTrue(all(c["detail"].startswith("not cut:") for c in e["cuts"]))
+
+    def test_vc4_p6_strings_cut_without_a_marker(self):
+        cut_op, full = self.cut_scenario()
+        page = copy.deepcopy(full)
+        page["evidence"]["support"] = "k"
+        page["rows"] = page["rows"][:1]
+        page["rows"][0].update(end="", labels_full=[])
+        self.five(op=cut_op, answer=page, w5=False)
+        e = self.op_entry(oid="walks-page")
+        self.assertEqual(e["outcome"], "disagree")
+        c = next(c for c in e["cuts"] if c["way"] == "W1")
+        self.assertEqual(c["pointer"], "/evidence/support")   # one row of two is evidence, the strings are not cuts
+
+    def test_vc4_p6b_a_page_without_rows(self):
+        cut_op, full = self.cut_scenario()
+        self.five(op=cut_op, answer=dict(full, rows=[]), w5=False)
+        c = next(c for c in self.op_entry(oid="walks-page")["cuts"] if c["way"] == "W1")
+        self.assertEqual((c["outcome"], c["pointer"]), ("disagree", "/rows"))
+        self.assertIn("a page without a row", c["detail"])
+
+    def test_vc4_a_short_page_is_a_cut(self):
+        cut_op, full = self.cut_scenario()
+        page = copy.deepcopy(full)
+        page["rows"] = page["rows"][:1]
+        self.five(op=cut_op, answer=page, w5=False)   # one row of two: a page cut by its size
+        e = self.op_entry(oid="walks-page")
+        self.assertEqual(e["outcome"], "agree", e)
+        self.assertIn("1 of 2 rows", next(c for c in e["cuts"] if c["way"] == "W1")["detail"])
 
     def test_a_cut_without_its_uncut_reference_is_inconclusive(self):
         cut_op = dict(self.op, id="walks-page", cut_of="walks-all")
