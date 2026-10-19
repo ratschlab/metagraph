@@ -114,13 +114,15 @@ def next_call(tool: str, page: Any) -> Optional[Tuple[str, Any]]:
 
 
 def _repeats(tool: str, pages: List[Any], given: Optional[Tuple[str, Any]]) -> bool:
-    """Whether the last page's continuation asks for a page already asked for: the cursor or next_from that asked for
-    the last page (|given| for the first), and for graphlet_sequence a next_from not beyond the page's own `from`."""
+    """Whether the last page's continuation asks for a page already asked for: any continuation that asked for one of
+    the pages fetched (|given| for the first, then each earlier page's next_call), so that a cycle (A, B, A, ...) stops
+    as an immediate repeat does (VERIFY-L VR7); for graphlet_sequence also a next_from not beyond the page's own
+    `from`. (Compared by equality, not hashed: a continuation is whatever the page states.)"""
     nxt = next_call(tool, pages[-1])
     if nxt is None:
         return False
-    before = next_call(tool, pages[-2]) if len(pages) > 1 else given
-    if before is not None and before == nxt:
+    asked = ([given] if given is not None else []) + [next_call(tool, p) for p in pages[:-1]]
+    if nxt in asked:
         return True
     start = pages[-1].get("from") if isinstance(pages[-1], dict) else None
     return tool == SEQUENCE_TOOL and isinstance(start, int) and isinstance(nxt[1], int) and nxt[1] <= start
@@ -128,9 +130,10 @@ def _repeats(tool: str, pages: List[Any], given: Optional[Tuple[str, Any]]) -> b
 
 def loop_error(tool: str, paging: Any, pages: List[Any], given: Optional[Tuple[str, Any]] = None) -> Optional[dict]:
     """The paging_runaway record of a loop that must stop although its paging asks for more (VERIFY-L VL6), else None:
-    the last page names a next page that repeats one already asked for (a cursor or next_from that does not advance:
-    the same page again, forever), or paging "all" fetched MAX_PAGES pages and a next one is still named. A `pages`
-    cap reached, or paging "none", is no runaway: the op asked for no more."""
+    the last page names a next page that repeats one already asked for (a cursor or next_from that does not advance,
+    or a cycle of them: the same pages again, forever), or paging "all" fetched MAX_PAGES pages and a next one is
+    still named. A `pages` cap reached, or paging "none", is no runaway: the op asked for no more. The check looks at
+    every continuation asked for so far (linear per page): nothing for a library listing of tens of pages."""
     if not pages or next_call(tool, pages[-1]) is None or len(pages) >= max_pages(paging) and paging != "all":
         return None
     if _repeats(tool, pages, given):

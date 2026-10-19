@@ -57,6 +57,13 @@ class LoopTests(unittest.TestCase):
         seq[0]["next_from"] = 9
         self.assertIsNone(gp.loop_error("graphlet_sequence", "all", seq))
         self.assertTrue(gp.more("graphlet_sequence", "all", seq))
+        # VR7: a cycle (A, B, A) is a repeat too, as is a return to the op's own cursor
+        cyc = [{"rows": [1], "next_cursor": "A"}, {"rows": [2], "next_cursor": "B"}, {"rows": [3], "next_cursor": "A"}]
+        self.assertTrue(gp.more("graphlet_walks", "all", cyc[:2]))
+        self.assertEqual(gp.loop_error("graphlet_walks", "all", cyc)["fields"], {"pages": 3, "reason": "repeats"})
+        self.assertEqual(gp.loop_error("graphlet_walks", "all", cyc[:2] + [{"rows": [3], "next_cursor": "Z"}],
+                                       ("cursor", "Z"))["fields"]["reason"], "repeats")
+        self.assertIsNone(gp.loop_error("graphlet_walks", "all", cyc[:2] + [{"rows": [3], "next_cursor": "C"}]))
         many = [{"rows": [i], "next_cursor": "c%d" % i} for i in range(gp.MAX_PAGES)]
         self.assertEqual(gp.loop_error("graphlet_walks", "all", many),
                          {"code": "paging_runaway", "fields": {"pages": gp.MAX_PAGES, "reason": "max_pages"}})
