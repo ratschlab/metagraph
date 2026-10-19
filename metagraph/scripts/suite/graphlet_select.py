@@ -118,7 +118,8 @@ def pointer(doc: Any, path: str) -> Any:
             cur = cur[tok]
         elif isinstance(cur, list):
             if not _INDEX.match(tok):
-                raise SelectorError("the JSON pointer %r: %r at %r is not an index of a list" % (path, tok, seen or "/"))
+                raise SelectorError("the JSON pointer %r: %r at %r is not an index of a list"
+                                    % (path, tok, seen or "/"))
             if int(tok) >= len(cur):
                 raise SelectorError("the JSON pointer %r: index %s at %r, the list has %d items"
                                     % (path, tok, seen or "/", len(cur)))
