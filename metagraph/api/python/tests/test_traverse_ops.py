@@ -238,17 +238,17 @@ class TestLabelWalksAndSupport(unittest.TestCase):
     def test_support_changes_with_reasons(self):
         g = T.body('merge')
         ch = g.support_changes('right', 0)
-        # b.fa leaves at the first bubble and returns at its merge, a.fa at the second (the
-        # displayed walk follows the majority's G allele there)
-        self.assertEqual([(20, [], ['c:1']), (36, ['c:1'], []), (46, [], ['c:0']),
-                          (62, ['c:0'], [])],
+        # displayed evidence (DESIGN §5.1): b.fa joins at its merge at 36, a.fa at the
+        # second at 62 (the displayed walk follows the majority's G allele there); their
+        # kept entries came through non-first parents, so the displayed bases before each
+        # merge are not theirs, and neither leaves at a bubble it never displayed
+        self.assertEqual([(36, ['c:1'], []), (62, ['c:0'], [])],
                          [(c.at_bp, refs(c.added), refs(c.removed)) for c in ch])
-        self.assertEqual({'why': 'split', 'took': ['T']},
-                         {k: ch[0].reasons[0][k] for k in ('why', 'took')})
-        self.assertEqual(('merge', 2), (ch[1].reasons[0]['why'], ch[1].reasons[0]['via_parent']))
-        self.assertEqual({'why': 'split', 'took': ['C']},
-                         {k: ch[2].reasons[0][k] for k in ('why', 'took')})
-        self.assertEqual(('merge', 4), (ch[3].reasons[0]['why'], ch[3].reasons[0]['via_parent']))
+        self.assertEqual(('merge', 2), (ch[0].reasons[0]['why'], ch[0].reasons[0]['via_parent']))
+        self.assertEqual(('merge', 4), (ch[1].reasons[0]['why'], ch[1].reasons[0]['via_parent']))
+        # a split reason where a displayed lineage leaves at a split: fork's left walk 0
+        fk = T.body('fork').support_changes('left', 0)
+        self.assertEqual([(1, 'split')], [(c.at_bp, r['why']) for c in fk for r in c.reasons])
         sw = T.body('switch_chain').support_changes('right', 1)
         self.assertEqual(['switched', 'switch', 'switched', 'switch'],
                          [r['why'] for c in sw for r in c.reasons])
@@ -259,9 +259,8 @@ class TestLabelWalksAndSupport(unittest.TestCase):
     def test_route_profile_adds_the_runs_own_stretch(self):
         g = T.body('merge')
         disp = [(r.from_bp, r.to_bp, refs(r.labels)) for r in g.support_profile('right', 0)]
-        self.assertEqual([(0, 20, ['c:0', 'c:1', 'c:2', 'c:3']), (20, 36, ['c:0', 'c:2', 'c:3']),
-                          (36, 46, ['c:0', 'c:1', 'c:2', 'c:3']),
-                          (46, 62, ['c:1', 'c:2', 'c:3']),
+        # displayed evidence: b.fa (c:1) from its merge at 36, a.fa (c:0) from 62
+        self.assertEqual([(0, 36, ['c:2', 'c:3']), (36, 62, ['c:1', 'c:2', 'c:3']),
                           (62, 100, ['c:0', 'c:1', 'c:2', 'c:3'])], disp)
         route = g.support_profile('right', 0, kind='route')
         self.assertEqual([(0, 100, ['c:0', 'c:1', 'c:2', 'c:3'])],

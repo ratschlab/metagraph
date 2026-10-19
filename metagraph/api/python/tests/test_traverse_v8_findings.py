@@ -547,5 +547,116 @@ class TestVR4ASliceCarriesABaseOrIsRefused(unittest.TestCase):
         self.assertGreater(n, refused)
 
 
+def _formula_profile(g, side, pid):
+    """DESIGN §5.1's displayed evidence along walk |pid|, per base, from the library's own
+    claims (one per run, with its evidence_from): a run's label supports base x where
+    evidence_from <= x < to_bp and the walk's segment at x is on the run's displayed chain
+    (the first-parent chain to its anchor)."""
+    a = g.arms[side]
+    p = derive.paths(a)[pid]
+    seg_at = []
+    for sid in p.segments:
+        seg_at += [sid] * a.segments[sid].length_bp
+    sets = [set() for _ in seg_at]
+    for c in g.claims(side, strict=False):
+        if c.to_bp <= c.from_bp:
+            continue
+        mine = set(derive.chain(a, c.segment))
+        for x in range(c.evidence_from, min(c.to_bp, len(seg_at))):
+            if seg_at[x] in mine:
+                sets[x].add(c.label.ref)
+    return sets
+
+
+def _profile_sets(g, side, pid, kind='displayed'):
+    out = []
+    for r in g.support_profile(side, pid, kind):
+        out += [{l.ref for l in r.labels}] * (r.to_bp - r.from_bp)
+    return out
+
+
+class TestG4TheProfileIsDisplayedEvidence(unittest.TestCase):
+    """G4 (VERIFY-O-B VO-B1): graphlet_support's profile (support_profile(kind=
+    'displayed')) counted a label wherever it was present on the walk's nodes. DESIGN §5.1
+    lists support_profile(kind='displayed') among the users of displayed-path evidence:
+    a run's displayed bases start at its evidence_from ("the displayed bases before s
+    are not this lineage's"), derived at its anchor. The profile now counts each run
+    from its evidence_from, on the part of its displayed chain the walk shares."""
+
+    def test_mini_ndm1_rc_switch1_left_walk_3(self):
+        g = _real('real/mini_refseq/mini_ndm1_rc__switch1')
+        a = g.arms['left']
+        run = a.runs[13]
+        claim, = [c for c in g.claims('left', strict=False)
+                  if c.segment == run.segment and c.label.id == run.label]
+        self.assertEqual((1239, 3), (claim.evidence_from, claim.path_id))
+        prof = g.support_profile('left', 3)
+        ref = g.labels[run.label].ref
+        for r in prof:
+            has = ref in {l.ref for l in r.labels}
+            self.assertEqual(r.from_bp >= 1239, has, (r.from_bp, r.to_bp))
+        self.assertEqual(5, len(prof[0].labels))
+        # the tool answers the same rows
+        with tempfile.TemporaryDirectory() as d:
+            store = GraphletStore(d)
+            h = store.put_graphlet(g)
+            rows = GraphletTools(store).graphlet_support(h, 'left', 3, max_bytes=1 << 20)['rows']
+        self.assertEqual([(r.from_bp, r.to_bp, len(r.labels)) for r in prof],
+                         [(r['from_bp'], r['to_bp'], r['n_labels']) for r in rows])
+
+    def test_merge_document(self):
+        # a.fa and b.fa enter walk 0 through non-first parents (evidence_from 62 and 36):
+        # they join there, and never leave at the bubbles they do not display
+        g = T.body('merge')
+        self.assertEqual([(36, ['b.fa'], [], 'merge'), (62, ['a.fa'], [], 'merge')],
+                         [(c.at_bp, [l.name for l in c.added], [l.name for l in c.removed],
+                           c.reasons[0]['why']) for c in g.support_changes('right', 0)])
+        sets = _profile_sets(g, 'right', 0)
+        names = {l.ref: l.name for l in g.labels}
+        for x, labs in enumerate(sets):
+            got = {names[r] for r in labs}
+            self.assertEqual('a.fa' in got, x >= 62, x)
+            self.assertEqual('b.fa' in got, x >= 36, x)
+
+    def test_every_constrain_walk_of_the_fixtures(self):
+        import glob
+        n = 0
+        docs = [(os.path.basename(f), parse(T.read(f)))
+                for f in sorted(glob.glob(os.path.join(T.DOCS, '*.mgt')))]
+        for f in sorted(glob.glob(os.path.join(T.DATA, 'real', '*', '*.graphlet.json.gz'))
+                        + glob.glob(os.path.join(T.DATA, 'coords', '*.graphlet.json.gz'))
+                        + glob.glob(os.path.join(T.DATA, 'review3', '*.graphlet.json'))):
+            if f.endswith('.gz'):
+                with gzip.open(f) as fh:
+                    resp = json.loads(fh.read())
+            else:
+                with open(f, encoding='utf-8') as fh:
+                    resp = json.load(fh)
+            resp = resp['response'] if isinstance(resp.get('response'), dict) else resp
+            for r in resp['results']:
+                if isinstance(r.get('graphlet'), str):
+                    docs.append((os.path.basename(f), from_response(r, resp)))
+        for name, g in docs:
+            if g.mode != 'constrain':
+                continue
+            for side, a in g.arms.items():
+                for p in derive.paths(a):
+                    if p.length_bp == 0:
+                        continue
+                    n += 1
+                    self.assertEqual(_formula_profile(g, side, p.id),
+                                     _profile_sets(g, side, p.id), (name, side, p.id))
+                    # support_changes reads the same profile: past base 0 a change is
+                    # exactly where its label set changes, and says what changed
+                    prof = g.support_profile(side, p.id)
+                    want = [(r.from_bp, {l.ref for l in r.labels} - {l.ref for l in q.labels},
+                             {l.ref for l in q.labels} - {l.ref for l in r.labels})
+                            for q, r in zip(prof, prof[1:])]
+                    got = [(c.at_bp, {l.ref for l in c.added}, {l.ref for l in c.removed})
+                           for c in g.support_changes(side, p.id) if c.at_bp > 0]
+                    self.assertEqual(want, got, (name, side, p.id))
+        self.assertGreater(n, 400)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -459,11 +459,13 @@ def alive_at(g, arm, seg, pos):
 
 
 def _alive_profile(g, arm, leaf_seg, b=None):
-    """Constrain: the labels alive at each base of the leaf's first-parent chain, as
-    maximal runs [(from, to, frozenset)]. Entry sets, then per segment the run ends
-    anchored there (removed from to_bp on) and the switch-ins (added from at_bp on) in
-    the chronological order of the G.end rule. |b|: each segment charged before it is
-    read (its pieces and their sets)."""
+    """Constrain: the labels alive (present) at each base of the leaf's first-parent
+    chain, as maximal runs [(from, to, frozenset)]. Entry sets, then per segment the run
+    ends anchored there (removed from to_bp on) and the switch-ins (added from at_bp on)
+    in the chronological order of the G.end rule. |b|: each segment charged before it is
+    read (its pieces and their sets). Presence, not displayed evidence: support_profile
+    reads _displayed_profile (DESIGN §5.1); compare's walk keys read these pieces
+    (_iter_alive_pieces)."""
     out = []
     chain = derive.chain(arm, leaf_seg)
     if b is not None:
@@ -471,6 +473,73 @@ def _alive_profile(g, arm, leaf_seg, b=None):
         b.charge(sum([pw[x] for x in chain]), sum([pm[x] for x in chain]))
     for sid in chain:
         out.extend(_alive_pieces(arm, arm.segments[sid]))
+    return _merge_runs(out)
+
+
+# an evidence cache entry of derive.evidence(): its dict slot and (route_from, evidence_from)
+_EVIDENCE_ENTRY = DICT_KEY + TUPLE + 2 * INT
+
+
+def _evidence_prices(b, g, arm):
+    """Per run the price of its evidence walk (derive.evidence: the merges above its
+    anchor), structural and cached -- as a claim prices it."""
+    md = derive.merge_depth(arm)
+    return derive.price_list(b, g, arm, 'evidence_prices',
+                             lambda: [2 + 3 * md[r.segment] for r in arm.runs])
+
+
+def _displayed_profile(g, arm, leaf_seg, b=None):
+    """Constrain: the displayed-path evidence along the walk to |leaf_seg| (DESIGN §5.1),
+    as maximal runs [(from, to, frozenset)] over [0, length). A run's label supports the
+    bases from its evidence_from (derive.evidence, derived at its anchor) to its to_bp, on
+    the part of its displayed chain -- the first-parent chain to its anchor -- that the
+    walk shares (a prefix of the walk). A label merely present on the walk's nodes is not
+    counted: a lineage whose kept entry came through a non-first parent supports the
+    displayed bases from that merge on ("the displayed bases before s are not this
+    lineage's"). |b|: the evidence walks, the edges and their sort charged before they
+    are made, each piece before its set is built."""
+    segs = arm.segments
+    runs = arm.runs
+    chain = derive.chain(arm, leaf_seg)
+    length = segs[leaf_seg].end_bp
+    if b is not None:
+        derive.uses(b, g, arm, 'merge_above', 'merge_depth', 'partition_sets')
+        n = len(runs)
+        b.charge(W_ELEM * (len(chain) + len(segs)) + sum(_evidence_prices(b, g, arm))
+                 + 2 * n + sort_work(2 * n),
+                 set_bytes(len(chain)) + list_bytes(len(segs)) + n * _EVIDENCE_ENTRY
+                 + list_bytes(2 * n) + 2 * n * (TUPLE + 3 * INT))
+    on = set(chain)
+    # per segment, the deepest segment of the walk's chain on its first-parent chain
+    # (parents precede children; the root is on every chain)
+    shared = []
+    for s in segs:
+        shared.append(s.id if s.id in on else shared[s.parents[0]])
+    edges = []
+    for r in runs:
+        if r.to_bp <= r.from_bp:
+            continue
+        hi = min(r.to_bp, segs[shared[r.segment]].end_bp)
+        lo = derive.evidence(arm, r)[1]
+        if lo < hi:
+            edges.append((lo, 1, r.label))
+            edges.append((hi, -1, r.label))
+    edges.sort()
+    out = []
+    count = collections.Counter()
+    pos = i = 0
+    while pos < length:
+        while i < len(edges) and edges[i][0] <= pos:
+            _, d, lab = edges[i]
+            count[lab] += d
+            if not count[lab]:
+                del count[lab]
+            i += 1
+        nxt = min(edges[i][0], length) if i < len(edges) else length
+        if b is not None:
+            b.charge(W_ELEM + (len(count) >> 1), TUPLE + 2 * INT + set_bytes(len(count)))
+        out.append((pos, nxt, frozenset(count)))
+        pos = nxt
     return _merge_runs(out)
 
 
@@ -1758,8 +1827,10 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
 
 def support_profile(g, arm, leaf, kind='displayed', *, budget=None):
     """Maximal SupportRun(from_bp, to_bp, labels, exact) over the walk [0, length).
-    displayed: the labels supporting the displayed bases (§5.1); route: also every run
-    anchored on the walk over its own [from_bp, to_bp) (route support, scope-free).
+    displayed: the labels supporting the displayed bases (§5.1): each run's label from its
+    evidence_from (as its claim states it) on the part of its displayed chain the walk
+    shares -- not every label present on the walk's nodes; route: also every run anchored
+    on the walk over its own [from_bp, to_bp) (route support, scope-free).
     Annotate mode records one set per node: both kinds are the recorded sets.
 
     budget= (local limits): a stop raises LocalBudgetExceeded with no partial -- the last
@@ -1796,7 +1867,7 @@ def _support_profile(g, arm, leaf, kind, b):
         return _support_out(g, b, _presence_profile(a, seg_id, b, g),
                             lambda r: SupportRun(r[0], r[1], _labels(g, r[2]),
                                                  r[3] == len(r[2]), r[3]))
-    prof = _alive_profile(g, a, seg_id, b)
+    prof = _displayed_profile(g, a, seg_id, b)
     if kind == 'route':
         extra = []
         rbs = derive.runs_by_segment(a)
@@ -1859,6 +1930,18 @@ def _support_changes(g, arm, leaf, b):
     segs = a.segments
     prof = _support_profile(g, a, leaf, 'displayed', b)
     prev = set(segs[chain[0]].entry)
+    if g.mode == 'constrain' and prof:
+        # a seed label whose displayed support starts later on this walk (at the merge its
+        # kept entry came through, §5.1) does not leave at 0 -- it joins there -- unless a
+        # run of its ends at 0 (a boundary end, e.g. minority at the seed). A seed label
+        # that never supports this walk still leaves at 0 (a split, an end)
+        if b is not None:
+            b.charge(W_ELEM * len(a.runs) + sum(len(r.labels) for r in prof) + len(prev),
+                     2 * set_bytes(len(prev)))
+        first = {l.id for l in prof[0].labels}
+        later = {l.id for r in prof[1:] for l in r.labels} - first
+        ended = {r.label for r in a.runs if r.to_bp == 0}
+        prev = {l for l in prev if l not in later or l in ended}
     out = []
     on_chain = set(chain)
     rbs = derive.runs_by_segment(a)
