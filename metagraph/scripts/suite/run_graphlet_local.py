@@ -47,7 +47,8 @@ loaded so far reloaded into it, and the next op runs (handles an op made are gon
 that is no JSON is that call's `exception` {type}, one holding a NaN or an infinity `non_finite` {pointer, page}
 (VL9: the records are strict JSON, as the service refuses such numbers with number_not_finite). The child reads its
 requests from a duplicate of fd 0 and points fd 0 at /dev/null, as it points fd 1 at its log. A way whose process
-does not start, or restarts more than 20 times, is reported and the next way runs; the invocation then exits 1.
+does not start, or restarts more than 20 times, is reported (run.json state failed, with its failure; the op in
+flight still recorded) and the next way runs; the invocation then exits 1.
 
 Op execution (FORMAT §1-§2): per way, scenarios in manifest order, each scenario's ops in order; an op runs on a way
 when its `ways` (else the scenario's graphlet.ways.default, else every way) names the way (drift runs W4's ops).
@@ -430,7 +431,22 @@ class Way(object):
         self.exports = os.path.realpath(os.path.join(self.dir, "work", "exports"))
         self.child = None
         self.restarts = []   # [{reason, utc}] of every restart of the way's process (supervision)
-        self.start_child()
+        self.failure = None  # why the way failed (WayFailed), noted in run.json
+        self.started = time.time()
+        try:
+            self.start_child()
+        except WayFailed as e:
+            # no process to run on: run.json still says so, apart from a way that never ran (VERIFY-L VR5)
+            sc.write_json_atomic(os.path.join(self.dir, "run.json"), {
+                "run_id": runner.run_id, "way": name, "way_dir": WAY_DIRS[name], "state": "failed",
+                "failure": str(e), "source": runner.source_note(name),
+                "library": {"root": os.path.abspath(self.root), "commit": runner.commits[name]},
+                "limits": runner.limits, "limits_not_applied": runner.limits_not_applied,
+                "started_utc": iso(self.started), "updated_utc": iso(time.time()),
+                "runner": os.path.basename(__file__)})
+            if not runner.args.keep_work:
+                shutil.rmtree(os.path.join(self.dir, "work"), ignore_errors=True)
+            raise
         self.library = {"commit": runner.commits[name], "python": self.info["python"], "hashseed": self.hashseed,
                         "work_model": self.info["work_model"], "limits": runner.limits}
         self.handles = {}    # scenario -> its graphlet's handle in this process
@@ -438,7 +454,6 @@ class Way(object):
         self.owner = {}      # handle -> (scenario, op or None)
         self.docs = {}       # scenario -> its graphlet_docs line
         self.counts = {"ops": 0, "answered": 0, "error": 0, "selector_error": 0, "calls": 0}
-        self.started = time.time()
         self.ops_file = open(self.ops_path, "w", encoding="utf-8")
         self.docs_file = open(os.path.join(self.dir, "graphlet_docs.jsonl"), "w", encoding="utf-8")
         self.write_run("running")
@@ -509,7 +524,10 @@ class Way(object):
             code, fields = "timeout", {"timeout_s": timeout}
         except ChildDied as e:
             code, fields = "child_died", {"exit": e.exit}
-        self.restart(code)
+        try:
+            self.restart(code)
+        except WayFailed as e:   # the call in flight is still recorded; run_scenario then ends the way
+            self.failure = str(e)
         raise Supervised(code, fields)
 
     # -- records ----------------------------------------------------------------------------------------------
@@ -521,6 +539,7 @@ class Way(object):
     def write_run(self, state):
         sc.write_json_atomic(os.path.join(self.dir, "run.json"), {
             "run_id": self.r.run_id, "way": self.name, "way_dir": WAY_DIRS[self.name], "state": state,
+            "failure": self.failure,
             "source": self.r.source_note(self.name), "library": dict(self.library, root=os.path.abspath(self.root),
                                                                       file=self.info["library_file"]),
             "interpreter": dict((k, self.info.get(k)) for k in (
@@ -725,6 +744,8 @@ class Way(object):
             self.counts["ops"] += 1
             self.counts["answered" if rec["answer"] is not None else
                         "selector_error" if rec["selector_error"] else "error"] += 1
+            if self.failure:   # the process could not be restarted after this op: the way ends here
+                raise WayFailed(self.failure)
 
     def run_op(self, sid, op, answers):
         """One op in this way -> (its record, the answer later selectors read: graphlet_paging.selector_view of the
@@ -929,6 +950,7 @@ class Runner(object):
                 state = "done"
             except WayFailed as e:
                 summary[name] = {"failed": str(e)}
+                way.failure = way.failure or str(e)
                 print("run_graphlet_local: %s" % e, file=sys.stderr)
             finally:
                 way.close(state)

@@ -4856,7 +4856,8 @@ Nothing here touches staging; every test is offline.
   ends during a call `child_died` {exit, page}; the process is then killed and restarted with every document loaded
   so far, and the next op runs (handles an op made are gone). An answer that is no JSON is `exception` {type}, one
   holding a NaN or an infinity `non_finite` {pointer, page} (VERIFY-L VL9: records are strict JSON). A way whose
-  process does not start or restarts more than 20 times is reported, the next way runs, the exit code is 1. Each
+  process does not start or restarts more than 20 times is reported (its run.json `state: failed` with the
+  `failure`, the op in flight recorded: VERIFY-L VR5), the next way runs, the exit code is 1. Each
   way's work/ (the library's spool and export directory) is removed after the run unless --keep-work.
 - Handles in records are symbols relative to the op's scenario: `<handle>` (its own graphlet, FORMAT's form),
   `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in

@@ -833,6 +833,32 @@ class SupervisionTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_a_way_that_restarts_too_often(self):
+        """VR5: past MAX_RESTARTS (here 2) the way ends: the op in flight is recorded (child_died), run.json says
+        failed and why, the next way runs, the exit code is 1."""
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        saved = rgl.MAX_RESTARTS
+        try:
+            rgl.MAX_RESTARTS = 2
+            ops = [op("die%d" % i, "graphlet_walks", {"arm": "left", "mode": "die", "max_bytes": 2048})
+                   for i in range(4)]
+            plan = {"scenarios": [{"id": "G-a", "graphlet": {"ops": ops}}]}
+            out = os.path.join(tmp, "run")
+            argv = ["--plan", write_json(os.path.join(tmp, "plan.json"), plan), "--doc", "G-a=" + DOCS["G-body"],
+                    "--library-root", FAKE_LIB, "--library-commit", "fake", "--out", out, "--ways", "W1,W2",
+                    "--quiet"]
+            self.assertEqual(rgl.main(argv), 1)
+            for way in ("W1", "W2"):
+                recs = records(out, way)
+                self.assertEqual([(r["op"], outcome(r)) for r in recs],
+                                 [("die0", "child_died"), ("die1", "child_died"), ("die2", "child_died")])
+                run = sc.read_json(os.path.join(out, "arms", rgl.WAY_DIRS[way], "run.json"))
+                self.assertEqual(run["state"], "failed")
+                self.assertIn("restarted 2 times", run["failure"])
+        finally:
+            rgl.MAX_RESTARTS = saved
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_seed_that_does_not_take_effect(self):
         """VL7: a child launched with -E echoes the seed it was given, but ignores it: the way does not start."""
         tmp = tempfile.mkdtemp(prefix="graphlet-local-")
@@ -868,6 +894,13 @@ class SupervisionTests(unittest.TestCase):
             self.assertEqual(rgl.main(argv), 1)
             self.assertFalse(os.path.exists(os.path.join(out, "arms", "mcp-lib", "graphlet_ops.jsonl")))
             self.assertEqual([r["op"] for r in records(out, "drift")], ["w"])
+            # VR5: the failed way's run.json says so, and why; the way that ran is done with no failure
+            failed = sc.read_json(os.path.join(out, "arms", "mcp-lib", "run.json"))
+            self.assertEqual(failed["state"], "failed")
+            self.assertIn("refuses max_bytes 77", failed["failure"])
+            self.assertFalse(os.path.exists(os.path.join(out, "arms", "mcp-lib", "work")))
+            ran = sc.read_json(os.path.join(out, "arms", "drift-lib", "run.json"))
+            self.assertEqual((ran["state"], ran["failure"]), ("done", None))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
