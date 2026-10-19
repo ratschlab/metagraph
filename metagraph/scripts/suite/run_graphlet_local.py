@@ -663,8 +663,8 @@ class Way(object):
             line["error"] = {"code": e.code, "fields": dict(e.fields, stage="convert")}
             return None
         if not msg["ok"]:
-            line["error"] = {"code": "document_refused", "fields": {"stage": "convert", "type": msg["type"]}}
-            line["error_text"] = msg["error"]
+            line["error"] = {"code": "document_refused", "fields": {"stage": "convert", "type": msg.get("type")}}
+            line["error_text"] = msg.get("error")
             return None
         if "refused" in msg["result"]:
             line["error"] = {"code": "document_refused", "fields": {"stage": "convert",
@@ -694,7 +694,9 @@ class Way(object):
             line["error"] = {"code": e.code, "fields": dict(e.fields, stage="load")}
             return
         answer = msg["result"].get("answer") if msg["ok"] else None
-        if not msg["ok"]:
+        if not msg["ok"] and "non_finite" in msg:   # a receipt holding a NaN or an infinity (VERIFY-L VR2)
+            line["error"] = {"code": "document_refused", "fields": {"stage": "load", "non_finite": msg["non_finite"]}}
+        elif not msg["ok"]:
             line["error"] = {"code": "document_refused", "fields": {"stage": "load", "type": msg["type"]}}
             line["error_text"] = msg["error"]
         elif not isinstance(answer, dict) or isinstance(answer.get("error"), str):

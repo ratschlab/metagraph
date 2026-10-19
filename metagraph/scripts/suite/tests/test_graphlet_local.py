@@ -814,6 +814,25 @@ class SupervisionTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_a_load_receipt_holding_nan(self):
+        """VR2: a graphlet_load receipt holding a NaN refuses that document (stage load, its pointer); the other
+        scenario runs."""
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            ops = [op("w", "graphlet_walks", {"arm": "left", "mode": "ok", "max_bytes": 2048})]
+            plan = {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid in ("G-nanload", "G-a")]}
+            out = os.path.join(tmp, "run")
+            recs = run_offline(out, plan, docs={"G-nanload": DOCS["G-body"], "G-a": DOCS["G-body"]}, ways="W4",
+                               extra=["--library-root", FAKE_LIB, "--library-commit", "fake"])["W4"]
+            got = dict((r["scenario"], r) for r in recs)
+            self.assertEqual(got["G-nanload"]["error"], {"code": "document_refused", "fields": {
+                "stage": "load", "non_finite": "/summary/seed/length_bp"}})
+            self.assertEqual(outcome(got["G-a"]), "ok")
+            docs = dict((d["scenario"], d) for d in records(out, "W4", "graphlet_docs.jsonl"))
+            self.assertIsNone(docs["G-nanload"]["load"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_seed_that_does_not_take_effect(self):
         """VL7: a child launched with -E echoes the seed it was given, but ignores it: the way does not start."""
         tmp = tempfile.mkdtemp(prefix="graphlet-local-")

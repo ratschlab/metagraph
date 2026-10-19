@@ -30,6 +30,8 @@ class GraphletTools(object):
         self.loaded += 1
         handle = "g_%012x" % (0xfa4e000 + self.loaded)
         self.handles.add(handle)
+        if "nanload" in os.path.basename(path):   # a receipt holding a NaN (VERIFY-L VR2)
+            return {"handle": handle, "summary": {"seed": {"length_bp": float("nan")}}}
         return {"handle": handle, "summary": None}
 
     def graphlet_summary(self, handle, arm=None, detail="summary", cursor=None, max_bytes=None, budget=None):
