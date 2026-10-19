@@ -141,6 +141,7 @@ C_BAD_ARM = "library-defined: an arm not retrieved, or none of two, is bad_arm (
 C_NO_BASES = "SPEC §7.1 sequences: false omits the strings; the code no_bases is library-defined (INVENTORY §2.12)"
 C_NO_BASES_EXPORT = "SPEC §7.1 sequences: false omits the strings, so no walk can be written; the code is " \
                     "library-defined"
+C_WHOLE_LIST = "the whole list W5 derives (every page assembled, FORMAT-v8 §3): no element beyond it"
 C_BAD_ARG = "library-defined: an argument outside the tool's domain is bad_argument (INVENTORY §1.1)"
 
 
@@ -221,10 +222,10 @@ class _Doc:
                 break
         self.arms: Dict[str, dict] = {s: a for s, a in (self.result.get("arms") or {}).items() if s in ARMS}
         self.sides = [s for s in ARMS if s in self.arms]
-        self.mode = self.result.get("label_mode") or {"c": "constrain", "a": "annotate"}.get(self._h(6), self._h(6))
+        self.mode = self.result.get("label_mode") or {"c": "constrain", "a": "annotate"}.get(self.h(6), self.h(6))
         self.labels = self._label_list()
 
-    def _h(self, i: int) -> Optional[str]:
+    def h(self, i: int) -> Optional[str]:
         """H field |i| (SPEC §7.5.2: H mgt 1 k regime alphabet mode support reconverge cap continuation_bp seed_index
         walk index_ns index_fp index_meta_fp), None for `*` or a missing field."""
         v = self.H[i] if i < len(self.H) else None
@@ -311,19 +312,26 @@ def _matches(pattern: str, pointer: str) -> bool:
 
 def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[str],
             inputs: Sequence[str] = ("full", "mgt"), unordered: Sequence[str] = (), absent: Any = (),
-            position_ordered: Sequence[str] = (), **extra: Any) -> dict:
+            position_ordered: Sequence[str] = (), partial: Sequence[str] = (), **extra: Any) -> dict:
     """The W5 record: every value of |ans| claimed by the first clause pattern that matches its pointer (a pattern
     naming an object or a list claims it whole). A value no clause claims is a bug of this module: W5 answers only
     what it checks (FORMAT-v8 §4). |unordered|: patterns of checked lists compared as multisets (a tool list whose
     order no clause fixes); |absent|: pointers (with their clause) that must not exist in the other answer, e.g. a
-    seed's labels in annotate mode (FORMAT questions Q2, Q4)."""
+    seed's labels in annotate mode (FORMAT questions Q2, Q4). A list W5 claims element by element is a whole list
+    unless named in |partial| (rows of a listing W1 did not read to its end) or consistency-only: its length is
+    checked by an absent pointer at its end (VO7: an extra or repeated element is a difference)."""
     checked: Dict[str, str] = {}
+    lengths: Dict[str, str] = {}
 
     def visit(node: Any, ptr: str) -> None:
         for pat, clause in clauses.items():
             if _matches(pat, ptr):
                 checked[ptr] = clause
                 return
+        if isinstance(node, list):
+            end = "%s/%d" % (ptr, len(node))
+            if ptr not in partial and not any(_matches(c, end) for c in consistency):
+                lengths[end] = C_WHOLE_LIST
         if isinstance(node, dict) and node:
             for k, v in node.items():
                 visit(v, ptr + "/" + _esc(k))
@@ -343,8 +351,9 @@ def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[
     posord = sorted(p for p in checked if any(_matches(u, p) for u in position_ordered))
     if posord:
         oracle["position_ordered"] = posord
+    absent = dict(absent, **lengths)
     if absent:
-        oracle["absent"] = dict(absent)
+        oracle["absent"] = absent
     oracle.update({k: v for k, v in extra.items() if v is not None or k == "expected_error"})
     return {"answer": ans, "oracle": oracle}
 
@@ -696,10 +705,10 @@ def _evidence(d: _Doc, sides: Sequence[str]) -> Tuple[dict, Dict[str, str], List
     ev: dict = {"complete_to_bp": {s: d.arms[s]["complete_to_bp"] for s in sides},
                 "scope": {s: d.arms[s]["completeness_scope"] for s in sides},
                 "outcome": d.result["outcome"]}
-    if d._h(7) in _SUPPORT:
-        ev["support"] = _SUPPORT[d._h(7)]
-    if d._h(8) in _RECONVERGE:
-        ev["reconverge"] = _RECONVERGE[d._h(8)]
+    if d.h(7) in _SUPPORT:
+        ev["support"] = _SUPPORT[d.h(7)]
+    if d.h(8) in _RECONVERGE:
+        ev["reconverge"] = _RECONVERGE[d.h(8)]
     clauses = {"/evidence/complete_to_bp": C_CTB, "/evidence/scope": C_SCOPE, "/evidence/outcome": C_OUTCOME,
                "/evidence/support": "SPEC §7.5.2 H support k|t (kmer, trace)",
                "/evidence/reconverge": "SPEC §7.5.2 H reconverge m|k (merge, keep)"}
@@ -709,15 +718,17 @@ def _evidence(d: _Doc, sides: Sequence[str]) -> Tuple[dict, Dict[str, str], List
                          "/evidence/limitations"]
 
 
-def _cut_rows(ans: dict, ctx: dict, consistency: List[str], key: str = "rows") -> None:
-    """Whole lists unless the op read fewer pages: then the reference way's row count, or no rows at all."""
+def _cut_rows(ans: dict, ctx: dict, consistency: List[str], key: str = "rows") -> List[str]:
+    """Whole lists unless the op read fewer pages: then the reference way's row count, or no rows at all. -> the
+    partial list's pointer (for _record), or []."""
     if ctx.get("paging", "all") == "all":
-        return
+        return []
     if isinstance(ctx.get("rows"), int):
         ans[key] = ans[key][:ctx["rows"]]
     else:
         ans[key] = []
         consistency.append("/%s/*" % key)
+    return ["/" + key]
 
 
 def _arm_counts(a: dict) -> dict:
@@ -732,7 +743,7 @@ def _arm_counts(a: dict) -> dict:
 # ---------------------------------------------------------------------------------------------- the tools
 def _summary_part(d: _Doc, sides: Sequence[str]) -> Tuple[dict, Dict[str, str], List[str]]:
     s = {"seed": {"length_bp": d.result["seed"]["length_bp"], "mode": d.mode}, "outcome": d.result["outcome"],
-         "index": {"ns": d._h(13), "verifiable": d._h(14) is not None}, "arms": {}}
+         "index": {"ns": d.h(13), "verifiable": d.h(14) is not None}, "arms": {}}
     for side in sides:
         a = d.arms[side]
         s["arms"][side] = dict({"status": a["status"], "complete_to_bp": a["complete_to_bp"],
@@ -804,8 +815,8 @@ def _limitations(d: _Doc, side: Optional[str], ctx: dict) -> dict:
         ans.pop("total")
         ans["rows"] = []
         cons += ["/total", "/rows/*"]
-    _cut_rows(ans, ctx, cons)
-    return _record(ans, clauses, cons)
+    partial = _cut_rows(ans, ctx, cons)
+    return _record(ans, clauses, cons, partial=partial)
 
 
 def _evidence_from_leaf(e: dict, runs: List[dict]) -> int:
@@ -918,12 +929,11 @@ def _graphlet_walks(d: _Doc, args: dict, ctx: dict) -> dict:
             cons += ["/total", "/rows/*", "/filtered"]
     if flanks is None and spell != "none":
         cons.append("/rows/*/sequence")
-    if "rows" in ans:
-        _cut_rows(ans, ctx, cons)
+    partial = _cut_rows(ans, ctx, cons) if "rows" in ans else []
     ev, ecl, econ = _evidence(d, [side])
     ans["evidence"] = ev
     clauses.update(ecl)
-    return _record(ans, clauses, cons + econ)
+    return _record(ans, clauses, cons + econ, partial=partial)
 
 
 def _walk_rows(d: _Doc, side: str, p: dict, cap: Optional[int]) -> List[dict]:
@@ -1019,13 +1029,13 @@ def _graphlet_walk(d: _Doc, args: dict, ctx: dict) -> dict:
     cons = ["/rows/*/exact", "/next_cursor"] + cons_r
     if d.mode == "constrain" and (d.arms[side].get("labels_per_node") or {}).get("nodes_truncated", 0) > 0:
         cons.append("/rows/*/labels_out_total")
-    _cut_rows(ans, ctx, cons)
-    if len(ans["rows"]) < len(rows):
-        absent = {k: v for k, v in absent.items() if not k.startswith("/rows/")}
+    partial = _cut_rows(ans, ctx, cons)
+    kept = len(ans["rows"])   # the row-level absent checks of rows W5 still answers stay (VO15)
+    absent = {k: v for k, v in absent.items() if not k.startswith("/rows/") or int(k.split("/")[2]) < kept}
     ev, ecl, econ = _evidence(d, [side])
     ans["evidence"] = ev
     clauses.update(ecl)
-    return _record(ans, clauses, cons + econ, absent=absent, **_ends_order("/rows/*/ends"))
+    return _record(ans, clauses, cons + econ, absent=absent, partial=partial, **_ends_order("/rows/*/ends"))
 
 
 def _alive_at(a: dict, label: int, at_bp: int) -> bool:
@@ -1073,11 +1083,11 @@ def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
     else:
         if at_bp is not None:
             clauses["/total"] += "; at_bp: a run of the label holds the base (SPEC §7.1 runs[] [from_bp, to_bp))"
-        _cut_rows(ans, ctx, cons)
+    partial = _cut_rows(ans, ctx, cons) if "rows" in ans else []
     ev, ecl, econ = _evidence(d, sides)
     ans["evidence"] = ev
     clauses.update(ecl)
-    return _record(ans, clauses, cons + econ)
+    return _record(ans, clauses, cons + econ, partial=partial)
 
 
 def _graphlet_splits(d: _Doc, args: dict, ctx: dict) -> dict:
@@ -1097,11 +1107,11 @@ def _graphlet_splits(d: _Doc, args: dict, ctx: dict) -> dict:
                "/rows/*/branches/*/char": "SPEC §7.4 branches[].char (the child's first base)",
                "/rows/*/branches/*/labels": "SPEC §7.4 branches[].labels_distinct (the true count)"}
     cons = ["/next_cursor"]
-    _cut_rows(ans, ctx, cons)
+    partial = _cut_rows(ans, ctx, cons)
     ev, ecl, econ = _evidence(d, [side])
     ans["evidence"] = ev
     clauses.update(ecl)
-    return _record(ans, clauses, cons + econ)
+    return _record(ans, clauses, cons + econ, partial=partial)
 
 
 def _graphlet_sequence(d: _Doc, args: dict, ctx: dict) -> dict:
@@ -1504,23 +1514,45 @@ def _rows_of(ans: dict, side: str) -> List[dict]:
     return [r for r in ans.get("rows") or [] if r.get("side") == side]
 
 
-def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: str) -> List[str]:
-    """graphlet_compare(a, a): the verdict rules on a graphlet compared with itself (DESIGN §5 compare, §5.2.5,
-    §3.1; SPEC §7.5.7): never `false` (one index identity, one oriented seed); without index_fp in H never a
-    verdict that compares (true or qualified: "unverifiable, never equal"), and `unverifiable` only then; no
-    difference under any verdict (counts zero or null, no rows); equal true exactly when comparable true; not true
-    when the label evidence is a lower bound (DESIGN §5.2.5: what cannot be exact is qualified); neither true nor
-    qualified for a side without bases in the modes that spell (claims, walks, prefix_subset: unknown). Where two
-    rules give a non-comparing verdict (no bases and no index_fp) DESIGN states no precedence: either is accepted.
+COMPARABLE = (True, "qualified", "unverifiable", "unknown", False)   # DESIGN §5 compare's verdicts
+_SPELLING_MODES = ("claims", "walks", "prefix_subset")
+
+
+def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: str,
+                            arm: Optional[str] = None) -> List[str]:
+    """graphlet_compare(a, a) on the arms the compare covers (|arm|: the op's argument): the verdict rules on a
+    graphlet compared with itself (DESIGN §5 compare, §5.2.5, §3.1; SPEC §7.5.7):
+    - comparable is one of true, qualified, unverifiable, unknown, false; never false (one index identity, one
+      oriented seed);
+    - without index_fp in H: unverifiable ("unverifiable, never equal", DESIGN §3.1), or unknown only where a rule of
+      unknown applies too (no bases in a mode that spells, DESIGN §5.2.5; or no common certified depth, complete_to_bp
+      0 on a covered arm), since DESIGN states no precedence between the two; with index_fp never unverifiable;
+    - with index_fp, no bases in a mode that spells: unknown (DESIGN §5.2.5);
+    - no difference under any verdict (counts zero or null, no rows); equal true exactly when comparable true; not
+      true when the label evidence is a lower bound (DESIGN §5.2.5: what cannot be exact is qualified).
     -> problems."""
     d = _Doc(full_answer, mgt_text)
+    sides = _compared_sides(d, d, arm)
     probs = []
     comp = ans.get("comparable")
+    if not any(comp is v if isinstance(v, bool) else comp == v for v in COMPARABLE):
+        probs.append("comparable %r: none of true, qualified, unverifiable, unknown, false (DESIGN §5)" % (comp,))
     if comp is False:
         probs.append("comparable false for a graphlet and itself (%s)" % ans.get("reason"))
-    no_fp = d._h(14) is None
-    if (no_fp and comp in (True, "qualified")) or (comp == "unverifiable" and not no_fp):
-        probs.append("comparable %r with index_fp %s (SPEC §7.5.7, DESIGN §3.1)" % (comp, "absent" if no_fp else "set"))
+    no_fp = d.h(14) is None
+    spelling = ans.get("mode") in _SPELLING_MODES
+    no_bases = spelling and any(d.flanks(s) is None for s in sides)
+    depth0 = any(d.arms[s].get("complete_to_bp") == 0 for s in sides)
+    if no_fp:
+        allowed = ("unverifiable", "unknown") if (no_bases or depth0) else ("unverifiable",)
+        if comp not in allowed or isinstance(comp, bool):
+            probs.append("comparable %r without index_fp: %s (SPEC §7.5.7, DESIGN §3.1%s)" % (
+                comp, " or ".join(allowed), ", §5.2.5" if no_bases or depth0 else ""))
+    else:
+        if comp == "unverifiable":
+            probs.append("comparable unverifiable with index_fp set (SPEC §7.5.7, DESIGN §3.1)")
+        if no_bases and comp != "unknown":
+            probs.append("comparable %r without bases in mode %s (DESIGN §5.2.5: unknown)" % (comp, ans.get("mode")))
     counts = ans.get("counts")
     if counts is not None and any(counts.get(k) for k in ("only_in_a", "only_in_b", "differ")):
         probs.append("differences %s between a graphlet and itself" % counts)
@@ -1531,9 +1563,6 @@ def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: st
     if comp is True and (d.result.get("outcome") or {}).get("label_evidence") not in (None, "complete"):
         probs.append("comparable true on label evidence %r (DESIGN §5.2.5: qualified)" %
                      d.result["outcome"]["label_evidence"])
-    no_bases = any(d.flanks(s) is None for s in d.sides)
-    if no_bases and ans.get("mode") in ("claims", "walks", "prefix_subset") and comp in (True, "qualified"):
-        probs.append("comparable %r without bases (DESIGN §5.2.5: unknown)" % (comp,))
     return probs
 
 

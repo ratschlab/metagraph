@@ -444,6 +444,44 @@ class RecordSemantics(unittest.TestCase):
         other["rows"][4]["ends"][0] = dict(other["rows"][4]["ends"][0], at_bp=99)
         self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/rows/4/ends"])
 
+    def test_list_lengths(self):
+        """VO7: a whole list's length is checked (an absent pointer at its end): a repeated row, an extra branch or
+        export record is a difference; rows of a listing W1 did not read to its end are not."""
+        g, f, mgt = doc("merge")
+        for tool, args, path in [("graphlet_walks", {"arm": "right"}, ["rows"]),
+                                 ("graphlet_walk", {"arm": "right", "walk": 0}, ["rows"]),
+                                 ("graphlet_labels", {}, ["rows"]),
+                                 ("graphlet_splits", {"arm": "right", "min_labels_before": 0}, ["rows"]),
+                                 ("graphlet_splits", {"arm": "right", "min_labels_before": 0}, ["rows", 0, "branches"]),
+                                 ("graphlet_summary", {"detail": "limitations"}, ["rows"]),
+                                 ("graphlet_export", {"format": "fasta"}, ["fasta"])]:
+            r = O.answer(tool, args, f, mgt)
+            other = copy.deepcopy(r["answer"])
+            node = other
+            for k in path:
+                node = node[k]
+            node.append(copy.deepcopy(node[-1]))
+            self.assertEqual(len(O.differences(r, other)), 1, (tool, path))
+        part = O.answer("graphlet_walks", {"arm": "right"}, f, mgt, {"paging": "none", "rows": 1})
+        other = copy.deepcopy(part["answer"])
+        other["rows"].append({"walk": 9})
+        self.assertEqual(O.differences(part, other), [])
+
+    def test_self_compare_rules(self):
+        """VO6: without index_fp a graphlet with bases and depth compares unverifiable only; unknown is accepted where
+        a rule of unknown also applies (no bases in a spelling mode: caps; complete_to_bp 0: no_bins)."""
+        base = {"equal": None, "counts": {"only_in_a": 0, "only_in_b": 0, "differ": 0}, "rows": []}
+        _, f, mgt = doc("fork")
+        self.assertEqual(O.compare_self_properties(dict(base, mode="walks", comparable="unverifiable"), f, mgt), [])
+        self.assertEqual(len(O.compare_self_properties(dict(base, mode="walks", comparable="unknown"), f, mgt)), 1)
+        self.assertEqual(len(O.compare_self_properties(dict(base, mode="walks", comparable="maybe"), f, mgt)), 2)
+        _, f, mgt = doc("caps")
+        for c in ("unknown", "unverifiable"):
+            self.assertEqual(O.compare_self_properties(dict(base, mode="walks", comparable=c), f, mgt), [])
+        self.assertEqual(len(O.compare_self_properties(dict(base, mode="labels", comparable="unknown"), f, mgt)), 1)
+        _, f, mgt = doc("no_bins")
+        self.assertEqual(O.compare_self_properties(dict(base, mode="labels", comparable="unknown"), f, mgt), [])
+
     def test_unordered_lists(self):
         g, f, mgt = doc("merge")
         r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
