@@ -387,7 +387,16 @@ class ClaimsGoldens(unittest.TestCase):
                          ({"merge_entered": 3}, ["both.fa", "both.fa", "both.fa"]))
         arm["runs"][4]["route_bp"] = 5
         open_ = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
-        self.assertEqual(("/rows" in open_["oracle"]["consistency_only"], "rows" in open_["answer"]), (True, False))
+        # R2B-3: the rows before the undecided claim stay checked; it, every later row, the total and the counts
+        # are consistency-only, and the list has no length check
+        self.assertEqual([(x["label"]["name"], x["to_bp"]) for x in open_["answer"]["rows"]], [("both.fa", 62)])
+        self.assertIn("/rows/0/to_bp", open_["oracle"]["checked"])
+        self.assertTrue({"/total", "/filtered"} <= set(open_["oracle"]["consistency_only"]))
+        self.assertNotIn("total", open_["answer"])
+        self.assertNotIn("/rows/1", open_["oracle"].get("absent", {}))
+        extra = copy.deepcopy(open_["answer"])
+        extra["rows"].append({"label": {"name": "both.fa"}})
+        self.assertEqual(O.differences(open_, extra), [])
         self.assertEqual(len(O.answer("graphlet_claims", {"arm": "right", "route_consistent": False}, f, mgt)
                              ["answer"]["rows"]), 6)          # without the filter nothing is open
 

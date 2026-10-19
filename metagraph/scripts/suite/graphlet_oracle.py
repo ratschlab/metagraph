@@ -1790,7 +1790,7 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
               if isinstance(e.get("run"), int)}
     rows, filtered, absent = [], {}, {}
     open_stamp = []
-    undecided = False
+    undecided_at: Optional[int] = None
     for i, run in enumerate(d.runs(side)):
         if labs is not None and run["label"] not in labs:
             continue
@@ -1806,7 +1806,8 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
             stamp = leaf_t[i] if i in leaf_t else run.get("route_bp", 0)
             other = leaf_t[i] if i in leaf_t else d.evidence_from(side, i, merge_part=True)
             if (stamp > 0) != ((other or 0) > 0) or (i in leaf_t and (run.get("route_bp", 0) > 0) != (stamp > 0)):
-                undecided = True
+                undecided_at = len(rows)   # this claim and every later row: open (R2B-3)
+                break
             if stamp > 0:
                 filtered["merge_entered"] = filtered.get("merge_entered", 0) + 1
                 continue
@@ -1842,13 +1843,16 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
             cons.append("/rows/%d/reason" % j)
         if "kind" not in row:   # DESIGN names the other kinds without defining them
             cons.append("/rows/%d/kind" % j)
-    if undecided:
-        return _record({"arm": side, "evidence": ev}, dict(ecl, **{"/arm": C_ARM_ECHO}),
-                       cons + econ + ["/total", "/rows", "/filtered", "/rows/*/kind"],
-                       note="route_consistent: a claim's R stamp and its displayed stamp disagree on a non-first-parent "
-                            "entry (PB2, VO-B2): which claims the filter keeps is open, consistency-only")
     ans: dict = {"arm": side, "total": len(rows), "rows": rows, "evidence": ev}
-    if filtered and not min_bp:
+    note = None
+    if undecided_at is not None:
+        # a claim whose R stamp and displayed stamp disagree on a non-first-parent entry (PB2, VO-B2): whether the
+        # filter keeps it is open, so it and every later row, the total and the counts are consistency-only; the
+        # rows before it stay checked (R2B-3)
+        del ans["total"]
+        cons += ["/total", "/filtered"]
+        note = "route_consistent: rows from %d on are consistency-only (an undecided claim)" % undecided_at
+    elif filtered and not min_bp:
         ans["filtered"] = filtered
     elif min_bp:
         # whether the route filter counts before or after min_bp is the tool's order (finding PB3)
@@ -1879,7 +1883,9 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
     if min_bp:   # min_bp selects on the displayed evidence (DESIGN §5.1, re-derived); the route filter on stamps
         red += ["/total", "/rows/*/label", "/rows/*/from_bp", "/rows/*/to_bp"]
     partial = _cut_rows(ans, ctx, cons)
-    return _record(ans, clauses, cons + econ, partial=partial, rederived=red)
+    if undecided_at is not None:
+        partial = ["/rows"]
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=red, note=note)
 
 
 def _merged_into(d: _Doc, side: str, run: dict) -> Optional[int]:
