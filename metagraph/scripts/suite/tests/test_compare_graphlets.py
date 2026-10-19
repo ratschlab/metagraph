@@ -876,13 +876,42 @@ class FiveWay(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.run_.dir, cg.COMPARE_FILE)))
         self.assertTrue(os.path.exists(gp.precheck_path(self.run_.dir)))
         self.assertEqual(cg.stale(self.run_.dir, res), [])
-        again = cg.load_or_compute(self.run_.dir)
-        self.assertEqual(again["generated_utc"], res["generated_utc"])
+        # VC3: without --reuse the comparison is recomputed every time, and never written
+        os.remove(os.path.join(self.run_.dir, cg.COMPARE_FILE))
+        cg.load_or_compute(self.run_.dir)
+        self.assertFalse(os.path.exists(os.path.join(self.run_.dir, cg.COMPARE_FILE)))
+        cg.compute(self.run_.dir)
+        written = gp.sc.read_json(os.path.join(self.run_.dir, cg.COMPARE_FILE))
+        self.assertEqual(cg.load_or_compute(self.run_.dir, reuse=True)["generated_utc"], written["generated_utc"])
         self.run_.record("W2", SID, "walks-len", "graphlet_walks", self.op["args"], answer=dict(gf.walks_answer(),
                                                                                                 total=7))
-        self.assertEqual(cg.stale(self.run_.dir, res), ["arms/dr-lib/graphlet_ops.jsonl"])
-        fresh = cg.load_or_compute(self.run_.dir)
+        self.assertEqual(cg.stale(self.run_.dir, written), ["arms/dr-lib/graphlet_ops.jsonl"])
+        fresh = cg.load_or_compute(self.run_.dir, reuse=True)
         self.assertEqual(fresh["scenarios"][SID]["ops"]["walks-len"]["outcome"], "disagree")
+
+    def test_every_input_is_in_the_reuse_key(self):
+        self.make()
+        self.five()
+        res = cg.compute(self.run_.dir)
+        # the twin and the job record (VERIFY-C VC3's probe S1), a document, the identity records
+        os.remove(os.path.join(self.run_.dir, "arms", "direct-local", "docs", SID + ".full.json.gz"))
+        self.assertEqual(cg.stale(self.run_.dir, res), ["docs"])
+        self.run_.write_echo(SID, {"direction": "left"})
+        self.run_.write_mcp_runs(library_commit="c" * 40)
+        self.assertEqual(cg.stale(self.run_.dir, res), ["arms/mcp/graphlet_jobs.jsonl", "arms/mcp/mcp_runs.jsonl",
+                                                         "docs"])
+        # the by-design table, the code
+        changed = dict(res, inputs=dict(cg.input_digests(self.run_.dir), by_design_table="0" * 64, code="0" * 64))
+        self.assertEqual(cg.stale(self.run_.dir, changed), ["by_design_table", "code"])
+        # an export file the records name
+        exp = {"id": "fasta", "tool": "graphlet_export", "args": {"format": "fasta"}}
+        f = self.run_.write_file("W1", "x.fa", ">a\nAC\n")
+        self.run_.record("W1", SID, "fasta", "graphlet_export", exp["args"], answer={"records": 1}, file=f)
+        before = cg.input_digests(self.run_.dir)
+        self.run_.write_file("W1", "x.fa", ">a\nAG\n")
+        after = cg.input_digests(self.run_.dir)
+        self.assertNotEqual(before["files"], after["files"])
+        self.assertEqual(before["code"], after["code"])
 
     def test_unplanned_records_are_counted(self):
         self.make()

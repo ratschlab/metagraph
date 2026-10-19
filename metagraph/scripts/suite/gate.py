@@ -2,7 +2,7 @@
 """The strict deploy gate of a suite run, and the run's persisted plan.
 
     gate.py RUN_DIR POLICY [--reevaluated] [--out FILE] [--max-lines N] [--expect-service-commit SHA]
-                           [--expect-library-commit SHA]
+                           [--expect-library-commit SHA] [--reuse]
     gate.py plan RUN_DIR --manifest M --arms A,B [--areas P,M] [--limit N] [--ids LIST] [--warm-every N] [--mode M]
     gate.py ids FILE --manifest M          print FILE's scenario ids, comma-separated in manifest order
     gate.py policy-ids POLICY [--arms A]  print the ids the policy's arms run (its selection less their exclusions)
@@ -69,8 +69,9 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
 - something passed: on each policy arm, an execution of the selection (a gate whose MCP selection is all excluded
   verified nothing via MCP, whatever a direct arm passed);
 - area G (a policy with a `graphlets` block, manifest v8; gate_policy.graphlet_block), over the run's graphlet
-  comparison (compare_graphlets.load_or_compute: graphlet_compare.json when it read the run's current records, else
-  computed), kind "graphlet" unless named otherwise: the comparison is of the policy's manifest (identity); every op
+  comparison, recomputed from the run's files every time (compare_graphlets.load_or_compute; with --reuse,
+  graphlet_compare.json when every input it read is current: records, documents, twin, job and identity records,
+  export files, the by-design table, the code), kind "graphlet" unless named otherwise: the comparison is of the policy's manifest (identity); every op
   call the policy requires has an entry and every way it requires a record (missing); its outcome is agree or a
   verified service_by_design pair, W3's not_exposed per the policy being no gap: a disagreement, an inconclusive or a
   precondition_failed blocks, unless the declared file sets the op call aside (graphlets.not_required, with its
@@ -688,13 +689,13 @@ def library_identity_problems(identity, expected=None, policy_arms=(), pin=None,
     return problems, notes
 
 
-def graphlet_problems(run_dir, policy, manifest, notes):
-    """([problem], counts) of area G (module docstring) for a policy with a graphlets block."""
+def graphlet_problems(run_dir, policy, manifest, notes, reuse=False):
+    """([problem], counts) of area G (module docstring) for a policy with a graphlets block; |reuse|: --reuse."""
     import compare_graphlets as cg
     block = policy.get("graphlets") or {}
     out = []
     try:
-        comp = cg.load_or_compute(run_dir, manifest)
+        comp = cg.load_or_compute(run_dir, manifest, reuse)
     except Exception as e:   # never take the gate down: an uncomputable comparison blocks
         return [_problem("graphlet", "the graphlet comparison could not be computed (%s: %s)" % (
             type(e).__name__, str(e)[:200]))], {}
@@ -782,7 +783,7 @@ def gp_way_name(way):
     return gp.WAY_NAMES.get(way, way)
 
 
-def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect_library_commit=None):
+def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect_library_commit=None, reuse=False):
     """The gate's verdict on a merged (and compared) run directory: {passed, problems, notes, counts}; with
     |expect_service_commit| (the deployed commit), the service identity the MCP arm recorded is held to it
     (service_identity_problems); with |expect_library_commit| or a policy with a graphlets block, the deployed
@@ -1047,7 +1048,7 @@ def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect
                                      arm=arm))
     gcounts = None
     if graphlets:
-        gprobs, gcounts = graphlet_problems(run_dir, policy, manifest, notes)
+        gprobs, gcounts = graphlet_problems(run_dir, policy, manifest, notes, reuse)
         problems.extend(gprobs)
     order = dict((k, i) for i, k in enumerate(KINDS))
     problems.sort(key=lambda p: order.get(p["kind"], len(order)))
@@ -1158,16 +1159,20 @@ def compared_with_checks_problems(run_dir, comp, reevaluated=False):
                   for key, f in HASH_KEYS if jw.get(key) != want[f]]
 
 
-GRAPHLET_INPUTS = ("graphlet_compare.json",)
+GRAPHLET_INPUTS = ("graphlet_inputs",)
 
 
 def inputs_digest(run_dir, reevaluated=False, graphlets=False):
     """{file: sha256 or None} of what a verdict judged: the merged lines, the comparison, the manifest and the plan
     (a report compares it with the files it reads: a run changed after the verdict, e.g. by a later resume without
-    --gate, makes the verdict stale); with |graphlets| the graphlet comparison too."""
+    --gate, makes the verdict stale); with |graphlets| also `graphlet_inputs`, the sha256 of every input the graphlet
+    comparison reads (compare_graphlets.input_digests)."""
     out = {}
+    if graphlets:
+        import compare_graphlets as cg
+        out["graphlet_inputs"] = hashlib.sha256(sc.canonical_json(cg.input_digests(run_dir))).hexdigest()
     for name in (sc.reevaluated_name("executions.jsonl", reevaluated), sc.reevaluated_name("compare.json", reevaluated),
-                 "manifest.json", PLAN_FILE) + (GRAPHLET_INPUTS if graphlets else ()):
+                 "manifest.json", PLAN_FILE):
         path = os.path.join(run_dir, name)
         try:
             with open(path, "rb") as fh:
@@ -1312,6 +1317,8 @@ def main(argv=None):
     ap.add_argument("--max-lines", type=int, default=400)
     ap.add_argument("--expect-service-commit", metavar="SHA", default=None,
                     help="the deployed service commit (run-gate's LIVE line): every MCP invocation must have read it")
+    ap.add_argument("--reuse", action="store_true",
+                    help="area G: reuse graphlet_compare.json when every input it read is current (default: recompute)")
     ap.add_argument("--expect-library-commit", metavar="SHA", default=None,
                     help="the deployed graphlet library commit (the service's library_commit): every MCP invocation "
                          "must have read it, and the manifest's pin must be it")
@@ -1329,7 +1336,7 @@ def main(argv=None):
     if not os.path.isdir(a.run_dir):
         sys.stderr.write("gate.py: %s is not a run directory\n" % a.run_dir)
         return 2
-    verdict = judge(a.run_dir, policy, a.reevaluated, a.expect_service_commit, a.expect_library_commit)
+    verdict = judge(a.run_dir, policy, a.reevaluated, a.expect_service_commit, a.expect_library_commit, a.reuse)
     verdict["policy"]["path"] = os.path.abspath(a.policy)
     sc.write_json_atomic(a.out or os.path.join(a.run_dir, gate_file(a.reevaluated)), verdict)
     sys.stdout.write(render(verdict, a.max_lines))

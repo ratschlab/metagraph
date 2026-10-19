@@ -150,8 +150,9 @@ class Judge(GateG):
         self.assertEqual(v["counts"]["graphlet_ops"]["agree"], 2)
         self.assertEqual(v["library_identity"]["recorded"]["library_commit"], gf.PIN)
         self.assertTrue(any(n.startswith("area G: 2 op call(s) required, 2 agree") for n in v["notes"]))
-        self.assertIn("graphlet_compare.json", v["inputs"])
+        self.assertIn("graphlet_inputs", v["inputs"])
         self.assertEqual(gate.stale_inputs(self.d, v), [])
+        self.assertFalse(os.path.exists(os.path.join(self.d, cg.COMPARE_FILE)))   # computed in memory (VC3)
 
     def test_a_disagreement_blocks(self):
         self.build(change={("walks-len", "W2"): lambda kw: kw["answer"].update(total=3)})
@@ -203,7 +204,7 @@ class Judge(GateG):
         pol = tg.policy_of(self.m)
         orig = cg.load_or_compute
         try:
-            cg.load_or_compute = lambda run_dir, manifest=None: dict(res, manifest=sc_.manifest_identity(self.m))
+            cg.load_or_compute = lambda run_dir, manifest=None, reuse=False: dict(res, manifest=sc_.manifest_identity(self.m))
             v = self.judge(pol)
         finally:
             cg.load_or_compute = orig
@@ -252,7 +253,7 @@ class Judge(GateG):
         data["manifest"]["content_sha256"] = "0" * 64
         orig = cg.load_or_compute
         try:
-            cg.load_or_compute = lambda run_dir, manifest=None: data
+            cg.load_or_compute = lambda run_dir, manifest=None, reuse=False: data
             v = self.judge()
         finally:
             cg.load_or_compute = orig
@@ -330,6 +331,37 @@ class ServiceChecksBlock(GateG):
         self.assertIn("service checks: 2 pass, 7 n/a", reason)
 
 
+class Recompute(GateG):
+    """VC3: the gate recomputes the graphlet comparison from the run's files; --reuse only with every digest current."""
+
+    def test_deleted_twin_and_job_record_are_seen(self):
+        self.build()
+        self.assertTrue(self.judge()["passed"])
+        cg.compute(self.d)   # a written comparison the gate must not trust by default
+        os.remove(os.path.join(self.d, "arms", "direct-local", "docs", GID + ".full.json.gz"))
+        os.remove(os.path.join(self.d, "arms", "mcp", "graphlet_jobs.jsonl"))
+        for reuse in (False, True):
+            v = self.judge(reuse=reuse)
+            details = [p["detail"] for p in self.kinds(v, "graphlet")]
+            self.assertTrue(any(d.startswith("pre-check twin inconclusive") for d in details), (reuse, details))
+            self.assertTrue(any(d.startswith("pre-check strategy inconclusive") for d in details), (reuse, details))
+
+    def test_reuse_takes_a_current_comparison(self):
+        self.build()
+        written = cg.compute(self.d)
+        seen = []
+        orig = cg.compute
+        try:
+            cg.compute = lambda *a, **k: seen.append(1) or orig(*a, **k)
+            self.assertTrue(self.judge(reuse=True)["passed"])
+            self.assertEqual(seen, [])   # reused
+            self.assertTrue(self.judge()["passed"])
+            self.assertEqual(seen, [1])  # recomputed without --reuse
+        finally:
+            cg.compute = orig
+        self.assertEqual(written["inputs"], cg.input_digests(self.d))
+
+
 class LibraryIdentity(GateG):
     def test_expect_library_commit(self):
         self.build()
@@ -375,7 +407,7 @@ class LibraryIdentity(GateG):
         self.assertTrue(v["passed"], gate.render(v))
         self.assertNotIn("library_identity", v)
         self.assertNotIn("graphlet_ops", v["counts"])
-        self.assertNotIn("graphlet_compare.json", v["inputs"])
+        self.assertNotIn("graphlet_inputs", v["inputs"])
         self.assertFalse(os.path.exists(os.path.join(d, cg.COMPARE_FILE)))
 
     def test_cli_flag(self):

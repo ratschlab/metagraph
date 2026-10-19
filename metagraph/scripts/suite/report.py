@@ -2,7 +2,7 @@
 """Report of a suite run: RUN_DIR/report.md from run.json, executions, samples and compare.json, then
 report.pdf via pandoc + xelatex (DESIGN §6).
 
-    report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf] [--max-failures 200] [--reevaluated]
+    report.py RUN_DIR [--compare EARLIER_RUN_DIR] [--no-pdf] [--max-failures 200] [--reevaluated] [--reuse]
 
 --reevaluated: the run's re-evaluated set (reevaluate.py) into report.reevaluated.md / .pdf, with a section on
 what the re-evaluation judged with and every execution whose outcome or checks it changed.
@@ -1367,15 +1367,17 @@ GRAPHLET_WAYS = (("W1", "dl+lib: direct-local's graphlet, the library at the dep
 GRAPHLET_PRECHECKS = ("body", "envelope", "twin", "strategy", "preconditions", "library_commit")
 
 
-def graphlet_data(run_dir, manifest):
-    """The run's graphlet comparison (compare_graphlets.load_or_compute) when its manifest has graphlet scenarios
-    (area G), else None: a run of v4..v7 has no chapter G and its report is unchanged."""
+def graphlet_data(run_dir, manifest, reuse=False):
+    """The run's graphlet comparison when its manifest has graphlet scenarios (area G), else None: a run of v4..v7
+    has no chapter G and its report is unchanged. Recomputed from the run's files in memory every time
+    (compare_graphlets.load_or_compute, VERIFY-C VC3); |reuse| (--reuse): graphlet_compare.json when every input it
+    read is current."""
     import graphlet_precheck as gp
     if not gp.graphlet_scenarios(manifest if isinstance(manifest, dict) else {}):
         return None
     import compare_graphlets as cg
     try:
-        return cg.load_or_compute(run_dir, manifest)
+        return cg.load_or_compute(run_dir, manifest, reuse)
     except Exception as e:   # the chapter says so; the rest of the report stands
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
@@ -1888,7 +1890,7 @@ def reevaluation_section(run_dir, max_items=200, run=None):
     return "\n".join(out)
 
 
-def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=None, reevaluated=False):
+def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=None, reevaluated=False, reuse=False):
     run = sc.read_json(os.path.join(run_dir, sc.reevaluated_name("run.json", reevaluated)), {}) or {}
     rows, _ = sc.read_jsonl(os.path.join(run_dir, sc.reevaluated_name("executions.jsonl", reevaluated)))
     samples, _ = sc.read_jsonl(os.path.join(run_dir, "samples.jsonl"))
@@ -1909,7 +1911,7 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
     parts.append(gate_text)
     parts.append(verdict_section(run, comp, rows, samples, reevaluated, missing, depth, manifest,
                                  report_cases(comp, run_dir), gated=bool(gate_text)))
-    graphlets = graphlet_data(run_dir, manifest)
+    graphlets = graphlet_data(run_dir, manifest, reuse)
     if graphlets is not None:
         parts.append(graphlet_headline(graphlets) + "\n")
     if reevaluated:
@@ -1957,9 +1959,12 @@ def main(argv=None):
     ap.add_argument("--by-design", default=None, help="the table compare.py uses when compare.json is missing")
     ap.add_argument("--reevaluated", action="store_true",
                     help="the run's re-evaluated set (reevaluate.py): report.reevaluated.md / .pdf")
+    ap.add_argument("--reuse", action="store_true",
+                    help="chapter G: reuse graphlet_compare.json when every input it read is current (default: recompute)")
     args = ap.parse_args(argv)
     try:
-        text = build_report(args.run_dir, args.compare, args.max_failures, args.by_design, args.reevaluated)
+        text = build_report(args.run_dir, args.compare, args.max_failures, args.by_design, args.reevaluated,
+                            args.reuse)
     except cmp.TableError as exc:   # a comparison to compute with a table compare.py refuses (as compare.py: 4)
         sys.stderr.write("report: refusing: %s\n" % exc)
         return 4

@@ -850,10 +850,51 @@ def drift(recs):
     return out
 
 
-def input_digests(run_dir):
-    """{relative path: sha256 or None} of what a graphlet comparison read: the manifest and every way's records."""
-    names = ["manifest.json"] + ["arms/%s/%s" % (gp.WAY_DIRS[w], gp.OPS_FILE) for w in WAYS + ("drift",)]
-    return dict((n, sc.file_sha256(os.path.join(run_dir, n))) for n in names)
+# the code a graphlet comparison runs (VERIFY-C VC3: a fix to any of them must be taken up)
+CODE_FILES = ("compare_graphlets.py", "graphlet_precheck.py", "graphlet_service_checks.py", "graphlet_oracle.py",
+              "graphlet_doc.py", "compare.py", "checks.py", "suite_common.py")
+
+
+def _tree_digest(run_dir, rel_dirs):
+    """sha256 over the sorted (relative path, sha256) of every file under |rel_dirs| (those that exist)."""
+    h = hashlib.sha256()
+    for rel in rel_dirs:
+        root = os.path.join(run_dir, rel)
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            for name in sorted(filenames):
+                path = os.path.join(dirpath, name)
+                h.update(("%s\0%s\n" % (os.path.relpath(path, run_dir), sc.file_sha256(path))).encode("utf-8"))
+    return h.hexdigest()
+
+
+def input_digests(run_dir, recs=None):
+    """{name: sha256 or None} of everything a graphlet comparison reads (VERIFY-C VC3): the manifest; every way's
+    records; the job record and the MCP runner's identity records (graphlet_jobs.jsonl, mcp_runs.jsonl, run.json);
+    every kept document and twin (arms/*/docs); every export or save file the records name (arms/*/raw/<file.raw>);
+    the by-design table the run reads; and the code (CODE_FILES, as this tree holds them)."""
+    import compare as cmp
+    names = ["manifest.json"] + ["arms/%s/%s" % (gp.WAY_DIRS[w], gp.OPS_FILE) for w in WAYS + ("drift",)] + \
+        ["arms/mcp/%s" % gp.JOBS_FILE, "arms/mcp/mcp_runs.jsonl", "arms/mcp/run.json"]
+    out = dict((n, sc.file_sha256(os.path.join(run_dir, n))) for n in names)
+    docs = sorted(set("arms/%s/docs" % d for d in list(gp.WAY_DIRS.values()) + ["direct-local", "mcp"]))
+    out["docs"] = _tree_digest(run_dir, docs)
+    if recs is None:
+        recs = gp.all_records(run_dir)[0]
+    h = hashlib.sha256()
+    for way in sorted(recs):
+        for key in sorted(recs[way], key=lambda k: (str(k[0]), str(k[1]))):
+            path = file_path(run_dir, way, recs[way][key]) if way in gp.WAY_DIRS else None
+            if path:
+                h.update(("%s\0%s\n" % (os.path.relpath(path, run_dir), sc.file_sha256(path))).encode("utf-8"))
+    out["files"] = h.hexdigest()
+    table, _ = cmp.table_for(run_dir, None)
+    out["by_design_table"] = sc.file_sha256(table) if table else None
+    out["code"] = hashlib.sha256("".join("%s\0%s\n" % (f, sc.file_sha256(os.path.join(HERE, f)))
+                                         for f in CODE_FILES).encode("utf-8")).hexdigest()
+    return out
 
 
 def compare_run(run_dir, manifest=None, checks_mod=None, extra=None):
@@ -883,7 +924,7 @@ def compare_run(run_dir, manifest=None, checks_mod=None, extra=None):
             if key not in planned:
                 unplanned.append({"way": way, "scenario": key[0], "op": key[1]})
     out = {"compare_version": COMPARE_VERSION, "generated_utc": sc.iso_utc(time.time()),
-           "manifest": sc.manifest_identity(manifest), "inputs": input_digests(run_dir),
+           "manifest": sc.manifest_identity(manifest), "inputs": input_digests(run_dir, recs),
            "prechecks_sha256": hashlib.sha256(sc.canonical_json(prechecks)).hexdigest(),
            "whitelist_sha256": whitelist_sha256(), "warnings": warnings,
            "scenarios": scenarios, "unplanned_records": unplanned[:200],
@@ -926,8 +967,8 @@ STAGES = []
 
 
 def compute(run_dir, manifest=None, write=True, out_path=None):
-    """Compares a run's area G (compare_run with STAGES) and writes graphlet_compare.json and the pre-check records
-    (unless not |write|); returns the comparison."""
+    """Compares a run's area G (compare_run with STAGES), from the run's files; writes graphlet_compare.json and the
+    pre-check records unless not |write| (the gate and the report compute in memory); returns the comparison."""
     _load_stages()
     result, prechecks = compare_run(run_dir, manifest, extra=STAGES)
     if write:
@@ -937,19 +978,22 @@ def compute(run_dir, manifest=None, write=True, out_path=None):
 
 
 def stale(run_dir, result):
-    """The inputs whose content differs from what |result| read ([] when current)."""
+    """The inputs (input_digests) whose content differs from what |result| read ([] when every one is current)."""
     now = input_digests(run_dir)
     was = (result or {}).get("inputs") or {}
     return [k for k in sorted(now) if was.get(k, "unrecorded") != now[k]]
 
 
-def load_or_compute(run_dir, manifest=None):
-    """RUN_DIR/graphlet_compare.json when it read the run's current inputs, else computed and written (the gate's
-    and the report's reading, as compare.load_or_compute)."""
-    data = sc.read_json(os.path.join(run_dir, COMPARE_FILE))
-    if isinstance(data, dict) and not stale(run_dir, data):
-        return data
-    return compute(run_dir, manifest)
+def load_or_compute(run_dir, manifest=None, reuse=False):
+    """The gate's and the report's reading (VERIFY-C VC3): the comparison recomputed from the run's files, in memory,
+    every time; with |reuse| (their --reuse flag) RUN_DIR/graphlet_compare.json when every input it read is current
+    (stale: records, documents, twin, job and identity records, export files, the by-design table, the code), else
+    recomputed. Never written here (compare_graphlets.py writes it)."""
+    if reuse:
+        data = sc.read_json(os.path.join(run_dir, COMPARE_FILE))
+        if isinstance(data, dict) and data.get("compare_version") == COMPARE_VERSION and not stale(run_dir, data):
+            return data
+    return compute(run_dir, manifest, write=False)
 
 
 def main(argv=None):

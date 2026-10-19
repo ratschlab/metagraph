@@ -99,7 +99,7 @@ class BuildReport(tgg.GateG):
         self.assertLess(text.index("**Area G"), text.index("# G. Graphlet tools"))
         self.assertLess(text.index("# Relations between scenarios"), text.index("# G. Graphlet tools"))
         self.assertLess(text.index("# G. Graphlet tools"), text.index("# Timing"))
-        self.assertTrue(os.path.exists(os.path.join(self.d, cg.COMPARE_FILE)))
+        self.assertFalse(os.path.exists(os.path.join(self.d, cg.COMPARE_FILE)))   # recomputed in memory (VC3)
 
     def test_a_run_without_graphlet_scenarios_has_none(self):
         m = tg.manifest_of()
