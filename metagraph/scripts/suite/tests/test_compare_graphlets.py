@@ -790,6 +790,32 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(e["outcome"], "inconclusive")
         self.assertIn("W5 could not judge the call", e["reason"])
 
+    def test_vr4_a_failed_seed_scenario_can_pass(self):
+        """A failed seed (FORMAT v2 D3): no way has a graphlet, W1/W2/W4 answer the runner's no_graphlet, W3 the
+        service's, and W5 expects no_graphlet (lane O, VERIFY-C-R2 VR4: from the full twin's seed error): the op agrees
+        and the scenario passes its pre-checks and its op."""
+        import graphlet_oracle as go
+        cg.graphlet_oracle = go
+        scen = gf.scenario(pre={"no_graphlet": True})
+        self.run_ = gf.GRun(scenarios=[scen])
+        self.run_.write_twin(SID, {"results": [{"seed": {"length_bp": 31}, "error": "seed_failed"}]})
+        self.run_.write_echo(SID, scen["request"]["strategy"])
+        self.run_.write_mcp_runs()
+        args = scen["graphlet"]["ops"][0]["args"]
+        for way in ("W1", "W2", "W4"):
+            self.run_.record(way, SID, "walks-len", "graphlet_walks", args,
+                             error={"code": "no_graphlet", "fields": {"outcome": "failed"}})
+        self.run_.record("W3", SID, "walks-len", "graphlet_walks", args,
+                         error={"code": "no_graphlet", "fields": {"reason": "the seed's retrieval failed"}})
+        self.run_.record("W5", SID, "walks-len", "graphlet_walks", args, answer=None,
+                         oracle={"checked": {}, "consistency_only": ["/*"], "declared": "expected_error",
+                                 "expected_error": "no_graphlet", "note": "the full twin's seed failed"})
+        res = self.result()
+        e = res["scenarios"][SID]["ops"]["walks-len"]
+        self.assertEqual(e["outcome"], "agree", e)
+        self.assertEqual(res["scenarios"][SID]["precheck"]["outcome"], "pass", res["scenarios"][SID]["precheck"])
+        self.assertEqual(res["scenarios"][SID]["outcome"], "pass")
+
     def test_a_run_level_w5_record(self):
         self.make()
         self.five()
