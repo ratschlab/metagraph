@@ -1,8 +1,9 @@
 """W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phase A.
 
     answer(tool, args_resolved, full_answer, mgt_text, context=None) -> record
-    compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked, "detail", "checked",
-                                "differences"}
+    compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked | inconclusive, "detail",
+                                "checked", "differences"}
+    is_cut_of(cut_value, full_value, cut_fields) / cut_problem(...)   # the suite's one cut rule
     python3 graphlet_oracle.py --run-dir RUN      # writes arms/oracle/graphlet_ops.jsonl (FORMAT v2 F4)
 
 answer() gives the answer a library tool should give on the graphlet whose MGT text is |mgt_text| (the engine's
