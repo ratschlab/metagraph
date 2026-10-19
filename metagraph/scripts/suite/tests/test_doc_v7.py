@@ -396,6 +396,11 @@ class DeployedIdentityTest(unittest.TestCase):
         run = _Stub(gate=self._gate(None), identity=None)
         text, replaced = sections.identity_note_text(_Stub(run=run))
         self.assertIn("self-reported, not cross-checked", text)
+        # W6: an expected commit that came with the gate's record never credits an identity input not given
+        run = _Stub(gate=self._gate(self.SHA), identity=None)
+        text, _ = sections.identity_note_text(_Stub(run=run))
+        self.assertIn("(as the gate's record names it) on all 5 MCP invocations", text)
+        self.assertNotIn("identity input", text)
         # a run recording no identity keeps the gate's own note (v5, v6)
         run = _Stub(gate={"service_identity": {"expected": None, "recorded": {"recorded": False}}}, identity=None)
         self.assertEqual(sections.identity_note_text(_Stub(run=run)), ("", []))
@@ -464,6 +469,10 @@ class DeployedIdentityTest(unittest.TestCase):
                     service_identity={"recorded": True, "service_commits": {self.SHA: 3}, "service_commit": self.SHA},
                     order=["A", "B", "C"], comp_entry=lambda sid: comp[sid],
                     identity={"deployed_service_commit": {"commit": self.SHA, "source": "LIVE"}})
+        # W6: a pair without a `verified` field counts as unverified
+        self.assertEqual(sections.by_design_tie_text(run), "generated at service commit 22d034ba (2026-10-13); 1 of 2 "
+                         "by-design pairs verified against the deployed 26a52cb6")
+        comp["B"]["mcp_agreement"]["verified"] = True
         self.assertEqual(sections.by_design_tie_text(run), "generated at service commit 22d034ba (2026-10-13); all 2 "
                          "by-design pairs verified against the deployed 26a52cb6")
         run.identity = None
@@ -662,6 +671,66 @@ class StrandsViaMcpTest(unittest.TestCase):
         self.assertEqual(sections._versioned(ctx7, note), "This source-table description predates v7: entry strands "
                          "are now exposed and checked.")
         self.assertEqual(sections._versioned(ctx6, note).strip(), "")
+
+
+class PreviousRunRefusalTest(unittest.TestCase):
+    """W6: the previous edition's run must be earlier and of the same or a lower manifest version; a service-log time
+    must be UTC."""
+
+    def _write(self, d, run_id, version):
+        os.makedirs(d)
+        with open(os.path.join(d, "manifest.json"), "w") as fh:
+            json.dump({"manifest_version": version, "scenarios": [{"id": "A-1"}]}, fh)
+        with open(os.path.join(d, "executions.jsonl"), "w") as fh:
+            fh.write(json.dumps({"scenario": "A-1", "arm": "mcp", "repeat": 0, "outcome": "pass",
+                                 "started_utc": "2026-10-17T08:30:00Z"}) + "\n")
+        with open(os.path.join(d, "run.json"), "w") as fh:
+            json.dump({"run_id": run_id}, fh)
+
+    def test_refusals(self):
+        import shutil
+        import tempfile
+        import reader
+        tmp = tempfile.mkdtemp()
+        try:
+            cur = {"run_id": "20261019T005230Z_x", "manifest_version": 7,
+                   "started": reader.run_start("20261019T005230Z_x", [])}
+            ok = os.path.join(tmp, "v6")
+            self._write(ok, "20261017T082918Z_x", 6)
+            self.assertEqual(reader.PreviousRun(ok, None, cur).run_id(), "20261017T082918Z_x")
+            later = os.path.join(tmp, "later")
+            self._write(later, "20261020T000000Z_x", 7)
+            with self.assertRaises(reader.RunError) as cm:
+                reader.PreviousRun(later, None, cur)
+            self.assertIn("is not earlier than this run", str(cm.exception))
+            higher = os.path.join(tmp, "v8")
+            self._write(higher, "20261018T000000Z_x", 8)
+            with self.assertRaises(reader.RunError) as cm:
+                reader.PreviousRun(higher, None, cur)
+            self.assertIn("manifest version 8 is above this run's 7", str(cm.exception))
+            with self.assertRaises(reader.RunError):
+                reader.PreviousRun(ok, ok, cur)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_service_log_time_must_be_utc(self):
+        import tempfile
+        import reader
+        rows = [{"started_utc": "2026-10-19T02:00:00.000Z", "ended_utc": "2026-10-19T03:00:00.000Z"}]
+        stub = _Stub(rows=rows, run={"release": None}, mcp_run={}, service_identity=None, manifest={},
+                     run_id=lambda: "R")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "identity.json")
+            for t, ok in (("2026-10-19T02:10:05Z", True), ("2026-10-19T02:10:05+00:00", True),
+                          ("2026-10-19T02:10:05+02:00", False), ("2026-10-19T02:10:05", False)):
+                with open(path, "w") as fh:
+                    json.dump({"run": "R", "service_commit": "abc1234", "service_log": {"text": "x", "times": [t]}}, fh)
+                if ok:
+                    reader.Run._load_identity(stub, path)
+                else:
+                    with self.assertRaises(reader.RunError) as cm:
+                        reader.Run._load_identity(stub, path)
+                    self.assertIn("ending in Z", str(cm.exception))
 
 
 class SincePreviousTest(unittest.TestCase):

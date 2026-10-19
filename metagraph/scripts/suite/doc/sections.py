@@ -5500,11 +5500,16 @@ def identity_note_text(ctx):
     if problems:
         return "", []
     if expected:
-        dep = _deployed(run) or {}
-        src = str(dep.get("source") or "the identity input")
-        rid = dep.get("railway_deployment_id")
-        text = ("the service's commit, as the MCP runner read it before each invocation, equals the deployed commit %s "
-                "(%s%s) on all %d MCP invocations" % (expected, src, (", Railway deployment %s" % rid) if rid else "", n))
+        dep = _deployed(run)
+        if dep and gate_mod.commit_matches(dep.get("commit"), expected):
+            rid = dep.get("railway_deployment_id")
+            where = " (%s%s)" % (str(dep.get("source") or "the identity input"),
+                                 (", Railway deployment %s" % rid) if rid else "")
+        else:
+            # the expected commit came with the gate's record, not from this document's identity input (W6)
+            where = " (as the gate's record names it)"
+        text = ("the service's commit, as the MCP runner read it before each invocation, equals the deployed commit %s"
+                "%s on all %d MCP invocations" % (expected, where, n))
     elif len(commits) == 1:
         text = ("the service identified itself as commit %s on every one of the %d MCP invocations, so one deployment "
                 "served the whole run; the gate was given no record of the intended deployment, so this identity is "
@@ -5527,10 +5532,11 @@ def by_design_tie_text(run):
     for sid in run.order:
         ma = run.comp_entry(sid).get("mcp_agreement") or {}
         if ma.get("class") == "service_by_design":
-            if ma.get("verified") is False:
-                unverified += 1
-            else:
+            # only a pair the comparison marks verified counts as verified (W6)
+            if ma.get("verified") is True:
                 verified += 1
+            else:
+                unverified += 1
     dep = _deployed(run)
     against = ("the deployed %s" % str(dep["commit"])[:8]) if dep and gate_mod.commit_matches(commits[0], dep["commit"]) \
         else "the recorded service %s" % commits[0][:8]

@@ -130,13 +130,29 @@ def sc_time(text):
     return whole + (float("0." + frac.group(1)) if frac else 0.0)
 
 
+def run_start(run_id, rows):
+    """Epoch seconds of a run's start: its run id's time ('20261019T005230Z_...'), else its first execution's start;
+    None when neither is known."""
+    m = re.match(r"\A(\d{8}T\d{6}Z)", str(run_id or ""))
+    if m:
+        import calendar
+        import time as _time
+        return calendar.timegm(_time.strptime(m.group(1), "%Y%m%dT%H%M%SZ"))
+    starts = [sc_time(r.get("started_utc")) for r in rows or []]
+    starts = [t for t in starts if t is not None]
+    return min(starts) if starts else None
+
+
 class PreviousRun(object):
     """The previous edition's run, read only for the comparison of this document's 'Since the previous edition'
     (make_doc --previous; the reader review of the v7 document, RV7: the v6 baseline given as an input, never a figure
     of it hard-coded): its manifest, its executions (the re-evaluated set when present, as its own document read it),
     its run.json and the sha256 of the executions file read."""
 
-    def __init__(self, run_dir, current_dir=None):
+    def __init__(self, run_dir, current_dir=None, current=None):
+        """|current|: {run_id, manifest_version, started} of this document's run; a previous run that is not earlier
+        (its run id's time, else its first execution) or has a higher manifest version is refused (W6: the change list
+        would read backwards)."""
         self.dir = os.path.abspath(run_dir)
         if not os.path.isdir(self.dir):
             raise RunError("--previous: not a directory: %s" % run_dir)
@@ -156,6 +172,14 @@ class PreviousRun(object):
         self.executions_sha256 = sha256_of(path)
         self.run = (sc.read_json(os.path.join(self.dir, sc.reevaluated_name("run.json", self.reevaluated)))
                     or sc.read_json(os.path.join(self.dir, "run.json")) or {})
+        if current:
+            mine, theirs = self.manifest.get("manifest_version"), current.get("manifest_version")
+            if isinstance(mine, int) and isinstance(theirs, int) and mine > theirs:
+                raise RunError("--previous %s: manifest version %d is above this run's %d" % (run_dir, mine, theirs))
+            t_prev, t_cur = run_start(self.run_id(), self.rows), current.get("started")
+            if t_prev is not None and t_cur is not None and t_prev >= t_cur:
+                raise RunError("--previous %s: run %s is not earlier than this run %s" % (
+                    run_dir, self.run_id(), current.get("run_id")))
 
     def run_id(self):
         return self.run.get("run_id") or os.path.basename(self.dir)
@@ -169,8 +193,6 @@ class Run(object):
     def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None,
                  identity=None, also_policies=None, previous=None):
         self.dir = os.path.abspath(run_dir)
-        # the previous edition's run (make_doc --previous), None without one
-        self.previous = PreviousRun(previous, self.dir) if previous else None
         if not os.path.isdir(self.dir):
             raise RunError("not a directory: %s" % run_dir)
         self.manifest = sc.read_json(os.path.join(self.dir, "manifest.json"))
@@ -228,6 +250,10 @@ class Run(object):
         self.service_identity = recorded if isinstance(recorded, dict) else (
             merge_run.service_identity(self.dir, {"mcp": self.mcp_run}) if self.mcp_run else None)
         self.identity = self._load_identity(identity)
+        # the previous edition's run (make_doc --previous), None without one; read once this run's identity is known
+        self.previous = PreviousRun(previous, self.dir, {
+            "run_id": self.run_id_early(), "manifest_version": self.manifest.get("manifest_version"),
+            "started": run_start(self.run_id_early(), self.rows)}) if previous else None
         # the deployed commit the gate holds the recorded identity to (gate.py --expect-service-commit), from the
         # identity input's deployment record, never from the run's own records (RV3, V3); None without one
         dep = (self.identity or {}).get("deployed_service_commit")
@@ -379,7 +405,7 @@ class Run(object):
         log = data.get("service_log")
         if log is not None:
             if not isinstance(log, dict) or not str(log.get("text") or "").strip():
-                problems.append("service_log is not {text, times, source}")
+                problems.append("service_log is not {text, times[, source]}")
             else:
                 starts = [sc_time(r.get("started_utc")) for r in self.rows]
                 ends = [sc_time(r.get("ended_utc")) for r in self.rows]
@@ -387,8 +413,9 @@ class Run(object):
                 ends = [t for t in ends + starts if t is not None]
                 for t in log.get("times") or []:
                     v = sc_time(t)
-                    if v is None:
-                        problems.append("service_log time %r is not an ISO UTC time" % (t,))
+                    if v is None or not re.search(r"(Z|\+00:00)\Z", str(t)):
+                        # only UTC: an offset would be read as UTC (sc_time reads the first 19 characters; W6)
+                        problems.append("service_log time %r is not an ISO UTC time ending in Z" % (t,))
                     elif starts and not (min(starts) <= v <= max(ends)):
                         problems.append("service_log time %s lies outside the run (%s to %s)" % (
                             t, min(r.get("started_utc") for r in self.rows if r.get("started_utc")),
@@ -467,6 +494,10 @@ class Run(object):
 
     def run_id(self):
         return self.run.get("run_id") or self.comp.get("run_id") or os.path.basename(self.dir)
+
+    def run_id_early(self):
+        """The run id before the comparison is read (run.json, else the directory's name)."""
+        return self.run.get("run_id") or os.path.basename(self.dir)
 
     def mcp_tool_calls(self):
         """{tool: {"n": calls, "formats": {format argument: calls}}} of the MCP runner's raw records
