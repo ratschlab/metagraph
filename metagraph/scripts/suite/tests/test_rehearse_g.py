@@ -1,6 +1,7 @@
 """Offline tests of the area G rehearsal (rehearse_g.py, lane D): the analysis of a recorded rehearsal made of the
 library's fixture graphlets (verdicts, measured facts, the shadow run of the op plans by the local library, the corpus
 file and the scenarios the build makes from it), the document facts and the slot rules. No request is sent."""
+import json
 import os
 import sys
 import tempfile
@@ -14,6 +15,103 @@ sys.path.insert(0, HERE)
 import area_g  # noqa: E402
 import suite_common as sc  # noqa: E402
 from test_area_g import FIXTURES, LIB, FakeCtx, needs_library, read_json, v7_scenarios  # noqa: E402
+
+
+class W3Headroom(unittest.TestCase):
+    """W3's headroom rule (DESIGN-v8 §3, refined 2026-10-20): interactive ops a third of the alarm, heavy ops a third
+    of the heavy timeout, an escalation allowed and recorded; the values from the capabilities' graphlet block
+    (sets compared as sets; a part absent or served null: the fallback, recorded missing; never a crash)."""
+
+    BLOCK = {"interactive": {"timeout_s": 20, "alarm_s": 3.0}, "heavy": {"timeout_s": 120},
+             "heavy_ops": ["graphlet_compare", "graphlet_export:fasta|gfa|json", "graphlet_labels:name"]}
+
+    def lanes(self, graphlet):
+        import rehearse_g
+        live = None if graphlet is ... else {"service_settings": {"graphlet": graphlet}}
+        return rehearse_g.graphlet_lanes(sc.References(None, {"service": live}))
+
+    def test_read_from_the_block(self):
+        got = self.lanes({"lanes": dict(self.BLOCK, heavy_ops=list(reversed(self.BLOCK["heavy_ops"])))})
+        self.assertEqual((got["alarm_s"], got["interactive_timeout_s"], got["heavy_timeout_s"]), (3.0, 20.0, 120.0))
+        self.assertEqual(got["heavy_ops"], frozenset(self.BLOCK["heavy_ops"]))   # a set: the served order aside
+        self.assertEqual(set(got["sources"].values()), {"live"})
+        self.assertEqual(got["missing"], [])
+        other = self.lanes({"lanes": dict(self.BLOCK, interactive={"timeout_s": 30, "alarm_s": 4.5},
+                                          heavy={"timeout_s": 90})})
+        self.assertEqual((other["alarm_s"], other["interactive_timeout_s"], other["heavy_timeout_s"]),
+                         (4.5, 30.0, 90.0))
+
+    def test_not_stated_is_the_fallback_recorded_missing(self):
+        lanes = dict(self.BLOCK, interactive={"timeout_s": 20, "alarm_s": None})
+        got = self.lanes({"lanes": lanes})
+        self.assertEqual(got["alarm_s"], 3.0)
+        self.assertEqual(got["sources"]["interactive.alarm_s"], "fallback")
+        self.assertEqual(got["missing"], ["service_settings.graphlet.lanes.interactive.alarm_s (null; fallback 3.0)"])
+        got = self.lanes({"lanes": None})
+        self.assertEqual(len(got["missing"]), 4)
+        self.assertTrue(all("null at service_settings.graphlet.lanes" in m for m in got["missing"]), got["missing"])
+        got = self.lanes(None)
+        self.assertTrue(all("null at service_settings.graphlet;" in m for m in got["missing"]), got["missing"])
+        got = self.lanes(...)   # no recorded document, the table states no graphlet block: every part absent
+        self.assertEqual((got["alarm_s"], got["heavy_timeout_s"]), (3.0, 120.0))
+        self.assertTrue(all("(absent;" in m for m in got["missing"]), got["missing"])
+        got = self.lanes({"lanes": dict(self.BLOCK, heavy_ops="graphlet_compare", heavy={"timeout_s": True})})
+        self.assertEqual(got["heavy_ops"], frozenset(self.BLOCK["heavy_ops"]))
+        self.assertEqual(got["heavy_timeout_s"], 120.0)
+        self.assertEqual(len(got["missing"]), 2)
+
+    def test_the_lane_of_an_op(self):
+        import rehearse_g
+        lanes = self.lanes({"lanes": self.BLOCK})
+        for tool, args, want in (("graphlet_compare", {}, "heavy"), ("graphlet_export", {"format": "fasta"}, "heavy"),
+                                 ("graphlet_export", {"format": "gfa"}, "heavy"),
+                                 ("graphlet_export", {"format": "mgt"}, "interactive"),
+                                 ("graphlet_labels", {"name": "x"}, "heavy"),
+                                 ("graphlet_labels", {"name": None}, "interactive"),
+                                 ("graphlet_walks", {"arm": "left"}, "interactive"),
+                                 ("graphlet_summary", {}, "interactive")):
+            self.assertEqual(rehearse_g.w3_lane({"id": "o", "tool": tool, "args": args}, lanes), want, (tool, args))
+
+    def test_the_rule(self):
+        import rehearse_g
+        lanes = self.lanes({"lanes": self.BLOCK})
+        ops = [{"id": i, "tool": t, "args": {}} for i, t in (
+            ("fast", "graphlet_walks"), ("slow", "graphlet_walks"), ("esc", "graphlet_walks"),
+            ("esc-slow", "graphlet_walks"), ("heavy", "graphlet_compare"), ("heavy-slow", "graphlet_compare"),
+            ("said-no", "graphlet_summary"), ("said-yes", "graphlet_summary"), ("untimed", "graphlet_walk"))]
+        w3 = {"fast": {"elapsed_ms": 800.0}, "slow": {"elapsed_ms": 1500.0}, "esc": {"elapsed_ms": 4000.0},
+              "esc-slow": {"elapsed_ms": 45000.0}, "heavy": {"elapsed_ms": 30000.0},
+              "heavy-slow": {"elapsed_ms": 41000.0},
+              "said-no": {"elapsed_ms": 4000.0, "headers": {"X-Graphlet-Op-Escalated": "false"}},
+              "said-yes": {"elapsed_ms": 2000.0, "op_meta": {"lane": "heavy", "escalated": True}},
+              "untimed": {"error": {"code": "op_busy"}}}
+        hr = rehearse_g.w3_headroom(ops, w3, lanes)
+        self.assertEqual(hr["timed"], 8)
+        self.assertEqual([x.split(":")[0] for x in hr["slow"]], ["slow", "esc-slow", "heavy-slow", "said-no"])
+        self.assertIn("slow: W3 1.50 s, interactive lane's third 1 s", hr["slow"])
+        self.assertIn("esc-slow: W3 45.00 s, heavy (escalated) lane's third 40 s", hr["slow"])
+        self.assertEqual(hr["escalations"], ["esc: 4.00 s, escalated to heavy (inferred: past the 3 s alarm)",
+                                             "esc-slow: 45.00 s, escalated to heavy (inferred: past the 3 s alarm)",
+                                             "said-yes: 2.00 s, escalated to heavy (stated)"])
+
+    def test_lanes_of_runs(self):
+        import rehearse_g
+        tmp = tempfile.mkdtemp(prefix="reh-lanes-")
+        try:
+            got = rehearse_g.lanes_of_runs([tmp])     # nothing recorded: the table's, every part the fallback
+            self.assertIsNone(got["document"])
+            self.assertEqual(got["alarm_s"], 3.0)
+            os.makedirs(os.path.join(tmp, "arms", "mcp"))
+            doc = {"service_settings": {"graphlet": {"lanes": dict(self.BLOCK, heavy={"timeout_s": 60})}}}
+            with open(os.path.join(tmp, "arms", "mcp", "run.json"), "w") as fh:
+                json.dump({"service_capabilities": {"document": doc}}, fh)
+            got = rehearse_g.lanes_of_runs([os.path.join(tmp, "absent"), tmp])
+            self.assertEqual(got["heavy_timeout_s"], 60.0)
+            self.assertIn("service_capabilities", got["document"])
+            self.assertEqual(rehearse_g.lanes_record(got)["headroom_s"], {"interactive": 1.0, "heavy": 20.0})
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 @needs_library
@@ -99,6 +197,37 @@ class Rehearsal(unittest.TestCase):
         s = dict((x["id"], x) for x in g)["G-arms2-0001"]
         self.assertEqual(s["graphlet"]["candidate"], "two_arms.2")
         self.assertEqual(s["graphlet"]["preconditions"], e["preconditions"])
+        # W3's times (the shadow run's): the lanes from the run's recorded capabilities (alarm 6 s: interactive
+        # third 2 s); sum at 2.5 s misses it; walks-id-left at 7 s is past the alarm: an escalation, recorded,
+        # within the heavy lane's third
+        w3dir = os.path.join(self.tmp, "w3")
+        os.makedirs(os.path.join(w3dir, "arms", "mcp"))
+        doc = {"service_settings": {"graphlet": {"lanes": {
+            "interactive": {"timeout_s": 20, "alarm_s": 6.0}, "heavy": {"timeout_s": 120},
+            "heavy_ops": ["graphlet_labels:name", "graphlet_compare", "graphlet_export:fasta|gfa|json"]}}}}
+        with open(os.path.join(w3dir, "arms", "mcp", "run.json"), "w") as fh:
+            json.dump({"service_capabilities": {"document": doc, "read_at": "2026-10-20T00:00:00Z"}}, fh)
+        with open(os.path.join(w3dir, "arms", "mcp", "graphlet_ops.jsonl"), "w") as fh:
+            for op, ms in (("sum", 2500.0), ("walks-id-left", 7000.0)):
+                fh.write(json.dumps({"scenario": "G-arms2-c2", "op": op, "elapsed_ms": ms}) + "\n")
+        out2 = os.path.join(self.tmp, "with-w3")
+        os.makedirs(out2)
+        res2 = rehearse_g.analyse(out2, manifest, meta, dl, mdir, LIB, "a" * 40, mcp_graphlet_run=w3dir)
+        r2 = res2["results"]["G-arms2-c2"]
+        self.assertEqual(res2["lanes"]["alarm_s"], 6.0)
+        self.assertEqual(res2["lanes"]["missing"], [])
+        self.assertIn("sum: W3 2.50 s, interactive lane's third 2 s", r2["verdicts"]["op_headroom"])
+        self.assertNotIn("walks-id-left: W3", r2["verdicts"]["op_headroom"])
+        self.assertEqual(r2["escalations"], ["walks-id-left: 7.00 s, escalated to heavy (inferred: past the 6 s "
+                                             "alarm)"])
+        self.assertFalse(r2["passed"])
+        rec = read_json(os.path.join(out2, "rehearsal.json"))
+        self.assertEqual(rec["w3_lanes"]["headroom_s"], {"interactive": 2.0, "heavy": 40.0})
+        self.assertEqual(rec["w3_lanes"]["sources"]["interactive.alarm_s"], "live")
+        with open(os.path.join(out2, "REPORT.md")) as fh:
+            report = fh.read()
+        self.assertIn("## W3 headroom", report)
+        self.assertIn("walks-id-left: 7.00 s, escalated to heavy", report)
 
     def test_a_second_rehearsal_merges_into_the_first(self):
         # rehearsal 1 (G-arms2-c1 failed its twin), then rehearsal 2's twin re-check of it, direct-local only: the

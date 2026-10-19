@@ -30,7 +30,13 @@ Per candidate (DESIGN-v8 §3 and the lane D brief):
   timeouts      per op: min(lane, max(TIMEOUT_FLOOR_S, TIMEOUT_FACTOR x the median elapsed)) over the local runs and
                 W3's (--mcp-graphlet-run, the async runner's area G records), written only when W3's are measured
                 (else the lane: a local median says nothing of an MCP call); the medians always recorded; an op whose
-                median exceeds a third of its lane is named (DESIGN-v8 §3).
+                median exceeds a third of its lane is named (DESIGN-v8 §3);
+  W3 headroom   (DESIGN-v8 §3, refined 2026-10-20) every op W3 runs within a third of its service lane: interactive
+                ops a third of lanes.interactive.alarm_s (3 s -> 1 s), heavy ops (lanes.heavy_ops) a third of
+                lanes.heavy.timeout_s (120 s -> 40 s); an interactive op past the alarm escalated (stated, else
+                inferred from its time): allowed, recorded (escalations), judged as heavy. The values from the run's
+                recorded capabilities, service_settings.graphlet.lanes (graphlet_lanes: a part absent or null is the
+                fallback, recorded missing); a miss fails op_headroom.
 A candidate that fails a verdict leaves the corpus (DESIGN-v8 §3: no op_timeout, no time stop is an expected outcome).
 Per slot the first candidate (area_g order) that passes every verdict is chosen; the pairs follow their slot's chosen
 candidate (its partner must pass too); the three chosen graphlets with the most segments are the richest. A
@@ -776,9 +782,138 @@ def flags_from(problems: List[dict], facts: dict) -> bool:
     return changed
 
 
-def op_timeouts(records: List[Dict], ops: List[dict]) -> Tuple[dict, List[str]]:
-    """({op: timeout_s}, [ops over a third of their lane]) from the elapsed times the records state (every way's)."""
+# W3's headroom (DESIGN-v8 §3, refined by the coordinator 2026-10-20): an op W3 runs keeps a third of its lane's
+# limit: an interactive op a third of the service's alarm (lanes.interactive.alarm_s: 3 s -> 1 s; past the alarm the
+# service escalates the op ONCE to the heavy lane, same digest, same answer), a heavy op a third of the heavy lane's
+# timeout (lanes.heavy.timeout_s: 120 s -> 40 s). An escalation is allowed and recorded: the escalated op is judged
+# as a heavy one. The values come from the capabilities' service_settings.graphlet.lanes (async's limits block: the
+# run's recorded live document, else the by-design table's service_settings block); a part absent or served null
+# (a part the service failed to compute) is "not stated": its fallback below is used and the missing limit recorded.
+W3_HEADROOM_DIVISOR = 3.0
+GRAPHLET_LANES = "service_settings.graphlet.lanes"
+LANES_FALLBACK = {"interactive.alarm_s": 3.0, "interactive.timeout_s": 20.0, "heavy.timeout_s": 120.0,
+                  "heavy_ops": ("graphlet_compare", "graphlet_export:fasta|gfa|json", "graphlet_labels:name")}
+
+
+def graphlet_lanes(refs: Optional[Any] = None) -> dict:
+    """The lanes W3's headroom reads: {alarm_s, interactive_timeout_s, heavy_timeout_s, heavy_ops (a frozenset: the
+    served list's order follows the service's tuples), sources {part: live | table | fallback}, missing [what the
+    capabilities did not state]}. |refs| a suite_common.References (default: the by-design table's blocks). Never
+    raises: a document it cannot read is a missing limit like any other."""
+    refs = refs if refs is not None else sc.default_references()
+    got: Dict[str, Any] = {}
+    sources: Dict[str, str] = {}
+    missing: List[str] = []
+    for part, fallback in LANES_FALLBACK.items():
+        path = "%s.%s" % (GRAPHLET_LANES, part)
+        try:
+            value, source, _mismatch = refs.resolve("service", path)
+        except Exception as e:   # a document of an unexpected shape: not stated
+            value, source = None, "unknown (%s)" % type(e).__name__
+        raw = value
+        if part == "heavy_ops":
+            ok = isinstance(raw, list) and bool(raw) and all(isinstance(x, str) and x for x in raw)
+            value = frozenset(raw) if ok else frozenset(fallback)
+        else:
+            ok = isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 0
+            value = float(raw) if ok else float(fallback)
+        if not ok:
+            why = "absent" if source.startswith("unknown") else ("null" if raw is None else "not a valid value")
+            if source.startswith("unknown"):
+                why = _null_ancestor(getattr(refs, "live", {}).get("service"), path) or why
+            missing.append("%s (%s; fallback %s)" % (path, why, sorted(fallback) if part == "heavy_ops" else
+                                                     fallback))
+        got[part] = value
+        sources[part] = source if ok else "fallback"
+    return {"alarm_s": got["interactive.alarm_s"], "interactive_timeout_s": got["interactive.timeout_s"],
+            "heavy_timeout_s": got["heavy.timeout_s"], "heavy_ops": got["heavy_ops"], "sources": sources,
+            "missing": missing}
+
+
+def _null_ancestor(doc: Any, path: str) -> Optional[str]:
+    """"null at P" when the document serves an ancestor P of |path| as null (a block the service failed to compute),
+    else None."""
+    keys = path.split(".")
+    cur = doc
+    for i, k in enumerate(keys[:-1]):
+        if not isinstance(cur, dict) or k not in cur:
+            return None
+        cur = cur[k]
+        if cur is None:
+            return "null at %s" % ".".join(keys[:i + 1])
+    return None
+
+
+def w3_lane(o: dict, lanes: dict) -> str:
+    """The lane an op starts on at the service: heavy when an entry of lanes.heavy_ops names it ("tool", or
+    "tool:qualifier": a format alternative "fasta|gfa|json" of graphlet_export, else an argument the op sends
+    non-null, e.g. graphlet_labels:name), else interactive."""
+    args = o.get("args") or {}
+    for entry in lanes["heavy_ops"]:
+        tool, _, qual = entry.partition(":")
+        if tool != o["tool"]:
+            continue
+        if not qual:
+            return "heavy"
+        if tool == "graphlet_export":
+            if args.get("format") in qual.split("|"):
+                return "heavy"
+        elif args.get(qual) is not None:
+            return "heavy"
+    return "interactive"
+
+
+def stated_escalation(rec: dict) -> Optional[bool]:
+    """Whether the service states it escalated the op (its X-Graphlet-Op-Escalated header or op meta, where the
+    runner recorded them; async's records keep neither at d876dc80), None when unstated."""
+    for meta in (rec.get("op_meta"), rec.get("service_meta")):
+        if isinstance(meta, dict) and isinstance(meta.get("escalated"), bool):
+            return meta["escalated"]
+    headers = rec.get("headers")
+    if isinstance(headers, dict):
+        for k, v in headers.items():
+            if str(k).lower() == "x-graphlet-op-escalated":
+                return str(v).lower() == "true"
+    return None
+
+
+def w3_headroom(ops: List[dict], w3: Dict[str, dict], lanes: dict) -> dict:
+    """W3's headroom over one scenario's ops (|w3|: {op: W3 record}, one execution each): {slow: [...], escalations:
+    [...], timed: n}. An interactive op past the alarm (stated, else inferred from its time: the service escalates
+    exactly when the library call outlives alarm_s, and the record's time includes it) escalated: recorded, judged
+    against the heavy lane's third."""
+    slow, escalations, timed = [], [], 0
+    interactive = lanes["alarm_s"] / W3_HEADROOM_DIVISOR
+    heavy = lanes["heavy_timeout_s"] / W3_HEADROOM_DIVISOR
+    for o in ops:
+        r = w3.get(o["id"])
+        ms = (r or {}).get("elapsed_ms")
+        if not isinstance(ms, (int, float)) or isinstance(ms, bool):
+            continue
+        timed += 1
+        t = ms / 1000.0
+        lane = w3_lane(o, lanes)
+        limit = heavy if lane == "heavy" else interactive
+        if lane == "interactive":
+            esc = stated_escalation(r)
+            how = "stated"
+            if esc is None:
+                esc, how = t > lanes["alarm_s"], "inferred: past the %.3g s alarm" % lanes["alarm_s"]
+            if esc:
+                escalations.append("%s: %.2f s, escalated to heavy (%s)" % (o["id"], t, how))
+                lane, limit = "heavy (escalated)", heavy
+        if t > limit:
+            slow.append("%s: W3 %.2f s, %s lane's third %.3g s" % (o["id"], t, lane, limit))
+    return {"slow": slow, "escalations": escalations, "timed": timed}
+
+
+def op_timeouts(records: List[Dict], ops: List[dict], lanes: Optional[dict] = None) -> Tuple[dict, List[str]]:
+    """({op: timeout_s}, [ops over a third of their lane]) from the elapsed times the records state (every way's);
+    the lanes' timeouts from |lanes| (graphlet_lanes), else area_g.LANE_S."""
     out, slow, medians = {}, [], {}
+    lane_s = dict(area_g.LANE_S)
+    if lanes:
+        lane_s = {"interactive": lanes["interactive_timeout_s"], "heavy": lanes["heavy_timeout_s"]}
     for o in ops:
         ms = [r[o["id"]]["elapsed_ms"] for r in records if o["id"] in r and
               isinstance(r[o["id"]].get("elapsed_ms"), (int, float))]
@@ -786,7 +921,7 @@ def op_timeouts(records: List[Dict], ops: List[dict]) -> Tuple[dict, List[str]]:
             continue
         med = statistics.median(ms) / 1000.0
         medians[o["id"]] = round(med * 1000.0, 3)
-        lane = area_g.LANE_S[area_g.lane_of(o)]
+        lane = lane_s[area_g.lane_of(o)]
         out[o["id"]] = round(min(lane, max(TIMEOUT_FLOOR_S, TIMEOUT_FACTOR * med)), 1)
         if med > lane / 3.0:
             slow.append("%s: median %.1f s, lane %.0f s" % (o["id"], med, lane))
@@ -843,6 +978,7 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
     if mcp_graphlet_run:
         rows, _ = sc.read_jsonl(os.path.join(mcp_graphlet_run, "arms", "mcp", "graphlet_ops.jsonl"))
         w3 = dict(((r.get("scenario"), r.get("op")), r) for r in rows)
+    lanes = lanes_of_runs([d for d in (mcp_graphlet_run, mcp_dir) if d])
     for s in shadow_manifest["scenarios"]:
         r = results[s["id"]]
         r["verdicts"]["plan"] = "pass" if not r["plan_problems"] else "fail: %d op(s): %s" % (
@@ -850,8 +986,13 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
                                                for p in r["plan_problems"][:6]))
         per = [dict((op, rec) for (sid, op), rec in recs.items() if sid == s["id"]) for recs in recs_by_rep]
         per.append(dict((op, rec) for (sid, op), rec in w3.items() if sid == s["id"]))
-        timeouts, r["slow_ops"] = op_timeouts(per, s["graphlet"]["ops"])
+        timeouts, r["slow_ops"] = op_timeouts(per, s["graphlet"]["ops"], lanes)
         r["op_medians_ms"] = dict(op_timeouts.medians)
+        hr = w3_headroom(s["graphlet"]["ops"], per[-1], lanes)
+        r["w3_headroom"] = hr
+        if hr["escalations"]:
+            r["escalations"] = hr["escalations"]
+        r["slow_ops"] = r["slow_ops"] + hr["slow"]
         # timeout_s goes to every runner, W3's too: without W3's own times (the async runner's area G records,
         # --mcp-graphlet-run) the local library's milliseconds would set a floor no MCP call was measured against,
         # so the ops keep their lanes (area_g.set_timeouts) and only the medians are recorded
@@ -868,8 +1009,25 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
     if prior:
         results, meta, scen = merge_prior(prior, results, meta, scen)
     corpus = choose_corpus(results, meta, scen, library_commit)
-    write_outputs(out, results, meta, scen, corpus, warm_ups)
-    return {"results": results, "corpus": corpus, "warm_ups": warm_ups}
+    write_outputs(out, results, meta, scen, corpus, warm_ups, lanes)
+    return {"results": results, "corpus": corpus, "warm_ups": warm_ups, "lanes": lanes}
+
+
+def lanes_of_runs(run_dirs: List[str]) -> dict:
+    """graphlet_lanes of the first run directory whose MCP arm recorded the service's capabilities document, else of
+    the by-design table alone (every part it lacks: the fallback, recorded missing)."""
+    for d in run_dirs:
+        try:
+            refs = sc.run_references(d)
+        except Exception:
+            continue
+        if refs.live.get("service") is not None:
+            lanes = graphlet_lanes(refs)
+            lanes["document"] = refs.origins.get("service") or d
+            return lanes
+    lanes = graphlet_lanes()
+    lanes["document"] = None
+    return lanes
 
 
 # candidates renamed since the first rehearsal (the owner's decision of 2026-10-19: trace with coordinates its own slot)
@@ -1006,11 +1164,20 @@ def choose_corpus(results: Dict, meta: Dict, scen: Dict, library_commit: Optiona
             "rich": [slot for slot, _ in rich]}
 
 
+def lanes_record(lanes: Optional[dict]) -> Optional[dict]:
+    if not lanes:
+        return None
+    return dict(lanes, heavy_ops=sorted(lanes["heavy_ops"]),
+                headroom_s={"interactive": lanes["alarm_s"] / W3_HEADROOM_DIVISOR,
+                            "heavy": lanes["heavy_timeout_s"] / W3_HEADROOM_DIVISOR})
+
+
 def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict,
-                  warm_ups: Optional[Dict] = None) -> None:
+                  warm_ups: Optional[Dict] = None, lanes: Optional[dict] = None) -> None:
     with open(os.path.join(out, "rehearsal.json"), "w") as fh:
         json.dump({"results": results, "meta": dict((k, dict((kk, vv) for kk, vv in v.items() if kk != "candidate"))
-                                                    for k, v in meta.items()), "warm_ups": warm_ups or {}},
+                                                    for k, v in meta.items()), "warm_ups": warm_ups or {},
+                   "w3_lanes": lanes_record(lanes)},
                   fh, indent=1, sort_keys=True, default=str)
     with open(os.path.join(out, "corpus.json"), "w") as fh:
         json.dump(corpus, fh, indent=1, sort_keys=True)
@@ -1040,6 +1207,22 @@ def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict,
         top = sorted(med.items(), key=lambda kv: -kv[1])[:3]
         lines.append("| %s | %d | %.2f | %s |" % (sid, len(med), statistics.median(med.values()),
                                                   ", ".join("%s %.1f" % kv for kv in top)))
+    lr = lanes_record(lanes)
+    if lr:
+        lines += ["", "## W3 headroom (DESIGN-v8 §3, refined 2026-10-20)", "",
+                  "Every op W3 runs keeps a third of its lane: interactive %.3g s (a third of the %.3g s alarm), "
+                  "heavy %.3g s (a third of the %.3g s heavy timeout); heavy ops: %s. An interactive op past the alarm "
+                  "escalates once to heavy: allowed, recorded, judged as heavy. Read from %s (%s)%s." % (
+                      lr["headroom_s"]["interactive"], lr["alarm_s"], lr["headroom_s"]["heavy"],
+                      lr["heavy_timeout_s"], ", ".join(lr["heavy_ops"]), lr.get("document") or "no recorded document",
+                      ", ".join("%s %s" % kv for kv in sorted(lr["sources"].items())),
+                      "; missing: " + "; ".join(lr["missing"]) if lr["missing"] else ""), "",
+                  "| scenario | W3 ops timed | over their third | escalations |", "|---|---|---|---|"]
+        for sid in scen:
+            hr = results[sid].get("w3_headroom") or {}
+            if hr.get("timed") or hr.get("escalations"):
+                lines.append("| %s | %d | %s | %s |" % (sid, hr.get("timed") or 0, "; ".join(hr.get("slow") or [])
+                                                        or "-", "; ".join(hr.get("escalations") or []) or "-"))
     with open(os.path.join(out, "REPORT.md"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
 
