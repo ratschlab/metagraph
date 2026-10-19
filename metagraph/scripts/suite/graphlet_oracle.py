@@ -32,9 +32,12 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
   reading an engine value (DESIGN-v8 §2: the report marks them "re-derived from DESIGN").
 - `declared` says why a record checks no value: not_implemented_phase_b (graphlet_support, graphlet_claims,
   graphlet_labels name=: DESIGN-v8 §8), properties_only (graphlet_compare: the compare_* functions below),
-  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view), twin_mismatch (the
-  full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's twin pre-check), selector_error (W1's
-  arguments did not resolve) and expected_error: the arguments name no answer, the tool must refuse; then
+  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view): W5 makes no claim
+  (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
+  twin pre-check), no_input (the run step found no twin or document), unresolved_handle (a handle symbol naming no
+  scenario or op), selector_error (W1's arguments did not resolve), unreadable_w1 (a torn W1 line): W5 could not
+  judge (compare: inconclusive, which blocks); and expected_error: the arguments name no answer, the tool must
+  refuse; then
   `expected_error` is the code W5 expects (null: any code), the note gives why and the clause (most codes are the
   library's vocabulary, so "library-defined").
 - Cut rows: a field the other answer marks cut to fit its page (FORMAT v2 A3: `_cut_fields` on each row of a page
@@ -433,6 +436,11 @@ def _canon(v: Any) -> str:
 # about the graphlet): `not_comparable` against W5, which makes no claim about fitting (FORMAT v2 F3, VO5)
 FIT_ERRORS = ("result_too_large", "receipt_too_large", "too_large", "body_too_large", "op_busy", "op_timeout",
               "op_memory", "local_budget_exceeded")
+# declarations by which W5 makes no claim about the call, by design: compare() answers not_checked
+NO_CLAIM = ("not_implemented_phase_b", "properties_only", "not_applicable", "view_consistency_only")
+# declarations by which W5 could not judge a call it should judge (an input missing or inconsistent, a handle or a
+# W1 line it cannot read): compare() answers inconclusive, which blocks (R2-5; owner policy 2026-10-14)
+CANNOT_JUDGE = ("no_input", "unresolved_handle", "twin_mismatch", "selector_error", "unreadable_w1")
 
 
 def expand(pattern: str, doc: Any) -> List[str]:
@@ -572,10 +580,12 @@ def compare(record_w5: dict, answer: Any) -> dict:
     bare tool answer (an error is {"error": "<code>", ...}), service fields already removed (DESIGN-v8 §5). For
     graphlet_export and graphlet_save the answer to pass is export_view(format, receipt, the file's text) (FORMAT v2
     B3: the file kept under the way's raw/), the shape W5 answers for a file.
-    -> {"outcome": "agree" | "disagree" | "not_comparable" | "not_checked", "detail": str, "checked": n,
-        "differences": [...]}:
-    - not_checked: W5 declares no claim (phase B, properties only, not applicable, a view, a twin mismatch, a W1
-      selector error);
+    -> {"outcome": "agree" | "disagree" | "not_comparable" | "not_checked" | "inconclusive", "detail": str,
+        "checked": n, "differences": [...]}:
+    - not_checked: W5 makes no claim about the call by design (NO_CLAIM: phase B, properties only, not applicable,
+      a view; or a record that checks nothing: consistency-only);
+    - inconclusive (blocks): W5 could not judge a call it should (CANNOT_JUDGE: no input, an unresolved handle
+      symbol, a twin mismatch, a W1 selector error, an unreadable W1 line), or the record is no W5 record;
     - not_comparable: the other way answered a fitting error (FIT_ERRORS: F3), about which W5 says nothing;
     - otherwise differences() decides: an expected error must be one (of W5's code when stated); an answer W5
       derives must hold every checked value (cut fields as cuts, unordered and position-ordered lists as such) and
@@ -587,8 +597,15 @@ def compare(record_w5: dict, answer: Any) -> dict:
         other = answer
     declared = o.get("declared")
     n = len(o.get("checked") or {})
-    if declared and declared != "expected_error":
-        return {"outcome": "not_checked", "detail": "W5 declares %s%s" % (
+    if not isinstance(record_w5.get("oracle"), dict) or not isinstance(o.get("checked"), dict) or \
+            (declared and declared not in NO_CLAIM + CANNOT_JUDGE + ("expected_error",)):
+        return {"outcome": "inconclusive", "detail": "not a W5 record W5 can be judged by (declared %r)" % declared,
+                "checked": 0, "differences": []}
+    if declared in CANNOT_JUDGE:
+        return {"outcome": "inconclusive", "detail": "W5 could not judge the call: %s%s" % (
+            declared, ": %s" % o["note"] if o.get("note") else ""), "checked": 0, "differences": []}
+    if declared in NO_CLAIM:
+        return {"outcome": "not_checked", "detail": "W5 makes no claim: %s%s" % (
             declared, ": %s" % o["note"] if o.get("note") else ""), "checked": 0, "differences": []}
     if not declared and not n and not o.get("absent"):
         return {"outcome": "not_checked", "detail": "W5 checks nothing of this call (consistency-only)%s" % (
@@ -1813,11 +1830,61 @@ def _context(rec: dict, view: bool, envelope: Optional[dict], full: dict) -> dic
     return ctx
 
 
+_TORN_KEY = re.compile(r'"(scenario|op|tool)":\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _read_w1(path: str) -> Tuple[List[dict], List[dict], int]:
+    """(records, torn, unkeyed) of W1's graphlet_ops.jsonl: the parsed lines; the torn lines whose scenario and op
+    can still be read from the text (each becomes a W5 record declaring unreadable_w1); the number of torn lines
+    with neither (one run-level record states them)."""
+    recs, torn, unkeyed = [], [], 0
+    if not os.path.exists(path):
+        return recs, torn, unkeyed
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for no, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+                if not isinstance(obj, dict):
+                    raise ValueError("not an object")
+                recs.append(obj)
+            except ValueError:
+                keys = dict(_TORN_KEY.findall(line))
+                if keys.get("scenario") and keys.get("op"):
+                    torn.append(dict(keys, line=no))
+                else:
+                    unkeyed += 1
+    return recs, torn, unkeyed
+
+
+def _target(hv: Any, sid: str, tools: Dict[Tuple[Any, Any], Any], scenarios: set) -> Tuple[Optional[str], bool]:
+    """(the scenario whose graphlet a call reads, whether through a subtrie's view) from its handle symbol (FORMAT
+    v2 B1): <handle> the scenario's, <handle:S> scenario S's, <handle:OP> / <handle:S/OP> the one op OP made (a
+    subtrie's: a view; a load's: the same graphlet). (None, False) for a symbol naming no scenario or op (<handle:?>,
+    a raw handle, a mistyped name)."""
+    m = _SYMBOL.match(hv) if isinstance(hv, str) else None
+    if not m:
+        return None, False
+    name = m.group(1)
+    if name is None:
+        return sid, False
+    if "/" in name:
+        owner, _, op = name.rpartition("/")
+        return (owner, tools[(owner, op)] == "graphlet_subtrie") if (owner, op) in tools else (None, False)
+    if (sid, name) in tools:
+        return sid, tools[(sid, name)] == "graphlet_subtrie"
+    return (name, False) if name in scenarios else (None, False)
+
+
 def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> List[dict]:
     """W5's records of a run (FORMAT v2 F4): one per W1 record of arms/dl-lib/graphlet_ops.jsonl, the same line
-    shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`."""
-    w1, bad = suite_common.read_jsonl(os.path.join(run, "arms", W1_DIR, "graphlet_ops.jsonl"))
+    shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`; a torn W1 line gives a record
+    declaring unreadable_w1 under its scenario and op where the text still names them, and the rest one run-level
+    record (scenario and op null, run_level true) that the compare stage reports as inconclusive (R2-5)."""
+    w1, torn, unkeyed = _read_w1(os.path.join(run, "arms", W1_DIR, "graphlet_ops.jsonl"))
     tools = {(r.get("scenario"), r.get("op")): r.get("tool") for r in w1}
+    scenarios = {r.get("scenario") for r in w1}
     cache: Dict[str, tuple] = {}
     out = []
     for rec in w1:
@@ -1830,23 +1897,17 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
         # whose graphlet the call reads (FORMAT v2 B1): <handle> the scenario's, <handle:S> scenario S's,
         # <handle:OP> / <handle:S/OP> the one an op made (a subtrie's view; a load's round trip of the same graphlet)
         hv = (rec.get("args_resolved") or {}).get("a" if tool == "graphlet_compare" else "handle", "<handle>")
-        m = _SYMBOL.match(hv) if isinstance(hv, str) else None
-        target, view = sid, False
-        if m and m.group(1):
-            owner, _, op = m.group(1).rpartition("/") if "/" in m.group(1) else ("", "", m.group(1))
-            owner = owner or sid
-            if (owner, op) in tools:
-                target, view = owner, tools[(owner, op)] == "graphlet_subtrie"
-            else:
-                target = m.group(1)
-        if target not in cache:
+        target, view = _target(hv, sid, tools, scenarios)
+        if target is not None and target not in cache:
             cache[target] = _inputs(run, target, repeat)
-        full, text, envelope, src = cache[target]
+        full, text, envelope, src = cache[target] if target is not None else (None, None, None, {})
         line["sources"] = src
         if rec.get("selector_error"):
             r = _declared("selector_error", "W1's arguments did not resolve: %s" % rec["selector_error"])
         elif rec.get("args_resolved") is None:
-            r = _declared("not_applicable", "W1 recorded no arguments (%s)" % ((rec.get("error") or {}).get("code")))
+            r = _declared("no_input", "W1 recorded no arguments (%s)" % ((rec.get("error") or {}).get("code")))
+        elif target is None:
+            r = _declared("unresolved_handle", "the handle symbol %r names no scenario or op of this run" % (hv,))
         elif full is None or text is None:
             r = _declared("no_input", "missing %s for scenario %s" % (
                 " and ".join(k for k, v in (("the full twin", full), ("the MGT document", text)) if v is None), target))
@@ -1856,8 +1917,18 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
         line["elapsed_ms"] = round((time.time() - started) * 1000.0, 3)
         line["started_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
         out.append(line)
-    if bad:
-        out.append({"way": "W5", "error": {"code": "unreadable_w1_lines", "fields": {"lines": bad}}})
+    for t in torn:
+        r = _declared("unreadable_w1", "W1's line %d is torn: its record cannot be read" % t["line"])
+        out.append({"run_id": run_id, "scenario": t["scenario"], "way": "W5", "op": t["op"], "tool": t.get("tool"),
+                    "args_resolved": None, "selector_error": None, "pages": None, "paging_complete": None,
+                    "answer": None, "error": None, "service_fields": None, "doc": None, "library": None,
+                    "elapsed_ms": 0.0, "started_utc": None, "sources": None, "oracle": r["oracle"]})
+    if unkeyed:
+        r = _declared("unreadable_w1", "%d torn W1 line(s) name no scenario and op: their ops have no W5 record"
+                      % unkeyed)
+        out.append({"run_id": run_id, "scenario": None, "way": "W5", "op": None, "tool": None, "run_level": True,
+                    "args_resolved": None, "answer": None,
+                    "error": {"code": "unreadable_w1_lines", "fields": {"lines": unkeyed}}, "oracle": r["oracle"]})
     return out
 
 
@@ -1881,7 +1952,11 @@ def write_run(run: str, repeat: int = 0, force: bool = False, quiet: bool = Fals
         k = (line.get("oracle") or {}).get("declared") or ("error" if line.get("error") else "answered")
         counts[k] = counts.get(k, 0) + 1
     summary = {"way": "W5", "records": len(lines), "outcomes": counts, "repeat": repeat,
-               "seconds": round(time.time() - started, 3), "w1": "arms/%s/graphlet_ops.jsonl" % W1_DIR}
+               "seconds": round(time.time() - started, 3), "w1": "arms/%s/graphlet_ops.jsonl" % W1_DIR,
+               "unreadable_w1_lines": sum(int(((x.get("error") or {}).get("fields") or {}).get("lines", 0))
+                                          for x in lines if x.get("run_level"))
+               + sum(1 for x in lines if (x.get("oracle") or {}).get("declared") == "unreadable_w1"
+                     and not x.get("run_level"))}
     with open(os.path.join(out_dir, "run.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, sort_keys=True, indent=1)
     if not quiet:

@@ -249,6 +249,8 @@ class OracleVsLibrary(unittest.TestCase):
                         self.assertIn(name.split("#")[0], NOT_TWINS)
                 verdict = O.compare(rec, lib)
                 outcomes[verdict["outcome"]] += 1
+                if verdict["outcome"] == "inconclusive":    # R2-5: only what W5 cannot judge, here the non-twins
+                    self.assertIn(name.split("#")[0], NOT_TWINS, (name, tool, args, verdict["detail"]))
                 diffs = verdict["differences"]
                 known = [k for k, (_, hit) in KNOWN_LIBRARY_DEFECTS.items() if hit(tool, op)]
                 if known:
