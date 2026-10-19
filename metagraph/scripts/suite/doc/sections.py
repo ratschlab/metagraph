@@ -234,6 +234,8 @@ class Context(object):
                 # an answer-side scenario-level mark in the manifest (the delta verifier's M2): the glossary's and
                 # appendix G's definitions of not implemented via MCP name it
                 "answer_side_mark": bool(answer_side_mark_ids(run)),
+                # the short names of the gate policies reported, for the glossary (RV5)
+                "gate_policy_names": gate_policy_names(run),
                 # the kinds of property-level mark the manifest carries, for appendix G's lead-in (V10)
                 "property_mark_kinds": "; ".join(w for k, w in (("not_implemented", "not implemented via MCP"),
                                                                 ("by_design", "service-side by design"))
@@ -792,10 +794,10 @@ def gate_population_text(run):
                 else "no declared file", gate_required_text(run), pop["n_required"]))
 
 
-def gate_judged_outcomes(run):
+def gate_judged_outcomes(run, policy=None):
     """{outcome: executions} over what the gate judged (V6-001): the policy's selection on its access paths less
-    its exclusions, as gate.judge counts `judged`; {} without a policy."""
-    pol = run.policy if isinstance(run.policy, dict) else None
+    its exclusions, as gate.judge counts `judged`; {} without a policy. |policy|: another than the deploy gate's."""
+    pol = policy if isinstance(policy, dict) else (run.policy if isinstance(run.policy, dict) else None)
     if not pol:
         return {}
     selected = set((pol.get("selection") or {}).get("scenarios") or [])
@@ -1302,9 +1304,9 @@ def gate_summary(ctx):
         word = "GATE PASS" if gate.get("passed") else "GATE FAIL"
         problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
         if run.gate_offline:
-            how = ("judged offline by gate.py for this document (the run recorded %s); policy %s" % (
+            how = ("judged offline by gate.py for this document (the run recorded %s); policy %s%s" % (
                 "a stale gate.json: %s" % stale_gate_text(run) if run.gate_stale else "no gate.json",
-                os.path.basename(pol.get("path") or "–")))
+                os.path.basename(pol.get("path") or "–"), deploy_label_text(run)))
             # gate.py's sha256 is that of the policy's canonical JSON; the deploy notes cite the file's bytes, so
             # both are printed (VERIFY-COLOURS-V5 item 9)
             file_sha = run.policy_file_sha256() if hasattr(run, "policy_file_sha256") else None
@@ -1333,10 +1335,31 @@ def gate_summary(ctx):
     return "not evaluated", how, None, None
 
 
-def judged_outcomes_text(run, counts):
+def deploy_label_text(run):
+    """' (rtp: POST /resolve, ... and POST /pattern)' after the deploy gate's policy file when another policy is
+    reported beside it (RV5: the short names explained where they first appear); '' otherwise."""
+    if not getattr(run, "also_gates", None) or not isinstance(getattr(run, "policy", None), dict):
+        return ""
+    return " (%s: %s)" % (policy_label(run.policy), facts._join(policy_routes(run.policy)) or "–")
+
+
+def gate_policy_names(run):
+    """The glossary's short names of the policies this document reports (RV5): 'rtp, the deploy gate (...) and rt
+    (...)'; '' with one policy or none."""
+    if not getattr(run, "also_gates", None) or not isinstance(getattr(run, "policy", None), dict):
+        return ""
+    parts = ["%s, the deploy gate (%s)" % (policy_label(run.policy), facts._join(policy_routes(run.policy)))]
+    for e in run.also_gates:
+        if isinstance(e.get("policy"), dict):
+            parts.append("%s (%s)" % (policy_label(e["policy"]), facts._join(policy_routes(e["policy"]))))
+    return facts._join(parts)
+
+
+def judged_outcomes_text(run, counts, policy=None):
     """' (1950 passed, 118 service-side by design)': the gate's judged executions by outcome (V6-001), the passed
-    count the gate's own; ', N passed' when the policy's population cannot be read."""
-    out = gate_judged_outcomes(run)
+    count the gate's own; ', N passed' when the policy's population cannot be read. |policy|: another policy than
+    the deploy gate's (an --also-policy one, RV5)."""
+    out = gate_judged_outcomes(run, policy)
     if not out or out.get("pass", 0) != counts.get("passed"):
         return ", %s passed" % counts.get("passed", "–")
     words = [("pass", "passed"), ("service_by_design", "service-side by design")]
@@ -2241,7 +2264,7 @@ def provenance_table(ctx):
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
     rows.append(("comparison", comparison_lines_text(run, short=True)))
     for entry in getattr(run, "also_gates", None) or []:
-        rows.append(("other gate policy", esc(also_gate_text(entry))))
+        rows.append(("other gate policy", esc(also_gate_text(entry, run))))
     if run.reruns:
         rows.append(("warm-ups run again", reruns_text(run)))
     lf = run.load or {}
@@ -2253,9 +2276,27 @@ def provenance_table(ctx):
     return _kv_table(rows)
 
 
-def also_gate_text(entry):
+ROUTE_ORDER = ("POST /resolve", "POST /traverse", "GET /traverse/capabilities", "POST /pattern")
+
+
+def policy_label(pol):
+    """A policy's short name as this document uses it: the middle of its name ('v7-rtp-mcp' -> 'rtp'), else the
+    name."""
+    name = str((pol or {}).get("name") or "")
+    m = re.match(r"\Av\d+-(.+)-[a-z]+\Z", name)
+    return m.group(1) if m else (name or "–")
+
+
+def policy_routes(pol):
+    """The routes a policy selects by (its counts.by_route), in the document's order."""
+    routes = list(((pol or {}).get("counts") or {}).get("by_route") or {})
+    return sorted(routes, key=lambda r: (ROUTE_ORDER.index(r) if r in ROUTE_ORDER else len(ROUTE_ORDER), r))
+
+
+def also_gate_text(entry, run=None):
     """A further gate policy judged offline for this document beside the deploy gate (make_doc --also-policy), plain
-    text: the policy, its verdict and counts, and that it is not the deploy gate."""
+    text: its short name and routes against the deploy gate's (RV5), the policy, its verdict and counts with the
+    judged executions by outcome, and that it is not the deploy gate."""
     name = os.path.basename(entry.get("path") or "") or "–"
     if entry.get("error") or not isinstance(entry.get("verdict"), dict):
         return "%s: not judged (%s)" % (name, latex.cut_text(latex.public_paths(str(entry.get("error") or "–")), 200))
@@ -2263,13 +2304,21 @@ def also_gate_text(entry):
     pol = gate.get("policy") or {}
     counts = gate.get("counts") or {}
     problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
-    return ("%s, %s version %s (sha256 %s… of the canonical JSON), access paths %s: %s, %d problem%s; %s executions "
-            "judged, %s passed, %s required; judged offline by gate.py for this document beside the deploy gate, "
-            "which it does not replace" % (
-                name, pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
-                ", ".join((entry.get("policy") or {}).get("arms") or []) or "–",
+    own = entry.get("policy") or {}
+    routes = policy_routes(own)
+    deploy = run.policy if run is not None and isinstance(getattr(run, "policy", None), dict) else {}
+    without = [r for r in policy_routes(deploy) if r not in routes]
+    head = "the %spolicy %s (%s%s)" % ("narrower " if without and set(routes) < set(policy_routes(deploy)) else "",
+                                      policy_label(own), facts._join(routes) or "–",
+                                      (", without %s" % facts._join(without)) if without else "")
+    judged = judged_outcomes_text(run, counts, own) if run is not None else ", %s passed" % counts.get("passed", "–")
+    return ("%s%s, %s version %s (sha256 %s… of the canonical JSON), access paths %s: %s, %d problem%s; %s executions "
+            "judged%s, %s required; judged offline by gate.py for this document beside the deploy gate, which it does "
+            "not replace" % (
+                (head + ": ") if own.get("name") else "", name, pol.get("name") or "–", pol.get("policy_version") or "–", str(pol.get("sha256") or "–")[:12],
+                ", ".join(own.get("arms") or []) or "–",
                 "GATE PASS" if gate.get("passed") else "GATE FAIL", len(problems), "" if len(problems) == 1 else "s",
-                counts.get("judged", "–"), counts.get("passed", "–"), counts.get("required", "–")))
+                counts.get("judged", "–"), judged, counts.get("required", "–")))
 
 
 def comparison_lines_text(run, short=False):

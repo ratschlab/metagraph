@@ -123,6 +123,7 @@
   "vocab": "the shared vocabulary's texts (doc/vocabulary.py glossary_texts), read as `{vocab[key]}`: check_outcome, execution_outcome, error, finding, inconclusive, pass, standing, classifications, access_path",
   "annotated_dimension": "the dimension the reading guide's annotated matrix varies: its unit's title up to any parenthesis (sections.annotated_matrix; 'the varied value' outside that matrix)",
   "answer_side_mark": "flag: the manifest has an answer-side scenario-level mark (sections.answer_side_mark_ids: blocks.scenario_mark_parts, the request expressible, the MCP answer lacking every field the property checks read)",
+  "gate_policy_names": "the short names of the gate policies the document reports, with their routes (sections.gate_policy_names: 'rtp, the deploy gate (POST /resolve, ...) and rt (...)'); empty with one policy or none",
   "property_mark_kinds": "the kinds of property-level mark the manifest carries, in words (sections.Context.placeholders: 'not implemented via MCP', 'service-side by design', joined by '; '; empty without any)",
   "answer_side_mark_text": "those scenarios with the fields their marks name (sections.answer_side_mark_text), e.g. 'P-scope-0004, P-scope-0006: absence_scope'",
   "annotated_record_key": "whether the annotated matrix's variants carry a record key in brackets: the flag of the column note's record-key clause (sections.annotated_matrix; false outside that matrix)"

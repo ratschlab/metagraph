@@ -458,6 +458,38 @@ class ByDesignPropertyMarkTest(unittest.TestCase):
                       "via MCP (on one of them: P-edge-0004)", text)
 
 
+class GatePoliciesNamedTest(unittest.TestCase):
+    """The two gate policies explained where they first appear (RV5): the deploy gate's short name with its routes
+    after its policy file, the other policy as the narrower one with its routes and the route it leaves out, its
+    judged executions split by outcome as the deploy gate's are, and the glossary's short names."""
+
+    def test_texts(self):
+        rtp = {"name": "v7-rtp-mcp", "arms": ["direct-local", "mcp"], "selection": {"scenarios": ["A", "B"]},
+               "counts": {"by_route": {"POST /pattern": 1, "POST /resolve": 1, "GET /traverse/capabilities": 1,
+                                       "POST /traverse": 1}}, "exclusions": []}
+        rt = {"name": "v7-rt-mcp", "arms": ["mcp"], "selection": {"scenarios": ["A"]},
+              "counts": {"by_route": {"POST /traverse": 1, "POST /resolve": 1}}, "exclusions": []}
+        self.assertEqual((sections.policy_label(rtp), sections.policy_label(rt)), ("rtp", "rt"))
+        self.assertEqual(sections.policy_routes(rtp), ["POST /resolve", "POST /traverse",
+                                                       "GET /traverse/capabilities", "POST /pattern"])
+        rows = [{"scenario": "A", "arm": "mcp", "repeat": 0, "outcome": "pass"},
+                {"scenario": "A", "arm": "mcp", "repeat": 1, "outcome": "service_by_design"}]
+        entry = {"path": "/x/policy_v7_rt_mcp.json", "policy": rt,
+                 "verdict": {"passed": True, "problems": [], "policy": {"name": "v7-rt-mcp", "policy_version": 1,
+                                                                        "sha256": "ab" * 32},
+                             "counts": {"judged": 2, "passed": 1, "required": 2}}}
+        run = _Stub(policy=rtp, also_gates=[entry], rows=rows)
+        text = sections.also_gate_text(entry, run)
+        self.assertTrue(text.startswith("the narrower policy rt (POST /resolve and POST /traverse, without GET "
+                                        "/traverse/capabilities and POST /pattern): policy_v7_rt_mcp.json"), text)
+        self.assertIn("2 executions judged (1 passed, 1 service-side by design), 2 required", text)
+        self.assertEqual(sections.deploy_label_text(run), " (rtp: POST /resolve, POST /traverse, GET "
+                         "/traverse/capabilities and POST /pattern)")
+        self.assertIn("rtp, the deploy gate (POST /resolve", sections.gate_policy_names(run))
+        self.assertEqual(sections.deploy_label_text(_Stub(policy=rtp, also_gates=[])), "")
+        self.assertEqual(sections.gate_policy_names(_Stub(policy=rtp, also_gates=[])), "")
+
+
 class SincePreviousTest(unittest.TestCase):
     """I.4's 'Since the previous edition' (RV7), computed from the previous edition's run given as an input: the
     scenarios, the MCP marks removed and moved, a check argument gained, the outcomes changed and the inconclusive
