@@ -2347,11 +2347,184 @@ def limitations_table(ctx):
                              needspace=len(rows) + 3)
 
 
+# a changed check argument in plain words ('Since the previous edition'), with the argument's value; an argument not
+# listed here is named as it is
+ARGUMENT_CHANGE_WORDS = {
+    ("budget_respected", "reserve_ms", "added"): "a /pattern time stop is now held to the host's documented "
+                                                "finalisation reserve of %s ms, no longer to the reserve the answer "
+                                                "itself reports",
+}
+_PREV_OUTCOME_WORDS = {"pass": "pass", "inconclusive": "inconclusive", "service_by_design": "service-side by design",
+                       "not_implemented_mcp": "not exercised via MCP", "fail": "fail", "error": "error",
+                       "finding": "finding", None: "no execution"}
+
+
+def _mark_sets(scenario):
+    """(scenario-level marks, property-level marks) of a scenario's MCP block: ({'not_implemented', 'by_design'} the
+    scenario carries, {(check, mark, reason or case)})."""
+    mcp = (scenario or {}).get("mcp") if isinstance((scenario or {}).get("mcp"), dict) else {}
+    level = set(k for k in ("not_implemented", "by_design") if mcp.get(k))
+    prop = set((name, m.get("mark"), str(m.get("reason") or m.get("case") or ""))
+               for name, m in sc.mcp_check_marks(scenario).items())
+    return level, prop
+
+
+def _argument_changes(prev, cur):
+    """{(check, argument, 'added' | 'removed' | 'changed'): (scenarios, routes, values)} of the expectations of the
+    scenarios both manifests hold, item by item (check name and occurrence)."""
+    out = {}
+    for sid, s in cur.items():
+        p = prev.get(sid)
+        if not p:
+            continue
+        def items(sc_):
+            seen, res = {}, {}
+            for e in sc_.get("expect") or []:
+                if isinstance(e, dict) and e.get("check"):
+                    k = (e["check"], seen.get(e["check"], 0))
+                    seen[e["check"]] = k[1] + 1
+                    res[k] = e.get("args") if isinstance(e.get("args"), dict) else {}
+            return res
+        a, b = items(p), items(s)
+        for key in set(a) & set(b):
+            for arg in set(a[key]) | set(b[key]):
+                if arg in ("rule",):   # the rule's prose is a citation, not a judged value
+                    continue
+                kind = ("added" if arg not in a[key] else "removed" if arg not in b[key] else
+                        "changed" if a[key][arg] != b[key][arg] else None)
+                if kind:
+                    v = out.setdefault((key[0], arg, kind), (set(), set(), set()))
+                    v[0].add(sid)
+                    v[1].add(str(s.get("route") or "–"))
+                    v[2].add(json.dumps(b[key].get(arg), sort_keys=True))
+    return out
+
+
+def since_previous(ctx):
+    """I.4's 'Since the previous edition' (the reader review of the v7 document, RV7): computed from the previous
+    edition's run given as an input (make_doc --previous, reader.PreviousRun): the scenarios, the manifest's MCP marks
+    added and removed with this run's MCP outcomes of the tests concerned, the check arguments changed, the service
+    identity recorded or not, and the executions whose outcome changed, the inconclusive ones counted; nothing
+    without that input."""
+    prev = getattr(ctx.run, "previous", None)
+    if prev is None:
+        return ""
+    run = ctx.run
+    pm, cm = prev.manifest, run.manifest
+    items = []
+    p_ids, c_ids = set(prev.scenarios), set(run.order)
+    plines, clines = prev.lines(), dict(((l.get("scenario"), l.get("arm"), l.get("repeat")), l) for l in run.rows)
+    if p_ids == c_ids:
+        items.append("the same %d scenarios; %d executions against %d" % (len(c_ids), len(clines), len(plines)))
+    else:
+        items.append("%d scenarios against %d (%d added, %d removed); %d executions against %d" % (
+            len(c_ids), len(p_ids), len(c_ids - p_ids), len(p_ids - c_ids), len(clines), len(plines)))
+    # the manifest's MCP marks, scenario by scenario
+    removed_level, removed_prop, moved, added = [], {}, [], []
+    for sid in run.order:
+        if sid not in prev.scenarios:
+            continue
+        (pl, pp), (cl, cp) = _mark_sets(prev.scenarios[sid]), _mark_sets(run.scenario(sid))
+        if "not_implemented" in pl and "not_implemented" not in cl:
+            removed_level.append(sid)
+        p_checks = dict(((c, m), r) for c, m, r in pp)
+        c_checks = dict(((c, m), r) for c, m, r in cp)
+        for (check, mark), reason in p_checks.items():
+            if (check, mark) in c_checks:
+                continue
+            other = [(m2, r2) for (c2, m2), r2 in c_checks.items() if c2 == check and m2 != mark]
+            if other:
+                moved.append((sid, check, mark, other[0][0], other[0][1]))
+            elif mark == "not_implemented":
+                removed_prop.setdefault(check, []).append(sid)
+        for (check, mark), reason in c_checks.items():
+            if (check, mark) not in p_checks and not any(c2 == check for c2, _ in p_checks):
+                added.append((sid, check, mark, reason))
+
+    def mcp_outcome_text(sids):
+        outs = sorted(set(l.get("outcome") for k, l in clines.items() if k[0] in sids and k[1] == "mcp"),
+                      key=str)
+        if outs == ["pass"]:
+            return "every MCP execution passed"
+        return "their MCP outcomes: %s" % ", ".join(_PREV_OUTCOME_WORDS.get(o, str(o)) for o in outs)
+    marks = []
+    if removed_level:
+        marks.append("removes %d scenario-level mark%s not implemented via MCP (%s), so %s now run%s via MCP" % (
+            len(removed_level), "" if len(removed_level) == 1 else "s", facts.ids_ranges(removed_level),
+            "these tests" if len(removed_level) > 1 else "the test", "" if len(removed_level) > 1 else "s"))
+    for check, sids in removed_prop.items():
+        marks.append("removes %d property-level mark%s not implemented via MCP on %s (%s), so that check is now "
+                     "compared via MCP" % (len(sids), "" if len(sids) == 1 else "s", check, facts.ids_ranges(sids)))
+    for sid, check, old, new, why in moved:
+        marks.append("marks %s's %s %s instead of %s (%s)" % (
+            sid, check, "service-side by design" if new == "by_design" else "not implemented via MCP",
+            "not implemented via MCP" if old == "not_implemented" else "service-side by design",
+            ("case %s, appendix G" % why) if new == "by_design" and why else "appendix G"))
+    for sid, check, mark, why in added:
+        marks.append("adds a property-level mark on %s's %s (%s)" % (
+            sid, check, "service-side by design" if mark == "by_design" else "not implemented via MCP"))
+    if marks:
+        touched = set(removed_level) | set(s for v in removed_prop.values() for s in v)
+        text = "manifest v%s %s" % (cm.get("manifest_version"), "; ".join(marks)) if pm.get("manifest_version") != \
+            cm.get("manifest_version") else "the manifest %s" % "; ".join(marks)
+        if touched:
+            text += "; of the %d tests whose mark was removed, %s" % (len(touched), mcp_outcome_text(touched))
+        items.append(text)
+    for (check, arg, kind), (sids, routes, values) in sorted(_argument_changes(prev.scenarios, run.scenarios).items()):
+        words = ARGUMENT_CHANGE_WORDS.get((check, arg, kind))
+        value = ", ".join(sorted(values)) if len(values) <= 3 else "%d values" % len(values)
+        text = "the check %s %s the argument %s on %d scenarios (%s)" % (
+            check, {"added": "gains", "removed": "loses", "changed": "changes"}[kind], arg, len(sids),
+            ", ".join(sorted(routes)))
+        if words and len(values) == 1:
+            text += ": " + (words % value if "%s" in words else words)
+        items.append(text)
+    p_ident = (prev.run.get("service_identity") or {}) if isinstance(prev.run.get("service_identity"), dict) else {}
+    c_ident = recorded_service_identity(run) or {}
+    if c_ident.get("service_commits") and not p_ident.get("service_commits"):
+        items.append("the MCP runner records the service's deployed commit before each invocation, which the "
+                     "previous run's runner did not (the table above and appendix F)")
+    # the executions whose outcome changed, by change
+    changes = {}
+    for key in sorted(set(plines) | set(clines), key=lambda k: (str(k[0]), str(k[1]), str(k[2]))):
+        a = (plines.get(key) or {}).get("outcome")
+        b = (clines.get(key) or {}).get("outcome")
+        if a != b and key[0] in c_ids:
+            changes.setdefault((a, b), []).append(key)
+    if changes:
+        parts = []
+        for (a, b), keys in sorted(changes.items(), key=lambda kv: (-len(kv[1]), str(kv[0]))):
+            by_sid = {}
+            for sid, arm, rep in keys:
+                by_sid.setdefault(sid, []).append("%s r%s" % (arm, rep))
+            parts.append("%s to %s (%s)" % (
+                _PREV_OUTCOME_WORDS.get(a, str(a)) if a is not None else "no execution",
+                _PREV_OUTCOME_WORDS.get(b, str(b)),
+                "; ".join("%s %s" % (sid, ", ".join(v)) for sid, v in by_sid.items())))
+        n = sum(len(v) for v in changes.values())
+        items.append("%d execution%s changed outcome, from the previous run's to this one's: %s" % (
+            n, "" if n == 1 else "s", "; ".join(parts)))
+    else:
+        items.append("no execution changed outcome")
+    n_inc = sum(1 for l in run.rows if l.get("outcome") == "inconclusive")
+    p_inc = sum(1 for l in prev.rows if l.get("outcome") == "inconclusive")
+    items.append("%d inconclusive execution%s against %d" % (n_inc, "" if n_inc == 1 else "s", p_inc))
+    out = "\\parhead{Since the previous edition}\n"
+    out += ("Computed from the previous edition's run %s (manifest version %s, the %s set), given to this document as "
+            "an input:\n" % (tt(prev.run_id()), esc(pm.get("manifest_version")),
+                             "re-evaluated" if prev.reevaluated else "recorded"))
+    out += "\\begin{itemize}\\setlength\\itemsep{0pt}\n" + "".join(
+        "\\item %s.\n" % esc_wrap(t[0].upper() + t[1:], 2000) for t in items) + "\\end{itemize}\n"
+    return out
+
+
 def provenance_section(ctx):
-    """I.4: what answered and what judged (prose, the compact table), the coverage (prose `coverage`, the per-arm
-    outcome table) and the limitations and exemptions (prose `exemptions`, the counts with their appendix links)."""
+    """I.4: what answered and what judged (prose, the compact table), what changed since the previous edition (when
+    its run is given), the coverage (prose `coverage`, the per-arm outcome table) and the limitations and exemptions
+    (prose `exemptions`, the counts with their appendix links)."""
     out = ctx.prose_paragraphs("provenance")
     out += provenance_table(ctx)
+    out += since_previous(ctx)
     out += "\\parhead{Coverage}\n"
     out += ctx.prose_paragraphs("provenance", "coverage", optional=True)
     out += counting_units_table(ctx)
@@ -4488,6 +4661,12 @@ def evidence_manifest(ctx):
         "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
         if table.get("path") else None,
         "service_identity": _identity_evidence(run, ident),
+        # the previous edition's run, an input of 'Since the previous edition' (make_doc --previous)
+        "previous_run": None if getattr(run, "previous", None) is None else {
+            "run_id": run.previous.run_id(), "run_directory": latex.public_paths(run.previous.dir),
+            "manifest_version": run.previous.manifest.get("manifest_version"),
+            "manifest_content_sha256": run.previous.manifest.get("content_sha256"),
+            "executions_file": run.previous.executions_file, "sha256": run.previous.executions_sha256},
     }
 
 

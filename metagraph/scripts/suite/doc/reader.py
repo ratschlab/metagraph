@@ -113,10 +113,47 @@ def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
     return depth
 
 
+class PreviousRun(object):
+    """The previous edition's run, read only for the comparison of this document's 'Since the previous edition'
+    (make_doc --previous; the reader review of the v7 document, RV7: the v6 baseline given as an input, never a figure
+    of it hard-coded): its manifest, its executions (the re-evaluated set when present, as its own document read it),
+    its run.json and the sha256 of the executions file read."""
+
+    def __init__(self, run_dir, current_dir=None):
+        self.dir = os.path.abspath(run_dir)
+        if not os.path.isdir(self.dir):
+            raise RunError("--previous: not a directory: %s" % run_dir)
+        if current_dir and os.path.abspath(current_dir) == self.dir:
+            raise RunError("--previous names this document's own run: %s" % run_dir)
+        self.manifest = sc.read_json(os.path.join(self.dir, "manifest.json"))
+        if not isinstance(self.manifest, dict) or not isinstance(self.manifest.get("scenarios"), list):
+            raise RunError("--previous %s: manifest.json missing or without scenarios" % run_dir)
+        self.scenarios = dict((s["id"], s) for s in self.manifest["scenarios"] if isinstance(s, dict) and s.get("id"))
+        self.reevaluated = os.path.exists(os.path.join(self.dir, "executions.reevaluated.jsonl"))
+        self.executions_file = sc.reevaluated_name("executions.jsonl", self.reevaluated)
+        path = os.path.join(self.dir, self.executions_file)
+        if not os.path.exists(path):
+            raise RunError("--previous %s: no executions file" % run_dir)
+        rows, _ = sc.read_jsonl(path)
+        self.rows = sc.judged_lines(rows) if hasattr(sc, "judged_lines") else rows
+        self.executions_sha256 = sha256_of(path)
+        self.run = (sc.read_json(os.path.join(self.dir, sc.reevaluated_name("run.json", self.reevaluated)))
+                    or sc.read_json(os.path.join(self.dir, "run.json")) or {})
+
+    def run_id(self):
+        return self.run.get("run_id") or os.path.basename(self.dir)
+
+    def lines(self):
+        """{(scenario, arm, repeat): line}."""
+        return dict(((r.get("scenario"), r.get("arm"), r.get("repeat")), r) for r in self.rows)
+
+
 class Run(object):
     def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None,
-                 identity=None, also_policies=None):
+                 identity=None, also_policies=None, previous=None):
         self.dir = os.path.abspath(run_dir)
+        # the previous edition's run (make_doc --previous), None without one
+        self.previous = PreviousRun(previous, self.dir) if previous else None
         if not os.path.isdir(self.dir):
             raise RunError("not a directory: %s" % run_dir)
         self.manifest = sc.read_json(os.path.join(self.dir, "manifest.json"))

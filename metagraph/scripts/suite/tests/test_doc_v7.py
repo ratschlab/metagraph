@@ -200,6 +200,62 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertEqual(sections.memory_episode_text(_Stub(run=self._run(peak=100))), "")
 
 
+class SincePreviousTest(unittest.TestCase):
+    """I.4's 'Since the previous edition' (RV7), computed from the previous edition's run given as an input: the
+    scenarios, the MCP marks removed and moved, a check argument gained, the outcomes changed and the inconclusive
+    count; nothing without that input (every v5 / v6 build)."""
+
+    def _scen(self, sid, ni=None, ni_checks=(), bd_checks=(), reserve=None):
+        mcp = {"tool": "pattern_search"}
+        if ni:
+            mcp["not_implemented"] = ni
+        if ni_checks:
+            mcp["not_implemented_checks"] = [{"check": c, "reason": "r"} for c in ni_checks]
+        if bd_checks:
+            mcp["by_design_checks"] = [{"check": c, "case": "pattern.lowercase"} for c in bd_checks]
+        args = {"rule": "x"}
+        if reserve is not None:
+            args["reserve_ms"] = reserve
+        return {"id": sid, "route": "POST /pattern", "mcp": mcp,
+                "expect": [{"check": "entry_fields", "args": {}}, {"check": "budget_respected", "args": args}]}
+
+    def test_block(self):
+        prev_s = [self._scen("P-a-0001", ni="not implemented yet"), self._scen("P-a-0002", ni_checks=["entry_fields"]),
+                  self._scen("P-a-0003", ni_checks=["entry_fields"])]
+        cur_s = [self._scen("P-a-0001", reserve=250), self._scen("P-a-0002", reserve=250),
+                 self._scen("P-a-0003", bd_checks=["entry_fields"], reserve=250)]
+        def row(sid, arm, rep, outcome):
+            return {"scenario": sid, "arm": arm, "repeat": rep, "outcome": outcome}
+        prev = _Stub(manifest={"manifest_version": 6, "scenarios": prev_s}, scenarios=dict((s["id"], s) for s in prev_s),
+                     rows=[row("P-a-0001", "mcp", 0, "not_implemented_mcp"), row("P-a-0002", "mcp", 0, "pass"),
+                           row("P-a-0002", "direct-local", 0, "inconclusive")],
+                     reevaluated=True, run={"run_id": "R6"})
+        prev.run_id = lambda: "R6"
+        prev.lines = lambda: dict(((r["scenario"], r["arm"], r["repeat"]), r) for r in prev.rows)
+        cur = _Stub(manifest={"manifest_version": 7, "scenarios": cur_s}, order=[s["id"] for s in cur_s],
+                    scenarios=dict((s["id"], s) for s in cur_s),
+                    rows=[row("P-a-0001", "mcp", 0, "pass"), row("P-a-0001", "mcp", 1, "pass"),
+                          row("P-a-0002", "mcp", 0, "pass"), row("P-a-0002", "direct-local", 0, "pass")],
+                    previous=prev, service_identity={"recorded": True, "service_commits": {"abc1234": 3}}, mcp_run={})
+        cur.scenario = cur.scenarios.get
+        text = sections.since_previous(_Stub(run=cur))
+        self.assertIn("The same 3 scenarios; 4 executions against 3", text)
+        self.assertIn("removes 1 scenario-level mark not implemented via MCP (P-a-0001), so the test now runs via MCP",
+                      text)
+        self.assertIn("removes 1 property-level mark not implemented via MCP on entry\\_fields (P-a-0002)", text)
+        self.assertIn("marks P-a-0003's entry\\_fields service-side by design instead of not implemented via MCP", text)
+        self.assertIn("every MCP execution passed", text)
+        self.assertIn("gains the argument reserve\\_ms on 3 scenarios (POST /pattern): a /pattern time stop is now "
+                      "held to the host's documented finalisation reserve of 250 ms", text)
+        self.assertIn("records the service's deployed commit", text)
+        self.assertIn("not exercised via MCP to pass (P-a-0001 mcp r0)", text)
+        self.assertIn("no execution to pass (P-a-0001 mcp r1)", text)
+        self.assertIn("inconclusive to pass (P-a-0002 direct-local r0)", text)
+        self.assertIn("0 inconclusive executions against 1", text)
+        cur.previous = None
+        self.assertEqual(sections.since_previous(_Stub(run=cur)), "")
+
+
 class RecordedIdentityEvidenceTest(unittest.TestCase):
     def test_recorded_identity_in_evidence(self):
         run = _Stub(service_identity={"recorded": True, "service_commits": {"abc1234": 3}, "service_commit": "abc1234",
