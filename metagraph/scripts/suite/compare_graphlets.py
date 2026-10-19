@@ -26,6 +26,8 @@ Per op call, in this order:
 6. errors by code and structured fields (never message or hint text; result_too_large's `bytes` depends on the
    handle's length); a fitting error (FIT_ERRORS) is not comparable against W5 (FORMAT v2 F3), compared as usual
    between W1..W4;
+   a row the service's ceiling cut (marked _cut_fields, FORMAT v2 A3) is judged, against a library way, as a cut of
+   that way's row (cut_aware_difference), since W3's longer handle moves the cut; library ways compare strictly;
 7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in the suite's words, in each
    way against that way's uncut answer (is_cut): the same uncut answer (the uncut op's own comparison), every string
    or list of the cut answer a prefix of the uncut one, every key it lacks an optional one (OPTIONAL_KEYS, or named
@@ -110,7 +112,11 @@ ENV_KEYS = {"graphlet_export": ("path", "bytes")}
 # a cut answer may add these keys (the ceiling's markers); a cut answer may lack these keys (per tool) and the keys
 # its own fields_cut / cut_fields name
 CUT_MARKERS = frozenset(("fields_cut", "row_truncated", "cut_fields", "caveat_effects_cut", "caveats_truncated",
-                         "next_cursor", "truncated", "next_from"))
+                         "next_cursor", "truncated", "next_from", "_cut_fields"))
+# FORMAT v2 A3: a row the ceiling cut carries "_cut_fields" (its page's cut_fields) in the assembled rows; the page's
+# row_truncated / cut_fields stay merged at the top
+ROW_CUT = "_cut_fields"
+PAGE_CUT_MARKERS = ("row_truncated", "cut_fields")
 OPTIONAL_KEYS = {
     "graphlet_summary": frozenset(("effect", "message", "top_labels", "caveats")),
     "graphlet_compare": frozenset(("evidence", "export")),
@@ -252,9 +258,10 @@ def comparable_view(way, rec, keep_local=False):
 def is_cut(cut, uncut, optional=frozenset(), pointer=""):
     """None when |cut| is a cut of |uncut|, else (pointer, why): every string a prefix, every list a prefix whose
     items are cuts of the uncut items, every key the cut lacks optional (|optional|, or named in its fields_cut /
-    cut_fields at that level), every key it adds a cut marker (CUT_MARKERS), every other value equal."""
+    cut_fields / a row's _cut_fields at that level), every key it adds a cut marker (CUT_MARKERS), every other value
+    equal."""
     if isinstance(cut, dict) and isinstance(uncut, dict):
-        named = set(x for k in ("fields_cut", "cut_fields") for x in (cut.get(k) or []) if isinstance(x, str))
+        named = set(x for k in ("fields_cut", "cut_fields", ROW_CUT) for x in (cut.get(k) or []) if isinstance(x, str))
         for k in sorted(set(cut) | set(uncut), key=str):
             p = pointer + "/" + gp.pointer_escape(k)
             if k not in uncut:
@@ -283,6 +290,46 @@ def is_cut(cut, uncut, optional=frozenset(), pointer=""):
         return pointer or "/", "a value of another type than the uncut one"
     return None if gp.leaf_equal(cut, uncut) else (pointer or "/", "a value other than the uncut one (%s vs %s)" % (
         gp.compact(cut, 60), gp.compact(uncut, 60)))
+
+
+def _rows_cut(ans):
+    return isinstance(ans, dict) and isinstance(ans.get("rows"), list) and any(
+        isinstance(r, dict) and r.get(ROW_CUT) for r in ans["rows"])
+
+
+def cut_aware_difference(a, b):
+    """The first difference of two ways' canonical answers when a row of either is marked cut (FORMAT v2 A3), else
+    None-or-difference as first_difference: (pointer, value in a, value in b[, why]). The page markers
+    (row_truncated, cut_fields) are left to the rows; a row marked _cut_fields on one side only must be a cut of the
+    other side's row (is_cut: its strings and lists prefixes); every other row, and everything else, equal. For pairs
+    whose ceilings or handle lengths differ (W3 against a library way: INVENTORY §1.2, page boundaries and cuts
+    depend on the handle's length), never between library ways, which cut identically."""
+    if not (_rows_cut(a) or _rows_cut(b)):
+        return gp.first_difference(a, b)
+    rest_a = dict((k, v) for k, v in a.items() if k not in PAGE_CUT_MARKERS + ("rows",))
+    rest_b = dict((k, v) for k, v in b.items() if k not in PAGE_CUT_MARKERS + ("rows",))
+    d = gp.first_difference(rest_a, rest_b)
+    if d:
+        return d
+    ra, rb = a.get("rows") or [], b.get("rows") or []
+    if len(ra) != len(rb):
+        i = min(len(ra), len(rb))
+        return "/rows/%d" % i, ra[i] if i < len(ra) else gp.MISSING, rb[i] if i < len(rb) else gp.MISSING
+    for i, (x, y) in enumerate(zip(ra, rb)):
+        cx = isinstance(x, dict) and bool(x.get(ROW_CUT))
+        cy = isinstance(y, dict) and bool(y.get(ROW_CUT))
+        if cx != cy:
+            cut, whole = (x, y) if cx else (y, x)
+            r = is_cut(cut, whole, frozenset(), "/rows/%d" % i)
+            if r:
+                pa, pb = gp.pointer_get(a, r[0]), gp.pointer_get(b, r[0])
+                return (r[0], pa[1] if pa[0] else gp.MISSING, pb[1] if pb[0] else gp.MISSING,
+                        "the row %s cut is no cut of the other's: %s" % ("a" if cx else "b", r[1]))
+            continue
+        d = gp.first_difference(x, y, "/rows/%d" % i)
+        if d:
+            return d
+    return None
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -358,9 +405,14 @@ def compare_records(a, ra, b, rb, what):
         code = (va.get("error") or vb.get("error") or {}).get("code")
         return _pair(a, b, what, "disagree", "%s answered the error %s, %s an answer" % (err, code, ok),
                      ("/", va, vb), kind="error", views=(va, vb))
-    d = gp.first_difference(va, vb)
+    if "answer" in va and "W3" in (a, b) and isinstance(va["answer"], dict) and isinstance(vb["answer"], dict):
+        d = cut_aware_difference(va["answer"], vb["answer"])   # FORMAT v2 A3: the service's cut rows
+        d = d and ("/answer" + (d[0] or ""),) + tuple(d[1:])
+    else:
+        d = gp.first_difference(va, vb)
     if d:
-        return _pair(a, b, what, "disagree", None, d, kind="error" if "error" in va else "answer", views=(va, vb))
+        return _pair(a, b, what, "disagree", d[3] if len(d) > 3 else None, d[:3],
+                     kind="error" if "error" in va else "answer", views=(va, vb))
     return _pair(a, b, what, "agree")
 
 

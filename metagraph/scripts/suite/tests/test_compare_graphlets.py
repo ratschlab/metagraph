@@ -201,6 +201,26 @@ class Cut(unittest.TestCase):
         scalar["summary"]["top_labels"][0] = 9
         self.assertEqual(cg.is_cut(scalar, self.UNCUT, opt)[0], "/summary/top_labels/0")
 
+    def test_a_row_marked_cut(self):
+        uncut = {"total": 2, "rows": [{"walk": 1, "sequence": "ACGTACGT", "labels_full": [1, 2, 3]}, {"walk": 0}]}
+        cut = {"total": 2, "row_truncated": True, "cut_fields": ["sequence", "labels_full"],
+               "rows": [{"walk": 1, "sequence": "ACG", "labels_full": [1], "_cut_fields": ["sequence", "labels_full"]},
+                        {"walk": 0}]}
+        self.assertIsNone(cg.is_cut(cut, uncut))
+        self.assertIsNone(cg.cut_aware_difference(cut, uncut))
+        self.assertIsNone(cg.cut_aware_difference(uncut, cut))
+        bad = copy.deepcopy(cut)
+        bad["rows"][0]["sequence"] = "ACT"
+        d = cg.cut_aware_difference(uncut, bad)
+        self.assertEqual((d[0], d[1], d[2]), ("/rows/0/sequence", "ACGTACGT", "ACT"))
+        self.assertIn("no cut of the other's", d[3])
+        scalar = copy.deepcopy(cut)
+        scalar["rows"][0]["walk"] = 2
+        self.assertEqual(cg.cut_aware_difference(uncut, scalar)[0], "/rows/0/walk")
+        other_row = copy.deepcopy(cut)
+        other_row["rows"][1]["walk"] = 5
+        self.assertEqual(cg.cut_aware_difference(uncut, other_row)[0], "/rows/1/walk")
+
     def test_fields_cut_and_a_truncated_row(self):
         uncut = {"a": "<handle>", "evidence": {"a": 1}, "export": "x", "total": 2,
                  "rows": [{"key": "k", "prefix": "ACGTACGT", "labels": [1, 2, 3, 4]}, {"key": "j"}]}
@@ -547,6 +567,33 @@ class FiveWay(unittest.TestCase):
         e = self.op_entry(oid="walks-page")
         self.assertEqual((e["outcome"], e["disagreeing"]), ("disagree", ["W3-uncut"]))
         self.assertEqual(next(c for c in e["cuts"] if c["way"] == "W3")["pointer"], "/rows/0/length_bp")
+
+    def test_the_service_cuts_a_row_the_library_did_not(self):
+        self.make(ways=["W1", "W2", "W3", "W4"])
+        lib = gf.walks_answer(rows=[dict(gf.walks_answer()["rows"][0], sequence="ACGTACGTACGT")])
+        lib["total"] = 1
+        w3 = copy.deepcopy(lib)
+        w3.update(handle=UUID, row_truncated=True, cut_fields=["sequence"])
+        w3["rows"][0].update(sequence="ACGTAC", _cut_fields=["sequence"])
+        self.five(answer=lib, w3=w3, w5=False)
+        e = self.op_entry()
+        self.assertEqual(e["outcome"], "agree", e)
+        # a library way that cut where the others did not is a disagreement (library ways cut identically)
+        self.run_.cleanup()
+        self.make(ways=["W1", "W2", "W3", "W4"])
+        self.five(answer=lib, w3=dict(lib, handle=UUID), w5=False,
+                  changes={"W2": lambda a: (a.update(row_truncated=True, cut_fields=["sequence"]),
+                                            a["rows"][0].update(sequence="ACG", _cut_fields=["sequence"]))})
+        self.assertEqual(self.op_entry()["disagreeing"], ["W1-W2"])
+        # the service's cut row that is no prefix
+        self.run_.cleanup()
+        self.make(ways=["W1", "W2", "W3", "W4"])
+        bad = copy.deepcopy(w3)
+        bad["rows"][0]["sequence"] = "TTTT"
+        self.five(answer=lib, w3=bad, w5=False)
+        p = next(p for p in self.op_entry()["pairs"] if p["pair"] == "W3-W4")
+        self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/sequence"))
+        self.assertIn("no cut of the other's", p["detail"])
 
     def test_a_cut_without_its_uncut_reference_is_inconclusive(self):
         cut_op = dict(self.op, id="walks-page", cut_of="walks-all")
