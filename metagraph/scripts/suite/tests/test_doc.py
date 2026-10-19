@@ -5999,12 +5999,14 @@ class V6DeltaTest(unittest.TestCase):
         # v5's inconclusive branch unchanged
         prose = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["families"]["P-scope"]["prose"]
         ne = {"mcp": {"standing": "not exercised"}}
-        filled = facts.fill(prose, {"x": {"P-scope-0004": ne, "P-scope-0006": ne}, "n_relations": 0})
+        filled = facts.fill(prose, {"x": {"P-scope-0004": ne, "P-scope-0006": ne}, "n_relations": 0,
+                                    "manifest_version": 6})
         self.assertIn("so via MCP neither is run (!!not implemented yet via MCP!!: the MCP answer lacks that field), and "
                       "the two relations are not judged there.", filled)
         inc = {"mcp": {"standing": "inconclusive"}}
         self.assertIn("they read inconclusive (the check not exposed",
-                      facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0}))
+                      facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0,
+                                         "manifest_version": 5}))
 
     def test_verify_round_plurals_and_limits(self):
         """The delta verifier's L5 / L6 (2026-10-18): a count carried as text takes its plural from the number; the
@@ -6119,8 +6121,12 @@ class V6DeltaTest(unittest.TestCase):
         self.assertIn("by design", v6)
         self.assertIn("the frozen v6 manifest", v6)
         self.assertIn("the next manifest revision corrects it", v6)
-        for version in (4, 5, 7):
+        for version in (4, 5):
             self.assertEqual(facts.fill(note, {"manifest_version": version}).strip(), "")
+        # the v7 delta: manifest v7 marks the check service-side by design, which the note says instead
+        v7 = facts.fill(note, {"manifest_version": 7})
+        self.assertIn("manifest v7 marks its entry_fields check service-side by design", v7)
+        self.assertNotIn("the next manifest revision corrects it", v7)
         self.assertIn('note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""',
                       inspect.getsource(sections.unit_section))
 
