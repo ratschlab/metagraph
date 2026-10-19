@@ -18,10 +18,12 @@ def lab(i, name=None):
     return {"name": name or "label %d" % i, "ref": "c:%d" % i}
 
 
-def row(segment, ins, outs, merge_of=None, cut_out=None):
-    """A graphlet_walk row (mcp_tools._walk_rows) with |ins| / |outs| label ids; |cut_out|: the true out count."""
+def row(segment, ins, outs, merge_of=None, cut_out=None, true_out=None):
+    """A graphlet_walk row (mcp_tools._walk_rows) with |ins| / |outs| label ids; |cut_out|: the recorded out count
+    (the list shown cut to it), |true_out|: the true count (a recorded list cut by a label cap, annotate mode)."""
     r = {"segment": segment, "from_bp": 10 * segment, "to_bp": 10 * segment + 10, "labels_in": len(ins),
-         "labels_in_total": len(ins), "labels_out": cut_out or len(outs), "labels_out_total": cut_out or len(outs),
+         "labels_in_total": len(ins), "labels_out": cut_out or len(outs),
+         "labels_out_total": true_out or cut_out or len(outs),
          "exact": True, "in": [lab(i) for i in ins], "out": [lab(i) for i in outs]}
     if merge_of:
         r["merge_of"] = merge_of
@@ -52,6 +54,8 @@ def answers():
                                                                          "labels": 0}),
         "walk-cut": walk("left", 7, [row(0, [0, 1], [0, 1]), row(1, [0, 1], [0], cut_out=9),
                                      row(3, [0, 1, 2], [0], merge_of=[1, 2])]),
+        "walk-capped": walk("left", 6, [row(0, [0, 1], [0, 1]), row(1, [0, 1], [0], true_out=2),
+                                        row(3, [0, 1, 2], [0], merge_of=[1, 2])]),
         "walk-same": walk("left", 8, [row(0, [0, 1], [0, 1]), row(1, [0, 1], [0, 1]),
                                       row(3, [0, 1], [0, 1], merge_of=[1, 2])]),
         "walk-wrong": walk("left", 9, [row(0, [0], [0]), row(3, [0, 1], [0, 1], merge_of=[2, 1])]),
@@ -238,6 +242,8 @@ class NamedSelectorTests(unittest.TestCase):
         self.fails("also leaves the first parent", "label_entered_at_merge", walk="walk-same")
         self.fails("no merge on the walks of walk-l0", "label_entered_at_merge", walk="walk-l0")
         self.fails("shows 1 of its 9 out labels", "label_entered_at_merge", walk="walk-cut")
+        # VL12: the shown list is the whole recorded list, but the record was cut by a label cap
+        self.fails("shows 1 of its 2 out labels", "label_entered_at_merge", walk="walk-capped")
         self.fails("not its first parent 2", "label_entered_at_merge", walk="walk-wrong")
         self.fails("form is one of", "label_entered_at_merge", walk="walk-l5", form="id")
 

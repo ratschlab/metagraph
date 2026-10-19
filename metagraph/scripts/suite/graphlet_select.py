@@ -234,8 +234,9 @@ def _merge_rows(ans: dict) -> List[int]:
 def walk_through_merge(answers: Mapping[str, Any], walks: Any, order: str = "id", arm: Optional[str] = None) -> int:
     """A walk through a merge: of the walks whose graphlet_walk answers |walks| names (an op id or a list of them,
     each assembled whole: paging "all"), one whose segment chain holds a merge, i.e. a row with `merge_of` listing
-    two or more parents: the chain is the walk's first-parent path from its leaf to the root, so the walk reaches
-    that segment from both parents' branches. The lowest such walk id (order "id", the default) or the first in the
+    two or more parents: the rows are the walk's segment chain from the root to its leaf, each row's previous row
+    its first parent (model.Path.segments, derive.chain), so the walk passes a segment that both parents' branches
+    reach. The lowest such walk id (order "id", the default) or the first in the
     order named (order "given"), on arm |arm| when given. -> the walk id."""
     return _pick_walk(answers, walks, lambda a: bool(_merge_rows(a)), "passes a merge (a row with merge_of)",
                       order, arm)
@@ -294,8 +295,9 @@ def label_entered_at_merge(answers: Mapping[str, Any], walk: Any, form: str = "s
     shown, that the previous row's `out` does not hold. The previous row is the merge's first parent (the chain
     follows first parents), so such a label is alive at the merge only because another parent carried it in: the
     displayed walk shows it from the merge on (a merge-entered label). The previous row's `out` must be shown whole
-    (its list as long as labels_out), else absence there proves nothing and the selector fails; a merge whose shown
-    `in` labels all come from the first parent is passed over. -> the label (form "selector" {"ref"}, "ref",
+    (its list as long as labels_out_total, the true count: a list cut to the row's 8 labels, or a recorded list cut
+    by a label cap, labels_out < labels_out_total in annotate mode, VERIFY-L VL12), else absence there proves nothing
+    and the selector fails; a merge whose shown `in` labels all come from the first parent is passed over. -> the label (form "selector" {"ref"}, "ref",
     "name")."""
     _choice("form", form, LABEL_FORMS)
     names = _ops(walk, "walk")
@@ -312,12 +314,13 @@ def label_entered_at_merge(answers: Mapping[str, Any], walk: Any, form: str = "s
                 raise SelectorError("op %r: the row before merge segment %r is segment %r, not its first parent %r"
                                     % (op, row.get("segment"), prev.get("segment"), row["merge_of"][0]))
             out = prev.get("out")
-            if not isinstance(out, list) or not isinstance(prev.get("labels_out"), int):
-                raise SelectorError("op %r: segment %r's row has no out list with labels_out"
+            if not isinstance(out, list) or not isinstance(prev.get("labels_out_total"), int):
+                raise SelectorError("op %r: segment %r's row has no out list with labels_out_total"
                                     % (op, prev.get("segment")))
-            if len(out) < prev["labels_out"]:
+            if len(out) < prev["labels_out_total"]:
                 raise SelectorError("op %r: segment %r shows %d of its %d out labels: a label missing there may "
-                                    "still be one of them" % (op, prev.get("segment"), len(out), prev["labels_out"]))
+                                    "still be one of them" % (op, prev.get("segment"), len(out),
+                                                              prev["labels_out_total"]))
             have = set(l.get("ref") for l in out if isinstance(l, dict))
             for lab in row.get("in") or []:
                 if isinstance(lab, dict) and lab.get("ref") not in have:
