@@ -3926,21 +3926,24 @@ def _previous_outcome(ctx, l):
     return (p or {}).get("outcome")
 
 
-def _service_log_text(ctx, named):
+def _service_log_text(ctx, named=None):
     """The service's own log as the identity input states it (make_doc --identity: `service_log` {text, times,
-    source}; reader._load_identity refuses times outside the run): the text with its times, each time tied to the
-    host call of a named MCP execution it falls in (|named|: [(line, call start, call end)]); '' without one."""
+    source}; reader._load_identity refuses times that are not UTC or lie outside the run): the text in the input's
+    words with its times, at the input's `{times}` or after it ("... at 02:34:58 and 02:38:15 UTC"), then where it
+    comes from (W4: the log's own observations, the time-outs and the status page, kept; no tie to an execution
+    claimed); '' without one. |named| is kept for the callers' signature."""
     ident = getattr(ctx.run, "identity", None)
     log = ident.get("service_log") if isinstance(ident, dict) and isinstance(ident.get("service_log"), dict) else None
     if not log or not log.get("text"):
         return ""
     times = [t for t in (_utc_s(x) for x in (log.get("times") or [])) if t is not None]
-    parts = []
-    for t in times:
-        hit = [l for l, a, b in named if a <= t <= b]
-        parts.append("at %s UTC%s" % (_clock(t), (", during %s's call to the host" % _exec_name(hit[0])) if hit else ""))
-    return ("The service's own log, checked separately and not part of the run's files, recorded %s%s." % (
-        str(log["text"]).rstrip("."), (": " + "; ".join(parts)) if parts else ""))
+    when = ("%s UTC" % facts._join(_clock(t) for t in times)) if times else ""
+    text = str(log["text"]).rstrip(".")
+    if "{times}" in text:
+        text = text.replace("{times}", when or "times not given")
+    elif when:
+        text += ", at %s" % when
+    return "The service's own log recorded %s (checked separately; not part of the run's files)." % text
 
 
 def memory_episode_text(ctx):

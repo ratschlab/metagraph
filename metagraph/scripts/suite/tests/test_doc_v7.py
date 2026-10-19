@@ -311,19 +311,24 @@ class MemoryEpisodeTest(unittest.TestCase):
 
     def test_service_log_note(self):
         run = self._run()
-        run.identity = {"service_commit": "abc", "service_log": {"source": "a lane's CIRCUIT_X",
-                                                                 "text": "a slow answer from the host",
-                                                                 "times": ["2026-10-19T02:10:05Z"]}}
+        run.identity = {"service_commit": "abc", "service_log": {
+            "source": "a lane's CIRCUIT_X", "times": ["2026-10-19T02:10:05Z", "2026-10-19T02:12:00Z"],
+            "text": "two requests to the host that timed out after 5 s, at {times}, while the host's status page still "
+                    "answered; the log was otherwise clean"}}
         text = self._text(run)
-        # RV8, V4: the log in plain words with its time, tied to the host call it falls in; its source (a file, an
-        # internal state) only in evidence.json
-        self.assertIn("The service's own log, checked separately and not part of the run's files, recorded a slow "
-                      "answer from the host: at 02:10:05 UTC, during X-1 mcp r1's call to the host.", text)
+        # RV8, V4, W4: the log in its own words with its times; its source (a file, an internal state) only in
+        # evidence.json
+        self.assertIn("The service's own log recorded two requests to the host that timed out after 5~s, at 02:10:05 "
+                      "and 02:12:00 UTC, while the host's status page still answered; the log was otherwise clean "
+                      "(checked separately; not part of the run's files).", text)
+        run.identity["service_log"]["text"] = "a slow answer"
+        self.assertIn("The service's own log recorded a slow answer, at 02:10:05 and 02:12:00 UTC (checked separately",
+                      self._text(run))
         self.assertNotIn("a lane", text)
         self.assertNotIn("CIRCUIT", text)
         ev = sections._identity_evidence(_Stub(service_identity={"recorded": False}, mcp_run={}), run.identity)
         self.assertEqual(ev["service_log"]["source"], "a lane's CIRCUIT_X")
-        self.assertEqual(ev["service_log"]["times"], ["2026-10-19T02:10:05Z"])
+        self.assertEqual(ev["service_log"]["times"], ["2026-10-19T02:10:05Z", "2026-10-19T02:12:00Z"])
 
     def test_service_log_time_outside_the_run_refused(self):
         import tempfile
