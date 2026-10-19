@@ -658,5 +658,62 @@ class TestG4TheProfileIsDisplayedEvidence(unittest.TestCase):
         self.assertGreater(n, 400)
 
 
+def _constrain_fixtures():
+    """(name, graphlet) of every constrain fixture: the documents and the real, coords and
+    review3 retrievals."""
+    import glob
+    out = [(os.path.basename(f), parse(T.read(f)))
+           for f in sorted(glob.glob(os.path.join(T.DOCS, '*.mgt')))]
+    for f in sorted(glob.glob(os.path.join(T.DATA, 'real', '*', '*.graphlet.json.gz'))
+                    + glob.glob(os.path.join(T.DATA, 'coords', '*.graphlet.json.gz'))
+                    + glob.glob(os.path.join(T.DATA, 'review3', '*.graphlet.json'))):
+        if f.endswith('.gz'):
+            with gzip.open(f) as fh:
+                resp = json.loads(fh.read())
+        else:
+            with open(f, encoding='utf-8') as fh:
+                resp = json.load(fh)
+        resp = resp['response'] if isinstance(resp.get('response'), dict) else resp
+        for i, r in enumerate(resp['results']):
+            if isinstance(r.get('graphlet'), str):
+                out.append(('%s#%d' % (os.path.basename(f), i), from_response(r, resp)))
+    return [(n, g) for n, g in out if g.mode == 'constrain']
+
+
+class TestG41TheChangesStartFromTheDisplayedProfile(unittest.TestCase):
+    """G4-1 (VERIFY-F-G4): the support-change rows started from the seed's entry set, so a
+    seed label never displayed on the walk was reported removed at 0 with the fallback
+    reason 'ended' (406 rows). The start set is the displayed profile at base 0: such a
+    label was never there, from the walk's view; a seed label with a run ending at 0 keeps
+    its K-coded end."""
+
+    def test_no_fallback_end_on_any_constrain_walk(self):
+        n = 0
+        for name, g in _constrain_fixtures():
+            for side, a in g.arms.items():
+                for p in derive.paths(a):
+                    for c in g.support_changes(side, p.id):
+                        for r in c.reasons:
+                            n += 1
+                            self.assertFalse(r['why'] == 'ended' and 'end' not in r,
+                                             (name, side, p.id, c.at_bp, r))
+        self.assertGreater(n, 1000)
+
+    def test_limits_right_walk_0(self):
+        # c:2 enters the merge segment through its non-first parent (evidence_from 7): it
+        # displays nothing on the walk, so no row names it (it was 'removed at 0, ended')
+        g = T.body('limits')
+        rows = [(c.at_bp, [l.ref for l in c.added], [l.ref for l in c.removed],
+                 [r['why'] for r in c.reasons]) for c in g.support_changes('right', 0)]
+        self.assertEqual([(5, [], ['c:1'], ['loss_budget'])], rows)
+
+    def test_a_boundary_end_at_0_keeps_its_end(self):
+        # linear: h:0:1 ends minority at the seed boundary (a zero-length run)
+        lin = T.body('linear').support_changes('right', 0)
+        self.assertEqual([(0, ['h:0:1'], 'minority')],
+                         [(c.at_bp, [l.ref for l in c.removed], c.reasons[0]['why'])
+                          for c in lin])
+
+
 if __name__ == '__main__':
     unittest.main()

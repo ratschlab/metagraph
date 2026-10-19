@@ -1930,21 +1930,20 @@ def _support_changes(g, arm, leaf, b):
     segs = a.segments
     prof = _support_profile(g, a, leaf, 'displayed', b)
     prev = set(segs[chain[0]].entry)
-    if g.mode == 'constrain' and prof:
-        # a seed label whose displayed support starts later on this walk (at the merge its
-        # kept entry came through, §5.1) does not leave at 0 -- it joins there -- unless a
-        # run of its ends at 0 (a boundary end, e.g. minority at the seed). A seed label
-        # that never supports this walk still leaves at 0 (a split, an end)
+    rbs = derive.runs_by_segment(a)
+    if g.mode == 'constrain':
+        # the start set is the displayed profile at base 0 (§5.1): a seed label never
+        # displayed on this walk was never there, from the walk's view, and does not leave;
+        # one whose displayed support starts later joins where it starts. A seed label
+        # with a run on the walk's chain ending at 0 keeps its end there (its K-coded end)
         if b is not None:
-            b.charge(W_ELEM * len(a.runs) + sum(len(r.labels) for r in prof) + len(prev),
-                     2 * set_bytes(len(prev)))
-        first = {l.id for l in prof[0].labels}
-        later = {l.id for r in prof[1:] for l in r.labels} - first
-        ended = {r.label for r in a.runs if r.to_bp == 0}
-        prev = {l for l in prev if l not in later or l in ended}
+            b.charge(W_ELEM * len(a.runs) + len(prev), 2 * set_bytes(len(prev)))
+        first = {l.id for l in prof[0].labels} if prof else set()
+        ended = {a.runs[r].label for x in chain for r in rbs[x]
+                 if a.runs[r].to_bp == 0 and not a.runs[r].merged}
+        prev = first | (prev & ended)
     out = []
     on_chain = set(chain)
-    rbs = derive.runs_by_segment(a)
     if b is not None:
         derive.uses(b, g, a, 'partition_sets')
         b.phase = 'changes'
