@@ -816,6 +816,28 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(res["scenarios"][SID]["precheck"]["outcome"], "pass", res["scenarios"][SID]["precheck"])
         self.assertEqual(res["scenarios"][SID]["outcome"], "pass")
 
+    def test_vr4_a_failed_seed_with_lane_os_run_step(self):
+        """The same failed seed with W5 written by lane O's own run step (graphlet_oracle.write_run, 846eeb97d: W5
+        expects no_graphlet from the full twin's seed error): the op agrees and the scenario passes."""
+        import graphlet_oracle as go
+        cg.graphlet_oracle = go
+        scen = gf.scenario(pre={"no_graphlet": True})
+        self.run_ = gf.GRun(scenarios=[scen])
+        self.run_.write_twin(SID, {"results": [{"seed": {"length_bp": 31}, "error": "seed_failed"}]})
+        self.run_.write_echo(SID, scen["request"]["strategy"])
+        self.run_.write_mcp_runs()
+        args = scen["graphlet"]["ops"][0]["args"]
+        for way in ("W1", "W2", "W4"):
+            self.run_.record(way, SID, "walks-len", "graphlet_walks", args,
+                             error={"code": "no_graphlet", "fields": {"outcome": "failed"}})
+        self.run_.record("W3", SID, "walks-len", "graphlet_walks", args,
+                         error={"code": "no_graphlet", "fields": {"reason": "the seed's retrieval failed"}})
+        go.write_run(self.run_.dir, quiet=True, force=True)
+        res = self.result()
+        e = res["scenarios"][SID]["ops"]["walks-len"]
+        self.assertEqual(e["outcome"], "agree", e)
+        self.assertEqual(res["scenarios"][SID]["outcome"], "pass", res["scenarios"][SID])
+
     def test_a_run_level_w5_record(self):
         self.make()
         self.five()
