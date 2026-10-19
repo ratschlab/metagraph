@@ -406,6 +406,38 @@ class _Doc:
                 break
         return ef if merge_part else max(ef, run["from_bp"])
 
+    def route(self, side: str, i: int) -> Optional[List[int]]:
+        """Run |i|'s own route, root -> its anchor segment (DESIGN §5 routes: through merges via the partitions,
+        re-derived): at a merge, the parent whose partition (labels_via_parent, SPEC §7.1) holds the lineage's
+        incoming label there. None where a merge states no partition holding it."""
+        out = [self.runs(side)[i]["segment"]]
+        while True:
+            sg = self.segment(side, out[-1])
+            parents = sg.get("parents") or []
+            if not parents:
+                return out[::-1]
+            if len(parents) == 1:
+                out.append(parents[0])
+                continue
+            parts = sg.get("labels_via_parent") or []
+            lab = self.label_at(side, i, sg["from_bp"])
+            k = next((k for k, part in enumerate(parts) if lab in part), None)
+            if k is None or k >= len(parents):
+                return None
+            out.append(parents[k])
+
+    def leaves_below(self, side: str, sid: int) -> int:
+        """The leaves (segments with a path) reachable from segment |sid| through children (SPEC §7.5.6), itself
+        included."""
+        kids, leaves = self.children(side), {p["segments"][-1] for p in self.arms[side].get("paths") or []}
+        seen, todo = set(), [sid]
+        while todo:
+            x = todo.pop()
+            if x not in seen:
+                seen.add(x)
+                todo += kids.get(x, [])
+        return len(seen & leaves)
+
 
 # ---------------------------------------------------------------------------------------------- the record
 def _esc(key: Any) -> str:
@@ -1261,6 +1293,8 @@ def _holds_base(a: dict, label: int, at_bp: int, mode: str) -> Optional[bool]:
 
 
 def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
+    if args.get("name") is not None:
+        return _label_walks(d, args, ctx)
     side = d.arm(args.get("arm"), required=False)
     sides = [side] if side else d.sides
     rank = args.get("rank", "direct_bp")
@@ -1826,6 +1860,82 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
     return _record(ans, clauses, cons + econ, partial=partial, rederived=red)
 
 
+def _merged_into(d: _Doc, side: str, run: dict) -> Optional[int]:
+    """The merge that closed a run (R end m): the segment created at to_bp with the run's anchor among its parents
+    (SPEC §7.5.2 R m; DESIGN §4: every m run's anchor is a parent of the segment created at to_bp)."""
+    hits = [sg["id"] for sg in d.arms[side]["segments"]
+            if len(sg.get("parents") or []) > 1 and sg["from_bp"] == run["to_bp"] and run["segment"] in sg["parents"]]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
+    """graphlet_labels(name=): the named label's runs (DESIGN §5 label_walks, §6 "that label's runs/routes incl.
+    merge routes"), per arm (both, left first, when arm is None), in run id order: from_bp, to_bp and end (the
+    engine's run, SPEC §7.1 runs[]; the end named as SPEC §7.5.6 names a label end), evidence_from (DESIGN §5.1,
+    re-derived, also for a zero-length run: PB4), merged_into (the merge that closed it, SPEC §7.5.2 R m),
+    walks_below (DESIGN §5's leaves below the run's anchor: reachable through children, SPEC §7.5.6) and route
+    (DESIGN §5 routes, re-derived). rank, min_direct_bp and at_bp do not apply (INVENTORY §2.9). Annotate: the
+    witness route of DESIGN §5.2.1, consistency-only."""
+    lab = d.resolve(args["name"])
+    side = d.arm(args.get("arm"), required=False)
+    sides = [side] if side else d.sides
+    if _bool_arg(args, "coordinates", False) and not isinstance(d.result.get("coordinates"), dict):
+        raise _Refused("coordinates=true on a retrieval without record coordinates", "no_coordinates",
+                       "SPEC §7.1 record coordinates (null, coordinates_reason); the code no_coordinates is "
+                       "library-defined (INVENTORY §2.9)")
+    ev, ecl, econ = _evidence(d, sides)
+    base = {"name": d.labels[lab]["name"], "ref": d.labels[lab]["ref"]}
+    c_base = {"/name": "the label named (" + C_LABEL + ")", "/ref": "the label named (" + C_LABEL + ")"}
+    cons = ["/rows/*/coordinates", "/rows/*/coordinates_total", "/rows/*/coordinates_truncated",
+            "/rows/*/coordinates_kind", "/rows/*/coordinates_lower_bound", "/next_cursor", "/coordinates"]
+    if not all(_constrain_runs(d, s) for s in sides):
+        return _record(dict(base, evidence=ev), dict(ecl, **c_base), cons + econ + ["/total", "/rows"],
+                       note="annotate: the witness route of DESIGN §5.2.1, consistency-only")
+    rows, red_rows = [], []
+    for s in sides:
+        for i, run in enumerate(d.runs(s)):
+            if run["label"] != lab:
+                continue
+            ef = d.evidence_from(s, i)
+            route = d.route(s, i)
+            code = d.end_code(s, i)
+            # a run, not a claim: DESIGN §5.1's formula, also for a zero-length run (the boundary-claim rule is the
+            # claims'; finding PB4)
+            row: dict = {"arm": s, "from_bp": run["from_bp"], "to_bp": run["to_bp"], "evidence_from": ef,
+                         "walks_below": d.leaves_below(s, run["segment"]),
+                         "merged_into": _merged_into(d, s, run) if code == "m" else None}
+            if "end_reason" in run and code not in ("Lw", "m"):
+                # SPEC §7.5.6: a label end's reason is the qualifier's text or the code's enum
+                row["end"] = _QUALIFIER.get(code) or run["end_reason"]
+            else:   # a silent switch-source end (Lw) and a merge's close have no label_end event: no SPEC word
+                cons.append("/rows/%d/end" % len(rows))
+            if route is not None:
+                row["route"] = route
+            else:
+                cons.append("/rows/%d/route" % len(rows))
+            if ef is None:
+                del row["evidence_from"]
+                cons.append("/rows/%d/evidence_from" % len(rows))
+            rows.append(row)
+    ans: dict = dict(base, total=len(rows), rows=rows, evidence=ev)
+    clauses = dict(c_base, **{
+        "/total": "the named label's runs on the arms asked (SPEC §7.5.2 R, §7.1 runs[])",
+        "/rows/*/arm": "the arm of the run (" + C_ARM_ECHO + "), left before right (SPEC §7.5.2 document order)",
+        "/rows/*/from_bp": C_RUN, "/rows/*/to_bp": C_RUN,
+        "/rows/*/end": "SPEC §7.5.6: the label end's reason, the qualifier's text (R's end code, SPEC §7.5.1) or "
+                       "the enum (runs[].end_reason); Lw and m have no label_end event: c/o",
+        "/rows/*/evidence_from": C_EVIDENCE + " (a run, not a claim: the formula also for a zero-length run, PB4)",
+        "/rows/*/merged_into": "SPEC §7.5.2 R m and DESIGN §4: the merge segment created at to_bp with the run's "
+                               "anchor among its parents; null when no merge closed the run",
+        "/rows/*/walks_below": "DESIGN §5 label_walks leaves_below: the leaves reachable from the run's anchor "
+                               "through children (SPEC §7.5.6)",
+        "/rows/*/route": "DESIGN §5 routes (re-derived): root -> the run's anchor, at each merge the parent whose "
+                         "partition (labels_via_parent, SPEC §7.1) holds the lineage's incoming label"})
+    clauses.update(ecl)
+    partial = _cut_rows(ans, ctx, cons)
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=["/rows/*/evidence_from", "/rows/*/route"])
+
+
 _TOOLS: Dict[str, Callable[[_Doc, dict, dict], dict]] = {
     "graphlet_summary": _graphlet_summary, "graphlet_walks": _graphlet_walks, "graphlet_walk": _graphlet_walk,
     "graphlet_labels": _graphlet_labels, "graphlet_splits": _graphlet_splits, "graphlet_sequence": _graphlet_sequence,
@@ -1874,7 +1984,7 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional
                            note="%s (%s; the code is library-defined)" % (why, C_FAILED_SEED))
         return _record(None, {}, ["/*"], declared="expected_error", expected_error="no_graphlet",
                        note="%s (%s)" % (why, C_FAILED_SEED))
-    if tool in PHASE_B or (tool == "graphlet_labels" and args.get("name") is not None):
+    if tool in PHASE_B:
         return _declared("not_implemented_phase_b", "%s: DESIGN-v8 §8 phase B" % tool)
     if tool in NOT_APPLICABLE:
         return _declared("not_applicable", "%s: a backend or store tool, outside graphlet processing" % tool)

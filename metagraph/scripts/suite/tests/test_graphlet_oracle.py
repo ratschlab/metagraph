@@ -406,13 +406,57 @@ class ClaimsGoldens(unittest.TestCase):
                          (set(), True))
 
 
+class LabelWalkGoldens(unittest.TestCase):
+    """graphlet_labels(name=) (phase B): the named label's runs with their routes (DESIGN §5 label_walks, routes)."""
+
+    def test_merge_routes_and_closes(self):
+        """merge: both.fa's lineage splits at 20 (A and T) and its copies are closed by the merges at 36 and 62 (code
+        m: merged into segments 3 and 6); the run that reaches the radius takes the displayed parents."""
+        r = rec("graphlet_labels", {"name": "both.fa"}, "merge")
+        rows = r["answer"]["rows"]
+        self.assertEqual([(x["arm"], x["from_bp"], x["to_bp"], x["merged_into"], x["route"]) for x in rows],
+                         [("right", 0, 62, 6, [0, 1, 3, 4]), ("right", 0, 36, 3, [0, 2]),
+                          ("right", 0, 100, None, [0, 1, 3, 5, 6])])
+        self.assertEqual([x["walks_below"] for x in rows], [1, 1, 1])
+        self.assertEqual(rows[2]["end"], "max_extension_bp")
+        self.assertIn("/rows/0/end", r["oracle"]["consistency_only"])      # a merge's close: no label_end event
+        self.assertEqual(set(r["oracle"]["rederived"]) >= {"/rows/0/route", "/rows/0/evidence_from"}, True)
+        a = rec("graphlet_labels", {"name": {"ref": "c:0"}}, "merge")["answer"]["rows"]
+        # a.fa enters segment 6 through its second parent (partitions [[1, 2, 3], [0]]): its own route passes 4
+        self.assertEqual((a[0]["evidence_from"], a[0]["route"]), (62, [0, 1, 3, 4, 6]))
+
+    def test_design_clipped_merge_routes(self):
+        """DESIGN §5.1's clipped-merge case (HAND-MADE fixture and vector): lineB's own route passes the merge's second
+        parent (segments 0, 2, 3), lineA's the first (0, 1, 3)."""
+        g, f, mgt = doc("clipped_merge")
+        with open(os.path.join(DATA, "documents", "clipped_merge.claims.json"), encoding="utf-8") as fh:
+            routes = json.load(fh)["routes"]
+        for ref, want in routes.items():
+            rows = O.answer("graphlet_labels", {"name": {"ref": ref}}, f, mgt)["answer"]["rows"]
+            self.assertEqual([x["route"] for x in rows], want, ref)
+
+    def test_switch_lineages(self):
+        """caps: hZ, switched in from hY at 103 on segment 1, its route through hY's segments; switch_chain: a silent
+        switch-source end (Lw) has no SPEC word for its end (consistency-only); both arms of fork, left first."""
+        hz = rec("graphlet_labels", {"name": "hZ"}, "caps")["answer"]["rows"]
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["evidence_from"], x["route"], x["end"]) for x in hz],
+                         [(103, 126, 103, [0, 1], "max_steps")])
+        sc = rec("graphlet_labels", {"name": {"id": 1}}, "switch_chain")
+        self.assertIn("/rows/0/end", sc["oracle"]["consistency_only"])
+        both = rec("graphlet_labels", {"name": "acc1"}, "fork")["answer"]
+        self.assertEqual([x["arm"] for x in both["rows"]], ["left", "right"])
+        self.assertEqual((both["name"], both["ref"], both["total"]), ("acc1", "h:0:0", 2))
+        self.assertEqual(rec("graphlet_labels", {"name": "nope"}, "fork")["oracle"]["expected_error"], "unknown_label")
+        self.assertEqual(rec("graphlet_labels", {"name": "acc1", "coordinates": True}, "fork")["oracle"]
+                         ["expected_error"], "no_coordinates")
+
+
 class RecordSemantics(unittest.TestCase):
     """The record contract (FORMAT-v8 §4 and its extensions) and that W5 is not vacuous: a wrong answer differs."""
 
     def test_declared_records(self):
         g, f, mgt = doc("fork")
         for tool, args, why in [("graphlet_support", {"arm": "left", "walk": 0}, "not_implemented_phase_b"),
-                                ("graphlet_labels", {"name": "acc1"}, "not_implemented_phase_b"),
                                 ("graphlet_compare", {"mode": "walks"}, "properties_only"),
                                 ("graphlet_list", {}, "not_applicable"), ("traverse_fetch", {}, "not_applicable"),
                                 ("graphlet_walk", {"arm": "left", "walk": 2}, "expected_error"),

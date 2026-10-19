@@ -75,6 +75,18 @@ def _calls(res):
            ("graphlet_export", {"format": "fasta", "what": "walk"}), ("graphlet_subtrie", {"labels": ["no-such"]}),
            # fitting errors at small ceilings (INVENTORY §1.1 result_too_large): not_comparable against W5 (F3)
            ("graphlet_summary", {"max_bytes": 512}), ("graphlet_summary", {"detail": "limitations", "max_bytes": 300})]
+    # phase B, graphlet_labels name= (INVENTORY §3.1): 3 labels by name, by ref and as a bare string, per arm and
+    # both; coordinates=true with name; an unknown label
+    for k, lab in enumerate(sorted({0, len(res.get("label_dict") or [1]) - 1, len(res.get("label_dict") or [1]) // 2})):
+        e = (res.get("label_dict") or [{}])[lab] if res.get("label_dict") else {}
+        ref = "h:%s:%s" % (e.get("column"), e.get("seq_id")) if e.get("kind") == "header" else "c:%s" % e.get("column")
+        sel = [{"id": lab}, {"ref": ref}, {"name": e.get("name")}][k % 3] if e else {"id": lab}
+        out.append(("graphlet_labels", {"name": sel, "max_bytes": WIDE}))
+        out += [("graphlet_labels", {"name": sel, "arm": s, "max_bytes": WIDE}) for s in sides]
+    if res.get("label_dict"):
+        out += [("graphlet_labels", {"name": res["label_dict"][0]["name"], "max_bytes": WIDE}),
+                ("graphlet_labels", {"name": {"id": 0}, "coordinates": True, "max_bytes": WIDE}),
+                ("graphlet_labels", {"name": "no-such-label"}), ("graphlet_labels", {"name": {"id": 0}})]
     if len(sides) == 1:   # an arm this retrieval did not walk
         other = "left" if sides == ["right"] else "right"
         out += [("graphlet_walks", {"arm": other}), ("graphlet_summary", {"arm": other})]
