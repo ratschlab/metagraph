@@ -1,11 +1,19 @@
 """Offline tests of area G's local side: graphlet_doc (the suite's document digests) against the library's own
-parser.body_digest on the library's fixtures. The tests import the library (metagraph/api/python of this checkout);
-the modules under test never do."""
+parser.body_digest, and run_graphlet_local (the W1/W2/W4/drift runner) on the library's fixtures: an op plan calling
+every tool of GraphletTools with every paging mode and an error case per tool, paging assembly against the uncut
+answer, hash-seed determinism across ways, a response's conversion against the same document from a file, the manifest
+mode, the library export and the drift report. The tests import the library (metagraph/api/python of this checkout);
+the modules under test never do (the runner's way processes do, by their own sys.path)."""
+import copy
 import glob
 import gzip
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +23,11 @@ DATA = os.path.join(LIB, "tests", "data", "traverse")
 sys.path.insert(0, SUITE)
 
 import graphlet_doc  # noqa: E402
+import run_graphlet_local as rgl  # noqa: E402
+import suite_common as sc  # noqa: E402
+
+# the library (dataclass slots) needs Python 3.10+; the modules under test run on 3.8+
+needs_library = unittest.skipIf(sys.version_info < (3, 10), "the traversal library needs Python 3.10 or later")
 
 
 def library():
@@ -64,6 +77,7 @@ def with_seed_index(text, value):
     return " ".join(head) + text[first:]
 
 
+@needs_library
 class GraphletDocTests(unittest.TestCase):
     def test_fixtures_present(self):
         self.assertGreaterEqual(len(responses()), 20)
@@ -156,6 +170,869 @@ class GraphletDocTests(unittest.TestCase):
                     graphlet_doc.digests(text)
         # bytes are read as UTF-8
         self.assertEqual(graphlet_doc.body_digest(body.encode("utf-8")), graphlet_doc.body_digest(body))
+
+
+
+# ============================================================================================== run_graphlet_local
+REAL = os.path.join(DATA, "real", "mini_refseq")
+DOCS = {
+    "G-switch": os.path.join(REAL, "mini_ndm1_rc__switch1.graphlet.json.gz"),     # two arms, merges, cut lists
+    "G-trace": os.path.join(REAL, "mini_ndm1__trace.graphlet.json.gz"),           # constrain; compare a
+    "G-annot": os.path.join(REAL, "mini_ndm1__annotate_exh.graphlet.json.gz"),    # annotate, same seed; compare b
+    "G-body": os.path.join(DATA, "documents", "fork.mgt"),                        # a bare body: no envelope
+    "G-coords": os.path.join(REAL, "mini_rep_00__trace_coords.graphlet.json.gz"), # record coordinates
+    "G-merge": os.path.join(DATA, "documents", "merge.graphlet.json"),            # one arm, two merges
+}
+
+
+def sel(name, **args):
+    return {"select": name, "args": args}
+
+
+def ref(op, path):
+    return {"ref": op, "path": path}
+
+
+def op(oid, tool, args, expect="ok", paging="none"):
+    """An op of the plan; `expect` (the outcome: ok, an error code, or selector) is the test's, the runner ignores
+    keys it does not read."""
+    return {"id": oid, "tool": tool, "args": args, "paging": paging, "expect": expect}
+
+
+def walks(arm, **kw):
+    return dict({"arm": arm, "rank": "id", "n": 100, "min_bp": 0, "label": None, "spell": "none", "tail_bp": 60,
+                 "route_consistent": True, "max_bytes": 262144}, **kw)
+
+
+def labels(**kw):
+    return dict({"arm": None, "rank": "direct_bp", "n": 100, "min_direct_bp": 0, "at_bp": None, "name": None,
+                 "max_bytes": 262144, "coordinates": False}, **kw)
+
+
+def seq(**kw):
+    return dict({"arm": "left", "walk": None, "segment": None, "start": 0, "end": None, "orientation": "natural",
+                 "with_seed": False}, **kw)
+
+
+def export(**kw):
+    return dict({"format": "fasta", "arm": None, "walks": None, "path": None, "what": None, "other": None}, **kw)
+
+
+def fetch(**kw):
+    return dict({"index": None, "seed": {"sequence": "ACGTACGTAC"}, "strategy": {}, "keep": True,
+                 "max_graphlet_mb": 8, "replay": None, "allow_unverified_index": False, "max_bytes": 2048,
+                 "budget": None, "coordinates": "auto"}, **kw)
+
+
+def cont(**kw):
+    return dict({"arm": "left", "walk": None, "overrides": None, "execute": False, "allow_unverified_index": False,
+                 "max_bytes": 16384, "reset_branches": False, "budget": None}, **kw)
+
+
+CHAIN = ["walk-first", "walk-3", "walk-9", "walk-last"]
+MERGE = sel("walk_through_merge", walks=CHAIN)
+CONT = sel("walk_with_continuation", walks=CHAIN, min_labels=1)
+TOP = sel("top_label", labels="labels-tab", arm="left")
+ENTERED = sel("label_entered_at_merge", walk="walk-merge")
+
+
+def every_tool_plan():
+    """Every tool of GraphletTools at least once, every paging mode, an error case per tool, every named selector on
+    the library's real answers. Six documents: three enter as W1's (responses), G-body as a bare server body."""
+    switch = [
+        op("sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 262144}),
+        op("sum-cut", "graphlet_summary", {"arm": "left", "detail": "summary", "max_bytes": 900}),
+        op("lims", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": 600}, paging="all"),
+        op("lims-p1", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": 600},
+           paging={"pages": 1}),
+        op("sum-bad", "graphlet_summary", {"arm": None, "detail": "full", "max_bytes": 2048}, "bad_argument"),
+        op("sum-arm", "graphlet_summary", {"arm": "up", "detail": "summary", "max_bytes": 2048}, "bad_arm"),
+        op("labels-tab", "graphlet_labels", labels()),
+        op("walks-id-l", "graphlet_walks", walks("left")),
+        op("walks-len-l", "graphlet_walks", walks("left", rank="length", n=1)),
+        op("walks-sup-paged", "graphlet_walks", walks("left", rank="support", spell="tail", max_bytes=1500),
+           paging="all"),
+        op("walks-p1", "graphlet_walks", walks("left", rank="support", spell="tail", max_bytes=1500),
+           paging={"pages": 1}),
+        op("walks-resume", "graphlet_walks", walks("left", rank="support", spell="tail", max_bytes=1500,
+                                                   cursor=ref("walks-p1", "/next_cursor"))),
+        op("walks-reuse", "graphlet_walks", walks("left", rank="length", spell="tail", max_bytes=1500,
+                                                  cursor=ref("walks-p1", "/next_cursor")), "bad_cursor"),
+        op("walks-r", "graphlet_walks", walks("right", rank="loss", spell="full")),
+        op("walks-label", "graphlet_walks", walks("left", label=TOP, route_consistent=False)),
+        op("walks-bad-rank", "graphlet_walks", walks("left", rank="best"), "bad_argument"),
+        op("walks-coords", "graphlet_walks", walks("left", coordinates=True), "no_coordinates"),
+        op("walks-budget", "graphlet_walks", walks("left", budget={"work_units": 1000}), "bad_argument"),
+        op("walk-first", "graphlet_walk", {"arm": "left", "walk": ref("walks-id-l", "/rows/0/walk"),
+                                           "max_bytes": 262144}),
+        op("walk-last", "graphlet_walk", {"arm": "left", "walk": ref("walks-id-l", "/rows/11/walk"),
+                                          "max_bytes": 262144}),
+        op("walk-longest", "graphlet_walk", {"arm": "left", "walk": ref("walks-len-l", "/rows/0/walk"),
+                                             "max_bytes": 262144}),
+        op("walk-3", "graphlet_walk", {"arm": "left", "walk": 3, "max_bytes": 262144}),
+        op("walk-9", "graphlet_walk", {"arm": "left", "walk": 9, "max_bytes": 262144}),
+        op("walk-merge", "graphlet_walk", {"arm": "left", "walk": MERGE, "max_bytes": 262144}),
+        op("walk-cont", "graphlet_walk", {"arm": "left", "walk": CONT, "max_bytes": 262144}),
+        op("walk-paged", "graphlet_walk", {"arm": "left", "walk": 9, "max_bytes": 1500}, paging="all"),
+        op("walk-out", "graphlet_walk", {"arm": "left", "walk": ref("walks-id-l", "/total"), "max_bytes": 2048},
+           "bad_argument"),
+        op("walk-sel", "graphlet_walk", {"arm": "left", "walk": ref("walks-id-l", "/rows/40/walk"),
+                                         "max_bytes": 2048}, "selector"),
+        op("walks-label-merge", "graphlet_walks", walks("left", label=ENTERED)),
+        op("support-merge", "graphlet_support", {"arm": "left", "walk": MERGE, "step": None, "max_bytes": 262144}),
+        op("support-step", "graphlet_support", {"arm": "left", "walk": MERGE, "step": 50, "max_bytes": 1500},
+           paging="all"),
+        op("support-bad", "graphlet_support", {"arm": "middle", "walk": 0, "step": None, "max_bytes": 2048},
+           "bad_arm"),
+        op("labels-reach", "graphlet_labels", labels(arm="left", rank="reach_bp", max_bytes=1200), paging="all"),
+        op("labels-at", "graphlet_labels", labels(arm="left", min_direct_bp=10, at_bp=100)),
+        op("labels-name", "graphlet_labels", labels(name=TOP)),
+        op("labels-name-merge", "graphlet_labels", labels(arm="left", name=ENTERED)),
+        op("labels-coords", "graphlet_labels", labels(coordinates=True), "bad_argument"),
+        op("labels-unknown", "graphlet_labels", labels(name={"name": "no such label"}), "unknown_label"),
+        op("splits-l", "graphlet_splits", {"arm": "left", "n": 100, "min_labels_before": 0, "max_bytes": 262144}),
+        op("splits-paged", "graphlet_splits", {"arm": "left", "n": 100, "min_labels_before": 0, "max_bytes": 1000},
+           paging="all"),
+        op("splits-bad", "graphlet_splits", {"arm": "left", "n": 0, "min_labels_before": 0, "max_bytes": 2048},
+           "bad_argument"),
+        op("claims-l", "graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": True, "labels": None,
+                                           "max_bytes": 262144}),
+        op("claims-paged", "graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": False,
+                                               "labels": None, "max_bytes": 1500}, paging="all"),
+        op("claims-labels", "graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": True,
+                                                "labels": [TOP], "max_bytes": 262144}),
+        op("claims-unknown", "graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": True,
+                                                 "labels": [{"name": "no such label"}], "max_bytes": 2048},
+           "unknown_label"),
+        op("seq-walk", "graphlet_sequence", seq(walk=MERGE), paging="all"),
+        op("seq-seed", "graphlet_sequence", seq(walk=MERGE, with_seed=True, orientation="walk"), paging="all"),
+        op("seq-seg", "graphlet_sequence", seq(segment=3, orientation="walk")),
+        op("seq-past-end", "graphlet_sequence", seq(
+            walk=MERGE, start=sel("slice_past_end", length_of="seq-walk", part="start", keep=20),
+            end=sel("slice_past_end", length_of="seq-walk", part="end", past=50))),
+        op("seq-p2", "graphlet_sequence", seq(walk=MERGE, with_seed=True), paging={"pages": 2}),
+        op("seq-both", "graphlet_sequence", seq(walk=0, segment=0), "bad_argument"),
+        op("seq-seg-oor", "graphlet_sequence", seq(segment=999), "bad_argument"),
+        op("seq-seed-seg", "graphlet_sequence", seq(segment=0, with_seed=True), "bad_argument"),
+        op("seq-beyond", "graphlet_sequence", seq(walk=0, start=100000), "bad_argument"),
+        op("exp-fasta", "graphlet_export", export()),
+        op("exp-fasta-walks", "graphlet_export", export(arm="left", walks=[0, MERGE], path="G-switch.left.fa")),
+        op("exp-gfa", "graphlet_export", export(format="gfa")),
+        op("exp-json", "graphlet_export", export(format="json")),
+        op("exp-json-walk", "graphlet_export", export(format="json", what="walk", arm="left", walks=[MERGE],
+                                                      path="walk.json")),
+        op("exp-json-compare", "graphlet_export", export(format="json", what="compare",
+                                                         other={"graphlet": "G-switch"}, path="cmp.json")),
+        op("exp-mgt", "graphlet_export", export(format="mgt")),
+        op("exp-bad-what", "graphlet_export", export(what="walk"), "bad_argument"),
+        op("exp-path", "graphlet_export", export(path="../escape.fa"), "path_not_allowed"),
+        op("sub", "graphlet_subtrie", {"labels": [TOP], "arm": None, "mode": "any"}),
+        op("sub-all", "graphlet_subtrie", {"labels": [TOP, sel("top_label", labels="labels-tab", arm="left",
+                                                               index=1)], "arm": "left", "mode": "all"}),
+        op("sub-walks", "graphlet_walks", walks("left", handle=ref("sub", "/handle"))),
+        op("sub-summary", "graphlet_summary", {"handle": ref("sub", "/handle"), "arm": None, "detail": "summary",
+                                               "max_bytes": 262144}),
+        op("sub-cmp", "graphlet_compare", {"a": ref("sub", "/handle"), "b": {"graphlet": "G-switch"}, "arm": None,
+                                           "mode": "claims", "max_bytes": 262144}, "view_unsupported"),
+        op("sub-sub", "graphlet_subtrie", {"handle": ref("sub", "/handle"), "labels": [TOP], "arm": None,
+                                           "mode": "any"}, "view_unsupported"),
+        op("sub-bad", "graphlet_subtrie", {"labels": [], "arm": None, "mode": "any"}, "bad_argument"),
+        op("cmp-self", "graphlet_compare", {"b": {"graphlet": "G-switch"}, "arm": None, "mode": "walks",
+                                            "max_bytes": 262144}),
+        op("save", "graphlet_save", {"path": "G-switch.saved.mgt"}),
+        op("save-bad", "graphlet_save", {"path": "../saved.mgt"}, "path_not_allowed"),
+        op("load", "graphlet_load", {"path": "G-switch.saved.mgt"}),
+        op("load-summary", "graphlet_summary", {"handle": ref("load", "/handle"), "arm": "left",
+                                                "detail": "summary", "max_bytes": 262144}),
+        op("load-bad", "graphlet_load", {"path": "no-such-file.mgt"}, "io_error"),
+        op("list", "graphlet_list", {"max_bytes": 262144}),
+        op("list-paged", "graphlet_list", {"max_bytes": 900}, paging="all"),
+        op("list-bad", "graphlet_list", {"cursor": "junk", "max_bytes": 2048}, "bad_cursor"),
+        op("free", "graphlet_free", {"handle": ref("load", "/handle")}),
+        op("free-again", "graphlet_free", {"handle": ref("load", "/handle")}, "unknown_handle"),
+        op("caps", "traverse_capabilities", {"index": None, "max_bytes": 40000}, "unknown_index"),
+        op("resolve", "traverse_resolve", {"index": None, "sequence": "ACGTACGT", "labels": None, "discover": None,
+                                           "select": None, "limit": 10, "max_bytes": 2048}, "unknown_index"),
+        op("fetch", "traverse_fetch", fetch(), "unknown_index"),
+        op("fetch-bad", "traverse_fetch", fetch(seed=None), "bad_request"),
+        op("cont", "traverse_continue", cont(walk=CONT)),
+        op("cont-clash", "traverse_continue", cont(walk=CONT, overrides={"arm": "right"}), "bad_argument"),
+        op("nope", "graphlet_nope", {}, "unknown_tool"),
+    ]
+    trace = [
+        op("cmp-claims", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None, "mode": "claims",
+                                              "max_bytes": 262144}),
+        op("cmp-walks", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": "left", "mode": "walks",
+                                             "max_bytes": 262144}),
+        op("cmp-labels", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None, "mode": "labels",
+                                              "max_bytes": 262144}),
+        op("cmp-prefix", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None, "mode": "prefix_subset",
+                                              "max_bytes": 262144}),
+        op("cmp-paged", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None, "mode": "labels",
+                                             "max_bytes": 1500}, paging="all"),
+        op("cmp-bad", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None, "mode": "all",
+                                           "max_bytes": 2048}, "bad_argument"),
+        op("cmp-nodoc", "graphlet_compare", {"b": {"graphlet": "G-missing"}, "arm": None, "mode": "claims",
+                                             "max_bytes": 2048}, "selector"),
+    ]
+    body = [
+        op("body-sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048}, "missing_envelope"),
+        op("body-walks", "graphlet_walks", walks("left")),
+    ]
+    coords = [
+        op("coords-tab", "graphlet_labels", labels(arm="left", n=5)),
+        op("coords-walks", "graphlet_walks", walks("left", coordinates=True)),
+        op("coords-name", "graphlet_labels", labels(arm="left", name=sel("top_label", labels="coords-tab"),
+                                                    coordinates=True)),
+    ]
+    merge = [
+        op("m-sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 262144}),
+        op("m-walk", "graphlet_walk", {"arm": None, "walk": 0, "max_bytes": 262144}),
+        op("m-first", "graphlet_walks", walks(sel("first_arm", of="m-sum"))),
+        op("m-second", "graphlet_labels", labels(arm=sel("second_arm_or_none", of="m-sum"))),
+        op("m-entered", "graphlet_walks", walks(None, label=sel("label_entered_at_merge", walk="m-walk"))),
+    ]
+    return {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid, ops in (
+        ("G-switch", switch), ("G-trace", trace), ("G-annot", []), ("G-body", body), ("G-coords", coords),
+        ("G-merge", merge))]}
+
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh)
+    return path
+
+
+def run_offline(out, plan, docs=None, ways="W4", limits=None, hashseed=None, extra=()):
+    """run_graphlet_local offline over |plan| and |docs| ({id: path}) into |out| -> {way: [records]}."""
+    os.makedirs(out, exist_ok=True)
+    argv = ["--plan", write_json(os.path.join(out, "plan.json"), plan), "--library-root", LIB, "--out", out,
+            "--ways", ways, "--run-id", "test-run", "--quiet"]
+    for sid, path in sorted((docs or DOCS).items()):
+        argv += ["--doc", "%s=%s" % (sid, path)]
+    if limits is not None:
+        argv += ["--limits", write_json(os.path.join(out, "limits.json"), limits)]
+    if hashseed:
+        argv += ["--hashseed", hashseed]
+    rc = rgl.main(argv + list(extra))
+    assert rc == 0, rc
+    return dict((w, records(out, w)) for w in ways.split(","))
+
+
+def records(out, way, name="graphlet_ops.jsonl"):
+    rows, bad = sc.read_jsonl(os.path.join(out, "arms", rgl.WAY_DIRS[way], name))
+    assert bad == 0
+    return rows
+
+
+def outcome(rec):
+    if rec["selector_error"]:
+        return "selector"
+    return rec["error"]["code"] if rec["error"] else "ok"
+
+
+VOLATILE = ("elapsed_ms", "started_utc")
+
+
+def comparable(rec, drop_way=False):
+    """A record without its timing, hash seed (and way): what two processes must agree on. graphlet_list's rows carry
+    the store's wall-clock created / accessed times, timing too."""
+    r = copy.deepcopy(rec)
+    for k in VOLATILE:
+        r.pop(k, None)
+    r["library"].pop("hashseed", None)
+    if drop_way:
+        r.pop("way", None)
+    if r["tool"] == "graphlet_list" and r["answer"]:
+        for row in r["answer"]["rows"]:
+            row.pop("created", None)
+            row.pop("accessed", None)
+    return r
+
+
+def library_tool_names():
+    if LIB not in sys.path:
+        sys.path.insert(0, LIB)
+    from metagraph.traverse.mcp_tools import tool_names
+    return set(tool_names())
+
+
+class AssembleTests(unittest.TestCase):
+    def test_rows_concatenated_and_end_fields_last(self):
+        pages = [{"handle": "h", "evidence": {"x": 1}, "total": 3, "rows": [1, 2], "next_cursor": "c1"},
+                 {"handle": "h", "evidence": {"x": 1}, "total": 3, "rows": [3]}]
+        self.assertEqual(rgl.assemble("graphlet_walks", pages, True),
+                         {"handle": "h", "evidence": {"x": 1}, "total": 3, "rows": [1, 2, 3]})
+        budgeted = [{"handle": "h", "total_at_least": 2, "complete": False, "filtered_so_far": {"m": 1},
+                     "rows": [1, 2], "next_cursor": "c"},
+                    {"handle": "h", "total": 3, "complete": True, "filtered": {"m": 2}, "rows": [3],
+                     "local": {"complete": True}}]
+        self.assertEqual(rgl.assemble("graphlet_claims", budgeted, True),
+                         {"handle": "h", "total": 3, "complete": True, "filtered": {"m": 2}, "rows": [1, 2, 3],
+                          "local": {"complete": True}})
+
+    def test_evidence_of_the_completing_page(self):
+        marked = {"exact": True, "limitations": {"left": ["scope"], "local": ["local_work"]}}
+        plain = {"exact": True, "limitations": {"left": ["scope"]}}
+        pages = [{"handle": "h", "evidence": marked, "total_at_least": 1, "complete": False, "rows": [1],
+                  "next_cursor": "c"}, {"handle": "h", "evidence": plain, "total": 2, "complete": True, "rows": [2]}]
+        self.assertEqual(rgl.assemble("graphlet_walk", pages, True),
+                         {"handle": "h", "evidence": plain, "total": 2, "complete": True, "rows": [1, 2]})
+        self.assertEqual(rgl.assemble("graphlet_walk", pages[:1], False)["evidence"], marked)
+        pages[1]["evidence"] = dict(plain, exact=False)
+        with self.assertRaises(rgl.AssemblyError):
+            rgl.assemble("graphlet_walk", pages, True)
+
+    def test_compare_cuts_merged(self):
+        pages = [{"a": "x", "mode": "claims", "rows": [1], "total": 3, "fields_cut": ["evidence"], "export": "e",
+                  "next_cursor": "c"},
+                 {"a": "x", "mode": "claims", "rows": [2], "total": 3, "evidence": {"a": 1}, "export": "e",
+                  "next_cursor": "c"},
+                 {"a": "x", "mode": "claims", "rows": [3], "total": 3, "fields_cut": ["evidence", "export"]}]
+        self.assertEqual(rgl.assemble("graphlet_compare", pages, True),
+                         {"a": "x", "mode": "claims", "rows": [1, 2, 3], "total": 3, "evidence": {"a": 1},
+                          "export": "e"})
+        pages[1].pop("evidence")
+        self.assertEqual(rgl.assemble("graphlet_compare", pages, True)["fields_cut"], ["evidence"])
+
+    def test_truncated_rows_named(self):
+        pages = [{"rows": [{"s": "AC"}], "total": 2, "row_truncated": True, "cut_fields": ["s"], "next_cursor": "c"},
+                 {"rows": [{"s": "G"}], "total": 2}]
+        out = rgl.assemble("graphlet_walks", pages, True)
+        self.assertEqual((out["row_truncated"], out["cut_fields"], out["rows"]), (True, ["s"], [{"s": "AC"},
+                                                                                                 {"s": "G"}]))
+
+    def test_conflicting_pages_refused(self):
+        pages = [{"handle": "h", "rows": [1], "total": 2, "next_cursor": "c"}, {"handle": "k", "rows": [2], "total": 2}]
+        with self.assertRaises(rgl.AssemblyError):
+            rgl.assemble("graphlet_walks", pages, True)
+        with self.assertRaises(rgl.AssemblyError):
+            rgl.assemble("graphlet_walks", [{"rows": [1], "next_cursor": "c"}, {"total": 1}], True)
+        with self.assertRaises(rgl.AssemblyError):
+            rgl.assemble("graphlet_summary", [{"summary": {}}, {"summary": {}}], True)
+
+    def test_sequence(self):
+        pages = [{"from": 0, "to": 3, "length": 7, "sequence": "ACG", "truncated": True, "next_from": 3},
+                 {"from": 3, "to": 6, "length": 7, "sequence": "TAC", "truncated": True, "next_from": 6},
+                 {"from": 6, "to": 7, "length": 7, "sequence": "G"}]
+        self.assertEqual(rgl.assemble("graphlet_sequence", pages, True),
+                         {"from": 0, "to": 7, "length": 7, "sequence": "ACGTACG"})
+        self.assertEqual(rgl.assemble("graphlet_sequence", pages[:2], False),
+                         {"from": 0, "to": 6, "length": 7, "sequence": "ACGTAC", "truncated": True})
+
+    def test_single_objects_pass(self):
+        self.assertEqual(rgl.assemble("graphlet_summary", [{"summary": {"a": 1}}], True), {"summary": {"a": 1}})
+        self.assertEqual(rgl.assemble("graphlet_export", [{"path": "p", "bytes": 3}], True), {"path": "p", "bytes": 3})
+
+
+@needs_library
+class ListTableTests(unittest.TestCase):
+    def test_table_matches_the_library(self):
+        """Every self._page / self._page_cut call of mcp_tools.py names a tool of LIST_FIELDS and every tool there has
+        one; _page builds the page's list as `rows`; graphlet_sequence states next_from."""
+        with open(os.path.join(LIB, "metagraph", "traverse", "mcp_tools.py"), encoding="utf-8") as fh:
+            src = fh.read()
+        paged = set(re.findall(r"self\._page(?:_cut)?\(\s*'(\w+)'", src))
+        self.assertEqual(paged, set(rgl.LIST_FIELDS))
+        self.assertEqual(set(rgl.LIST_FIELDS.values()), {"rows"})
+        page = src[src.index("    def _page(self"):src.index("    def _page_cut(self")]
+        self.assertIn("rows=[])", page)
+        self.assertIn("out['next_cursor']", page)
+        sequence = src[src.index("    def graphlet_sequence(self"):src.index("    def graphlet_export(self")]
+        self.assertIn("next_from=start + len(part)", sequence)
+        self.assertTrue(set(rgl.HANDLE_ARG) | set(rgl.MINTING) | {"graphlet_list", "graphlet_load"}
+                        >= library_tool_names() - {"traverse_capabilities", "traverse_resolve"})
+
+
+@needs_library
+class EveryToolTests(unittest.TestCase):
+    """The every-tool plan on two ways with different hash seeds (W1, W2) in one invocation, sequence pages of 1 KiB."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        cls.plan = every_tool_plan()
+        cls.out = os.path.join(cls.tmp, "run")
+        cls.recs = run_offline(cls.out, cls.plan, ways="W1,W2", limits={"sequence_max_bytes": 1024},
+                               hashseed="W1=11,W2=12345")
+        cls.by_op = dict((r["op"], r) for r in cls.recs["W1"])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_outcomes_as_planned(self):
+        planned = dict((o["id"], o["expect"]) for s in self.plan["scenarios"] for o in s["graphlet"]["ops"])
+        self.assertEqual(len(self.recs["W1"]), len(planned))
+        for r in self.recs["W1"]:
+            with self.subTest(r["op"]):
+                self.assertEqual(outcome(r), planned[r["op"]], r["selector_error"] or r["error"])
+
+    def test_every_tool_called_and_refused(self):
+        names = library_tool_names()
+        self.assertEqual(len(names), 19)
+        called = set(r["tool"] for r in self.recs["W1"])
+        self.assertLessEqual(names, called)
+        answered = set(r["tool"] for r in self.recs["W1"] if r["answer"] is not None)
+        refused = set(r["tool"] for r in self.recs["W1"] if r["error"] is not None)
+        self.assertEqual(names - answered, {"traverse_capabilities", "traverse_resolve", "traverse_fetch"})
+        self.assertLessEqual(names, refused)
+
+    def test_paging_modes(self):
+        by = self.by_op
+        for name in ("lims", "walks-sup-paged", "walk-paged", "support-step", "labels-reach", "splits-paged",
+                     "claims-paged", "list-paged", "seq-walk", "seq-seed"):
+            with self.subTest(name):
+                self.assertGreater(by[name]["pages"], 1)
+                self.assertTrue(by[name]["paging_complete"])
+        for name, n in (("lims-p1", 1), ("seq-p2", 2)):
+            with self.subTest(name):
+                self.assertEqual(by[name]["pages"], n)
+                self.assertFalse(by[name]["paging_complete"])
+        self.assertEqual(len(by["lims-p1"]["answer"]["rows"]) < by["lims-p1"]["answer"]["total"], True)
+        self.assertTrue(by["seq-p2"]["answer"]["truncated"])
+        self.assertEqual(by["lims"]["answer"]["rows"][:len(by["lims-p1"]["answer"]["rows"])],
+                         by["lims-p1"]["answer"]["rows"])
+        self.assertEqual(by["sum"]["pages"], 1)
+        # a cursor an earlier op stopped at: selectors read it, args_resolved shows <cursor>
+        n = len(by["walks-p1"]["answer"]["rows"])
+        self.assertFalse(by["walks-p1"]["paging_complete"])
+        self.assertEqual(by["walks-resume"]["args_resolved"]["cursor"], "<cursor>")
+        self.assertEqual(by["walks-p1"]["answer"]["rows"] + by["walks-resume"]["answer"]["rows"],
+                         by["walks-sup-paged"]["answer"]["rows"][:n + len(by["walks-resume"]["answer"]["rows"])])
+        self.assertEqual(by["cmp-paged"]["pages"] > 1, True)
+        for r in self.recs["W1"]:
+            if r["answer"] is not None:
+                self.assertNotIn("next_cursor", r["answer"])
+                self.assertNotIn("next_from", r["answer"])
+        # every page is kept raw, numbered from 0
+        raw = os.path.join(self.out, "arms", "dl-lib", "raw")
+        n = by["claims-paged"]["pages"]
+        for i in range(n):
+            page = sc.read_gz_json(os.path.join(raw, "G-switch.claims-paged.%d.json.gz" % i))
+            self.assertEqual((page["page"], page["op"], page["reply"]["ok"]), (i, "claims-paged", True))
+            self.assertEqual("cursor" in page["args"], i > 0)
+        self.assertFalse(os.path.exists(os.path.join(raw, "G-switch.claims-paged.%d.json.gz" % n)))
+
+    def test_selectors_on_real_answers(self):
+        by = self.by_op
+        merge_walk = by["walk-merge"]["args_resolved"]["walk"]
+        self.assertTrue(any("merge_of" in row for row in by["walk-merge"]["answer"]["rows"]))
+        self.assertEqual(merge_walk, 3)   # walk 3 is the lowest named walk through a merge (segment 11)
+        self.assertEqual(by["walk-cont"]["args_resolved"]["walk"], 9)
+        self.assertGreaterEqual(by["walk-cont"]["answer"]["continuation"]["labels"], 1)
+        self.assertEqual(by["walk-first"]["args_resolved"]["walk"], 0)
+        self.assertEqual(by["walk-out"]["args_resolved"]["walk"], 12)
+        self.assertIn("index 40", by["walk-sel"]["selector_error"])
+        self.assertTrue(by["walk-sel"]["selector_error"].startswith("args.walk: "))
+        top = by["labels-tab"]["answer"]["rows"]
+        left = [r for r in top if r["arm"] == "left"]
+        self.assertEqual(by["walks-label"]["args_resolved"]["label"], {"ref": left[0]["ref"]})
+        self.assertEqual(by["sub-all"]["args_resolved"]["labels"], [{"ref": left[0]["ref"]}, {"ref": left[1]["ref"]}])
+        entered = by["labels-name-merge"]["args_resolved"]["name"]
+        self.assertEqual(entered, by["walks-label-merge"]["args_resolved"]["label"])
+        self.assertEqual(by["labels-name-merge"]["answer"]["ref"], entered["ref"])
+        length = by["seq-walk"]["answer"]["length"]
+        past = by["seq-past-end"]
+        self.assertEqual((past["args_resolved"]["start"], past["args_resolved"]["end"]), (length - 20, length + 50))
+        self.assertEqual((past["answer"]["from"], past["answer"]["to"], len(past["answer"]["sequence"])),
+                         (length - 20, length, 20))
+        self.assertEqual(by["seq-walk"]["answer"]["sequence"], by["seq-past-end"]["answer"]["sequence"][-20:]
+                         if False else by["seq-walk"]["answer"]["sequence"])
+        self.assertEqual(by["seq-walk"]["answer"]["sequence"][-20:], past["answer"]["sequence"])
+        self.assertEqual(len(by["seq-walk"]["answer"]["sequence"]), length)
+        merge = dict((r["op"], r) for r in self.recs["W1"] if r["scenario"] == "G-merge")
+        self.assertEqual(merge["m-first"]["args_resolved"]["arm"], "right")
+        self.assertIsNone(merge["m-second"]["args_resolved"]["arm"])
+        self.assertEqual(merge["m-entered"]["args_resolved"]["label"], {"ref": "c:1"})
+
+    def test_handles_as_symbols(self):
+        by = self.by_op
+        self.assertEqual(by["sum"]["args_resolved"]["handle"], "<handle>")
+        self.assertEqual(by["sum"]["answer"]["handle"], "<handle>")
+        self.assertEqual(by["sub"]["answer"]["handle"], "<handle:sub>")
+        self.assertEqual(by["sub"]["answer"]["of"], "<handle>")
+        self.assertEqual(by["sub-walks"]["args_resolved"]["handle"], "<handle:sub>")
+        self.assertEqual(by["sub-walks"]["answer"]["evidence"]["view"]["of"], "<handle>")
+        self.assertEqual(by["sub-cmp"]["error"], {"code": "view_unsupported", "fields": {"of": "<handle>"}})
+        self.assertEqual(by["load-summary"]["args_resolved"]["handle"], "<handle:load>")
+        self.assertEqual(by["free"]["answer"], {"freed": "<handle:load>"})
+        self.assertEqual(by["cmp-self"]["args_resolved"]["b"], "<handle>")
+        self.assertEqual(by["cmp-self"]["args_resolved"]["a"], "<handle>")
+        self.assertEqual(by["exp-fasta"]["answer"]["path"], "<export_dir>/<handle>.fa")
+        self.assertEqual(by["exp-json-compare"]["args_resolved"]["other"], "<handle>")
+        cmp = dict((r["op"], r) for r in self.recs["W1"] if r["scenario"] == "G-trace")
+        self.assertEqual(cmp["cmp-claims"]["args_resolved"]["b"], "<handle:G-annot>")
+        self.assertEqual(cmp["cmp-claims"]["answer"]["b"], "<handle:G-annot>")
+        self.assertIn("args.b", cmp["cmp-nodoc"]["selector_error"])
+        # the store when G-switch lists it (its scenario runs first): its graphlet and what its ops made, oldest first
+        self.assertEqual([row["handle"] for row in by["list"]["answer"]["rows"]],
+                         ["<handle>", "<handle:sub>", "<handle:sub-all>", "<handle:load>"])
+        with open(os.path.join(self.out, "arms", "dl-lib", "graphlet_ops.jsonl"), encoding="utf-8") as fh:
+            self.assertIsNone(re.search(r"g_[0-9a-f]{12}", fh.read()))
+
+    def test_files_kept(self):
+        for name in ("exp-fasta", "exp-fasta-walks", "exp-gfa", "exp-json", "exp-json-walk", "exp-json-compare",
+                     "exp-mgt", "save"):
+            with self.subTest(name):
+                f = self.by_op[name]["file"]
+                with gzip.open(os.path.join(self.out, "arms", "dl-lib", f["raw"]), "rb") as fh:
+                    data = fh.read()
+                self.assertEqual(len(data), f["bytes"])
+                self.assertEqual(len(data), self.by_op[name]["answer"]["bytes"])
+        with gzip.open(os.path.join(self.out, "arms", "dl-lib", self.by_op["exp-json-walk"]["file"]["raw"])) as fh:
+            self.assertRegex(json.loads(fh.read().decode("utf-8"))["handle"], r"\Ag_[0-9a-f]{12}\Z")
+        with gzip.open(os.path.join(self.out, "arms", "dl-lib", self.by_op["exp-mgt"]["file"]["raw"])) as fh:
+            mgt = fh.read().decode("utf-8")
+        self.assertEqual(graphlet_doc.digests(mgt)["body_digest"], self.by_op["sum"]["doc"]["body_digest"])
+
+    def test_record_shape(self):
+        keys = {"run_id", "scenario", "way", "op", "tool", "args_resolved", "selector_error", "pages",
+                "paging_complete", "answer", "error", "service_fields", "doc", "library", "elapsed_ms", "started_utc"}
+        for r in self.recs["W1"]:
+            self.assertEqual(set(r) - {"file"}, keys)
+            self.assertEqual(r["way"], "W1")
+            self.assertIsNone(r["service_fields"])
+            self.assertEqual(set(r["library"]), {"commit", "python", "hashseed", "work_model", "limits"})
+            self.assertEqual(r["library"]["hashseed"], 11)
+            self.assertEqual(r["library"]["limits"]["sequence_max_bytes"], 1024)
+            self.assertTrue(r["library"]["commit"])
+            self.assertEqual((r["answer"] is None), bool(r["error"] or r["selector_error"]))
+            if r["error"]:
+                self.assertEqual(set(r["error"]), {"code", "fields"})
+                self.assertNotIn("message", r["error"]["fields"])
+        docs = dict((d["scenario"], d) for d in records(self.out, "W1", "graphlet_docs.jsonl"))
+        self.assertEqual(set(docs), set(DOCS))
+        self.assertIsNone(docs["G-body"]["doc"]["envelope_digest"])
+        for sid, d in docs.items():
+            self.assertIsNone(d["error"], sid)
+            self.assertEqual(d["load"]["handle"], "<handle>")
+            with gzip.open(os.path.join(self.out, "arms", "dl-lib", "docs", sid + ".mgt.gz"), "rb") as fh:
+                self.assertEqual(graphlet_doc.digests(fh.read())["body_digest"], d["doc"]["body_digest"])
+
+    def test_hashseed_determinism(self):
+        """W1 and W2 run the same documents in two processes with different PYTHONHASHSEED: their records are equal
+        but for the way, the hash seed and the timing fields."""
+        a, b = self.recs["W1"], self.recs["W2"]
+        self.assertEqual(len(a), len(b))
+        self.assertEqual([comparable(r, True) for r in a], [comparable(r, True) for r in b])
+        self.assertEqual(set(r["library"]["hashseed"] for r in b), {12345})
+        runs = [sc.read_json(os.path.join(self.out, "arms", d, "run.json")) for d in ("dl-lib", "dr-lib")]
+        self.assertEqual([r["interpreter"]["hashseed"] for r in runs], ["11", "12345"])
+        self.assertNotEqual(runs[0]["interpreter"]["hash_probe"], runs[1]["interpreter"]["hash_probe"])
+        self.assertEqual(runs[0]["child"]["env_keys"].count("PYTHONHASHSEED"), 1)
+        self.assertFalse([k for k in runs[0]["child"]["env_keys"] if k.startswith("PYTHON") and k != "PYTHONHASHSEED"])
+        self.assertEqual(runs[0]["state"], "done")
+        for way in ("W1", "W2"):
+            files = sorted(os.listdir(os.path.join(self.out, "arms", rgl.WAY_DIRS[way], "raw")))
+            self.assertEqual(len(files), len(os.listdir(os.path.join(self.out, "arms", "dl-lib", "raw"))))
+
+    def test_no_append(self):
+        with self.assertRaises(SystemExit):
+            run_offline(self.out, self.plan, ways="W1")
+
+
+@needs_library
+class DocumentErrorTests(unittest.TestCase):
+    def test_missing_failed_and_broken_documents(self):
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            failed = write_json(os.path.join(tmp, "failed.json"), {"results": [{"seed": {}, "error": "no labels"}]})
+            with open(DOCS["G-body"], encoding="utf-8") as fh:
+                cut = fh.read()[:-40]
+            broken = os.path.join(tmp, "broken.mgt")
+            with open(broken, "w", encoding="utf-8") as fh:
+                fh.write(cut)
+            docs = {"G-nofile": os.path.join(tmp, "absent.mgt.gz"), "G-failed": failed, "G-broken": broken,
+                    "G-annot": DOCS["G-annot"]}
+            ops = [op("s", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048}),
+                   op("c", "graphlet_compare", {"a": {"graphlet": "G-annot"}, "b": "<handle>", "arm": None,
+                                                "mode": "labels", "max_bytes": 2048})]
+            plan = {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid in ("G-nofile", "G-failed",
+                                                                                   "G-broken", "G-nodoc")]}
+            recs = run_offline(os.path.join(tmp, "run"), plan, docs=docs, ways="W4")["W4"]
+            got = dict(((r["scenario"], r["op"]), r) for r in recs)
+            self.assertEqual(got[("G-nofile", "s")]["error"]["code"], "no_document")
+            self.assertEqual(got[("G-nodoc", "s")]["error"], {"code": "no_document", "fields": {"source": None}})
+            self.assertEqual(got[("G-failed", "s")]["error"], {"code": "no_graphlet", "fields": {}})
+            self.assertEqual(got[("G-broken", "s")]["error"]["code"], "document_refused")
+            self.assertEqual(got[("G-broken", "s")]["error"]["fields"], {"stage": "load", "code": "format_error"})
+            # a call on another graphlet still runs; <handle> of a scenario without one is left to the library
+            self.assertEqual(got[("G-failed", "c")]["args_resolved"]["a"], "<handle:G-annot>")
+            self.assertEqual(got[("G-failed", "c")]["error"]["code"], "unknown_handle")
+            docs_lines = dict((d["scenario"], d) for d in records(os.path.join(tmp, "run"), "W4",
+                                                                   "graphlet_docs.jsonl"))
+            self.assertIn("no labels", docs_lines["G-failed"]["error_text"])
+            self.assertIsNotNone(docs_lines["G-broken"]["doc_error"])
+            self.assertIsNone(docs_lines["G-broken"]["doc"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@needs_library
+class PagingTests(unittest.TestCase):
+    """Paging assembly over small max_bytes equals the uncut one-page answer of a large max_bytes, for every list
+    tool; the sequence's next_from loop equals one slice under a large ceiling."""
+
+    LISTS = {
+        "lims": ("G-switch", "graphlet_summary", {"arm": None, "detail": "limitations"}),
+        "walks": ("G-switch", "graphlet_walks", dict(walks("left", rank="support", spell="tail"))),
+        "walk": ("G-switch", "graphlet_walk", {"arm": "left", "walk": 9}),
+        "support": ("G-switch", "graphlet_support", {"arm": "left", "walk": 9, "step": None}),
+        "labels": ("G-switch", "graphlet_labels", labels()),
+        "labels-name": ("G-switch", "graphlet_labels", labels(name={"ref": "h:5:6"})),
+        "splits": ("G-switch", "graphlet_splits", {"arm": "left", "n": 100, "min_labels_before": 0}),
+        "claims": ("G-switch", "graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": False,
+                                                   "labels": None}),
+        "compare": ("G-trace", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None, "mode": "claims"}),
+        "compare-labels": ("G-trace", "graphlet_compare", {"b": {"graphlet": "G-annot"}, "arm": None,
+                                                           "mode": "labels"}),
+        "list": ("G-trace", "graphlet_list", {}),   # after G-trace's compares loaded G-annot: three entries
+    }
+    SIZES = (500, 700, 800, 900, 1000, 1500, 2000, 3000, 5000)
+
+    def test_assembled_equals_uncut(self):
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            ops = {"G-switch": [], "G-trace": []}
+            for name, (sid, tool, args) in sorted(self.LISTS.items()):
+                args = dict(args)
+                args.pop("max_bytes", None)
+                ops[sid].append(op(name + "@big", tool, dict(args, max_bytes=262144)))
+                for size in self.SIZES:
+                    ops[sid].append(op("%s@%d" % (name, size), tool, dict(args, max_bytes=size), paging="all"))
+            plan = {"scenarios": [{"id": sid, "graphlet": {"ops": o}} for sid, o in sorted(ops.items())]}
+            recs = run_offline(os.path.join(tmp, "run"), plan, ways="W4")["W4"]
+            by = dict((r["op"], r) for r in recs)
+            for name in sorted(self.LISTS):
+                with self.subTest(name):
+                    big = comparable(by[name + "@big"])["answer"]
+                    self.assertEqual(by[name + "@big"]["pages"], 1)
+                    self.assertGreater(big["total"], 1)
+                    used = []
+                    for size in self.SIZES:
+                        r = by["%s@%d" % (name, size)]
+                        if r["error"] or r["pages"] < 2 or r["answer"].get("row_truncated"):
+                            continue
+                        used.append(size)
+                        self.assertTrue(r["paging_complete"])
+                        small = comparable(r)["answer"]
+                        # compare's base gives way per page (_page_cut): a field cut on EVERY page stays cut and
+                        # named; the assembled answer is then the uncut one without exactly those optional fields
+                        cut = small.pop("fields_cut", [])
+                        self.assertLessEqual(set(cut), {"evidence", "export"})
+                        self.assertEqual(small, dict((k, v) for k, v in big.items() if k not in cut),
+                                         "max_bytes %d" % size)
+                    self.assertTrue(used, "no size gave whole rows over several pages")
+            cuts = [by["compare@%d" % size]["answer"].get("fields_cut") for size in self.SIZES
+                    if by["compare@%d" % size]["answer"]]
+            self.assertIn(["evidence"], cuts)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_sequence_pages_equal_one_slice(self):
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            ops = [op("s-%d" % i, "graphlet_sequence", seq(**kw), paging="all") for i, kw in enumerate((
+                {"walk": 9}, {"walk": 9, "with_seed": True}, {"walk": 3, "orientation": "walk", "with_seed": True},
+                {"walk": 9, "start": 100, "end": 1500}, {"segment": 3}))]
+            plan = {"scenarios": [{"id": "G-switch", "graphlet": {"ops": ops}}]}
+            small = run_offline(os.path.join(tmp, "small"), plan, limits={"sequence_max_bytes": 700})["W4"]
+            large = run_offline(os.path.join(tmp, "large"), plan, limits={"sequence_max_bytes": 1 << 20})["W4"]
+            self.assertTrue(all(r["pages"] == 1 for r in large))
+            self.assertGreater(sum(r["pages"] > 1 for r in small), 3)
+            for a, b in zip(small, large):
+                with self.subTest(a["op"]):
+                    a, b = comparable(a)["answer"], comparable(b)["answer"]
+                    self.assertEqual((a.pop("ceiling_bytes"), b.pop("ceiling_bytes")), (700, 1 << 20))
+                    self.assertEqual(a, b)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@needs_library
+class BudgetTests(unittest.TestCase):
+    def test_budgeted_pages_resume_to_the_whole_list(self):
+        """Under local limits a small work budget stops a list after a few rows (complete false, a resume cursor);
+        paging "all" resumes it page by page, each under its own budget, and the assembly takes total, complete and the
+        local block from the last page: the rows are the unbudgeted call's."""
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            lists = {"claims": ("graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": False,
+                                                    "labels": None}, 800),
+                     "walks": ("graphlet_walks", walks("left", spell="full"), 1000),
+                     "splits": ("graphlet_splits", {"arm": "left", "n": 100, "min_labels_before": 0}, 600),
+                     "walk": ("graphlet_walk", {"arm": "left", "walk": 9}, 700)}
+            ops = []
+            for name, (tool, args, wu) in sorted(lists.items()):
+                args = dict(args, max_bytes=262144)
+                ops += [op(name, tool, args), op(name + "-b", tool, dict(args, budget={"work_units": wu}),
+                                                 paging="all"),
+                        op(name + "-b1", tool, dict(args, budget={"work_units": wu}), paging={"pages": 1})]
+            plan = {"scenarios": [{"id": "G-switch", "graphlet": {"ops": ops}}]}
+            by = dict((r["op"], r) for r in run_offline(os.path.join(tmp, "run"), plan, docs={
+                "G-switch": DOCS["G-switch"]}, limits={"local_limits": {}})["W4"])
+            for name in lists:
+                with self.subTest(name):
+                    whole, paged, first = by[name]["answer"], by[name + "-b"]["answer"], by[name + "-b1"]["answer"]
+                    self.assertGreater(by[name + "-b"]["pages"], 1)
+                    self.assertFalse(first["complete"])
+                    self.assertFalse(by[name + "-b1"]["paging_complete"])
+                    self.assertTrue(paged["complete"])
+                    self.assertTrue(paged["local"]["complete"])
+                    self.assertEqual(paged["rows"], whole["rows"])
+                    self.assertEqual(paged["total"], whole["total"])
+                    self.assertEqual(first["rows"], whole["rows"][:len(first["rows"])])
+                    self.assertEqual(by[name]["library"]["limits"]["local_limits"], {})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@needs_library
+class ConversionTests(unittest.TestCase):
+    def test_response_equals_file(self):
+        """A W1-style document (the response, converted in the way's process by standalone_text) and the same
+        document saved by the library (parser.save of from_response, gzipped: W4's form) give the same records."""
+        parser = library()
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            files = {}
+            for sid in ("G-switch", "G-trace", "G-annot", "G-coords", "G-merge"):
+                resp = read_json(DOCS[sid])
+                g = parser.from_response(resp["results"][0], resp)
+                plain = os.path.join(tmp, sid + ".mgt")
+                parser.save(g, plain)
+                with open(plain, "rb") as fh, gzip.open(plain + ".gz", "wb") as out:
+                    out.write(fh.read())
+                files[sid] = plain + ".gz"
+            files["G-body"] = DOCS["G-body"]
+            plan = every_tool_plan()
+            a = run_offline(os.path.join(tmp, "resp"), plan, ways="W1")["W1"]
+            b = run_offline(os.path.join(tmp, "file"), plan, docs=files, ways="W1")["W1"]
+            self.assertEqual([comparable(r) for r in a], [comparable(r) for r in b])
+            for sid in files:
+                with gzip.open(os.path.join(tmp, "resp", "arms", "dl-lib", "docs", sid + ".mgt.gz")) as x, \
+                        gzip.open(os.path.join(tmp, "file", "arms", "dl-lib", "docs", sid + ".mgt.gz")) as y:
+                    self.assertEqual(x.read(), y.read(), sid)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def fake_run_dir(tmp, ids):
+    """A run directory as the arms leave it: each scenario's /traverse response as the direct arms' raw records, and the
+    MCP's export as its .mgt.gz (the library's standalone text of the same response)."""
+    parser = library()
+    run = os.path.join(tmp, "run")
+    for sid, path in ids.items():
+        resp = read_json(path)
+        for arm in ("direct-local", "direct-remote"):
+            rel = os.path.join(run, "arms", arm, sc.raw_name(sid, arm, 0))
+            os.makedirs(os.path.dirname(rel), exist_ok=True)
+            sc.write_gz_json(rel, {"scenario": sid, "arm": arm, "repeat": 0,
+                                   "answer": {"http": 200, "body": resp, "error": None}})
+        mgt = os.path.join(run, rgl.DEFAULT_MGT_TEMPLATE.format(id=sid, repeat=0))
+        os.makedirs(os.path.dirname(mgt), exist_ok=True)
+        with gzip.open(mgt, "wb") as fh:
+            r = resp["results"][0]
+            fh.write(parser.standalone_text(r["graphlet"], r, resp).encode("utf-8"))
+    return run
+
+
+@needs_library
+class ManifestModeTests(unittest.TestCase):
+    def test_three_ways_agree(self):
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            run = fake_run_dir(tmp, {"G-switch": DOCS["G-switch"], "G-trace": DOCS["G-trace"],
+                                     "G-annot": DOCS["G-annot"]})
+            plan = every_tool_plan()
+            scenarios = [s for s in plan["scenarios"] if s["id"] in ("G-switch", "G-trace", "G-annot")]
+            for s in scenarios:
+                s["graphlet"]["ways"] = {"default": ["W1", "W2", "W3", "W4", "W5"]}
+                if s["id"] == "G-trace":   # an op of the service only, and one of W1 alone
+                    s["graphlet"]["ops"][0]["ways"] = ["W3"]
+                    s["graphlet"]["ops"][1]["ways"] = ["W1"]
+            manifest = write_json(os.path.join(tmp, "manifest.json"), {"manifest_version": "8-test",
+                                                                       "scenarios": [{"id": "T-other"}] + scenarios})
+            rc = rgl.main(["--run-dir", run, "--manifest", manifest, "--library-root", LIB, "--quiet"])
+            self.assertEqual(rc, 0)
+            recs = dict((w, records(run, w)) for w in ("W1", "W2", "W4"))
+            trace = [r["op"] for r in recs["W4"] if r["scenario"] == "G-trace"]
+            self.assertNotIn("cmp-claims", trace)
+            self.assertNotIn("cmp-walks", trace)
+            self.assertIn("cmp-walks", [r["op"] for r in recs["W1"] if r["scenario"] == "G-trace"])
+            w1 = [comparable(r, True) for r in recs["W1"] if r["op"] != "cmp-walks"]
+            self.assertEqual(w1, [comparable(r, True) for r in recs["W2"] if r["op"] != "cmp-walks"])
+            self.assertEqual([r for r in w1 if r["scenario"] == "G-switch"],
+                             [comparable(r, True) for r in recs["W4"] if r["scenario"] == "G-switch"])
+            for way, source in (("W1", "arms/direct-local/raw/G-switch.direct-local.0.json.gz"),
+                                ("W4", "arms/mcp/raw/G-switch.mcp.0.mgt.gz")):
+                docs = dict((d["scenario"], d) for d in records(run, way, "graphlet_docs.jsonl"))
+                self.assertEqual(docs["G-switch"]["source"], source)
+                self.assertEqual(set(docs), {"G-switch", "G-trace", "G-annot"})   # G-annot: a compare's b
+            self.assertEqual(sc.read_json(os.path.join(run, "arms", "mcp-lib", "run.json"))["run_id"], "run")
+            # one scenario selected: its compare partner is loaded all the same
+            rc = rgl.main(["--run-dir", run, "--manifest", manifest, "--library-root", LIB, "--quiet", "--out",
+                           os.path.join(tmp, "one"), "--ways", "W4", "--scenarios", "G-trace"])
+            self.assertEqual(rc, 0)
+            one = records(os.path.join(tmp, "one"), "W4")
+            self.assertEqual(set(r["scenario"] for r in one), {"G-trace"})
+            self.assertEqual([comparable(r) for r in one],
+                             [comparable(r) for r in recs["W4"] if r["scenario"] == "G-trace"])
+            with self.assertRaises(SystemExit):
+                rgl.main(["--run-dir", run, "--manifest", manifest, "--library-root", LIB, "--quiet", "--out",
+                          os.path.join(tmp, "x"), "--scenarios", "G-nope"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_malformed_plans_refused(self):
+        for bad in ({"ops": [{"id": "a", "tool": "graphlet_summary", "paging": "some"}]},
+                    {"ops": [{"id": "a", "tool": "graphlet_summary"}, {"id": "a", "tool": "graphlet_walks"}]},
+                    {"ops": [{"id": "a", "tool": 3}]}, {"ops": [{"id": "a", "tool": "x", "args": []}]},
+                    {"ops": [{"id": "a", "tool": "x", "paging": {"pages": 0}}]}):
+            with self.subTest(bad):
+                problems = rgl.plan_problems(rgl.plan_scenarios(bad, ["G"]))
+                self.assertTrue(problems)
+        self.assertEqual(rgl.plan_problems(every_tool_plan()["scenarios"]), [])
+
+
+@needs_library
+class ExportAndDriftTests(unittest.TestCase):
+    def test_export_library_and_drift_report(self):
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            repo = subprocess.check_output(["git", "-C", SUITE, "rev-parse", "--show-toplevel"]).decode().strip()
+            head = subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"]).decode().strip()
+            lib = os.path.join(tmp, "lib")
+            self.assertEqual(rgl.export_library("HEAD", lib, repo, quiet=True), head)
+            self.assertTrue(os.path.isfile(os.path.join(lib, "metagraph", "api", "python", "metagraph", "traverse",
+                                                        "mcp_tools.py")))
+            self.assertEqual(rgl.library_commit(lib), head)
+            # the same commit again: left as it is
+            self.assertEqual(rgl.export_library(head, lib, repo, quiet=True), head)
+            with self.assertRaises(SystemExit):
+                rgl.export_library("HEAD~1", lib, repo, quiet=True)
+            plan = {"scenarios": [s for s in every_tool_plan()["scenarios"] if s["id"] in ("G-trace", "G-annot")]}
+            out = os.path.join(tmp, "run")
+            docs = {"G-trace": DOCS["G-trace"], "G-annot": DOCS["G-annot"]}
+            run_offline(out, plan, docs=docs, ways="W4,drift", extra=["--drift-library-root", LIB])
+            w4 = records(out, "W4")
+            self.assertEqual(set(r["library"]["commit"] for r in w4), {rgl.library_commit(LIB)})
+            report = rgl.drift_report(out, quiet=True)
+            self.assertEqual((report["compared"], report["differ"]), (len(w4), []))
+            # the exported copy runs too, and a drift record that differs is listed
+            run_offline(os.path.join(tmp, "copy"), plan, docs=docs, ways="W4", extra=["--library-root", lib])
+            self.assertEqual(set(r["library"]["commit"] for r in records(os.path.join(tmp, "copy"), "W4")), {head})
+            path = os.path.join(out, "arms", "drift-lib", "graphlet_ops.jsonl")
+            rows = records(out, "drift")
+            rows[0]["answer"]["equal"] = "changed"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("".join(json.dumps(r) + "\n" for r in rows))
+            report = rgl.drift_report(out, quiet=True)
+            self.assertEqual(report["differ"], [{"scenario": "G-trace", "op": rows[0]["op"], "tool": "graphlet_compare",
+                                                 "fields": ["answer"]}])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

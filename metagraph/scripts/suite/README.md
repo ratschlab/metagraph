@@ -4796,6 +4796,58 @@ block's strands ("either" / "context") are other fields.
   new rule's test fails on the code before it. manifest/suite_v6.json recomputes to 49907dbb...; every manifest,
   declared file and policy of v1-v6 and service_by_design.json are byte-identical to 48e04d825's.
 
+## Manifest v8, lane L: area G's local library runner and the selectors (2026-10-19)
+Design: DESIGN-v8 §2-§4, §7 items 2-3; the contract FORMAT-v8 §1-§3 (both in the v8 plans, outside the repository).
+Nothing here touches staging; every test is offline.
+
+### Files
+- `graphlet_doc.py`: the suite's own digests of an MGT document (no library import): `body_digest` (H with its
+  seed_index written `*`, J and Z left out: a server body, its standalone file and one seed at two batch positions
+  share it; unmasked it is the library's parser.body_digest), `envelope_digest` (the J envelope without the top-level
+  `timing` and `usage` and results[i].`timing`; strategy.output.timing is a setting and stays), `digests` (FORMAT's
+  `doc` block). A broken frame (no final LF, no H of MGT v1 first, J anywhere but line 2, no Z counting the lines) is
+  a ValueError, never a digest.
+- `graphlet_select.py`: run-time selectors, pure and stdlib (async vendors it): `resolve(value, answers)` replaces
+  `{ref, path}` (an RFC 6901 pointer into an earlier assembled answer) and `{select, args}` at any depth; a label
+  selector `{"ref": "c:3"}` (no `path`) stays a literal. Named: walk_through_merge, walk_with_continuation,
+  slice_past_end, label_entered_at_merge, top_label, first_arm, second_arm_or_none, each defined in its docstring
+  over the library's answer shapes. A failure is a `SelectorError` naming the argument, the op and the rule.
+- `run_graphlet_local.py`: the ways W1 (arms/dl-lib), W2 (arms/dr-lib), W4 (arms/mcp-lib) and drift
+  (arms/drift-lib) over a run directory and a manifest, or offline over `--doc [ID=]PATH ... --plan PLAN`;
+  `--export-library COMMIT --to DIR` (`git archive COMMIT metagraph/api/python | tar -x`, DIR/LIBRARY_COMMIT);
+  `--drift-report` (the drift way's differences from W4, report-only). The module docstring states the record and
+  file layout.
+- `tests/test_graphlet_local.py` (the digests against the library; an op plan calling all 19 tools with every paging
+  mode and an error case each; paging assembly against the uncut answer for every list tool and the sequence; hash
+  seeds; budgeted pages resumed under local limits; a response against the same document from a file; the manifest
+  mode; export and drift),
+  `tests/test_graphlet_select.py`. The library-backed classes skip below Python 3.10 (the library's own floor).
+
+### Decisions where FORMAT-v8 is silent
+- Documents: W1/W2 take `answer.body` of the direct raw record and convert it in the way's process with
+  `parser.standalone_text(results[0].graphlet, results[0], response)`; W4 reads `arms/mcp/raw/<id>.mcp.<repeat>.mgt.gz`
+  (`--mgt-template`); every document is then written to the way's spool and loaded by `graphlet_load`. A missing
+  file, a failed seed or a refused document is the error `no_document` / `no_graphlet` / `document_refused` of every
+  op of its scenario.
+- Isolation: one child per way, `python -s -B [-P]`, its environment scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus
+  PYTHONHASHSEED (defaults W1 1001, W2 2002, W4 4004, drift 5005; distinct per run), sys.path the library root first.
+  Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere; the
+  parent refuses a child whose seed did not take effect.
+- Handles in records are symbols relative to the op's scenario: `<handle>` (its own graphlet, FORMAT's form),
+  `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in
+  args_resolved `<cursor>`; the way's directories `<export_dir>`, `<spool_dir>`. Raw pages keep everything.
+- Assembly: every paged library list is `rows` (mcp_tools._page / _page_cut; the table is checked against the source
+  by a test); rows concatenated, other fields from the first page, the fields that say how a listing ended from the
+  last, `evidence` from the last page that states it (a page its budget stopped marks it `limitations.local`),
+  compare's per-page `fields_cut` merged (a field is cut only if every page cut it), `row_truncated` /
+  `cut_fields` merged, next_cursor removed; graphlet_sequence concatenates `sequence`, takes `to` from the last page
+  and drops next_from (and `truncated` when the loop reached the end). Pages that state a base field differently are
+  `assembly_error`.
+- Records add `paging_complete` and, for graphlet_export / graphlet_save, `file` {bytes, sha256 of the text with
+  symbols, raw}; `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
+  exception (the library raised), unknown_tool, paging_runaway, assembly_error and the three document codes. A later
+  op's selectors also see a listing's last next_cursor when its paging stopped early.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
