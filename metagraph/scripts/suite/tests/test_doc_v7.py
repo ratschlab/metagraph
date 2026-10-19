@@ -566,24 +566,58 @@ class RecordedSetTest(unittest.TestCase):
 
 
 class NotCoveredTest(unittest.TestCase):
-    """RV14: I.2 says plainly, for manifest v7, which MCP tools the scenarios call (counted from the manifest), how the
-    graphlet document is read, and that the graphlet tools and the traversal library are not covered by this run."""
+    """RV14, W3: I.2 says plainly, for manifest v7, which MCP tools the scenarios name (counted from the manifest),
+    which the runner called (read from its raw records), how the graphlet document is read, which traversal tools
+    were never called, and that the MCP's other tools are outside the suite's scope."""
 
     def test_tools_and_paragraph(self):
+        import gzip
+        import shutil
+        import tempfile
+        import reader
         v7 = sc.read_json(os.path.join(SUITE, "manifest", "suite_v7.json"))
         scen = dict((s["id"], s) for s in v7["scenarios"])
         run = _Stub(order=[s["id"] for s in v7["scenarios"]], scenario=scen.get)
         self.assertEqual(sections.mcp_tools_text(run), "four tools: pattern_search (456 scenarios), traverse_resolve "
                          "(118), traverse_fetch (99) and catalog (1)")
+        # the runner's raw records: tools and the export's format; a download and an HTTP read are no MCP tools
+        tmp = tempfile.mkdtemp()
+        try:
+            raw = os.path.join(tmp, "arms", "mcp", "raw")
+            os.makedirs(raw)
+            calls = [{"tool": "traverse_fetch"}, {"tool": "traverse_status"}, {"tool": "graphlet_export",
+                                                                               "args": {"format": "mgt"}},
+                     {"tool": "download"}, {"tool": "GET /admin/traversal/jobs/x"}, {"tool": "catalog"}]
+            with gzip.open(os.path.join(raw, "T-1.mcp.0.json.gz"), "wt") as fh:
+                json.dump({"calls": calls}, fh)
+            stub = _Stub(dir=tmp, _mcp_tools=None)
+            got = reader.Run.mcp_tool_calls(stub)
+            self.assertEqual(sorted(got), ["catalog", "graphlet_export", "traverse_fetch", "traverse_status"])
+            self.assertEqual(got["graphlet_export"]["formats"], {"mgt": 1})
+            stub.mcp_tool_calls = lambda: got
+            self.assertEqual(sections.mcp_tools_called_text(stub), "`traverse_fetch`, `traverse_status`, `catalog` and "
+                             "`graphlet_export` in the MGT format to download the graphlet document a traversal returns")
+            text = sections.traversal_tools_not_called_text(stub)
+            self.assertIn("the graphlet processing tools (`graphlet_summary`", text)
+            self.assertIn("`graphlet_export`'s other formats)", text)
+            self.assertTrue(text.endswith("`traverse_resolve`, `traverse_results`, `traverse_stop`, `traverse_lock` and "
+                                          "`traverse_capabilities`"), text)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
         par = [p for p in prose("overview")["sections"]["methods"]["paragraphs"] if "*Not covered.*" in p][0]
-        self.assertEqual(facts.fill(par, {"manifest_version": 6, "mcp_tools_text": "x"}, unresolved=[]).strip(), "")
-        text = facts.fill(par, {"manifest_version": 7, "mcp_tools_text": "four tools: ..."}, unresolved=[])
-        for tool in ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_sequence",
-                     "graphlet_compare", "graphlet_support", "graphlet_splits", "graphlet_claims", "graphlet_subtrie",
-                     "graphlet_save", "graphlet_load"):
-            self.assertIn("`%s`" % tool, text)
-        self.assertIn("`graphlet_export` in its MGT format", text)
-        self.assertIn("tested by its own offline test suite, not by this run", text)
+        self.assertEqual(facts.fill(par, {"manifest_version": 6, "mcp_tools_text": "x", "mcp_tools_called": "y",
+                                          "traversal_tools_not_called": "z"}, unresolved=[]).strip(), "")
+        text = facts.fill(par, {"manifest_version": 7, "mcp_tools_text": "four tools", "mcp_tools_called": "TOOLS",
+                                "traversal_tools_not_called": "NOT"}, unresolved=[])
+        self.assertIn("to run them the MCP runner called, as its records show, TOOLS.", text)
+        self.assertIn("Not called, and so not covered: NOT;", text)
+        self.assertIn("reference examples of the document format", text)
+        self.assertNotIn("codec vectors", text)
+        self.assertIn("The MCP's other tools (sequence search, taxonomy, reference and sequence utilities) are outside "
+                      "this suite's scope.", text)
+        access = prose("overview")["sections"]["methods"]["paragraphs"][0]
+        self.assertIn("`pattern_search`, `catalog`)", access)
+        self.assertNotIn("the capabilities tools", access)
 
 
 class PluralsTest(unittest.TestCase):

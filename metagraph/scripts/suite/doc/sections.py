@@ -248,6 +248,9 @@ class Context(object):
                 "answer_side_mark": bool(answer_side_mark_ids(run)),
                 # the MCP tools the scenarios call, counted from the manifest (RV14: what the suite covers via MCP)
                 "mcp_tools_text": mcp_tools_text(run),
+                # the tools the MCP runner called and the traversal tools it never called, from its raw records (W3)
+                "mcp_tools_called": mcp_tools_called_text(run),
+                "traversal_tools_not_called": traversal_tools_not_called_text(run),
                 # the MCP runner's git head, short, for the prose that credits its normaliser (V12)
                 "mcp_runner_head": str((run.mcp_run or {}).get("git_head") or "–")[:8],
                 # whether this document reads a re-evaluated set: a sentence about the re-evaluation prints only then
@@ -460,6 +463,51 @@ def checks_commit_text(run):
         text += "; the MCP runner, a program at its own git head %s%s, judged with the same checks.py, sha256 %s…" % (
             str(head)[:12], mcp_runner_repository_text(run), list(shas)[0][:12])
     return text + ")"
+
+
+# the service's traversal tools (its MCP tool list: traverse_* and graphlet_*), for what the suite does not call
+TRAVERSAL_TOOLS = ("traverse_resolve", "traverse_fetch", "traverse_status", "traverse_results", "traverse_stop",
+                   "traverse_lock", "traverse_capabilities", "graphlet_summary", "graphlet_walks", "graphlet_walk",
+                   "graphlet_labels", "graphlet_sequence", "graphlet_compare", "graphlet_export")
+MCP_TOOL_ORDER = ("traverse_resolve", "traverse_fetch", "traverse_status", "traverse_results", "pattern_search",
+                  "get_status", "get_results", "catalog", "graphlet_export")
+
+
+def mcp_tools_called_text(run):
+    """The MCP tools the runner called, read from its raw records (reader.Run.mcp_tool_calls; W3), by name:
+    '`traverse_resolve`, ..., `catalog`, and `graphlet_export` in the MGT format to download the graphlet document a
+    traversal returns'; '' without records."""
+    calls = run.mcp_tool_calls() if hasattr(run, "mcp_tool_calls") else {}
+    names = sorted((t for t in calls if t != "graphlet_export"),
+                   key=lambda t: (MCP_TOOL_ORDER.index(t) if t in MCP_TOOL_ORDER else len(MCP_TOOL_ORDER), t))
+    if not names and "graphlet_export" not in calls:
+        return ""
+    items = ["`%s`" % t for t in names]
+    if "graphlet_export" in calls:
+        formats = sorted(calls["graphlet_export"]["formats"])
+        items.append("`graphlet_export`%s to download the graphlet document a traversal returns" % (
+            (" in the %s format%s" % (" and ".join(f.upper() for f in formats), "s" if len(formats) > 1 else ""))
+            if formats else ""))
+    return facts._join(items)
+
+
+def traversal_tools_not_called_text(run):
+    """The service's traversal tools the runner never called (W3): the graphlet processing tools (and
+    graphlet_export's formats it did not use) and the traverse_* tools; '' without records."""
+    calls = run.mcp_tool_calls() if hasattr(run, "mcp_tool_calls") else {}
+    if not calls:
+        return ""
+    graphlet = [t for t in TRAVERSAL_TOOLS if t.startswith("graphlet_") and t != "graphlet_export" and t not in calls]
+    parts = []
+    if graphlet or "graphlet_export" in calls:
+        inner = ["`%s`" % t for t in graphlet]
+        if "graphlet_export" in calls:
+            inner.append("`graphlet_export`'s other formats")
+        elif "graphlet_export" in TRAVERSAL_TOOLS:
+            inner.append("`graphlet_export`")
+        parts.append("the graphlet processing tools (%s)" % facts._join(inner))
+    parts += ["`%s`" % t for t in TRAVERSAL_TOOLS if t.startswith("traverse_") and t not in calls]
+    return facts._join(parts)
 
 
 def mcp_tools_text(run):
@@ -5317,6 +5365,10 @@ def evidence_manifest(ctx):
                 other = True
             inputs.append({"path": name, "sha256": _file_sha256(path), "role": "present, not read" if other
                            else "read by this document"})
+    if getattr(run, "mcp_raw_files", None):
+        # the MCP runner's raw records, read for the tool names I.2's scope note prints (W3)
+        inputs.append({"path": "arms/mcp/raw/", "files": run.mcp_raw_files,
+                       "role": "read by this document (the MCP tool names of the records)"})
     gate = run.gate if isinstance(run.gate, dict) else None
     pol = None
     if run.policy_path:

@@ -113,6 +113,10 @@ def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
     return depth
 
 
+# the MCP runner's steps beside the MCP tools in its raw records: the download of an export's link
+NON_MCP_STEPS = ("download",)
+
+
 def sc_time(text):
     """Epoch seconds of an ISO UTC time ('2026-10-19T02:34:58Z', a fraction kept), None when not one."""
     import calendar
@@ -463,6 +467,43 @@ class Run(object):
 
     def run_id(self):
         return self.run.get("run_id") or self.comp.get("run_id") or os.path.basename(self.dir)
+
+    def mcp_tool_calls(self):
+        """{tool: {"n": calls, "formats": {format argument: calls}}} of the MCP runner's raw records
+        (arms/mcp/raw/*.json[.gz]: every object naming a `tool`), read once; the HTTP reads the runner makes beside the
+        tools (a name with a '/', the export's download) are left out. {} without raw records."""
+        if getattr(self, "_mcp_tools", None) is not None:
+            return self._mcp_tools
+        import glob
+        import gzip
+        out = {}
+
+        def walk(o):
+            if isinstance(o, dict):
+                tool = o.get("tool")
+                if isinstance(tool, str) and re.match(r"\A[a-z_]+\Z", tool) and tool not in NON_MCP_STEPS:
+                    e = out.setdefault(tool, {"n": 0, "formats": {}})
+                    e["n"] += 1
+                    fmt = (o.get("args") or {}).get("format") if isinstance(o.get("args"), dict) else None
+                    if fmt is not None:
+                        e["formats"][str(fmt)] = e["formats"].get(str(fmt), 0) + 1
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+        files = sorted(glob.glob(os.path.join(self.dir, "arms", "mcp", "raw", "*.json"))
+                       + glob.glob(os.path.join(self.dir, "arms", "mcp", "raw", "*.json.gz")))
+        for path in files:
+            try:
+                opener = gzip.open if path.endswith(".gz") else open
+                with opener(path, "rb") as fh:
+                    walk(json.loads(fh.read().decode("utf-8")))
+            except (OSError, ValueError):
+                continue
+        self._mcp_tools = out
+        self.mcp_raw_files = len(files)
+        return out
 
     def line_no(self, line):
         """The physical line of an execution in the executions file (1-based), or None."""
