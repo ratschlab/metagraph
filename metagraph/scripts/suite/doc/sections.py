@@ -234,6 +234,9 @@ class Context(object):
                 # an answer-side scenario-level mark in the manifest (the delta verifier's M2): the glossary's and
                 # appendix G's definitions of not implemented via MCP name it
                 "answer_side_mark": bool(answer_side_mark_ids(run)),
+                # whether this document reads a re-evaluated set: a sentence about the re-evaluation prints only then
+                # (the reader review of the v7 document, RV6; the fact verifier, V12)
+                "reevaluated": bool(run.reevaluated),
                 # the short names of the gate policies reported, for the glossary (RV5)
                 "gate_policy_names": gate_policy_names(run),
                 # the kinds of property-level mark the manifest carries, for appendix G's lead-in (V10)
@@ -429,7 +432,33 @@ def checks_commit_text(run):
     arms = run.run.get("arms") or {}
     commit = next((str((info or {}).get("scripts_commit"))[:12] for info in arms.values()
                    if (info or {}).get("scripts_commit")), None)
-    return ("%s (the runners' scripts, as recorded)" % commit) if commit else "not recorded"
+    if not commit:
+        return "not recorded"
+    text = "%s (the runners' scripts, as recorded" % commit
+    # the MCP runner is another program at its own git head; it judged with the run's snapshot of the checks, the
+    # same checks.py as the direct runners when the recorded sha256 agree (the reader review of the v7 document, RV6)
+    mcp = arms.get("mcp") or {}
+    head = (getattr(run, "mcp_run", None) or {}).get("git_head")
+    shas = set(str((info or {}).get("checks_sha256")) for info in arms.values() if (info or {}).get("checks_sha256"))
+    if head and len(shas) == 1 and mcp.get("checks_sha256"):
+        text += "; the MCP runner, a program at its own git head %s%s, judged with the same checks.py, sha256 %s…" % (
+            str(head)[:12], mcp_runner_repository_text(run), list(shas)[0][:12])
+    return text + ")"
+
+
+def mcp_runner_repository_text(run):
+    """', in <repository>' of the MCP runner, as the identity input states it (make_doc --identity:
+    `mcp_runner_repository`; the run records the runner's git head, not its repository), '' otherwise."""
+    ident = getattr(run, "identity", None)
+    repo = ident.get("mcp_runner_repository") if isinstance(ident, dict) else None
+    return (", in %s" % repo) if repo else ""
+
+
+def mcp_runner_text(run):
+    """The MCP access path's runner for the tables (RV6: never '–' beside the direct runners' hosts): the MCP client
+    at its git head (and repository when given), else '–'."""
+    head = (getattr(run, "mcp_run", None) or {}).get("git_head")
+    return ("the MCP client, git head %s%s" % (str(head)[:12], mcp_runner_repository_text(run))) if head else "–"
 
 
 def scope_note_text(ctx):
@@ -968,9 +997,10 @@ def gate_read_text(run):
              else "recorded in the run by gate.py")
     return ("%s, from the run directory's %s set (%s and %s) and the policy %s; the checks it read for the property "
             "reading are those of the checkout at build time, and an identity problem that names that checkout's "
-            "checks.py or suite_common.py compares it with the checks the re-evaluation recorded" % (
+            "checks.py or suite_common.py compares it with the checks the %s recorded" % (
                 where, "re-evaluated" if run.reevaluated else "recorded", run.executions_file,
-                sc.reevaluated_name("compare.json", run.reevaluated), pol_path))
+                sc.reevaluated_name("compare.json", run.reevaluated), pol_path,
+                "re-evaluation" if run.reevaluated else "runners"))
 
 
 def counting_example_text(ctx):
@@ -2233,7 +2263,9 @@ def provenance_table(ctx):
             tt(_short(checks.get("commit"), 12)), " (dirty)" if checks.get("dirty") else "",
             _date(reeval.get("reevaluated_utc")))))
     else:
-        rows.append(("checks", "the recorded set, judged by the runners' checks"))
+        rows.append(("checks", "the recorded set: the outcomes as the runners' checks judged them during the run; no "
+                               "re-evaluation was run afterwards, so a change to the checks since the run is not "
+                               "reflected here"))
     if table.get("path"):
         text = "version %s, %s cases, service commit %s…, sha256 %s…" % (
             esc(table.get("version")), esc(table.get("cases")), tt(_short(table.get("service_commit"), 12)),
@@ -2252,7 +2284,7 @@ def provenance_table(ctx):
         info = info or {}
         rows.append(("access path %s" % esc(arm), "%s executions, %s to %s, runner %s" % (
             esc(info.get("executions_recorded", "–")), _date(info.get("started_utc")), _date(_arm_end(run, arm, info)),
-            esc(info.get("runner_host") or "–"))))
+            esc(info.get("runner_host") or (mcp_runner_text(run) if arm == "mcp" else "–")))))
     sessions = _sessions(run)
     if sessions:
         first = sessions[0]
@@ -4653,7 +4685,7 @@ def check_catalogue(ctx):
            "that use it.\n\n")
     common = ctx.checks_prose.get("common") or []
     if common:
-        out += "\\grouphead{The rules before any check}\n" + paragraphs(common)
+        out += "\\grouphead{The rules before any check}\n" + paragraphs([ctx.fill(p) for p in common])
     generic = [k for k in sorted(kinds) if not run.is_property(k)]
     props = [k for k in sorted(kinds) if run.is_property(k)]
     if generic:
@@ -5037,9 +5069,13 @@ def environment_table(ctx):
         info = info or {}
         ended = _arm_end(run, arm, info)
         scripts = info.get("scripts_commit") or (mcp_run.get("git_head") if arm == "mcp" else None)
+        state = info.get("state")
+        if not state and arm == "mcp" and info.get("exit") is not None and (info.get("finished_utc") or ended):
+            # the MCP runner records its exit status, not a state (RV6)
+            state = "finished, exit %s" % info.get("exit")
         rows.append(("access path %s" % esc(arm), "%s; state %s; %s executions recorded; runner %s, scripts %s; %s to %s" % (
-            tt(info.get("base") or "–"), esc(info.get("state") or "–"), esc(info.get("executions_recorded", "–")),
-            esc(info.get("runner_host") or "–"), tt(_short(scripts, 12)),
+            tt(info.get("base") or "–"), esc(state or "–"), esc(info.get("executions_recorded", "–")),
+            esc(info.get("runner_host") or (mcp_runner_text(run) if arm == "mcp" else "–")), tt(_short(scripts, 12)),
             _date(info.get("started_utc")), _date(ended))))
     if mcp_run:
         # three revisions are distinct (READ-021): the runner's (the client that asked), the by-design table's service

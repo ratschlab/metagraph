@@ -490,6 +490,35 @@ class GatePoliciesNamedTest(unittest.TestCase):
         self.assertEqual(sections.gate_policy_names(_Stub(policy=rtp, also_gates=[])), "")
 
 
+class RecordedSetTest(unittest.TestCase):
+    """The recorded set defined and the MCP runner named (RV6), and no sentence about a re-evaluation in a document
+    of a recorded set (RV6, V12; v5 too)."""
+
+    def _run(self, reevaluated=False):
+        arms = {"direct-local": {"scripts_commit": "1a9cee291e4b409e", "checks_sha256": "7580" * 16},
+                "mcp": {"checks_sha256": "7580" * 16}}
+        return _Stub(reevaluated=reevaluated, reeval={}, run={"arms": arms}, mcp_run={"git_head": "fcf7ae49465c9b61"},
+                     identity={"service_commit": "x", "mcp_runner_repository": "the search service's repository"},
+                     gate={"passed": True}, gate_offline=True, policy_path="/x/policy.json",
+                     executions_file="executions.jsonl")
+
+    def test_texts(self):
+        run = self._run()
+        self.assertEqual(sections.checks_commit_text(run), "1a9cee291e4b (the runners' scripts, as recorded; the MCP "
+                         "runner, a program at its own git head fcf7ae49465c, in the search service's repository, "
+                         "judged with the same checks.py, sha256 758075807580…)")
+        self.assertEqual(sections.mcp_runner_text(run), "the MCP client, git head fcf7ae49465c, in the search "
+                         "service's repository")
+        self.assertIn("compares it with the checks the runners recorded", sections.gate_read_text(run))
+        self.assertNotIn("re-evaluation", sections.gate_read_text(run))
+        common = " ".join(prose("checks")["common"])
+        self.assertIn("the direct runners[[reevaluated ? and the re-evaluation]] record", common)
+        self.assertIn("(the MCP runner's rule[[reevaluated ?, replayed by the re-evaluation]])", common)
+        for p in prose("checks")["common"]:
+            filled = facts.fill(p, {"reevaluated": False}, unresolved=[])
+            self.assertNotIn("re-evaluation", filled)
+
+
 class SincePreviousTest(unittest.TestCase):
     """I.4's 'Since the previous edition' (RV7), computed from the previous edition's run given as an input: the
     scenarios, the MCP marks removed and moved, a check argument gained, the outcomes changed and the inconclusive
