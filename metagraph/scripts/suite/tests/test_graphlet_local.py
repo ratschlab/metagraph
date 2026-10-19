@@ -890,7 +890,7 @@ def fake_run_dir(tmp, ids):
             os.makedirs(os.path.dirname(rel), exist_ok=True)
             sc.write_gz_json(rel, {"scenario": sid, "arm": arm, "repeat": 0,
                                    "answer": {"http": 200, "body": resp, "error": None}})
-        mgt = os.path.join(run, rgl.DEFAULT_MGT_TEMPLATE.format(id=sid, repeat=0))
+        mgt = os.path.join(run, "arms", "mcp", "docs", sid + ".mgt.gz")   # FORMAT v2 C1
         os.makedirs(os.path.dirname(mgt), exist_ok=True)
         with gzip.open(mgt, "wb") as fh:
             r = resp["results"][0]
@@ -926,7 +926,7 @@ class ManifestModeTests(unittest.TestCase):
             self.assertEqual([r for r in w1 if r["scenario"] == "G-switch"],
                              [comparable(r, True) for r in recs["W4"] if r["scenario"] == "G-switch"])
             for way, source in (("W1", "arms/direct-local/raw/G-switch.direct-local.0.json.gz"),
-                                ("W4", "arms/mcp/raw/G-switch.mcp.0.mgt.gz")):
+                                ("W4", "arms/mcp/docs/G-switch.mgt.gz")):
                 docs = dict((d["scenario"], d) for d in records(run, way, "graphlet_docs.jsonl"))
                 self.assertEqual(docs["G-switch"]["source"], source)
                 self.assertEqual(set(docs), {"G-switch", "G-trace", "G-annot"})   # G-annot: a compare's b

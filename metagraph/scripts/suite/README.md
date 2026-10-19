@@ -4829,8 +4829,9 @@ Nothing here touches staging; every test is offline.
 
 ### Decisions where FORMAT-v8 is silent
 - Documents: W1/W2 take `answer.body` of the direct raw record and convert it in the way's process with
-  `parser.standalone_text(results[0].graphlet, results[0], response)`; W4 reads `arms/mcp/raw/<id>.mcp.<repeat>.mgt.gz`
-  (`--mgt-template`); every document is then written to the way's spool and loaded by `graphlet_load`. A missing
+  `parser.standalone_text(results[0].graphlet, results[0], response)`; W4 and drift read the MCP's exported file
+  `arms/mcp/docs/<id>.mgt.gz` (FORMAT v2 C1; `--mgt-template`); every way writes the document it processed to
+  `arms/<way dir>/docs/<id>.mgt.gz`, then to its spool, and loads it by `graphlet_load`. A missing
   file, a failed seed or a refused document is the error `no_document` / `no_graphlet` / `document_refused` of every
   op of its scenario.
 - Isolation: one child per way, `python -s -B [-P]`, its environment scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus

@@ -16,8 +16,8 @@ Ways and their documents (DESIGN-v8 §2):
                         parser.standalone_text(results[0].graphlet, results[0], response) in the way's process (byte
                         for byte dump(from_response(...), envelope=True), parser.py:1343-1366)
   W2 -> arms/dr-lib     the same from arms/direct-remote
-  W4 -> arms/mcp-lib    the .mgt.gz the MCP exported, as it is (--mgt-template, default
-                        arms/mcp/raw/<id>.mcp.<repeat>.mgt.gz: FORMAT names no place for it)
+  W4 -> arms/mcp-lib    the MCP's exported file arms/mcp/docs/<id>.mgt.gz, as it is (FORMAT v2 C1: one MCP execution
+                        per area G scenario, no repeat; --mgt-template overrides it)
   drift -> arms/drift-lib  W4's documents and ops under --drift-library-root (the branch head); report-only, listed by
                         --drift-report against W4's records
 Offline (--doc/--plan: the tests, the rehearsal): a .json/.json.gz document (a /traverse response or a raw record)
@@ -52,8 +52,8 @@ The raw pages keep everything as the library answered it.
 Files of a way's directory: graphlet_ops.jsonl (one record per op, FORMAT §3, plus `paging_complete` and, for
 graphlet_export / graphlet_save, `file`), graphlet_docs.jsonl (one line per document: its source, digests, load
 receipt or error), raw/<scenario>.<op>.<page>.json.gz (page 0 first) and raw/<scenario>.<op>.file<.ext>.gz (an
-export's text, handles as symbols), docs/<scenario>.mgt.gz (the document the way processed), run.json, child.log, work/ (the spool and the export
-directory). An existing graphlet_ops.jsonl is never appended to: use another --out.
+export's text, handles as symbols), docs/<scenario>.mgt.gz (the document the way processed), run.json, child.log,
+work/ (the spool and the export directory). An existing graphlet_ops.jsonl is never appended to: use another --out.
 """
 
 import argparse
@@ -77,7 +77,9 @@ WAY_SOURCE = {"W1": "direct-local", "W2": "direct-remote", "W4": "mcp", "drift":
 # the plan's way an op must name to run on this way (the drift lane re-runs W4's ops at another commit)
 PLAN_WAY = {"W1": "W1", "W2": "W2", "W4": "W4", "drift": "W4"}
 DEFAULT_HASHSEEDS = {"W1": 1001, "W2": 2002, "W4": 4004, "drift": 5005}
-DEFAULT_MGT_TEMPLATE = "arms/mcp/raw/{id}.mcp.{repeat}.mgt.gz"
+# FORMAT v2 C1: the MCP's exported document of a scenario, which W4 and drift read; each way writes the document it
+# processed to arms/<way dir>/docs/<scenario>.mgt.gz
+DEFAULT_MGT_TEMPLATE = "arms/mcp/docs/{id}.mgt.gz"
 DEFAULT_LIMITS = {"max_bytes": 2048, "sequence_max_bytes": 16384, "local_limits": None, "max_graphlet_mb": 1e6}
 # fixed, so that a cursor (raw pages only) is the same string in every process of one commit
 CURSOR_SECRET = "metagraph-suite-v8-local-cursors"
@@ -876,9 +878,10 @@ def parse_args(argv):
     ap.add_argument("--drift-library-root", help="the branch head's library (the drift way)")
     ap.add_argument("--drift-library-commit")
     ap.add_argument("--limits", help="JSON {max_bytes, sequence_max_bytes, local_limits, max_graphlet_mb}")
-    ap.add_argument("--repeat", type=int, default=0, help="the arms' repeat whose documents are read (0)")
+    ap.add_argument("--repeat", type=int, default=0, help="the direct arms' repeat whose answers W1/W2 read (0)")
     ap.add_argument("--mgt-template", default=DEFAULT_MGT_TEMPLATE,
-                    help="W4's document relative to --run-dir, with {id} and {repeat} (%s)" % DEFAULT_MGT_TEMPLATE)
+                    help="W4's and drift's document relative to --run-dir, with {id} (and {repeat}) (%s)"
+                         % DEFAULT_MGT_TEMPLATE)
     ap.add_argument("--hashseed", default=None, help="WAY=N,... (defaults %s)" % ",".join(
         "%s=%d" % kv for kv in sorted(DEFAULT_HASHSEEDS.items())))
     ap.add_argument("--python", help="the interpreter of the ways (default: this one)")
