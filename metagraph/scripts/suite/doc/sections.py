@@ -3648,8 +3648,9 @@ MEMORY_SLOWER_FACTOR = 2.0    # an execution in an episode at twice its test's t
 def memory_summary(ctx):
     """Per memory episode the facts the summary lines read (I.1, Timing 1, the attention caption): the window
     (HH:MM to HH:MM), the limit, the executions that ran in it, their chapters, those that did not pass, the chapters
-    of the time-budget tests among them, and whether some passing search in it took MEMORY_SLOWER_FACTOR times its
-    test's time elsewhere or more (this run outside every episode, or the previous edition's run when given)."""
+    of the time-budget tests among them, and the passing searches in it that took MEMORY_SLOWER_FACTOR times their
+    test's longest server time elsewhere or more (this run outside every episode, and the previous edition's run when
+    given), each with that ratio (W2: the split is printed, never a general "slower")."""
     run = ctx.run
     eps = memory_episodes(run)
     if not eps:
@@ -3664,7 +3665,7 @@ def memory_summary(ctx):
     out = []
     for ep in eps:
         rows = [l for l, _ in ep["rows"]]
-        slower = False
+        slower = []
         for l in rows:
             sv = _server_ms(l)
             if l.get("outcome") != "pass" or sv is None:
@@ -3673,13 +3674,35 @@ def memory_summary(ctx):
             ref += [_server_ms(x) for x in (prev.rows if prev is not None else []) if x.get("scenario") == l.get("scenario")]
             ref = [x for x in ref if x is not None and x > 0]
             if ref and sv >= MEMORY_SLOWER_FACTOR * max(ref):
-                slower = True
-                break
+                slower.append((l, sv / max(ref)))
         out.append({"window": "%s to %s" % (ep["start"][:5], ep["end"][:5]), "limit_gib": ep["limit_gib"],
                     "rows": rows, "chapters": ch_sort(area(l) for l in rows),
                     "bad": [l for l in rows if l.get("outcome") != "pass"],
-                    "tb_chapters": ch_sort(area(l) for l in rows if facts.time_budget_issue(l)), "slower": slower})
+                    "tb_chapters": ch_sort(area(l) for l in rows if facts.time_budget_issue(l)), "slower": slower,
+                    "chapter_order": chapters, "area_of": dict((l.get("scenario"), area(l)) for l in rows)})
     return out
+
+
+def _ratio(x):
+    return fmt_n(x, 0) if x >= 10 else fmt_n(x, 1)
+
+
+def _memory_slower_text(m):
+    """'15 of the 31 searches in that window took at least twice as long as the same test elsewhere (M-planted-0007
+    to -0009, -0013, 38 to 197 times); the others did not' (W2): the split, computed, never a general claim."""
+    n = len(m["rows"])
+    slow = m["slower"]
+    factor = "twice" if MEMORY_SLOWER_FACTOR == 2 else "%s times" % fmt_n(MEMORY_SLOWER_FACTOR)
+    if not slow:
+        return "none of the %d searches in that window took %s as long as the same test elsewhere" % (n, factor)
+    chapters = m.get("chapter_order") or []
+    sids = sorted(set(l.get("scenario") for l, _ in slow), key=lambda s: (
+        chapters.index(m["area_of"].get(s)) if m["area_of"].get(s) in chapters else 99, s))
+    lo, hi = min(r for _, r in slow), max(r for _, r in slow)
+    return "%d of the %d searches in that window took at least %s as long as the same test elsewhere (%s, %s)%s" % (
+        len(slow), n, factor, facts.ids_ranges(sids),
+        ("%s times" % _ratio(lo)) if _ratio(lo) == _ratio(hi) else "%s to %s times" % (_ratio(lo), _ratio(hi)),
+        "; the others did not" if len(slow) < n else "")
 
 
 def _memory_outcomes_text(m):
@@ -3702,15 +3725,14 @@ def memory_lead_text(ctx):
         return ""
     parts = []
     for m in mem:
-        parts.append("from %s UTC the engine's container stood at its %s GiB memory limit on the host: %d execution%s "
-                     "ran then (chapter%s %s)%s; %s" % (
+        slow = _memory_slower_text(m)
+        parts.append("From %s UTC the engine's container stood at its %s GiB memory limit on the host: %d execution%s "
+                     "ran then (chapter%s %s); %s. %s" % (
                          m["window"], fmt_n(m["limit_gib"]), len(m["rows"]), "" if len(m["rows"]) == 1 else "s",
-                         "" if len(m["chapters"]) == 1 else "s", facts._join(m["chapters"]),
-                         ", and searches that ran then were slower than the same tests elsewhere" if m["slower"] else "",
-                         _memory_outcomes_text(m)))
-    text = "; ".join(parts)
-    return ("*The host's memory.* %s%s (Timing 6). It is an operational note about the host, not a finding of the "
-            "service." % (text[0].upper(), text[1:]))
+                         "" if len(m["chapters"]) == 1 else "s", facts._join(m["chapters"]), _memory_outcomes_text(m),
+                         slow[0].upper() + slow[1:]))
+    return ("*The host's memory.* %s (Timing 6). It is an operational note about the host, not a finding of the "
+            "service." % ". ".join(parts))
 
 
 def memory_timing_bullet(ctx):
@@ -3926,7 +3948,8 @@ def memory_episode_text(ctx):
     named = [(l, a, b) for l, _, a, b in late]
     ran, late_par, rest_par, place_par = [], [], [], []
     window_tests = []
-    for ep in eps:
+    summaries = memory_summary(ctx)
+    for i_ep, ep in enumerate(eps):
         rows = ep["rows"]
         areas = sorted(set(str(run.scenario(l.get("scenario")).get("area") or l.get("area") or "?") for l, _ in rows),
                        key=lambda x: (ctx.units.chapters.index(x) if x in ctx.units.chapters else 99, x))
@@ -3952,6 +3975,9 @@ def memory_episode_text(ctx):
                 len(rows) - len(bad), "%d" % len(bad) if len(bad) > 1 else "one",
                 "; ".join(items) + ("; … %d more" % (len(bad) - MEMORY_LIST_MAX) if len(bad) > MEMORY_LIST_MAX else ""))
         ran.append(text + ".")
+        # which of them were slower, by how much, and that the others were not (W2): the same split as I.1's
+        slow = _memory_slower_text(summaries[i_ep])
+        ran.append(slow[0].upper() + slow[1:] + ".")
         # the time-budget tests with an execution in the window, placed by time before any tag (V1)
         tests = []
         for l, _ in rows:

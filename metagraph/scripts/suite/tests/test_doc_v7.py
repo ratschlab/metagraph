@@ -278,10 +278,19 @@ class MemoryEpisodeTest(unittest.TestCase):
         ctx = _Stub(run=run, units=units)
         lead = sections.memory_lead_text(ctx)
         self.assertIn("From 02:20 to 02:30 UTC the engine's container stood at its 128 GiB memory limit on the host: 3 "
-                      "executions ran then (chapters P and M), and searches that ran then were slower than the same "
-                      "tests elsewhere; 2 passed, and W-1 direct-local r0 ended in a 503 deadline, inconclusive "
-                      "(Timing 6). It is an operational note about the host, not a finding of the service.",
-                      latex_plain(lead))
+                      "executions ran then (chapters P and M); 2 passed, and W-1 direct-local r0 ended in a 503 "
+                      "deadline, inconclusive. 2 of the 3 searches in that window took at least twice as long as the "
+                      "same test elsewhere (B-1, M-1, 133 to 192 times); the others did not (Timing 6). It is an "
+                      "operational note about the host, not a finding of the service.", latex_plain(lead))
+        # W2: a search in the window faster than the same test elsewhere is not counted as slower
+        run2 = self._run()
+        run2.scenario.__self__["F-1"] = {"tags": [], "area": "M"}
+        run2.order.append("F-1")
+        run2.rows += [dict(run2.rows[0], scenario="F-1", server={"elapsed_ms": 50.0}, wall_ms=50.0),
+                      dict(run2.rows[1], scenario="F-1", server={"elapsed_ms": 5000.0}, wall_ms=5000.0)]
+        m = sections.memory_summary(_Stub(run=run2, units=units))[0]
+        self.assertEqual(sorted(l["scenario"] for l, _ in m["slower"]), ["B-1", "M-1"])
+        self.assertIn("2 of the 4 searches in that window took at least twice as long", sections._memory_slower_text(m))
         self.assertIn("placed in Timing 6: 3, of which 2 passed", sections.memory_timing_bullet(ctx))
         self.assertEqual(sections.memory_chapter_note(ctx, "M"), "2 of this chapter's executions ran while the "
                          "engine's container stood at its memory limit, 02:20 to 02:30 UTC (Timing 6)")
