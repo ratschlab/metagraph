@@ -552,18 +552,30 @@ def oracle_view(way, rec):
 
 
 def _oracle_result(res):
-    """(outcome or None, [difference]) of what graphlet_oracle.compare returned: a list of differences (lane O's
-    `differences` shape: {pointer, clause, oracle, other | missing | present}), or an object {outcome?, differences}."""
+    """(outcome or None, [difference], detail or None) of what graphlet_oracle.compare returned: lane O's
+    {outcome: agree | disagree | not_comparable | not_checked, detail, checked, differences}, or a bare list of
+    differences ({pointer, clause, oracle, other | missing | present})."""
     if isinstance(res, dict):
         diffs = res.get("differences") if isinstance(res.get("differences"), list) else []
-        return res.get("outcome"), diffs
-    return None, list(res or [])
+        return res.get("outcome"), diffs, res.get("detail")
+    return None, list(res or []), None
+
+
+def fit_errors(way):
+    """The fitting errors W5 makes no claim about (FORMAT v2 F3): lane O's graphlet_oracle.FIT_ERRORS (the owner's
+    list) where its module loads, else result_too_large and receipt_too_large (op_busy too on W3)."""
+    owner = getattr(graphlet_oracle, "FIT_ERRORS", None) if graphlet_oracle is not None else None
+    if isinstance(owner, (tuple, list, set, frozenset)) and owner:
+        return tuple(owner)
+    return FIT_ERRORS_W3 if way == "W3" else FIT_ERRORS
 
 
 def compare_w5(x, rx, r5):
     """The pair entry of way |x| against W5: graphlet_oracle.compare(W5's record, x's view) decides (FORMAT v2 F2;
-    lane O's rules: checked pointers, unordered lists, absent keys, expected_error, cut rows); this stage adds only
-    the selector and args_resolved readings and names the first difference with both values."""
+    lane O's rules: checked pointers, unordered and position-ordered lists, absent keys, expected_error, cut rows,
+    fitting errors); this stage adds only the selector, runner and args_resolved readings and names the first
+    difference with both values. Its outcomes pass through: agree, disagree, not_comparable (a fitting error),
+    not_checked (W5 makes no claim on this call)."""
     if rx.get("selector_error") or r5.get("selector_error"):
         return _pair(x, "W5", W5_WHAT, "not_compared", "the selector failed in %s" % (
             x if rx.get("selector_error") else "W5"), kind="selector")
@@ -574,7 +586,7 @@ def compare_w5(x, rx, r5):
     if d:
         return _pair(x, "W5", W5_WHAT, "disagree", "args_resolved differ (W5 takes W1's)", d, kind="args_resolved")
     code = (rx.get("error") or {}).get("code") if isinstance(rx.get("error"), dict) else None
-    if code in (FIT_ERRORS_W3 if x == "W3" else FIT_ERRORS):
+    if code in fit_errors(x):
         return _pair(x, "W5", W5_WHAT, "not_comparable", "%s answered %s: W5 makes no claim about fitting an answer "
                                                          "to a ceiling (FORMAT v2 F3)" % (x, code), kind="fit")
     fn = oracle_compare_fn()
@@ -582,22 +594,22 @@ def compare_w5(x, rx, r5):
         return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare (lane O, FORMAT v2 F2) is not "
                                                        "available", kind="oracle_unavailable")
     try:
-        outcome, diffs = _oracle_result(fn(r5, oracle_view(x, rx)))
+        outcome, diffs, detail = _oracle_result(fn(r5, oracle_view(x, rx)))
     except Exception as e:   # a W5 record the comparison cannot read: nothing compared, named
         return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare raised %s: %s" % (
             type(e).__name__, str(e)[:200]), kind="oracle_error")
-    oracle = r5.get("oracle") if isinstance(r5.get("oracle"), dict) else {}
-    if outcome == "not_comparable":
-        return _pair(x, "W5", W5_WHAT, "not_comparable", "graphlet_oracle.compare: not comparable", kind="oracle")
-    if diffs:
-        first = diffs[0] if isinstance(diffs[0], dict) else {"pointer": "/", "clause": str(diffs[0])}
+    if outcome in ("not_comparable", "not_checked"):
+        return _pair(x, "W5", W5_WHAT, outcome, detail or "graphlet_oracle.compare: %s" % outcome, kind="oracle")
+    if diffs or outcome == "disagree":
+        first = diffs[0] if diffs and isinstance(diffs[0], dict) else {"pointer": "/", "clause": detail}
         theirs = first["other"] if "other" in first else first["present"] if "present" in first else gp.MISSING
         return _pair(x, "W5", W5_WHAT, "disagree", "%d difference(s); %s" % (len(diffs), first.get("clause")),
                      (first.get("pointer") or "/", theirs, first.get("oracle", gp.MISSING)), kind="oracle")
+    oracle = r5.get("oracle") if isinstance(r5.get("oracle"), dict) else {}
     declared = oracle.get("declared")
     n = len(oracle.get("checked") or {}) if isinstance(oracle.get("checked"), dict) else 0
-    return _pair(x, "W5", W5_WHAT, "agree", "W5 declares %s" % declared if declared else
-                 "%d checked pointer(s)" % n)
+    return _pair(x, "W5", W5_WHAT, "agree", detail or ("W5 declares %s" % declared if declared else
+                                                        "%d checked pointer(s)" % n))
 
 
 def compare_cut(way, rec, ref, optional):

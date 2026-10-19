@@ -464,7 +464,7 @@ class FiveWay(unittest.TestCase):
                                  "note": "a walk id out of range"})
         e = self.op_entry()
         self.assertEqual(e["outcome"], "agree", e)
-        self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W1-W5")["detail"], "W5 declares expected_error")
+        self.assertIn("expected error", next(p for p in e["pairs"] if p["pair"] == "W1-W5")["detail"])
         self.assertEqual(e["w5"]["declared"], "expected_error")
         # every way answered where W5 expects an error
         self.run_.cleanup()
@@ -477,6 +477,7 @@ class FiveWay(unittest.TestCase):
     def test_w5_is_judged_by_lane_os_compare(self):
         self.make()
         self.five()
+        self.oracle = cg.graphlet_oracle = gf.OracleStub()   # the calls compare_w5 makes
         self.op_entry()
         # one call per way, with W5's whole record and the way's view (service fields stripped, handles symbolised)
         self.assertEqual(len(self.oracle.calls), 4)
@@ -510,7 +511,7 @@ class FiveWay(unittest.TestCase):
         w5 = [p for p in e["pairs"] if p["pair"].endswith("W5")]
         self.assertEqual(set(p["outcome"] for p in w5), {"not_comparable"})
         self.assertIn("W1 answered result_too_large: W5 makes no claim", w5[0]["detail"])
-        self.assertEqual(self.oracle.calls, [])   # never handed to the oracle's comparison
+        self.assertEqual(getattr(self.oracle, "calls", []), [])   # never handed to the oracle's comparison
         # between W1..W4 a fitting error is compared as usual: W3 answered where the library did not fit
         self.run_.cleanup()
         self.make()
@@ -525,6 +526,51 @@ class FiveWay(unittest.TestCase):
         e = self.op_entry()
         self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W3-W5")["outcome"], "not_comparable")
         self.assertEqual(e["disagreeing"], ["W3-W4"])
+
+    def test_lane_os_compare_on_the_vo4_cases(self):
+        import graphlet_oracle as go
+        if not callable(getattr(go, "compare", None)):
+            self.skipTest("lane O's graphlet_oracle.compare is not on this tree")
+        cg.graphlet_oracle = go
+        op = dict(self.op, id="walk", tool="graphlet_walk", args={"arm": "left", "walk": 1, "max_bytes": 2048},
+                  ways=["W1", "W2", "W3", "W4", "W5"])
+        ans = {"handle": "g_0123456789ab", "arm": "left", "walk": 1, "length_bp": 120, "total": 1,
+               "rows": [{"segment": 0, "ends": [{"at_bp": 5, "ref": "c:1"}, {"at_bp": 5, "ref": "c:0"}]}]}
+        self.make(ops=[op])
+        self.five(op=op, answer=ans, w5=False)
+        # W5 lists the ends in another order and names them unordered; it also names a key that must be absent
+        self.run_.record("W5", SID, "walk", "graphlet_walk", op["args"],
+                         answer={"rows": [{"ends": [{"at_bp": 5, "ref": "c:0"}, {"at_bp": 5, "ref": "c:1"}]}]},
+                         oracle={"checked": {"/rows/0/ends": "SPEC §7.5.6"}, "unordered": ["/rows/0/ends"],
+                                 "absent": {"/continuation": "SPEC §7.1: no continuation"}})
+        e = self.op_entry(oid="walk")
+        self.assertEqual(e["outcome"], "agree", e)
+        self.assertEqual(e["w5"]["unordered"], ["/rows/0/ends"])
+        # a continuation where W5 says none
+        self.run_.cleanup()
+        self.make(ops=[op])
+        self.five(op=op, answer=dict(ans, continuation={"length_bp": 3}), w5=False)
+        self.run_.record("W5", SID, "walk", "graphlet_walk", op["args"], answer={"length_bp": 120},
+                         oracle={"checked": {"/length_bp": "SPEC §7.5.6"},
+                                 "absent": {"/continuation": "SPEC §7.1: no continuation"}})
+        p = next(p for p in self.op_entry(oid="walk")["pairs"] if p["pair"] == "W1-W5")
+        self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/continuation"))
+        # an expected error of a stated code, and a call W5 makes no claim on
+        self.run_.cleanup()
+        self.make(ops=[op])
+        err = {"code": "bad_argument", "fields": {}}
+        self.five(op=op, answer=ans, errors=dict((w, err) for w in ("W1", "W2", "W3", "W4")), w5=False)
+        self.run_.record("W5", SID, "walk", "graphlet_walk", op["args"], answer=None,
+                         oracle={"checked": {}, "declared": "expected_error", "expected_error": "bad_arm",
+                                 "note": "an arm not retrieved"})
+        p = next(p for p in self.op_entry(oid="walk")["pairs"] if p["pair"] == "W1-W5")
+        self.assertEqual((p["outcome"], p["pointer"], p["W1"], p["W5"]), ("disagree", "/error/code",
+                                                                         '"bad_argument"', '"bad_arm"'))
+        self.run_.record("W5", SID, "walk", "graphlet_walk", op["args"], answer=None,
+                         oracle={"checked": {}, "declared": "not_implemented_phase_b"})
+        e = self.op_entry(oid="walk")
+        self.assertEqual((e["outcome"], next(p for p in e["pairs"] if p["pair"] == "W1-W5")["outcome"]),
+                         ("agree", "not_checked"))
 
     def test_without_lane_os_module_w5_is_not_compared(self):
         self.make()
@@ -702,6 +748,7 @@ class FiveWay(unittest.TestCase):
     def test_w5_reads_the_file_through_export_view(self):
         exp = {"id": "fasta", "tool": "graphlet_export", "args": {"format": "fasta", "arm": "left"}}
         self.make(ops=[exp])
+        self.oracle = cg.graphlet_oracle = gf.OracleStub()
         self.oracle.export_view = lambda fmt, receipt, text, what: {"records": receipt.get("records"),
                                                                     "fasta": [text.strip()], "fmt": fmt}
         self.put_files(exp, ">left_0\nACGT\n", {"records": 1})
