@@ -1560,7 +1560,7 @@ def findings_lead_text(ctx, groups=None):
         gate = ", %s of them required by the deploy gate" % (gp["inconclusive"] or "none")
     else:
         gate = ""
-    tail = "%d execution%s %s inconclusive%s (Properties still untested, below)" % (
+    tail = "%d execution%s %s inconclusive%s (Properties not shown on any access path, below)" % (
         n_inc, "" if n_inc == 1 else "s", "was" if n_inc == 1 else "were", gate)
     if not groups:
         return ("*The result.* No execution failed or errored, no resource-budget finding was recorded, no "
@@ -1849,7 +1849,7 @@ def decision_summary(ctx):
         if len(items) > 20:
             out += "\\item … %d more (Part II)\n" % (len(items) - 20)
         out += "\\end{itemize}\n"
-    out += "\\parhead{Properties still untested}\n"
+    out += "\\parhead{Properties not shown on any access path}\n"
     if ctx.overview_section("decision").get("untested"):
         out += ctx.prose_paragraphs("decision", "untested")
     else:

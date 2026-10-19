@@ -657,7 +657,7 @@ class OverviewReadingPathTest(unittest.TestCase):
         self.assertEqual(lead, "*The result.* No execution failed or errored, no resource-budget finding was "
                                "recorded, no comparison between access paths disagreed and no relation failed in this "
                                "run; 1 execution was inconclusive, not required by the deploy gate "
-                               "(Properties still untested, below).")
+                               "(Properties not shown on any access path, below).")
         lead = sections.findings_lead_text(_Stub(run=run), [("findings (1 execution, 1 test)", [])])
         self.assertTrue(lead.startswith("*The result.* Listed below: findings (1 execution, 1 test); 1 execution"))
 

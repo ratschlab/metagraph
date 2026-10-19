@@ -1178,7 +1178,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
             glyph_key = "inconclusive"
         self.assertEqual(sections._arm_reason([line], S()), "503 deadline (allowed)")
         main = self.tex()
-        self.assertIn("\\parhead{Properties still untested}", main)
+        self.assertIn("\\parhead{Properties not shown on any access path}", main)
         self.assertIn("Every property check of the built chapters was passed", main)
 
     def test_timing_legends_and_record_key(self):
@@ -1232,7 +1232,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
             ctx.footnotes[ch] = cells.Footnotes()
         text = sections.decision_summary(ctx)
         order = ["SCOPE Chapter R sample; whole-run summary shown for context.", "\\bline{run verdict}", "VERDICT-SLOT",
-                 "\\parhead{Principal findings}", "FINDINGS-SLOT 0", "\\parhead{Properties still untested}",
+                 "\\parhead{Principal findings}", "FINDINGS-SLOT 0", "\\parhead{Properties not shown on any access path}",
                  "UNTESTED-SLOT", "CLOSING-SLOT"]
         positions = [text.find(s) for s in order]
         self.assertTrue(all(p >= 0 for p in positions), list(zip(order, positions)))
@@ -2938,7 +2938,7 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertEqual(run.marked_aside("T-labels-0003", run.arm_lines("T-labels-0003", "mcp")[0]),
                          {("label_dict_contains", 0): {"mark": "not_implemented",
                                                       "reason": "the MCP traverse answers carry no label dictionary"}})
-        self.assertNotIn("label\\_dict\\_contains", main.split("Properties still untested", 1)[1].split("\\parhead", 1)[0])
+        self.assertNotIn("label\\_dict\\_contains", main.split("Properties not shown on any access path", 1)[1].split("\\parhead", 1)[0])
         # the warm-up's re-run is timing evidence in the provenance and appendix F, not an execution
         self.assertEqual(len(run.reruns), 1)
         self.assertIn("Warm-ups run again for a resume", main)
