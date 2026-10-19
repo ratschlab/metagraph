@@ -642,6 +642,10 @@ class FiveWay(unittest.TestCase):
         e = self.op_entry()
         self.assertEqual((e["outcome"], next(p for p in e["pairs"] if p["pair"] == "W1-W5")["outcome"]),
                          ("agree", "not_comparable"))
+        cg.graphlet_oracle = gf.OracleStub({"outcome": "error", "detail": "W5 record unreadable", "differences": []})
+        e = self.op_entry()   # VC8 (the verifier's P7): an unknown outcome is no agreement
+        self.assertEqual(e["outcome"], "inconclusive")
+        self.assertIn("graphlet_oracle.compare answered the outcome 'error': W5 record unreadable", e["reason"])
         cg.graphlet_oracle = gf.OracleStub(ValueError("no oracle block"))
         e = self.op_entry()
         self.assertEqual(e["outcome"], "inconclusive")

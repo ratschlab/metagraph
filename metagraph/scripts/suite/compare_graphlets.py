@@ -672,6 +672,10 @@ def oracle_view(way, rec):
     return canonical_answer(rec.get("tool"), library_part(way, rec))
 
 
+# graphlet_oracle.compare's outcomes (lane O); a bare list of differences (None) is read as agree / disagree
+ORACLE_OUTCOMES = ("agree", "disagree", "not_comparable", "not_checked")
+
+
 def _oracle_result(res):
     """(outcome or None, [difference], detail or None) of what graphlet_oracle.compare returned: lane O's
     {outcome: agree | disagree | not_comparable | not_checked, detail, checked, differences}, or a bare list of
@@ -719,6 +723,10 @@ def compare_w5(x, rx, r5):
     except Exception as e:   # a W5 record the comparison cannot read: nothing compared, named
         return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare raised %s: %s" % (
             type(e).__name__, str(e)[:200]), kind="oracle_error")
+    if outcome not in (None,) + ORACLE_OUTCOMES:
+        # an outcome outside lane O's vocabulary is never an agreement (VERIFY-C VC8)
+        return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare answered the outcome %r%s" % (
+            outcome, (": %s" % detail) if detail else ""), kind="oracle_error")
     if outcome in ("not_comparable", "not_checked"):
         return _pair(x, "W5", W5_WHAT, outcome, detail or "graphlet_oracle.compare: %s" % outcome, kind="oracle")
     if diffs or outcome == "disagree":
