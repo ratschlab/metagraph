@@ -4829,6 +4829,99 @@ block's strands ("either" / "context") are other fields.
   new rule's test fails on the code before it. manifest/suite_v6.json recomputes to 49907dbb...; every manifest,
   declared file and policy of v1-v6 and service_by_design.json are byte-identical to 48e04d825's.
 
+## Manifest v8, lane L: area G's local library runner and the selectors (2026-10-19)
+Design: DESIGN-v8 §2-§4, §7 items 2-3; the contract FORMAT-v8 §1-§3 (both in the v8 plans, outside the repository).
+Nothing here touches staging; every test is offline.
+
+### Files
+- `graphlet_doc.py`: the suite's own digests of an MGT document (no library import): `body_digest` (H with its
+  seed_index written `*`, J and Z left out: a server body, its standalone file and one seed at two batch positions
+  share it; unmasked it is the library's parser.body_digest), `envelope_digest` (the J envelope without the top-level
+  `timing` and `usage`, results[*].`timing`, FORMAT v2 E1's results[*].annotation lookahead counters
+  `direct_reads` and `keys_mapped`, and VERIFY-L VL16's results[*].seed.seed_id (the caller's own seed name) and
+  results[*].seed.seed_id_mismatch (whether that name differs from the recomputed id); strategy settings such as
+  output.timing and annotation.batch_kmers stay),
+  `digests` (FORMAT's `doc` block). A broken frame (no final LF, no H of MGT v1 first, J anywhere but line 2, no Z
+  counting the lines) is a ValueError, never a digest.
+- `graphlet_select.py`: run-time selectors, pure and stdlib (async vendors it): `resolve(value, answers)` replaces
+  `{ref, path}` (an RFC 6901 pointer into an earlier assembled answer), `{select, args}` and `{cursor_of}` at any
+  depth; a label
+  selector `{"ref": "c:3"}` (no `path`) stays a literal. Named: walk_through_merge, walk_with_continuation,
+  slice_past_end, label_entered_at_merge, top_label, first_arm, second_arm_or_none, each defined in its docstring
+  over the library's answer shapes. A failure is a `SelectorError` naming the argument, the op and the rule.
+- `graphlet_paging.py` (FORMAT v2 A2): the paging loop's helpers (`paging_problem`, `max_pages`, `next_call`,
+  `more`, `loop_error`, `error_page`, `error_record`, `paging_complete`) and `assemble(tool, pages, complete,
+  volatile=())` with its tables, pure and stdlib: async's runner vendors it, so both sides follow and assemble pages
+  identically by construction. `loop_error` is the `paging_runaway` rule (VERIFY-L VL6): a cursor or next_from that
+  repeats one already asked for, immediately or in a cycle (VERIFY-L VR7), stops the loop at once (reason
+  `repeats`), paging "all" stops at 10,000 pages (reason `max_pages`); a `pages` cap reached is no error.
+- `run_graphlet_local.py`: the ways W1 (arms/dl-lib), W2 (arms/dr-lib), W4 (arms/mcp-lib) and drift
+  (arms/drift-lib) over a run directory and a manifest, or offline over `--doc [ID=]PATH ... --plan PLAN`;
+  `--export-library COMMIT --to DIR` (`git archive COMMIT metagraph/api/python | tar -x`, DIR/LIBRARY_COMMIT);
+  `--drift-report` (the drift way's differences from W4, report-only). The module docstring states the record and
+  file layout.
+- `tests/test_graphlet_local.py` (the digests against the library; an op plan calling all 19 tools with every paging
+  mode and an error case each; paging assembly against the uncut answer for every list tool and the sequence; hash
+  seeds; budgeted pages resumed under local limits; a response against the same document from a file; the manifest
+  mode; export and drift),
+  `tests/test_graphlet_select.py`, `tests/test_graphlet_paging.py`. The library-backed classes skip below Python 3.10
+  (the library's own floor).
+
+### Decisions where FORMAT-v8 is silent
+- Documents: W1/W2 take `answer.body` of the direct raw record and convert it in the way's process with
+  `parser.standalone_text(results[0].graphlet, results[0], response)`; W4 and drift read the MCP's exported file
+  `arms/mcp/docs/<id>.mgt.gz` (FORMAT v2 C1; `--mgt-template`); every way writes the document it processed to
+  `arms/<way dir>/docs/<id>.mgt.gz`, then to its spool, and loads it by `graphlet_load`. A
+  document's failure is the error of every op of its scenario: `no_document` (no file, or a direct request that got
+  no HTTP status: a transport failure, fields stage fetch and the code), `document_refused` (an HTTP status other
+  than 2xx or an error body, fields stage fetch, http, code; a 2xx body with no results[0], or a result with neither
+  a graphlet nor an error, stage convert; a conversion or graphlet_load that fails, stage convert / load; a load
+  receipt holding a NaN or an infinity, stage load with its pointer, VERIFY-L VR2), `no_graphlet` only for a 2xx
+  answer whose seed failed (results[0] carries `error`, SPEC-core §7.1) (VERIFY-L VL2).
+- Isolation: one child per way, `python -s -B [-P]`, its environment scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus
+  PYTHONHASHSEED (defaults W1 1001, W2 2002, W4 4004, drift 5005; distinct per run), sys.path the library root first.
+  Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere. The
+  parent starts a way only when the child states the seed it was given, hash randomization on and the environment
+  read (sys.flags.ignore_environment 0), and its hash of a probe string equals that of a separate launch of the same
+  interpreter, flags and seed (VERIFY-L VL7: an echo of the variable alone proves nothing under -E).
+- Supervision (VERIFY-L VL3): each library call waits for its reply with select() up to the op's `timeout_s` (a
+  manifest op field; else --op-timeout, 120 s). A call over it is recorded `timeout` {timeout_s, page}, a child that
+  ends during a call `child_died` {exit, page}; the process is then killed and restarted with every document loaded
+  so far, and the next op runs (handles an op made are gone). An answer that is no JSON is `exception` {type}, one
+  holding a NaN or an infinity `non_finite` {pointer, page} (VERIFY-L VL9: records are strict JSON). A way whose
+  process does not start or restarts more than 20 times is reported (its run.json `state: failed` with the
+  `failure`, the op in flight recorded: VERIFY-L VR5), the next way runs, the exit code is 1. Each
+  way's work/ (the library's spool and export directory) is removed after the run unless --keep-work.
+- Handles in records are symbols relative to the op's scenario: `<handle>` (its own graphlet, FORMAT's form),
+  `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in
+  args_resolved `<cursor>`; the way's directories `<export_dir>`, `<spool_dir>`. Raw pages keep everything.
+- Assembly (graphlet_paging.assemble): every paged library list is `rows` (mcp_tools._page / _page_cut; the table is
+  checked against the source by a test). Rows are concatenated; every other field comes from the first page that
+  states it (page 0's, and a key page 0 lacks from the first later page carrying it: nothing a page states is
+  dropped, VERIFY-L VL1); the fields that say how a listing ended (total, total_at_least, complete, filtered,
+  filtered_so_far, hint, local, stop) from the last page; `evidence` from the last page that states it (a page its
+  budget stopped marks it `limitations.local`); compare's `fields_cut` then names only what no page carried;
+  `row_truncated` / `cut_fields` merged and every row of a page that cut its row marked
+  `"_cut_fields": [that page's cut_fields]` (FORMAT v2 A3); next_cursor and cursor removed. `volatile=` names keys a
+  runner's pages may state differently (taken from the last page stating them): the local runner passes none, async
+  the service's own per-page fields (VERIFY-L VL4). graphlet_sequence concatenates
+  `sequence`, takes `to` from the last page and drops next_from (and `truncated` when the loop reached the end); its
+  other fields follow the list's rule (END_FIELDS such as a per-call `local` block from the last page, keys only later
+  pages state kept: VERIFY-L VR1).
+  A base field two pages state differently is `assembly_error`.
+- Records add `paging_complete` (FORMAT v2 A4, graphlet_paging.paging_complete: false when the last page still
+  names a next one or the answer states complete false; null on a record without an answer) and, for
+  graphlet_export / graphlet_save, `file` {name, bytes, sha256, raw} (FORMAT v2 B3: the file's text kept gzipped at
+  `raw`, relative to the way's directory, with handles and directories as symbols like the rest of the record;
+  `bytes` the file's own size, `sha256` the kept text's); `library` adds `limits`
+  (max_bytes, sequence_max_bytes, local_limits: the GraphletTools configuration; a limits file's max_graphlet_mb is
+  noted in run.json as not applied, VERIFY-L VL10); `error.fields` leaves out `message` and `hint`. Runner-side
+  error codes:
+  exception (the library raised, or its answer is no JSON), non_finite, unknown_tool, paging_runaway, assembly_error,
+  timeout, child_died and the three document codes. A plan
+  names a cursor by `{"cursor_of": "<op id>"}` (graphlet_select, VERIFY-L VL5): the last next_cursor of that op's
+  listing when its paging stopped early, kept by `graphlet_paging.selector_view` in the answers selectors read.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
