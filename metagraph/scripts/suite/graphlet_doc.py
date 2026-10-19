@@ -5,7 +5,8 @@ MGT v1 frame (SPEC-labeled-traversal-core.md §7.5.1, §7.5.2), never by the lib
     frame(text)             -> {"head", "seed_index", "j", "lines", "body_start", "z_start"}   (ValueError naming why)
     body_digest(text)       -> sha256 hex of the body: H with its seed_index masked, J and Z left out
     envelope(text)          -> the J line's object, or None for a server body (no J)
-    envelope_digest(text)   -> sha256 hex of the envelope without its per-request values, or None (no J)
+    envelope_digest(text)   -> sha256 hex of the envelope without its per-request values (timing, usage, results[*]
+                               .timing, results[*].annotation.direct_reads/keys_mapped), or None (no J)
 
 A server body (`detail: graphlet`, results[i].graphlet) is `H S X* L* O Q? K* (A B* V* (G P* E* T? C?)* R*)* Z`; the
 standalone file of the same seed (the library's save/standalone_text, the MCP's mgt export) has the J line right after
@@ -37,6 +38,10 @@ _MGT_INT = re.compile(r"(0|[1-9][0-9]*)\Z")
 # strategy.output.timing is a strategy setting, not a measurement, and stays.
 ENVELOPE_DROP = ("timing", "usage")
 SUMMARY_DROP = ("timing",)
+# FORMAT v2 E1: the seed summary's annotation counters of lookahead work, which differ between two engine runs of one
+# request (SPEC-labeled-traversal-core.md §8.3: direct_reads and keys_mapped "count lookahead work"; INVENTORY §4.1).
+# The strategy's own `annotation` block (batch_kmers) is a setting and stays, as do access_path and rows_requested.
+ANNOTATION_DROP = ("direct_reads", "keys_mapped")
 
 
 def _text(text: Any) -> str:
@@ -118,14 +123,23 @@ def envelope(text: Any) -> Optional[dict]:
     return obj
 
 
+def _summary_view(r: Any) -> Any:
+    if not isinstance(r, dict):
+        return r
+    out = {k: v for k, v in r.items() if k not in SUMMARY_DROP}
+    if isinstance(out.get("annotation"), dict):
+        out["annotation"] = {k: v for k, v in out["annotation"].items() if k not in ANNOTATION_DROP}
+    return out
+
+
 def envelope_view(env: dict) -> dict:
-    """|env| without its per-request values: the top-level `timing` and `usage` and every seed summary's `timing`
-    (results[i].timing). Everything else is kept as it is, strategy (output.timing included), capabilities,
-    release, the seed summary's annotation counters."""
+    """|env| without its per-request values (FORMAT v2 E1): the top-level `timing` and `usage`, every seed summary's
+    `timing` (results[*].timing) and its annotation's lookahead counters (results[*].annotation.direct_reads,
+    .keys_mapped). Everything else is kept as it is: the strategy (output.timing and annotation.batch_kmers included),
+    the capabilities, the release, the rest of the seed summary."""
     out = {k: v for k, v in env.items() if k not in ENVELOPE_DROP}
     if isinstance(out.get("results"), list):
-        out["results"] = [{k: v for k, v in r.items() if k not in SUMMARY_DROP} if isinstance(r, dict) else r
-                          for r in out["results"]]
+        out["results"] = [_summary_view(r) for r in out["results"]]
     return out
 
 
