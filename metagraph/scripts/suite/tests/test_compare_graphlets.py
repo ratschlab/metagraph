@@ -609,17 +609,83 @@ class FiveWay(unittest.TestCase):
         lst = {"id": "list", "tool": "graphlet_list", "args": {"max_bytes": 2048}, "ways": ["W1", "W2", "W4"],
                "not_exposed": {"W3": "store bookkeeping (D-R15)"}}
         self.make(ops=[exp, lst])
-        self.five(op=exp, answer={"path": "/x/g_0123456789ab.fa", "bytes": 100, "records": 4},
-                  w3={"path": None, "bytes": 99, "records": 4, "export_id": "e1", "link": {"url": "u"},
-                      "format": "fasta", "handle": UUID, "status": "done", "in_service": True}, w5=False)
+        self.put_files(exp, ">left_0 length_bp=80\nACGT\n",
+                       answer={"path": "/x/g_0123456789ab.fa", "bytes": 100, "records": 4},
+                       w3={"path": None, "bytes": 99, "records": 4, "export_id": "e1", "link": {"url": "u"},
+                           "format": "fasta", "handle": UUID, "status": "done", "in_service": True})
         self.five(op=lst, answer={"total": 1, "rows": [{"handle": "g_1"}]}, ways=("W1", "W2", "W4"), w5=False)
         res = self.result()
         e = self.op_entry(res, "fasta")
-        # path None vs a path: path is left out on every way; the service's receipt keys are its own
+        # path None vs a path: path and bytes are left out on every way; the files are compared by content
         self.assertEqual(e["outcome"], "agree", e)
         self.assertTrue(self.op_entry(res, "list")["smoke"])
         self.assertEqual(res["summary"]["ops"]["agree"], 1)   # the smoke is outside the five-way counts
         self.assertEqual(res["summary"]["per_tool"]["graphlet_list"]["smoke"], 1)
+
+    def put_files(self, op, text, answer, w3=None, texts=None, ways=("W1", "W2", "W3", "W4"), raw_gz=False):
+        """Records an export op on |ways| with its file kept (FORMAT v2 B3): |text| on every way unless |texts|."""
+        for way in ways:
+            raw = "%s.%s.file%s" % (SID, op["id"], ".gz" if raw_gz else "")
+            f = self.run_.write_file(way, raw, (texts or {}).get(way, text))
+            ans = copy.deepcopy(w3 if way == "W3" and w3 is not None else answer)
+            self.run_.record(way, SID, op["id"], op["tool"], op["args"], answer=ans, file=f)
+
+    def test_files_are_compared_by_content(self):
+        exp = {"id": "fasta", "tool": "graphlet_export", "args": {"format": "fasta", "arm": "left"},
+               "ways": ["W1", "W2", "W3", "W4"]}
+        self.make(ops=[exp])
+        rec = {"bytes": 10, "records": 1}
+        self.put_files(exp, ">left_0\nACGT\n", rec, texts={"W3": ">left_0\nACGA\n"}, raw_gz=True)
+        e = self.op_entry(oid="fasta")
+        self.assertEqual(e["disagreeing"], ["W3-W4"])
+        self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W3-W4")["pointer"], "/file/sha256")
+        # a file not kept where the record says: not compared, the op inconclusive
+        os.remove(os.path.join(self.run_.dir, "arms", "dr-lib", "raw", "%s.fasta.file.gz" % SID))
+        e = self.op_entry(oid="fasta")
+        self.assertEqual(e["outcome"], "disagree")   # W3-W4 still differs
+        p = next(p for p in e["pairs"] if p["pair"] == "W1-W2")
+        self.assertEqual((p["outcome"], p["kind"]), ("not_compared", "no_file"))
+        self.assertIn("W2's file is not kept at arms/dr-lib/raw/", p["detail"])
+
+    def test_json_and_mgt_files(self):
+        whole = {"id": "json", "tool": "graphlet_export", "args": {"format": "json"}, "ways": ["W1", "W2", "W3", "W4"]}
+        walk = {"id": "jwalk", "tool": "graphlet_export", "args": {"format": "json", "what": "walk", "arm": "left",
+                                                                    "walks": [0]}, "ways": ["W1", "W2", "W3", "W4"]}
+        mgt = {"id": "mgt", "tool": "graphlet_export", "args": {"format": "mgt"}, "ways": ["W1", "W2", "W3", "W4"]}
+        self.make(ops=[whole, walk, mgt])
+        doc = {"seed": {"length_bp": 30}, "arms": {"left": {"paths": [1]}}, "timing": {"elapsed_ms": 3},
+               "annotation": {"labels": 4, "direct_reads": 10, "keys_mapped": 7}}
+        other = copy.deepcopy(doc)
+        other["timing"] = {"elapsed_ms": 9}
+        other["annotation"].update(direct_reads=12, keys_mapped=9)   # lookahead work: per request (FORMAT v2 E1)
+        self.put_files(whole, json.dumps(doc), {"records": 1}, texts={"W2": json.dumps(other)})
+        wdoc = {"handle": "g_0123456789ab", "arm": "left", "walks": [{"walk": 0, "sequence": "ACGT"}],
+                "evidence": {"view": None}}
+        self.put_files(walk, json.dumps(wdoc), {"records": 1},
+                       texts={"W3": json.dumps(dict(wdoc, handle=UUID))})
+        f = self.run_.fixture
+        # the library's dump carries its envelope; the service's stored body none, at another batch position
+        self.put_files(mgt, f.doc(0), {"records": 9}, texts={"W3": f.doc(5, envelope=False)})
+        res = self.result()
+        for oid in ("json", "jwalk", "mgt"):
+            self.assertEqual(self.op_entry(res, oid)["outcome"], "agree", (oid, self.op_entry(res, oid)))
+        other["annotation"]["labels"] = 5
+        self.put_files(whole, json.dumps(doc), {"records": 1}, texts={"W2": json.dumps(other)})
+        p = next(p for p in self.op_entry(oid="json")["pairs"] if p["pair"] == "W1-W2")
+        self.assertEqual(p["pointer"], "/file/json/annotation/labels")
+
+    def test_w5_reads_the_file_through_export_view(self):
+        exp = {"id": "fasta", "tool": "graphlet_export", "args": {"format": "fasta", "arm": "left"}}
+        self.make(ops=[exp])
+        self.oracle.export_view = lambda fmt, receipt, text, what: {"records": receipt.get("records"),
+                                                                    "fasta": [text.strip()], "fmt": fmt}
+        self.put_files(exp, ">left_0\nACGT\n", {"records": 1})
+        self.run_.record("W5", SID, "fasta", "graphlet_export", exp["args"], answer={"fasta": [">left_0\nACGT"]},
+                         oracle={"checked": {"/fasta": "DESIGN §5 to_fasta"}})
+        e = self.op_entry(oid="fasta")
+        self.assertEqual(e["outcome"], "agree", e)
+        views = [v for _, v in self.oracle.calls]
+        self.assertEqual(views[0], {"records": 1, "fasta": [">left_0\nACGT"], "fmt": "fasta"})
 
     def test_drift_lane_is_listed(self):
         self.make()

@@ -241,8 +241,20 @@ class GRun(object):
                         {"service_commit": service_commit, "identity_changed": False,
                          "library_commit": library_commit})
 
+    def write_file(self, way, raw, text):
+        """Keeps a file's text where a record's file.raw names it (FORMAT v2 B3) and returns its `file` block."""
+        path = self.path("arms", WAY_DIRS[way], "raw", raw)
+        if raw.endswith(".gz"):
+            with gzip.open(path, "wb") as fh:
+                fh.write(text.encode("utf-8"))
+        else:
+            with open(path, "w") as fh:
+                fh.write(text)
+        return {"name": os.path.basename(raw), "bytes": len(text.encode("utf-8")),
+                "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "raw": raw}
+
     def record(self, way, sid, op, tool, args, answer=None, error=None, service_fields=None, doc=None,
-               library=None, selector_error=None, oracle=None, pages=1):
+               library=None, selector_error=None, oracle=None, pages=1, file=None):
         """Appends one per-call record (FORMAT-v8 §3) to arms/<way>/graphlet_ops.jsonl."""
         if library is None:
             library = None if way == "W5" else ({"commit": PIN} if way == "W3" else
@@ -254,6 +266,8 @@ class GRun(object):
                "elapsed_ms": 1.0, "started_utc": "2026-10-19T00:00:00Z"}
         if oracle is not None:
             rec["oracle"] = oracle
+        if file is not None:
+            rec["file"] = file
         self.append(os.path.join("arms", WAY_DIRS[way], "graphlet_ops.jsonl"), rec)
         return rec
 

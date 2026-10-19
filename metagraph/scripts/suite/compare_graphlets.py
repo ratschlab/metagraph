@@ -17,7 +17,8 @@ Per op call, in this order:
    per-tool answer keys, frozen here) stripped and kept for the service checks; handles to symbols (<handle>,
    <handle_b>, <handle:N>), cursors removed, parsed JSON values only (numbers by value); the `local` block compared
    only between library ways of one (commit, interpreter, work model) (D-R10); an export's `path` and `bytes` left
-   out (the export directory, the handle and the envelope's timing make them differ by construction);
+   out (the export directory, the handle and the envelope's timing make them differ by construction): the file
+   itself is compared by its content (FORMAT v2 B3, file_view), a file not kept leaves the pair not compared;
 5. whole assembled answers compared by pairs: W1-W2 (transport), W1-W4 (fetch path), W3-W4 (service wrapper), and
    each of them against W5 (library vs independent reading) by graphlet_oracle.compare (lane O's one comparison of an
    answer against a W5 record, FORMAT v2 F2: checked pointers, unordered lists, absent keys, expected_error, cut
@@ -108,7 +109,14 @@ ERROR_TEXT_FIELDS = ("message", "hint")
 # counts the handle's own bytes)
 ERROR_ENV_FIELDS = {"result_too_large": ("bytes",)}
 # per tool, answer keys whose value depends on where the way ran, left out of the comparison
-ENV_KEYS = {"graphlet_export": ("path", "bytes")}
+ENV_KEYS = {"graphlet_export": ("path", "bytes"), "graphlet_save": ("path", "bytes")}
+# the tools that make a file (FORMAT v2 B3: the record's `file` {name, bytes, sha256, raw}, the text kept at
+# arms/<way dir>/raw/<raw>): their files are compared by content (file_view), not only their receipts
+FILE_TOOLS = ("graphlet_export", "graphlet_save")
+# the per-request values of an export's json (to_json: the seed summary's timing, and the annotation's lookahead
+# counters, which differ between two engine runs of one request: FORMAT v2 E1)
+JSON_EXPORT_DROP = ("timing",)
+ANNOTATION_LOOKAHEAD = ("direct_reads", "keys_mapped")
 # a cut answer may add these keys (the ceiling's markers); a cut answer may lack these keys (per tool) and the keys
 # its own fields_cut / cut_fields name
 CUT_MARKERS = frozenset(("fields_cut", "row_truncated", "cut_fields", "caveat_effects_cut", "caveats_truncated",
@@ -126,7 +134,7 @@ SMOKE_TOOLS = ("graphlet_list", "graphlet_free")
 PAIRS = (("W1", "W2", "transport"), ("W1", "W4", "fetch path"), ("W3", "W4", "service wrapper"))
 W5_WHAT = "library vs independent reading"
 # a pair not compared for one of these makes the op inconclusive (a missing way is named by its own reason)
-UNREAD_KINDS = ("oracle_unavailable", "oracle_error")
+UNREAD_KINDS = ("oracle_unavailable", "oracle_error", "no_file")
 # errors of fitting an answer to a ceiling (FORMAT v2 F3, VO5): not comparable against W5, which makes no claim about
 # fitting (INVENTORY §1.1: result_too_large, receipt_too_large; on W3 also op_busy, the service's worker state);
 # between W1..W4 they are compared as usual (W3 calls are designed to fit, DESIGN-v8 §5)
@@ -236,6 +244,63 @@ def canonical_args(args):
     return dict((k, v) for k, v in args.items() if k not in ARG_SKIP)
 
 
+def file_path(run_dir, way, rec):
+    """Where a record's file text is kept (FORMAT v2 B3: arms/<way dir>/raw/<file.raw>), or None."""
+    f = rec.get("file") if isinstance(rec.get("file"), dict) else None
+    raw = f.get("raw") if f else None
+    if not isinstance(raw, str) or not raw or os.path.isabs(raw) or ".." in raw.split("/"):
+        return None
+    return os.path.join(run_dir, "arms", gp.WAY_DIRS[way], "raw", raw)
+
+
+def file_view(rec, text):
+    """A file's content as the ways compare it (INVENTORY §4.2): fasta and gfa byte for byte (their sha256); json
+    parsed, a whole export without its seed summary's timing and the annotation's lookahead counters, a walk or
+    compare export with its handles as symbols; mgt (an mgt export, a save) by the body digest (graphlet_doc: H's
+    seed_index masked, J and Z left out, so a stored body and the library's dump with its envelope have one)."""
+    args = rec.get("args_resolved") if isinstance(rec.get("args_resolved"), dict) else {}
+    fmt = "mgt" if rec.get("tool") == "graphlet_save" else args.get("format")
+    what = args.get("what")
+    try:
+        if fmt in ("fasta", "gfa"):
+            return {"format": fmt, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+        if fmt == "json":
+            doc = json.loads(text)
+            if what == "compare":
+                return {"format": "json", "what": what, "json": canonical_answer("graphlet_compare", doc)}
+            if what == "walk":
+                return {"format": "json", "what": what, "json": canonical_answer("graphlet_walk", doc)}
+            if isinstance(doc, dict):
+                doc = dict((k, v) for k, v in doc.items() if k not in JSON_EXPORT_DROP)
+                if isinstance(doc.get("annotation"), dict):
+                    doc["annotation"] = dict((k, v) for k, v in doc["annotation"].items()
+                                             if k not in ANNOTATION_LOOKAHEAD)
+            return {"format": "json", "json": doc}
+        if fmt == "mgt":
+            digest = gp.graphlet_doc.body_digest(text) if gp.graphlet_doc is not None else \
+                hashlib.sha256("\n".join(gp.body_records(text)).encode("utf-8")).hexdigest()
+            return {"format": "mgt", "body_digest": digest}
+    except (ValueError, TypeError) as e:
+        return {"unreadable": "%s: %s" % (type(e).__name__, str(e)[:120])}
+    return {"format": fmt, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+
+
+def attach_files(run_dir, recs):
+    """Reads every recorded file (FORMAT v2 B3) and keeps on its record `_file_text` and `_file_view` (None for a
+    record of no file; {"not_kept": path} for a file whose text is not where the record says)."""
+    for way, by in recs.items():
+        if way not in gp.WAY_DIRS:
+            continue
+        for rec in by.values():
+            if rec.get("tool") not in FILE_TOOLS or not isinstance(rec.get("file"), dict):
+                continue
+            path = file_path(run_dir, way, rec)
+            text = gp._read_text(path) if path and os.path.exists(path) else None
+            rec["_file_text"] = text
+            rec["_file_view"] = file_view(rec, text) if text is not None else {
+                "not_kept": "arms/%s/raw/%s" % (gp.WAY_DIRS[way], (rec["file"] or {}).get("raw"))}
+
+
 def same_library_env(ra, rb):
     """Whether two library records ran one (commit, interpreter, work model): only then is `local` compared (D-R10)."""
     la, lb = ra.get("library") or {}, rb.get("library") or {}
@@ -246,10 +311,28 @@ def same_library_env(ra, rb):
 
 
 def comparable_view(way, rec, keep_local=False):
-    """{"error": canonical error} or {"answer": canonical answer} of a record."""
+    """{"error": canonical error} or {"answer": canonical answer[, "file": file_view]} of a record."""
     if rec.get("error"):
         return {"error": canonical_error(rec["error"], keep_local)}
-    return {"answer": canonical_answer(rec.get("tool"), library_part(way, rec), keep_local)}
+    out = {"answer": canonical_answer(rec.get("tool"), library_part(way, rec), keep_local)}
+    if rec.get("_file_view") is not None:
+        out["file"] = rec["_file_view"]
+    return out
+
+
+def _file_unread(way, rec):
+    """Why a record of a file-making tool cannot be compared by its file (no `file`, its text not kept or not
+    readable), or None."""
+    if rec.get("tool") not in FILE_TOOLS or rec.get("error") or rec.get("selector_error"):
+        return None
+    view = rec.get("_file_view")
+    if view is None:
+        return "%s recorded no file (FORMAT v2 B3)" % way
+    if "not_kept" in view:
+        return "%s's file is not kept at %s" % (way, view["not_kept"])
+    if "unreadable" in view:
+        return "%s's file does not read (%s)" % (way, view["unreadable"])
+    return None
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -398,6 +481,9 @@ def compare_records(a, ra, b, rb, what):
     if d:
         return _pair(a, b, what, "disagree", "args_resolved differ (a selector resolved differently)", d,
                      kind="args_resolved")
+    unread = _file_unread(a, ra) or _file_unread(b, rb)
+    if unread:
+        return _pair(a, b, what, "not_compared", unread, kind="no_file")
     keep = a in gp.LIBRARY_WAYS and b in gp.LIBRARY_WAYS and same_library_env(ra, rb)
     va, vb = comparable_view(a, ra, keep), comparable_view(b, rb, keep)
     if ("error" in va) != ("error" in vb):
@@ -408,6 +494,9 @@ def compare_records(a, ra, b, rb, what):
     if "answer" in va and "W3" in (a, b) and isinstance(va["answer"], dict) and isinstance(vb["answer"], dict):
         d = cut_aware_difference(va["answer"], vb["answer"])   # FORMAT v2 A3: the service's cut rows
         d = d and ("/answer" + (d[0] or ""),) + tuple(d[1:])
+        if not d:   # the rest of the view (a file's content) equal as usual
+            d = gp.first_difference(dict((k, v) for k, v in va.items() if k != "answer"),
+                                    dict((k, v) for k, v in vb.items() if k != "answer"))
     else:
         d = gp.first_difference(va, vb)
     if d:
@@ -429,6 +518,11 @@ def oracle_view(way, rec):
     reading)."""
     if rec.get("error"):
         return {"error": canonical_error(rec["error"])}
+    if rec.get("tool") in FILE_TOOLS and callable(getattr(graphlet_oracle, "export_view", None)):
+        # an export's receipt and file in the shape W5 answers (lane O's export_view, FORMAT v2 B3)
+        args = rec.get("args_resolved") or {}
+        fmt = "save" if rec.get("tool") == "graphlet_save" else args.get("format")
+        return graphlet_oracle.export_view(fmt, library_part(way, rec), rec.get("_file_text"), args.get("what"))
     return canonical_answer(rec.get("tool"), library_part(way, rec))
 
 
@@ -670,6 +764,7 @@ def compare_run(run_dir, manifest=None, checks_mod=None, extra=None):
     stages run after the per-op comparison and before the summary (STAGES)."""
     manifest = manifest if manifest is not None else sc.read_json(os.path.join(run_dir, "manifest.json"))
     recs, warnings, _ = gp.all_records(run_dir)
+    attach_files(run_dir, recs)
     prechecks = gp.prechecks(run_dir, manifest, recs, checks_mod)
     pre_by = dict((p["scenario"], p) for p in prechecks)
     scenarios, gaps, unplanned = {}, {}, []
