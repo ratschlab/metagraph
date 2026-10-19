@@ -262,8 +262,7 @@ class TestVF4EveryRuleAnswersItsPhrase(unittest.TestCase):
 
     def test_every_committed_pair(self):
         import traverse_golden as TG
-        fixed = set(R.values()) | {'the %s arm was not retrieved in b' % s
-                                   for s in ('left', 'right', 'seed')} | {'no arm in common'}
+        fixed = set(R.values())
         items = TG.items_of(TG.golden_files() + TG.coordinate_files())
         by = {}
         for key, r, resp in items:
@@ -315,6 +314,36 @@ class TestR21NoAnswerLongerThanBeforeG1(unittest.TestCase):
                     worse.append((k, want[k], got[k]))
         self.assertEqual([], longer[:10], '%d answers longer' % len(longer))
         self.assertEqual([], worse[:10], '%d pages worse' % len(worse))
+
+
+class TestR22TheArmRuleAnswersItsPhrase(unittest.TestCase):
+    """R2-2 (VERIFY-F-R2): the arm rule ('no arm in common', an explicit arm b did not
+    retrieve) answers fixed phrases of COMPARE_REASONS, and an unverifiable identity it
+    decides over stays said in the short note."""
+
+    def test_an_arm_b_did_not_retrieve(self):
+        # fork has both arms
+        for fp in (None, 'f' * 64):
+            a, b = T.graphlet('fork'), T.graphlet('fork')
+            for g in (a, b):
+                g.index_fp = fp
+            del b.arms['right']
+            b.cache.clear()
+            c = a.compare(b, arm='right')
+            self.assertEqual((False, R['right']), (c.comparable, c.reason))
+            self.assertEqual([] if fp else ['no index_fp on both'], c.notes)
+            # without an arm the left one is compared
+            self.assertNotEqual(False, a.compare(b).comparable)
+
+    def test_no_arm_in_common(self):
+        a, b = T.graphlet('fork'), T.graphlet('fork')
+        del a.arms['right']
+        del b.arms['left']
+        for g in (a, b):
+            g.cache.clear()
+        c = a.compare(b)
+        self.assertEqual((False, R['no_arm'], ['no index_fp on both']),
+                         (c.comparable, c.reason, c.notes))
 
 
 class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):

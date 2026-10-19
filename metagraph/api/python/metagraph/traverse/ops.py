@@ -3388,6 +3388,9 @@ COMPARE_REASONS = {
     'release': 'different index releases',
     'seed': 'different oriented seed sequences',
     'names': 'a label ref names different labels',
+    'no_arm': 'no arm in common',
+    'left': 'the left arm was not retrieved in b',
+    'right': 'the right arm was not retrieved in b',
     'unverifiable_both': 'no index manifest digest (index_fp) on both: label joins cannot '
                          'be verified',
     'unverifiable_one': 'no index manifest digest (index_fp) on one side: label joins '
@@ -3604,11 +3607,11 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     None in every case but True). The verdict is the weakest any rule gives, and the
     reason is the fixed phrase (COMPARE_REASONS, at most 80 bytes; a statement with values
     where it fits) of the rule that decided it: the first, in the order index identity and
-    seed, index_fp, common depth, bases, then the qualifications (label evidence, scopes,
-    displayed parents, an inexact restriction), of the rules giving that verdict. The
-    notes state every other rule that applied, and the deciding rule where its reason says
-    less, each once (a missing index_fp as a short note, 'no index_fp on both' or '... on
-    one side', when a weaker verdict decided).
+    seed, the arms in common, index_fp, common depth, bases, then the qualifications (label
+    evidence, scopes, displayed parents, an inexact restriction), of the rules giving that
+    verdict. The notes state every other rule that applied, and the deciding rule where
+    its reason says less, each once (a missing index_fp as a short note, 'no index_fp on
+    both' or '... on one side', when a weaker verdict decided).
 
     modes: claims (the §6.9 unit: run ends, keyed (arm, ref, evidence_from, displayed
     prefix)), walks (walks cut at the depth, with the labels supporting the whole cut
@@ -3690,16 +3693,16 @@ def _stopped_comparison(a, b, mode, state, e):
 
 
 def _compare_sides(a, b, arm):
-    """The arms a comparison reads -> (sides, the reason there are none). An explicit arm
-    is resolved on |a| and must be one |b| retrieved too (looked up on |b| it would raise a
-    KeyError)."""
+    """The arms a comparison reads -> (sides, the reason there are none: a fixed phrase,
+    COMPARE_REASONS). An explicit arm is resolved on |a| and must be one |b| retrieved too
+    (looked up on |b| it would raise a KeyError)."""
     if arm is not None:
         side = a.arm(arm).side
         if side not in b.arms:
-            return [], 'the %s arm was not retrieved in b' % side
+            return [], COMPARE_REASONS[side]
         return [side], None
     sides = [s for s in ARM_SIDES if s in a.arms and s in b.arms]
-    return sides, None if sides else 'no arm in common'
+    return sides, None if sides else COMPARE_REASONS['no_arm']
 
 
 _COMPARE_MODES = ('claims', 'walks', 'labels', 'prefix_subset')
@@ -3723,9 +3726,11 @@ def _compare(a, b, arm, labels, mode, cb, state):
     verdict = _Verdict(comparable, reason, notes)
     sides, none = _compare_sides(a, b, arm)
     if not sides:
-        # the support kinds and strategies of both sides, as every other answer states
+        # the arm rule decides False; an unverifiable identity stays said (a short note).
+        # The support kinds and strategies of both sides, as every other answer states
         # them (not the defaults, ('kmer', 'kmer'), for any pair)
-        return Comparison(False, none, None, None, [], [], notes, mode=mode,
+        verdict.weaken(False, none)
+        return Comparison(False, verdict.reason, None, None, [], [], notes, mode=mode,
                           support=(a.support, b.support), strategies=strategies)
     scopes = (a.arms[sides[0]].scope, b.arms[sides[0]].scope)
     depth = min(min(a.arms[s].complete_to_bp, b.arms[s].complete_to_bp) for s in sides)
