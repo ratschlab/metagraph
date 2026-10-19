@@ -4837,9 +4837,12 @@ Nothing here touches staging; every test is offline.
 - Documents: W1/W2 take `answer.body` of the direct raw record and convert it in the way's process with
   `parser.standalone_text(results[0].graphlet, results[0], response)`; W4 and drift read the MCP's exported file
   `arms/mcp/docs/<id>.mgt.gz` (FORMAT v2 C1; `--mgt-template`); every way writes the document it processed to
-  `arms/<way dir>/docs/<id>.mgt.gz`, then to its spool, and loads it by `graphlet_load`. A missing
-  file, a failed seed or a refused document is the error `no_document` / `no_graphlet` / `document_refused` of every
-  op of its scenario.
+  `arms/<way dir>/docs/<id>.mgt.gz`, then to its spool, and loads it by `graphlet_load`. A
+  document's failure is the error of every op of its scenario: `no_document` (no file, or a direct request that got
+  no HTTP status: a transport failure, fields stage fetch and the code), `document_refused` (an HTTP status other
+  than 2xx or an error body, fields stage fetch, http, code; a 2xx body with no results[0], or a result with neither
+  a graphlet nor an error, stage convert; a conversion or graphlet_load that fails, stage convert / load),
+  `no_graphlet` only for a 2xx answer whose seed failed (results[0] carries `error`, SPEC-core §7.1) (VERIFY-L VL2).
 - Isolation: one child per way, `python -s -B [-P]`, its environment scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus
   PYTHONHASHSEED (defaults W1 1001, W2 2002, W4 4004, drift 5005; distinct per run), sys.path the library root first.
   Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere; the

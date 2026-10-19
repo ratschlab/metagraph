@@ -168,11 +168,13 @@ def _child_do(state, req):
         resp, i = req["response"], req.get("index", 0)
         results = resp.get("results") if isinstance(resp, dict) else None
         if not isinstance(results, list) or i >= len(results) or not isinstance(results[i], dict):
-            return {"no_graphlet": "the response has no results[%d]" % i}
+            return {"refused": "no_results", "text": "the response has no results[%d]" % i}
         r = results[i]
         if not isinstance(r.get("graphlet"), str):
-            return {"no_graphlet": "results[%d] carries no graphlet%s" % (i, (": %s" % r["error"]) if "error" in r
-                                                                           else "")}
+            if "error" in r:   # a failed seed (SPEC-core §7.1's failed shape {seed, error}): the one no_graphlet
+                return {"no_graphlet": "results[%d] failed: %s" % (i, r["error"])}
+            return {"refused": "no_graphlet_no_error",
+                    "text": "results[%d] carries neither a graphlet nor an error" % i}
         return {"text": state["parser"].standalone_text(r["graphlet"], r, resp)}
     if cmd == "call":
         if req["tool"] not in state["names"]:
@@ -467,11 +469,33 @@ class Way(object):
             line["error"] = {"code": "document_refused", "fields": {"stage": "read", "type": type(e).__name__}}
             line["error_text"] = str(e)
             return None
-        resp = obj["answer"]["body"] if isinstance(obj, dict) and isinstance(obj.get("answer"), dict) else obj
+        resp = obj
+        if isinstance(obj, dict) and isinstance(obj.get("answer"), dict):
+            # a direct arm's raw record (suite_common.normalise_direct / transport_failure): only a 2xx answer without
+            # an error is a response to convert (VERIFY-L VL2); a transport failure (no HTTP status) left no document,
+            # an HTTP error or an error body refused it -- neither is a failed seed (no_graphlet)
+            answer = obj["answer"]
+            http, err = answer.get("http"), answer.get("error")
+            code = err.get("code") if isinstance(err, dict) else None
+            if not http:
+                line["error"] = {"code": "no_document", "fields": {"source": src["rel"], "stage": "fetch",
+                                                                   "code": code}}
+                line["error_text"] = err.get("text") if isinstance(err, dict) else None
+                return None
+            if not isinstance(http, int) or not 200 <= http < 300 or err is not None:
+                line["error"] = {"code": "document_refused", "fields": {"stage": "fetch", "http": http, "code": code}}
+                line["error_text"] = err.get("text") if isinstance(err, dict) else None
+                return None
+            resp = answer.get("body")
         msg = self.child.ask({"cmd": "convert", "response": resp, "index": 0})
         if not msg["ok"]:
             line["error"] = {"code": "document_refused", "fields": {"stage": "convert", "type": msg["type"]}}
             line["error_text"] = msg["error"]
+            return None
+        if "refused" in msg["result"]:
+            line["error"] = {"code": "document_refused", "fields": {"stage": "convert",
+                                                                    "reason": msg["result"]["refused"]}}
+            line["error_text"] = msg["result"]["text"]
             return None
         if "no_graphlet" in msg["result"]:
             line["error"] = {"code": "no_graphlet", "fields": {}}

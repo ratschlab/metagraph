@@ -690,17 +690,38 @@ class DocumentErrorTests(unittest.TestCase):
             broken = os.path.join(tmp, "broken.mgt")
             with open(broken, "w", encoding="utf-8") as fh:
                 fh.write(cut)
+            # VL2: a direct arm's raw records of a transport failure, an HTTP error with an error body, a 200 answer
+            # whose seed failed, and a 200 answer that is no traverse response
+            seed_failed = {"results": [{"seed": {}, "error": "no labels"}]}
+            raws = {"G-transport": {"http": 0, "body": None, "error": {"code": "timeout", "text": "timed out"}},
+                    "G-http": {"http": 503, "body": {"error": "server_busy"},
+                               "error": {"code": None, "text": "server_busy"}},
+                    "G-seed": {"http": 200, "body": seed_failed, "error": None},
+                    "G-empty": {"http": 200, "body": {"results": [{"seed": {}}]}, "error": None},
+                    "G-noresults": {"http": 200, "body": {"status": "ok"}, "error": None}}
+            for sid, answer in raws.items():
+                sc.write_gz_json(os.path.join(tmp, sid + ".json.gz"), {"scenario": sid, "answer": answer})
             docs = {"G-nofile": os.path.join(tmp, "absent.mgt.gz"), "G-failed": failed, "G-broken": broken,
                     "G-annot": DOCS["G-annot"]}
+            docs.update((sid, os.path.join(tmp, sid + ".json.gz")) for sid in raws)
             ops = [op("s", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048}),
                    op("c", "graphlet_compare", {"a": {"graphlet": "G-annot"}, "b": "<handle>", "arm": None,
                                                 "mode": "labels", "max_bytes": 2048})]
-            plan = {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid in ("G-nofile", "G-failed",
-                                                                                   "G-broken", "G-nodoc")]}
+            plan = {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid in (
+                "G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws))]}
             recs = run_offline(os.path.join(tmp, "run"), plan, docs=docs, ways="W4")["W4"]
             got = dict(((r["scenario"], r["op"]), r) for r in recs)
             self.assertEqual(got[("G-nofile", "s")]["error"]["code"], "no_document")
             self.assertEqual(got[("G-nodoc", "s")]["error"], {"code": "no_document", "fields": {"source": None}})
+            self.assertEqual(got[("G-transport", "s")]["error"], {"code": "no_document", "fields": {
+                "source": os.path.join(tmp, "G-transport.json.gz"), "stage": "fetch", "code": "timeout"}})
+            self.assertEqual(got[("G-http", "s")]["error"], {"code": "document_refused", "fields": {
+                "stage": "fetch", "http": 503, "code": None}})
+            self.assertEqual(got[("G-seed", "s")]["error"], {"code": "no_graphlet", "fields": {}})
+            self.assertEqual(got[("G-empty", "s")]["error"], {"code": "document_refused", "fields": {
+                "stage": "convert", "reason": "no_graphlet_no_error"}})
+            self.assertEqual(got[("G-noresults", "s")]["error"], {"code": "document_refused", "fields": {
+                "stage": "convert", "reason": "no_results"}})
             self.assertEqual(got[("G-failed", "s")]["error"], {"code": "no_graphlet", "fields": {}})
             self.assertEqual(got[("G-broken", "s")]["error"]["code"], "document_refused")
             self.assertEqual(got[("G-broken", "s")]["error"]["fields"], {"stage": "load", "code": "format_error"})
