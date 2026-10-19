@@ -663,6 +663,32 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(O.answer("traverse_fetch", {}, f, None, {"seed_index": 1})["oracle"]["declared"],
                          "not_applicable")
 
+    def test_refused_arguments(self):
+        """F-D2: a path outside the export directory (path_not_allowed), a budget without local limits (bad_argument),
+        a cursor of another listing (bad_cursor): expected errors, their codes library-defined; what W5 cannot
+        judge (a subdirectory path, a budget under local limits, a resumed page) makes no claim."""
+        g, f, mgt = doc("fork")
+        code = lambda tool, args, **ctx: O.answer(tool, args, f, mgt, ctx)["oracle"]   # noqa: E731
+        for tool, path in [("graphlet_export", "/etc/x.fa"), ("graphlet_export", "../x.fa"), ("graphlet_save", "/tmp/x.mgt"),
+                           ("graphlet_load", "../../x.mgt"), ("graphlet_export", "<export_dir>/../x.fa")]:
+            o = code(tool, {"format": "fasta", "path": path})
+            self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "path_not_allowed"), path)
+            self.assertIn("library-defined", o["note"])
+        for tool, path in [("graphlet_export", "x.fa"), ("graphlet_export", "<export_dir>/x.fa"),
+                           ("graphlet_load", "<spool_dir>/x.mgt")]:
+            self.assertNotIn("declared", code(tool, {"format": "fasta", "path": path}), path)
+        self.assertEqual(code("graphlet_export", {"format": "fasta", "path": "sub/x.fa"})["declared"], "path_unknown")
+        o = code("graphlet_walks", {"arm": "left", "budget": {"work_units": 10}})
+        self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_argument"))
+        self.assertEqual(code("graphlet_walks", {"arm": "left", "budget": {"work_units": 10}},
+                              local_limits={"view": {}})["declared"], "local_limits")
+        self.assertNotIn("declared", code("graphlet_walks", {"arm": "left", "budget": None}))
+        self.assertEqual(code("graphlet_walks", {"arm": "left", "cursor": "<cursor>"})["declared"], "cursor_page")
+        o = code("graphlet_walks", {"arm": "left", "cursor": "<cursor>"}, cursor_bound_elsewhere=True)
+        self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_cursor"))
+        for why in ("cursor_page", "path_unknown", "local_limits"):
+            self.assertEqual(O.compare(O._declared(why), {"rows": []})["outcome"], "not_checked")
+
     def test_patterns_and_position_order(self):
         """`*` patterns in checked, unordered and absent expand over the answers (FORMAT v2 F1); with
         ENDS_UNORDERED off (G3) a row's ends compare sorted by position only (SPEC §7.1)."""
@@ -1025,7 +1051,15 @@ class RunStep(unittest.TestCase):
              "error": {"code": "no_document", "fields": {}}},
             {"scenario": "G-fail", "op": "fail-walks", "tool": "graphlet_walks", "paging_complete": None,
              "args_resolved": {"handle": "<handle>", "arm": "left"}, "answer": None,
-             "error": {"code": "no_graphlet", "fields": {}}}]
+             "error": {"code": "no_graphlet", "fields": {}}},
+            # F-D2: a cursor from the one listing W1 did not read to its end (walks-1 above), with other arguments
+            # (bad_cursor) and with its own (a resumed page: no claim)
+            {"scenario": "G-caps", "op": "cur-other", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "<handle>", "arm": "right", "rank": "id", "n": 1, "cursor": "<cursor>"}},
+            {"scenario": "G-caps", "op": "cur-same", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "<handle>", "arm": "right", "rank": "length", "n": 5, "cursor": "<cursor>"}},
+            {"scenario": "G-caps", "op": "budget", "tool": "graphlet_walks", "library": {"limits": {"local_limits": None}},
+             "args_resolved": {"handle": "<handle>", "arm": "right", "budget": {"work_units": 5}}}]
         with open(os.path.join(root, "arms", "dl-lib", "graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
             for r in w1:
                 fh.write(json.dumps(dict(r, run_id="R", way="W1")) + "\n")
@@ -1063,6 +1097,10 @@ class RunStep(unittest.TestCase):
             for op in ("q", "typo", "raw"):
                 self.assertEqual(lines[op]["oracle"]["declared"], "unresolved_handle", op)
             self.assertEqual(lines["noargs"]["oracle"]["declared"], "no_input")
+            o = lines["cur-other"]["oracle"]
+            self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_cursor"))
+            self.assertEqual(lines["cur-same"]["oracle"]["declared"], "cursor_page")
+            self.assertEqual(lines["budget"]["oracle"]["expected_error"], "bad_argument")
             fail = lines["fail-walks"]["oracle"]
             self.assertEqual((fail["declared"], fail["expected_error"]), ("expected_error", "no_graphlet"))
             self.assertEqual(O.compare(lines["fail-walks"], dict(w1[-1], error={"code": "no_graphlet", "fields": {}}))

@@ -33,8 +33,9 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
   reading an engine value (DESIGN-v8 §2: the report marks them "re-derived from DESIGN").
 - `declared` says why a record checks no value: not_implemented_phase_b (no tool today: DESIGN-v8 §8's phase B
   is answered), properties_only (graphlet_compare: the compare_* functions below),
-  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view): W5 makes no claim
-  (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
+  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view), cursor_page (a page
+  resumed from an opaque cursor), path_unknown (a file path W5 cannot place inside or outside the export directory),
+  local_limits (a budget under local limits): W5 makes no claim (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
   twin pre-check), no_input (the run step found no twin or document), unresolved_handle (a handle symbol naming no
   scenario or op), selector_error (W1's arguments did not resolve), unreadable_w1 (a torn W1 line): W5 could not
   judge (compare: inconclusive, which blocks); and expected_error: the arguments name no answer, or the full twin
@@ -548,7 +549,8 @@ def _canon(v: Any) -> str:
 FIT_ERRORS = ("result_too_large", "receipt_too_large", "too_large", "body_too_large", "op_busy", "op_timeout",
               "op_memory", "local_budget_exceeded")
 # declarations by which W5 makes no claim about the call, by design: compare() answers not_checked
-NO_CLAIM = ("not_implemented_phase_b", "properties_only", "not_applicable", "view_consistency_only")
+NO_CLAIM = ("not_implemented_phase_b", "properties_only", "not_applicable", "view_consistency_only", "cursor_page",
+            "path_unknown", "local_limits")
 # declarations by which W5 could not judge a call it should judge (an input missing or inconsistent, a handle or a
 # W1 line it cannot read): compare() answers inconclusive, which blocks (R2-5; owner policy 2026-10-14)
 CANNOT_JUDGE = ("no_input", "unresolved_handle", "twin_mismatch", "selector_error", "unreadable_w1")
@@ -1510,6 +1512,9 @@ def _walk_ids(d: _Doc, side: str, walks: Any) -> List[int]:
 def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     fmt = args.get("format", "fasta")
     what = args.get("what")
+    refused = _path_refused(args)
+    if refused is not None:
+        return refused
     if fmt not in ("fasta", "gfa", "json", "mgt") or (what is not None and fmt != "json"):
         raise _Refused("format %r / what %r" % (fmt, what))
     cons = ["/path", "/bytes", "/fields_cut", "/local", "/parsed", "/validation"]
@@ -1634,6 +1639,9 @@ def _graphlet_subtrie(d: _Doc, args: dict, ctx: dict) -> dict:
 
 
 def _graphlet_save(d: _Doc, args: dict, ctx: dict) -> dict:
+    refused = _path_refused(args)
+    if refused is not None:
+        return refused
     return _record({"body_digest": body_digest(d.mgt), "arms_digest": arms_digest(d.mgt)},
                    {"/body_digest": "SPEC §7.5.2: the saved file is H, J, the body unchanged (FORMAT-v8 §3 body_digest)",
                     "/arms_digest": "the saved file reads as the original (checks.graphlet_arms, SPEC §7.5)"},
@@ -1641,6 +1649,9 @@ def _graphlet_save(d: _Doc, args: dict, ctx: dict) -> dict:
 
 
 def _graphlet_load(d: _Doc, args: dict, ctx: dict) -> dict:
+    refused = _path_refused(args, spool=True)
+    if refused is not None:
+        return refused
     summ, clauses, cons = _summary_part(d, d.sides)
     cons = cons + ["/handle", "/fields_cut"]
     if ctx.get("max_bytes", 2048) < 16384:
@@ -2085,6 +2096,51 @@ def _failed_error(full_answer: dict, seed_index: int) -> Any:
     return r.get("error")
 
 
+def _arguments_refused(tool: str, args: dict, ctx: dict) -> Optional[dict]:
+    """Arguments the tools refuse, or that W5 cannot judge, before any derivation:
+    - `budget` on a server without local limits: bad_argument (library-defined, INVENTORY §1.1); with local limits a
+      budget's stops are the tool's (DESIGN §5.4: deterministic, but library-defined): no claim (local_limits);
+    - a `cursor`: W5 cannot read it (INVENTORY §1.2: opaque, bound to the handle, the tool and the arguments other
+      than cursor, max_bytes and n). Where the run step found its source op and that op's tool or bound arguments
+      differ (context cursor_bound_elsewhere), the tool must refuse it: bad_cursor (library-defined, INVENTORY §1.2);
+      else a page resumed from it is the tool's: no claim (cursor_page)."""
+    if args.get("budget") is not None and tool not in NOT_APPLICABLE:
+        if not ctx.get("local_limits"):
+            return _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_argument",
+                           note="budget on a server without local limits (library-defined, INVENTORY §1.1)")
+        return _declared("local_limits", "a budget under local limits: its stops are the tool's (DESIGN §5.4)")
+    if args.get("cursor") is not None:
+        if ctx.get("cursor_bound_elsewhere"):
+            return _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_cursor",
+                           note="a cursor of another listing (its source op's tool or arguments differ: library-defined, "
+                                "INVENTORY §1.2)")
+        return _declared("cursor_page", "a page resumed from an opaque cursor (INVENTORY §1.2): the tool's")
+    return None
+
+
+def _path_refused(args: dict, spool: bool = False) -> Optional[dict]:
+    """A file path of export, save or load (DESIGN §6: file names confined to the export directory; load also reads
+    the spool, INVENTORY §2.17): None when inside (a plain file name, or <export_dir>/<name>, <spool_dir>/<name> for
+    load, as the runners symbolise them); an expected error path_not_allowed (the code library-defined, INVENTORY
+    §2.13, §2.17) when outside for sure (an absolute path elsewhere, a `..` component); else no claim."""
+    path = args.get("path")
+    if path is None:
+        return None
+    if not isinstance(path, str) or not path:
+        return _declared("path_unknown", "path %r: what the tool answers is its own" % (path,))
+    parts = path.replace("\\", "/").split("/")
+    roots = ("<export_dir>", "<spool_dir>") if spool else ("<export_dir>",)
+    if len(parts) == 1 and parts[0] not in (".", ".."):
+        return None
+    if len(parts) == 2 and parts[0] in roots and parts[1] not in ("", ".", ".."):
+        return None
+    if ".." in parts or path.startswith("/") or path.startswith("~"):
+        return _record(None, {}, ["/*"], declared="expected_error", expected_error="path_not_allowed",
+                       note="path %r outside the export directory (DESIGN §6; the code library-defined, INVENTORY "
+                            "§2.13, §2.17)" % path)
+    return _declared("path_unknown", "path %r: inside or not is the tool's reading" % path)
+
+
 def seed_failed(full_answer: Optional[dict], seed_index: int = 0) -> bool:
     """Whether the full twin states the seed failed (SPEC §7.1: the result carries `error`, no arms)."""
     if not isinstance(full_answer, dict):
@@ -2111,6 +2167,9 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional
                        note="%s (%s)" % (why, C_FAILED_SEED))
     if tool in PHASE_B:
         return _declared("not_implemented_phase_b", "%s: DESIGN-v8 §8 phase B" % tool)
+    pre = _arguments_refused(tool, args_resolved or {}, ctx)
+    if pre is not None:
+        return pre
     if tool in NOT_APPLICABLE:
         return _declared("not_applicable", "%s: a backend or store tool, outside graphlet processing" % tool)
     if tool == "graphlet_compare":
@@ -2351,6 +2410,7 @@ def _context(rec: dict, view: bool, envelope: Optional[dict], full: dict) -> dic
     limits = (rec.get("library") or {}).get("limits") or {}
     args = rec.get("args_resolved") or {}
     ctx: dict = {"seed_index": 0, "paging": "all" if rec.get("paging_complete") is not False else "none",
+                 "local_limits": limits.get("local_limits"),
                  "max_bytes": args.get("max_bytes", limits.get("max_bytes", 2048)),
                  "sequence_max_bytes": limits.get("sequence_max_bytes", 16384),
                  "strategy": (envelope or {}).get("strategy") or (full or {}).get("strategy")}
@@ -2408,6 +2468,27 @@ def _target(hv: Any, sid: str, tools: Dict[Tuple[Any, Any], Any], scenarios: set
     return (name, False) if name in scenarios else (None, False)
 
 
+_UNBOUND = ("cursor", "max_bytes", "n")   # INVENTORY §1.2: a cursor binds the handle, the tool and the other arguments
+
+
+def _cursor_elsewhere(rec: dict, w1: List[dict]) -> bool:
+    """Whether a call's cursor comes from another listing: its source is the one earlier op of the scenario whose
+    listing W1 did not read to its end (paging_complete false: the op that left a next_cursor for a selector), and
+    that op's tool or bound arguments (all but cursor, max_bytes and n, INVENTORY §1.2) differ. False when the
+    source is not that one op (none, or several: W5 then makes no claim)."""
+    earlier = []
+    for r in w1:
+        if r is rec:
+            break
+        if r.get("scenario") == rec.get("scenario") and r.get("paging_complete") is False and r.get("args_resolved"):
+            earlier.append(r)
+    if len(earlier) != 1:
+        return False
+    src = earlier[0]
+    bound = lambda a: {k: v for k, v in (a or {}).items() if k not in _UNBOUND}   # noqa: E731
+    return src.get("tool") != rec.get("tool") or bound(src["args_resolved"]) != bound(rec["args_resolved"])
+
+
 def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> List[dict]:
     """W5's records of a run (FORMAT v2 F4): one per W1 record of arms/dl-lib/graphlet_ops.jsonl, the same line
     shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`; a torn W1 line gives a record
@@ -2443,7 +2524,10 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
             r = _declared("no_input", "missing %s for scenario %s" % (
                 " and ".join(k for k, v in (("the full twin", full), ("the MGT document", text)) if v is None), target))
         else:
-            r = answer(tool, rec["args_resolved"], full, text, _context(rec, view, envelope, full))
+            ctx = _context(rec, view, envelope, full)
+            if (rec.get("args_resolved") or {}).get("cursor") is not None:
+                ctx["cursor_bound_elsewhere"] = _cursor_elsewhere(rec, w1)
+            r = answer(tool, rec["args_resolved"], full, text, ctx)
         line["answer"], line["oracle"] = r["answer"], r["oracle"]
         line["elapsed_ms"] = round((time.time() - started) * 1000.0, 3)
         line["started_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))

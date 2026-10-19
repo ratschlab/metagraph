@@ -333,7 +333,7 @@ class OracleVsLibrary(unittest.TestCase):
                 continue
             for tool, args in _calls(f["results"][i]):
                 kw = dict(args, handle=h)
-                if tool == "graphlet_save":
+                if tool == "graphlet_save" and "path" not in args:
                     kw["path"] = "saved_%d.mgt" % n_calls
                 lib = self.assemble(tool, kw)
                 if tool in ("graphlet_export", "graphlet_save") and "error" not in lib:
@@ -509,6 +509,43 @@ class OracleVsLibrary(unittest.TestCase):
                         problems.append("%s %s walk %d: W5 %s, under G4 %s" % (name, side, p["id"], own, alt))
         self.assertEqual(problems, [], "\n".join(problems[:10]))
         self.assertEqual(counts["affected"], 73, counts)
+
+    def test_refused_arguments(self):
+        """F-D2 against the library: paths outside the export directory, a budget without local limits, a cursor of
+        another listing; W5 expects the tool's refusal (library-defined codes)."""
+        name = next(k for k in self.docs if k.startswith("documents/merge#"))
+        h, f, i, text = self.docs[name]
+        outside = os.path.join(self.tmp.name, "outside")
+        for tool, args in [("graphlet_export", {"format": "fasta", "path": outside + ".fa"}),
+                           ("graphlet_export", {"format": "fasta", "path": "../escape.fa"}),
+                           ("graphlet_save", {"path": outside + ".mgt"}),
+                           ("graphlet_walks", {"arm": "right", "budget": {"work_units": 1000}}),
+                           ("graphlet_summary", {"budget": {"work_units": 1000}})]:
+            lib = getattr(self.tools, tool)(handle=h, **args)
+            rec = O.answer(tool, args, f, text, {"seed_index": i})
+            self.assertEqual(O.compare(rec, lib)["outcome"], "agree", (tool, args, lib))
+            self.assertFalse(os.path.exists(outside + ".fa") or os.path.exists(outside + ".mgt"))
+        # a cursor of one listing (walks, one row a page) sent with other arguments, or to another tool: bad_cursor
+        name2 = next(k for k in self.docs if k.startswith("real/mini_refseq/mini_ndm1__trace#"))
+        h2, f2, i2, text2 = self.docs[name2]
+        page = self.tools.graphlet_walks(handle=h2, arm="right", rank="id", n=1, max_bytes=WIDE)
+        self.assertIn("next_cursor", page)
+        for lib_args in ({"rank": "length"}, {"rank": "id", "min_bp": 1}):
+            lib = self.tools.graphlet_walks(handle=h2, arm="right", n=1, max_bytes=WIDE, cursor=page["next_cursor"],
+                                            **lib_args)
+            op = dict(lib_args, arm="right", n=1, cursor="<cursor>")
+            rec = O.answer("graphlet_walks", op, f2, text2, {"seed_index": i2, "cursor_bound_elsewhere": True})
+            self.assertEqual(O.compare(rec, lib)["outcome"], "agree", (lib_args, lib))
+        lib = self.tools.graphlet_labels(handle=h2, cursor=page["next_cursor"], max_bytes=WIDE)
+        rec = O.answer("graphlet_labels", {"cursor": "<cursor>"}, f2, text2, {"seed_index": i2,
+                                                                            "cursor_bound_elsewhere": True})
+        self.assertEqual(O.compare(rec, lib)["outcome"], "agree", lib)
+        # the same listing resumed: a page W5 makes no claim about
+        lib = self.tools.graphlet_walks(handle=h2, arm="right", rank="id", n=1, max_bytes=WIDE, cursor=page["next_cursor"])
+        self.assertNotIn("error", lib)
+        rec = O.answer("graphlet_walks", {"arm": "right", "rank": "id", "n": 1, "cursor": "<cursor>"}, f2, text2,
+                       {"seed_index": i2})
+        self.assertEqual(O.compare(rec, lib)["outcome"], "not_checked")
 
     def test_load_receipt_summary(self):
         """graphlet_load's summary, with a ceiling it fits under, is graphlet_summary's (W5 checks it only then)."""
