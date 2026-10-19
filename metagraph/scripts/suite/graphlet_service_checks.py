@@ -33,6 +33,7 @@ still compared. A pair that does not hold is a disagreement naming the side (tab
 """
 
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -223,7 +224,8 @@ def check_qualified_cause(recs, manifest, facts):
             continue
         for side in (sid, _b_scenario(sid, op)):
             cap = facts.get(side, {}).get("cap")
-            if isinstance(cap, int) and str(cap) not in cause:
+            # the cap as a number of its own (VERIFY-C VC12): 64 is not stated by "640" or "1964"
+            if isinstance(cap, int) and not re.search(r"(?<![0-9])%d(?![0-9])" % cap, cause):
                 bad.append(_fail(sid, op, "qualified_cause %s does not state the cap %d of %s" % (
                     gp.compact(cause), cap, side)))
                 break

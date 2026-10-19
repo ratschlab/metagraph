@@ -150,6 +150,13 @@ class CompareFields(ServiceBase):
                              "hint": "h"})
         self.assertIn("does not state the cap 32 of %s" % SID_B, self.check(res, "qualified_cause")["detail"])
 
+    def test_vc12_the_cap_is_a_number_of_its_own(self):
+        res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 640 and 1932: %s" %
+                             gs.NO_DIFFERENCE, "hint": "h"})
+        c = self.check(res, "qualified_cause")
+        self.assertEqual(c["outcome"], "fail")
+        self.assertIn("does not state the cap 64", c["detail"])
+
     def test_hint_iff_more_than_64_labels_per_node(self):
         res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" %
                              gs.NO_DIFFERENCE})
