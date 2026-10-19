@@ -58,45 +58,51 @@ with no definition outside the library, or only DESIGN pseudocode the twin does 
 Values a clock measured (a time limitation's observed, a time resource stop's amounts) differ between the twin's
 execution and the graphlet's (SPEC §6.8) and are never checked.
 
-Coverage (phase A; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2; c/o = consistency-only):
-  every answer's evidence: complete_to_bp, scope [S §7.4], support, reconverge [S §7.5.2 H], outcome [S §7.0]
-      | c/o: limitations (the tool's digest, finding F1), exact, coordinates, view.of
+Coverage (phase A; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2, [L] library-defined (an expected
+error's code); [R] re-derived from DESIGN (oracle.rederived); c/o = consistency-only). Every whole list's length is
+checked (VO7); refusals are expected errors with their code [L].
+  every answer's evidence: complete_to_bp, scope [S §7.4], support, reconverge [S §7.5.2 H], outcome [S §7.0],
+      exact false where DESIGN §6's condition fails (label evidence not complete, a cut list) | c/o: limitations
+      (the tool's digest, finding F1), exact otherwise, coordinates, view.of
   graphlet_summary summary: seed.length_bp [S §7.1], seed.mode [S §7.4 label_mode], outcome [S §7.0],
       index.ns, index.verifiable [S §7.5.2 H, §7.5.7], arms.*: status, complete_to_bp, scope [S §7.4], walks,
       segments, splits, merges, bases, max_bp [S §7.5.5 counts, §7.5.2 A] | c/o: seed.seed_id, seed.labels,
       top_labels, caveats, cut flags
   graphlet_summary limitations: outcome, resource_stop [S §7.0], rows (each entry, arm) and total [S §7.0, §7.5.2 K
-      order] | c/o: rows.*.informational; rows with arm= on a result with seed-level entries
-  graphlet_walks: arm, total, rows.*.walk (in the rank's order: support [D §5], length, id), length_bp, end
-      [S §7.5.6, §7.1; string P], n_alive [S §7.5.6], n_full, labels_full (+_truncated) [D §5.1 via
-      end_labels.route_bp and runs.from_bp], sequence (spell tail/full) [S §7.5.4], label filter (alive at the leaf)
-      and route_consistent (filtered.merge_entered: entered through a non-first parent) [D §6, §5.1; finding F2]
-      | c/o: complete, beyond_certified_bp, coordinates, hint, filtered.not_from_seed; rank=loss order (no key in
-      DESIGN); annotate: n_alive, n_full, labels_full, rank=support order, label filters
+      order] | c/o: rows.*.informational; a clock's values (SPEC §6.8); rows with arm= beside seed-level entries
+  graphlet_walks: arm, total, rows.*.walk (in the rank's order: support [D §5][R], length, id [P ties]), length_bp,
+      end [S §7.5.6, §7.1; string P], n_alive [S §7.5.6], n_full, labels_full (+_truncated) [D §5.1 via
+      end_labels.route_bp and runs.from_bp][R], sequence (spell tail/full) [S §7.5.4], label filter (alive at the
+      leaf) and route_consistent (filtered.merge_entered: entered through a non-first parent) [D §6, §5.1][R];
+      coordinates=true without record coordinates: expected no_coordinates [S §7.1][L] | c/o: complete,
+      beyond_certified_bp, coordinates, hint, filtered.not_from_seed; rank=loss order (no key in DESIGN);
+      annotate: n_alive, n_full, labels_full, rank=support order, label filters
   graphlet_walk: arm, walk, length_bp, total, rows.*: segment, from_bp, to_bp, labels_in(_total), labels_out(_total)
-      [S §7.1, §7.4], in, out [S §7.1; first 8 P], merge_of (absent on one parent) [S §7.5.6], ends (a set, absent
-      without one) [S §7.5.6 label_end events; finding F5], continuation {length_bp, loss_used, labels} (absent
-      without one) [S §7.1] | c/o: rows.*.exact; ends beyond 8; labels_out_total on cut lists (constrain)
+      [S §7.1, §7.4], in, out [S §7.1; first 8 P], merge_of (absent on one parent) [S §7.5.6], ends (a set while
+      ENDS_UNORDERED, G3; absent without one) [S §7.5.6 label_end events], continuation {length_bp, loss_used,
+      labels} (absent without one) [S §7.1] | c/o: rows.*.exact; ends beyond 8; labels_out_total on cut lists
   graphlet_labels (table): total, rows (name, ref, arm, direct_bp, reach_bp, reentries, runs) [S §7.1
-      label_summary], order (-rank, ref, arm) [D §6; ties P], min_direct_bp, at_bp (constrain: a run holds the
-      base) [S §7.1 runs] | c/o: at_bp in annotate
+      label_summary], order (-rank, ref, arm) [D §6; ties P], min_direct_bp, at_bp (constrain: a run holds the base,
+      S §7.1; annotate: a recorded label set holds it, S §7.4) | c/o: at_bp where a cut label set covers the base
   graphlet_splits: total, rows (at_bp, segment, kind, labels_before, branches.char, branches.labels =
       labels_distinct) in (at_bp, first child) order [S §7.4, §7.5.6], min_labels_before
   graphlet_sequence: arm, orientation, with_seed, from, length, sequence [S §7.5.4], to (an uncut slice) | c/o:
       ceiling_bytes, truncated/next_from/to of a cut slice, left-arm walk orientation with the seed
   graphlet_export: fasta records, ids and sequences [D §5 to_fasta, S §7.5.4]; gfa P count and the walks the paths
-      spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37]; json what=walk chains;
-      mgt body digest [S §7.5.2, FORMAT §3] | c/o: header tags, gfa S/L lines, records of gfa/json/mgt, what=compare
+      spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37]; json what=walk chains (arm and
+      walks required, D §6); mgt body digest [S §7.5.2, FORMAT §3]; no bases: an expected error [S §7.1] | c/o:
+      header tags, gfa S/L lines and gfa with arm, records of gfa/json/mgt, what=compare, fasta walks without arm
   graphlet_subtrie: view selectors, mode, arm, summary labels, per-arm complete_to_bp, scope, qualified [D §5
       subgraph] | c/o: the view's walk and segment counts; every tool on the view handle
   graphlet_save / graphlet_load: the saved text's body digest and its graphlet_arms (round trip) [S §7.5.2];
       load's summary as graphlet_summary's
   traverse_continue (execute=False): request.seeds (sequence; labels, absent in annotate mode [S §6.9, §5;
-      finding F3]), the reduced loss budget and branch allowance (the block where the allowance is > 0, finding F6),
-      parent arm/walk/overlap_bp [S §7.1 continuation, D §5.3] | c/o: labels.extra, notes, the rest of the strategy
-      (direction, detail); execute=True (backend)
+      finding F3]), the request's loss_budget and max_label_branches ('unlimited' kept, the original with
+      reset_branches), parent arm/walk/overlap_bp [S §7.1 continuation, D §5.3] | c/o: the loss_budget /
+      branch_budget blocks [P §2.4], labels.extra, notes, the rest of the strategy, the whole strategy with
+      overrides (their merge [L]); execute=True (backend)
   graphlet_compare: properties only (compare_self_properties, compare_swap_properties, compare_walks_properties,
-      compare_prefix_subset_properties) [D §5, §5.2.5, §3.1, S §6.10, §7.5.7]
+      compare_prefix_subset_properties; each takes the compare's arm) [D §5, §5.2.5, §3.1, §9 T39, S §6.10, §7.5.7]
   phase B (declared): graphlet_support, graphlet_claims, graphlet_labels name=
 """
 
