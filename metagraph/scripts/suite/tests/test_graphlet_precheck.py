@@ -147,6 +147,14 @@ class Envelope(PrecheckBase):
         self.assertEqual(rec["outcome"], "fail")
         self.assertEqual(rec["difference"]["pointer"], "/results/0/annotation/access_path")
 
+    def test_the_callers_seed_name_alone_differs_passes(self):
+        # lane L's VL16: envelope_digest and envelope_view drop results[*].seed.seed_id (the service names its own)
+        f = self.run_.fixture
+        res = copy.deepcopy(f.envelope["results"])
+        res[0].setdefault("seed", {})["seed_id"] = "service-seed-17"
+        self.run_.complete_scenario(docs={"W1": f.doc(0), "W2": f.doc(0), "W4": f.doc(0, results=res)})
+        self.assertEqual(self.check("envelope")["outcome"], "pass")
+
     def test_a_feature_level_difference_is_named(self):
         f = self.run_.fixture
         caps = copy.deepcopy(f.envelope["capabilities"])
