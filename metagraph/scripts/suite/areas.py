@@ -2505,6 +2505,19 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     return out
 
 
+# ================================================================================================= G: graphlet tools (v8)
+def gen_G(ctx: Ctx, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,
+          include_direct_only: bool = False) -> List[dict]:
+    """Area G of manifest v8 (DESIGN-v8 §3-§5, FORMAT-v8 §1-§2): the graphlet processing tools five ways on the
+    corpus of graphlets the rehearsal chose (|corpus|, rehearse_g.py; provisional without one), each scenario a
+    `detail: graphlet` request with the exact merged strategy the service sends, its MCP mapping (traverse_fetch with
+    a preset and overrides that merge to it), the `full` twin, the structural preconditions, the library pin
+    |library_commit| and the op plan with run-time selectors. |built|: the scenarios of the other areas (v7's),
+    whose T seeds the candidates reuse. The code is area_g.py."""
+    import area_g
+    return area_g.gen_G(ctx, built, corpus, library_commit, include_direct_only)
+
+
 # ================================================================================================= N: negatives, near misses, hard regions, use cases
 PRIMERS = {   # universal 16S primers (IUPAC), the classic agent use case
     "27F": "AGAGTTTGATCMTGGCTCAG", "1492R": "GGTTACCTTGTTACGACTT",
