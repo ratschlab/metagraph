@@ -402,8 +402,8 @@ the same hash, and a per-ref name check agrees too. So:
   loads it with `--index-manifest`.
 - `index_ns` (`--index-name`) names the index for humans and routing; it is not identity.
 - Without a manifest the server reports `index_fp: *`, and everything that joins labels across retrievals reports
-  *unverifiable* — never equal. The metadata hash is kept as `index_meta_fp`: a cheap **negative** check (a mismatch
-  proves different indexes), never a positive one.
+  *unverifiable* (or a weaker verdict, §5.2.5) — never equal. The metadata hash is kept as `index_meta_fp`: a cheap
+  **negative** check (a mismatch proves different indexes), never a positive one.
 - Tested: two indexes over the same records with identical counts and column names but swapped memberships get
   different `index_fp` and compare `unverifiable`/`different`, never equal; `scripts/traversal/build_mini_refseq.sh`
   writes the manifest so the fixture exercises the positive path.
@@ -622,8 +622,10 @@ for s in segments in id order:                                   # parents prece
    verified, not proven different"). A fallback needs the explicit opt-in `allow_unverified_index` (default off).
 5. **Comparison at a depth.** The DAG is restricted to the comparison depth, and merges at or beyond it are left out
    (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`, and so
-   does no common certified depth (`complete_to_bp` 0 on a side), which decides before the bases and `index_fp`: the
-   verdict is the weakest any rule gives, `reason` names the rule that decided it and `notes` the others. Above
+   does no common certified depth (`complete_to_bp` 0 on a side). The verdict is the weakest any rule gives
+   (`unknown` is weaker than `unverifiable`), and of the rules giving it the first in order decides (no common depth
+   before missing bases). `reason` is the deciding rule's fixed phrase (at most 80 bytes); `notes` state every other
+   rule that applied, and the deciding rule only where its phrase says less, so nothing is said twice. Above
    64 labels, "qualified" can come from the per-node label limit (`max_labels_per_node`), which the docs of
    `compare()` state. Record coordinates are noted, never compared or clipped by `compare()`.
 6. **The displayed parent at a merge** is the server's (§11); the library checks the rule as it stands
