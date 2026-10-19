@@ -470,24 +470,29 @@ def _rows_cut(ans):
 
 
 def oracle_is_cut_of():
-    """Lane O's cut rule (graphlet_oracle.is_cut_of(whole, cut, order), its private _is_cut_of until it is public):
-    a string's leading part, a list's leading whole items (VC1: the one rule of a cut field), or None without the
-    module."""
+    """Lane O's cut rule as fn(whole, cut) -> why |cut| is no cut of |whole| ('' when it is):
+    graphlet_oracle.cut_problem(cut_value, full_value) (the suite's one cut rule, public since lane O's round 3), its
+    private _is_cut_of before; None without the module. On a field's value: a string's leading part, a list's leading
+    whole items (VERIFY-C VC1)."""
     if graphlet_oracle is None:
         return None
-    fn = getattr(graphlet_oracle, "is_cut_of", None) or getattr(graphlet_oracle, "_is_cut_of", None)
-    return fn if callable(fn) else None
+    public = getattr(graphlet_oracle, "cut_problem", None)
+    if callable(public):
+        return lambda whole, cut: public(cut, whole) or ""
+    private = getattr(graphlet_oracle, "_is_cut_of", None)
+    if callable(private):
+        return lambda whole, cut: "" if private(whole, cut, "ordered") else "not a cut of the full value (ordered)"
+    return None
 
 
 def field_cut_problem(whole, cut, fn):
-    """Why |cut| is no cut of |whole| for a field a row names cut ('' when it is): lane O's rule (a string's leading
-    part, a list's leading whole items, never a nested prefix inside an item), and never an empty value for a
-    non-empty one (the coordinator's VC1: empty-for-full is no cut)."""
+    """Why |cut| is no cut of |whole| for a field a row names cut ('' when it is): lane O's rule (|fn|: a string's
+    leading part, a list's leading whole items, never a nested prefix inside an item), and never an empty value for a
+    non-empty one (the coordinator's VC1 decision: empty-for-full is no cut)."""
     if isinstance(whole, (str, list)) and isinstance(cut, (str, list)) and whole and not cut:
         return "empty for a non-empty value"
-    if not fn(whole, cut, "ordered"):
-        return "not a leading part (a string's leading part, a list's leading whole items)"
-    return ""
+    why = fn(whole, cut)
+    return "not a leading part: %s" % why if why else ""
 
 
 def row_cut_difference(x, y, pointer, fn):
@@ -672,8 +677,9 @@ def oracle_view(way, rec):
     return canonical_answer(rec.get("tool"), library_part(way, rec))
 
 
-# graphlet_oracle.compare's outcomes (lane O); a bare list of differences (None) is read as agree / disagree
-ORACLE_OUTCOMES = ("agree", "disagree", "not_comparable", "not_checked")
+# graphlet_oracle.compare's outcomes (lane O); a bare list of differences (None) is read as agree / disagree;
+# inconclusive (W5 could not judge a call it should) blocks
+ORACLE_OUTCOMES = ("agree", "disagree", "not_comparable", "not_checked", "inconclusive")
 
 
 def _oracle_result(res):
@@ -727,6 +733,9 @@ def compare_w5(x, rx, r5):
         # an outcome outside lane O's vocabulary is never an agreement (VERIFY-C VC8)
         return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare answered the outcome %r%s" % (
             outcome, (": %s" % detail) if detail else ""), kind="oracle_error")
+    if outcome == "inconclusive":
+        return _pair(x, "W5", W5_WHAT, "not_compared", "W5 could not judge the call (graphlet_oracle.compare): %s"
+                     % (detail or "inconclusive"), kind="oracle_error")
     if outcome in ("not_comparable", "not_checked"):
         return _pair(x, "W5", W5_WHAT, outcome, detail or "graphlet_oracle.compare: %s" % outcome, kind="oracle")
     if diffs or outcome == "disagree":

@@ -289,6 +289,7 @@ class CutRows(unittest.TestCase):
         p = self.pair(w3, lib)
         self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/labels_full"))
         self.assertIn("not a leading part", p["detail"])
+        self.assertIn("not a cut of the full value", p["detail"])   # lane O's cut_problem's own words
 
     def test_p1c_a_field_emptied_that_the_row_does_not_name(self):
         lib, w3 = self.answers()
@@ -646,6 +647,11 @@ class FiveWay(unittest.TestCase):
         e = self.op_entry()   # VC8 (the verifier's P7): an unknown outcome is no agreement
         self.assertEqual(e["outcome"], "inconclusive")
         self.assertIn("graphlet_oracle.compare answered the outcome 'error': W5 record unreadable", e["reason"])
+        cg.graphlet_oracle = gf.OracleStub({"outcome": "inconclusive", "detail": "an unresolved handle symbol",
+                                            "differences": []})
+        e = self.op_entry()   # lane O's inconclusive: W5 could not judge a call it should (blocks)
+        self.assertEqual(e["outcome"], "inconclusive")
+        self.assertIn("W5 could not judge the call (graphlet_oracle.compare): an unresolved handle symbol", e["reason"])
         cg.graphlet_oracle = gf.OracleStub(ValueError("no oracle block"))
         e = self.op_entry()
         self.assertEqual(e["outcome"], "inconclusive")
