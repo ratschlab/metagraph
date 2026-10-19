@@ -370,10 +370,14 @@ def _long_walk_candidates(ctx: Any) -> List[dict]:
     graphlet_sequence(with_seed) pages (truncated + next_from). Drawn here (own random stream: no other area's
     draws move); the walk preset (15 s) and the trie preset (30 s) for the rehearsal's headroom."""
     out = []
-    for i, (key, preset) in enumerate((("ser", "walk"), ("mpn", "walk"), ("ser", "trie"))):
+    # .4 / .5 (2026-10-19, after the first rehearsal had walked the windows of .1-.3): fresh windows of the same
+    # records, so that the second rehearsal measures the warm-ups' effect from a cold host
+    for i, (key, preset, stream) in enumerate((("ser", "walk", ""), ("mpn", "walk", ""), ("ser", "trie", ""),
+                                                ("ser", "walk", "fresh"), ("mpn", "walk", "fresh"))):
         try:
             rec = ctx.rec(key)
-            t = _long_window(ctx, ctx.rng("G", "long_walk", key), rec, LONG_SEED_BP, LONG_RADIUS_BP + 200)
+            rng = ctx.rng("G", "long_walk", key, stream) if stream else ctx.rng("G", "long_walk", key)
+            t = _long_window(ctx, rng, rec, LONG_SEED_BP, LONG_RADIUS_BP + 200)
         except (KeyError, ValueError) as e:
             ctx.skip(AREA, "long_walk.%d" % (i + 1), "no %d bp window: %s" % (LONG_SEED_BP, e))
             continue
@@ -435,7 +439,7 @@ LONG_WARM_MAX_QUERY_BP = 10000     # the host's max_query_bp (its /traverse/capa
 LONG_WARM_MARGIN_BP = 45           # areas.WARM_MARGIN_BP: what a warm-up reads beyond the walk
 
 
-def long_walk_warm_ups(ctx: Any, c: dict, target_id: str) -> List[dict]:
+def long_walk_warm_ups(ctx: Any, c: dict, target_id: str, ids: Tuple[str, ...] = LONG_WARM_IDS) -> List[dict]:
     """The warm-ups of the long walk |c| (LONG_WARM_IDS): its seed and its right arm's radius plus
     LONG_WARM_MARGIN_BP, in two contiguous pieces of at most LONG_WARM_MAX_QUERY_BP overlapping by k - 1, each resolved
     against the walk's own label (a column: its rows), every k-mer supported; direct-local only (timing_class long, the
@@ -449,11 +453,11 @@ def long_walk_warm_ups(ctx: Any, c: dict, target_id: str) -> List[dict]:
     s0 = t["start"] - rec.offset
     a, b = s0, min(len(rec.seq), s0 + t["length"] + radius + LONG_WARM_MARGIN_BP)
     k = 31
-    n = len(LONG_WARM_IDS)
+    n = len(ids)
     piece = -(-(b - a + (n - 1) * (k - 1)) // n)
     assert piece <= LONG_WARM_MAX_QUERY_BP, "a long-walk warm-up within the host's max_query_bp"
     out = []
-    for i, sid in enumerate(LONG_WARM_IDS):
+    for i, sid in enumerate(ids):
         start = a + i * (piece - (k - 1))
         end = min(b, start + piece) if i + 1 < n else b
         region = ctx.truth_at(rec, start, end - start, flank=0)

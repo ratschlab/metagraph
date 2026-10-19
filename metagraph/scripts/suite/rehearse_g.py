@@ -183,6 +183,124 @@ def rehearsal_scenarios(ctx: Any, v7: List[dict], skip_conditional: bool = False
     return out, meta
 
 
+# The second rehearsal (the coordinator, 2026-10-19), short and direct-local mostly: the twins without
+# max_memory_mb (F-D4) of the candidates whose twin failed (SPEC-core R21 (4)), direct-local only, one graphlet
+# request and the twin each; and the long walk with its warm-ups (the owner's decision), on fresh windows (the first
+# rehearsal walked the old ones), its MCP call cold after the warm-ups, three direct repeats and the twin.
+REHEARSAL2_TWIN = ("two_arms.1", "merges.1", "cut_lists.1", "cut_lists.2", "cut_lists.3", "no_bases.1", "no_bases.2")
+REHEARSAL2_TWIN_PARTNERS = ("two_arms.1+shift10", "merges.1+cap2")
+REHEARSAL2_LONG = ("long_walk.4", "long_walk.5")
+REHEARSAL2_DIRECT = ("rehearsal 2 (the coordinator, 2026-10-19): direct-local only, the twin's re-check without "
+                     "bounds.max_memory_mb (F-D4)")
+
+
+def rehearsal2_scenarios(ctx: Any, v7: List[dict]) -> Tuple[List[dict], Dict[str, dict]]:
+    """(the second rehearsal's scenarios, meta): the twin re-checks (REHEARSAL2_TWIN and their partners: repeat 1,
+    the MCP mapping not implemented), then each long walk of REHEARSAL2_LONG right after its two warm-ups
+    (area_g.long_walk_warm_ups: direct-local only, the long class) with its MCP mapping and repeat 3. Ids and op plans
+    as in the first rehearsal (a candidate keeps its G-<stem>-c<n>)."""
+    cands = area_g.candidates(ctx, v7)
+    by = dict((c["cid"], c) for c in cands)
+    ids = candidate_ids(cands)
+    corpus = area_g.default_corpus()
+    out, meta = [], {}
+    partners = dict((pc["cid"], (pc, of, pair)) for pc, of, pair in partner_candidates(cands))
+    for cid in REHEARSAL2_TWIN:
+        c = by[cid]
+        sid = ids[cid]
+        ops = area_g.op_plan(sid, c["slot"], area_g.facts_of(c, corpus), c["slot"] in area_g.DEFAULT_RICH,
+                             [(sid, False)] if c["slot"] == "two_arms" else [], direct_only=True,
+                             extras={"other": sid})
+        sc_ = area_g.g_scenario(sid, "rehearsal 2: the twin of %s" % cid, c, corpus, None, ops,
+                                ["rehearsal", "rehearsal-2"])
+        _direct_local_only(sc_)
+        out.append(sc_)
+        meta[sid] = {"cid": cid, "slot": c["slot"], "candidate": c}
+        for pcid in REHEARSAL2_TWIN_PARTNERS:
+            pc, of, pair = partners[pcid]
+            if of["cid"] != cid:
+                continue
+            pid = "G-pair-%s-c%s" % (pair.replace("_", ""), cid.split(".")[1])
+            pops = area_g.op_plan(pid, pc["slot"], area_g.facts_of(pc, corpus), False,
+                                  [(sid, pair in ("radius", "two_seeds"))], extras={}, partner_of=sid)
+            ps = area_g.g_scenario(pid, "rehearsal 2: the twin of %s" % pcid, pc, corpus, None, pops,
+                                   ["rehearsal", "rehearsal-2", "pair"])
+            _direct_local_only(ps)
+            out.append(ps)
+            meta[pid] = {"cid": pcid, "slot": c["slot"], "pair": pair, "of": cid, "candidate": pc}
+    for cid in REHEARSAL2_LONG:
+        c = by.get(cid)
+        if c is None:
+            raise SystemExit("rehearsal 2: no candidate %s (the record cache: SUITE_TRUTH_CACHE)" % cid)
+        sid = ids[cid]
+        n = cid.split(".")[1]
+        warm = area_g.long_walk_warm_ups(ctx, c, sid, ("G-warm-c%s-1" % n, "G-warm-c%s-2" % n))
+        for w in warm:
+            out.append(w)
+            meta[w["id"]] = {"warm_up_of": sid}
+        ops = area_g.op_plan(sid, c["slot"], area_g.facts_of(c, corpus), False, [], extras={"other": sid,
+                                                                                            "row_cut": True,
+                                                                                            "sequence_cut": True})
+        sc_ = area_g.g_scenario(sid, "rehearsal 2: %s with its warm-ups" % cid, c, corpus, None, ops,
+                                ["rehearsal", "rehearsal-2"], timing_class="slow")
+        sc_["repeat"] = DL_REPEATS
+        out.append(sc_)
+        meta[sid] = {"cid": cid, "slot": c["slot"], "candidate": c}
+    return out, meta
+
+
+def _direct_local_only(scen: dict) -> None:
+    """A twin re-check of the second rehearsal: one graphlet request (repeat 1) and its twin, no MCP job (the
+    first rehearsal recorded the MCP's), so a direct-only scenario of the rehearsal's manifest."""
+    scen["repeat"] = 1
+    scen["mcp"] = {"not_implemented": REHEARSAL2_DIRECT}
+    g = scen["graphlet"]
+    g["ways"]["default"] = list(area_g.DIRECT_ONLY_WAYS)
+    g["not_exposed"]["*"] = REHEARSAL2_DIRECT
+    for o in g["ops"]:
+        o["ways"] = [w for w in o.get("ways") or area_g.DIRECT_ONLY_WAYS if w in area_g.DIRECT_ONLY_WAYS]
+        o["not_exposed"] = {"W3": REHEARSAL2_DIRECT, "W4": REHEARSAL2_DIRECT}
+
+
+def plan2(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
+    """What the second rehearsal sends (run_suite.sh --paired --skip-remote --warm-every 0: per scenario in order the
+    MCP arm cold, direct-local, the MCP arm's warm repeats), and its expected duration."""
+    rows, dl, mcp_jobs, seconds = [], 0, 0, 0.0
+    for s_ in scenarios:
+        m = meta[s_["id"]]
+        if m.get("warm_up_of"):
+            n_dl, jobs, t = 1, 0, 20.0   # a cold resolve of ~8.3 kbp under a single-record column (estimate)
+        elif "tool" in s_["mcp"]:
+            n_dl, jobs = DL_REPEATS + 1, max(2, s_.get("repeat", 1))   # cold + warm repeats (suite_common.mcp_repeats)
+            t = jobs * (1.0 + MCP_OVERHEAD_S) + n_dl * (0.5 + DL_PAUSE_S)
+        else:
+            n_dl, jobs = s_.get("repeat", 1) + 1, 0
+            t = n_dl * (0.5 + DL_PAUSE_S)
+        dl += n_dl
+        mcp_jobs += jobs
+        seconds += t
+        rows.append({"scenario": s_["id"], "candidate": m.get("cid") or "warm-up of %s" % m["warm_up_of"],
+                     "mcp_jobs": jobs, "direct_local_requests": n_dl, "expected_s": round(t, 1)})
+    dl += 4
+    return {"candidates": sum(1 for s_ in scenarios if not meta[s_["id"]].get("warm_up_of")),
+            "warm_ups": sum(1 for s_ in scenarios if meta[s_["id"]].get("warm_up_of")),
+            "mcp_jobs": mcp_jobs, "direct_local_requests": dl, "direct_remote_requests": 0,
+            "expected_minutes": round(seconds / 60.0, 1), "rows": rows,
+            "load": "one request in flight at a time, in manifest order (run_suite.sh --paired --skip-remote): the "
+                    "twin re-checks on direct-local only (one graphlet request and its twin each; the MCP runner "
+                    "only records their not-implemented mark), then per long walk its two warm-up resolves on "
+                    "direct-local, its MCP call cold, three direct-local repeats and the twin, and the MCP arm's two "
+                    "warm repeats"}
+
+
+def execute2(out: str, manifest_path: str, mcp_cmd: str) -> int:
+    """The second rehearsal in one paired run (staging: only with the coordinator's go)."""
+    env = dict(os.environ, SUITE_RUNS=os.path.join(out, "runs"))
+    return subprocess.call([os.path.join(HERE, "run_suite.sh"), "--manifest", manifest_path, "--paired",
+                            "--skip-remote", "--mcp-cmd", mcp_cmd, "--warm-every", "0", "--no-gate", "--no-pdf"],
+                           env=env, stdin=subprocess.DEVNULL)
+
+
 def rehearsal_manifest(scenarios: List[dict], skipped: List[dict]) -> dict:
     return {"manifest_version": 8, "rehearsal": "area G (rehearse_g.py)", "partial_build": True,
             "content_sha256": ml.sha256_json(scenarios), "created_utc": utc_now(), "index": {"database": ml.DB},
@@ -228,6 +346,24 @@ def plan(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
             "load": "one request in flight at a time: the MCP jobs first (cold, one per candidate, the async runner's "
                     "queue check), then the direct-local arm on mex (run_suite.sh --sequential --skip-remote "
                     "--no-mcp: three repeats and one twin per candidate); no direct-remote request"}
+
+
+def plan2_markdown(p: dict, out: str, mpath: str, mcp_cmd: str) -> str:
+    lines = ["# Area G rehearsal 2 plan", "",
+             "Candidates %d and %d warm-ups: MCP jobs %d, direct-local requests %d, direct-remote 0; expected about "
+             "%.0f minutes of staging time." % (p["candidates"], p["warm_ups"], p["mcp_jobs"],
+                                                p["direct_local_requests"], p["expected_minutes"]), "",
+             "Load: %s." % p["load"], "",
+             "Command: `rehearse_g.py --rehearsal 2 --out %s --execute` = `run_suite.sh --manifest %s --paired "
+             "--skip-remote --mcp-cmd '<%s>' --warm-every 0 --no-gate --no-pdf` (SUITE_RUNS=%s/runs)" % (
+                 out, mpath, mcp_cmd.split(" ")[1] if " " in mcp_cmd else mcp_cmd, out), "",
+             "Then offline: `rehearse_g.py --rehearsal 2 --out %s --analyse --dl-run <the run> --prior <rehearsal 1's "
+             "directory>`." % out, "",
+             "| scenario | candidate | MCP jobs | direct-local | expected s |", "|---|---|---|---|---|"]
+    for r in p["rows"]:
+        lines.append("| %s | %s | %d | %d | %.1f |" % (r["scenario"], r["candidate"], r["mcp_jobs"],
+                                                        r["direct_local_requests"], r["expected_s"]))
+    return "\n".join(lines) + "\n"
 
 
 def plan_markdown(p: dict, out: str, mcp_cmd: str) -> str:
@@ -462,9 +598,9 @@ def mcp_execution(mcp_dir: str, sid: str) -> dict:
             "not_exposed": raw.get("not_exposed"), "outcome": raw.get("outcome")}
 
 
-def dl_executions(dl_run: str, sid: str) -> List[dict]:
+def dl_executions(dl_run: str, sid: str, repeats: int = DL_REPEATS) -> List[dict]:
     out = []
-    for rep in range(DL_REPEATS):
+    for rep in range(repeats):
         raw = _read(os.path.join(dl_run, "arms", "direct-local", sc.raw_name(sid, "direct-local", rep)))
         ans = (raw or {}).get("answer") or {}
         out.append({"repeat": rep, "http": ans.get("http"), "response": ans.get("body")
@@ -659,13 +795,21 @@ def op_timeouts(records: List[Dict], ops: List[dict]) -> Tuple[dict, List[str]]:
 
 
 def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_dir: str, library_root: str,
-            library_commit: Optional[str] = None, mcp_graphlet_run: Optional[str] = None) -> dict:
+            library_commit: Optional[str] = None, mcp_graphlet_run: Optional[str] = None,
+            prior: Optional[str] = None) -> dict:
     """The rehearsal's judgement (module docstring): rehearsal.json, corpus.json, REPORT.md under |out|."""
     results = {}
-    scen = dict((s["id"], s) for s in manifest["scenarios"])
+    warm_ups = {}
+    for s in manifest["scenarios"]:
+        if meta.get(s["id"], {}).get("warm_up_of"):
+            raw = _read(os.path.join(dl_run, "arms", "direct-local", sc.raw_name(s["id"], "direct-local", 0)))
+            ans = (raw or {}).get("answer") or {}
+            warm_ups[s["id"]] = {"of": meta[s["id"]]["warm_up_of"], "http": ans.get("http"),
+                                 "engine_ms": engine_ms(ans.get("body") if isinstance(ans.get("body"), dict) else {})}
+    scen = dict((s["id"], s) for s in manifest["scenarios"] if isinstance(s.get("graphlet"), dict))
     first_of_seed: Dict[str, str] = {}
     for sid, s in scen.items():
-        dl = dl_executions(dl_run, sid)
+        dl = dl_executions(dl_run, sid, int(s.get("repeat") or 1))
         mcp = mcp_execution(mcp_dir, sid) if "tool" in s["mcp"] else {}
         twin = _read(os.path.join(dl_run, "arms", "direct-local", "docs", sid + ".full.json.gz"))
         results[sid] = judge(s, meta[sid], dl, mcp, twin)
@@ -691,8 +835,10 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
                                         for s in shadow_manifest["scenarios"]]
     recs_by_rep.append(recs)
     for rep in range(1, DL_REPEATS):
-        recs_by_rep.append(shadow_run(shadow_manifest, graphed, dl_run, library_root,
-                                      os.path.join(out, "shadow", "repeat%d" % rep), repeat=rep))
+        more = [sid for sid in graphed if int(scen[sid].get("repeat") or 1) > rep]
+        if more:
+            recs_by_rep.append(shadow_run(shadow_manifest, more, dl_run, library_root,
+                                          os.path.join(out, "shadow", "repeat%d" % rep), repeat=rep))
     w3 = {}
     if mcp_graphlet_run:
         rows, _ = sc.read_jsonl(os.path.join(mcp_graphlet_run, "arms", "mcp", "graphlet_ops.jsonl"))
@@ -718,9 +864,54 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
         if "sum" in per[0] and isinstance(per[0]["sum"].get("answer"), dict):
             uncut = len(json.dumps(per[0]["sum"]["answer"], separators=(",", ":")))
             r["facts"]["summary_cut_bytes"] = max(1100, uncut * 2 // 3)
+    meta = dict((sid, meta[sid]) for sid in scen)
+    if prior:
+        results, meta, scen = merge_prior(prior, results, meta, scen)
     corpus = choose_corpus(results, meta, scen, library_commit)
-    write_outputs(out, results, meta, scen, corpus)
-    return {"results": results, "corpus": corpus}
+    write_outputs(out, results, meta, scen, corpus, warm_ups)
+    return {"results": results, "corpus": corpus, "warm_ups": warm_ups}
+
+
+# candidates renamed since the first rehearsal (the owner's decision of 2026-10-19: trace with coordinates its own slot)
+RENAMED = {"trace.3": ("coordinates.1", "coordinates")}
+
+
+def merge_prior(prior: str, results: Dict, meta: Dict, scen: Dict) -> Tuple[Dict, Dict, Dict]:
+    """The first rehearsal's results (|prior|: its directory) with this one's: a candidate judged again takes this
+    rehearsal's verdicts; the order is the first rehearsal's, then the candidates new here."""
+    ctx, v7 = build_context()
+    cands = dict((c["cid"], c) for c in area_g.candidates(ctx, v7))
+    for _seed_cid, pc_ in [(pc["cid"], pc) for pc, _of, _pair in partner_candidates(list(cands.values()))]:
+        cands[pc_["cid"]] = pc_
+    old = sc.read_json(os.path.join(prior, "rehearsal.json")) or {}
+    old_scen = [x for x in (sc.read_json(os.path.join(prior, "rehearsal_manifest.json")) or {}).get("scenarios") or []
+                if isinstance(x.get("graphlet"), dict)]
+    m_results, m_meta, m_scen = {}, {}, {}
+    for s_ in old_scen:
+        sid = s_["id"]
+        m = dict((old.get("meta") or {}).get(sid) or {})
+        if m.get("cid") in RENAMED:
+            m["cid"], m["slot"] = RENAMED[m["cid"]]
+        if m.get("cid") not in cands or sid not in (old.get("results") or {}):
+            continue
+        m["candidate"] = cands[m["cid"]]
+        m_results[sid], m_meta[sid], m_scen[sid] = old["results"][sid], m, s_
+    for sid, s_ in scen.items():
+        if sid in m_results and (s_.get("mcp") or {}).get("not_implemented") == REHEARSAL2_DIRECT:
+            # a twin re-check (direct-local only): the first rehearsal's verdicts with this one's twin, plan, fit and
+            # slot readings (the MCP's, the echo and the cold engine time stay the first rehearsal's)
+            r = copy.deepcopy(m_results[sid])
+            r2 = results[sid]
+            for k in ("twin", "plan", "fit", "slot"):
+                if k in r2["verdicts"]:
+                    r["verdicts"][k] = r2["verdicts"][k]
+            r["facts"] = r2["facts"]
+            r["twin_rechecked"] = "rehearsal 2 (the twin without bounds.max_memory_mb, F-D4)"
+            r["passed"] = passed(r["verdicts"])
+            m_results[sid] = r
+            continue
+        m_results[sid], m_meta[sid], m_scen[sid] = results[sid], meta[sid], s_
+    return m_results, m_meta, m_scen
 
 
 def shared_seed_headroom(sid: str, s: dict, meta: dict, results: Dict, first_of_seed: Dict[str, str]) -> None:
@@ -815,11 +1006,12 @@ def choose_corpus(results: Dict, meta: Dict, scen: Dict, library_commit: Optiona
             "rich": [slot for slot, _ in rich]}
 
 
-def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict) -> None:
+def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict,
+                  warm_ups: Optional[Dict] = None) -> None:
     with open(os.path.join(out, "rehearsal.json"), "w") as fh:
         json.dump({"results": results, "meta": dict((k, dict((kk, vv) for kk, vv in v.items() if kk != "candidate"))
-                                                    for k, v in meta.items())}, fh, indent=1, sort_keys=True,
-                  default=str)
+                                                    for k, v in meta.items()), "warm_ups": warm_ups or {}},
+                  fh, indent=1, sort_keys=True, default=str)
     with open(os.path.join(out, "corpus.json"), "w") as fh:
         json.dump(corpus, fh, indent=1, sort_keys=True)
     lines = ["# Area G rehearsal report", "", "## Corpus", "", "| slot | chosen | why |", "|---|---|---|"]
@@ -835,6 +1027,10 @@ def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict)
                         if not str(v).startswith(("pass", "not expressible")))
         lines.append("| %s | %s | %s | %s | %s |" % (sid, meta[sid]["cid"], "yes" if r["passed"] else "no", t,
                                                      bad.replace("|", "/")[:300]))
+    if warm_ups:
+        lines += ["", "## Warm-ups (direct-local)", "", "| warm-up | of | http | engine ms |", "|---|---|---|---|"]
+        for wid, w in warm_ups.items():
+            lines.append("| %s | %s | %s | %s |" % (wid, w["of"], w["http"], w["engine_ms"]))
     lines += ["", "## Per-op medians (the local library, W1, over the three direct documents)", "",
               "| scenario | ops timed | median of medians ms | slowest ops (median ms) |", "|---|---|---|---|"]
     for sid in scen:
@@ -863,12 +1059,18 @@ def main(argv=None) -> int:
     ap.add_argument("--library-commit", default=None, help="the pin written into the corpus file")
     ap.add_argument("--skip-conditional", action="store_true", help="leave out the conditional (over 8 MiB) slot")
     ap.add_argument("--slots", default=None, help="comma-separated slots (default all)")
+    ap.add_argument("--rehearsal", type=int, choices=(1, 2), default=1,
+                    help="2: the second rehearsal (the twin re-checks, the long walk with its warm-ups)")
+    ap.add_argument("--prior", default=None, help="--analyse: the first rehearsal's directory, merged into the corpus")
     a = ap.parse_args(argv)
     out = os.path.abspath(a.out or default_out())
     os.makedirs(out, exist_ok=True)
     ctx, v7 = build_context()
     slots = [x.strip() for x in a.slots.split(",")] if a.slots else None
-    scenarios, meta = rehearsal_scenarios(ctx, v7, a.skip_conditional, slots)
+    if a.rehearsal == 2:
+        scenarios, meta = rehearsal2_scenarios(ctx, v7)
+    else:
+        scenarios, meta = rehearsal_scenarios(ctx, v7, a.skip_conditional, slots)
     skipped = list(getattr(ctx, "skipped", []) or [])
     manifest = rehearsal_manifest(scenarios, skipped)
     mpath = os.path.join(out, "rehearsal_manifest.json")
@@ -878,18 +1080,21 @@ def main(argv=None) -> int:
     else:
         manifest = sc.read_json(mpath)
     mcp_cmd = a.mcp_cmd or async_mcp_template()
-    p = plan(manifest["scenarios"], meta)
+    p = plan2(manifest["scenarios"], meta) if a.rehearsal == 2 else plan(manifest["scenarios"], meta)
     with open(os.path.join(out, "plan.json"), "w") as fh:
         json.dump(p, fh, indent=1, sort_keys=True)
     with open(os.path.join(out, "PLAN.md"), "w") as fh:
-        fh.write(plan_markdown(p, out, mcp_cmd))
+        fh.write(plan2_markdown(p, out, mpath, mcp_cmd) if a.rehearsal == 2 else plan_markdown(p, out, mcp_cmd))
     if a.execute:
+        if a.rehearsal == 2:
+            return execute2(out, mpath, mcp_cmd)
         return execute(out, mpath, manifest["scenarios"], mcp_cmd)
     if a.analyse:
         if not a.dl_run:
             ap.error("--analyse needs --dl-run")
-        res = analyse(out, manifest, meta, a.dl_run, a.mcp_dir or os.path.join(out, "mcp"), a.library_root,
-                      a.library_commit, a.mcp_graphlet_run)
+        default_mcp = os.path.join(a.dl_run, "arms", "mcp") if a.rehearsal == 2 else os.path.join(out, "mcp")
+        res = analyse(out, manifest, meta, a.dl_run, a.mcp_dir or default_mcp, a.library_root,
+                      a.library_commit, a.mcp_graphlet_run, a.prior)
         n = sum(1 for e in res["corpus"]["slots"].values() if e["candidate"])
         print("rehearsal: %d of %d slots chosen; %s" % (n, len(res["corpus"]["slots"]), os.path.join(out, "REPORT.md")))
         return 0
