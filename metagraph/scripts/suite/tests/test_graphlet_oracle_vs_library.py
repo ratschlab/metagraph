@@ -30,7 +30,8 @@ from test_graphlet_oracle import DATA, NOT_TWINS, engine_pairs  # noqa: E402
 
 LIB = os.path.normpath(os.path.join(SUITE, "..", "..", "api", "python"))
 WIDE = 262144            # the service's largest page (DESIGN-v8 §5: whole-list calls fit uncut there)
-LIST_TOOLS = ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_splits")
+LIST_TOOLS = ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_splits",
+              "graphlet_claims", "graphlet_support")
 SAME_SEED = [
     ["real/mini_refseq/mini_rep_00__trace_coords#0", "real/mini_refseq/mini_rep_00__trace_coords_column#0",
      "coords/rep0_column#0", "coords/rep0_cut1#0", "coords/rep0_kmer_null#0", "coords/rep0_lower_bound#0",
@@ -153,6 +154,17 @@ def _calls(res):
                                            "reset_branches": True})]
         out += [("traverse_continue", {"arm": s, "walk": p["id"], "execute": False, "max_bytes": WIDE})
                 for p in a["paths"][:1] if not p.get("continuation")]
+        # phase B, graphlet_claims (INVENTORY §3.1): min_bp {0, mid} x route_consistent; labels one and a list; a
+        # paging pass at 2048; annotate and trace retrievals are among the documents
+        runs = a.get("runs") or []
+        labs = sorted({r["label"] for r in runs})[:3] or [0]
+        mid = sorted(r["to_bp"] - r["from_bp"] for r in runs)[len(runs) // 2] if runs else 10
+        for rc, mb in itertools.product((True, False), (0, mid)):
+            out.append(("graphlet_claims", {"arm": s, "route_consistent": rc, "min_bp": mb, "max_bytes": WIDE}))
+        out += [("graphlet_claims", {"arm": s, "labels": {"id": labs[0]}, "route_consistent": False, "max_bytes": WIDE}),
+                ("graphlet_claims", {"arm": s, "labels": [{"id": x} for x in labs], "max_bytes": WIDE}),
+                ("graphlet_claims", {"arm": s}), ("graphlet_claims", {"arm": s, "labels": []}),
+                ("graphlet_claims", {"arm": s, "min_bp": -1})]
     return out
 
 
