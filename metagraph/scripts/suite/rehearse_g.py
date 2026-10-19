@@ -22,7 +22,8 @@ Per candidate (DESIGN-v8 §3 and the lane D brief):
                 cut lists, a resource stop by work, complete_to_bp 0, one linear walk, no graphlet, a walk with its seed
                 over 16 kbp, a body over 8 MiB), plan (the op plan run by the local library on the direct document,
                 W1, every op answering what area_g.expected_outcome says; selector flags the plan reads adjusted and the
-                plan run again once);
+                plan run again once); fit (every whole list W3 runs at max_bytes 262,144 fits it uncut in W1's
+                answer, with room for W3's longer handle and its own fields: DESIGN-v8 §5);
   facts         from the document by the suite's own reader (checks.graphlet_arms): arms, walks, segments, merges,
                 labels, walk lengths, bases, cut lists, labels per node, body bytes, continuations (the twin's paths);
                 frozen as graphlet.preconditions; the service-check facts as graphlet.facts;
@@ -561,6 +562,29 @@ def plan_problems(s: dict, facts: dict, recs: Dict) -> List[dict]:
     return out
 
 
+# what W3's answer adds to the library's beside the rows (its 36-character handle, walk_display, label_evidence,
+# qualified_cause, hint): a whole list designed to fit 262,144 bytes keeps this much room in W1's answer
+W3_ROOM_BYTES = 4096
+
+
+def fit_problems(s: dict, recs: Dict) -> List[str]:
+    """The ops of |s| W3 runs at the service's ceiling (max_bytes 262,144) whose W1 answer would not fit it uncut
+    (DESIGN-v8 §5): a row cut (row_truncated), or an answer within W3_ROOM_BYTES of the ceiling."""
+    out = []
+    for o in s["graphlet"]["ops"]:
+        ways = o.get("ways") or s["graphlet"]["ways"]["default"]
+        if "W3" not in ways or o["args"].get("max_bytes") != area_g.MAXB:
+            continue
+        r = recs.get((s["id"], o["id"])) or {}
+        ans = r.get("answer")
+        if not isinstance(ans, dict):
+            continue
+        size = len(json.dumps(ans, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        if ans.get("row_truncated") or size > area_g.MAXB - W3_ROOM_BYTES:
+            out.append("%s: %d bytes%s" % (o["id"], size, ", a row cut" if ans.get("row_truncated") else ""))
+    return out
+
+
 def flags_from(problems: List[dict], facts: dict) -> bool:
     """Turn off the plan's selector flags an op's selector failure shows (FLAG_OF_OP); whether any changed."""
     changed = False
@@ -636,6 +660,8 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
         per = [dict((op, rec) for (sid, op), rec in recs.items() if sid == s["id"]) for recs in recs_by_rep]
         per.append(dict((op, rec) for (sid, op), rec in w3.items() if sid == s["id"]))
         r["timeouts"], r["slow_ops"] = op_timeouts(per, s["graphlet"]["ops"])
+        r["fit_problems"] = fit_problems(s, recs_by_rep[0])
+        r["verdicts"]["fit"] = "pass" if not r["fit_problems"] else "fail: %s" % "; ".join(r["fit_problems"][:4])
         if r["slow_ops"]:
             r["verdicts"]["op_headroom"] = "fail: %s" % "; ".join(r["slow_ops"][:4])
         r["passed"] = passed(r["verdicts"])

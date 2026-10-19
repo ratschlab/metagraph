@@ -72,7 +72,7 @@ class Rehearsal(unittest.TestCase):
         r1, r2 = res["results"]["G-arms2-c1"], res["results"]["G-arms2-c2"]
         self.assertTrue(r1["verdicts"]["bodies"].startswith("fail"), r1["verdicts"])
         self.assertTrue(r2["passed"], r2["verdicts"])
-        for k in ("echo", "bodies", "envelope", "headroom", "twin", "slot", "plan"):
+        for k in ("echo", "bodies", "envelope", "headroom", "twin", "slot", "plan", "fit"):
             self.assertEqual(r2["verdicts"][k], "pass", (k, r2["verdicts"]))
         corpus = res["corpus"]
         self.assertEqual(corpus["slots"]["two_arms"]["candidate"], "two_arms.2")
