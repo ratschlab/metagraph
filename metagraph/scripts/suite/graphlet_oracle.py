@@ -132,9 +132,9 @@ ARMS = ("left", "right")
 _ARM_NAMES = {"left": "left", "right": "right", "l": "left", "r": "right"}
 _SUPPORT = {"k": "kmer", "t": "trace"}            # SPEC §7.5.2 H <support k|t>
 _RECONVERGE = {"m": "merge", "k": "keep"}         # SPEC §7.5.2 H <reconverge m|k>
-# G3 (VO9, F5): the library lists a walk row's `ends` in run order; SPEC §7.1 / DESIGN §2.5 order events by position.
-# Until the library is fixed (a separate lane), W5 compares them as a set; then flip to False: position-ordered
-ENDS_UNORDERED = True
+# G3 (VO9, F5): SPEC §7.1 / DESIGN §2.5 order a walk row's `ends` by position; the library does since gr/v8-libfix
+# (d39b6b38b), so W5 compares them position-ordered (True would compare them as a set, the pre-fix reading)
+ENDS_UNORDERED = False
 LIST_CAP = 8      # the label lists a row shows (labels_full, in, out, ends): INVENTORY §2.6/§2.7 (presentation)
 # bytes of a sequence page beyond the fields W5 answers: the handle (a UUID at most), ceiling_bytes, truncated and
 # next_from with their keys, and the JSON frame; a slice fits when it, W5's own page without the slice and this

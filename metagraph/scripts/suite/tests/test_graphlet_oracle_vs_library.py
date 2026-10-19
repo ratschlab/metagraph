@@ -41,12 +41,9 @@ RADII = [("cli_bubbles_r60", "cli_bubbles_r100"), ("cli_bubbles_r60", "cli_bubbl
 # library defects W5 finds, fixed on gr/labeled-traversal by a separate lane (FORMAT v2 G): each must still reproduce
 # here until the fixed library is vendored, then its entry is removed (the test says so)
 # (what, the calls it affects, the differences it excuses on them: nothing else on those calls is excused, R2-6)
-KNOWN_LIBRARY_DEFECTS = {
-    "G2": ("graphlet_walks spell=tail tail_bp=0 gives the whole right flank (DESIGN §6: the last 0 outward bases)",
-           lambda tool, args: tool == "graphlet_walks" and args.get("spell") == "tail" and args.get("tail_bp") == 0
-           and args.get("arm") == "right",
-           lambda d: re.match(r"/rows/\d+/sequence\Z", d["pointer"]) is not None),
-}
+# G1-G3 and VR4 landed with gr/v8-libfix (d39b6b38b): none is known now; a new one goes here with its call and
+# differences, and the test says when the fixed library arrives
+KNOWN_LIBRARY_DEFECTS = {}
 
 
 def excused(tool, args, diffs):
@@ -350,7 +347,14 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertGreater(outcomes["not_comparable"], 40)
 
     def test_known_defects_excuse_only_their_difference(self):
-        """R2-6: G2 excuses /rows/*/sequence on the right arm's tail_bp=0 calls, and nothing else."""
+        """R2-6: a known defect excuses only its own difference on its own calls (the G2 entry as it stood before the
+        fixed library landed, injected here so the mechanism stays tested)."""
+        g2 = ("graphlet_walks spell=tail tail_bp=0 gives the whole right flank",
+              lambda tool, args: tool == "graphlet_walks" and args.get("spell") == "tail"
+              and args.get("tail_bp") == 0 and args.get("arm") == "right",
+              lambda d: re.match(r"/rows/\d+/sequence\Z", d["pointer"]) is not None)
+        KNOWN_LIBRARY_DEFECTS["G2"] = g2
+        self.addCleanup(KNOWN_LIBRARY_DEFECTS.pop, "G2", None)
         args = {"arm": "right", "spell": "tail", "tail_bp": 0, "rank": "id"}
         diffs = [{"pointer": "/rows/0/sequence"}, {"pointer": "/rows/3/sequence"}, {"pointer": "/rows/0/n_full"},
                  {"pointer": "/total"}]

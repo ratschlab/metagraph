@@ -479,11 +479,12 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(sorted(d["pointer"] for d in O.differences(rec_, {"rows": [{"x": 1}, {"x": 3, "e": []}]})),
                          ["/rows/0/e", "/rows/1/x"])
         g, f, mgt = doc("merge")
+        old = O.ENDS_UNORDERED
         try:
             O.ENDS_UNORDERED = False
             r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
         finally:
-            O.ENDS_UNORDERED = True
+            O.ENDS_UNORDERED = old
         self.assertIn("/rows/4/ends", r["oracle"]["position_ordered"])
         other = copy.deepcopy(r["answer"])
         other["rows"][4]["ends"].reverse()      # all four at 100: ties unordered
@@ -530,8 +531,14 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(O.compare_self_properties(dict(base, mode="labels", comparable="unknown"), f, mgt), [])
 
     def test_unordered_lists(self):
+        """The unordered reading (ENDS_UNORDERED on, the pre-G3 library's run order) compares ends as a set."""
         g, f, mgt = doc("merge")
-        r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
+        old = O.ENDS_UNORDERED
+        try:
+            O.ENDS_UNORDERED = True
+            r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
+        finally:
+            O.ENDS_UNORDERED = old
         self.assertIn("/rows/4/ends", r["oracle"]["unordered"])
         other = copy.deepcopy(r["answer"])
         other["rows"][4]["ends"].reverse()     # run order instead of (at_bp, label): the same set (F5)
