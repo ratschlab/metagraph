@@ -5072,6 +5072,31 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
 - The frozen v1-v7 manifests, the declared files and the policies are byte-identical to 549e06ef2; v6 and v7 rebuild
   byte for byte (created_utc aside); the committed policies regenerate identical; v8's first 725 scenarios are v7's.
 
+### After the first rehearsal (the owner's and the coordinator's decisions of 2026-10-19)
+- The rehearsal of 20261019T195746Z on staging (35 MCP jobs, then 164 direct-local requests) chose two_arms.2, merges.2,
+  one_arm.1, resource_stop.1, depth_zero.1, linear.1, failed_seed.1, trace.1 and annotate.1; its report and corpus
+  file are in the v8 plans.
+- Direct-only scenarios are v8's (the owner): annotate, output.sequences false and trace with record coordinates (now
+  its own slot, coordinates) run on W1, W2, W5, W3 and W4 not_exposed "not expressible via MCP on staging (advanced
+  strategy path off)"; built by default (--no-direct-only leaves them out). graphlet_precheck accepts them (body and
+  envelope W1 = W2, no echo expected, the twin unchanged; compare_graphlets states W4 not_exposed).
+- The full twin is sent without bounds.max_memory_mb (F-D4): SPEC-core §7.1 R21 (4) keeps a merge's arrival order in
+  full detail under a memory budget while graphlet detail shows the majority parent first; the pre-check allows exactly
+  that key (TWIN_FREE_KEY).
+- Warm-ups for the two heavy walks (the owner): T-walk-0024 gets ten warm-up resolves of its walked region under its
+  column (R-warm-0009..-0018, 688 bp each, ten so that every later index keeps its warm repeat), area G's long walk two
+  direct-local ones (G-warm-0001, -0002, P-warm style). v8 is exactly v7's 725 scenarios, byte-identical and in v7's
+  order, with the ten R-warm scenarios inserted right before T-walk-0024, then area G; relations v7's; no v7
+  scenario's warm repeat changes.
+- Two databases and a body over 8 MiB are v9 (unreachable under the presets). The two stop scenarios (traverse_stop
+  via MCP on a running /traverse and /resolve, mcp.flow) are built only with --stop-scenarios, until async's runner
+  has the stop flow.
+- compare_graphlets reads an export's file at arms/<way dir>/<file.raw> (FORMAT v2.1 B3; F-D1); the service checks read
+  cut label lists from the engine's K label_lists / O label_evidence (F-D3).
+- `rehearse_g.py --rehearsal 2`: the twins without max_memory_mb of the candidates whose twin failed, direct-local only,
+  and the long walk with its warm-ups on fresh windows (long_walk.4 / .5), MCP cold after the warm-ups; --analyse
+  --prior merges it into the first rehearsal's corpus.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
