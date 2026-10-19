@@ -178,6 +178,12 @@ class Context(object):
                 "n_failures": sum((totals.get(a) or {}).get("outcomes", {}).get(k, 0) for a in ARMS
                                   for k in ("fail", "error")),
                 "n_executions": "{:,}".format(sum((totals.get(a) or {}).get("executions", 0) for a in ARMS)),
+                # the two counts of I.2's classifications in words, never "execution(s)" (RV12)
+                "findings_in_run": _count_phrase(sum((totals.get(a) or {}).get("outcomes", {}).get("finding", 0)
+                                                     for a in ARMS), "execution", "none in this run",
+                                                 " in this run: %s" % finding_kinds_text(run)),
+                "failures_in_run": _count_phrase(sum((totals.get(a) or {}).get("outcomes", {}).get(k, 0) for a in ARMS
+                                                     for k in ("fail", "error")), "execution", "none"),
                 "inconclusive_by_reason": inconclusive_by_reason_text(run),
                 "n_not_implemented_mcp": (totals.get("mcp") or {}).get("outcomes", {}).get("not_implemented_mcp", 0),
                 "n_service_by_design": (totals.get("mcp") or {}).get("outcomes", {}).get("service_by_design", 0),
@@ -1306,18 +1312,34 @@ _FINDINGS_VERDICT = re.compile(r"^FINDINGS \((\d+) execution\(s\) where the host
                                r"the request; (no failure, no disagreement)\)(.*)$", re.S)
 
 
+def _count_phrase(n, noun, zero, tail=""):
+    """'none in this run' for 0, '1 execution<tail>', 'N executions<tail>'."""
+    return zero if not n else "%d %s%s%s" % (n, noun, "" if n == 1 else "s", tail)
+
+
+_PLURAL_RE = re.compile(r"\b(\d+) ((?:[a-z-]+ )*?)(execution|relation)\(s\)")
+
+
+def plural_counts(text):
+    """'11 inconclusive execution(s)' -> '11 inconclusive executions', '1 relation(s) failed' -> '1 relation failed':
+    the counts of a generated line in their proper number (RV12)."""
+    return _PLURAL_RE.sub(lambda m: "%s %s%s%s" % (m.group(1), m.group(2), m.group(3),
+                                                   "" if m.group(1) == "1" else "s"), text)
+
+
 def doc_verdict_text(run):
     """The run verdict as this document prints it: report.verdict_text's word and figures, the reason of a FINDINGS
     verdict in the document's vocabulary (READ-003; the readability review's verification of 2026-10-16, shared
     M1): the findings by what the check read (finding_kinds_text), never 'without failing the request', since a
     late 503 deadline carried no results. Every other verdict is report.py's line as it stands."""
-    # the document's convention (I.2): "access paths" in the prose, "arms" for row labels only (RV11)
+    # the document's convention (I.2): "access paths" in the prose, "arms" for row labels only (RV11); counts in
+    # proper plurals, never "execution(s)" (RV12)
     v = (run.verdict or "–").replace("between the arms", "between the access paths")
     m = _FINDINGS_VERDICT.match(v)
     if not m:
-        return v
-    return "FINDINGS (%s execution(s) with a finding, a stated bound broken on the clock the check reads: %s; %s)%s" % (
-        m.group(1), finding_kinds_text(run), m.group(2), m.group(3))
+        return plural_counts(v)
+    return plural_counts("FINDINGS (%s execution(s) with a finding, a stated bound broken on the clock the check reads: "
+                         "%s; %s)%s" % (m.group(1), finding_kinds_text(run), m.group(2), m.group(3)))
 
 
 def verdict_line(ctx):
@@ -1435,14 +1457,16 @@ def gate_line(ctx):
     run = ctx.run
     passed = bool((run.gate or {}).get("passed"))
     if passed:
+        # "by design" never hyphenated in the box (RV12)
         return "\\textbf{\\large %s}: nothing blocks (%s); %s; the gate covers %s; %s" % (
-            esc(word), esc(problems_text), esc(counts_text), esc(gate_scope(run)["text"]),
-            esc(_without_access_paths(how, run)))
+            esc(word), esc(problems_text), esc(counts_text).replace("by design", "\\mbox{by design}"),
+            esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run)))
     head, kinds = _problems_head_and_kinds(problems_text)
     return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s, by what would clear them: %s (by the "
             "gate's kinds: %s); the count is not a count of service defects; %s; the gate covers %s; %s" % (
                 esc(word), esc(head[:1].upper() + head[1:]), esc(gate_groups_text(run)), esc(kinds),
-                esc(counts_text), esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run))))
+                esc(counts_text).replace("by design", "\\mbox{by design}"), esc(gate_scope(run)["text"]),
+                esc(_without_access_paths(how, run))))
 
 
 def sample_note(ctx):

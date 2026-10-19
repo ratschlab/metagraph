@@ -4419,9 +4419,9 @@ class ReadabilityReviewTest(unittest.TestCase):
                                      "request; no failure, no disagreement); 2 inconclusive execution(s) (not counted as pass)",
                              order=perturbed.order, arm_lines=perturbed.arm_lines)
         doc_verdict = sections.doc_verdict_text(findings_run)
-        self.assertEqual(doc_verdict, "FINDINGS (1 execution(s) with a finding, a stated bound broken on the clock the "
+        self.assertEqual(doc_verdict, "FINDINGS (1 execution with a finding, a stated bound broken on the clock the "
                                       "check reads: 1 late 503 deadline (no results carried; beyond the suite's tolerance "
-                                      "on the client's clock); no failure, no disagreement); 2 inconclusive execution(s) "
+                                      "on the client's clock); no failure, no disagreement); 2 inconclusive executions "
                                       "(not counted as pass)")
         self.assertNotIn("without failing the request", doc_verdict)
         pctx = self.ctx(run=perturbed, units=units_mod.resolve(perturbed.manifest, self.budget_mappings["perturbed"]))
@@ -4690,7 +4690,7 @@ class ReadabilityReviewTest(unittest.TestCase):
         finally:
             rel_ctx.run.relations = []
         # the glossary labels the later manifest's mark as not exercised by this run
-        entry = [e for e in self.glossary["entries"] if e["term"] == "property-level mark (manifest v5)"][0]
+        entry = [e for e in self.glossary["entries"] if e["term"] == "property-level mark (manifest v5 and later)"][0]
         self.assertIn("[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest", entry["definition"])
         self.assertIn("supplies no evidence about it on that path", entry["definition"])
         rendered = facts.fill(entry["definition"], {"manifest_version": 4})
@@ -5588,7 +5588,7 @@ class IntegrationRoundTest(unittest.TestCase):
         verdict = report.verdict_text({"arms": {"direct-local": {"state": "done"}}}, comp, [])[0]
         self.assertTrue(sections._FINDINGS_VERDICT.match(verdict), verdict)
         doc = sections.doc_verdict_text(_Stub(verdict=verdict, order=[]))
-        self.assertTrue(doc.startswith("FINDINGS (1 execution(s) with a finding, a stated bound broken"), doc)
+        self.assertTrue(doc.startswith("FINDINGS (1 execution with a finding, a stated bound broken"), doc)
 
 
 class ColourRoundTwoTest(unittest.TestCase):

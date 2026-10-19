@@ -141,7 +141,7 @@
    ]
   },
   {
-   "term": "property-level mark (manifest v5)",
+   "term": "property-level mark (manifest v5 and later)",
    "definition": "[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest (version {manifest_version}): a mark of a later manifest version, exercised by no scenario of this run and read into none of its results; defined here so that the term is not misread where a reason or a plan names it.]] A mark of one check of a scenario (`mcp.not_implemented_checks`, `mcp.by_design_checks`): on the MCP path a marked check that reads not exposed is set aside, neither compared nor counted untested, while the rest of the scenario stays tested; a marked check that reads anything else is judged as any check. Setting a check aside changes how the comparison and the gate treat it and supplies no evidence about it on that path.",
    "see": [
     "service-side by design"
@@ -177,7 +177,7 @@
   },
   {
    "term": "time budget, finalisation reserve",
-   "definition": "`bounds.time_budget_ms` of a /resolve (opt-in: without it no deadline), `time_budget_ms` of a /pattern, the strategy's budget of a /traverse (per seed): lowered to the server's cap and stated in limits.clamped when lowered. A /resolve keeps 250 ms to build the answer: the work stops at the budget less the reserve; a budget not above it is refused (SPEC 4.5). A budget bounds the host's work on the request or the seed, never the caller's latency or the service's queue (the scope per route in I.2).",
+   "definition": "`bounds.time_budget_ms` of a /resolve (opt-in: without it no deadline), `time_budget_ms` of a /pattern, the strategy's budget of a /traverse (per seed): lowered to the server's cap and stated in limits.clamped when lowered. A /resolve keeps 250 ms to build the answer: the work stops at the budget less the reserve; a budget not above it is refused (SPEC 4.5).[[manifest_version >= 7 ? A /pattern stop is held to the same 250 ms reserve, the host's finalisation reserve its capabilities state (manifest v7: budget_respected's reserve_ms).]] A budget bounds the host's work on the request or the seed, never the caller's latency or the service's queue (the scope per route in I.2).",
    "see": [
     "stated stop, prefix",
     "deadline (503)"
