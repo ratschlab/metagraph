@@ -5007,6 +5007,71 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   (echo, library_commit), the pin graphlet.library_commit, op fields not_exposed / cut_of / by_design / probe, a
   failed seed's preconditions {"no_graphlet": true}.
 
+## Manifest v8, area G: the scenarios, the direct G requests and the rehearsal (lane D, 2026-10-19)
+
+Design: DESIGN-v8 §3-§5, FORMAT-v8 §1-§2 and v2-v2.3 (the v8 plans, outside the repository). Not frozen: the owner
+freezes v8 after the rehearsal on staging (phase P2); nothing here has run against a host.
+
+### Files
+- `area_g.py` (areas.gen_G): the corpus and its scenarios. Slots (INVENTORY §3.2): two arms, merges, one arm, cut
+  label lists, a resource stop by work units, complete_to_bp 0 (max_steps 1), a single linear walk, a failed seed
+  (a work budget below the seed phase), a walk with its seed over 16 kbp (a 6.6 kbp seed + a 10 kbp arm, drawn from
+  the records), trace, annotate, output.sequences false; conditional: a body over 8 MiB (a six-call by-design plan),
+  two databases (not built). Several candidates per slot, from the seeds of v7's T scenarios whose v7 answers show the
+  slot's shape (each quotes its evidence: the MCP's cold engine time, the graph per arm). A scenario is the
+  `detail: graphlet` request with the EXACT merged strategy the service sends (the preset, the overrides
+  deep-merged, output {detail graphlet, timing true}: the v7 echo of T-graphlet-0001), its traverse_fetch mapping
+  (preset + overrides that merge to it), and the `graphlet` block: twin (the strategy with detail full),
+  preconditions (frozen by the rehearsal; a failed seed {"no_graphlet": true}), library_commit (--library-commit),
+  ways, not_exposed (the owner's reasons per tool and argument), facts, slot / candidate, reference (report-only).
+  Op plans: every distinct behaviour per tool and arm, every argument the service's tool takes named on an op W3
+  runs (SERVICE_ARGS, the MCP schemas), library-only tools and arguments (support, splits, claims, subtrie,
+  save / load, traverse_continue, list / free; coordinates, budget, export path / other, what=compare) without W3;
+  run-time selectors only ({ref, path}, graphlet_select's named selectors, cursor_of); per-walk sampling and paging
+  passes on the three richest graphlets; one deliberate cut per kind in the corpus (cut_of: summary, a ceiling's
+  refusal, a page, a cut row, a cut sequence slice, compare's fields_cut); the W3 probes (wrong_token, bad_handle);
+  the by-design max_bytes 262,145 call; timeout_s per op (the rehearsal's, else the lane: 20 s, 120 s heavy).
+  Compare pairs: one seed at two radii, one seed under the default and a label cap of 2, two seeds of one locus (a
+  10 bp shift), a graphlet with itself; the compare ops go on the partner, placed right after its graphlet.
+  expected_outcome states what the library answers to each op (the tests and the rehearsal hold every op to it).
+- `build_manifest.py --manifest-version 8`: v7's 725 scenarios unchanged and in v7's order, then area G after every
+  v7 layout step (no v7 scenario moves, the gate's warm repeats are v7's), the relations v7's; `--corpus` (default
+  truth/area_g/corpus.json when it exists, else provisional: the first candidate of every slot the MCP can express),
+  `--library-commit`, `--include-direct-only`; refused into manifest/ without `--freeze`; the `graphlets` block
+  (outside the content digest) names the corpus, the pin and what the freeze still needs (pending).
+- `run_direct.py`: an area G scenario is its graphlet request on both direct arms; on direct-local the runner sends
+  the `detail: full` twin once, right after the scenario's first execution of the session, and keeps the bare engine
+  body at docs/<id>.full.json.gz (the one shape graphlet_precheck and graphlet_oracle both read) and its raw record
+  at raw/<id>.direct-local.twin.json.gz; a missing twin is sent alone on a resume; a refused one is recorded once.
+- `rehearse_g.py` (`build_manifest.py --rehearse G -- ...`): `--plan` writes the rehearsal manifest (every candidate
+  and pair partner, repeat 3) and PLAN.md; `--execute` (staging: only with the coordinator's go) runs the MCP step
+  first, cold, one traverse_fetch per expressible candidate through run_suite.sh's ASYNC_MCP_CMD, then direct-local
+  x3 + the twin (run_suite.sh --sequential --skip-remote --no-mcp --warm-every 0); `--analyse` judges offline: the
+  echo against request.strategy, the bodies (graphlet_doc.body_digest) of the three direct answers and the MCP's,
+  the envelopes, the twin, the headroom (every engine time <= 25 % of the effective budget), the slot's shape, the op
+  plan run by the local library on the direct document (W1, every op as expected_outcome says), the per-op timeouts
+  (min(lane, max(5 s, 10 x median))); writes corpus.json (per slot the first passing candidate), rehearsal.json and
+  REPORT.md.
+
+### Decisions where the brief left room
+- Staging's service runs without the advanced strategy path: annotate, output.sequences false and trace with
+  coordinates cannot be expressed via traverse_fetch. Their candidates are direct-only (W1, W2, W5; W3 not_exposed
+  with that reason) and enter the corpus only with --include-direct-only (the owner's decision; lane C's pre-checks
+  would read them inconclusive today: no W4 document, no echo). The constrain-vs-annotate pair is therefore the
+  label-cap pair.
+- The twin is the bare engine body (graphlet_precheck reads a bare body or {http, body}; graphlet_oracle a bare body
+  or a raw record).
+- One scenario per graphlet per MCP execution: a warm repeat the paired plan gives a G scenario (every tenth index)
+  is an extra direct determinism repeat; the twin and the local ways read repeat 0.
+
+### Validation (offline; no host was contacted)
+- tests/test_area_g.py, tests/test_run_direct_g.py, tests/test_rehearse_g.py: the op plans run by the local library
+  on six fixture graphlets (every op answers as expected_outcome says, every cut op shows a cut by compare_cut, every
+  whole list fits the service's 262,144 bytes), the twin against the fake host, a recorded rehearsal of fixture
+  graphlets analysed into a corpus the build reads, the v8 build against the frozen v7 (with the record cache).
+- The frozen v1-v7 manifests, the declared files and the policies are byte-identical to 549e06ef2; v6 and v7 rebuild
+  byte for byte (created_utc aside); the committed policies regenerate identical; v8's first 725 scenarios are v7's.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.
