@@ -234,6 +234,10 @@ class Context(object):
                 # an answer-side scenario-level mark in the manifest (the delta verifier's M2): the glossary's and
                 # appendix G's definitions of not implemented via MCP name it
                 "answer_side_mark": bool(answer_side_mark_ids(run)),
+                # the kinds of property-level mark the manifest carries, for appendix G's lead-in (V10)
+                "property_mark_kinds": "; ".join(w for k, w in (("not_implemented", "not implemented via MCP"),
+                                                                ("by_design", "service-side by design"))
+                                                 if _has_property_marks(run, k)),
                 "answer_side_mark_text": answer_side_mark_text(run),
                 # the annotated matrix's column note (annotated_matrix fills both from the unit it picks)
                 "annotated_dimension": "the varied value", "annotated_record_key": False}
@@ -1812,7 +1816,7 @@ LEGEND_WORD = {"pass": "pass", "fail": "fail", "error": "error", "finding": "fin
                "none": "no execution"}
 LEGEND_PREFIXES = {"not_implemented": ("not exercised via MCP:", "not implemented via MCP:")}
 MARK_EXAMPLE = {"superscript digit": "\\ginc\\fn{1}", "not-equal sign": "\\gpass\\gne", "t": "\\gpass\\tmark{t}",
-                "property-level mark": "\\gpass\\gnip",
+                "property-level mark": "\\gpass\\gnip", "by-design property mark": "\\gpass\\gbdp",
                 "s": "\\gpass\\tmark{s}", "n": "\\gpass\\tmark{n}", "u": "\\gbd\\tmark{u}", "c": "9.1 s\\tmark{c}",
                 "a": "9.1 s\\tmark{a}", "i": "9.1 s\\tmark{i}", "m": "\\ginc\\tmark{m}"}
 ANNOTATION_DEFAULT = {
@@ -1849,6 +1853,9 @@ def legend_table(ctx=None):
     # the property-level mark exists only under a manifest with property-level marks (v5): no row otherwise
     if ctx is not None and not _has_property_marks(ctx.run):
         marks = [e for e in marks if e.get("mark") != "property-level mark"]
+    # the by-design kind only under a manifest with such marks (v7; RV4)
+    if ctx is not None and not _has_property_marks(ctx.run, "by_design"):
+        marks = [e for e in marks if e.get("mark") != "by-design property mark"]
     glyph_rows = _glyph_rows(ctx)
     if marks:
         mark_rows = [[MARK_EXAMPLE[e["mark"]], esc(e.get("on") or ""), inline(e.get("meaning") or "")]
@@ -1857,11 +1864,12 @@ def legend_table(ctx=None):
     return _legend_builtin(glyph_rows)
 
 
-def _has_property_marks(run):
-    """Whether any scenario of the run's manifest carries a property-level mark not implemented via MCP."""
+def _has_property_marks(run, kind="not_implemented"):
+    """Whether any scenario of the run's manifest carries a property-level mark of |kind| (not_implemented,
+    by_design)."""
     if not hasattr(run, "check_marks"):
         return False
-    return any(m.get("mark") == "not_implemented" for sid in run.order for m in run.check_marks(sid).values())
+    return any(m.get("mark") == kind for sid in run.order for m in run.check_marks(sid).values())
 
 
 def _legend_tables(glyph_rows, mark_rows):

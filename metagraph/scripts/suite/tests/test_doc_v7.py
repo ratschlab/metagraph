@@ -74,8 +74,11 @@ class V7ProseTest(unittest.TestCase):
         self.assertIn("carries neither `absence_scope` nor `timing.elapsed_ms`",
                       facts.fill(intro, {"manifest_version": 6}, unresolved=[]))
         note = p["units"]["P-edge"]["note"]
-        self.assertIn("manifest v7 marks its entry_fields check service-side by design",
-                      facts.fill(note, {"manifest_version": 7}, unresolved=[]))
+        # RV4: one reason, told plainly: the answer carries no pattern text; the case documents the upper-casing
+        self.assertIn("via MCP the `entry_fields` check is set aside as service-side by design (manifest v7's "
+                      "mcp.by_design_checks", facts.fill(note, {"manifest_version": 7}, unresolved=[]))
+        self.assertIn("the tool's answer carries no pattern text", facts.fill(note, {"manifest_version": 7},
+                                                                             unresolved=[]))
         self.assertNotIn("the next manifest revision corrects it", facts.fill(note, {"manifest_version": 7},
                                                                               unresolved=[]))
         self.assertIn("the next manifest revision corrects it", facts.fill(note, {"manifest_version": 6},
@@ -417,6 +420,42 @@ class DeployedIdentityTest(unittest.TestCase):
         run.service_identity = {"recorded": False}
         run.mcp_run = {}
         self.assertEqual(sections.by_design_tie_text(run), "")
+
+
+class ByDesignPropertyMarkTest(unittest.TestCase):
+    """The property-level mark service-side by design is visible and told apart from the not-implemented kind (RV4,
+    V10): the MCP cell carries its own raised mark (a blue diamond, \\gbdp), the legend a row of its own (only for a
+    manifest with such marks), and the chapter's 'fully checked' names the check set aside by design."""
+
+    def _run(self, kind):
+        marks = {"entry_fields": {"mark": kind, "case" if kind == "by_design" else "reason": "x"}}
+        return _Stub(check_marks=lambda sid: marks,
+                     marked_aside=lambda sid, l: marks if l.get("aside") else {}, order=["P-edge-0004"])
+
+    def test_cell_mark(self):
+        import cells
+        run = self._run("by_design")
+        self.assertTrue(cells.property_by_design(run, "P-edge-0004", [{"aside": True}]))
+        self.assertFalse(cells.property_by_design(run, "P-edge-0004", [{}]))
+        self.assertFalse(cells.property_not_implemented(run, "P-edge-0004", [{"aside": True}]))
+        st = cells.ArmState("mcp")
+        st.glyph_key, st.bd_marked = "pass", True
+        self.assertTrue(st.glyph_tex().endswith("\\gbdp"))
+        self.assertFalse(cells.property_by_design(self._run("not_implemented"), "P-edge-0004", [{"aside": True}]))
+        with open(os.path.join(DOC, "templates", "doc.sty"), encoding="utf-8") as fh:
+            self.assertIn("\\newcommand\\gbdp", fh.read())
+
+    def test_legend_and_full_definition(self):
+        self.assertTrue(sections._has_property_marks(self._run("by_design"), "by_design"))
+        self.assertFalse(sections._has_property_marks(self._run("by_design")))
+        self.assertIn("by-design property mark", sections.MARK_EXAMPLE)
+        text = facts.mcp_full_definition(_Stub(run=self._run("by_design")), ["P-edge-0004"])
+        self.assertIn("except P-edge-0004's entry_fields, which appendix G lists as set aside service-side by design",
+                      text)
+        self.assertNotIn("not compared and unverified", text)
+        text = facts.mcp_full_definition(_Stub(run=self._run("not_implemented")), ["P-edge-0004"])
+        self.assertIn("except a check a property-level mark of the manifest sets aside, not compared and unverified "
+                      "via MCP (on one of them: P-edge-0004)", text)
 
 
 class SincePreviousTest(unittest.TestCase):

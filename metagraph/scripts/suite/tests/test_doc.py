@@ -6125,7 +6125,7 @@ class V6DeltaTest(unittest.TestCase):
             self.assertEqual(facts.fill(note, {"manifest_version": version}).strip(), "")
         # the v7 delta: manifest v7 marks the check service-side by design, which the note says instead
         v7 = facts.fill(note, {"manifest_version": 7})
-        self.assertIn("manifest v7 marks its entry_fields check service-side by design", v7)
+        self.assertIn("via MCP the `entry_fields` check is set aside as service-side by design (manifest v7's", v7)
         self.assertNotIn("the next manifest revision corrects it", v7)
         self.assertIn('note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""',
                       inspect.getsource(sections.unit_section))

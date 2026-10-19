@@ -1384,6 +1384,24 @@ def mcp_full_definition(ctx, marked):
     by family; the marked check is not compared and stays unverified via MCP."""
     if not marked:
         return MCP_FULL_DEF
+    run = getattr(ctx, "run", None)
+    bd = [sid for sid in marked if hasattr(run, "check_marks")
+          and any(m.get("mark") == "by_design" for m in run.check_marks(sid).values())]
+    ni = [sid for sid in marked if sid not in bd]
+    text = MCP_FULL_DEF
+    if ni:
+        text = _full_def_ni(text, ni)
+    if bd:
+        # a check set aside as a documented service difference, told apart from the not-implemented kind (RV4)
+        named = ["%s's %s" % (sid, ", ".join(c for c, m in run.check_marks(sid).items() if m.get("mark") == "by_design"))
+                 for sid in bd[:3]]
+        text += "%s except %s, which appendix G lists as set aside service-side by design" % (
+            ";" if ni else ",", _join(named) + (" and %d more" % (len(bd) - 3) if len(bd) > 3 else ""))
+    return text
+
+
+def _full_def_ni(base, marked):
+    """'fully checked' with the exception of the not-implemented property-level marks (V6-201), by family when many."""
     if len(marked) <= 3:
         which = _ids_short(marked)
     else:
@@ -1398,7 +1416,7 @@ def mcp_full_definition(ctx, marked):
                 fams.append([fid, 1])
         which = ", ".join("%s %d" % (f, k) for f, k in fams)
     return ("%s, except a check a property-level mark of the manifest sets aside, not compared and unverified via MCP "
-            "(on %s of them: %s)" % (MCP_FULL_DEF, number_word(len(marked)), which))
+            "(on %s of them: %s)" % (base, number_word(len(marked)), which))
 
 
 def chapter_facts(ctx, ch):

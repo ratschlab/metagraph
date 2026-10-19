@@ -316,6 +316,10 @@ class ArmState(object):
         # property-level mark not implemented via MCP (property_not_implemented): the cell carries the small red ○
         # (doc.sty's \gnip) and the test counts under not implemented via MCP (facts.not_implemented_issue)
         self.ni_marked = False
+        # an MCP arm one of whose executions had a property check set aside by the manifest's property-level mark
+        # service-side by design (property_by_design): the cell carries the small blue diamond (doc.sty's \gbdp); not
+        # an attention kind (the reader review of the v7 document, RV4)
+        self.bd_marked = False
 
     @property
     def glyph(self):
@@ -356,6 +360,8 @@ class ArmState(object):
             out += "\\gne"
         if self.ni_marked:
             out += "\\gnip"
+        if self.bd_marked:
+            out += "\\gbdp"
         if footnote:
             out += "\\fn{%d}" % footnote
         return out
@@ -380,12 +386,26 @@ def property_not_implemented(run, sid, lines):
     return False
 
 
+def property_by_design(run, sid, lines):
+    """Whether an MCP execution of the scenario among `lines` had a property check set aside by the manifest's
+    property-level mark service-side by design (manifest v7's mcp.by_design_checks; the check read not_exposed)."""
+    marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
+    if not any(m.get("mark") == "by_design" for m in marks.values()):
+        return False
+    for l in lines:
+        aside = run.marked_aside(sid, l) if hasattr(run, "marked_aside") else {}
+        if any(m.get("mark") == "by_design" for m in aside.values()):
+            return True
+    return False
+
+
 def arm_state(run, sid, arm):
     """The ArmState of a scenario on an arm (_arm_state), with the property-level mark of an MCP arm that does not
     stand ○ (ArmState.ni_marked)."""
     st = _arm_state(run, sid, arm)
     if arm == "mcp" and st.present and st.glyph_key != "not_implemented_mcp":
         st.ni_marked = property_not_implemented(run, sid, st.lines)
+        st.bd_marked = property_by_design(run, sid, st.lines)
     return st
 
 
