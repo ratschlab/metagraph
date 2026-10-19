@@ -4473,6 +4473,7 @@ def mcp_limits(ctx):
     out += latex.plain_table(latex.spec_p([60, 104], extra_cols=1, extra_spec="r"),
                              ["reason", "ids", "scenarios"], [[r[0], r[2], r[1]] for r in rows])
     out += property_marks_table(ctx)
+    out += property_by_design_table(ctx)
     dec = run.declared
     out += "\\parhead{Owner-declared exemptions}\n"
     out += ctx.prose_paragraphs("provenance", "exemption_kinds", optional=True) if ctx.overview_section(
@@ -4536,6 +4537,33 @@ def property_marks_table(ctx):
             "MCP in the attention tags, and its MCP cell carries the property-level mark (I.3).}\\par\\smallskip\n")
     out += latex.plain_table(latex.spec_p([34, 64, 66], extra_cols=1, extra_spec="r"),
                              ["check", "the manifest's reason", "scenarios", "set aside"], rows)
+    return out
+
+
+def property_by_design_table(ctx):
+    """Appendix G's property-level marks service-side by design (`mcp.by_design_checks` [{check, case}]; manifest v7:
+    P-edge-0004's entry_fields under pattern.lowercase): per check and case the scenarios that carry the mark. On the
+    MCP access path the marked check, read not exposed, is set aside as a documented difference (appendix B gives the
+    case), the rest of the test compared; it stays required on the direct access paths. Empty for a manifest without
+    such marks (v5, v6)."""
+    run = ctx.run
+    marked = {}
+    for sid in run.order:
+        marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
+        for check, m in sorted(marks.items()):
+            if m.get("mark") == "by_design":
+                marked.setdefault((check, str(m.get("case") or "–")), []).append(sid)
+    if not marked:
+        return ""
+    rows = [[tt(check), tt(case), esc(facts._ids_short(sids)), str(len(sids))]
+            for (check, case), sids in sorted(marked.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+    out = "\\parhead{The manifest's property-level marks service-side by design}\n"
+    out += ("\\noindent{\\small A mark of one check of a scenario as a documented service difference: on the MCP access "
+            "path the marked check, read not exposed, is set aside under the by-design table's case (appendix B), the "
+            "rest of the test stays tested and compared; the check stays required on the direct access paths, and the "
+            "test does not count under not implemented via MCP.}\\par\\smallskip\n")
+    out += latex.plain_table(latex.spec_p([34, 60, 70], extra_cols=1, extra_spec="r"),
+                             ["check", "the by-design case", "scenarios", "n"], rows)
     return out
 
 
