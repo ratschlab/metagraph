@@ -87,6 +87,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import checks
@@ -331,11 +332,45 @@ def _canon(v: Any) -> str:
     return json.dumps(v, sort_keys=True, separators=(",", ":"))
 
 
+def _cut_by_other(other: Any, ptr: str) -> bool:
+    """Whether |other| names the field at |ptr| as cut to fit its page (DESIGN §6: a row larger than max_bytes comes
+    alone with row_truncated and the fields cut named): on the object that holds the field, or, for a page of one
+    row, on the page (FORMAT question Q5: an assembled answer keeps only the first page's marker)."""
+    parent, key = ptr.rsplit("/", 1)
+    try:
+        holder = resolve_pointer(other, parent)
+    except KeyError:
+        return False
+    if isinstance(holder, dict) and holder.get("row_truncated") and key in (holder.get("cut_fields") or ()):
+        return True
+    m = re.match(r"/rows/0/[^/]+\Z", ptr)
+    return bool(m and isinstance(other, dict) and other.get("row_truncated") and len(other.get("rows") or []) == 1
+                and key in (other.get("cut_fields") or ()))
+
+
+def _is_cut_of(mine: Any, theirs: Any, unordered: bool) -> bool:
+    """|theirs| a cut of |mine| in the suite's words (REVIEW D-R8): a string or a list a prefix, an unordered list a
+    sub-multiset."""
+    if isinstance(mine, str) and isinstance(theirs, str):
+        return mine.startswith(theirs)
+    if isinstance(mine, list) and isinstance(theirs, list):
+        if unordered:
+            pool = [_canon(x) for x in mine]
+            for x in theirs:
+                if _canon(x) not in pool:
+                    return False
+                pool.remove(_canon(x))
+            return True
+        return len(theirs) <= len(mine) and all(same(x, y) for x, y in zip(mine, theirs))
+    return same(mine, theirs)
+
+
 def differences(record: dict, other: Optional[dict]) -> List[dict]:
     """Where |other| (another way's assembled answer, service fields removed) departs from W5 on a checked
     pointer: [{pointer, clause, oracle, other | missing | present}]. Lists the record names `unordered` are compared
-    as multisets; a pointer the record names `absent` must not resolve in |other|. A record that declares
-    `expected_error` requires an `error` key in |other|; any other declaration checks nothing."""
+    as multisets; a field |other| names cut to fit its page must be a cut of W5's (_is_cut_of); a pointer the record
+    names `absent` must not resolve in |other|. A record that declares `expected_error` requires an `error` key in
+    |other|; any other declaration checks nothing."""
     o = record["oracle"]
     if o.get("declared") == "expected_error":
         if not (isinstance(other, dict) and "error" in other):
@@ -350,7 +385,13 @@ def differences(record: dict, other: Optional[dict]) -> List[dict]:
         except KeyError:
             out.append({"pointer": ptr, "clause": clause, "oracle": mine, "missing": True})
             continue
-        if ptr in o.get("unordered", ()) and isinstance(mine, list) and isinstance(theirs, list):
+        unord = ptr in o.get("unordered", ())
+        if _cut_by_other(other, ptr):
+            if not _is_cut_of(mine, theirs, unord):
+                out.append({"pointer": ptr, "clause": clause + "; cut to fit (DESIGN §6, REVIEW D-R8): a prefix",
+                            "oracle": mine, "other": theirs})
+            continue
+        if unord and isinstance(mine, list) and isinstance(theirs, list):
             mine, theirs = sorted(mine, key=_canon), sorted(theirs, key=_canon)
         if not same(mine, theirs):
             out.append({"pointer": ptr, "clause": clause, "oracle": mine, "other": theirs})
@@ -1254,17 +1295,20 @@ def _rows_of(ans: dict, side: str) -> List[dict]:
 
 def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: str) -> List[str]:
     """graphlet_compare(a, a): the verdict rules on a graphlet compared with itself (DESIGN §5 compare, §5.2.5,
-    §3.1; SPEC §7.5.7): never `false` (one index identity, one oriented seed); `unverifiable` exactly when H states
-    no index_fp; no difference under any verdict (counts zero or null, no rows); equal true exactly when comparable
-    true; not true when the label evidence is a lower bound (DESIGN §5.2.5: what cannot be exact is qualified);
-    `unknown` for a side without bases in the modes that spell (claims, walks, prefix_subset). -> problems."""
+    §3.1; SPEC §7.5.7): never `false` (one index identity, one oriented seed); without index_fp in H never a
+    verdict that compares (true or qualified: "unverifiable, never equal"), and `unverifiable` only then; no
+    difference under any verdict (counts zero or null, no rows); equal true exactly when comparable true; not true
+    when the label evidence is a lower bound (DESIGN §5.2.5: what cannot be exact is qualified); neither true nor
+    qualified for a side without bases in the modes that spell (claims, walks, prefix_subset: unknown). Where two
+    rules give a non-comparing verdict (no bases and no index_fp) DESIGN states no precedence: either is accepted.
+    -> problems."""
     d = _Doc(full_answer, mgt_text)
     probs = []
     comp = ans.get("comparable")
     if comp is False:
         probs.append("comparable false for a graphlet and itself (%s)" % ans.get("reason"))
     no_fp = d._h(14) is None
-    if (comp == "unverifiable") != no_fp:
+    if (no_fp and comp in (True, "qualified")) or (comp == "unverifiable" and not no_fp):
         probs.append("comparable %r with index_fp %s (SPEC §7.5.7, DESIGN §3.1)" % (comp, "absent" if no_fp else "set"))
     counts = ans.get("counts")
     if counts is not None and any(counts.get(k) for k in ("only_in_a", "only_in_b", "differ")):
@@ -1277,7 +1321,7 @@ def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: st
         probs.append("comparable true on label evidence %r (DESIGN §5.2.5: qualified)" %
                      d.result["outcome"]["label_evidence"])
     no_bases = any(d.flanks(s) is None for s in d.sides)
-    if no_bases and ans.get("mode") in ("claims", "walks", "prefix_subset") and comp not in ("unknown", "unverifiable"):
+    if no_bases and ans.get("mode") in ("claims", "walks", "prefix_subset") and comp in (True, "qualified"):
         probs.append("comparable %r without bases (DESIGN §5.2.5: unknown)" % (comp,))
     return probs
 
@@ -1291,9 +1335,13 @@ def _swap_row(r: dict) -> dict:
 
 
 def compare_swap_properties(ab: dict, ba: dict) -> List[str]:
-    """graphlet_compare(a, b) vs (b, a), whole lists: the same mode, verdict, equality and depth; only_in_a and
-    only_in_b exchanged, differ kept; the rows the same up to the side exchange (DESIGN §5 compare: keyed by LabelRef
-    and spelled walk, a symmetric relation reported per side). -> problems."""
+    """graphlet_compare(a, b) vs (b, a), whole lists, modes claims, walks and labels: the same mode, verdict,
+    equality and depth; only_in_a and only_in_b exchanged, differ kept; the rows the same up to the side exchange
+    (DESIGN §5 compare: keyed by LabelRef and spelled walk, a symmetric relation reported per side). prefix_subset
+    asks whether a is a prefix-subset of b (DESIGN §9 T39: tuned against exhaustive): directional, no swap
+    property. -> problems."""
+    if ab.get("mode") == "prefix_subset" or ba.get("mode") == "prefix_subset":
+        return []
     probs = []
     for k in ("mode", "comparable", "equal", "depth_used"):
         if not same(ab.get(k), ba.get(k)):

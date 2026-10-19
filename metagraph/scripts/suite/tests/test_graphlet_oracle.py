@@ -387,6 +387,26 @@ class RecordSemantics(unittest.TestCase):
         other["rows"][4]["ends"].pop()
         self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/rows/4/ends"])
 
+    def test_cut_rows(self):
+        """A row cut to fit its page names the cut fields (DESIGN §6): each must be a cut of W5's value in the
+        suite's words (REVIEW D-R8: a prefix; a set field a subset), on the row or on a page of one row."""
+        g, f, mgt = doc("merge")
+        r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
+        other = copy.deepcopy(r["answer"])
+        row = other["rows"][4]
+        row.update(row_truncated=True, cut_fields=["ends", "in"])
+        row["in"] = row["in"][:2]
+        row["ends"] = row["ends"][2:3]
+        self.assertEqual(O.differences(r, other), [])
+        row["in"] = row["in"][1:]
+        self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/rows/4/in"])
+        page = dict(copy.deepcopy(r["answer"]), row_truncated=True, cut_fields=["out"])
+        page["rows"] = [dict(page["rows"][0], out=page["rows"][0]["out"][:1])]
+        one = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt, {"paging": "none", "rows": 1})
+        self.assertEqual(O.differences(one, page), [])
+        page["cut_fields"] = []
+        self.assertEqual([d["pointer"] for d in O.differences(one, page)], ["/rows/0/out"])
+
     def test_paging_context(self):
         g, f, mgt = doc("caps")
         whole = O.answer("graphlet_walks", {"arm": "right", "rank": "length"}, f, mgt)
