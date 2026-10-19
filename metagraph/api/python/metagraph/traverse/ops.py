@@ -3487,8 +3487,22 @@ def _displayed_parent_rules(a, b, sides, depth, cb=None):
             % (stated(ra, a), stated(rb, b), level, hit))
 
 
-def _weaker(cur, new):
-    return new if _COMPARABLE_RANK[new] > _COMPARABLE_RANK[cur] else cur
+class _Verdict:
+    """compare()'s verdict as its rules weaken it: the reason is the rule that decided it
+    -- the first, in rule order, of the rules giving the weakest verdict -- and a reason it
+    replaces that no note states (the identity rule's 'unverifiable') moves to the notes."""
+
+    def __init__(self, comparable, reason, notes):
+        self.comparable, self.reason, self.notes = comparable, reason, notes
+
+    def weaken(self, to, why):
+        """Weaken the verdict to |to| for rule |why| -> whether the rule decided it."""
+        if _COMPARABLE_RANK[to] <= _COMPARABLE_RANK[self.comparable]:
+            return False
+        if self.comparable == 'unverifiable':
+            self.notes.append(self.reason)
+        self.comparable, self.reason = to, why
+        return True
 
 
 def _label_evidence_notes(g, sides):
@@ -3524,7 +3538,12 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     equal, and so is a pair where either side's label evidence is a lower bound or
     qualified (cut lists cannot tell 'absent' from 'cut'); without index_fp on either side
     'unverifiable'; with no common certified depth (complete_to_bp 0) 'unknown' (equal
-    None in every case but True).
+    None in every case but True). The verdict is the weakest any rule gives, and the
+    reason names the rule that decided it: the first, in the order index identity and
+    seed, index_fp, common depth, bases, then the qualifications (label evidence, scopes,
+    displayed parents, an inexact restriction), of the rules giving that verdict; the
+    other rules that applied are in the notes (index_fp's too, when a weaker verdict
+    decided).
 
     modes: claims (the §6.9 unit: run ends, keyed (arm, ref, evidence_from, displayed
     prefix)), walks (walks cut at the depth, with the labels supporting the whole cut
@@ -3636,6 +3655,7 @@ def _compare(a, b, arm, labels, mode, cb, state):
     if comparable is False:
         return Comparison(False, reason, None, None, [], [], notes, mode=mode,
                           support=(a.support, b.support), strategies=strategies)
+    verdict = _Verdict(comparable, reason, notes)
     sides, none = _compare_sides(a, b, arm)
     if not sides:
         # the support kinds and strategies of both sides, as every other answer states
@@ -3649,19 +3669,22 @@ def _compare(a, b, arm, labels, mode, cb, state):
         cb.charge(W_ELEM * sum(len(g.arms[s].segments) for g in (a, b) for s in sides))
     if depth == 0:
         # equality over an empty window is not equality: nothing was certified on one side
-        comparable = _weaker(comparable, 'unknown')
-        notes.append('no common certified depth (complete_to_bp 0 on a or b)')
+        # (this decides before missing bases: with bases the window would still be empty)
+        why = 'no common certified depth (complete_to_bp 0 on a or b)'
+        verdict.weaken('unknown', why)
+        notes.append(why)
     for tag, g in (('a', a), ('b', b)):
-        evidence = _label_evidence_notes(g, sides)
+        evidence = ['%s: %s' % (tag, n) for n in _label_evidence_notes(g, sides)]
         if evidence:
-            comparable = _weaker(comparable, 'qualified')
-            notes.extend('%s: %s' % (tag, n) for n in evidence)
+            verdict.weaken('qualified', evidence[0])
+            notes.extend(evidence)
     for s in sides:
         if a.arms[s].scope != b.arms[s].scope:
-            comparable = _weaker(comparable, 'qualified')
-            notes.append('%s arm: completeness scopes differ (%s vs %s): a structural block '
-                         'on a merged route need not be where the per-path trie ends a label'
-                         % (s, a.arms[s].scope, b.arms[s].scope))
+            why = ('%s arm: completeness scopes differ (%s vs %s): a structural block on a '
+                   'merged route need not be where the per-path trie ends a label'
+                   % (s, a.arms[s].scope, b.arms[s].scope))
+            verdict.weaken('qualified', why)
+            notes.append(why)
         if a.arms[s].scope == 'united_history' and any(
                 len(x.parents) > 1 for x in a.arms[s].segments):
             notes.append('%s arm of a: histories were united at merges' % s)
@@ -3679,7 +3702,7 @@ def _compare(a, b, arm, labels, mode, cb, state):
             # the displayed bases, so the same trie can spell a walk through a merge
             # differently on the two sides. A difference there may be the display's, not the
             # retrieval's: qualified, as when the completeness scopes differ
-            comparable = _weaker(comparable, 'qualified')
+            verdict.weaken('qualified', shown)
             notes.append(shown)
     if cb is not None and labels is not None:
         _uses_g(cb, a, 'label_index')
@@ -3715,13 +3738,14 @@ def _compare(a, b, arm, labels, mode, cb, state):
                             ', '.join('%d on %s' % (n, t) for t, n in beyond.items() if n),
                             'is' if sum(beyond.values()) == 1 else 'are', depth))
     if mode in ('claims', 'walks', 'prefix_subset') and no_bases:
-        comparable = _weaker(comparable, 'unknown')
         evaluated = False
-        reason = ('%s carries no bases (output.sequences false): mode %s matches %s by '
-                  'their displayed bases, so it cannot compare them; retrieve both with '
-                  'output.sequences true, or compare mode labels'
-                  % (' and '.join(no_bases) + (' each' if len(no_bases) > 1 else ''), mode,
-                     'claims' if mode == 'claims' else 'walks'))
+        why = ('%s carries no bases (output.sequences false): mode %s matches %s by '
+               'their displayed bases, so it cannot compare them; retrieve both with '
+               'output.sequences true, or compare mode labels'
+               % (' and '.join(no_bases) + (' each' if len(no_bases) > 1 else ''), mode,
+                  'claims' if mode == 'claims' else 'walks'))
+        if not verdict.weaken('unknown', why):
+            notes.append(why)       # the depth rule decided
     elif mode == 'claims':
         ka = _keys_of(cb, state, 'a', lambda: _claim_keys(a, sides, depth, sel, inexact, cb))
         kb = _keys_of(cb, state, 'b', lambda: _claim_keys(b, sides, depth, sel, inexact, cb))
@@ -3756,11 +3780,12 @@ def _compare(a, b, arm, labels, mode, cb, state):
     if inexact:
         # a route that cannot be reconstructed keys a claim on the wrong branch: what
         # differs may be that, so no difference (and no equality) is asserted
-        comparable = _weaker(comparable, 'qualified')
-        notes.append('the DAG restricted to the depth could not be reconstructed exactly: '
-                     '%s%s' % ('; '.join(inexact[:3]),
-                               ' and %d more' % (len(inexact) - 3) if len(inexact) > 3
-                               else ''))
+        why = ('the DAG restricted to the depth could not be reconstructed exactly: %s%s'
+               % ('; '.join(inexact[:3]),
+                  ' and %d more' % (len(inexact) - 3) if len(inexact) > 3 else ''))
+        verdict.weaken('qualified', why)
+        notes.append(why)
+    comparable, reason = verdict.comparable, verdict.reason
     if mode == 'prefix_subset':
         holds = not only_a
     else:

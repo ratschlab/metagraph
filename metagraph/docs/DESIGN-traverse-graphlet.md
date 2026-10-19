@@ -621,7 +621,9 @@ for s in segments in id order:                                   # parents prece
 4. **Identity.** With a manifest on one side only, continue and replay refuse with `index_unverifiable` ("cannot be
    verified, not proven different"). A fallback needs the explicit opt-in `allow_unverified_index` (default off).
 5. **Comparison at a depth.** The DAG is restricted to the comparison depth, and merges at or beyond it are left out
-   (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`. Above
+   (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`, and so
+   does no common certified depth (`complete_to_bp` 0 on a side), which decides before the bases and `index_fp`: the
+   verdict is the weakest any rule gives, `reason` names the rule that decided it and `notes` the others. Above
    64 labels, "qualified" can come from the per-node label limit (`max_labels_per_node`), which the docs of
    `compare()` state. Record coordinates are noted, never compared or clipped by `compare()`.
 6. **The displayed parent at a merge** is the server's (§11); the library checks the rule as it stands
