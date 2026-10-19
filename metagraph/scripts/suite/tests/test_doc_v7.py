@@ -15,6 +15,7 @@ for p in (SUITE, HERE, DOC):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import gate  # noqa: E402
 import suite_common as sc  # noqa: E402
 
 import facts  # noqa: E402
@@ -310,6 +311,112 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertEqual(sections.memory_episodes(self._run(peak=100)), [])
         self.assertEqual(self._text(self._run(peak=100)), "")
         self.assertEqual(sections.memory_episodes(_Stub(samples=[], rows=[], run={})), [])
+
+
+class DeployedIdentityTest(unittest.TestCase):
+    """The service identity held to the deployed commit (RV3, V3): the identity input's `deployed_service_commit`
+    (from the deployment record, never the run's own records) is validated, passed to both gate calls, and appendix
+    F's note says in plain words that the recorded commit equals it; without it the recorded identity is said to be
+    self-reported; the by-design table is tied to the service that answered."""
+
+    SHA = "26a52cb63efd95752a109b5e09b1163bfffe60ca"
+
+    def _gate(self, expected):
+        rec = {"recorded": True, "service_commits": {self.SHA: 5}, "service_commit": self.SHA, "invocations": 5,
+               "identity_changed": False, "source": "arms/mcp/mcp_runs.jsonl"}
+        _, notes = gate.service_identity_problems(rec, expected, ["mcp"])
+        return {"service_identity": {"expected": expected, "recorded": rec}, "policy": {"arms": ["mcp"]},
+                "notes": notes + ["plan: 5 execution(s)"]}
+
+    def test_note(self):
+        ident = {"deployed_service_commit": {"commit": self.SHA, "source": "the deploy's LIVE line",
+                                             "railway_deployment_id": "6afb760e"}}
+        run = _Stub(gate=self._gate(self.SHA), identity=ident)
+        text, replaced = sections.identity_note_text(_Stub(run=run))
+        self.assertIn("equals the deployed commit", text)
+        self.assertIn("(the deploy's LIVE line, Railway deployment 6afb760e) on all 5 MCP invocations", text)
+        self.assertIn("\\allowbreak{}", text)
+        self.assertNotIn("--expect", text)
+        self.assertNotIn("mcp\\_runs", text)
+        self.assertEqual(len(replaced), 1)
+        run = _Stub(gate=self._gate(None), identity=None)
+        text, replaced = sections.identity_note_text(_Stub(run=run))
+        self.assertIn("self-reported, not cross-checked", text)
+        # a run recording no identity keeps the gate's own note (v5, v6)
+        run = _Stub(gate={"service_identity": {"expected": None, "recorded": {"recorded": False}}}, identity=None)
+        self.assertEqual(sections.identity_note_text(_Stub(run=run)), ("", []))
+
+    def test_identity_input_validated(self):
+        import tempfile
+        import reader
+        stub = _Stub(rows=[], run={"release": None}, mcp_run={}, service_identity=None, manifest={},
+                     run_id=lambda: "R")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "identity.json")
+            for dep, ok in (({"commit": self.SHA, "source": "LIVE"}, True), ({"commit": "not-a-sha", "source": "x"},
+                                                                           False), ({"commit": self.SHA}, False)):
+                with open(path, "w") as f:
+                    json.dump({"run": "R", "service_commit": self.SHA, "deployed_service_commit": dep}, f)
+                if ok:
+                    self.assertEqual(reader.Run._load_identity(stub, path)["deployed_service_commit"]["commit"],
+                                     self.SHA)
+                else:
+                    with self.assertRaises(reader.RunError):
+                        reader.Run._load_identity(stub, path)
+
+    def test_reader_passes_the_expected_commit_to_both_gates(self):
+        import shutil
+        import tempfile
+        import compare as cmp
+        import gate_policy
+        import merge_run
+        import reader
+        import test_doc as td
+        tmp = tempfile.mkdtemp()
+        try:
+            run_dir = os.path.join(tmp, "run")
+            os.makedirs(run_dir)
+            td.build_run(run_dir)
+            merge_run.merge(run_dir)
+            sc.write_json_atomic(os.path.join(run_dir, "compare.json"), cmp.compare(run_dir, (td.CASES, {"cases": 5})))
+            base = reader.Run(run_dir)
+            policy = gate_policy.build_policy(base.manifest, table=(td.CASES, {"cases": 5}), manifest_file="m.json",
+                                              arms=("direct-local", "mcp"), warm_every=0)
+            ppath, ipath = os.path.join(tmp, "policy.json"), os.path.join(tmp, "identity.json")
+            with open(ppath, "w") as fh:
+                json.dump(policy, fh)
+            with open(ipath, "w") as fh:
+                json.dump({"run": base.run_id(), "service_commit": self.SHA,
+                           "deployed_service_commit": {"commit": self.SHA, "source": "LIVE"}}, fh)
+            seen, orig = [], reader.gate_mod.judge
+
+            def spy(*a, **kw):
+                seen.append(kw.get("expect_service_commit"))
+                return orig(*a, **kw)
+            reader.gate_mod.judge = spy
+            try:
+                run = reader.Run(run_dir, policy=ppath, also_policies=[ppath], identity=ipath)
+            finally:
+                reader.gate_mod.judge = orig
+            self.assertEqual(seen, [self.SHA, self.SHA])
+            self.assertEqual(run.gate["service_identity"]["expected"], self.SHA)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_by_design_tie(self):
+        comp = {"A": {"mcp_agreement": {"class": "service_by_design", "verified": True}},
+                "B": {"mcp_agreement": {"class": "service_by_design"}}, "C": {"mcp_agreement": {"class": "agree"}}}
+        run = _Stub(table_meta={"service_commit": "22d034ba5c3de328", "generated_utc": "2026-10-13T11:04:20Z"},
+                    service_identity={"recorded": True, "service_commits": {self.SHA: 3}, "service_commit": self.SHA},
+                    order=["A", "B", "C"], comp_entry=lambda sid: comp[sid],
+                    identity={"deployed_service_commit": {"commit": self.SHA, "source": "LIVE"}})
+        self.assertEqual(sections.by_design_tie_text(run), "generated at service commit 22d034ba (2026-10-13); all 2 "
+                         "by-design pairs verified against the deployed 26a52cb6")
+        run.identity = None
+        self.assertIn("against the recorded service 26a52cb6", sections.by_design_tie_text(run))
+        run.service_identity = {"recorded": False}
+        run.mcp_run = {}
+        self.assertEqual(sections.by_design_tie_text(run), "")
 
 
 class SincePreviousTest(unittest.TestCase):

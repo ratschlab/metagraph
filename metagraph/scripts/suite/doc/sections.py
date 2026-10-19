@@ -1148,6 +1148,14 @@ def service_version_text(run, full=False):
             parts.append("read once only on %d invocation(s) (a read failed)" % recorded["unconfirmed"])
         text = "the service's deployed revision as the MCP runner recorded it (read from the service before each MCP " \
                "invocation): %s" % ", ".join(parts)
+        dep = (ident or {}).get("deployed_service_commit")
+        if isinstance(dep, dict) and dep.get("commit") and len(commits) == 1:
+            # held to the deployed commit of the deployment record (RV3, V3)
+            same = gate_mod.commit_matches(list(commits)[0], dep["commit"])
+            text += "; %s the deployed commit%s, taken from %s%s" % (
+                "equal to" if same else "not", "" if same else " %s" % _commit_text(dep["commit"], full),
+                str(dep.get("source") or "the identity input"),
+                (" (Railway deployment %s)" % dep["railway_deployment_id"]) if dep.get("railway_deployment_id") else "")
         if ident and ident.get("railway_deployment_id"):
             text += "; Railway deployment %s, taken from %s (not recorded by the run)" % (
                 ident["railway_deployment_id"], source)
@@ -2203,6 +2211,9 @@ def provenance_table(ctx):
             text += ", the re-evaluation's"
         elif table.get("replayed_sha256"):
             text += " (\\textbf{not} the table the re-evaluation replayed: appendix F)"
+        tie = by_design_tie_text(run)
+        if tie:
+            text += "; " + esc(tie)
         rows.append(("by-design table", text))
     elif table.get("warnings"):
         rows.append(("by-design table", "none read: %s" % esc(latex.public_paths("; ".join(table["warnings"])), 300)))
@@ -5038,6 +5049,9 @@ def _identity_evidence(run, ident):
     def input_part(i):
         part = {"source": i.get("source"), "service_commit": i.get("service_commit"),
                 "railway_deployment_id": i.get("railway_deployment_id")}
+        if isinstance(i.get("deployed_service_commit"), dict):
+            # the deployed commit the gate held the recorded identity to, with its source (RV3, V3)
+            part["deployed_service_commit"] = i["deployed_service_commit"]
         if isinstance(i.get("service_log"), dict):
             # the service's log as the input states it, with its source (the document's body names neither the
             # log's file nor its internal states; RV8)
@@ -5176,6 +5190,78 @@ def gate_action_table(ctx, problems):
                              needspace=12)
 
 
+def _deployed(run):
+    """The identity input's deployed commit record (make_doc --identity: `deployed_service_commit` {commit, source,
+    railway_deployment_id}), None without one."""
+    ident = getattr(run, "identity", None)
+    dep = ident.get("deployed_service_commit") if isinstance(ident, dict) else None
+    return dep if isinstance(dep, dict) and dep.get("commit") else None
+
+
+def _break_hex(text):
+    return re.sub(r"[0-9a-f]{32,}", lambda m: "\\allowbreak{}".join(
+        m.group(0)[i:i + 8] for i in range(0, len(m.group(0)), 8)), text)
+
+
+def identity_note_text(ctx):
+    """(appendix F's note on the service identity in plain words, the gate notes it replaces): the recorded commit
+    equal to the deployed one on all invocations, or self-reported and not cross-checked when no deployed commit was
+    given; ('', []) otherwise (a run recording no identity keeps the gate's note: v5, v6)."""
+    run = ctx.run
+    gate = run.gate if isinstance(run.gate, dict) else {}
+    si = gate.get("service_identity") if isinstance(gate.get("service_identity"), dict) else {}
+    rec = si.get("recorded") if isinstance(si.get("recorded"), dict) else None
+    if not rec or not rec.get("recorded") or not rec.get("service_commits"):
+        return "", []
+    expected = si.get("expected")
+    arms = (gate.get("policy") or {}).get("arms") or ["mcp"]
+    problems, notes = gate_mod.service_identity_problems(rec, expected, arms)
+    commits = rec["service_commits"]
+    n = rec.get("invocations") or sum(commits.values())
+    if problems:
+        return "", []
+    if expected:
+        dep = _deployed(run) or {}
+        src = str(dep.get("source") or "the identity input")
+        rid = dep.get("railway_deployment_id")
+        text = ("the service's commit, as the MCP runner read it before each invocation, equals the deployed commit %s "
+                "(%s%s) on all %d MCP invocations" % (expected, src, (", Railway deployment %s" % rid) if rid else "", n))
+    elif len(commits) == 1:
+        text = ("the service identified itself as commit %s on every one of the %d MCP invocations, so one deployment "
+                "served the whole run; the gate was given no record of the intended deployment, so this identity is "
+                "self-reported, not cross-checked" % (list(commits)[0], n))
+    else:
+        return "", []
+    return _break_hex(esc(text)), notes
+
+
+def by_design_tie_text(run):
+    """The by-design table tied to the service that answered (RV3): the commit and date it was generated at, and how
+    many of the run's by-design pairs were verified against the deployed commit (the identity input's, equal to the
+    recorded one) or the recorded one; '' for a run recording no service identity."""
+    table = run.table_meta or {}
+    rec = recorded_service_identity(run) or {}
+    commits = list(rec.get("service_commits") or {})
+    if not table.get("service_commit") or len(commits) != 1:
+        return ""
+    verified = unverified = 0
+    for sid in run.order:
+        ma = run.comp_entry(sid).get("mcp_agreement") or {}
+        if ma.get("class") == "service_by_design":
+            if ma.get("verified") is False:
+                unverified += 1
+            else:
+                verified += 1
+    dep = _deployed(run)
+    against = ("the deployed %s" % str(dep["commit"])[:8]) if dep and gate_mod.commit_matches(commits[0], dep["commit"]) \
+        else "the recorded service %s" % commits[0][:8]
+    when = str(table.get("generated_utc") or "")[:10]
+    pairs = ("all %d by-design pairs verified" % verified) if not unverified else (
+        "%d of %d by-design pairs verified" % (verified, verified + unverified))
+    return "generated at service commit %s%s; %s against %s" % (
+        str(table["service_commit"])[:8], (" (%s)" % when) if when else "", pairs, against)
+
+
 def gate_problems(ctx):
     """The deploy gate's problems (READ-002, READ-023): what the gate read, the problems by group with the evidence
     that clears each, then by kind (the scenarios linked, every configuration text once, none left out), and the
@@ -5254,7 +5340,12 @@ def gate_problems(ctx):
         out += latex.plain_table(latex.spec_p([30, 134], extra_cols=1, extra_spec="r"),
                                  ["problem kind", "scenario and access path, or the problem's text", "n"], rows,
                                  "every problem by the gate's kind (a text cut here is complete in {\\upshape %s})" % tt(GATE_PROBLEMS_FILE))
-    for n in (gate.get("notes") or [])[:6]:
+    # the service identity in plain words (RV3, V3): the recorded commit against the deployed one the identity input
+    # gives (the gate's own notes name the command-line flag and the runner's file; they stay in gate_problems.json)
+    ident_text, ident_notes = identity_note_text(ctx)
+    if ident_text:
+        out += "{\\small\\color{black!60}note: %s}\\par\n" % ident_text
+    for n in [x for x in (gate.get("notes") or []) if x not in ident_notes][:6]:
         # a long path and a full commit sha may break (the v7 baseline's identity note named the 40-hex commit and
         # ran 22 pt past the margin); no local path (as the record)
         text = esc_wrap(latex.public_paths(str(n)), 300)

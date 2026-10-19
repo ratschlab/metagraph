@@ -224,6 +224,10 @@ class Run(object):
         self.service_identity = recorded if isinstance(recorded, dict) else (
             merge_run.service_identity(self.dir, {"mcp": self.mcp_run}) if self.mcp_run else None)
         self.identity = self._load_identity(identity)
+        # the deployed commit the gate holds the recorded identity to (gate.py --expect-service-commit), from the
+        # identity input's deployment record, never from the run's own records (RV3, V3); None without one
+        dep = (self.identity or {}).get("deployed_service_commit")
+        self.expected_service_commit = dep.get("commit") if isinstance(dep, dict) else None
         self.orchestrator = sc.read_json(os.path.join(self.dir, "orchestrator.json")) or {}
         judged = cmp.judging_checks(self.dir, reevaluated) or {}
         self.judged = judged
@@ -248,7 +252,8 @@ class Run(object):
             # no verdict recorded in the run: the gate is evaluated offline from the run directory (gate.judge
             # reads the merged lines, compare.json, the manifest and the plan; it writes nothing)
             try:
-                self.gate = gate_mod.judge(self.dir, self.policy, reevaluated)
+                self.gate = gate_mod.judge(self.dir, self.policy, reevaluated,
+                                           expect_service_commit=self.expected_service_commit)
                 self.gate["policy"]["path"] = self.policy_path
                 self.gate_offline = True
             except Exception as e:  # a run the gate cannot judge: the document says why, never a crash
@@ -261,7 +266,8 @@ class Run(object):
             entry = {"path": os.path.abspath(path), "policy": None, "verdict": None, "error": None}
             try:
                 entry["policy"] = gate_mod.load_policy(path)
-                entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated)
+                entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated,
+                                                  expect_service_commit=self.expected_service_commit)
             except Exception as e:  # a policy the gate cannot read or judge: the document says why, never a crash
                 entry["error"] = "%s: %s" % (type(e).__name__, e)
             self.also_gates.append(entry)
@@ -383,6 +389,14 @@ class Run(object):
                         problems.append("service_log time %s lies outside the run (%s to %s)" % (
                             t, min(r.get("started_utc") for r in self.rows if r.get("started_utc")),
                             max(r.get("ended_utc") or "" for r in self.rows)))
+        # the deployed commit from the deployment record (the deploy's LIVE line), with its source: the gate compares
+        # the recorded identity with it (RV3, V3); a commit the run recorded otherwise is the gate's problem, not a
+        # refusal here
+        dep = data.get("deployed_service_commit")
+        if dep is not None:
+            if not isinstance(dep, dict) or not gate_mod.COMMIT_RE.match(str(dep.get("commit") or "")) \
+                    or not str(dep.get("source") or "").strip():
+                problems.append("deployed_service_commit is not {commit (a git sha), source}")
         content = re.search(r"\b[0-9a-f]{64}\b", str(data.get("manifest") or ""))
         if content and self.manifest.get("content_sha256") and content.group(0) != self.manifest["content_sha256"]:
             problems.append("manifest content %s, the run's is %s" % (content.group(0), self.manifest["content_sha256"]))
