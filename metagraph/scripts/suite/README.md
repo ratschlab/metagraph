@@ -4843,7 +4843,8 @@ Nothing here touches staging; every test is offline.
   no HTTP status: a transport failure, fields stage fetch and the code), `document_refused` (an HTTP status other
   than 2xx or an error body, fields stage fetch, http, code; a 2xx body with no results[0], or a result with neither
   a graphlet nor an error, stage convert; a conversion or graphlet_load that fails, stage convert / load; a load
-  receipt holding a NaN or an infinity, stage load with its pointer, VERIFY-L VR2), `no_graphlet` only for a 2xx answer whose seed failed (results[0] carries `error`, SPEC-core §7.1) (VERIFY-L VL2).
+  receipt holding a NaN or an infinity, stage load with its pointer, VERIFY-L VR2), `no_graphlet` only for a 2xx
+  answer whose seed failed (results[0] carries `error`, SPEC-core §7.1) (VERIFY-L VL2).
 - Isolation: one child per way, `python -s -B [-P]`, its environment scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus
   PYTHONHASHSEED (defaults W1 1001, W2 2002, W4 4004, drift 5005; distinct per run), sys.path the library root first.
   Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere. The
