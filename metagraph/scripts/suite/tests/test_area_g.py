@@ -297,6 +297,23 @@ class CorpusFile(unittest.TestCase):
             area_g.gen_G(FakeCtx(), v7_scenarios(), c, None)
 
 
+class ByDesignTable(unittest.TestCase):
+    """async's three area G cases (BY-DESIGN-G-CASES.json, 2026-10-20) are in the bundled table, load and validate,
+    and every case an op plan names is one of them."""
+
+    def test_the_g_cases_load_and_the_plans_name_them(self):
+        import compare as cmp
+        cases, info = cmp.load_by_design(os.path.join(SUITE, "service_by_design.json"))
+        for cid in (area_g.SERVICE_CAP_CASE, area_g.BIG_BODY_CASE, area_g.BIG_BODY_CASE + ".summary"):
+            self.assertIn(cid, cases)
+            self.assertEqual(cmp.graphlet_case_problems(cases[cid]), [], cid)
+        g, _ = provisional()
+        named = set(o["by_design"] for s in g for o in s["graphlet"]["ops"] if o.get("by_design"))
+        self.assertTrue(named <= set(cases), named - set(cases))
+        self.assertEqual(area_g.validate_g(g, set(cases))[1],
+                         sorted(p for p in area_g.validate_g(g, set(cases))[1] if "by-design case" not in p))
+
+
 class OpProblems(unittest.TestCase):
     def test_validation_catches_plan_mistakes(self):
         g = {"ways": {"default": area_g.ALL_WAYS}}

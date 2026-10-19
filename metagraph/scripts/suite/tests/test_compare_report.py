@@ -486,12 +486,14 @@ class CompareTest(unittest.TestCase):
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         # async's vendored table at 31a2e41f (e427d503's edit, case 131), and lane S8g's discovery cap (two renamed
-        # cases, their old ids kept as aliases: 133)
-        self.assertEqual(info["cases"], 133)
+        # cases, their old ids kept as aliases: 133); v8 (lane D, 2026-10-20): async's three area G cases appended
+        # (BY-DESIGN-G-CASES.json), every earlier byte unchanged: 136
+        self.assertEqual(info["cases"], 136)
         # lane S7v: the vocabulary's wall_rule entry states budget_minus_reserve's threshold (B - 1 s, the name kept);
         # lane S8g: the discovery cap 1000 of async's fb66f1dd; integration stage 2: traverse.duplicate_seeds also
-        # explains the merged seed's missing result
-        self.assertEqual(info["sha256"], "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44")
+        # explains the merged seed's missing result; v8: the G cases (the v4-v7 policies pin d4b8636c..., the table
+        # before them, and stay as committed)
+        self.assertEqual(info["sha256"], "3aed0befe936d2e6fe9efbeb41f6b061ec63c4b001e2d806df147b411ccb7382")
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07),
         # and the field the merge removes from the MCP answer, results.1.duplicate (T-edge-0008, by design)
