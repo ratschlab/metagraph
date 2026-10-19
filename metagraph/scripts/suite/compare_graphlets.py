@@ -693,10 +693,24 @@ def compare_records(a, ra, b, rb, what):
         d = gp.first_difference(va, vb)
     if d and len(d) > 3 and str(d[3]).startswith("uncomparable"):
         return _pair(a, b, what, "not_compared", d[3], kind="oracle_unavailable")
+    fit = w3_fit_rows(a, va, b, vb) if not d and "W3" in (a, b) else []
     if d:
         return _pair(a, b, what, "disagree", (d[3] or None) if len(d) > 3 else None, d[:3],
                      kind="error" if "error" in va else "answer", views=(va, vb))
-    return _pair(a, b, what, "agree")
+    out = _pair(a, b, what, "agree")
+    if fit:
+        out["w3_fit_where_library_cut"] = fit
+    return out
+
+
+def w3_fit_rows(a, va, b, vb):
+    """The rows a library way cut (_cut_fields) where W3's same row is whole (VERIFY-C-R2 VR7): accepted by the cut
+    rule, but W3 normally has less room (a longer handle, walk_display), so the report notes them. -> [row index]."""
+    w3, lib = (va, vb) if a == "W3" else (vb, va)
+    rw = ((w3.get("answer") or {}).get("rows") or []) if isinstance(w3.get("answer"), dict) else []
+    rl = ((lib.get("answer") or {}).get("rows") or []) if isinstance(lib.get("answer"), dict) else []
+    return [i for i, (x, y) in enumerate(zip(rl, rw)) if isinstance(x, dict) and x.get(ROW_CUT)
+            and isinstance(y, dict) and not y.get(ROW_CUT)]
 
 
 def oracle_compare_fn():
@@ -1164,9 +1178,12 @@ def summarise(result):
             t["smoke"] += 1 if e.get("smoke") else 0
             if not e.get("smoke"):
                 counts[e["outcome"]] = counts.get(e["outcome"], 0) + 1
+    fits = [{"scenario": sid, "op": oid, "pair": p["pair"], "rows": p["w3_fit_where_library_cut"]}
+            for sid, sv in sorted(result["scenarios"].items()) for oid, e in sorted(sv["ops"].items())
+            for p in e.get("pairs") or [] if p.get("w3_fit_where_library_cut")]
     result["summary"].update({"scenarios": dict((k, sum(1 for s in result["scenarios"].values()
                                                         if s["outcome"] == k)) for k in SCENARIO_OUTCOMES),
-                              "ops": counts, "per_tool": per_tool})
+                              "ops": counts, "per_tool": per_tool, "w3_fit_where_library_cut": fits})
     return result
 
 

@@ -102,6 +102,23 @@ class Section(tsc.ServiceBase):
         self.assertIn("| graphlet\\_walks | /rows/\\*/n\\_full | checked, re-derived from DESIGN | DESIGN S5.1", text)
         self.assertIn("| graphlet\\_walks | /rows/\\*/length\\_bp | checked | SPEC-core S7.5.6", text)
 
+    def test_vr7_w3_fit_where_the_library_cut_is_a_note(self):
+        self.make([gf.scenario(ops=[self.WALKS])])
+        lib = gf.walks_answer()
+        lib["rows"][0]["sequence"] = "ACGTACGT"
+        cut = copy.deepcopy(lib)
+        cut["rows"][0].update(sequence="ACGT", _cut_fields=["sequence"])
+        self.put(SID, self.WALKS, {"*": cut, "W3": dict(lib, handle=UUID)}, sf={"walk_display": "first_parent"},
+                 ways=["W1", "W2", "W3", "W4"])
+        self.run_.record("W5", SID, "walks-len", "graphlet_walks", self.WALKS["args"], answer={},
+                         oracle={"checked": {}})
+        g = self.result()
+        self.assertEqual(g["scenarios"][SID]["ops"]["walks-len"]["outcome"], "agree")
+        self.assertEqual(g["summary"]["w3_fit_where_library_cut"],
+                         [{"scenario": SID, "op": "walks-len", "pair": "W3-W4", "rows": [0]}])
+        text = report.graphlet_section(g)
+        self.assertIn("W3 fit where the library cut: 1 row(s) in 1 op call(s)", text)
+
     def test_an_uncomputable_comparison(self):
         self.assertEqual(report.graphlet_verdict({"error": "x"})[0], "ERROR")
         self.assertIn("could not be computed", report.graphlet_section({"error": "boom"}))

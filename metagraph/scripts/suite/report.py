@@ -1579,6 +1579,14 @@ def graphlet_section(g, max_items=200):
     if gaps:
         notes.append("keys the library ways answer outside the frozen table (compare_graphlets.ANSWER_KEYS): %s" %
                      "; ".join("%s: %s" % (t, ", ".join(k)) for t, k in sorted(gaps.items())))
+    fits = (g.get("summary") or {}).get("w3_fit_where_library_cut") or []
+    if fits:
+        # accepted by the cut rule, noted (VERIFY-C-R2 VR7): W3 normally has less room than the library ways
+        notes.append("W3 fit where the library cut: %d row(s) in %d op call(s) (%s); W3 normally has less room (a "
+                     "longer handle, walk_display), so a W3 row that should have been cut would show here" % (
+                         sum(len(x["rows"]) for x in fits), len(fits), "; ".join(
+                             "%s %s %s rows %s" % (x["scenario"], x["op"], x["pair"], x["rows"][:5])
+                             for x in fits[:5])))
     if (g.get("summary") or {}).get("unplanned_records"):
         notes.append("%d record(s) of op calls the manifest does not plan" % g["summary"]["unplanned_records"])
     notes.extend(g.get("warnings") or [])
