@@ -475,17 +475,18 @@ MCP_TOOL_ORDER = ("traverse_resolve", "traverse_fetch", "traverse_status", "trav
 
 def mcp_tools_called_text(run):
     """The MCP tools the runner called, read from its raw records (reader.Run.mcp_tool_calls; W3), by name:
-    '`traverse_resolve`, ..., `catalog`, and `graphlet_export` in the MGT format to download the graphlet document a
+    'traverse_resolve, ..., catalog and graphlet_export in the MGT format to download the graphlet document a
     traversal returns'; '' without records."""
     calls = run.mcp_tool_calls() if hasattr(run, "mcp_tool_calls") else {}
     names = sorted((t for t in calls if t != "graphlet_export"),
                    key=lambda t: (MCP_TOOL_ORDER.index(t) if t in MCP_TOOL_ORDER else len(MCP_TOOL_ORDER), t))
     if not names and "graphlet_export" not in calls:
         return ""
-    items = ["`%s`" % t for t in names]
+    # plain names, as the scenarios' tools in the sentence's first half (a run of code spans would not break)
+    items = ["%s" % t for t in names]
     if "graphlet_export" in calls:
         formats = sorted(calls["graphlet_export"]["formats"])
-        items.append("`graphlet_export`%s to download the graphlet document a traversal returns" % (
+        items.append("graphlet_export%s to download the graphlet document a traversal returns" % (
             (" in the %s format%s" % (" and ".join(f.upper() for f in formats), "s" if len(formats) > 1 else ""))
             if formats else ""))
     return facts._join(items)
@@ -500,13 +501,13 @@ def traversal_tools_not_called_text(run):
     graphlet = [t for t in TRAVERSAL_TOOLS if t.startswith("graphlet_") and t != "graphlet_export" and t not in calls]
     parts = []
     if graphlet or "graphlet_export" in calls:
-        inner = ["`%s`" % t for t in graphlet]
+        inner = ["%s" % t for t in graphlet]
         if "graphlet_export" in calls:
-            inner.append("`graphlet_export`'s other formats")
+            inner.append("graphlet_export's other formats")
         elif "graphlet_export" in TRAVERSAL_TOOLS:
-            inner.append("`graphlet_export`")
+            inner.append("graphlet_export")
         parts.append("the graphlet processing tools (%s)" % facts._join(inner))
-    parts += ["`%s`" % t for t in TRAVERSAL_TOOLS if t.startswith("traverse_") and t not in calls]
+    parts += ["%s" % t for t in TRAVERSAL_TOOLS if t.startswith("traverse_") and t not in calls]
     return facts._join(parts)
 
 

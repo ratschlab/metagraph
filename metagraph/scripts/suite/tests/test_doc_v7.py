@@ -621,13 +621,13 @@ class NotCoveredTest(unittest.TestCase):
             self.assertEqual(sorted(got), ["catalog", "graphlet_export", "traverse_fetch", "traverse_status"])
             self.assertEqual(got["graphlet_export"]["formats"], {"mgt": 1})
             stub.mcp_tool_calls = lambda: got
-            self.assertEqual(sections.mcp_tools_called_text(stub), "`traverse_fetch`, `traverse_status`, `catalog` and "
-                             "`graphlet_export` in the MGT format to download the graphlet document a traversal returns")
+            self.assertEqual(sections.mcp_tools_called_text(stub), "traverse_fetch, traverse_status, catalog and "
+                             "graphlet_export in the MGT format to download the graphlet document a traversal returns")
             text = sections.traversal_tools_not_called_text(stub)
-            self.assertIn("the graphlet processing tools (`graphlet_summary`", text)
-            self.assertIn("`graphlet_export`'s other formats)", text)
-            self.assertTrue(text.endswith("`traverse_resolve`, `traverse_results`, `traverse_stop`, `traverse_lock` and "
-                                          "`traverse_capabilities`"), text)
+            self.assertIn("the graphlet processing tools (graphlet_summary", text)
+            self.assertIn("graphlet_export's other formats)", text)
+            self.assertTrue(text.endswith("traverse_resolve, traverse_results, traverse_stop, traverse_lock and "
+                                          "traverse_capabilities"), text)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         par = [p for p in prose("overview")["sections"]["methods"]["paragraphs"] if "*Not covered.*" in p][0]
