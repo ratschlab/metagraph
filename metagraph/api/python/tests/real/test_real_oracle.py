@@ -721,6 +721,7 @@ class Plan:
             for lab in w.labels_full:
                 lo, hi = kmer_range(side, self.S, F, self.k, 0, F, boundary=True)
                 checks.append((lab, lo, hi, 'labels_full'))
+            asked = {lab.name for lab in w.labels_full}
             if g.mode == 'constrain':
                 for sr in g.support_profile(side, w.path_id, kind='displayed'):
                     if sr.to_bp <= sr.from_bp:
@@ -729,14 +730,22 @@ class Plan:
                     for lab in sr.labels:
                         checks.append((lab, lo, hi, 'support_profile [%d,%d)'
                                        % (sr.from_bp, sr.to_bp)))
+                # /resolve is asked for every label PRESENT on the walk's nodes, a superset
+                # of the displayed profile's (DESIGN §5.1 displayed evidence, G4): the
+                # request the recorded oracle answers were made for
+                from metagraph.traverse import ops
+                asked |= {g.labels[l].name
+                          for _, _, ids in ops._alive_profile(g, g.arms[side], w.leaf)
+                          for l in ids}
             checks = [c for c in checks if c[0].name not in self.dup_names]
-            names = sorted({c[0].name for c in checks})
+            names = sorted(asked - self.dup_names)
             if len(names) > 300:
                 keep = set(pick(names, 300))
                 checks = [c for c in checks if c[0].name in keep]
+                names = sorted(keep)
                 self.notes['walk_labels_sampled'] += 1
             self.walks.append((w, side, mol, F, checks))
-            self.extra.need(mol, {c[0].name for c in checks})
+            self.extra.need(mol, set(names))
 
     # ------------------------------------------------------------ b: stretches (annotate)
 

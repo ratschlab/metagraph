@@ -547,5 +547,238 @@ class TestVR4ASliceCarriesABaseOrIsRefused(unittest.TestCase):
         self.assertGreater(n, refused)
 
 
+def _formula_profile(g, side, pid):
+    """DESIGN §5.1's displayed evidence along walk |pid|, per base, from the library's own
+    claims (one per run, with its evidence_from): a run's label supports base x where
+    evidence_from <= x < to_bp and the walk's segment at x is on the run's displayed chain
+    (the first-parent chain to its anchor)."""
+    a = g.arms[side]
+    p = derive.paths(a)[pid]
+    seg_at = []
+    for sid in p.segments:
+        seg_at += [sid] * a.segments[sid].length_bp
+    sets = [set() for _ in seg_at]
+    for c in g.claims(side, strict=False):
+        if c.to_bp <= c.from_bp:
+            continue
+        mine = set(derive.chain(a, c.segment))
+        for x in range(c.evidence_from, min(c.to_bp, len(seg_at))):
+            if seg_at[x] in mine:
+                sets[x].add(c.label.ref)
+    return sets
+
+
+def _profile_sets(g, side, pid, kind='displayed'):
+    out = []
+    for r in g.support_profile(side, pid, kind):
+        out += [{l.ref for l in r.labels}] * (r.to_bp - r.from_bp)
+    return out
+
+
+class TestG4TheProfileIsDisplayedEvidence(unittest.TestCase):
+    """G4 (VERIFY-O-B VO-B1): graphlet_support's profile (support_profile(kind=
+    'displayed')) counted a label wherever it was present on the walk's nodes. DESIGN §5.1
+    lists support_profile(kind='displayed') among the users of displayed-path evidence:
+    a run's displayed bases start at its evidence_from ("the displayed bases before s
+    are not this lineage's"), derived at its anchor. The profile now counts each run
+    from its evidence_from, on the part of its displayed chain the walk shares."""
+
+    def test_mini_ndm1_rc_switch1_left_walk_3(self):
+        g = _real('real/mini_refseq/mini_ndm1_rc__switch1')
+        a = g.arms['left']
+        run = a.runs[13]
+        claim, = [c for c in g.claims('left', strict=False)
+                  if c.segment == run.segment and c.label.id == run.label]
+        self.assertEqual((1239, 3), (claim.evidence_from, claim.path_id))
+        prof = g.support_profile('left', 3)
+        ref = g.labels[run.label].ref
+        for r in prof:
+            has = ref in {l.ref for l in r.labels}
+            self.assertEqual(r.from_bp >= 1239, has, (r.from_bp, r.to_bp))
+        self.assertEqual(5, len(prof[0].labels))
+        # the tool answers the same rows
+        with tempfile.TemporaryDirectory() as d:
+            store = GraphletStore(d)
+            h = store.put_graphlet(g)
+            rows = GraphletTools(store).graphlet_support(h, 'left', 3, max_bytes=1 << 20)['rows']
+        self.assertEqual([(r.from_bp, r.to_bp, len(r.labels)) for r in prof],
+                         [(r['from_bp'], r['to_bp'], r['n_labels']) for r in rows])
+
+    def test_merge_document(self):
+        # a.fa and b.fa enter walk 0 through non-first parents (evidence_from 62 and 36):
+        # they join there, and never leave at the bubbles they do not display
+        g = T.body('merge')
+        self.assertEqual([(36, ['b.fa'], [], 'merge'), (62, ['a.fa'], [], 'merge')],
+                         [(c.at_bp, [l.name for l in c.added], [l.name for l in c.removed],
+                           c.reasons[0]['why']) for c in g.support_changes('right', 0)])
+        sets = _profile_sets(g, 'right', 0)
+        names = {l.ref: l.name for l in g.labels}
+        for x, labs in enumerate(sets):
+            got = {names[r] for r in labs}
+            self.assertEqual('a.fa' in got, x >= 62, x)
+            self.assertEqual('b.fa' in got, x >= 36, x)
+
+    def test_every_constrain_walk_of_the_fixtures(self):
+        import glob
+        n = 0
+        docs = [(os.path.basename(f), parse(T.read(f)))
+                for f in sorted(glob.glob(os.path.join(T.DOCS, '*.mgt')))]
+        for f in sorted(glob.glob(os.path.join(T.DATA, 'real', '*', '*.graphlet.json.gz'))
+                        + glob.glob(os.path.join(T.DATA, 'coords', '*.graphlet.json.gz'))
+                        + glob.glob(os.path.join(T.DATA, 'review3', '*.graphlet.json'))):
+            if f.endswith('.gz'):
+                with gzip.open(f) as fh:
+                    resp = json.loads(fh.read())
+            else:
+                with open(f, encoding='utf-8') as fh:
+                    resp = json.load(fh)
+            resp = resp['response'] if isinstance(resp.get('response'), dict) else resp
+            for r in resp['results']:
+                if isinstance(r.get('graphlet'), str):
+                    docs.append((os.path.basename(f), from_response(r, resp)))
+        for name, g in docs:
+            if g.mode != 'constrain':
+                continue
+            for side, a in g.arms.items():
+                for p in derive.paths(a):
+                    if p.length_bp == 0:
+                        continue
+                    n += 1
+                    self.assertEqual(_formula_profile(g, side, p.id),
+                                     _profile_sets(g, side, p.id), (name, side, p.id))
+                    # support_changes reads the same profile: past base 0 a change is
+                    # exactly where its label set changes, and says what changed
+                    prof = g.support_profile(side, p.id)
+                    want = [(r.from_bp, {l.ref for l in r.labels} - {l.ref for l in q.labels},
+                             {l.ref for l in q.labels} - {l.ref for l in r.labels})
+                            for q, r in zip(prof, prof[1:])]
+                    got = [(c.at_bp, {l.ref for l in c.added}, {l.ref for l in c.removed})
+                           for c in g.support_changes(side, p.id) if c.at_bp > 0]
+                    self.assertEqual(want, got, (name, side, p.id))
+        self.assertGreater(n, 400)
+
+
+def _constrain_fixtures():
+    """(name, graphlet) of every constrain fixture: the documents and the real, coords and
+    review3 retrievals."""
+    import glob
+    out = [(os.path.basename(f), parse(T.read(f)))
+           for f in sorted(glob.glob(os.path.join(T.DOCS, '*.mgt')))]
+    for f in sorted(glob.glob(os.path.join(T.DATA, 'real', '*', '*.graphlet.json.gz'))
+                    + glob.glob(os.path.join(T.DATA, 'coords', '*.graphlet.json.gz'))
+                    + glob.glob(os.path.join(T.DATA, 'review3', '*.graphlet.json'))):
+        if f.endswith('.gz'):
+            with gzip.open(f) as fh:
+                resp = json.loads(fh.read())
+        else:
+            with open(f, encoding='utf-8') as fh:
+                resp = json.load(fh)
+        resp = resp['response'] if isinstance(resp.get('response'), dict) else resp
+        for i, r in enumerate(resp['results']):
+            if isinstance(r.get('graphlet'), str):
+                out.append(('%s#%d' % (os.path.basename(f), i), from_response(r, resp)))
+    return [(n, g) for n, g in out if g.mode == 'constrain']
+
+
+class TestG41TheChangesStartFromTheDisplayedProfile(unittest.TestCase):
+    """G4-1 (VERIFY-F-G4): the support-change rows started from the seed's entry set, so a
+    seed label never displayed on the walk was reported removed at 0 with the fallback
+    reason 'ended' (406 rows). The start set is the displayed profile at base 0: such a
+    label was never there, from the walk's view; a seed label with a run ending at 0 keeps
+    its K-coded end."""
+
+    def test_no_fallback_end_on_any_constrain_walk(self):
+        n = 0
+        for name, g in _constrain_fixtures():
+            for side, a in g.arms.items():
+                for p in derive.paths(a):
+                    for c in g.support_changes(side, p.id):
+                        for r in c.reasons:
+                            n += 1
+                            self.assertFalse(r['why'] == 'ended' and 'end' not in r,
+                                             (name, side, p.id, c.at_bp, r))
+        self.assertGreater(n, 1000)
+
+    def test_limits_right_walk_0(self):
+        # c:2 enters the merge segment through its non-first parent (evidence_from 7): it
+        # displays nothing on the walk, so no row names it (it was 'removed at 0, ended')
+        g = T.body('limits')
+        rows = [(c.at_bp, [l.ref for l in c.added], [l.ref for l in c.removed],
+                 [r['why'] for r in c.reasons]) for c in g.support_changes('right', 0)]
+        self.assertEqual([(5, [], ['c:1'], ['loss_budget'])], rows)
+
+    def test_a_boundary_end_at_0_keeps_its_end(self):
+        # linear: h:0:1 ends minority at the seed boundary (a zero-length run)
+        lin = T.body('linear').support_changes('right', 0)
+        self.assertEqual([(0, ['h:0:1'], 'minority')],
+                         [(c.at_bp, [l.ref for l in c.removed], c.reasons[0]['why'])
+                          for c in lin])
+
+
+def _expected_prefixes(t):
+    """(side, ref) -> the walking-order prefixes w[:j] (j > 0) over which a label has
+    displayed evidence from base 0 on a walk of |t|, read off its support profile."""
+    out = {}
+    for side, a in t.arms.items():
+        for p in derive.paths(a):
+            prof = t.support_profile(side, p.id)
+            if not prof:
+                continue
+            w = t.spell(side, p.id, 'walk')
+            alive, reach = None, {}
+            for r in prof:
+                ids = {l.id for l in r.labels}
+                alive = ids if alive is None else alive & ids
+                for l in alive:
+                    reach[l] = r.to_bp        # a label leaving keeps the prefix it reached
+            for l, j in reach.items():
+                out.setdefault((side, t.labels[l].ref), set()).add(w[:j])
+    return out
+
+
+def _library_prefixes(g, depth):
+    got = ops._supported_prefixes(g, list(g.arms), depth)
+    return {k: {w for w in v if w} for k, v in got.items() if any(v)}
+
+
+class TestG5PrefixSubsetReadsDisplayedEvidence(unittest.TestCase):
+    """G5 (VERIFY-F-G4, the open note): compare(mode='prefix_subset') keyed b's supported
+    prefixes (_supported_prefixes) by presence contiguous from base 0, while its docstring
+    promises displayed support. In mini_ndm1_rc__switch1 left, labels present on [0, 186)
+    display only from 1239. b's map is now displayed evidence (DESIGN §5.1) in the DAG
+    restricted to the depth: equal to the support profiles of a retrieval walked to the
+    depth (test_traverse_review3.truncated)."""
+
+    def check(self, g, depth, label):
+        from test_traverse_review3 import truncated
+        want = _expected_prefixes(truncated(g, depth))
+        want = {k: v for k, v in want.items() if v}
+        self.assertEqual(want, _library_prefixes(g, depth), label)
+
+    def test_mini_ndm1_rc_switch1(self):
+        g = _real('real/mini_refseq/mini_ndm1_rc__switch1')
+        top = max(s.end_bp for a in g.arms.values() for s in a.segments)
+        got = ops._supported_prefixes(g, ['left'], top)
+        # label 1 is present on walk 3's first 186 bases, displayed only from 1239
+        ref = g.labels[1].ref
+        self.assertFalse(any(0 < len(w) <= 186 for w in got.get(('left', ref), ())), ref)
+        self.check(g, top, 'full')
+
+    def test_the_constrain_fixtures_at_their_depths(self):
+        n = 0
+        for name, g in _constrain_fixtures():
+            top = max((s.end_bp for a in g.arms.values() for s in a.segments), default=0)
+            if top <= 0 or any(not ops._has_bases(g, s) for s in g.arms):
+                continue
+            depths = set()
+            for a in g.arms.values():
+                depths.update(s.from_bp + 1 for s in a.segments if len(s.parents) > 1)
+            for d in sorted(depths)[:5] + [top]:
+                if d > 0:
+                    n += 1
+                    self.check(g, d, (name, d))
+        self.assertGreater(n, 50)
+
+
 if __name__ == '__main__':
     unittest.main()

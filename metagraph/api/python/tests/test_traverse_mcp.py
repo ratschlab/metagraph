@@ -210,7 +210,8 @@ class TestTools(ToolsCase):
         self.assertEqual([0, 1, 3, 5, 6], [r['segment'] for r in w['rows']])
         self.assertEqual({'length_bp': 38, 'loss_used': 0.0, 'labels': 4}, w['continuation'])
         s = self.tools.graphlet_support(h, 'right', 0, max_bytes=4096)
-        self.assertEqual(['split', 'merge', 'split', 'merge'],
+        # displayed evidence (DESIGN §5.1): b.fa and a.fa join at their merges
+        self.assertEqual(['merge', 'merge'],
                          [r['why'][0]['why'] for r in s['rows'] if 'why' in r])
         lab = self.tools.graphlet_labels(h, max_bytes=4096)
         self.assertEqual(4, lab['total'])
