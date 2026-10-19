@@ -24,7 +24,8 @@ Per op call, in this order:
    rows); W5's other pointers are consistency-only and listed; without lane O's module a W5 pair is not compared
    and the op is inconclusive;
 6. errors by code and structured fields (never message or hint text; result_too_large's `bytes` depends on the
-   handle's length);
+   handle's length); a fitting error (FIT_ERRORS) is not comparable against W5 (FORMAT v2 F3), compared as usual
+   between W1..W4;
 7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in the suite's words, in each
    way against that way's uncut answer (is_cut): the same uncut answer (the uncut op's own comparison), every string
    or list of the cut answer a prefix of the uncut one, every key it lacks an optional one (OPTIONAL_KEYS, or named
@@ -120,6 +121,11 @@ PAIRS = (("W1", "W2", "transport"), ("W1", "W4", "fetch path"), ("W3", "W4", "se
 W5_WHAT = "library vs independent reading"
 # a pair not compared for one of these makes the op inconclusive (a missing way is named by its own reason)
 UNREAD_KINDS = ("oracle_unavailable", "oracle_error")
+# errors of fitting an answer to a ceiling (FORMAT v2 F3, VO5): not comparable against W5, which makes no claim about
+# fitting (INVENTORY §1.1: result_too_large, receipt_too_large; on W3 also op_busy, the service's worker state);
+# between W1..W4 they are compared as usual (W3 calls are designed to fit, DESIGN-v8 §5)
+FIT_ERRORS = ("result_too_large", "receipt_too_large")
+FIT_ERRORS_W3 = FIT_ERRORS + ("op_busy",)
 OP_OUTCOMES = ("agree", "disagree", "service_by_design", "inconclusive", "precondition_failed")
 SCENARIO_OUTCOMES = ("fail", "precondition_failed", "inconclusive", "pass")
 
@@ -393,6 +399,10 @@ def compare_w5(x, rx, r5):
     d = _args_difference(rx, r5)
     if d:
         return _pair(x, "W5", W5_WHAT, "disagree", "args_resolved differ (W5 takes W1's)", d, kind="args_resolved")
+    code = (rx.get("error") or {}).get("code") if isinstance(rx.get("error"), dict) else None
+    if code in (FIT_ERRORS_W3 if x == "W3" else FIT_ERRORS):
+        return _pair(x, "W5", W5_WHAT, "not_comparable", "%s answered %s: W5 makes no claim about fitting an answer "
+                                                         "to a ceiling (FORMAT v2 F3)" % (x, code), kind="fit")
     fn = oracle_compare_fn()
     if fn is None:
         return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare (lane O, FORMAT v2 F2) is not "

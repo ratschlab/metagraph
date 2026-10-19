@@ -456,6 +456,31 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(e["outcome"], "inconclusive")
         self.assertIn("graphlet_oracle.compare raised ValueError: no oracle block", e["reason"])
 
+    def test_fitting_errors_are_not_comparable_against_w5_only(self):
+        self.make()
+        fit = {"code": "result_too_large", "fields": {"bytes": 3000, "max_bytes": 512}}
+        self.five(errors=dict((w, fit) for w in ("W1", "W2", "W3", "W4")))
+        e = self.op_entry()
+        self.assertEqual(e["outcome"], "agree", e)
+        w5 = [p for p in e["pairs"] if p["pair"].endswith("W5")]
+        self.assertEqual(set(p["outcome"] for p in w5), {"not_comparable"})
+        self.assertIn("W1 answered result_too_large: W5 makes no claim", w5[0]["detail"])
+        self.assertEqual(self.oracle.calls, [])   # never handed to the oracle's comparison
+        # between W1..W4 a fitting error is compared as usual: W3 answered where the library did not fit
+        self.run_.cleanup()
+        self.make()
+        self.five(errors={"W1": fit, "W2": fit, "W4": fit})
+        e = self.op_entry()
+        self.assertEqual(e["disagreeing"], ["W3-W4"])   # W3's answer agrees with W5; the library ways' are fitting errors
+        # op_busy is the service's worker state: not comparable against W5 on W3 only
+        self.run_.cleanup()
+        self.make()
+        busy = {"code": "op_busy", "fields": {"retryable": True}}
+        self.five(errors={"W3": busy})
+        e = self.op_entry()
+        self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W3-W5")["outcome"], "not_comparable")
+        self.assertEqual(e["disagreeing"], ["W3-W4"])
+
     def test_without_lane_os_module_w5_is_not_compared(self):
         self.make()
         self.five()
