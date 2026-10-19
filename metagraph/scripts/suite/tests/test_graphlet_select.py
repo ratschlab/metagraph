@@ -139,6 +139,9 @@ class ResolveTests(unittest.TestCase):
     def test_select_failures(self):
         cases = {
             "unknown": ({"select": "nope"}, "no named selector 'nope'"),
+            "name a list": ({"select": ["top_label"]}, "named by a string, not ['top_label']"),
+            "name an object": ({"select": {"a": 1}, "args": {}}, "named by a string"),
+            "name a number": ({"select": 3}, "named by a string, not 3"),
             "args not an object": ({"select": "top_label", "args": [1]}, "are an object"),
             "unexpected argument": (sel("top_label", labels="labels", colour="red"), "colour"),
             "missing argument": (sel("top_label"), "labels"),

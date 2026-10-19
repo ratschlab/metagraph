@@ -86,6 +86,8 @@ def resolve(value: Any, answers: Mapping[str, Any], where: str = "args") -> Any:
         return ans[CURSOR_KEY]
     if is_select(value):
         name, args = value["select"], value.get("args", {})
+        if not isinstance(name, str):   # (a list or object would not even be a key: TypeError, VERIFY-L VL8)
+            raise SelectorError("%s: a selector is named by a string, not %r" % (where, name))
         if name not in SELECTORS:
             raise SelectorError("%s: no named selector %r (known: %s)" % (where, name, ", ".join(sorted(SELECTORS))))
         if not isinstance(args, dict):
