@@ -1431,26 +1431,38 @@ def compare_swap_properties(ab: dict, ba: dict) -> List[str]:
     return probs
 
 
-def compare_walks_properties(ans: dict, full_a: Optional[dict], mgt_a: str, full_b: Optional[dict],
-                             mgt_b: str) -> List[str]:
-    """mode walks, whole lists, a verdict that compares (true or qualified): per arm, the walks only in a (b) are the
-    spelled walks of a (b) cut at depth_used that b (a) lacks, and every differ row names a walk both have (DESIGN
-    §5.2.5: the DAGs restricted to the comparison depth; walks spelled in natural orientation, SPEC §7.5.4). Rows
-    name a walk by its bases (`walk`). -> problems; [] when the verdict compares nothing."""
+def _compared_sides(da: _Doc, db: _Doc, arm: Any) -> List[str]:
+    """The arms a compare covers: the one its `arm` argument names (the op's args_resolved: the compare answer itself
+    names none), else every arm both retrievals walked."""
+    want = _ARM_NAMES.get(arm) if isinstance(arm, str) else None
+    return [s for s in ARMS if s in da.arms and s in db.arms and (arm is None or want == s)]
+
+
+def compare_walks_properties(ans: dict, full_a: Optional[dict], mgt_a: str, full_b: Optional[dict], mgt_b: str,
+                             arm: Optional[str] = None) -> List[str]:
+    """mode walks, whole lists, a verdict that compares (true or qualified), on the arms the compare covers (|arm|:
+    the op's `arm` argument): per arm, the walks only in a (b) are the spelled walks of a (b) cut at depth_used that
+    b (a) lacks, and every differ row names a walk both have (DESIGN §5.2.5: the DAGs restricted to the comparison
+    depth; walks spelled in natural orientation, SPEC §7.5.4). Rows name a walk by its bases (`walk`) and its arm.
+    -> problems; [] when the verdict compares nothing."""
     if ans.get("comparable") not in (True, "qualified") or ans.get("mode") != "walks":
         return []
     D = ans.get("depth_used")
-    if not isinstance(D, int):
+    if not isinstance(D, int) or isinstance(D, bool):
         return ["depth_used %r" % (D,)]
     da, db = _Doc(full_a, mgt_a), _Doc(full_b, mgt_b)
     probs = []
-    arm = ans.get("arm")
-    for side in [s for s in ARMS if s in da.arms and s in db.arms and (arm is None or _ARM_NAMES.get(arm) == s)]:
+    sides = _compared_sides(da, db, arm)
+    stray = [r for r in ans.get("rows") or [] if _ARM_NAMES.get(r.get("arm")) not in sides]
+    if stray:
+        probs.append("%d rows on an arm the compare does not cover (%s)" % (len(stray), sides))
+    for side in sides:
         wa, wb = _cut_walks(da, side, D), _cut_walks(db, side, D)
         if wa is None or wb is None:
             probs.append("%s: no bases on a side under a comparing verdict" % side)
             continue
-        got = {k: {r.get("walk") for r in _rows_of(ans, k) if r.get("arm") in (side, side[0])} for k in ("a", "b", "differ")}
+        got = {k: {r.get("walk") for r in _rows_of(ans, k) if _ARM_NAMES.get(r.get("arm")) == side}
+               for k in ("a", "b", "differ")}
         if got["a"] != wa - wb:
             probs.append("%s: only_in_a %d walks, the twins' cut walks give %d" % (side, len(got["a"]), len(wa - wb)))
         if got["b"] != wb - wa:
@@ -1461,27 +1473,30 @@ def compare_walks_properties(ans: dict, full_a: Optional[dict], mgt_a: str, full
 
 
 def compare_prefix_subset_properties(ans: dict, full_small: Optional[dict], mgt_small: str,
-                                     full_large: Optional[dict], mgt_large: str) -> List[str]:
-    """mode prefix_subset on one seed at two radii, a = the smaller: within the comparison depth the two retrievals
-    are one trie (SPEC §6.10, T35: walks equal the trie's at every depth <= complete_to_bp), so a comparing verdict
-    has nothing to report (no rows, counts zero) and depth_used is at most the smaller radius's complete_to_bp
-    (DESIGN §5.2.5). The precondition is checked on the twins: their walks cut at depth_used coincide per arm
-    (else the property does not apply and says so). -> problems."""
+                                     full_large: Optional[dict], mgt_large: str,
+                                     arm: Optional[str] = None) -> List[str]:
+    """mode prefix_subset on one seed at two radii, a = the smaller, on the arms the compare covers (|arm|: the op's
+    `arm` argument): within the comparison depth the two retrievals are one trie (SPEC §6.10, T35: the walks equal
+    the trie's at every depth <= complete_to_bp), so a comparing verdict has nothing to report (no rows, counts zero)
+    and depth_used is at most the smaller retrieval's complete_to_bp on those arms (DESIGN §5.2.5). The twins' walks
+    cut at depth_used must coincide on each covered arm: where they do not, the ENGINE broke SPEC §6.10's guarantee
+    (a finding about the retrievals, named as such), and the property is not judged further. -> problems."""
     if ans.get("comparable") not in (True, "qualified") or ans.get("mode") != "prefix_subset":
         return []
     D = ans.get("depth_used")
-    ds, dl = _Doc(full_small, mgt_small), _Doc(full_large, mgt_large)
-    probs = []
-    if not isinstance(D, int):
+    if not isinstance(D, int) or isinstance(D, bool):
         return ["depth_used %r" % (D,)]
-    ctb = min(ds.arms[s]["complete_to_bp"] for s in ds.sides)
+    ds, dl = _Doc(full_small, mgt_small), _Doc(full_large, mgt_large)
+    sides = _compared_sides(ds, dl, arm)
+    probs = []
+    ctb = min((ds.arms[s]["complete_to_bp"] for s in sides), default=0)
     if D > ctb:
-        probs.append("depth_used %d beyond the smaller retrieval's complete_to_bp %d" % (D, ctb))
-    for side in [s for s in ARMS if s in ds.arms and s in dl.arms]:
+        probs.append("depth_used %d beyond the smaller retrieval's complete_to_bp %d on %s" % (D, ctb, sides))
+    for side in sides:
         ws, wl = _cut_walks(ds, side, D), _cut_walks(dl, side, D)
         if ws is None or wl is None or ws != wl:
-            return probs + ["precondition: the twins' %s walks cut at %d differ: the property does not apply" % (
-                side, D)]
+            return probs + ["engine (SPEC §6.10, T35): the two radii's %s walks cut at %d differ, so they are no "
+                            "single trie within the depth" % (side, D)]
     counts = ans.get("counts") or {}
     if any(counts.get(k) for k in ("only_in_a", "only_in_b", "differ")) or ans.get("rows"):
         probs.append("one trie within depth %d, yet counts %s and %d rows" % (D, counts, len(ans.get("rows") or [])))

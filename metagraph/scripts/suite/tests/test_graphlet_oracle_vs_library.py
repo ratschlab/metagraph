@@ -298,8 +298,11 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertGreater(n, 10)
 
     def test_compare_properties(self):
-        whole = lambda a, b, mode: self.assemble("graphlet_compare",   # noqa: E731
-                                                 {"a": a, "b": b, "mode": mode, "max_bytes": WIDE})
+        def whole(a, b, mode, arm=None):
+            kw = {"a": a, "b": b, "mode": mode, "max_bytes": WIDE}
+            if arm:
+                kw["arm"] = arm
+            return self.assemble("graphlet_compare", kw)
         problems, seen = [], collections.Counter()
         for name, (h, f, i, text) in self.docs.items():
             fi = f if f is None else {"results": [f["results"][i]]}
@@ -312,23 +315,26 @@ class OracleVsLibrary(unittest.TestCase):
                 (ha, fa, ia, ta), (hb, fb, ib, tb) = self.docs[x], self.docs[y]
                 fa = fa if fa is None else {"results": [fa["results"][ia]]}
                 fb = fb if fb is None else {"results": [fb["results"][ib]]}
-                for mode in ("claims", "walks", "labels"):
-                    ab, ba = whole(ha, hb, mode), whole(hb, ha, mode)
-                    problems += ["swap %s %s %s: %s" % (x, y, mode, p) for p in O.compare_swap_properties(ab, ba)]
+                arms = [None] + [s for s in ("left", "right") if s in O._Doc(fa, ta).arms and s in O._Doc(fb, tb).arms]
+                for mode, arm in itertools.product(("claims", "walks", "labels"), arms):
+                    ab, ba = whole(ha, hb, mode, arm), whole(hb, ha, mode, arm)
+                    problems += ["swap %s %s %s %s: %s" % (x, y, mode, arm, p)
+                                 for p in O.compare_swap_properties(ab, ba)]
                     if mode == "walks":
-                        ps = O.compare_walks_properties(ab, fa, ta, fb, tb)
-                        problems += ["walks %s %s: %s" % (x, y, p) for p in ps]
+                        ps = O.compare_walks_properties(ab, fa, ta, fb, tb, arm=arm)
+                        problems += ["walks %s %s %s: %s" % (x, y, arm, p) for p in ps]
                         if ab.get("comparable") in (True, "qualified") and ab.get("rows"):
-                            seen["walk-set differences checked"] += 1
-        for small, large in RADII:
+                            seen["walk-set differences checked" + (" (one arm)" if arm else "")] += 1
+        for (small, large), arm in itertools.product(RADII, (None, "right")):
             (ha, _, _, ta), (hb, _, _, tb) = self.docs[small], self.docs[large]
-            ans = whole(ha, hb, "prefix_subset")
+            ans = whole(ha, hb, "prefix_subset", arm)
             self.assertIn(ans.get("comparable"), (True, "qualified"))
-            problems += ["prefix_subset %s %s: %s" % (small, large, p)
-                         for p in O.compare_prefix_subset_properties(ans, None, ta, None, tb)]
+            problems += ["prefix_subset %s %s %s: %s" % (small, large, arm, p)
+                         for p in O.compare_prefix_subset_properties(ans, None, ta, None, tb, arm=arm)]
         self.assertEqual(problems, [], "\n".join(problems[:20]))
         self.assertGreater(seen["self True"], 30)
         self.assertGreater(seen["walk-set differences checked"], 20)
+        self.assertGreater(seen["walk-set differences checked (one arm)"], 20)
 
 
 if __name__ == "__main__":

@@ -571,6 +571,25 @@ class CompareProperties(unittest.TestCase):
         self.assertTrue(O.compare_walks_properties(dict(ans, rows=rows[1:]), None, self.r60, None, self.r100))
 
 
+    def test_walks_property_on_one_arm(self):
+        """VO2: the compare's arm comes from its arguments (the answer names none); rows of the left arm only are
+        right for arm=left and short for both arms."""
+        _, fa, ta = doc("fork")
+        _, fb, tb = doc("linear")
+        D = 10
+        da, db = O._Doc(fa, ta), O._Doc(fb, tb)
+        rows = []
+        for side in ("left", "right"):
+            wa, wb = O._cut_walks(da, side, D), O._cut_walks(db, side, D)
+            rows.append([{"side": "a", "arm": side, "walk": w, "labels": []} for w in sorted(wa - wb)] +
+                        [{"side": "b", "arm": side, "walk": w, "labels": []} for w in sorted(wb - wa)])
+        self.assertTrue(rows[0] and rows[1])
+        ans = {"mode": "walks", "comparable": "qualified", "equal": None, "depth_used": D, "rows": rows[0]}
+        self.assertEqual(O.compare_walks_properties(ans, fa, ta, fb, tb, arm="left"), [])
+        self.assertTrue(O.compare_walks_properties(ans, fa, ta, fb, tb))
+        self.assertTrue(O.compare_walks_properties(dict(ans, rows=rows[0] + rows[1]), fa, ta, fb, tb, arm="left"))
+
+
 class Independence(unittest.TestCase):
     """DESIGN-v8 §2 / REVIEW D-R5, mechanically: the oracle imports the standard library and the suite's checks only
     (checks imports suite_common, stdlib only), and names no library file or function."""
