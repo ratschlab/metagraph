@@ -27,9 +27,10 @@ Per candidate (DESIGN-v8 §3 and the lane D brief):
   facts         from the document by the suite's own reader (checks.graphlet_arms): arms, walks, segments, merges,
                 labels, walk lengths, bases, cut lists, labels per node, body bytes, continuations (the twin's paths);
                 frozen as graphlet.preconditions; the service-check facts as graphlet.facts;
-  timeouts      per op: min(lane, max(TIMEOUT_FLOOR_S, TIMEOUT_FACTOR x the median elapsed)) over the local runs and,
-                when given (--mcp-graphlet-run, the async runner's area G records), W3's; an op whose median exceeds a
-                third of its lane is named (DESIGN-v8 §3).
+  timeouts      per op: min(lane, max(TIMEOUT_FLOOR_S, TIMEOUT_FACTOR x the median elapsed)) over the local runs and
+                W3's (--mcp-graphlet-run, the async runner's area G records), written only when W3's are measured
+                (else the lane: a local median says nothing of an MCP call); the medians always recorded; an op whose
+                median exceeds a third of its lane is named (DESIGN-v8 §3).
 A candidate that fails a verdict leaves the corpus (DESIGN-v8 §3: no op_timeout, no time stop is an expected outcome).
 Per slot the first candidate (area_g order) that passes every verdict is chosen; the pairs follow their slot's chosen
 candidate (its partner must pass too); the three chosen graphlets with the most segments are the richest. A
@@ -160,7 +161,8 @@ def rehearsal_scenarios(ctx: Any, v7: List[dict], skip_conditional: bool = False
         facts = area_g.facts_of(c, corpus)
         rich = c["slot"] in area_g.DEFAULT_RICH
         ops = area_g.op_plan(sid, c["slot"], facts, rich, [(sid, False)] if c["slot"] == "two_arms" else [],
-                             direct_only=not area_g.expressible(c), extras={"other": sid})
+                             direct_only=not area_g.expressible(c),
+                             extras={"other": ids[cands[0]["cid"]] if c["expected"].get("failed") else sid})
         s = area_g.g_scenario(sid, "rehearsal: %s candidate %s" % (c["slot"], c["cid"]), c, corpus, None, ops,
                               ["rehearsal"])
         s["repeat"] = DL_REPEATS
@@ -318,8 +320,13 @@ def document_facts(response: dict, full: Optional[dict] = None) -> dict:
     }
     all_segs = [s for a in segs for s in segs[a]]
     if all_segs and all("labels_total" in s for s in all_segs):
-        f["cut_lists"] = any(s.get("labels_truncated") for s in all_segs)
         f["max_labels_per_node"] = max(s.get("labels_total") or 0 for s in all_segs)
+    # cut label lists: the engine states them (a label_lists limitation, label_evidence lower_bound); the segments'
+    # entry lists (labels_truncated) can all be whole while other recorded lists (end sets, events) are cut
+    lims = [x for x in (r.get("limitations") or []) if isinstance(x, dict)]
+    f["cut_lists"] = (any(x.get("kind") == "label_lists" for x in lims)
+                      or (r.get("outcome") or {}).get("label_evidence") == "lower_bound"
+                      or any(s.get("labels_truncated") for s in all_segs))
     rarms = r.get("arms") or {}
     f["complete_to_bp"] = dict((a, (rarms.get(a) or {}).get("complete_to_bp")) for a in f["arms"])
     rs = r.get("resource_stop")
@@ -495,9 +502,17 @@ def judge(s: dict, meta: dict, dl: List[dict], mcp: dict, twin: Optional[dict]) 
         vals = set(bodies.values())
         v["bodies"] = "pass" if len(vals) == 1 and None not in vals and "unreadable" not in vals else \
             "fail: %s" % dict((k, (x or "none")[:12]) for k, x in bodies.items())
-    ev = set(envs.values())
-    v["envelope"] = "pass" if len(ev) == 1 and None not in ev else "fail: %s" % dict(
-        (k, (x or "none")[:12]) for k, x in envs.items())
+    if meta["slot"] == "failed_seed":
+        # the service keeps no body for a failed seed (its record's summary only): the error and outcome compared
+        fails = dict((n, (((r or {}).get("results") or [{}])[0] or {})) for n, r in zip(names, responses))
+        keys = set(json.dumps([x.get("error"), (x.get("outcome") or {}).get("walks")], sort_keys=True)
+                   for x in fails.values())
+        v["envelope"] = "pass (failed seed: error and outcome equal)" if len(keys) == 1 else \
+            "fail: the failed seed's error or outcome differs: %s" % sorted(keys)
+    else:
+        ev = set(envs.values())
+        v["envelope"] = "pass" if len(ev) == 1 and None not in ev else "fail: %s" % dict(
+            (k, (x or "none")[:12]) for k, x in envs.items())
     times = dict((n, engine_ms(r)) for n, r in zip(names, responses))
     worst = max([t for t in times.values() if t is not None] or [None]) if any(
         t is not None for t in times.values()) else None
@@ -506,17 +521,42 @@ def judge(s: dict, meta: dict, dl: List[dict], mcp: dict, twin: Optional[dict]) 
         "fail: engine %s ms against %d ms (25 %% of %d ms)" % (worst, limit, budget)
     resp0 = dl[0]["response"] if dl else None
     facts = document_facts(resp0, twin) if resp0 else {"failed": True}
+    flags = area_g.facts_of(meta["candidate"], area_g.default_corpus())
+    for k in ("coordinates", "annotate"):
+        if flags.get(k) and k not in facts:
+            facts[k] = flags[k]
     if twin is None:
         v["twin"] = "fail: no twin kept"
     elif facts.get("failed"):
         v["twin"] = "pass" if not ((twin.get("results") or [{}])[0] or {}).get("arms") else "fail: the twin walked"
     else:
         diff = gp.twin_difference(resp0["results"][0]["graphlet"], twin, checks)
-        v["twin"] = "pass" if diff is None else "fail: %s" % gp.compact(diff)
+        v["twin"] = "pass" if diff is None else "fail: %s%s" % (gp.compact(diff), twin_cause(resp0, twin))
     seed_bp = len(s["request"]["seeds"][0]["sequence"])
     sp = slot_problem(meta["slot"], facts, seed_bp) if not meta.get("pair") else ""
     v["slot"] = "pass" if not sp else "fail: " + sp
     return {"verdicts": v, "facts": facts, "times_ms": times, "bodies": bodies, "echo": mcp.get("echo")}
+
+
+def twin_cause(response: dict, twin: dict) -> str:
+    """Why a twin differs, where the reading can say: a merge whose parents are one set in another order means
+    SPEC-core §7.1 (R21 (4), feature level 6): `graphlet` detail shows a merge's majority parent first, `full` detail
+    under a memory budget (the presets' max_memory_mb) keeps the arrival order, so the first-parent paths differ."""
+    try:
+        arms = checks.graphlet_arms(response["results"][0]["graphlet"])
+        farms = ((twin.get("results") or [{}])[0] or {}).get("arms") or {}
+        for a, arm in arms.items():
+            fs = (farms.get(a) or {}).get("segments") or []
+            for i, seg in enumerate(arm["segments"]):
+                fp = fs[i].get("parents") if i < len(fs) else None
+                if len(seg["parents"]) > 1 and fp is not None and seg["parents"] != fp and \
+                        sorted(seg["parents"]) == sorted(fp):
+                    return (" (by design: SPEC-core §7.1 R21 (4), a merge's majority parent first in graphlet detail, "
+                            "the arrival order in full detail under the memory budget max_memory_mb %s)"
+                            % ((twin.get("strategy") or {}).get("bounds") or {}).get("max_memory_mb"))
+    except Exception:
+        pass
+    return ""
 
 
 def passed(verdicts: dict) -> bool:
@@ -602,17 +642,19 @@ def flags_from(problems: List[dict], facts: dict) -> bool:
 
 def op_timeouts(records: List[Dict], ops: List[dict]) -> Tuple[dict, List[str]]:
     """({op: timeout_s}, [ops over a third of their lane]) from the elapsed times the records state (every way's)."""
-    out, slow = {}, []
+    out, slow, medians = {}, [], {}
     for o in ops:
         ms = [r[o["id"]]["elapsed_ms"] for r in records if o["id"] in r and
               isinstance(r[o["id"]].get("elapsed_ms"), (int, float))]
         if not ms:
             continue
         med = statistics.median(ms) / 1000.0
+        medians[o["id"]] = round(med * 1000.0, 3)
         lane = area_g.LANE_S[area_g.lane_of(o)]
         out[o["id"]] = round(min(lane, max(TIMEOUT_FLOOR_S, TIMEOUT_FACTOR * med)), 1)
         if med > lane / 3.0:
             slow.append("%s: median %.1f s, lane %.0f s" % (o["id"], med, lane))
+    op_timeouts.medians = medians
     return out, slow
 
 
@@ -621,17 +663,20 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
     """The rehearsal's judgement (module docstring): rehearsal.json, corpus.json, REPORT.md under |out|."""
     results = {}
     scen = dict((s["id"], s) for s in manifest["scenarios"])
+    first_of_seed: Dict[str, str] = {}
     for sid, s in scen.items():
         dl = dl_executions(dl_run, sid)
         mcp = mcp_execution(mcp_dir, sid) if "tool" in s["mcp"] else {}
         twin = _read(os.path.join(dl_run, "arms", "direct-local", "docs", sid + ".full.json.gz"))
         results[sid] = judge(s, meta[sid], dl, mcp, twin)
+        shared_seed_headroom(sid, s, meta[sid], results, first_of_seed)
     # the shadow run: op plans rebuilt from the measured facts, run by the local library on the direct documents
     graphed = [sid for sid, r in results.items()
                if not r["facts"].get("failed") and r["verdicts"].get("direct") is None]
     shadow_manifest = {"scenarios": []}
+    other = next((sid for sid in scen if not results[sid]["facts"].get("failed")), None)
     for sid in sorted(scen):
-        shadow_manifest["scenarios"].append(replan(scen[sid], meta[sid], results[sid]["facts"]))
+        shadow_manifest["scenarios"].append(replan(scen[sid], meta[sid], results[sid]["facts"], other))
     recs_by_rep = []
     for attempt in range(2):
         recs = shadow_run(shadow_manifest, list(scen), dl_run, library_root, os.path.join(out, "shadow", str(attempt)))
@@ -642,7 +687,7 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
             changed |= flags_from(probs, results[s["id"]]["facts"])
         if not changed:
             break
-        shadow_manifest["scenarios"] = [replan(scen[s["id"]], meta[s["id"]], results[s["id"]]["facts"])
+        shadow_manifest["scenarios"] = [replan(scen[s["id"]], meta[s["id"]], results[s["id"]]["facts"], other)
                                         for s in shadow_manifest["scenarios"]]
     recs_by_rep.append(recs)
     for rep in range(1, DL_REPEATS):
@@ -659,7 +704,12 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
                                                for p in r["plan_problems"][:6]))
         per = [dict((op, rec) for (sid, op), rec in recs.items() if sid == s["id"]) for recs in recs_by_rep]
         per.append(dict((op, rec) for (sid, op), rec in w3.items() if sid == s["id"]))
-        r["timeouts"], r["slow_ops"] = op_timeouts(per, s["graphlet"]["ops"])
+        timeouts, r["slow_ops"] = op_timeouts(per, s["graphlet"]["ops"])
+        r["op_medians_ms"] = dict(op_timeouts.medians)
+        # timeout_s goes to every runner, W3's too: without W3's own times (the async runner's area G records,
+        # --mcp-graphlet-run) the local library's milliseconds would set a floor no MCP call was measured against,
+        # so the ops keep their lanes (area_g.set_timeouts) and only the medians are recorded
+        r["timeouts"] = timeouts if w3 else {}
         r["fit_problems"] = fit_problems(s, recs_by_rep[0])
         r["verdicts"]["fit"] = "pass" if not r["fit_problems"] else "fail: %s" % "; ".join(r["fit_problems"][:4])
         if r["slow_ops"]:
@@ -673,8 +723,28 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
     return {"results": results, "corpus": corpus}
 
 
-def replan(s: dict, meta: dict, facts: dict) -> dict:
-    """|s| with its op plan rebuilt from the measured |facts| (as the build would make it)."""
+def shared_seed_headroom(sid: str, s: dict, meta: dict, results: Dict, first_of_seed: Dict[str, str]) -> None:
+    """A candidate (not a pair partner: a partner runs after its graphlet in the baseline too) whose seed an earlier
+    candidate of the rehearsal already walked met warm rows: its headroom is judged against the cold engine time of
+    the first candidate with that seed as well (the baseline runs only the chosen one, cold)."""
+    key = s["request"]["seeds"][0]["sequence"]
+    first = first_of_seed.setdefault(key, sid)
+    if first == sid or meta.get("pair"):
+        return
+    cold = [t for t in results[first]["times_ms"].values() if t is not None]
+    if not cold:
+        return
+    budget = min(float(s["request"]["strategy"]["bounds"]["time_budget_ms"]), float(area_g.HOST_MAX_TIME_MS))
+    worst = max(cold)
+    if worst > area_g.HEADROOM_FRACTION * budget:
+        results[sid]["verdicts"]["headroom"] = (
+            "fail: the seed's cold engine time %.0f ms (%s ran it first; this candidate met warm rows) against %d ms "
+            "(25 %% of %d ms)" % (worst, first, area_g.HEADROOM_FRACTION * budget, budget))
+
+
+def replan(s: dict, meta: dict, facts: dict, other: Optional[str] = None) -> dict:
+    """|s| with its op plan rebuilt from the measured |facts| (as the build would make it); |other| the graphlet a
+    failed seed's compare names."""
     s = copy.deepcopy(s)
     c = meta["candidate"]
     f = dict(area_g.facts_of(c, area_g.default_corpus()))
@@ -686,7 +756,7 @@ def replan(s: dict, meta: dict, facts: dict) -> dict:
     else:
         ops = area_g.op_plan(s["id"], c["slot"], f, c["slot"] in area_g.DEFAULT_RICH,
                              [(s["id"], False)] if c["slot"] == "two_arms" else [],
-                             direct_only=not area_g.expressible(c), extras={"other": s["id"]})
+                             direct_only=not area_g.expressible(c), extras={"other": other or s["id"]})
     area_g.set_timeouts(ops)
     s["graphlet"]["ops"] = ops
     return s
@@ -733,7 +803,11 @@ def choose_corpus(results: Dict, meta: Dict, scen: Dict, library_commit: Optiona
             entry["reference"] = {"body_digest": body, "engine_ms": r["times_ms"]}
         cands[m["cid"]] = entry
     chosen = [(slot, slots[slot]["candidate"]) for slot in slots if slots[slot]["candidate"]]
-    rich = sorted(chosen, key=lambda x: -sum((cands[x[1]]["facts"].get("segments") or {}).values()))
+    direct_only = set(m["cid"] for m in meta.values() if not area_g.expressible(m["candidate"]))
+    # the richest: most segments, the graphlets the MCP can express first (a direct-only one enters the corpus only
+    # with the owner's decision)
+    rich = sorted(chosen, key=lambda x: (x[1] in direct_only,
+                                         -sum((cands[x[1]]["facts"].get("segments") or {}).values())))
     rich = rich[:area_g.RICHEST]
     return {"version": 1, "provisional": False,
             "rehearsal": {"utc": utc_now()},
@@ -761,6 +835,15 @@ def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict)
                         if not str(v).startswith(("pass", "not expressible")))
         lines.append("| %s | %s | %s | %s | %s |" % (sid, meta[sid]["cid"], "yes" if r["passed"] else "no", t,
                                                      bad.replace("|", "/")[:300]))
+    lines += ["", "## Per-op medians (the local library, W1, over the three direct documents)", "",
+              "| scenario | ops timed | median of medians ms | slowest ops (median ms) |", "|---|---|---|---|"]
+    for sid in scen:
+        med = results[sid].get("op_medians_ms") or {}
+        if not med:
+            continue
+        top = sorted(med.items(), key=lambda kv: -kv[1])[:3]
+        lines.append("| %s | %d | %.2f | %s |" % (sid, len(med), statistics.median(med.values()),
+                                                  ", ".join("%s %.1f" % kv for kv in top)))
     with open(os.path.join(out, "REPORT.md"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
 

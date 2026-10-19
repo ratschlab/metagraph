@@ -254,6 +254,14 @@ class CorpusFile(unittest.TestCase):
         self.assertEqual(ops["walks-length-left"]["timeout_s"], area_g.LANE_S["interactive"])
         self.assertNotIn("rehearsal-pending", s["tags"])
 
+    def test_a_direct_only_choice_waits_for_the_owner(self):
+        c = self.corpus()
+        c["slots"]["annotate"] = {"candidate": "annotate.1", "why": "passed"}
+        ids = [s["id"] for s in area_g.gen_G(FakeCtx(), v7_scenarios(), c, None)]
+        self.assertNotIn("G-annot-0001", ids)
+        ids = [s["id"] for s in area_g.gen_G(FakeCtx(), v7_scenarios(), c, None, include_direct_only=True)]
+        self.assertIn("G-annot-0001", ids)
+
     def test_an_echo_that_differs_is_refused(self):
         c = self.corpus(**{"two_arms.2": {"strategy": {"bounds": {}}}})
         with self.assertRaises(SystemExit):

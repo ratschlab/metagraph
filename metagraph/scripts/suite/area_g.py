@@ -983,6 +983,8 @@ def choose(cands: List[dict], corpus: dict, include_direct_only: bool = False) -
             if stated["candidate"] is not None and pick is None:
                 raise SystemExit("corpus: slot %s names candidate %s, which the generator does not build" % (
                     slot, stated["candidate"]))
+            if pick is not None and not expressible(pick) and not include_direct_only:
+                pick = None   # a direct-only graphlet enters only with the owner's decision (--include-direct-only)
         elif not corpus.get("slots") or corpus.get("provisional"):
             if not conditional:
                 pick = next((c for c in by_slot.get(slot, []) if include_direct_only or expressible(c)), None)
@@ -1068,6 +1070,10 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
     # the pairs: partner scenarios (built from the slot's candidate) and where the compare ops go
     pair_specs = pair_plan(present, ids, corpus)
     extras = corpus_extras(present, ids, pair_specs)
+    if "failed_seed" in present:
+        # a failed seed's compare names a graphlet that exists (its own resolves in no way: a selector error)
+        graphlet = next((ids[s] for s in SLOT_NAMES if s in present and s != "failed_seed"), None)
+        extras.setdefault(ids["failed_seed"], {})["other"] = graphlet
     out: List[dict] = []
     titles = dict((s[0], s[2]) for s in SLOTS)
     for slot, stem, _title, _cond in SLOTS:

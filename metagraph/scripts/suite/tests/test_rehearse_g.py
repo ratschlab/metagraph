@@ -81,7 +81,15 @@ class Rehearsal(unittest.TestCase):
         self.assertEqual(e["preconditions"]["arms"], ["left", "right"])
         self.assertEqual(e["preconditions"]["walks_min"], {"left": 12, "right": 1})
         self.assertEqual(e["strategy"], scen[1]["request"]["strategy"])
-        self.assertTrue(e["timeouts"] and all(v >= rehearse_g.TIMEOUT_FLOOR_S for v in e["timeouts"].values()))
+        # without W3's own times the ops keep their lanes; the local medians are recorded
+        self.assertEqual(e["timeouts"], {})
+        self.assertTrue(res["results"]["G-arms2-c2"]["op_medians_ms"])
+        t, slow = rehearse_g.op_timeouts([{"sum": {"elapsed_ms": 4000.0}}, {"sum": {"elapsed_ms": 9000.0}}],
+                                         [{"id": "sum", "tool": "graphlet_summary", "args": {}}])
+        self.assertEqual(t, {"sum": 20.0})       # min(lane 20 s, max(5 s, 10 x 6.5 s))
+        self.assertEqual(len(slow), 0)
+        # a failed seed's facts, the cut lists the engine states
+        self.assertFalse(rehearse_g.document_facts(switch, full).get("failed"))
         self.assertIn("summary_cut_bytes", e["facts"])
         for name in ("rehearsal.json", "corpus.json", "REPORT.md"):
             self.assertTrue(os.path.exists(os.path.join(self.tmp, name)), name)
@@ -103,6 +111,27 @@ class Rehearsal(unittest.TestCase):
         self.assertTrue(fail["failed"])
         self.assertEqual(rehearse_g.slot_problem("failed_seed", fail, 31), "")
         self.assertEqual(rehearse_g.preconditions_of(fail), {"no_graphlet": True})
+        # cut label lists as the engine states them (rehearsal 2026-10-19: every segment's entry list whole while 10
+        # recorded lists were cut): a label_lists limitation, label_evidence lower_bound
+        resp = read_json(FIXTURES["G-caps"])
+        resp["results"][0]["limitations"] = [{"kind": "label_lists", "knob": "labels.max_labels_per_node"}]
+        self.assertTrue(rehearse_g.document_facts(resp)["cut_lists"])
+        resp["results"][0]["limitations"] = []
+        resp["results"][0]["outcome"] = {"label_evidence": "lower_bound"}
+        self.assertTrue(rehearse_g.document_facts(resp)["cut_lists"])
+
+    def test_a_shared_seed_is_judged_by_its_cold_time(self):
+        import rehearse_g
+        s = {"request": {"seeds": [{"sequence": "ACGT" * 10}], "strategy": {"bounds": {"time_budget_ms": 30000}}}}
+        results = {"first": {"times_ms": {"dl0": 300.0, "mcp": 14676.0}, "verdicts": {"headroom": "fail"}},
+                   "later": {"times_ms": {"dl0": 170.0, "mcp": 430.0}, "verdicts": {"headroom": "pass"}}}
+        seen = {}
+        rehearse_g.shared_seed_headroom("first", s, {}, results, seen)
+        rehearse_g.shared_seed_headroom("later", s, {}, results, seen)
+        self.assertTrue(results["later"]["verdicts"]["headroom"].startswith("fail: the seed's cold engine time 14676"))
+        results["pair"] = {"times_ms": {"mcp": 40.0}, "verdicts": {"headroom": "pass"}}
+        rehearse_g.shared_seed_headroom("pair", s, {"pair": "radius"}, results, seen)
+        self.assertEqual(results["pair"]["verdicts"]["headroom"], "pass")   # a partner runs after its graphlet anyway
 
 
 if __name__ == "__main__":
