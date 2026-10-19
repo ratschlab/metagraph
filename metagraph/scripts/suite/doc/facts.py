@@ -1561,7 +1561,7 @@ def chapter_facts(ctx, ch):
     # access paths and another not compared on some repeat (the detail block names which); the first such pair in
     # run order named with what it left uncompared, for the chapter summary's reading line
     v["n_mcp_agree_partial"] = max(0, v["n_mcp_agree"] - v["n_mcp_full"])
-    v.update(_mcp_agree_short(run, sids))
+    v.update(_mcp_agree_short(run, sids, footnoted=lambda sid: bool(x[sid]["footnoted"])))
     v["mcp_agree_partial_example"] = ""
     for sid in sids:
         e = run.comp_entry(sid)
@@ -1724,7 +1724,7 @@ AGREE_SHORT_PARTIAL = ("partial", "partial_non_pass")
 AGREE_SHORT_ON_FAILURE = ("on_failure",)
 
 
-def _mcp_agree_short(run, sids):
+def _mcp_agree_short(run, sids, footnoted=None):
     """The agreeing MCP pairs short of fully checked, by depth class (report.DEPTH_CLASSES): {n_mcp_agree_generic
     (generic checks only or a refusal: no property check compared), n_mcp_agree_partial_checked (partial or
     partial_non_pass: some property check compared and agreeing on both, another not compared on some repeat),
@@ -1732,6 +1732,7 @@ def _mcp_agree_short(run, sids):
     words, separated by semicolons since the first holds a relative clause (the re-verification L-j), the empty ones
     left out; '' when none)}."""
     counts = {"generic": 0, "partial": 0, "on_failure": 0}
+    partial_ids = []
     for sid in sids:
         e = run.comp_entry(sid)
         d = (run.depth or {}).get(sid)
@@ -1742,14 +1743,31 @@ def _mcp_agree_short(run, sids):
             counts["generic"] += 1
         elif cls in AGREE_SHORT_PARTIAL:
             counts["partial"] += 1
+            partial_ids.append(sid)
         elif cls in AGREE_SHORT_ON_FAILURE:
             counts["on_failure"] += 1
     parts = []
     if counts["generic"]:
         parts.append("%d on the generic checks or a refusal alone, which verifies no property" % counts["generic"])
     if counts["partial"]:
+        # the detail block names the uncompared check only where the test has one (`footnoted`: the chapter's
+        # footnoted tests); else the tests and their checks are named here (the verification of round 2, R5)
+        if footnoted is None or all(footnoted(sid) for sid in partial_ids):
+            which = "the detail block names which"
+        else:
+            by_reason = []
+            for sid in partial_ids:
+                why = blocks.not_compared_text((run.depth or {}).get(sid) or {}, list(run.check_marks(sid))
+                                               if hasattr(run, "check_marks") else []) or "a check not compared"
+                for r in by_reason:
+                    if r[0] == why:
+                        r[1].append(sid)
+                        break
+                else:
+                    by_reason.append([why, [sid]])
+            which = "; ".join("%s: %s" % (ids_ranges(ids), why) for why, ids in by_reason)
         parts.append("%d with some property check compared and agreeing on both access paths and another not "
-                     "compared on some repeat (the detail block names which)" % counts["partial"])
+                     "compared on some repeat (%s)" % (counts["partial"], which))
     if counts["on_failure"]:
         parts.append("%d with every property check compared on a failing answer" % counts["on_failure"])
     return {"n_mcp_agree_generic": counts["generic"], "n_mcp_agree_partial_checked": counts["partial"],
