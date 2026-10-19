@@ -122,7 +122,8 @@ checked (VO7); refusals are expected errors with their code [L].
       S §7.5.6], route [D §5 routes][R]; name, ref, total; unknown / ambiguous name [L] | c/o: the end of Lw and m
       runs, coordinate columns; annotate (D §5.2.1 witness route)
   graphlet_support (phase B): total, rows from_bp, to_bp, n_labels, n_labels_total, joined, left after the first row:
-      constrain, displayed support along the walk [D §5, §6; §5.1 with the walk as displayed path][R] (PB5);
+      constrain, each run's displayed evidence from its anchor, kept on the walk [D §5, §5.1][R] (G4: the
+      library's presence profile is a defect);
       annotate, the recorded label sets along the walk [S §7.4] | c/o: the first row's lists, why, exact, step=, who
       joined or left across a cut list, n_labels_total on a constrain arm with cut lists
 """
@@ -1953,11 +1954,11 @@ def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
 
 def _support_sets(d: _Doc, side: str, p: dict) -> Optional[List[set]]:
     """Per outward base of walk |p| (0 .. length-1), the labels with displayed support there (DESIGN §5 support
-    profile, kind displayed; re-derived): DESIGN §5.1's evidence with the walk itself as the displayed path. A run
-    supports base b when it covers b (from_bp <= b < to_bp) and its own route (DESIGN §5 routes, through the merge
-    partitions) passes the walk's segment at b: a lineage that entered a merge through a non-first parent was off the
-    walk just before it, so its displayed support restarts at the merge (§5.1's clipping), and one that left at a
-    split no longer supports the walk (finding PB5). None where a route cannot be read (no partition holds a label)."""
+    profile, kind displayed; re-derived from DESIGN §5.1): each run's displayed evidence, derived at its anchored
+    endpoint with p = the first-parent chain root -> its anchor ([evidence_from, to_bp), "the displayed bases before
+    s are not this lineage's"), kept where that chain is the walk (the walk's segment at the base lies on it). The
+    library's presence profile (a run's route passing the walk's segment) is library defect G4 (VERIFY-O-B VO-B1).
+    None where a merge states no partitions."""
     seg_at: List[int] = []
     for sid in p["segments"]:
         seg_at += [sid] * d.segment(side, sid)["length_bp"]
@@ -1965,12 +1966,12 @@ def _support_sets(d: _Doc, side: str, p: dict) -> Optional[List[set]]:
     for i, run in enumerate(d.runs(side)):
         if run["from_bp"] == run["to_bp"]:
             continue
-        route = d.route(side, i)
-        if route is None:
+        ef = d.evidence_from(side, i)
+        if ef is None:
             return None
-        on = set(route)
-        for b in range(run["from_bp"], min(run["to_bp"], p["length_bp"])):
-            if seg_at[b] in on:
+        chain = set(d.chain(side, run["segment"]))
+        for b in range(ef, min(run["to_bp"], p["length_bp"])):
+            if seg_at[b] in chain:
                 sets[b].add(run["label"])
     return sets
 
@@ -1991,8 +1992,8 @@ def _recorded_sets(d: _Doc, side: str, p: dict) -> Optional[List[Tuple[Tuple[int
 def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
     """graphlet_support: the support profile along a walk (DESIGN §5 support_profile(kind='displayed'), §6 "support
     runs with who left / joined"): maximal stretches [from_bp, to_bp) of one set of labels with displayed support
-    (re-derived from DESIGN §5.1 along the walk, _support_sets; a stretch no label supports is an empty set, as SPEC
-    §6.11 records one), each with
+    (re-derived from DESIGN §5.1, _support_sets; a stretch no label supports is an empty set, as SPEC §6.11 records
+    one), each with
     n_labels and, after the first, the labels that joined and left (ascending label id, first 8). Consistency-only:
     the first row's lists, why, exact, n_labels_total on cut lists, every row with step= (its merging rule is the
     tool's). In annotate mode the profile is the labels the engine recorded at the walk's nodes (SPEC §7.4
@@ -2045,9 +2046,9 @@ def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
         prev = r
         out.append(row)
     ans: dict = dict(base, total=len(out), rows=out, evidence=ev)
-    c_sup = "DESIGN §5 support_profile (displayed; re-derived from DESIGN §5.1 with the walk as the displayed path): " \
-            "a run supports a base it covers where its own route (DESIGN §5 routes) passes the walk's segment; " \
-            "maximal stretches of one label set (an empty set too, as SPEC §6.11 records one)"
+    c_sup = "DESIGN §5 support_profile (displayed; re-derived from DESIGN §5.1): each run's [evidence_from, to_bp) " \
+            "derived at its anchor (p = the first-parent chain to it), kept where that chain is the walk; maximal " \
+            "stretches of one label set (an empty set too, as SPEC §6.11 records one)"
     if annotate:
         c_sup = "SPEC §7.4 label_sets: the labels recorded at the walk's nodes (annotate), maximal runs of one " \
                 "(capped list, count)"

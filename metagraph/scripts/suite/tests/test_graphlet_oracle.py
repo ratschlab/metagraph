@@ -461,15 +461,18 @@ class SupportGoldens(unittest.TestCase):
     §5.1 with the walk as the displayed path)."""
 
     def test_merge_profile(self):
-        """merge, walk 0 (segments 0, 1, 3, 5, 6): b.fa takes the T branch at the split at 20 and rejoins through the
-        merge at 36 (its partition is the second parent's); a.fa takes C at 46 and rejoins at 62."""
+        """merge, walk 0 (segments 0, 1, 3, 5, 6), as W5's claims of the same document say (DESIGN §5.1): a.fa's kept
+        entry came through the second parent at 62, b.fa's at 36, so the displayed bases before those merges are not
+        theirs; c.fa and both.fa (its runs closed at 36 and 62 kept where their chains are the walk) span it."""
         r = rec("graphlet_support", {"arm": "right", "walk": 0}, "merge")
         rows = r["answer"]["rows"]
         name = lambda xs: [x["name"] for x in xs]   # noqa: E731
-        self.assertEqual([(x["from_bp"], x["to_bp"], x["n_labels"]) for x in rows],
-                         [(0, 20, 4), (20, 36, 3), (36, 46, 4), (46, 62, 3), (62, 100, 4)])
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["n_labels"]) for x in rows], [(0, 36, 2), (36, 62, 3), (62, 100, 4)])
         self.assertEqual([(name(x.get("joined", [])), name(x.get("left", []))) for x in rows[1:]],
-                         [([], ["b.fa"]), (["b.fa"], []), ([], ["a.fa"]), (["a.fa"], [])])
+                         [(["b.fa"], []), (["a.fa"], [])])
+        claims = {x["label"]["name"]: x["evidence_from"] for x in rec("graphlet_claims", {
+            "arm": "right", "route_consistent": False}, "merge")["answer"]["rows"] if x["to_bp"] == 100}
+        self.assertEqual((claims["a.fa"], claims["b.fa"]), (rows[2]["from_bp"], rows[1]["from_bp"]))
         self.assertIn("/rows/0/n_labels", r["oracle"]["rederived"])
         stepped = rec("graphlet_support", {"arm": "right", "walk": 0, "step": 10}, "merge")["oracle"]
         self.assertEqual(("/rows" in stepped["consistency_only"], stepped["checked"].keys() & {"/total"}),
