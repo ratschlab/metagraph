@@ -715,5 +715,70 @@ class TestG41TheChangesStartFromTheDisplayedProfile(unittest.TestCase):
                           for c in lin])
 
 
+def _expected_prefixes(t):
+    """(side, ref) -> the walking-order prefixes w[:j] (j > 0) over which a label has
+    displayed evidence from base 0 on a walk of |t|, read off its support profile."""
+    out = {}
+    for side, a in t.arms.items():
+        for p in derive.paths(a):
+            prof = t.support_profile(side, p.id)
+            if not prof:
+                continue
+            w = t.spell(side, p.id, 'walk')
+            alive, reach = None, {}
+            for r in prof:
+                ids = {l.id for l in r.labels}
+                alive = ids if alive is None else alive & ids
+                for l in alive:
+                    reach[l] = r.to_bp        # a label leaving keeps the prefix it reached
+            for l, j in reach.items():
+                out.setdefault((side, t.labels[l].ref), set()).add(w[:j])
+    return out
+
+
+def _library_prefixes(g, depth):
+    got = ops._supported_prefixes(g, list(g.arms), depth)
+    return {k: {w for w in v if w} for k, v in got.items() if any(v)}
+
+
+class TestG5PrefixSubsetReadsDisplayedEvidence(unittest.TestCase):
+    """G5 (VERIFY-F-G4, the open note): compare(mode='prefix_subset') keyed b's supported
+    prefixes (_supported_prefixes) by presence contiguous from base 0, while its docstring
+    promises displayed support. In mini_ndm1_rc__switch1 left, labels present on [0, 186)
+    display only from 1239. b's map is now displayed evidence (DESIGN §5.1) in the DAG
+    restricted to the depth: equal to the support profiles of a retrieval walked to the
+    depth (test_traverse_review3.truncated)."""
+
+    def check(self, g, depth, label):
+        from test_traverse_review3 import truncated
+        want = _expected_prefixes(truncated(g, depth))
+        want = {k: v for k, v in want.items() if v}
+        self.assertEqual(want, _library_prefixes(g, depth), label)
+
+    def test_mini_ndm1_rc_switch1(self):
+        g = _real('real/mini_refseq/mini_ndm1_rc__switch1')
+        top = max(s.end_bp for a in g.arms.values() for s in a.segments)
+        got = ops._supported_prefixes(g, ['left'], top)
+        # label 1 is present on walk 3's first 186 bases, displayed only from 1239
+        ref = g.labels[1].ref
+        self.assertFalse(any(0 < len(w) <= 186 for w in got.get(('left', ref), ())), ref)
+        self.check(g, top, 'full')
+
+    def test_the_constrain_fixtures_at_their_depths(self):
+        n = 0
+        for name, g in _constrain_fixtures():
+            top = max((s.end_bp for a in g.arms.values() for s in a.segments), default=0)
+            if top <= 0 or any(not ops._has_bases(g, s) for s in g.arms):
+                continue
+            depths = set()
+            for a in g.arms.values():
+                depths.update(s.from_bp + 1 for s in a.segments if len(s.parents) > 1)
+            for d in sorted(depths)[:5] + [top]:
+                if d > 0:
+                    n += 1
+                    self.check(g, d, (name, d))
+        self.assertGreater(n, 50)
+
+
 if __name__ == '__main__':
     unittest.main()
