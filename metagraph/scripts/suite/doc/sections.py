@@ -1249,7 +1249,7 @@ def front_matter(ctx):
                                                         tt(_short(run.run.get("index_fp"), 16)))),
             ("manifest", "version %s, %d scenarios, content sha256 %s…" % (
                 esc(manifest.get("manifest_version")), len(run.order), tt(_short(manifest.get("content_sha256"), 16)))),
-            ("arms", "; ".join("%s %s to %s" % (esc(arm), _date((info or {}).get("started_utc")),
+            ("access paths (arms)", "; ".join("%s %s to %s" % (esc(arm), _date((info or {}).get("started_utc")),
                                                _date(_arm_end(run, arm, info)))
                                for arm, info in sorted(arms.items())) or "–"),
             ("set", "the re-evaluated set (checks commit %s)" % tt(_short(((run.reeval or {}).get("checks") or {}).get(
@@ -1311,7 +1311,8 @@ def doc_verdict_text(run):
     verdict in the document's vocabulary (READ-003; the readability review's verification of 2026-10-16, shared
     M1): the findings by what the check read (finding_kinds_text), never 'without failing the request', since a
     late 503 deadline carried no results. Every other verdict is report.py's line as it stands."""
-    v = run.verdict or "–"
+    # the document's convention (I.2): "access paths" in the prose, "arms" for row labels only (RV11)
+    v = (run.verdict or "–").replace("between the arms", "between the access paths")
     m = _FINDINGS_VERDICT.match(v)
     if not m:
         return v
