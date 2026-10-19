@@ -525,6 +525,17 @@ class OracleVsLibrary(unittest.TestCase):
             rec = O.answer(tool, args, f, text, {"seed_index": i})
             self.assertEqual(O.compare(rec, lib)["outcome"], "agree", (tool, args, lib))
             self.assertFalse(os.path.exists(outside + ".fa") or os.path.exists(outside + ".mgt"))
+        # R2B-2, the verifier's path probes: resolved inside the export directory the library answers (and W5 with
+        # it, the file compared through export_view); `~` (not expanded: io_error) makes no claim
+        for path, want in [("sub/../a.fa", "agree"), (os.path.join(self.exp, "b.fa"), "agree"), ("~/c.fa", "not_checked"),
+                           (os.path.join(self.exp, "..", "outside2.fa"), "agree")]:
+            args = {"format": "fasta", "path": path}
+            lib = self.tools.graphlet_export(handle=h, **args)
+            if "error" not in lib:
+                with open(lib["path"], encoding="utf-8") as fh:
+                    lib = O.export_view("fasta", lib, fh.read())
+            rec = O.answer("graphlet_export", args, f, text, {"seed_index": i, "export_dir": self.exp})
+            self.assertEqual(O.compare(rec, lib)["outcome"], want, (path, lib))
         # a cursor of one listing (walks, one row a page) sent with other arguments, or to another tool: bad_cursor
         name2 = next(k for k in self.docs if k.startswith("real/mini_refseq/mini_ndm1__trace#"))
         h2, f2, i2, text2 = self.docs[name2]

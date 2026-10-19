@@ -138,6 +138,7 @@ import gzip
 import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
 import time
@@ -1512,7 +1513,7 @@ def _walk_ids(d: _Doc, side: str, walks: Any) -> List[int]:
 def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     fmt = args.get("format", "fasta")
     what = args.get("what")
-    refused = _path_refused(args)
+    refused = _path_refused(args, ctx)
     if refused is not None:
         return refused
     if fmt not in ("fasta", "gfa", "json", "mgt") or (what is not None and fmt != "json"):
@@ -1639,7 +1640,7 @@ def _graphlet_subtrie(d: _Doc, args: dict, ctx: dict) -> dict:
 
 
 def _graphlet_save(d: _Doc, args: dict, ctx: dict) -> dict:
-    refused = _path_refused(args)
+    refused = _path_refused(args, ctx)
     if refused is not None:
         return refused
     return _record({"body_digest": body_digest(d.mgt), "arms_digest": arms_digest(d.mgt)},
@@ -1649,7 +1650,7 @@ def _graphlet_save(d: _Doc, args: dict, ctx: dict) -> dict:
 
 
 def _graphlet_load(d: _Doc, args: dict, ctx: dict) -> dict:
-    refused = _path_refused(args, spool=True)
+    refused = _path_refused(args, ctx, spool=True)
     if refused is not None:
         return refused
     summ, clauses, cons = _summary_part(d, d.sides)
@@ -2179,27 +2180,48 @@ def _cursor_record(d: "_Doc", tool: str, args: dict, ctx: dict) -> dict:
     return _declared("cursor_page", "a page resumed from the same listing: the tool's (INVENTORY §1.2)")
 
 
-def _path_refused(args: dict, spool: bool = False) -> Optional[dict]:
+def _path_refused(args: dict, ctx: dict, spool: bool = False) -> Optional[dict]:
     """A file path of export, save or load (DESIGN §6: file names confined to the export directory; load also reads
-    the spool, INVENTORY §2.17): None when inside (a plain file name, or <export_dir>/<name>, <spool_dir>/<name> for
-    load, as the runners symbolise them); an expected error path_not_allowed (the code library-defined, INVENTORY
-    §2.13, §2.17) when outside for sure (an absolute path elsewhere, a `..` component); else no claim."""
+    the spool, INVENTORY §2.17), judged on the path normalised and resolved against that directory:
+    - inside, W5 answers (None): a plain file name once normalised (`sub/../a.fa` is `a.fa`), <export_dir>/<name>
+      (<spool_dir>/<name> for load) as the runners write them, or an absolute path under the directory the context
+      names (export_dir, spool_dir);
+    - outside for sure, an expected error path_not_allowed (the code library-defined, INVENTORY §2.13, §2.17): the
+      normalised path climbs out (`..`), or it is absolute and outside the directory (a runner writes any path inside
+      the export or spool directory as <export_dir>/... or <spool_dir>/..., FORMAT v2 B1, so a raw absolute path is
+      outside when the context names no directory);
+    - no claim (path_unknown): `~` (the tool does not expand it: an io_error), the empty path, a subdirectory (whether
+      it exists is the file system's)."""
     path = args.get("path")
     if path is None:
         return None
-    if not isinstance(path, str) or not path:
-        return _declared("path_unknown", "path %r: what the tool answers is its own" % (path,))
-    parts = path.replace("\\", "/").split("/")
-    roots = ("<export_dir>", "<spool_dir>") if spool else ("<export_dir>",)
-    if len(parts) == 1 and parts[0] not in (".", ".."):
-        return None
-    if len(parts) == 2 and parts[0] in roots and parts[1] not in ("", ".", ".."):
-        return None
-    if ".." in parts or path.startswith("/") or path.startswith("~"):
-        return _record(None, {}, ["/*"], declared="expected_error", expected_error="path_not_allowed",
-                       note="path %r outside the export directory (DESIGN §6; the code library-defined, INVENTORY "
-                            "§2.13, §2.17)" % path)
-    return _declared("path_unknown", "path %r: inside or not is the tool's reading" % path)
+    unknown = _declared("path_unknown", "path %r: what the tool answers is its own" % (path,))
+    if not isinstance(path, str) or not path or path.startswith("~"):
+        return unknown
+    out = _record(None, {}, ["/*"], declared="expected_error", expected_error="path_not_allowed",
+                  note="path %r outside the export directory (DESIGN §6; the code library-defined, INVENTORY §2.13, "
+                       "§2.17)" % path)
+    symbols = ("<export_dir>", "<spool_dir>") if spool else ("<export_dir>",)
+    roots = [r for r in (ctx.get("export_dir"), ctx.get("spool_dir") if spool else None) if isinstance(r, str)]
+
+    def judge(rel: str) -> Optional[dict]:
+        rel = posixpath.normpath(rel) if rel else "."
+        if rel == ".." or rel.startswith("../"):
+            return out
+        return None if "/" not in rel and rel != "." else unknown
+
+    for sym in symbols:
+        if path == sym or path.startswith(sym + "/"):
+            return judge(path[len(sym) + 1:])
+    if path.startswith("<"):
+        return unknown
+    if posixpath.isabs(path):
+        for root in roots:
+            rel = posixpath.relpath(posixpath.normpath(path), posixpath.normpath(root))
+            if not (rel == ".." or rel.startswith("../")):
+                return judge(rel)
+        return out
+    return judge(path)
 
 
 def seed_failed(full_answer: Optional[dict], seed_index: int = 0) -> bool:

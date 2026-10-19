@@ -675,9 +675,17 @@ class RecordSemantics(unittest.TestCase):
             self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "path_not_allowed"), path)
             self.assertIn("library-defined", o["note"])
         for tool, path in [("graphlet_export", "x.fa"), ("graphlet_export", "<export_dir>/x.fa"),
-                           ("graphlet_load", "<spool_dir>/x.mgt")]:
+                           ("graphlet_load", "<spool_dir>/x.mgt"), ("graphlet_export", "sub/../a.fa"),
+                           ("graphlet_export", "<export_dir>/sub/../a.fa")]:
             self.assertNotIn("declared", code(tool, {"format": "fasta", "path": path}), path)
-        self.assertEqual(code("graphlet_export", {"format": "fasta", "path": "sub/x.fa"})["declared"], "path_unknown")
+        # R2B-2: resolved against the export directory the context names: inside is answered, outside refused
+        self.assertNotIn("declared", code("graphlet_export", {"format": "fasta", "path": "/w/e/b.fa"}, export_dir="/w/e"))
+        self.assertEqual(code("graphlet_export", {"format": "fasta", "path": "/w/e/../b.fa"}, export_dir="/w/e")
+                         ["expected_error"], "path_not_allowed")
+        self.assertEqual(code("graphlet_export", {"format": "fasta", "path": "/w/f/b.fa"}, export_dir="/w/e")
+                         ["expected_error"], "path_not_allowed")
+        for path in ("sub/x.fa", "~/c.fa", "", "<export_dir>/sub/x.fa", "<other>/x.fa"):
+            self.assertEqual(code("graphlet_export", {"format": "fasta", "path": path})["declared"], "path_unknown", path)
         o = code("graphlet_walks", {"arm": "left", "budget": {"work_units": 10}})
         self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_argument"))
         self.assertEqual(code("graphlet_walks", {"arm": "left", "budget": {"work_units": 10}},
@@ -1140,7 +1148,8 @@ class Independence(unittest.TestCase):
     suite_common only (checks imports suite_common; both stdlib only), and names no library file or function."""
 
     STDLIB = {"__future__", "copy", "hashlib", "json", "typing", "gzip", "math", "re", "datetime", "os", "shlex",
-              "sys", "zlib", "importlib", "importlib.util", "shutil", "time", "platform", "subprocess", "argparse"}
+              "sys", "zlib", "importlib", "importlib.util", "shutil", "time", "platform", "subprocess", "argparse",
+              "posixpath"}
 
     def imports(self, path):
         with open(path, encoding="utf-8") as fh:
