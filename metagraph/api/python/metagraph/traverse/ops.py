@@ -3366,29 +3366,69 @@ def comparability(a, b):
     release differ), have different oriented seed sequences, or name one label ref
     differently; 'unverifiable' when either side has no index manifest digest (index_fp);
     else True. |notes| is a new empty list for the caller's notes. compare() starts from
-    this verdict and only ever weakens it."""
+    this verdict and only ever weakens it (its reason is the rule's fixed phrase, the
+    statement here in its notes where the phrase says less, _identity)."""
+    comparable, _, statement = _identity(a, b)
+    return comparable, statement, []
+
+
+# compare()'s reasons: one fixed phrase per rule, at most 80 bytes, naming the rule that
+# decided the verdict (a rule's whole statement, where it says more, is in the notes). A
+# qualification's phrase is at most 19 bytes, the length of 'same index and seed': a
+# qualified answer is never longer than the comparable one it qualifies would be
+COMPARE_REASONS = {
+    'same': 'same index and seed',
+    'meta_fp': 'different indexes (index_meta_fp differs)',
+    'fp': 'different indexes (index_fp differs)',
+    'ns': 'different index namespaces',
+    'release': 'different index releases',
+    'seed': 'different oriented seed sequences',
+    'names': 'a label ref names different labels',
+    'unverifiable_both': 'no index manifest digest (index_fp) on both: label joins cannot '
+                         'be verified',
+    'unverifiable_one': 'no index manifest digest (index_fp) on one side: label joins '
+                        'cannot be verified',
+    'depth': 'no common certified depth (complete_to_bp 0 on a or b)',
+    'bases': 'a side carries no bases (output.sequences false)',
+    'work': 'stopped by the local work budget',
+    'memory': 'stopped by the local memory budget',
+    'deadline': 'stopped by the local deadline',
+    'cancelled': 'stopped by cancellation',
+    'lower_bound': 'labels: lower bound',
+    'overstated': 'labels: overstated',
+    'incomplete': 'labels: incomplete',
+    'scopes': 'scopes differ',
+    'parents': 'displayed parents',
+    'inexact': 'inexact restriction',
+}
+
+
+def _identity(a, b):
+    """The identity and seed rule of compare() -> (comparable, phrase, statement): the
+    verdict, its fixed phrase (COMPARE_REASONS) and the rule's whole statement (the
+    phrase itself where that says everything)."""
     ia, ib = index_identity(a), index_identity(b)
-    notes = []
     if ia['meta_fp'] and ib['meta_fp'] and ia['meta_fp'] != ib['meta_fp']:
-        return False, 'different indexes (index_meta_fp differs)', notes
+        return False, COMPARE_REASONS['meta_fp'], COMPARE_REASONS['meta_fp']
     if ia['fp'] and ib['fp'] and ia['fp'] != ib['fp']:
-        return False, 'different indexes (index_fp differs)', notes
+        return False, COMPARE_REASONS['fp'], COMPARE_REASONS['fp']
     for k in ('ns', 'release'):
         if ia[k] and ib[k] and ia[k] != ib[k]:
-            return False, 'different index %s (%r vs %r)' % (k, ia[k], ib[k]), notes
+            return (False, COMPARE_REASONS[k],
+                    'different index %s (%r vs %r)' % (k, ia[k], ib[k]))
     if a.seed.sequence != b.seed.sequence:
-        return False, 'different oriented seed sequences', notes
+        return False, COMPARE_REASONS['seed'], COMPARE_REASONS['seed']
     # names must agree per ref (a cheap guard on top of the digest)
     names_a = {l.ref: l.name for l in a.labels}
     for l in b.labels:
         if l.ref in names_a and names_a[l.ref] != l.name:
-            return False, 'label %s is %r in one and %r in the other' % (
-                l.ref, names_a[l.ref], l.name), notes
+            return (False, COMPARE_REASONS['names'], 'label %s is %r in one and %r in the '
+                    'other' % (l.ref, names_a[l.ref], l.name))
     if not ia['fp'] or not ib['fp']:
-        return 'unverifiable', ('no index manifest digest (index_fp) on %s: label joins '
-                                'cannot be verified' % ('both' if not ia['fp'] and not ib['fp']
-                                                        else 'one side')), notes
-    return True, 'same index and seed', notes
+        why = COMPARE_REASONS['unverifiable_both' if not ia['fp'] and not ib['fp']
+                              else 'unverifiable_one']
+        return 'unverifiable', why, why
+    return True, COMPARE_REASONS['same'], COMPARE_REASONS['same']
 
 
 # the private name, kept for callers that import it
@@ -3488,27 +3528,30 @@ def _displayed_parent_rules(a, b, sides, depth, cb=None):
 
 
 class _Verdict:
-    """compare()'s verdict as its rules weaken it: the reason is the rule that decided it
-    -- the first, in rule order, of the rules giving the weakest verdict -- and a reason it
-    replaces that no note states (the identity rule's 'unverifiable') moves to the notes."""
+    """compare()'s verdict as its rules weaken it. The reason is the fixed phrase
+    (COMPARE_REASONS) of the rule that decided it -- the first, in rule order, of the rules
+    giving the weakest verdict; each rule states itself in the notes where its phrase says
+    less, so nothing is said twice. The identity rule's 'unverifiable' statement is its own
+    phrase: replaced as the reason, it moves to the notes."""
 
     def __init__(self, comparable, reason, notes):
         self.comparable, self.reason, self.notes = comparable, reason, notes
 
-    def weaken(self, to, why):
-        """Weaken the verdict to |to| for rule |why| -> whether the rule decided it."""
+    def weaken(self, to, phrase):
+        """Weaken the verdict to |to| for the rule of |phrase| -> whether it decided it."""
         if _COMPARABLE_RANK[to] <= _COMPARABLE_RANK[self.comparable]:
             return False
         if self.comparable == 'unverifiable':
             self.notes.append(self.reason)
-        self.comparable, self.reason = to, why
+        self.comparable, self.reason = to, phrase
         return True
 
 
 def _label_evidence_notes(g, sides):
-    """Why |g|'s label evidence is not complete on |sides|: one note per stated
-    label-class limitation, else the outcome dimension or the cut lists themselves (a
-    graphlet whose K records were lost still says so through O and A)."""
+    """Why |g|'s label evidence is not complete on |sides| -> [(phrase, note)]: one note
+    per stated label-class limitation, else the outcome dimension or the cut lists
+    themselves (a graphlet whose K records were lost still says so through O and A), each
+    with its fixed phrase (COMPARE_REASONS: a lower bound, overstated, incomplete)."""
     notes = []
     seen = set()
     for lim in g.limitations:
@@ -3518,15 +3561,18 @@ def _label_evidence_notes(g, sides):
             if lim.kind in seen:
                 continue
             seen.add(lim.kind)
-            notes.append('%s (%s): %s' % (
-                lim.kind, lim.knob, 'the oracle is a lower bound' if lim.kind in
-                LOWER_BOUND_KINDS else 'reported evidence may be overstated'))
+            lower = lim.kind in LOWER_BOUND_KINDS
+            notes.append((COMPARE_REASONS['lower_bound' if lower else 'overstated'],
+                          '%s (%s): %s' % (lim.kind, lim.knob, 'the oracle is a lower bound'
+                                           if lower else 'reported evidence may be overstated')))
     cut = sum(g.arms[s].labels_per_node.nodes_truncated for s in sides)
     if not notes and cut:
-        notes.append('label_lists (labels.max_labels_per_node): %d recorded lists cut, the '
-                     'oracle is a lower bound' % cut)
+        notes.append((COMPARE_REASONS['lower_bound'],
+                      'label_lists (labels.max_labels_per_node): %d recorded lists cut, the '
+                      'oracle is a lower bound' % cut))
     if not notes and g.outcome is not None and g.outcome.label_evidence != 'complete':
-        notes.append('label_evidence %s' % g.outcome.label_evidence)
+        notes.append((COMPARE_REASONS['incomplete'],
+                      'label_evidence %s' % g.outcome.label_evidence))
     return notes
 
 
@@ -3539,11 +3585,12 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     qualified (cut lists cannot tell 'absent' from 'cut'); without index_fp on either side
     'unverifiable'; with no common certified depth (complete_to_bp 0) 'unknown' (equal
     None in every case but True). The verdict is the weakest any rule gives, and the
-    reason names the rule that decided it: the first, in the order index identity and
-    seed, index_fp, common depth, bases, then the qualifications (label evidence, scopes,
-    displayed parents, an inexact restriction), of the rules giving that verdict; the
-    other rules that applied are in the notes (index_fp's too, when a weaker verdict
-    decided).
+    reason is the fixed phrase (COMPARE_REASONS, at most 80 bytes) of the rule that
+    decided it: the first, in the order index identity and seed, index_fp, common depth,
+    bases, then the qualifications (label evidence, scopes, displayed parents, an inexact
+    restriction), of the rules giving that verdict. The notes state every other rule that
+    applied, and the deciding rule where its phrase says less, each once (index_fp's
+    statement too, when a weaker verdict decided).
 
     modes: claims (the §6.9 unit: run ends, keyed (arm, ref, evidence_from, displayed
     prefix)), walks (walks cut at the depth, with the labels supporting the whole cut
@@ -3610,14 +3657,13 @@ def _stopped_comparison(a, b, mode, state, e):
     st = e.stop
     done = {k: v for k, v in state.items() if k in ('keys_a', 'keys_b')}
     st.restate(**done)
-    reason = ('the comparison stopped on the %s in phase %s (%s): neither equality nor a '
-              'difference is asserted; %s'
-              % ({'work': 'local work budget', 'memory': 'local memory budget',
-                  'deadline': 'local deadline', 'cancelled': 'cancellation'}[st.resource],
-                 st.phase, ', '.join('%s %s' % (k, v) for k, v in done.items())
-                 or 'before keying', 'raise the budget, or narrow the labels or the arm'))
-    return Comparison('unknown', reason, state.get('depth'), None, [], [],
-                      list(state.get('notes') or []), [], mode=mode,
+    # the reason names the resource (COMPARE_REASONS); the note says where it stopped
+    note = ('stopped in phase %s (%s): neither equality nor a difference is asserted; '
+            'raise the budget, or narrow the labels or the arm'
+            % (st.phase, ', '.join('%s %s' % (k, v) for k, v in done.items())
+               or 'before keying'))
+    return Comparison('unknown', COMPARE_REASONS[st.resource], state.get('depth'), None,
+                      [], [], list(state.get('notes') or []) + [note], [], mode=mode,
                       support=(a.support, b.support),
                       scopes=state.get('scopes') or ('per_path', 'per_path'),
                       strategies=((a.envelope or {}).get('strategy'),
@@ -3650,7 +3696,8 @@ def _compare(a, b, arm, labels, mode, cb, state):
         cb.charge(W_ELEM * (2 * len(a.labels) + 2 * len(b.labels)),
                   dict_bytes(len(a.labels) + len(b.labels))
                   + (len(a.labels) + len(b.labels)) * (2 * STR + 24))
-    comparable, reason, notes = comparability(a, b)
+    comparable, reason, statement = _identity(a, b)
+    notes = [] if statement == reason else [statement]
     strategies = ((a.envelope or {}).get('strategy'), (b.envelope or {}).get('strategy'))
     if comparable is False:
         return Comparison(False, reason, None, None, [], [], notes, mode=mode,
@@ -3669,22 +3716,21 @@ def _compare(a, b, arm, labels, mode, cb, state):
         cb.charge(W_ELEM * sum(len(g.arms[s].segments) for g in (a, b) for s in sides))
     if depth == 0:
         # equality over an empty window is not equality: nothing was certified on one side
-        # (this decides before missing bases: with bases the window would still be empty)
-        why = 'no common certified depth (complete_to_bp 0 on a or b)'
-        verdict.weaken('unknown', why)
-        notes.append(why)
+        # (this decides before missing bases: with bases the window would still be empty).
+        # Its phrase is its whole statement: a note only where it did not decide
+        if not verdict.weaken('unknown', COMPARE_REASONS['depth']):
+            notes.append(COMPARE_REASONS['depth'])
     for tag, g in (('a', a), ('b', b)):
-        evidence = ['%s: %s' % (tag, n) for n in _label_evidence_notes(g, sides)]
+        evidence = _label_evidence_notes(g, sides)
         if evidence:
-            verdict.weaken('qualified', evidence[0])
-            notes.extend(evidence)
+            verdict.weaken('qualified', evidence[0][0])
+            notes.extend('%s: %s' % (tag, n) for _, n in evidence)
     for s in sides:
         if a.arms[s].scope != b.arms[s].scope:
-            why = ('%s arm: completeness scopes differ (%s vs %s): a structural block on a '
-                   'merged route need not be where the per-path trie ends a label'
-                   % (s, a.arms[s].scope, b.arms[s].scope))
-            verdict.weaken('qualified', why)
-            notes.append(why)
+            verdict.weaken('qualified', COMPARE_REASONS['scopes'])
+            notes.append('%s arm: completeness scopes differ (%s vs %s): a structural block '
+                         'on a merged route need not be where the per-path trie ends a label'
+                         % (s, a.arms[s].scope, b.arms[s].scope))
         if a.arms[s].scope == 'united_history' and any(
                 len(x.parents) > 1 for x in a.arms[s].segments):
             notes.append('%s arm of a: histories were united at merges' % s)
@@ -3702,7 +3748,7 @@ def _compare(a, b, arm, labels, mode, cb, state):
             # the displayed bases, so the same trie can spell a walk through a merge
             # differently on the two sides. A difference there may be the display's, not the
             # retrieval's: qualified, as when the completeness scopes differ
-            verdict.weaken('qualified', shown)
+            verdict.weaken('qualified', COMPARE_REASONS['parents'])
             notes.append(shown)
     if cb is not None and labels is not None:
         _uses_g(cb, a, 'label_index')
@@ -3739,13 +3785,11 @@ def _compare(a, b, arm, labels, mode, cb, state):
                             'is' if sum(beyond.values()) == 1 else 'are', depth))
     if mode in ('claims', 'walks', 'prefix_subset') and no_bases:
         evaluated = False
-        why = ('%s carries no bases (output.sequences false): mode %s matches %s by '
-               'their displayed bases, so it cannot compare them; retrieve both with '
-               'output.sequences true, or compare mode labels'
-               % (' and '.join(no_bases) + (' each' if len(no_bases) > 1 else ''), mode,
-                  'claims' if mode == 'claims' else 'walks'))
-        if not verdict.weaken('unknown', why):
-            notes.append(why)       # the depth rule decided
+        verdict.weaken('unknown', COMPARE_REASONS['bases'])
+        notes.append('%s carries no bases: mode %s matches %s by their displayed bases; '
+                     'retrieve both with output.sequences true, or compare mode labels'
+                     % (' and '.join(no_bases) + (' each' if len(no_bases) > 1 else ''),
+                        mode, 'claims' if mode == 'claims' else 'walks'))
     elif mode == 'claims':
         ka = _keys_of(cb, state, 'a', lambda: _claim_keys(a, sides, depth, sel, inexact, cb))
         kb = _keys_of(cb, state, 'b', lambda: _claim_keys(b, sides, depth, sel, inexact, cb))
@@ -3780,11 +3824,11 @@ def _compare(a, b, arm, labels, mode, cb, state):
     if inexact:
         # a route that cannot be reconstructed keys a claim on the wrong branch: what
         # differs may be that, so no difference (and no equality) is asserted
-        why = ('the DAG restricted to the depth could not be reconstructed exactly: %s%s'
-               % ('; '.join(inexact[:3]),
-                  ' and %d more' % (len(inexact) - 3) if len(inexact) > 3 else ''))
-        verdict.weaken('qualified', why)
-        notes.append(why)
+        verdict.weaken('qualified', COMPARE_REASONS['inexact'])
+        notes.append('the DAG restricted to the depth could not be reconstructed exactly: '
+                     '%s%s' % ('; '.join(inexact[:3]),
+                               ' and %d more' % (len(inexact) - 3) if len(inexact) > 3
+                               else ''))
     comparable, reason = verdict.comparable, verdict.reason
     if mode == 'prefix_subset':
         holds = not only_a

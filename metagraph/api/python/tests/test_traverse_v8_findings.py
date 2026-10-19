@@ -11,11 +11,14 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
 
-from metagraph.traverse import GraphletStore, derive, from_response, parse  # noqa: E402
+from metagraph.traverse import (  # noqa: E402
+    GraphletStore, derive, from_response, ops, parse,
+)
 from metagraph.traverse.mcp_tools import GraphletTools  # noqa: E402
 
 MODES = ('claims', 'walks', 'labels', 'prefix_subset')
-DEPTH_RULE = 'no common certified depth'
+R = ops.COMPARE_REASONS
+DEPTH = R['depth']
 
 
 def _with_fp(text, fp='cd' * 32):
@@ -23,11 +26,27 @@ def _with_fp(text, fp='cd' * 32):
     return text.replace(' walk fixtures * ', ' walk fixtures %s ' % fp, 1)
 
 
+def _coords(name):
+    """A committed snapshot of data/traverse/coords as a client sees it."""
+    with gzip.open(os.path.join(T.DATA, 'coords', name + '.graphlet.json.gz')) as f:
+        resp = json.loads(f.read())
+    return from_response(resp['results'][0], resp)
+
+
+def _level5(name):
+    """The fixture as a level-5 server (arrival-order parents) answered it."""
+    with open(os.path.join(T.DATA, 'r21', name + '_level5.graphlet.json'),
+              encoding='utf-8') as f:
+        resp = json.load(f)
+    return from_response(resp['results'][0], resp)
+
+
 class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
     """G1 (O1): no_bins (no index_fp, complete_to_bp 0 on both arms) compares 'unknown' by
     the depth rule, but its reason named the missing index_fp, the rule of the stronger
-    verdict 'unverifiable'. The reason names the rule that decided the verdict; a rule it
-    outranks stays stated in the notes."""
+    verdict 'unverifiable'. The reason is the fixed phrase (ops.COMPARE_REASONS) of the
+    rule that decided the verdict; the notes state every other rule that applied, and the
+    deciding one where its phrase says less, each once."""
 
     def test_no_bins_without_index_fp(self):
         g = parse(T.doc_text('no_bins'))
@@ -35,17 +54,18 @@ class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
         for mode in MODES:
             c = g.compare(g, mode=mode)
             self.assertEqual(('unknown', None, 0), (c.comparable, c.equal, c.depth_used))
-            self.assertIn(DEPTH_RULE, c.reason, mode)
-            self.assertNotIn('index_fp', c.reason, mode)
-            # the identity is still unverifiable, and still said so
-            self.assertTrue(any('index_fp' in n for n in c.notes), (mode, c.notes))
+            self.assertEqual(DEPTH, c.reason, mode)
+            # the identity is still unverifiable, and said so once; the depth rule's
+            # phrase is its whole statement, not repeated in the notes
+            self.assertIn(R['unverifiable_both'], c.notes, mode)
+            self.assertNotIn(DEPTH, c.notes, mode)
 
     def test_no_bins_with_index_fp(self):
         g = parse(_with_fp(T.doc_text('no_bins')))
         for mode in MODES:
             c = g.compare(g, mode=mode)
-            self.assertEqual('unknown', c.comparable)
-            self.assertIn(DEPTH_RULE, c.reason, mode)
+            self.assertEqual(('unknown', DEPTH), (c.comparable, c.reason), mode)
+            self.assertNotIn(DEPTH, c.notes, mode)
 
     def test_the_depth_rule_decides_before_missing_bases(self):
         # with nothing certified on a side, bases would not make the pair comparable
@@ -54,8 +74,7 @@ class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
         bare = without_bases(g)
         for mode in ('claims', 'walks', 'prefix_subset'):
             c = g.compare(bare, mode=mode)
-            self.assertEqual('unknown', c.comparable)
-            self.assertIn(DEPTH_RULE, c.reason, mode)
+            self.assertEqual(('unknown', DEPTH), (c.comparable, c.reason), mode)
             self.assertTrue(any('output.sequences' in n for n in c.notes), (mode, c.notes))
 
     def test_the_tool_answers_the_same_reason(self):
@@ -65,31 +84,99 @@ class TestG1TheReasonNamesTheRuleThatDecided(unittest.TestCase):
             tools = GraphletTools(store)
             for mode in MODES:
                 out = tools.graphlet_compare(h, h, mode=mode)
-                self.assertEqual('unknown', out['comparable'], out)
-                self.assertIn(DEPTH_RULE, out['reason'], out)
+                self.assertEqual(('unknown', DEPTH), (out['comparable'], out['reason']), out)
 
-    def test_the_other_verdicts_keep_or_name_their_rule(self):
-        # unverifiable with a common depth: the index_fp rule decides
+    def test_the_other_verdicts_name_their_rule(self):
+        # unverifiable with a common depth: the index_fp rule decides; its statement is
+        # its phrase, so no note repeats it
         merge = T.graphlet('merge')
         c = merge.compare(merge)
-        self.assertEqual('unverifiable', c.comparable)
-        self.assertIn('index_fp', c.reason)
-        # no bases with a common depth: that rule decides
+        self.assertEqual(('unverifiable', R['unverifiable_both']), (c.comparable, c.reason))
+        self.assertNotIn(c.reason, c.notes)
+        # no bases with a common depth: that rule decides, its whole text in the notes
         from test_traverse_regressions import without_bases
         c = merge.compare(without_bases(merge), mode='claims')
-        self.assertEqual('unknown', c.comparable)
-        self.assertIn('output.sequences', c.reason)
-        # qualified by a lower-bound side: the reason names the qualification, not the
-        # identity that held
+        self.assertEqual(('unknown', R['bases']), (c.comparable, c.reason))
+        self.assertTrue(any(n.startswith('b carries no bases: mode claims') for n in c.notes),
+                        c.notes)
+        # qualified by a lower-bound side: the reason names the qualification, its whole
+        # text in the notes only
         constrain = parse(_with_fp(T.doc_text('merge')))
         annotate = parse(_with_fp(T.doc_text('annotate')))     # lists cut at 2
         c = constrain.compare(annotate, arm='right', mode='claims', labels=['a.fa'])
-        self.assertEqual('qualified', c.comparable)
-        self.assertIn('lower bound', c.reason)
-        self.assertIn(c.reason, c.notes)
+        self.assertEqual(('qualified', R['lower_bound']), (c.comparable, c.reason))
+        self.assertNotIn(c.reason, c.notes)
+        self.assertIn('b: label_lists (labels.max_labels_per_node): the oracle is a lower '
+                      'bound', c.notes)
         # comparable: the identity and the seed
         c = constrain.compare(constrain)
         self.assertEqual((True, 'same index and seed'), (c.comparable, c.reason))
+        self.assertNotIn(c.reason, c.notes)
+
+
+class TestVF1AQualifiedAnswerFitsAsBefore(unittest.TestCase):
+    """VF1 (VERIFY-F): G1 first made a qualified answer's reason its whole first
+    qualification (up to ~480 bytes) in compare's base, which the tool never cuts, so
+    answers that fit before failed and default pages lost rows or their evidence. Every
+    reason is a fixed phrase of at most 80 bytes, and a qualification's at most 19, the
+    length of 'same index and seed', the reason a qualified answer had before."""
+
+    # the pages at the default max_bytes (2048) of the qualified pairs before G1
+    # (bf010a984; VERIFY-F probe_tool_sizes.py): (rows, next_cursor, fields_cut)
+    BEFORE = {
+        ('rep0_column', 'rep0_cut1', 'claims'): (1, True, None),
+        ('rep0_column', 'rep0_cut1', 'walks'): (2, True, None),
+        ('rep0_cut1', 'rep0_kmer_null', 'claims'): (2, True, None),
+        ('rep0_cut1', 'rep0_kmer_null', 'walks'): (2, True, None),
+        ('rep0_lower_bound', 'rep0_mixed', 'claims'): (1, True, None),
+        ('rep0_lower_bound', 'rep0_mixed', 'walks'): (1, True, None),
+        ('merge', 'merge', 'claims'): (2, True, None),
+        ('merge', 'merge', 'walks'): (2, False, None),
+        ('annotate', 'annotate', 'claims'): (4, False, ['evidence']),
+        ('annotate', 'annotate', 'walks'): (2, False, ['evidence']),
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = GraphletStore(self.tmp.name)
+        self.tools = GraphletTools(self.store)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def pair(self, x, y):
+        if x == y:
+            # level 5 (arrival order) against level 6 (majority parent), both with a
+            # manifest digest: qualified by the displayed parents
+            a, b = _level5(x), T.graphlet(x)
+            for g in (a, b):
+                g.index_fp = 'f' * 64
+        else:
+            a, b = _coords(x), _coords(y)
+        return self.store.put_graphlet(a), self.store.put_graphlet(b)
+
+    def test_the_smallest_page_of_rep0_cut1_and_rep0_kmer_null(self):
+        ha, hb = self.pair('rep0_cut1', 'rep0_kmer_null')
+        out = self.tools.graphlet_compare(ha, hb, mode='walks', max_bytes=950)
+        self.assertNotIn('error', out, out)
+        self.assertEqual(('qualified', R['scopes'], 1),
+                         (out['comparable'], out['reason'], len(out['rows'])))
+
+    def test_qualified_pages_at_the_default_as_before(self):
+        for (x, y, mode), want in sorted(self.BEFORE.items()):
+            ha, hb = self.pair(x, y)
+            for mb in (None, 2048):
+                out = self.tools.graphlet_compare(ha, hb, mode=mode, max_bytes=mb)
+                self.assertEqual('qualified', out.get('comparable'), (x, y, mode, out))
+                self.assertEqual(want, (len(out['rows']), 'next_cursor' in out,
+                                        out.get('fields_cut')), (x, y, mode, mb))
+                self.assertNotIn('row_truncated', out, (x, y, mode))
+
+    def test_the_phrases_are_bounded(self):
+        for k, v in R.items():
+            self.assertLessEqual(len(v.encode('utf-8')), 80, k)
+        for k in ('lower_bound', 'overstated', 'incomplete', 'scopes', 'parents', 'inexact'):
+            self.assertLessEqual(len(R[k].encode('utf-8')), len(R['same']), k)
 
 
 class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):

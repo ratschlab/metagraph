@@ -1755,8 +1755,8 @@ class TestCompareAtDepthZero(unittest.TestCase):
                         cmp = x.compare(y, arm='right', mode=mode)
                         self.assertEqual(('unknown', None, 0),
                                          (cmp.comparable, cmp.equal, cmp.depth_used))
-                        self.assertIn('no common certified depth (complete_to_bp 0 on a or b)',
-                                      cmp.notes)
+                        self.assertEqual('no common certified depth (complete_to_bp 0 on a or b)',
+                                         cmp.reason)
             n += 1
         if n == 0:
             self.skipTest('no server up')

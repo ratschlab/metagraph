@@ -546,7 +546,9 @@ class TestCompare(unittest.TestCase):
                     st = c.local_stop
                     self.assertEqual('work', st['resource'])
                     self.assertEqual(st, c.as_dict()['local_stop'])
-                    self.assertIn('neither equality nor a difference', c.reason)
+                    # the reason names the resource, the note where it stopped
+                    self.assertEqual('stopped by the local work budget', c.reason)
+                    self.assertIn('neither equality nor a difference', c.notes[-1])
                     phases.add(st['phase'])
         self.assertGreater(n, 50)
         self.assertTrue({'keys:a', 'keys:b'} <= phases, phases)
