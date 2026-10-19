@@ -448,6 +448,42 @@ def is_cut(cut, uncut, optional=frozenset(), pointer="", fn=None):
         gp.compact(cut, 60), gp.compact(uncut, 60)))
 
 
+def sequence_cut_problem(cut, uncut, fn=None):
+    """Why a graphlet_sequence answer is no cut of the same uncut slice, or None (VERIFY-C-R2 VR6): a slice cut at
+    its ceiling says truncated and next_from (INVENTORY §2.12); its sequence is a leading part of the uncut one (lane
+    O's rule), its `to` no greater than the uncut one's; every other key equal; truncated and next_from only on the
+    cut side."""
+    fn = fn or oracle_is_cut_of()
+    if not isinstance(cut, dict) or not isinstance(uncut, dict):
+        return "/", "a sequence answer that is no object"
+    if not cut.get("truncated"):
+        return "/truncated", "a sequence cut without truncated"
+    for k in sorted(set(cut) | set(uncut), key=str):
+        p = "/" + gp.pointer_escape(k)
+        if k in ("truncated", "next_from") and k not in uncut:
+            continue
+        if k not in cut or k not in uncut:
+            return p, "a key on one side only"
+        if k == "sequence":
+            if fn is None:
+                return p, "uncomparable: graphlet_oracle's cut rule (lane O) is not available"
+            why = field_cut_problem(uncut[k], cut[k], fn) if isinstance(cut[k], str) and isinstance(uncut[k], str) \
+                else "a sequence that is no string"
+            if why:
+                return p, "the slice's sequence: %s" % why
+        elif k == "to":
+            if not all(isinstance(v, int) and not isinstance(v, bool) for v in (cut[k], uncut[k])) or \
+                    cut[k] > uncut[k]:
+                return p, "the cut slice's to (%s) is greater than the uncut one's (%s)" % (
+                    gp.compact(cut[k], 20), gp.compact(uncut[k], 20))
+        else:
+            d = gp.first_difference(cut[k], uncut[k], p)
+            if d:
+                return d[0] or p, "a value other than the uncut one (%s vs %s)" % (gp.compact(d[1], 60),
+                                                                                 gp.compact(d[2], 60))
+    return None
+
+
 def cut_evidence(rec, answer):
     """What shows that a call was cut (VERIFY-C VC4), or None: a cut marker anywhere in its answer (CUT_EVIDENCE),
     paging_complete false (FORMAT v2 A4), or fewer rows than its total."""
@@ -780,7 +816,11 @@ def compare_cut(way, rec, ref, optional):
         return {"way": way, "outcome": "disagree", "detail": "not cut: the call was designed to cut (cut_of) and "
                                                              "its answer shows no cut (no marker, its paging "
                                                              "complete, every row)"}
-    r = is_cut(mine, canonical_answer(ref.get("tool"), library_part(way, ref)), optional)
+    theirs = canonical_answer(ref.get("tool"), library_part(way, ref))
+    if rec.get("tool") == "graphlet_sequence":
+        r = sequence_cut_problem(mine, theirs)   # a slice is cut by its own form (VR6)
+    else:
+        r = is_cut(mine, theirs, optional)
     if r and r[1].startswith("uncomparable"):
         return {"way": way, "outcome": "not_compared", "detail": r[1]}
     if r:

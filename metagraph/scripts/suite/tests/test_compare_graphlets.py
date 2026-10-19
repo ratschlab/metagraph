@@ -1019,6 +1019,29 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(e["outcome"], "agree", e)
         self.assertIn("1 of 2 rows", next(c for c in e["cuts"] if c["way"] == "W1")["detail"])
 
+    def test_vr6_a_sequence_cut_by_its_own_form(self):
+        whole = {"id": "seq-all", "tool": "graphlet_sequence", "args": {"arm": "left", "walk": 0, "start": 0},
+                 "paging": "all", "ways": ["W1", "W2", "W3", "W4"]}
+        cut_op = {"id": "seq-page", "tool": "graphlet_sequence", "args": {"arm": "left", "walk": 0, "start": 0},
+                  "paging": "none", "cut_of": "seq-all", "ways": ["W1", "W2", "W3", "W4"]}
+        self.make(ops=[whole, cut_op])
+        uncut = {"handle": "g_0123456789ab", "arm": "left", "orientation": "natural", "with_seed": False, "from": 0,
+                 "length": 20, "ceiling_bytes": 16384, "evidence": {}, "to": 20, "sequence": "ACGTACGTACGTACGTACGT"}
+        self.five(op=whole, answer=uncut, w5=False)
+        page = dict(uncut, sequence="ACGTACGTAC", to=10, truncated=True, next_from=10)
+        self.five(op=cut_op, answer=page, w5=False)
+        e = self.op_entry(oid="seq-page")
+        self.assertEqual(e["outcome"], "agree", e)
+        # a slice that is no leading part, or a to past the uncut one, is no cut
+        self.run_.cleanup()
+        self.make(ops=[whole, cut_op])
+        self.five(op=whole, answer=uncut, w5=False)
+        self.five(op=cut_op, answer=dict(page, sequence="ACGTTCGTAC"), w5=False)
+        c = next(c for c in self.op_entry(oid="seq-page")["cuts"] if c["way"] == "W1")
+        self.assertEqual((c["outcome"], c["pointer"]), ("disagree", "/sequence"))
+        self.assertEqual(cg.sequence_cut_problem(dict(page, to=25), uncut)[0], "/to")
+        self.assertEqual(cg.sequence_cut_problem(dict(page, truncated=False), uncut)[0], "/truncated")
+
     def test_a_cut_without_its_uncut_reference_is_inconclusive(self):
         cut_op = dict(self.op, id="walks-page", cut_of="walks-all")
         self.make(ops=[cut_op])
