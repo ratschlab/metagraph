@@ -120,6 +120,12 @@ class Context(object):
         s = self.cases_prose.get("short")
         return s if isinstance(s, dict) else {}
 
+    def current_notes(self):
+        """doc/prose/cases.json `current`: a case's note on how its pinned table statement reads against the
+        deployment this run met (manifest-version conditionals), printed in appendix B under its short reason."""
+        s = self.cases_prose.get("current")
+        return s if isinstance(s, dict) else {}
+
     def verification_rules(self):
         """doc/prose/cases.json `verification`: the rule by which a case's pairs are verified or not, printed in
         appendix B under the case's short reason and nowhere else (the short reason stays one clause)."""
@@ -4872,6 +4878,12 @@ def by_design_table(ctx):
         matches = latex.join_units(esc_wrap(c.get("scenario_match"), 600))
         if short.get(cid):
             matches += "\\newline{\\scriptsize in short: %s}" % inline(short[cid])
+        # the pinned table's statement qualified for the deployment this run met (cases.json `current`, by manifest
+        # version; the share review of the v7 document, V7-101): the table's own text and identity stay as they are
+        notes = ctx.current_notes() if hasattr(ctx, "current_notes") else {}
+        current = _versioned(ctx, notes.get(cid) or "").strip()
+        if current:
+            matches += "\\newline{\\scriptsize %s}" % inline(current)
         if rules.get(cid):
             matches += "\\newline{\\scriptsize verification: %s}" % inline(rules[cid])
         rows.append(first + [matches, "; ".join(service) or "– (none stated)", "; ".join(direct) or "– (none stated)",

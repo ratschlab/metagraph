@@ -575,6 +575,31 @@ class PluralsTest(unittest.TestCase):
         self.assertEqual(sections._count_phrase(2, "execution", "none", " in this run: x"), "2 executions in this run: x")
 
 
+class StrandsViaMcpTest(unittest.TestCase):
+    """V7-101: under manifest v7 chapter N's background says the service's answer carries each entry's strands and
+    N-usecase-0005 checks them via MCP; appendix B qualifies the pinned table's pattern.strands_vocabulary statement
+    without changing it; v5 / v6 read as before."""
+
+    def test_branches(self):
+        n = [p for p in prose("N")["intro"] if "pattern.strands_vocabulary" in p][0]
+        v7 = facts.fill(n, {"manifest_version": 7}, unresolved=[])
+        v6 = facts.fill(n, {"manifest_version": 6}, unresolved=[])
+        self.assertIn("(`pattern.strands_vocabulary`). In v7 the service's answer carries each entry's `strands`, so "
+                      "N-usecase-0005 checks that field through MCP as well. Appendix B", v7)
+        self.assertNotIn("does not echo", v7)
+        self.assertIn("(`pattern.strands_vocabulary`), and the service's answer does not echo an entry's `strands`, so "
+                      "that field is not exposed there. Appendix B", v6)
+        # appendix B: the short reason (the pinned table's statement) unchanged, a v7 note beside it
+        self.assertTrue(prose("cases")["short"]["pattern.strands_vocabulary"].endswith(
+            "does not echo an entry's `strands`"))
+        note = prose("cases")["current"]["pattern.strands_vocabulary"]
+        ctx7 = _Stub(run=_Stub(manifest={"manifest_version": 7}))
+        ctx6 = _Stub(run=_Stub(manifest={"manifest_version": 6}))
+        self.assertEqual(sections._versioned(ctx7, note), "This source-table description predates v7: entry strands "
+                         "are now exposed and checked.")
+        self.assertEqual(sections._versioned(ctx6, note).strip(), "")
+
+
 class SincePreviousTest(unittest.TestCase):
     """I.4's 'Since the previous edition' (RV7), computed from the previous edition's run given as an input: the
     scenarios, the MCP marks removed and moved, a check argument gained, the outcomes changed and the inconclusive
