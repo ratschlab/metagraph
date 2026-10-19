@@ -234,6 +234,56 @@ class Cut(unittest.TestCase):
         self.assertEqual(cg.is_cut(bare, uncut)[0], "/rows/0/labels")
 
 
+class RunnerCodes(unittest.TestCase):
+    """VR1: every runner-side code of FORMAT v2.3 B2 is inconclusive, never compared."""
+
+    # FORMAT v2.3 B2 (FORMAT-v8.md, 2026-10-19): the runner-side error codes, selector_error being its own field
+    FORMAT_V23_B2 = ("no_document", "no_graphlet", "document_refused", "exception", "non_finite", "unknown_tool",
+                     "paging_runaway", "assembly_error", "timeout", "child_died")
+
+    def test_the_constant_is_b2s_list(self):
+        # no_graphlet is a failed seed's answer (D3): compared by its code, not a runner failure
+        self.assertEqual(sorted(cg.RUNNER_ERRORS + ("no_graphlet",)), sorted(self.FORMAT_V23_B2))
+        self.assertIn("no_graphlet", cg.ERROR_CODE_ONLY)
+
+    def test_the_verifiers_gate_case(self):
+        """probe_n1_gate: graphlet_support (library-only, W5 phase B) where W1, W2 and W4 hit a runner-side code, W5
+        written by lane O's run step: the op is inconclusive and the gate blocks, for every code."""
+        import gate
+        import gate_policy
+        import graphlet_oracle as go
+        gf.install_graphlet_doc_stub()
+        saved = cg.graphlet_oracle
+        cg.graphlet_oracle = go
+        walks = {"id": "walks-len", "tool": "graphlet_walks", "paging": "all", "ways": ["W1", "W2", "W3", "W4"],
+                 "args": {"arm": "left", "rank": "length", "n": 1, "max_bytes": 2048}}
+        sup = {"id": "sup", "tool": "graphlet_support", "args": {"arm": "left", "walk": 0, "max_bytes": 2048},
+               "paging": "all", "ways": ["W1", "W2", "W4", "W5"],
+               "not_exposed": {"W3": "library-only (owner, DESIGN-v8 §2)"}}
+        try:
+            for code in ("timeout", "child_died", "non_finite", "exception"):
+                scen = gf.scenario(ops=[walks, sup])
+                run = gf.GRun(scenarios=[scen])
+                try:
+                    run.complete_scenario(ops=[("walks-len", "graphlet_walks", walks["args"], gf.walks_answer())])
+                    for w in ("W1", "W2", "W4"):
+                        run.record(w, scen["id"], "sup", "graphlet_support", sup["args"],
+                                   error={"code": code, "fields": {"timeout_s": 120}})
+                    go.write_run(run.dir, quiet=True, force=True)
+                    block = gate_policy.graphlet_block(run.manifest, {scen["id"]})
+                    pol = {"graphlets": block, "manifest": {"content_sha256": run.manifest["content_sha256"]}}
+                    probs, _ = gate.graphlet_problems(run.dir, pol, run.manifest, [])
+                    e = cg.compute(run.dir, run.manifest, write=False)["scenarios"][scen["id"]]["ops"]["sup"]
+                    self.assertEqual((e["outcome"], e["ways"]["W1"]), ("inconclusive", "runner_error"), code)
+                    self.assertIn("runner: %s" % code, e["reason"])
+                    self.assertTrue(any("op sup (graphlet_support) inconclusive" in p["detail"] for p in probs),
+                                    (code, probs))
+                finally:
+                    run.cleanup()
+        finally:
+            cg.graphlet_oracle = saved
+
+
 class CutRows(unittest.TestCase):
     """VC1: the cut-row rule on pairs with W3 is lane O's, on the fields a row names in _cut_fields only (the verifier's
     probes P1, P1b, P1c, P3 as negatives)."""

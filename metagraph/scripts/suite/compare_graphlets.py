@@ -116,9 +116,13 @@ ERROR_ENV_FIELDS = {"result_too_large": ("bytes",)}
 # codes compared without their fields: a failed seed's no_graphlet is the runner's on W1/W2/W4 and the service's on
 # W3 (FORMAT v2 B2), each with fields of its own
 ERROR_CODE_ONLY = ("no_graphlet",)
-# the runners' own failures (FORMAT v2 B2): the way did not run the call (no document, a refused document, an
-# exception, an unknown tool, a runaway paging loop, an assembly error): never compared, the op inconclusive
-RUNNER_ERRORS = ("no_document", "document_refused", "exception", "unknown_tool", "paging_runaway", "assembly_error")
+# the runners' own failures (FORMAT v2.3 B2): the way did not run the call (no document, a refused document, an
+# exception, a NaN or infinity in the answer, an unknown tool, a runaway paging loop, an assembly error, the local
+# runner's op timeout, a child process that died): never compared, the op inconclusive (VERIFY-C-R2 VR1). B2's
+# list also names no_graphlet: that one is a failed seed's answer (FORMAT v2 D3), compared by its code
+# (ERROR_CODE_ONLY). tests/test_compare_graphlets.py holds this constant to B2's list.
+RUNNER_ERRORS = ("no_document", "document_refused", "exception", "non_finite", "unknown_tool", "paging_runaway",
+                 "assembly_error", "timeout", "child_died")
 # per tool, answer keys whose value depends on where the way ran, left out of the comparison
 ENV_KEYS = {"graphlet_export": ("path", "bytes"), "graphlet_save": ("path", "bytes")}
 # the tools that make a file (FORMAT v2 B3: the record's `file` {name, bytes, sha256, raw}, the text kept at
