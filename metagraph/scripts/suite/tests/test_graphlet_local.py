@@ -7,6 +7,7 @@ the modules under test never do (the runner's way processes do, by their own sys
 import copy
 import glob
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -594,16 +595,25 @@ class EveryToolTests(unittest.TestCase):
             self.assertIsNone(re.search(r"g_[0-9a-f]{12}", fh.read()))
 
     def test_files_kept(self):
-        for name in ("exp-fasta", "exp-fasta-walks", "exp-gfa", "exp-json", "exp-json-walk", "exp-json-compare",
-                     "exp-mgt", "save"):
-            with self.subTest(name):
-                f = self.by_op[name]["file"]
+        """FORMAT v2 B3: {name, bytes, sha256, raw}; the text kept at raw with handles as symbols."""
+        names = {"exp-fasta": "<handle>.fa", "exp-fasta-walks": "G-switch.left.fa", "exp-gfa": "<handle>.gfa",
+                 "exp-json": "<handle>.json", "exp-json-walk": "walk.json", "exp-json-compare": "cmp.json",
+                 "exp-mgt": "<handle>.mgt", "save": "G-switch.saved.mgt"}
+        for op_id, name in names.items():
+            with self.subTest(op_id):
+                f = self.by_op[op_id]["file"]
+                self.assertEqual(set(f), {"name", "bytes", "sha256", "raw"})
+                self.assertEqual(f["name"], name)
+                self.assertTrue(f["raw"].startswith("raw/G-switch.%s.file." % op_id))
                 with gzip.open(os.path.join(self.out, "arms", "dl-lib", f["raw"]), "rb") as fh:
                     data = fh.read()
-                self.assertEqual(len(data), f["bytes"])
-                self.assertEqual(len(data), self.by_op[name]["answer"]["bytes"])
+                self.assertEqual(hashlib.sha256(data).hexdigest(), f["sha256"])
+                self.assertEqual(f["bytes"], self.by_op[op_id]["answer"]["bytes"])
+                self.assertIsNone(re.search(rb"g_[0-9a-f]{12}", data))
+                if op_id != "exp-json-walk":   # the one file here that names a handle: kept as its symbol
+                    self.assertEqual(len(data), f["bytes"])
         with gzip.open(os.path.join(self.out, "arms", "dl-lib", self.by_op["exp-json-walk"]["file"]["raw"])) as fh:
-            self.assertRegex(json.loads(fh.read().decode("utf-8"))["handle"], r"\Ag_[0-9a-f]{12}\Z")
+            self.assertEqual(json.loads(fh.read().decode("utf-8"))["handle"], "<handle>")
         with gzip.open(os.path.join(self.out, "arms", "dl-lib", self.by_op["exp-mgt"]["file"]["raw"])) as fh:
             mgt = fh.read().decode("utf-8")
         self.assertEqual(graphlet_doc.digests(mgt)["body_digest"], self.by_op["sum"]["doc"]["body_digest"])

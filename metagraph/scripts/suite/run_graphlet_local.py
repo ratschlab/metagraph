@@ -51,8 +51,8 @@ The raw pages keep everything as the library answered it.
 
 Files of a way's directory: graphlet_ops.jsonl (one record per op, FORMAT §3, plus `paging_complete` and, for
 graphlet_export / graphlet_save, `file`), graphlet_docs.jsonl (one line per document: its source, digests, load
-receipt or error), raw/<scenario>.<op>.<page>.json.gz (page 0 first) and raw/<scenario>.<op>.file.gz (an export's
-bytes), docs/<scenario>.mgt.gz (the document the way processed), run.json, child.log, work/ (the spool and the export
+receipt or error), raw/<scenario>.<op>.<page>.json.gz (page 0 first) and raw/<scenario>.<op>.file<.ext>.gz (an
+export's text, handles as symbols), docs/<scenario>.mgt.gz (the document the way processed), run.json, child.log, work/ (the spool and the export
 directory). An existing graphlet_ops.jsonl is never appended to: use another --out.
 """
 
@@ -599,19 +599,23 @@ class Way(object):
         return rec, view
 
     def keep_file(self, sid, op, answer):
-        """The file an export or save wrote: its bytes gzipped under raw/, its size, and the sha256 of its text with the
-        handles and directories as symbols (so that it compares across processes)."""
+        """FORMAT v2 B3: the file an export or save wrote -> {name, bytes, sha256, raw}. Its text is kept gzipped at
+        `raw` (relative to the way's directory, under raw/) with the handles and the way's directories written as
+        symbols, as everywhere in the record, so that W5 and the compare stage read the same content from every way
+        (byte for byte the file wherever it names no handle: all but json what=walk and a view's mgt); `bytes` is the
+        file's own size, `sha256` that of the kept text."""
         path = answer.get("path") if isinstance(answer, dict) else None
         if not isinstance(path, str) or not os.path.isfile(path):
             return {"missing": self.symbolise(path, sid) if isinstance(path, str) else None}
         with open(path, "rb") as fh:
             data = fh.read()
-        rel = "raw/%s.%s.file.gz" % (safe(sid), safe(op))
+        name = self.symbolise(os.path.basename(path), sid)
+        ext = os.path.splitext(name)[1]
+        rel = "raw/%s.%s.file%s.gz" % (safe(sid), safe(op), safe(ext) if ext else "")
+        text = self.symbolise(data.decode("utf-8", "surrogateescape"), sid).encode("utf-8", "surrogateescape")
         with gzip.open(os.path.join(self.dir, rel), "wb") as fh:
-            fh.write(data)
-        text = self.symbolise(data.decode("utf-8", "surrogateescape"), sid)
-        return {"bytes": len(data), "sha256": hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest(),
-                "raw": rel}
+            fh.write(text)
+        return {"name": name, "bytes": len(data), "sha256": hashlib.sha256(text).hexdigest(), "raw": rel}
 
 
 # ================================================================================================ the runner

@@ -4850,7 +4850,9 @@ Nothing here touches staging; every test is offline.
   `assembly_error`.
 - Records add `paging_complete` (FORMAT v2 A4, graphlet_paging.paging_complete: false when the last page still
   names a next one or the answer states complete false; null on a record without an answer) and, for
-  graphlet_export / graphlet_save, `file` {bytes, sha256 of the text with symbols, raw}; `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
+  graphlet_export / graphlet_save, `file` {name, bytes, sha256, raw} (FORMAT v2 B3: the file's text kept gzipped at
+  `raw`, relative to the way's directory, with handles and directories as symbols like the rest of the record;
+  `bytes` the file's own size, `sha256` the kept text's); `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
   exception (the library raised), unknown_tool, paging_runaway, assembly_error and the three document codes. A later
   op's selectors also see a listing's last next_cursor when its paging stopped early.
 
