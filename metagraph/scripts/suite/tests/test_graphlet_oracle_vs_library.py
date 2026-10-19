@@ -153,12 +153,14 @@ class OracleVsLibrary(unittest.TestCase):
         cls.exp = os.path.join(cls.tmp.name, "exports")
         os.makedirs(cls.exp)
         cls.tools = GraphletTools(GraphletStore(os.path.join(cls.tmp.name, "spool")), {}, export_dir=cls.exp)
-        cls.docs = {}       # name -> (handle, full answer or None, seed index, W1's document text)
+        cls.docs = {}       # name -> (handle, full answer or None, seed index, the engine's MGT body)
         cls.pairs = engine_pairs()
         for cell, i, g, f in cls.pairs:
+            # the library loads W1's document (its own standalone_text); W5 reads the engine's body (VO12), so that
+            # a rewrite the conversion made would show
             text = parser.standalone_text(g["results"][i]["graphlet"], g["results"][i], g)
             name = "%s#%d" % (cell, i)
-            cls.docs[name] = (cls._load(name, text), f, i, text)
+            cls.docs[name] = (cls._load(name, text), f, i, g["results"][i]["graphlet"])
         for n in ("cli_bubbles_r60", "cli_bubbles_r100", "cli_bubbles_steps150", "cli_quorum_tuned",
                   "cli_quorum_exhaustive"):
             # body-only CLI documents without a manifest: the library's own tests stamp an index_fp into H

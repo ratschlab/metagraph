@@ -597,14 +597,32 @@ def compare(record_w5: dict, answer: Any) -> dict:
 
 # ---------------------------------------------------------------------------------------------- shared derivations
 def twin_difference(full_answer: dict, mgt_text: str, seed_index: int = 0) -> Optional[str]:
-    """The DESIGN-v8 §2 twin pre-check: checks.graphlet_arms of the graphlet body against the full twin's arms
-    (status, segments: id, parents, from_bp, length_bp; paths: id, segments, length_bp, end_reasons, path_reason).
-    None when they describe one walk; else the first difference."""
+    """The DESIGN-v8 §2 twin pre-check: the graphlet body against the full twin: the seed (S validated_seed_id and
+    the number of seed labels), the label dictionary (L records: name, kind, column, seq_id), and per arm
+    (checks.graphlet_arms) status, segments (id, parents, from_bp, length_bp) and paths (id, segments, length_bp,
+    end_reasons, path_reason). None when they describe one walk; else the first difference."""
     res = full_answer["results"][seed_index] if isinstance(full_answer.get("results"), list) else full_answer
     try:
         arms = checks.graphlet_arms(mgt_text)
     except (checks.Missing, ValueError, KeyError, IndexError) as e:
         return "the MGT text does not read: %s" % e
+    # the seed and the permitted labels: a time-stopped derivation (SPEC §7.0 D3) can read another number of k-mers in
+    # the other execution and walk another label set with the same trie (VO11)
+    S = next((x.split(" ", 5) for x in mgt_text.split("\n") if x.startswith("S ")), None)
+    seed = res.get("seed") or {}
+    if S and len(S) > 4 and "validated_seed_id" in seed and S[1] != seed["validated_seed_id"]:
+        return "seed: validated_seed_id full %r, graphlet %r" % (seed["validated_seed_id"], S[1])
+    if S and len(S) > 4 and S[4].isdigit() and isinstance(seed.get("labels"), list) and \
+            res.get("label_mode") == "constrain" and int(S[4]) != len(seed["labels"]):
+        return "seed: %d seed labels in full, %s in the graphlet's S record" % (len(seed["labels"]), S[4])
+    try:
+        ld = checks.graphlet_label_dict(mgt_text)
+    except ValueError as e:
+        return "the L records do not read: %s" % e
+    fld = res.get("label_dict") or []
+    keys = ("name", "kind", "column", "seq_id")
+    if len(ld) != len(fld) or any(any(k in fe and fe[k] != ge.get(k) for k in keys) for ge, fe in zip(ld, fld)):
+        return "label_dict: %d labels in full, %d L records, or another label" % (len(fld), len(ld))
     full_arms = {s: a for s, a in (res.get("arms") or {}).items() if s in ARMS}
     if set(full_arms) != set(arms):
         return "arms: full %s, graphlet %s" % (sorted(full_arms), sorted(arms))
@@ -677,14 +695,15 @@ def normalise_full_result(result: dict) -> dict:
     return r
 
 
-_TIME_KNOBS = ("bounds.time_budget_ms",)
+_TIME_KNOBS = ("bounds.time_budget_ms", "attempt_id")   # attempt_id: an attempt's elapsed ms (SPEC §7.0)
 _TIME_RESOURCES = ("time", "attempt_deadline", "cancelled")
 
 
 def _time_measured(result: dict) -> List[str]:
-    """Pointers (relative to a full result) of the values a clock measured: a time limitation's observed, a time
-    resource stop's amounts and message. Two executions of one walk measure different times (SPEC §6.8: a stop by
-    time is not deterministic; §7.2 timing), so W5 checks none of them against its twin."""
+    """Pointers (relative to a full result) of the values a clock measured: a time or attempt limitation's observed,
+    a time resource stop's used, remaining and message (its requested and effective budget are settings, kept: SPEC
+    §7.0). Two executions of one walk measure different times (SPEC §6.8: a stop by time is not deterministic;
+    §7.2 timing), so W5 checks none of them against its twin."""
     out = []
     for j, e in enumerate(result.get("limitations") or []):
         if e.get("knob") in _TIME_KNOBS:
@@ -695,7 +714,7 @@ def _time_measured(result: dict) -> List[str]:
                 out.append("/arms/%s/limitations/%d/observed" % (_esc(s), j))
     rs = result.get("resource_stop")
     if isinstance(rs, dict) and rs.get("resource") in _TIME_RESOURCES:
-        out += ["/resource_stop/%s" % k for k in ("used", "remaining", "effective", "message") if k in rs]
+        out += ["/resource_stop/%s" % k for k in ("used", "remaining", "message") if k in rs]
     return out
 
 
