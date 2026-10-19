@@ -90,7 +90,7 @@ checked (VO7); refusals are expected errors with their code [L].
       ceiling_bytes, truncated/next_from/to of a cut slice, left-arm walk orientation with the seed
   graphlet_export: fasta records, ids and sequences [D §5 to_fasta, S §7.5.4]; gfa P count and the walks the paths
       spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37]; json what=walk chains (arm and
-      walks required, D §6); mgt body digest [S §7.5.2, FORMAT §3]; no bases: an expected error [S §7.1] | c/o:
+      walks required [L §2.13]); mgt body digest [S §7.5.2, FORMAT §3]; no bases: an expected error [S §7.1] | c/o:
       header tags, gfa S/L lines and gfa with arm, records of gfa/json/mgt, what=compare, fasta walks without arm
   graphlet_subtrie: view selectors, mode, arm, summary labels, per-arm complete_to_bp, scope, qualified [D §5
       subgraph] | c/o: the view's walk and segment counts; every tool on the view handle
@@ -1348,8 +1348,8 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     if fmt == "json" and what == "walk":
         if args.get("arm") is None or args.get("walks") is None:
             raise _Refused("what=walk without arm and walks", "bad_argument",
-                           "DESIGN §6: what=walk with arm and walks writes their chains; the code is library-defined "
-                           "(INVENTORY §2.13)")
+                           "library-defined: what=walk needs arm and walks, and the code (INVENTORY §2.13); DESIGN §6 "
+                           "only says what=walk writes the complete chains")
         side = d.arm(args.get("arm"), required=True)
         ids = _walk_ids(d, side, args.get("walks"))
         walks, absent = [], {}
