@@ -488,7 +488,9 @@ class EveryToolTests(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="graphlet-local-")
         cls.plan = every_tool_plan()
         cls.out = os.path.join(cls.tmp, "run")
-        cls.recs = run_offline(cls.out, cls.plan, ways="W1,W2", limits={"sequence_max_bytes": 1024},
+        # max_graphlet_mb: accepted, not applied (VL10)
+        cls.recs = run_offline(cls.out, cls.plan, ways="W1,W2", limits={"sequence_max_bytes": 1024,
+                                                                        "max_graphlet_mb": 8},
                                hashseed="W1=11,W2=12345")
         cls.by_op = dict((r["op"], r) for r in cls.recs["W1"])
 
@@ -643,6 +645,7 @@ class EveryToolTests(unittest.TestCase):
             self.assertEqual(set(r["library"]), {"commit", "python", "hashseed", "work_model", "limits"})
             self.assertEqual(r["library"]["hashseed"], 11)
             self.assertEqual(r["library"]["limits"]["sequence_max_bytes"], 1024)
+            self.assertEqual(set(r["library"]["limits"]), {"max_bytes", "sequence_max_bytes", "local_limits"})
             self.assertTrue(r["library"]["commit"])
             self.assertEqual((r["answer"] is None), bool(r["error"] or r["selector_error"]))
             if r["error"]:
@@ -673,6 +676,7 @@ class EveryToolTests(unittest.TestCase):
         self.assertEqual(runs[0]["child"]["env_keys"].count("PYTHONHASHSEED"), 1)
         self.assertFalse([k for k in runs[0]["child"]["env_keys"] if k.startswith("PYTHON") and k != "PYTHONHASHSEED"])
         self.assertEqual(runs[0]["state"], "done")
+        self.assertEqual(runs[0]["limits_not_applied"]["max_graphlet_mb"]["value"], 8)
         for way in ("W1", "W2"):
             files = sorted(os.listdir(os.path.join(self.out, "arms", rgl.WAY_DIRS[way], "raw")))
             self.assertEqual(len(files), len(os.listdir(os.path.join(self.out, "arms", "dl-lib", "raw"))))

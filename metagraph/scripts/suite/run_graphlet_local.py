@@ -25,8 +25,10 @@ enters as W1's does, any other (.mgt, .mgt.gz, a bare server body too) as W4's; 
 
 Every document enters its way the same way: written to the way's spool and loaded by the library's graphlet_load (the
 load path of a standalone file, the one the service names for its links). The way's GraphletTools is configured from
---limits (default max_bytes 2048, sequence_max_bytes 16384, local_limits null, max_graphlet_mb 1e6: DESIGN §3), with
-a fixed cursor secret, and the limits are recorded with every call.
+--limits (default max_bytes 2048, sequence_max_bytes 16384, local_limits null: DESIGN §3), with a fixed MAC key for
+its cursors, and the limits are recorded with every call (library.limits). A limits file may carry max_graphlet_mb
+(the capabilities' graphlet limits block does): it is accepted and noted in run.json as not applied, being a
+traverse_fetch argument with no meaning for a document graphlet_load reads (VERIFY-L VL10).
 
 Process isolation: one child process per way, `python -s -B [-P] run_graphlet_local.py --child`, its environment
 scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus the way's PYTHONHASHSEED (distinct per way, recorded), its sys.path the
@@ -93,8 +95,11 @@ DEFAULT_HASHSEEDS = {"W1": 1001, "W2": 2002, "W4": 4004, "drift": 5005}
 # FORMAT v2 C1: the MCP's exported document of a scenario, which W4 and drift read; each way writes the document it
 # processed to arms/<way dir>/docs/<scenario>.mgt.gz
 DEFAULT_MGT_TEMPLATE = "arms/mcp/docs/{id}.mgt.gz"
-DEFAULT_LIMITS = {"max_bytes": 2048, "sequence_max_bytes": 16384, "local_limits": None, "max_graphlet_mb": 1e6}
-# fixed, so that a cursor (raw pages only) is the same string in every process of one commit
+DEFAULT_LIMITS = {"max_bytes": 2048, "sequence_max_bytes": 16384, "local_limits": None}
+# keys a limits file may carry that configure nothing here: noted in run.json, never in library.limits
+LIMITS_NOT_APPLIED = {"max_graphlet_mb": "a traverse_fetch argument (spool above it): no meaning for graphlet_load"}
+# the cursors' MAC key, fixed (only the key: a cursor also holds the handle, random per process, so cursors still
+# differ between processes; they are never compared, VERIFY-L VL14)
 CURSOR_SECRET = "metagraph-suite-v8-local-cursors"
 ENV_KEEP = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE")
 # the child's interpreter flags (-P added from 3.11): no user site, no bytecode written into the library root
@@ -294,15 +299,19 @@ def python_version(python):
 
 
 def read_limits(path):
-    """DEFAULT_LIMITS updated by the limits file (an unknown key is refused)."""
-    limits = dict(DEFAULT_LIMITS)
+    """(DEFAULT_LIMITS updated by the limits file, {key: (value, why)} of the keys it carries that configure nothing
+    here: LIMITS_NOT_APPLIED). Any other unknown key is refused."""
+    limits, ignored = dict(DEFAULT_LIMITS), {}
     if path:
         given = sc.read_json(path)
-        if not isinstance(given, dict) or set(given) - set(DEFAULT_LIMITS):
+        if not isinstance(given, dict) or set(given) - set(DEFAULT_LIMITS) - set(LIMITS_NOT_APPLIED):
             raise SystemExit("run_graphlet_local: %s is not a limits object (keys %s)"
-                             % (path, ", ".join(sorted(DEFAULT_LIMITS))))
+                             % (path, ", ".join(sorted(set(DEFAULT_LIMITS) | set(LIMITS_NOT_APPLIED)))))
+        for key in LIMITS_NOT_APPLIED:
+            if key in given:
+                ignored[key] = {"value": given.pop(key), "why": LIMITS_NOT_APPLIED[key]}
         limits.update(given)
-    return limits
+    return limits, ignored
 
 
 def read_text(path):
@@ -511,7 +520,7 @@ class Way(object):
                 "python", "implementation", "executable", "hashseed", "hash_randomization", "ignore_environment",
                 "hash_probe", "hash_probe_launch")),
             "child": {"argv": self.child.cmd, "env_keys": sorted(self.child.env), "restarts": self.restarts},
-            "limits": self.r.limits, "counts": self.counts, "started_utc": iso(self.started),
+            "limits": self.r.limits, "limits_not_applied": self.r.limits_not_applied, "counts": self.counts, "started_utc": iso(self.started),
             "updated_utc": iso(time.time()), "runner": os.path.basename(__file__)})
 
     def close(self, state="done"):
@@ -816,7 +825,7 @@ class Way(object):
 class Runner(object):
     def __init__(self, args):
         self.args = args
-        self.limits = read_limits(args.limits)
+        self.limits, self.limits_not_applied = read_limits(args.limits)
         self.python = args.python or sys.executable
         self.op_timeout = args.op_timeout
         self.ways = args.ways
@@ -1087,7 +1096,8 @@ def parse_args(argv):
     ap.add_argument("--library-commit", help="the commit of --library-root when it records none")
     ap.add_argument("--drift-library-root", help="the branch head's library (the drift way)")
     ap.add_argument("--drift-library-commit")
-    ap.add_argument("--limits", help="JSON {max_bytes, sequence_max_bytes, local_limits, max_graphlet_mb}")
+    ap.add_argument("--limits", help="JSON {max_bytes, sequence_max_bytes, local_limits} (max_graphlet_mb accepted, "
+                                     "not applied)")
     ap.add_argument("--repeat", type=int, default=0, help="the direct arms' repeat whose answers W1/W2 read (0)")
     ap.add_argument("--mgt-template", default=DEFAULT_MGT_TEMPLATE,
                     help="W4's and drift's document relative to --run-dir, with {id} (and {repeat}) (%s)"

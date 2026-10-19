@@ -4874,7 +4874,10 @@ Nothing here touches staging; every test is offline.
   names a next one or the answer states complete false; null on a record without an answer) and, for
   graphlet_export / graphlet_save, `file` {name, bytes, sha256, raw} (FORMAT v2 B3: the file's text kept gzipped at
   `raw`, relative to the way's directory, with handles and directories as symbols like the rest of the record;
-  `bytes` the file's own size, `sha256` the kept text's); `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
+  `bytes` the file's own size, `sha256` the kept text's); `library` adds `limits`
+  (max_bytes, sequence_max_bytes, local_limits: the GraphletTools configuration; a limits file's max_graphlet_mb is
+  noted in run.json as not applied, VERIFY-L VL10); `error.fields` leaves out `message` and `hint`. Runner-side
+  error codes:
   exception (the library raised, or its answer is no JSON), non_finite, unknown_tool, paging_runaway, assembly_error,
   timeout, child_died and the three document codes. A plan
   names a cursor by `{"cursor_of": "<op id>"}` (graphlet_select, VERIFY-L VL5): the last next_cursor of that op's
