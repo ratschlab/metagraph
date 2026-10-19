@@ -17,8 +17,9 @@ One line per scenario with a `graphlet` block, each check an outcome of the suit
                   both state one), each path's segments, length_bp and end_reasons; otherwise fail, naming the first
                   difference;
   strategy        the MCP's echo (traverse_status.overrides: the strategy the service sent) equals
-                  request.strategy, and the twin's strategy is request.strategy with output.detail "full"; otherwise
-                  fail, naming the drift (the path and both values);
+                  request.strategy, and the twin's strategy is request.strategy with output.detail "full" (bounds.
+                  max_memory_mb may be left out: TWIN_FREE_KEY, F-D4); otherwise fail, naming the drift (the path and
+                  both values);
   preconditions   each fact of graphlet.preconditions on W1's document (PRECONDITION_FACTS); otherwise
                   precondition_failed, naming the fact and the value seen;
   library_commit  every W3 call's library.commit (as the service reported it) is the deployed one (what the MCP
@@ -80,6 +81,11 @@ CHECKS = ("body", "envelope", "twin", "strategy", "preconditions", "library_comm
 # compares them (VERIFY-C-R2 VR1), and a W3 record of one may take its invocation's library_commit (VR3)
 RUNNER_ERRORS = ("no_document", "document_refused", "exception", "non_finite", "unknown_tool", "paging_runaway",
                  "assembly_error", "timeout", "child_died")
+# The one strategy key the full twin may leave out (the coordinator's decision on F-D4, 2026-10-19): SPEC-core §7.1
+# R21 (4) keeps a merge's arrival order in `full` detail under a memory budget, while `graphlet` detail shows its
+# majority parent first, so a twin under the presets' max_memory_mb walks other first parents than the graphlet; the
+# twin is sent without it (area_g.TWIN_WITHOUT). Any other difference, or another value of it, is a drift.
+TWIN_FREE_KEY = ("bounds", "max_memory_mb")
 # the checks whose failure is a determinism finding (DESIGN-v8 §2, §3)
 DETERMINISM_CHECKS = ("body", "envelope", "twin")
 # a pre-check's outcomes (the suite's vocabulary; not_exposed: library_commit without a W3 call)
@@ -574,6 +580,9 @@ def strategy_check(run_dir, scenario):
     if isinstance(twin, dict):
         want = copy.deepcopy(strategy)
         want.setdefault("output", {})["detail"] = "full"
+        group, key = TWIN_FREE_KEY
+        if key not in (twin.get(group) or {}) and isinstance(want.get(group), dict):
+            want[group].pop(key, None)   # the one key the twin may leave out (TWIN_FREE_KEY)
         d = first_difference(twin, want)
         if d:
             drifts.append({"what": "twin", "path": _dotted(d[0]), "twin": compact(d[1]), "request": compact(d[2])})

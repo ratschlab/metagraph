@@ -255,6 +255,35 @@ class Strategy(PrecheckBase):
         self.assertEqual(rec["drifts"][0]["what"], "twin")
 
 
+class TwinWithoutMemoryBudget(PrecheckBase):
+    """F-D4 (the coordinator, 2026-10-19): the full twin is sent without bounds.max_memory_mb (SPEC-core §7.1
+    R21 (4): full detail under a memory budget keeps a merge's arrival order); exactly that key may be missing."""
+
+    def scen(self, twin_bounds):
+        scen = copy.deepcopy(self.run_.scenarios[0])
+        scen["request"]["strategy"]["bounds"]["max_memory_mb"] = 512
+        scen["graphlet"]["twin"]["strategy"]["bounds"] = twin_bounds
+        return scen
+
+    def test_only_max_memory_mb_may_be_left_out(self):
+        self.run_.complete_scenario(echo=False)
+        full = copy.deepcopy(gf.strategy("full")["bounds"])
+        rec = gp.strategy_check(self.run_.dir, self.scen(dict(full)))          # left out: no drift
+        self.assertEqual(rec["outcome"], "inconclusive", rec)                    # (no echo recorded: inconclusive)
+        self.assertNotIn("drift", rec["detail"])
+        rec = gp.strategy_check(self.run_.dir, self.scen(dict(full, max_memory_mb=512)))   # stated alike: no drift
+        self.assertNotIn("drift", rec["detail"])
+        rec = gp.strategy_check(self.run_.dir, self.scen(dict(full, max_memory_mb=256)))   # another value: a drift
+        self.assertEqual(rec["outcome"], "fail")
+        self.assertEqual(rec["drifts"][0]["path"], "bounds.max_memory_mb")
+        other = dict(full)
+        del other["max_work_units"]
+        rec = gp.strategy_check(self.run_.dir, self.scen(dict(other, max_memory_mb=512)))   # another key: a drift
+        self.assertEqual(rec["outcome"], "fail")
+        self.assertEqual(rec["drifts"][0]["path"], "bounds.max_work_units")
+        self.assertEqual(gp.TWIN_FREE_KEY, ("bounds", "max_memory_mb"))
+
+
 class Preconditions(PrecheckBase):
     def scen(self, pre):
         scen = copy.deepcopy(self.run_.scenarios[0])

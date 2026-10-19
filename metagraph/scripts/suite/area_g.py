@@ -5,7 +5,8 @@ A scenario of area G is a `POST /traverse` request with `output.detail: graphlet
 EXACT merged strategy the service sends for its MCP mapping (traverse_fetch with a preset and overrides: the preset's
 strategy, the overrides deep-merged into it, output {detail: graphlet, timing: true}; DESIGN-v8 §3, the v7 echo of
 T-graphlet-0001 in traverse_status.overrides), plus a `graphlet` block (FORMAT §1):
-  twin             {strategy}: the request's strategy with output.detail "full" (direct-local only: W5's input);
+  twin             {strategy}: the request's strategy with output.detail "full" and without bounds.max_memory_mb
+                   (TWIN_WITHOUT: F-D4; direct-local only, W5's input);
   preconditions    structural facts frozen from the rehearsal (graphlet_precheck.PRECONDITION_FACTS; a failed seed
                    states {"no_graphlet": true}, FORMAT v2 D3); empty before the rehearsal;
   library_commit   the library commit the manifest is frozen against (a build parameter; FORMAT v2 D1);
@@ -396,6 +397,23 @@ def _long_window(ctx: Any, rng: Any, rec: Any, L: int, margin: int, tries: int =
             continue
         return ctx.truth_at(rec, s, L)
     raise ValueError("no unique %d bp window found in %s" % (L, rec.key))
+
+
+# The full twin's one difference from the request's strategy (the coordinator's decision on F-D4, 2026-10-19):
+# SPEC-core §7.1 R21 (4) keeps a merge's arrival order in `full` detail under a memory budget, while `graphlet` detail
+# shows its majority parent first, so with the presets' max_memory_mb the twin's first-parent paths differ from the
+# graphlet's wherever a merge's majority arrived second (the rehearsal of 2026-10-19: 9 candidates). The twin is
+# direct-local only and feeds W5; the budget does not bind at these sizes. graphlet_precheck allows exactly this key.
+TWIN_WITHOUT = ("bounds", "max_memory_mb")
+
+
+def twin_strategy(strategy: dict) -> dict:
+    """The full twin's strategy: |strategy| with output.detail "full" and without bounds.max_memory_mb
+    (TWIN_WITHOUT)."""
+    twin = copy.deepcopy(strategy)
+    twin.setdefault("output", {})["detail"] = "full"
+    (twin.get(TWIN_WITHOUT[0]) or {}).pop(TWIN_WITHOUT[1], None)
+    return twin
 
 
 def candidate_strategy(c: dict) -> dict:
@@ -1021,8 +1039,7 @@ def g_scenario(sid: str, title: str, c: dict, corpus: dict, library_commit: Opti
             raise SystemExit("%s: the rehearsal's strategy echo differs from the merged strategy of %s: rebuild the "
                              "candidate from the echo (rehearsal report)" % (sid, c["cid"]))
     request = {"seeds": [copy.deepcopy(c["seed"])], "strategy": strategy}
-    twin = copy.deepcopy(strategy)
-    twin["output"]["detail"] = "full"
+    twin = twin_strategy(strategy)
     failed = bool(c["expected"].get("failed"))
     if failed:
         pre: dict = {"no_graphlet": True}
@@ -1246,10 +1263,9 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
             problems.append("%s: output.detail is not graphlet" % sid)
         if len(req.get("seeds") or []) != 1:
             problems.append("%s: not one seed" % sid)
-        want_twin = copy.deepcopy(st)
-        want_twin["output"]["detail"] = "full"
-        if (g.get("twin") or {}).get("strategy") != want_twin:
-            problems.append("%s: the twin's strategy is not the request's with detail full" % sid)
+        if (g.get("twin") or {}).get("strategy") != twin_strategy(st):
+            problems.append("%s: the twin's strategy is not the request's with detail full and without "
+                            "bounds.max_memory_mb" % sid)
         mcp = s.get("mcp") or {}
         if "tool" in mcp:
             a = mcp["arguments"]

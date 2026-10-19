@@ -37,8 +37,7 @@ class Twin(unittest.TestCase):
     @staticmethod
     def g(sid, route="POST /traverse", repeat=2):
         strategy = area_g.mcp_merge("walk", {"bounds": {"max_extension_bp": 100}})
-        twin = copy.deepcopy(strategy)
-        twin["output"]["detail"] = "full"
+        twin = area_g.twin_strategy(strategy)
         return {"id": sid, "area": "G", "title": sid, "route": route,
                 "request": {"seeds": [{"sequence": "ACGT" * 10}], "strategy": strategy},
                 "mcp": {"not_implemented": "test"}, "truth": {}, "expect": [{"check": "status", "args": {"http": 200}}],
@@ -68,6 +67,7 @@ class Twin(unittest.TestCase):
         with gzip.open(os.path.join(out, "raw", "G-x-0001.direct-local.twin.json.gz"), "rt") as fh:
             raw = json.load(fh)
         self.assertEqual(raw["request"]["body"]["strategy"]["output"]["detail"], "full")
+        self.assertNotIn("max_memory_mb", raw["request"]["body"]["strategy"]["bounds"])   # F-D4
         self.assertEqual(raw["request"]["body"]["seeds"], [{"sequence": "ACGT" * 10}])
         run = sc.read_json(os.path.join(out, "run.json"))
         self.assertEqual(run["twins"]["G-x-0001"]["file"], "docs/G-x-0001.full.json.gz")

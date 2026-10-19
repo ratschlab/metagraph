@@ -125,7 +125,9 @@ class Scenarios(unittest.TestCase):
             self.assertEqual(len(s["request"]["seeds"]), 1)
             twin = copy.deepcopy(st)
             twin["output"]["detail"] = "full"
+            del twin["bounds"]["max_memory_mb"]     # F-D4: the twin without the memory budget
             self.assertEqual(s["graphlet"]["twin"]["strategy"], twin)
+            self.assertEqual(st["bounds"]["max_memory_mb"], 512)
             self.assertEqual(s["mcp"]["tool"], "traverse_fetch")
             self.assertEqual(s["graphlet"]["ways"]["default"], area_g.ALL_WAYS)
             self.assertEqual(s["area"], "G")
