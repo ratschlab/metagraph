@@ -124,6 +124,13 @@ class GraphletDocTests(unittest.TestCase):
         self.assertEqual(digest_of(dict(resp, timing={"elapsed_ms": 12.5}, usage={"attempt_id": "x", "per_seed": [
             {"index": 0, "work": 3}, {"index": 1, "work": 4}]})), base)
         self.assertEqual(digest_of(resp, dict(r, timing={"serialize_ms": 1.0})), base)
+        # E1: the annotation's lookahead counters differ between two engine runs of one request
+        annotation = dict(r.get("annotation") or {}, direct_reads=7, keys_mapped=12345)
+        self.assertEqual(digest_of(resp, dict(r, annotation=annotation)), base)
+        self.assertNotEqual(digest_of(resp, dict(r, annotation=dict(annotation, rows_requested=1))), base)
+        strategy_ann = json.loads(json.dumps(resp["strategy"]))
+        strategy_ann["annotation"] = {"batch_kmers": 7}
+        self.assertNotEqual(digest_of(dict(resp, strategy=strategy_ann)), base)
         # everything else is compared: the strategy (its output.timing too), the capabilities, the summary
         strategy = json.loads(json.dumps(resp["strategy"]))
         strategy.setdefault("output", {})["timing"] = not strategy["output"].get("timing", False)
