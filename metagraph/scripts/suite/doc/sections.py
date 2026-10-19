@@ -5482,13 +5482,15 @@ def gate_problems(ctx):
     if ident_text:
         out += "{\\small\\color{black!60}note: %s}\\par\n" % ident_text
     for n in [x for x in (gate.get("notes") or []) if x not in ident_notes][:6]:
-        # a long path and a full commit sha may break (the v7 baseline's identity note named the 40-hex commit and
-        # ran 22 pt past the margin); no local path (as the record)
-        text = esc_wrap(latex.public_paths(str(n)), 300)
-        text = re.sub(r"[0-9a-f]{32,}", lambda m: "\\allowbreak{}".join(
-            m.group(0)[i:i + 8] for i in range(0, len(m.group(0)), 8)), text)
-        out += "{\\small\\color{black!60}note: %s}\\par\n" % text
+        out += gate_note_tex(n)
     return out + "\n"
+
+
+def gate_note_tex(note):
+    """One gate note as appendix F prints it: a long path and a full commit sha may break (the v7 baseline's identity
+    note named the 40-hex commit and ran 22 pt past the margin), no local path (as the record), the text cut at 300
+    characters with its end kept."""
+    return "{\\small\\color{black!60}note: %s}\\par\n" % _break_hex(esc_wrap(latex.public_paths(str(note)), 300))
 
 
 def mcp_limits(ctx):

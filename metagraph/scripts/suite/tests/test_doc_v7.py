@@ -126,10 +126,20 @@ class V7RealRunTest(unittest.TestCase):
         self.assertIn("kept the two off the MCP access path): via MCP both pass.", filled)
 
     def test_gate_note_breaks(self):
-        import inspect
-        src = inspect.getsource(sections.gate_problems)
-        self.assertIn('re.sub(r"[0-9a-f]{32,}"', src)
-        self.assertIn("esc_wrap(latex.public_paths(str(n)), 300)", src)
+        # V6: the behaviour, not the source: a note with a 40-hex commit breaks every 8 hex digits, a local path is
+        # made public, the LaTeX special characters are escaped
+        sha = "26a52cb63efd95752a109b5e09b1163bfffe60ca"
+        tex = sections.gate_note_tex("the MCP arm recorded the service commit %s on 1369 invocation(s) (%s)" % (
+            sha, os.path.join(SUITE, "runs", "R", "arms", "mcp", "mcp_runs.jsonl")))
+        self.assertTrue(SUITE.startswith("/"))
+        self.assertIn("26a52cb6\\allowbreak{}3efd9575\\allowbreak{}2a109b5e\\allowbreak{}09b1163b\\allowbreak{}"
+                      "fffe60ca", tex)
+        self.assertNotIn(sha, tex)
+        self.assertNotIn(SUITE, tex.replace("\\allowbreak{}", ""))
+        self.assertIn("mcp\\_runs", tex.replace("\\allowbreak{}", ""))
+        self.assertTrue(tex.startswith("{\\small\\color{black!60}note: "))
+        self.assertEqual(sections._break_hex("abc 0123456789abcdef0123456789abcdef"),
+                         "abc 01234567\\allowbreak{}89abcdef\\allowbreak{}01234567\\allowbreak{}89abcdef")
 
 
 class MemoryEpisodeTest(unittest.TestCase):
