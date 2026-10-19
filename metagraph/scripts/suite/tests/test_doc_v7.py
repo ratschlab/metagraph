@@ -125,64 +125,148 @@ class V7RealRunTest(unittest.TestCase):
 
 
 class MemoryEpisodeTest(unittest.TestCase):
-    """The v7 baseline's host memory episode (Timing 6) beside its time-budget issues: a window at the container's
-    memory limit is read from samples.jsonl; the time-budget issues are grouped as budget_stress, a stated stop by
-    the test's own budget, inside the window, just before it (time between the service and the host); none for a
-    run whose memory never reached its limit."""
+    """The host's memory episodes (Timing 6), as the reviews of the v7 document require (RV2, RV8, V1, V2, V4, V6):
+    each contiguous run of samples at the container's memory limit is an episode (two print as two); an execution is
+    placed by its [start, end] at millisecond precision before any tag (a budget_stress 503 inside the window is named
+    as the one that did not pass); an execution running across a drop at the window's end is told apart, with the
+    test's next execution; the MCP executions the host answered late are found by rule (host call against the host's
+    own search, the container at 90 % of its limit or more); the service's log is printed with its times, each tied
+    to the host call it falls in; every 503 and inconclusive execution is placed in or out of the window; nothing
+    without an episode."""
 
-    def _run(self, peak=128):
-        gib = float(1 << 30)
-        samples = []
-        for i, minute in enumerate(range(0, 60)):
-            mem = (peak if 20 <= minute <= 40 else 80) * gib
-            samples.append({"container": "eng", "mem_bytes": mem, "mem_limit_bytes": 128 * gib,
-                            "blk_read": 1e9 * minute, "t_utc": "2026-10-19T02:%02d:00.000Z" % minute})
-        def line(sid, arm, rep, minute, server, backend=None, outcome="pass", tl="", wall=None):
-            l = {"scenario": sid, "arm": arm, "repeat": rep, "outcome": outcome, "http": 200, "time_limited": tl,
-                 "started_utc": "2026-10-19T02:%02d:00.000Z" % minute, "server": {"elapsed_ms": server},
+    GIB = float(1 << 30)
+
+    def _samples(self, two=False, peak=128):
+        out = []
+        t = 0
+        while t <= 3600:
+            hh, mm, ss_ = 2, t // 60, t % 60
+            minute = t / 60.0
+            if 20 * 60 <= t <= 30 * 60:
+                mem = peak
+            elif 30 * 60 < t:
+                mem = 51 + 0.01 * ((t - 30 * 60) / 2.0)
+                if two and 45 * 60 <= t <= 46 * 60:
+                    mem = peak
+            elif 5 <= minute < 20:
+                mem = 120
+            else:
+                mem = 80
+            out.append({"container": "eng", "mem_bytes": min(mem, 128) * self.GIB, "mem_limit_bytes": 128 * self.GIB,
+                        "blk_read": 1e9 * t, "t_utc": "2026-10-19T%02d:%02d:%02d.000Z" % (hh, mm, ss_)})
+            t += 2
+        return out
+
+    def _run(self, two=False, peak=128):
+        def line(sid, arm, rep, start, end, server=None, outcome="pass", http=200, tl="", wall=None, phases=None,
+                 error=None):
+            l = {"scenario": sid, "arm": arm, "repeat": rep, "outcome": outcome, "http": http, "time_limited": tl,
+                 "started_utc": "2026-10-19T%s" % start, "ended_utc": "2026-10-19T%s" % end,
                  "wall_ms": wall if wall is not None else server}
-            if backend is not None:
-                l["mcp_phases"] = {"backend_ms": backend}
+            if server is not None:
+                l["server"] = {"elapsed_ms": server}
+            if phases:
+                l["mcp_phases"] = phases
+            if error:
+                l["error"] = error
             return l
-        rows = [line("M-1", "direct-local", 0, 25, 96000.0), line("M-1", "direct-local", 1, 50, 500.0),
-                line("X-1", "mcp", 1, 10, 34.0, backend=66000.0, wall=70000.0),
-                line("R-1", "direct-local", 0, 5, 300.0, tl="resolve stopped by time"),
-                line("W-1", "direct-local", 0, 30, 60000.0)]
-        scen = {"M-1": {"tags": []}, "X-1": {"tags": []}, "R-1": {"tags": []}, "W-1": {"tags": ["budget_stress"]}}
-        return _Stub(samples=samples, rows=rows, order=list(scen), scenario=scen.get)
+        rows = [line("M-1", "direct-local", 0, "02:25:00.000Z", "02:26:36.000Z", 96000.0),
+                line("M-1", "direct-local", 1, "02:50:00.000Z", "02:50:00.500Z", 500.0),
+                line("W-1", "direct-local", 0, "02:27:00.000Z", "02:28:50.800Z", None, outcome="inconclusive",
+                     http=503, wall=110800.0, tl="a 503 deadline", error={"code": "deadline"}),
+                line("B-1", "mcp", 0, "02:29:59.500Z", "02:31:20.000Z", 80000.0, wall=80500.0),
+                line("B-1", "direct-local", 0, "02:32:00.000Z", "02:32:00.600Z", 600.0),
+                line("X-1", "mcp", 1, "02:10:00.000Z", "02:11:10.000Z", 34.0, wall=70000.0,
+                     phases={"backend_ms": 66000.0, "backend_pattern_ms": 34.0, "submit_ms": 200.0, "queue_ms": 200.0}),
+                line("R-1", "direct-local", 0, "02:03:00.000Z", "02:03:00.300Z", 300.0, tl="resolve stopped by time"),
+                line("O-1", "direct-local", 0, "02:52:00.000Z", "02:52:01.000Z", 900.0, outcome="inconclusive")]
+        scen = {"M-1": {"tags": [], "area": "M"}, "W-1": {"tags": ["budget_stress"], "area": "P"},
+                "B-1": {"tags": [], "area": "M"}, "X-1": {"tags": [], "area": "X"}, "R-1": {"tags": [], "area": "R"},
+                "O-1": {"tags": [], "area": "C"}}
+        return _Stub(samples=self._samples(two, peak), rows=rows, order=list(scen), scenario=scen.get,
+                     run={"server_instance": "abc"}, previous=None)
+
+    def _text(self, run):
+        return sections.memory_episode_text(_Stub(run=run, units=_Stub(chapters=["R", "P", "X", "M", "C"])))
 
     def test_episode_and_text(self):
-        ep = sections.memory_episode(self._run())
-        self.assertEqual((ep["start"], ep["end"], ep["n"]), ("02:20:00", "02:40:00", 21))
-        self.assertEqual(sorted(ep["inside"]), ["M-1"])
-        self.assertEqual(sorted(ep["before"]), ["X-1"])
-        self.assertEqual(ep["stops"], ["R-1"])
-        self.assertEqual(ep["stress"], ["W-1"])
-        text = sections.memory_episode_text(_Stub(run=self._run()))
-        self.assertIn("stood at its memory limit of 128~GiB from 02:20:00 to 02:40:00 UTC", text)
-        self.assertIn("M-1 (96~s server time on 1 execution; outside the window 0.5~s)", text)
-        self.assertIn("likely the same episode, not established", text)
-        self.assertIn("not a finding of the service", text)
-        # RV8: Observation / What ran then / Limits, every memory figure in GiB (the disk read too)
+        run = self._run()
+        eps = sections.memory_episodes(run)
+        self.assertEqual(len(eps), 1)
+        ep = eps[0]
+        self.assertEqual((ep["start"], ep["end"], ep["n"]), ("02:20:00", "02:30:00", 301))
+        pos = dict(((l["scenario"], l["arm"], l["repeat"]), p) for l, p in ep["rows"])
+        self.assertEqual(pos, {("M-1", "direct-local", 0): "inside", ("W-1", "direct-local", 0): "inside",
+                               ("B-1", "mcp", 0): "across"})
+        self.assertEqual(round(ep["drop"]["to_gib"]), 51)
+        self.assertTrue(ep["drop"]["no_restart"])
+        text = self._text(run)
+        self.assertIn("stood at its memory limit of 128~GiB from 02:20:00 to 02:30:00 UTC", text)
         for head in ("\\emph{Observation.}", "\\emph{What ran then.}", "\\emph{Limits.}"):
             self.assertIn(head, text)
-        self.assertLess(text.index("Observation."), text.index("What ran then."))
-        self.assertLess(text.index("What ran then."), text.index("Limits."))
-        self.assertIn("from disk during the window", text)
-        self.assertNotIn("GB from disk", text.replace("GiB", ""))
+        self.assertLess(text.index("not a finding of the service"), text.index("Observation."))
+        self.assertIn("At the end of the window its memory fell from 128 to 51~GiB within 2~s (cached index pages "
+                      "released, no restart: the request in flight completed)", text)
+        # V1: the budget_stress 503 inside the window is placed there and named as the one that did not pass
+        self.assertIn("3 executions ran in the window (chapters P and M; one ran past its end): 2 passed, and one did "
+                      "not: W-1 direct-local r0 (a 503 deadline at 110.8~s wall, inconclusive)", text)
+        self.assertNotIn("Every one of these executions passed", text)
+        self.assertIn("W-1 (budget\\_stress; direct-local r0: the 503 deadline above)", text)
+        self.assertIn("M-1 (96~s server time on 1 execution; outside the window 0.5~s)", text)
+        # V2: the execution that started in the window's last second and ran across the fall
+        self.assertIn("B-1 (mcp r0 started 0.5~s before the window's end and ran across the fall to 51~GiB: 80~s "
+                      "server time; its next execution, direct-local r0 at 02:32:00 UTC, took 0.6~s)", text)
+        # V4: the late host answer by rule, and the stated stop computed from its outcome
+        self.assertIn("X-1 mcp r1 at 02:10:00 UTC, the container at 93~\\% of its limit", text)
+        self.assertIn("1 ended by a time budget they state (R-1), as their tests intend or allow: each of these "
+                      "executions passed", text)
+        # RV2: every 503 and inconclusive placed against the window
+        self.assertIn("inside, W-1 direct-local r0 (above); outside, and not attributed to it: O-1 (direct-local r0: "
+                      "inconclusive; 02:52:00 to 02:52:01 UTC", text)
+        self.assertNotIn("likely the same episode", text)
+
+    def test_two_episodes(self):
+        eps = sections.memory_episodes(self._run(two=True))
+        self.assertEqual([(e["start"], e["end"]) for e in eps], [("02:20:00", "02:30:00"), ("02:45:00", "02:46:00")])
+        text = self._text(self._run(two=True))
+        self.assertIn("In a second window, the engine's container (eng) stood at its memory limit of 128~GiB from "
+                      "02:45:00 to 02:46:00 UTC", text)
+        self.assertIn("In the window of 02:20:00 to 02:30:00, 3 executions ran in the window", text)
 
     def test_service_log_note(self):
         run = self._run()
-        run.identity = {"service_commit": "abc", "service_log": {"source": "a lane's CIRCUIT_X", "text": "two slow answers"}}
-        text = sections.memory_episode_text(_Stub(run=run))
-        # RV8: the log in plain words; its source (a file, an internal state) only in evidence.json
-        self.assertIn("The service's own log recorded two slow answers (checked separately; not part of the run's "
-                      "files)", text)
+        run.identity = {"service_commit": "abc", "service_log": {"source": "a lane's CIRCUIT_X",
+                                                                 "text": "a slow answer from the host",
+                                                                 "times": ["2026-10-19T02:10:05Z"]}}
+        text = self._text(run)
+        # RV8, V4: the log in plain words with its time, tied to the host call it falls in; its source (a file, an
+        # internal state) only in evidence.json
+        self.assertIn("The service's own log, checked separately and not part of the run's files, recorded a slow "
+                      "answer from the host: at 02:10:05 UTC, during X-1 mcp r1's call to the host.", text)
         self.assertNotIn("a lane", text)
         self.assertNotIn("CIRCUIT", text)
-        self.assertNotIn("likely the same episode", text)
         ev = sections._identity_evidence(_Stub(service_identity={"recorded": False}, mcp_run={}), run.identity)
         self.assertEqual(ev["service_log"]["source"], "a lane's CIRCUIT_X")
+        self.assertEqual(ev["service_log"]["times"], ["2026-10-19T02:10:05Z"])
+
+    def test_service_log_time_outside_the_run_refused(self):
+        import tempfile
+        import reader
+        run = self._run()
+        stub = _Stub(rows=run.rows, run={"release": None}, mcp_run={}, service_identity=None, manifest={},
+                     run_id=lambda: "R")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "identity.json")
+            for times, ok in ((["2026-10-19T02:10:05Z"], True), (["2026-10-19T05:10:05Z"], False)):
+                with open(path, "w") as f:
+                    json.dump({"run": "R", "service_commit": "abc1234",
+                               "service_log": {"text": "x", "times": times, "source": "s"}}, f)
+                if ok:
+                    self.assertEqual(reader.Run._load_identity(stub, path)["service_commit"], "abc1234")
+                else:
+                    with self.assertRaises(reader.RunError) as cm:
+                        reader.Run._load_identity(stub, path)
+                    self.assertIn("lies outside the run", str(cm.exception))
 
     def test_identity_evidence(self):
         rec = {"recorded": True, "service_commits": {"abc": 2}, "service_commit": "abc", "identity_changed": False,
@@ -196,8 +280,10 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertNotIn("input", ev6)
 
     def test_no_episode(self):
-        self.assertIsNone(sections.memory_episode(self._run(peak=100)))
-        self.assertEqual(sections.memory_episode_text(_Stub(run=self._run(peak=100))), "")
+        # a run whose memory never reached its limit (every v5 / v6 run): nothing printed, nothing pointed to
+        self.assertEqual(sections.memory_episodes(self._run(peak=100)), [])
+        self.assertEqual(self._text(self._run(peak=100)), "")
+        self.assertEqual(sections.memory_episodes(_Stub(samples=[], rows=[], run={})), [])
 
 
 class SincePreviousTest(unittest.TestCase):

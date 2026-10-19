@@ -2502,8 +2502,18 @@ def since_previous(ctx):
                 _PREV_OUTCOME_WORDS.get(b, str(b)),
                 "; ".join("%s %s" % (sid, ", ".join(v)) for sid, v in by_sid.items())))
         n = sum(len(v) for v in changes.values())
-        items.append("%d execution%s changed outcome, from the previous run's to this one's: %s" % (
-            n, "" if n == 1 else "s", "; ".join(parts)))
+        text = "%d execution%s changed outcome, from the previous run's to this one's: %s" % (
+            n, "" if n == 1 else "s", "; ".join(parts))
+        # the executions that became inconclusive, placed against the host's memory episodes (Timing 6)
+        became = [clines[k] for (a, b), keys in changes.items() if b == "inconclusive" for k in keys]
+        eps = memory_episodes(run)
+        if became and eps:
+            inside = [l for l in became if any(l is x for ep in eps for x, _ in ep["rows"])]
+            text += "; of the %d that became inconclusive, %s ran while the container stood at its memory limit " \
+                    "(Timing 6)%s" % (len(became), facts._join(_exec_name(l) for l in inside) if inside else "none",
+                                      ", the others outside that window" if inside and len(inside) < len(became)
+                                      else "")
+        items.append(text)
     else:
         items.append("no execution changed outcome")
     n_inc = sum(1 for l in run.rows if l.get("outcome") == "inconclusive")
@@ -3309,149 +3319,453 @@ def attention_table(ctx):
 
 MEMORY_LIMIT_SHARE = 0.98     # a sample at 98 % of the container's memory limit or more is "at its limit"
 MEMORY_EPISODE_MIN_SAMPLES = 10
-MEMORY_BEFORE_S = 15 * 60     # the executions just before the episode read beside it
+MEMORY_GAP_S = 60.0           # two samples at the limit further apart than this (the sampler paused) end an episode
+MEMORY_DROP_SHARE = 0.25      # a fall of a quarter of the limit or more from one sample to the next ends an episode
+                              # as a drop, reported as such
+MEMORY_LATE_MS = 30000.0      # an MCP host call longer than the host's own search by more than this ...
+MEMORY_LATE_SHARE = 0.90      # ... while the container was at 90 % of its limit or more: "the host answered late"
+MEMORY_LIST_MAX = 12
 
 
 def _utc_s(text):
-    try:
-        import calendar
-        import time as _time
-        return calendar.timegm(_time.strptime(str(text)[:19], "%Y-%m-%dT%H:%M:%S"))
-    except (TypeError, ValueError):
-        return None
+    """Epoch seconds of an ISO UTC time, its fraction kept (reader.sc_time: the classification is at millisecond
+    precision; the v7 baseline's M-planted-0013 started 0.8 s before the window's last sample, the same second)."""
+    return reader.sc_time(text)
+
+
+def _clock(t):
+    import time as _time
+    return _time.strftime("%H:%M:%S", _time.gmtime(t)) if t is not None else "–"
+
+
+def _gib(b):
+    return b / float(1 << 30)
+
+
+def _mem_samples(run):
+    """[(t, sample)] of the samples with a memory and a limit, in time order."""
+    out = []
+    for s in getattr(run, "samples", None) or []:
+        if not isinstance(s, dict) or cells._num(s.get("mem_bytes")) is None or not cells._num(s.get("mem_limit_bytes")):
+            continue
+        t = _utc_s(s.get("t_utc"))
+        if t is not None:
+            out.append((t, s))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _mem_at(ss, t):
+    """The sample at or last before |t| (the first sample when |t| precedes them all), None without samples."""
+    best = None
+    for st, s in ss:
+        if st > t:
+            break
+        best = s
+    return best if best is not None else (ss[0][1] if ss else None)
+
+
+def _mem_peak(ss, a, b):
+    """The highest memory (bytes) over [a, b], the sample at |a| included."""
+    vals = [s["mem_bytes"] for t, s in ss if a <= t <= b]
+    first = _mem_at(ss, a)
+    if first is not None:
+        vals.append(first["mem_bytes"])
+    return max(vals) if vals else None
+
+
+def _span(line):
+    s = _utc_s(line.get("started_utc"))
+    e = _utc_s(line.get("ended_utc"))
+    if s is None:
+        return None, None
+    return s, (e if e is not None and e >= s else s)
+
+
+def _late_host(run, ss):
+    """The MCP executions in which the host answered the service late: the service's host call (mcp_phases
+    backend_ms) longer than the host's own search (backend_pattern_ms) by more than MEMORY_LATE_MS, the container at
+    MEMORY_LATE_SHARE of its limit or more at the execution's start; each (line, share, host call start, end)."""
+    out = []
+    for l in run.rows:
+        p = l.get("mcp_phases") if isinstance(l.get("mcp_phases"), dict) else {}
+        b, h = cells._num(p.get("backend_ms")), cells._num(p.get("backend_pattern_ms"))
+        s, _ = _span(l)
+        if b is None or h is None or s is None or b - h <= MEMORY_LATE_MS:
+            continue
+        m = _mem_at(ss, s)
+        share = m["mem_bytes"] / float(m["mem_limit_bytes"]) if m else None
+        if share is None or share < MEMORY_LATE_SHARE:
+            continue
+        call = s + ((cells._num(p.get("submit_ms")) or 0) + (cells._num(p.get("queue_ms")) or 0)) / 1000.0
+        out.append((l, share, call, call + b / 1000.0))
+    return out
+
+
+def memory_episodes(run):
+    """The windows in which the engine's container stood at its memory limit (samples.jsonl: mem_bytes at
+    MEMORY_LIMIT_SHARE of mem_limit_bytes or more), each a contiguous run of such samples (a sample below the share,
+    or a gap of more than MEMORY_GAP_S, ends it) of at least MEMORY_EPISODE_MIN_SAMPLES samples; [] when none (every
+    run before the v7 baseline's 02:41-03:05Z at 128 GiB). Each: its start and end (seconds, fraction kept), samples,
+    limit and peak, the disk read meanwhile (GiB), a drop at its end (a fall of MEMORY_DROP_SHARE of the limit or more
+    to the next sample) with the evidence against a restart, the memory ten minutes after, and every execution whose
+    [start, end] overlaps it, placed: 'into' (started before it), 'inside', 'across' (ran past its end)."""
+    ss = _mem_samples(run)
+    runs_, cur = [], []
+    for i, (t, s) in enumerate(ss):
+        high = s["mem_bytes"] >= MEMORY_LIMIT_SHARE * s["mem_limit_bytes"]
+        if high and cur and t - cur[-1][1] > MEMORY_GAP_S:
+            runs_.append(cur)
+            cur = []
+        if high:
+            cur.append((i, t, s))
+        elif cur:
+            runs_.append(cur)
+            cur = []
+    if cur:
+        runs_.append(cur)
+    instance = (getattr(run, "run", None) or {}).get("server_instance")
+    out = []
+    for high in runs_:
+        if len(high) < MEMORY_EPISODE_MIN_SAMPLES:
+            continue
+        (i0, t0, s0), (i1, t1, s1) = high[0], high[-1]
+        limit = s0["mem_limit_bytes"]
+        ep = {"t0": t0, "t1": t1, "start": _clock(t0), "end": _clock(t1), "n": len(high),
+              "container": s0.get("container") or "the engine's container", "limit_gib": _gib(limit),
+              "peak_gib": _gib(max(s["mem_bytes"] for _, _, s in high)), "drop": None, "after_gib": None}
+        blk = [cells._num(s.get("blk_read")) for _, _, s in high if cells._num(s.get("blk_read")) is not None]
+        ep["read_gib"] = _gib(blk[-1] - blk[0]) if len(blk) > 1 and blk[-1] >= blk[0] else None
+        after = [s for t, s in ss if t >= t1 + 600]
+        ep["after_gib"] = _gib(after[0]["mem_bytes"]) if after else None
+        rows = []
+        for l in run.rows:
+            a, b = _span(l)
+            if a is None or a > t1 or b < t0:
+                continue
+            rows.append((l, "into" if a < t0 else "across" if b > t1 else "inside"))
+        ep["rows"] = rows
+        if i1 + 1 < len(ss):
+            tn, sn = ss[i1 + 1]
+            if s1["mem_bytes"] - sn["mem_bytes"] >= MEMORY_DROP_SHARE * limit:
+                b1, bn = cells._num(s1.get("blk_read")), cells._num(sn.get("blk_read"))
+                flight = [l for l, _ in rows if _span(l)[0] <= t1 and _span(l)[1] >= tn]
+                # no restart: one server instance for the whole run, the disk-read counter kept counting, and every
+                # request in flight across the fall completed with an answer the checks judged
+                ep["drop"] = {"from_gib": _gib(s1["mem_bytes"]), "to_gib": _gib(sn["mem_bytes"]), "s": tn - t1,
+                              "at": tn, "in_flight": flight,
+                              "no_restart": bool(isinstance(instance, str) and instance and b1 is not None
+                                                 and bn is not None and bn >= b1 and flight
+                                                 and all(l.get("outcome") not in ("error",) and l.get("http") == 200
+                                                         for l in flight))}
+        out.append(ep)
+    return out
 
 
 def memory_episode(run):
-    """The window in which the engine's container stood at its memory limit (samples.jsonl: mem_bytes at
-    MEMORY_LIMIT_SHARE of mem_limit_bytes or more, at least MEMORY_EPISODE_MIN_SAMPLES samples; the v7 baseline's
-    02:41-03:05Z at 128 GiB), with the memory at the run's start and ten minutes after, the disk read meanwhile (GiB), and
-    the time-budget issues of the run read against it; None when no such window (every earlier run)."""
-    samples = [s for s in (getattr(run, "samples", None) or []) if isinstance(s, dict)
-               and cells._num(s.get("mem_bytes")) is not None and cells._num(s.get("mem_limit_bytes"))]
-    high = [s for s in samples if s["mem_bytes"] >= MEMORY_LIMIT_SHARE * s["mem_limit_bytes"]]
-    if len(high) < MEMORY_EPISODE_MIN_SAMPLES:
-        return None
-    t0, t1 = _utc_s(high[0].get("t_utc")), _utc_s(high[-1].get("t_utc"))
-    if t0 is None or t1 is None:
-        return None
-    inside = [s for s in samples if t0 <= (_utc_s(s.get("t_utc")) or 0) <= t1]
-    after = [s for s in samples if (_utc_s(s.get("t_utc")) or 0) >= t1 + 600]
-    blk = [cells._num(s.get("blk_read")) for s in inside if cells._num(s.get("blk_read")) is not None]
-    ep = {"start": high[0]["t_utc"][11:19], "end": high[-1]["t_utc"][11:19], "n": len(high),
-          "container": high[0].get("container") or "the engine's container",
-          "limit_gib": high[0]["mem_limit_bytes"] / float(1 << 30),
-          "peak_gib": max(s["mem_bytes"] for s in samples) / float(1 << 30),
-          "first_gib": samples[0]["mem_bytes"] / float(1 << 30),
-          "after_gib": after[0]["mem_bytes"] / float(1 << 30) if after else None,
-          # docker stats' block reads are decimal bytes (the sampler parses "63GB" as 63e9); printed in GiB as every
-          # other memory figure of the document (RV8)
-          "read_gib": (blk[-1] - blk[0]) / float(1 << 30) if len(blk) > 1 else None,
-          "inside": {}, "before": {}, "stops": [], "stress": [], "other": []}
-    tags = dict((sid, (run.scenario(sid).get("tags") or [])) for sid in run.order)
-    seen = {}
-    for l in run.rows:
-        if not facts.time_budget_issue(l):
-            continue
-        sid = l.get("scenario")
-        t = _utc_s(l.get("started_utc"))
-        server = cells._num((l.get("server") or {}).get("elapsed_ms")) if isinstance(l.get("server"), dict) else None
-        backend = cells._num((l.get("mcp_phases") or {}).get("backend_ms")) if isinstance(l.get("mcp_phases"), dict) \
-            else None
-        if "budget_stress" in (tags.get(sid) or []):
-            kind = "stress"
-        elif t is not None and t0 <= t <= t1:
-            kind = "inside"
-        elif (t is not None and t0 - MEMORY_BEFORE_S <= t < t0 and server is not None and backend is not None
-              and backend - server > 50000):
-            kind = "before"
-        elif str(l.get("time_limited") or ""):
-            kind = "stops"
-        else:
-            kind = "other"
-        seen.setdefault(sid, set()).add(kind)
-        if kind in ("inside", "before"):
-            ep[kind].setdefault(sid, []).append((l, server, backend))
-    for sid, kinds in seen.items():
-        if "stress" in kinds:
-            ep["stress"].append(sid)
-        elif not kinds & {"inside", "before"}:
-            ep["stops" if kinds == {"stops"} else "other"].append(sid)
-    ep["n_tests"] = len(seen)
-    ep["outcomes"] = sorted(set(l.get("outcome") for k in ("inside", "before") for v in ep[k].values()
-                                for l, _, _ in v))
-    return ep
+    """The first memory episode (memory_episodes), None without one."""
+    eps = memory_episodes(run)
+    return eps[0] if eps else None
 
 
 def _secs(ms):
     return fmt_t(ms) if ms is not None else "–"
 
 
-def memory_episode_text(ctx):
-    """Timing 6's reading of the host's memory episode beside the run's time-budget issues (the v7 baseline: the
-    coordinator's addendum of 2026-10-19), as observed; nothing without an episode."""
-    ep = memory_episode(ctx.run)
-    if ep is None:
+def _server_ms(l):
+    return cells._num((l.get("server") or {}).get("elapsed_ms")) if isinstance(l.get("server"), dict) else None
+
+
+def _range_text(vals, unit_word="server time"):
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return None
+    lo, hi = _secs(min(vals)), _secs(max(vals))
+    return ("%s %s" % (lo, unit_word)) if lo == hi else ("%s to %s %s" % (lo, hi, unit_word))
+
+
+def _exec_name(l):
+    return "%s %s r%s" % (l.get("scenario"), l.get("arm"), l.get("repeat"))
+
+
+def _stop_word(l):
+    """How an execution that did not pass ended, in a few words: a 503 deadline (with its wall), the host's 503
+    deadline the service relayed, else its outcome."""
+    outcome = blocks.OUTCOME_WORD.get(l.get("outcome"), str(l.get("outcome"))) if hasattr(blocks, "OUTCOME_WORD") \
+        else str(l.get("outcome"))
+    outcome = re.sub(r"\\[a-z]+\{([^}]*)\}", r"\1", outcome)
+    if l.get("http") == 503:
+        w = cells._num(l.get("wall_ms"))
+        return "a 503 deadline at %s s wall, %s" % (fmt_n(w / 1000.0, 1) if w is not None else "–", outcome)
+    if "503 deadline" in str(l.get("time_limited") or ""):
+        return "the host's 503 deadline relayed by the service, %s" % (
+            "service-side by design" if l.get("outcome") == "service_by_design" else outcome)
+    return outcome
+
+
+def _kind_words(l, many):
+    """How a group of executions ended, plural when |many|: 503 deadlines (their outcome), the host's 503 deadline
+    the service relayed (service-side by design), else the outcome."""
+    if l.get("http") == 503:
+        return "%s, %s" % ("503 deadlines" if many else "a 503 deadline", _stop_word(l).rsplit(", ", 1)[-1])
+    if "503 deadline" in str(l.get("time_limited") or ""):
+        return "the host's 503 deadline relayed by the service, %s" % _stop_word(l).rsplit(", ", 1)[-1]
+    return _stop_word(l)
+
+
+def _arms_repeats(ls):
+    """'direct-local r0, r1 and direct-remote r0' of executions."""
+    by_arm = {}
+    for l in ls:
+        by_arm.setdefault(l.get("arm"), []).append("r%s" % l.get("repeat"))
+    return facts._join("%s %s" % (arm, ", ".join(reps)) for arm, reps in by_arm.items())
+
+
+def _count_word(n):
+    return "one" if n == 1 else "%d" % n
+
+
+def _not_passed(l):
+    """The executions the memory reading places against the windows (RV2): every inconclusive one and every 503
+    deadline, the host's relayed by the service included."""
+    return (l.get("outcome") == "inconclusive" or l.get("http") == 503
+            or "503 deadline" in str(l.get("time_limited") or ""))
+
+
+def _previous_servers(ctx, sid, arms=None):
+    """The server times of a test in the previous edition's run (make_doc --previous), on |arms| when given."""
+    prev = getattr(ctx.run, "previous", None)
+    if prev is None:
+        return None
+    return [_server_ms(l) for l in prev.rows if l.get("scenario") == sid and (arms is None or l.get("arm") in arms)
+            and _server_ms(l) is not None]
+
+
+def _previous_outcome(ctx, l):
+    prev = getattr(ctx.run, "previous", None)
+    if prev is None:
+        return None
+    p = prev.lines().get((l.get("scenario"), l.get("arm"), l.get("repeat")))
+    return (p or {}).get("outcome")
+
+
+def _service_log_text(ctx, named):
+    """The service's own log as the identity input states it (make_doc --identity: `service_log` {text, times,
+    source}; reader._load_identity refuses times outside the run): the text with its times, each time tied to the
+    host call of a named MCP execution it falls in (|named|: [(line, call start, call end)]); '' without one."""
+    ident = getattr(ctx.run, "identity", None)
+    log = ident.get("service_log") if isinstance(ident, dict) and isinstance(ident.get("service_log"), dict) else None
+    if not log or not log.get("text"):
         return ""
-    inside = []
-    for sid, v in ep["inside"].items():
-        servers = [s for _, s, _ in v if s is not None]
-        lo, hi = (_secs(min(servers)), _secs(max(servers))) if servers else ("–", "–")
-        rng = lo if lo == hi else "%s to %s" % (lo, hi)
-        # the same test's executions outside the window, for scale (the run's own evidence)
-        out_of = [cells._num((l.get("server") or {}).get("elapsed_ms")) for l in ctx.run.rows
-                  if l.get("scenario") == sid and isinstance(l.get("server"), dict)
-                  and not any(l is x for x, _, _ in v)]
-        out_of = [x for x in out_of if x is not None]
-        inside.append("%s (%s server time on %d execution%s%s)" % (
-            sid, rng, len(v), "" if len(v) == 1 else "s",
-            ("; outside the window %s" % _secs(max(out_of))) if out_of else ""))
-    before = []
-    for sid, v in ep["before"].items():
-        for l, server, backend in v:
-            before.append("%s %s r%s (a host search of %s, %s from the service's call to the host's answer)" % (
-                sid, l.get("arm"), l.get("repeat"), _secs(server), _secs(backend)))
-    # laid out as the other timing sections, Observation / What ran then / Limits (the reader review of the v7
-    # document, RV8); every memory figure in GiB
-    observation = (
-        "*Observation.* The engine's container (%s) stood at its memory limit of %s GiB from %s to %s UTC (%d samples "
-        "at %d %% of it or more, peak %s GiB). It started the run at %s GiB%s%s." % (
-            ep["container"], fmt_n(ep["limit_gib"]), ep["start"], ep["end"], ep["n"], int(MEMORY_LIMIT_SHARE * 100),
-            fmt_n(ep["peak_gib"], 1), fmt_n(ep["first_gib"]),
-            (" and was at %s GiB ten minutes after the window" % fmt_n(ep["after_gib"], 1))
-            if ep["after_gib"] is not None else "",
-            ("; it read %s GiB from disk during the window" % fmt_n(ep["read_gib"])) if ep["read_gib"] else ""))
-    ran = "*What ran then.* Of the %d tests with a time-budget issue (I.1)" % ep["n_tests"]
-    if inside:
-        ran += ", %d ran inside the window: %s" % (len(inside), "; ".join(inside))
-    else:
-        ran += ", none ran inside the window"
-    if before:
-        ran += ". Just before it, with the memory rising: %s" % "; ".join(before)
-        # an observation of the service's own log, which the run does not record, from the identity input
-        # (make_doc --identity: `service_log` {source, text}, the text in plain words; its source is evidence.json's)
-        ident = getattr(ctx.run, "identity", None)
-        log = ident.get("service_log") if isinstance(ident, dict) and isinstance(ident.get("service_log"), dict) \
-            else None
-        if log and log.get("text"):
-            ran += (". The service's own log recorded %s (checked separately; not part of the run's files)" %
-                    str(log["text"]).rstrip("."))
+    times = [t for t in (_utc_s(x) for x in (log.get("times") or [])) if t is not None]
+    parts = []
+    for t in times:
+        hit = [l for l, a, b in named if a <= t <= b]
+        parts.append("at %s UTC%s" % (_clock(t), (", during %s's call to the host" % _exec_name(hit[0])) if hit else ""))
+    return ("The service's own log, checked separately and not part of the run's files, recorded %s%s." % (
+        str(log["text"]).rstrip("."), (": " + "; ".join(parts)) if parts else ""))
+
+
+def memory_episode_text(ctx):
+    """Timing 6's reading of the host's memory (the coordinator's addendum and the reviews of the v7 document: RV2,
+    RV8, V1, V2, V4): led by what it is (an operational note about the host), then the samples (each episode, a drop
+    at its end), what ran then (every execution in an episode with its outcomes, the time-budget tests among them,
+    the MCP executions the host answered late, the service's log, the other time-budget tests), the run's 503
+    deadlines and inconclusive executions placed against the episodes, and the limits; nothing without an episode."""
+    run = ctx.run
+    eps = memory_episodes(run)
+    if not eps:
+        return ""
+    ss = _mem_samples(run)
+    several = len(eps) > 1
+    obs = []
+    for ep in eps:
+        text = ("the engine's container (%s) stood at its memory limit of %s GiB from %s to %s UTC (%d samples at %d %% "
+                "of it or more, peak %s GiB)%s" % (
+                    ep["container"], fmt_n(ep["limit_gib"]), ep["start"], ep["end"], ep["n"],
+                    int(MEMORY_LIMIT_SHARE * 100), fmt_n(ep["peak_gib"], 1),
+                    ("; it read %s GiB from disk meanwhile" % fmt_n(ep["read_gib"])) if ep["read_gib"] else ""))
+        d = ep["drop"]
+        if d:
+            text += (". At the end of the window its memory fell from %s to %s GiB within %s s%s" % (
+                fmt_n(d["from_gib"]), fmt_n(d["to_gib"]), fmt_n(d["s"]),
+                " (cached index pages released, no restart: the request in flight completed)" if d["no_restart"]
+                else " (whether the container restarted is not established)"))
+        if ep["after_gib"] is not None:
+            text += "; it was at %s GiB ten minutes after the window" % fmt_n(ep["after_gib"], 1)
+        obs.append(text)
+    first = _gib(ss[0][1]["mem_bytes"]) if ss else None
+    observation = "*Observation.* %s.%s" % (". In a second window, ".join(o[0].upper() + o[1:] if i == 0 else o
+                                                                         for i, o in enumerate(obs)),
+                                           (" It started the run at %s GiB." % fmt_n(first)) if first else "")
+    tags = dict((sid, (run.scenario(sid).get("tags") or [])) for sid in run.order)
+    tb_rows = [l for l in run.rows if facts.time_budget_issue(l)]
+    tb_tests = []
+    for l in tb_rows:
+        if l.get("scenario") not in tb_tests:
+            tb_tests.append(l.get("scenario"))
+    late = _late_host(run, ss)
+    named = [(l, a, b) for l, _, a, b in late]
+    ran, late_par, rest_par, place_par = [], [], [], []
+    window_tests = []
+    for ep in eps:
+        rows = ep["rows"]
+        areas = sorted(set(str(run.scenario(l.get("scenario")).get("area") or l.get("area") or "?") for l, _ in rows),
+                       key=lambda x: (ctx.units.chapters.index(x) if x in ctx.units.chapters else 99, x))
+        bad = [l for l, _ in rows if l.get("outcome") != "pass"]
+        lead = "In the window of %s to %s, " % (ep["start"], ep["end"]) if several else ""
+        text = "%s%d execution%s ran in the window (chapter%s %s)" % (
+            lead, len(rows), "" if len(rows) == 1 else "s", "" if len(areas) == 1 else "s", facts._join(areas))
+        into = [l for l, pos in rows if pos == "into"]
+        across = [l for l, pos in rows if pos == "across"]
+        if into or across:
+            text = text[:-1] + "; %s)" % " and ".join(x for x in (
+                ("%s started before it" % _count_word(len(into))) if into else "",
+                ("%s ran past its end" % _count_word(len(across))) if across else "") if x)
+        if not bad:
+            text += ": every one passed"
         else:
-            ran += ": likely the same episode, not established"
+            items = []
+            for l in bad[:MEMORY_LIST_MAX]:
+                prev = _previous_outcome(ctx, l)
+                items.append("%s (%s%s)" % (_exec_name(l), _stop_word(l), "; it passed in the previous edition's run"
+                                            if prev == "pass" else ""))
+            text += ": %d passed, and %s did not: %s" % (
+                len(rows) - len(bad), "%d" % len(bad) if len(bad) > 1 else "one",
+                "; ".join(items) + ("; … %d more" % (len(bad) - MEMORY_LIST_MAX) if len(bad) > MEMORY_LIST_MAX else ""))
+        ran.append(text + ".")
+        # the time-budget tests with an execution in the window, placed by time before any tag (V1)
+        tests = []
+        for l, _ in rows:
+            sid = l.get("scenario")
+            if sid in tb_tests and sid not in tests and sid not in window_tests:
+                tests.append(sid)
+        chapters = list(getattr(ctx.units, "chapters", None) or [])
+        tests.sort(key=lambda sid: (chapters.index(run.scenario(sid).get("area"))
+                                    if run.scenario(sid).get("area") in chapters else 99, sid))
+        window_tests += tests
+        if tests:
+            parts = []
+            for sid in tests:
+                mine = [(l, pos) for l, pos in rows if l.get("scenario") == sid]
+                ls = [l for l, _ in mine]
+                within = [l for l, pos in mine if pos != "across"]
+                passed = [l for l in within if l.get("outcome") == "pass"]
+                bits = []
+                if "budget_stress" in tags.get(sid, []):
+                    bits.append("budget_stress")
+                served = _range_text([_server_ms(l) for l in passed])
+                if served:
+                    bits.append("%s on %d execution%s" % (served, len(passed), "" if len(passed) == 1 else "s"))
+                for l in within:
+                    if l.get("outcome") != "pass":
+                        bits.append("%s r%s: %s" % (l.get("arm"), l.get("repeat"), "the 503 deadline above"
+                                                    if l.get("http") == 503 else "named above"))
+                for l, pos in mine:
+                    if pos != "across":
+                        continue
+                    a = _span(l)[0]
+                    txt = "%s r%s started %s s before the window's end and ran across %s" % (
+                        l.get("arm"), l.get("repeat"), fmt_n(ep["t1"] - a, 1),
+                        ("the fall to %s GiB" % fmt_n(ep["drop"]["to_gib"])) if ep["drop"] else "its end")
+                    if l.get("outcome") == "pass" and _server_ms(l) is not None:
+                        txt += ": %s server time" % _secs(_server_ms(l))
+                    later = sorted((x for x in run.rows if x.get("scenario") == sid and _span(x)[0] is not None
+                                    and _span(x)[0] > a), key=lambda x: _span(x)[0])
+                    if later and _server_ms(later[0]) is not None:
+                        txt += "; its next execution, %s r%s at %s UTC, took %s" % (
+                            later[0].get("arm"), later[0].get("repeat"), _clock(_span(later[0])[0]),
+                            _secs(_server_ms(later[0])))
+                    bits.append(txt)
+                outside = [_server_ms(l) for l in run.rows if l.get("scenario") == sid and not any(l is x for x in ls)]
+                o_text = _range_text(outside)
+                if o_text and not any(pos == "across" for _, pos in mine):
+                    bits.append("outside the window %s" % o_text.replace(" server time", ""))
+                prev = _previous_servers(ctx, sid, set(l.get("arm") for l in ls))
+                p_text = _range_text(prev or [])
+                if p_text:
+                    bits.append("in the previous edition's run %s" % p_text.replace(" server time", ""))
+                parts.append("%s (%s)" % (sid, "; ".join(bits)))
+            ran.append("Of the %d tests with a time-budget issue (I.1), %d had an execution in %s: %s." % (
+                len(tb_tests), len(tests), "this window" if several else "the window", "; ".join(parts)))
+    if late:
+        items = []
+        for l, share, a, b in late:
+            p = l.get("mcp_phases") or {}
+            items.append("%s at %s UTC, the container at %d %% of its limit (a host search of %s, %s from the "
+                         "service's call to the host's answer)" % (
+                             _exec_name(l), _clock(_span(l)[0]), int(share * 100),
+                             _secs(cells._num(p.get("backend_pattern_ms"))), _secs(cells._num(p.get("backend_ms")))))
+        late_par.append("The host answered the service late (its call to the host longer than the host's own search by "
+                   "more than %s s, with the container at %d %% of its memory limit or more) in %s: %s." % (
+                       fmt_n(MEMORY_LATE_MS / 1000.0), int(MEMORY_LATE_SHARE * 100),
+                       "one MCP execution" if len(late) == 1 else "%d MCP executions" % len(late), "; ".join(items)))
+    log = _service_log_text(ctx, named)
+    if log:
+        late_par.append(log)
+    late_tests = []
+    for l, _, _, _ in late:
+        sid = l.get("scenario")
+        if sid in tb_tests and sid not in window_tests and sid not in late_tests:
+            late_tests.append(sid)
+    rest_ids = [sid for sid in tb_tests if sid not in window_tests and sid not in late_tests]
+    stress = [sid for sid in rest_ids if "budget_stress" in tags.get(sid, [])]
+    stops, other = [], []
+    for sid in rest_ids:
+        if sid in stress:
+            continue
+        ls = [l for l in tb_rows if l.get("scenario") == sid]
+        (stops if all(str(l.get("time_limited") or "") for l in ls) else other).append(sid)
     rest = []
-    if ep["stress"]:
-        rest.append("%d are tagged budget_stress" % len(ep["stress"]))
-    if ep["stops"]:
-        rest.append("%d ended by a time budget they state, as their tests intend or allow (%s)" % (
-            len(ep["stops"]), facts.ids_ranges(ep["stops"])))
-    if ep["other"]:
-        rest.append("%d otherwise (%s)" % (len(ep["other"]), facts.ids_ranges(ep["other"])))
+    if stress:
+        rest.append("%d budget_stress test%s ran outside the window%s" % (
+            len(stress), "" if len(stress) == 1 else "s", "s" if several else ""))
+    if stops:
+        ls = [l for l in tb_rows if l.get("scenario") in stops]
+        rest.append("%d ended by a time budget they state (%s)%s" % (
+            len(stops), facts.ids_ranges(stops), ", as their tests intend or allow: each of these executions passed"
+            if all(l.get("outcome") == "pass" for l in ls) else ": %s" % ", ".join(sorted(set(
+                str(l.get("outcome")) for l in ls)))))
+    if other:
+        rest.append("%d otherwise (%s)" % (len(other), facts.ids_ranges(other)))
     if rest:
-        ran += ". Of the other %d, %s" % (ep["n_tests"] - len(set(ep["inside"]) | set(ep["before"])), "; ".join(rest))
-    ran += ". %s" % ("Every one of these executions passed." if ep["outcomes"] == ["pass"] else
-                     "Their outcomes: %s." % ", ".join(ep["outcomes"]))
-    limits = ("*Limits.* The run does not isolate the cause: the container's memory is an operational note about the "
-              "host, not a finding of the service.")
-    return "\\parhead{The host's memory}\n" + paragraphs([observation, ran, limits])
+        rest_par.append("Of the other %d tests with a time-budget issue, %s." % (len(rest_ids), "; ".join(rest)))
+    # every 503 deadline and inconclusive execution placed against the windows (RV2)
+    np_rows = [l for l in run.rows if _not_passed(l)]
+    if np_rows:
+        def in_ep(l):
+            return any(l is x for ep in eps for x, _ in ep["rows"])
+        inside = [l for l in np_rows if in_ep(l)]
+        outside = [l for l in np_rows if not in_ep(l)]
+        text = "The run's 503 deadlines and inconclusive executions, placed against the window%s: " % (
+            "s" if several else "")
+        text += ("inside, %s (above)" % facts._join(_exec_name(l) for l in inside)) if inside else "none inside"
+        if outside:
+            groups = []
+            by_sid = {}
+            for l in outside:
+                by_sid.setdefault(l.get("scenario"), []).append(l)
+            for sid, ls in by_sid.items():
+                kinds = {}
+                for l in ls:
+                    kinds.setdefault(_kind_words(l, False), []).append(l)
+                spans = [_span(l) for l in ls]
+                a, b = min(x for x, _ in spans), max(y for _, y in spans)
+                peak = _mem_peak(ss, a, b)
+                groups.append("%s (%s; %s to %s UTC%s)" % (
+                    sid, "; ".join("%s: %s" % (_arms_repeats(v), _kind_words(v[0], len(v) > 1)) for v in kinds.values()),
+                    _clock(a), _clock(b), (", memory at most %s GiB" % fmt_n(_gib(peak), 1)) if peak is not None
+                    else ""))
+            text += "; outside, and not attributed to %s: %s" % ("them" if several else "it", "; ".join(groups))
+        place_par.append(text + ".")
+    has_prev = getattr(run, "previous", None) is not None
+    limits = ("*Limits.* The samples show how much memory the container used, not what used it or why: the run does "
+              "not isolate the cause. That a search in the window was slower is read against the same test's other "
+              "executions%s, not measured." % (" and the previous edition's run" if has_prev else ""))
+    lead = ("The container's memory is an operational note about the host, not a finding of the service.")
+    return "\\parhead{The host's memory}\n" + paragraphs(
+        [lead, observation, "*What ran then.* " + " ".join(ran)] + [" ".join(x) for x in (late_par, rest_par, place_par)
+                                                                   if x] + [limits])
 
 
 def chapter(ctx, ch):
@@ -4034,11 +4348,28 @@ def closing(ctx):
             rows.append([esc(area), esc(arm), str(r.get("executions", "–")), str(r.get("executions_with_samples", "–")),
                          fmt_n(r.get("peak_cpu_pct")), cells.fmt_gib(r.get("peak_mem_bytes")),
                          fmt_n(r.get("mean_sra_all_cpu_pct")), fmt_n(r.get("mean_host_load1"), 1)])
+    # the peaks at the container's memory limit, read against the memory episodes (the reader review of the v7
+    # document, RV2): which rows reached it, and when
+    at_limit = {}
+    eps = memory_episodes(ctx.run)
+    if eps:
+        limit = min(ep["limit_gib"] for ep in eps) * float(1 << 30)
+        for area in areas:
+            for arm in ARMS:
+                peak = cells._num(((res.get(area) or {}).get(arm) or {}).get("peak_mem_bytes"))
+                if peak is not None and peak >= MEMORY_LIMIT_SHARE * limit:
+                    at_limit.setdefault(area, []).append(arm)
+    peaks_text = ""
+    if at_limit:
+        peaks_text = "; the peaks at the memory limit (%s) are the window%s of %s UTC (The host's memory, below)" % (
+            "; ".join("%s %s" % (esc(a), "on every access path" if len(v) == len(ARMS) else ", ".join(esc(x) for x in v))
+                      for a, v in at_limit.items()), "s" if len(eps) > 1 else "",
+            " and ".join("%s to %s" % (ep["start"][:5], ep["end"][:5]) for ep in eps))
     out += latex.plain_table("@{}l l r r r r r r@{}", ["chapter", "access path", "executions", "with samples", "peak CPU \\%",
                                                         "peak memory", "sra\\_all mean \\%", "load1 mean"], rows,
                              "sampled telemetry over each chapter's executions: the container's peak CPU (100\\,\\% is one "
                              "logical CPU) and peak memory (the container's memory usage as docker stats reports it), the host's sra\\_all CPU mean and load1 "
-                             "mean; context of the shared host, not any request's own cost")
+                             "mean; context of the shared host, not any request's own cost" + peaks_text)
     out += memory_episode_text(ctx)
     out += latex.section("%s 7\\qd Per-chapter timing" % CLOSING_PREFIX, "sec:C7")
     out += closing_section_prose(ctx, "C7", "")

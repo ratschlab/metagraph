@@ -113,6 +113,19 @@ def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
     return depth
 
 
+def sc_time(text):
+    """Epoch seconds of an ISO UTC time ('2026-10-19T02:34:58Z', a fraction kept), None when not one."""
+    import calendar
+    import time as _time
+    try:
+        text = str(text)
+        whole = calendar.timegm(_time.strptime(text[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
+    frac = re.match(r"\.(\d+)", text[19:])
+    return whole + (float("0." + frac.group(1)) if frac else 0.0)
+
+
 class PreviousRun(object):
     """The previous edition's run, read only for the comparison of this document's 'Since the previous edition'
     (make_doc --previous; the reader review of the v7 document, RV7: the v6 baseline given as an input, never a figure
@@ -351,6 +364,25 @@ class Run(object):
         rec = [c for c in ((self.service_identity or {}).get("service_commits") or {})]
         if rec and not any(gate_mod.commit_matches(c, data["service_commit"]) for c in rec):
             problems.append("service_commit %s, the MCP runner recorded %s" % (data["service_commit"], ", ".join(rec)))
+        # the service's log (an observation the run does not record, printed in Timing 6): plain text and explicit
+        # UTC times, each within the run's span (the review of the v7 document, V4)
+        log = data.get("service_log")
+        if log is not None:
+            if not isinstance(log, dict) or not str(log.get("text") or "").strip():
+                problems.append("service_log is not {text, times, source}")
+            else:
+                starts = [sc_time(r.get("started_utc")) for r in self.rows]
+                ends = [sc_time(r.get("ended_utc")) for r in self.rows]
+                starts = [t for t in starts if t is not None]
+                ends = [t for t in ends + starts if t is not None]
+                for t in log.get("times") or []:
+                    v = sc_time(t)
+                    if v is None:
+                        problems.append("service_log time %r is not an ISO UTC time" % (t,))
+                    elif starts and not (min(starts) <= v <= max(ends)):
+                        problems.append("service_log time %s lies outside the run (%s to %s)" % (
+                            t, min(r.get("started_utc") for r in self.rows if r.get("started_utc")),
+                            max(r.get("ended_utc") or "" for r in self.rows)))
         content = re.search(r"\b[0-9a-f]{64}\b", str(data.get("manifest") or ""))
         if content and self.manifest.get("content_sha256") and content.group(0) != self.manifest["content_sha256"]:
             problems.append("manifest content %s, the run's is %s" % (content.group(0), self.manifest["content_sha256"]))
