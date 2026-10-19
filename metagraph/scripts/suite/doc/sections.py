@@ -240,6 +240,8 @@ class Context(object):
                 # an answer-side scenario-level mark in the manifest (the delta verifier's M2): the glossary's and
                 # appendix G's definitions of not implemented via MCP name it
                 "answer_side_mark": bool(answer_side_mark_ids(run)),
+                # the MCP tools the scenarios call, counted from the manifest (RV14: what the suite covers via MCP)
+                "mcp_tools_text": mcp_tools_text(run),
                 # the MCP runner's git head, short, for the prose that credits its normaliser (V12)
                 "mcp_runner_head": str((run.mcp_run or {}).get("git_head") or "–")[:8],
                 # whether this document reads a re-evaluated set: a sentence about the re-evaluation prints only then
@@ -452,6 +454,22 @@ def checks_commit_text(run):
         text += "; the MCP runner, a program at its own git head %s%s, judged with the same checks.py, sha256 %s…" % (
             str(head)[:12], mcp_runner_repository_text(run), list(shas)[0][:12])
     return text + ")"
+
+
+def mcp_tools_text(run):
+    """'four tools: pattern_search (456 scenarios), traverse_resolve (118), traverse_fetch (99) and catalog (1)': the
+    MCP tools the manifest's scenarios name (mcp.tool), by count; '' when none names one."""
+    counts = {}
+    for sid in getattr(run, "order", None) or []:
+        tool = ((run.scenario(sid) or {}).get("mcp") or {}).get("tool")
+        if tool:
+            counts[tool] = counts.get(tool, 0) + 1
+    if not counts:
+        return ""
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    parts = ["%s (%d scenario%s)" % (items[0][0], items[0][1], "" if items[0][1] == 1 else "s")]
+    parts += ["%s (%d)" % kv for kv in items[1:]]
+    return "%s tool%s: %s" % (facts.number_word(len(items)), "" if len(items) == 1 else "s", facts._join(parts))
 
 
 def mcp_runner_repository_text(run):

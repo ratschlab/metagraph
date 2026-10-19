@@ -1578,7 +1578,9 @@ class VerifyRoundTwoTest(unittest.TestCase):
         self.assertIn("JUDGING %d" % len(self.runobj.order), text)
         overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json")) or {}
         heads = [p.split("*")[1] for p in overview["sections"]["methods"]["paragraphs"]]
-        self.assertEqual(heads, ["The three access paths.", "Execution order.", "Ground truth.", "Times and load."])
+        # RV14: what the suite does not cover via MCP follows the access paths (manifest v7 and later)
+        self.assertEqual(heads, ["The three access paths.", "Not covered.", "Execution order.", "Ground truth.",
+                                 "Times and load."])
         self.assertEqual(len(overview["appendix_F"]["rules"]), 2)
         self.assertNotIn("*Coverage.*", json.dumps(overview["sections"]["provenance"]))
 

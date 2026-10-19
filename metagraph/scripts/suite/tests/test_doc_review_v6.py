@@ -375,7 +375,7 @@ class GroundTruthWordingTest(unittest.TestCase):
     V6-301: chapter Q names exactly the expectations that depend on the assumed human non-carrier."""
 
     def test_overview_completeness(self):
-        text = prose("overview")["sections"]["methods"]["paragraphs"][2]
+        text = [p for p in prose("overview")["sections"]["methods"]["paragraphs"] if p.startswith("*Ground truth.*")][0]
         self.assertNotIn("which no check of this suite establishes other than through a complete list", text)
         self.assertIn("enumerates no matching result of the index independently", text)
         self.assertIn("lower bounds on recovery", text)
@@ -708,7 +708,8 @@ class VerifyRoundTest(unittest.TestCase):
         import glob
         for p in glob.glob(os.path.join(PROSE_DIR, "*.json")):
             self.assertNotIn("I.2's budget table", open(p, encoding="utf-8").read(), p)
-        self.assertIn("as the blocks below state per route", prose("overview")["sections"]["methods"]["paragraphs"][3])
+        self.assertIn("as the blocks below state per route", [p for p in prose("overview")["sections"]["methods"][
+            "paragraphs"] if p.startswith("*Times and load.*")][0])
 
 
     def test_l5_r2_002_gate_record(self):
@@ -725,7 +726,7 @@ class VerifyRoundTest(unittest.TestCase):
 
 
     def test_l7_exact_count_not_absence(self):
-        text = prose("overview")["sections"]["methods"]["paragraphs"][2]
+        text = [p for p in prose("overview")["sections"]["methods"]["paragraphs"] if p.startswith("*Ground truth.*")][0]
         self.assertIn("which a client may read as complete within the searched scope (an absence there only when it "
                       "is an exact 0 or a complete empty list)", text)
 

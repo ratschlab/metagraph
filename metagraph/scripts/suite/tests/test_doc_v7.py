@@ -538,6 +538,27 @@ class RecordedSetTest(unittest.TestCase):
             self.assertNotIn("re-evaluation", filled)
 
 
+class NotCoveredTest(unittest.TestCase):
+    """RV14: I.2 says plainly, for manifest v7, which MCP tools the scenarios call (counted from the manifest), how the
+    graphlet document is read, and that the graphlet tools and the traversal library are not covered by this run."""
+
+    def test_tools_and_paragraph(self):
+        v7 = sc.read_json(os.path.join(SUITE, "manifest", "suite_v7.json"))
+        scen = dict((s["id"], s) for s in v7["scenarios"])
+        run = _Stub(order=[s["id"] for s in v7["scenarios"]], scenario=scen.get)
+        self.assertEqual(sections.mcp_tools_text(run), "four tools: pattern_search (456 scenarios), traverse_resolve "
+                         "(118), traverse_fetch (99) and catalog (1)")
+        par = [p for p in prose("overview")["sections"]["methods"]["paragraphs"] if "*Not covered.*" in p][0]
+        self.assertEqual(facts.fill(par, {"manifest_version": 6, "mcp_tools_text": "x"}, unresolved=[]).strip(), "")
+        text = facts.fill(par, {"manifest_version": 7, "mcp_tools_text": "four tools: ..."}, unresolved=[])
+        for tool in ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_sequence",
+                     "graphlet_compare", "graphlet_support", "graphlet_splits", "graphlet_claims", "graphlet_subtrie",
+                     "graphlet_save", "graphlet_load"):
+            self.assertIn("`%s`" % tool, text)
+        self.assertIn("`graphlet_export` in its MGT format", text)
+        self.assertIn("tested by its own offline test suite, not by this run", text)
+
+
 class SincePreviousTest(unittest.TestCase):
     """I.4's 'Since the previous edition' (RV7), computed from the previous edition's run given as an input: the
     scenarios, the MCP marks removed and moved, a check argument gained, the outcomes changed and the inconclusive
