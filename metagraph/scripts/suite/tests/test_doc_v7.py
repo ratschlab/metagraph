@@ -89,8 +89,14 @@ class V7ProseTest(unittest.TestCase):
         fails = prose("checks")["checks"]["entry_fields"]["fails"]
         self.assertTrue(facts.fill(fails, {"manifest_version": 6}, unresolved=[]).endswith(
             "whose answer carries no `absence_scope` and no `timing.elapsed_ms`)."))
-        self.assertNotIn("absence_scope", facts.fill(fails, {"manifest_version": 7}, unresolved=[]).split(
-            "access path, whose answer")[1])
+        v7 = facts.fill(fails, {"manifest_version": 7}, unresolved=[])
+        # V8: what entry_fields reads via MCP under v7: P-edge-0004's pattern text, never timing.elapsed_ms
+        self.assertNotIn("absence_scope", v7)
+        self.assertNotIn("timing.elapsed_ms", v7)
+        self.assertIn("only P-edge-0004's pattern text, set aside as service-side by design", v7)
+        args = prose("checks")["checks"]["budget_respected"]["args"]
+        self.assertIn("`reserve_ms` (manifest v7", facts.fill(args, {"manifest_version": 7}, unresolved=[]))
+        self.assertNotIn("reserve_ms", facts.fill(args, {"manifest_version": 6}, unresolved=[]))
 
     def test_catalogue_versioned(self):
         ctx = _Stub(run=_Stub(manifest={"manifest_version": 7}))
