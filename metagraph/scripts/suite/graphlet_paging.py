@@ -8,6 +8,8 @@ I/O, no library import, stdlib only, Python 3.8+.
     error_page(page)                  -> whether a page is a tool error ({"error": "<code>", ...})
     error_record(page)                -> FORMAT's {"code", "fields"} of an error page (its text left out)
     next_call(tool, page)             -> (argument, value) of the next page's call, or None after the last page
+    more(tool, paging, pages, given)  -> whether the loop fetches another page
+    loop_error(tool, paging, pages, given) -> None, or the paging_runaway record of a loop that must stop
     assemble(tool, pages, complete, volatile=())
                                       -> the pages as one answer (AssemblyError when they do not make one)
     paging_complete(tool, last, answer) -> FORMAT v2 A4's record field: whether the listing was followed to its end
@@ -17,13 +19,15 @@ The library's tools (metagraph/api/python/metagraph/traverse/mcp_tools.py) page 
 base fields give way per page, named in fields_cut), and graphlet_sequence by `next_from` (:2150-2161: a slice longer
 than the ceiling is cut; the next page is the same call with start = next_from). A runner calls, for one op:
 
+    given = the op's own continuation argument, ("cursor", args["cursor"]) or ("start", args["start"]), or None
     page = call(args); pages = [page]
-    while not error_page(page) and len(pages) < max_pages(paging) and next_call(tool, page):
+    while not error_page(page) and more(tool, paging, pages, given):
         arg, value = next_call(tool, page); page = call(dict(args, **{arg: value})); pages.append(page)
-    answer = assemble(tool, pages, complete=next_call(tool, pages[-1]) is None)
-    record["paging_complete"] = paging_complete(tool, pages[-1], answer)
+    error page: record error_record(page); else loop_error(tool, paging, pages, given): record that error;
+    else answer = assemble(tool, pages, complete=next_call(tool, pages[-1]) is None)
+         record["paging_complete"] = paging_complete(tool, pages[-1], answer)
 
-(an error page ends the op: its record states error_record(page), no answer, and paging_complete null).
+(an op with an error has no answer and paging_complete null).
 """
 
 from __future__ import annotations
@@ -57,7 +61,7 @@ PAGE_FIELDS = ("next_cursor", "cursor", "fields_cut", "row_truncated", "cut_fiel
 ROW_CUT_MARKER = "_cut_fields"
 # an error's text, kept in the raw page only (FORMAT v2 B2: errors by code and structured fields)
 ERROR_TEXT = ("error", "message", "hint")
-# "all" stops here: a cursor that never ends is a library defect, recorded as paging_runaway
+# "all" stops here: a listing that never ends is a defect, recorded as paging_runaway (loop_error)
 MAX_PAGES = 10000
 
 
@@ -101,6 +105,39 @@ def next_call(tool: str, page: Any) -> Optional[Tuple[str, Any]]:
     if tool == SEQUENCE_TOOL:
         return None if page.get("next_from") is None else ("start", page["next_from"])
     return None if page.get("next_cursor") is None else ("cursor", page["next_cursor"])
+
+
+def _repeats(tool: str, pages: List[Any], given: Optional[Tuple[str, Any]]) -> bool:
+    """Whether the last page's continuation asks for a page already asked for: the cursor or next_from that asked for
+    the last page (|given| for the first), and for graphlet_sequence a next_from not beyond the page's own `from`."""
+    nxt = next_call(tool, pages[-1])
+    if nxt is None:
+        return False
+    before = next_call(tool, pages[-2]) if len(pages) > 1 else given
+    if before is not None and before == nxt:
+        return True
+    start = pages[-1].get("from") if isinstance(pages[-1], dict) else None
+    return tool == SEQUENCE_TOOL and isinstance(start, int) and isinstance(nxt[1], int) and nxt[1] <= start
+
+
+def loop_error(tool: str, paging: Any, pages: List[Any], given: Optional[Tuple[str, Any]] = None) -> Optional[dict]:
+    """The paging_runaway record of a loop that must stop although its paging asks for more (VERIFY-L VL6), else None:
+    the last page names a next page that repeats one already asked for (a cursor or next_from that does not advance:
+    the same page again, forever), or paging "all" fetched MAX_PAGES pages and a next one is still named. A `pages`
+    cap reached, or paging "none", is no runaway: the op asked for no more."""
+    if not pages or next_call(tool, pages[-1]) is None or len(pages) >= max_pages(paging) and paging != "all":
+        return None
+    if _repeats(tool, pages, given):
+        return {"code": "paging_runaway", "fields": {"pages": len(pages), "reason": "repeats"}}
+    if paging == "all" and len(pages) >= MAX_PAGES:
+        return {"code": "paging_runaway", "fields": {"pages": len(pages), "reason": "max_pages"}}
+    return None
+
+
+def more(tool: str, paging: Any, pages: List[Any], given: Optional[Tuple[str, Any]] = None) -> bool:
+    """Whether the loop fetches another page: the last page names one, the paging allows it, and it is no runaway."""
+    return next_call(tool, pages[-1]) is not None and len(pages) < max_pages(paging) \
+        and loop_error(tool, paging, pages, given) is None
 
 
 def unmarked(evidence: Any) -> Any:

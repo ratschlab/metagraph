@@ -549,8 +549,12 @@ class Way(object):
             return rec, None
         send = self.unsymbolise(args, sid)
         paging = op.get("paging", "none")
+        # the continuation the op's own arguments give (a plan's cursor, a sequence's start): graphlet_paging's
+        # runaway rule compares the first page's continuation with it
+        given = (("start", send.get("start")) if tool == gp.SEQUENCE_TOOL else ("cursor", send.get("cursor"))) \
+            if (send.get("start") if tool == gp.SEQUENCE_TOOL else send.get("cursor")) is not None else None
         pages, nxt, error = [], None, None
-        while True:   # graphlet_paging's loop: follow next_call() up to max_pages(), stop at an error page
+        while True:   # graphlet_paging's loop: follow next_call() while more(), stop at an error page
             call = dict(send)
             if nxt is not None:
                 call[nxt[0]] = nxt[1]
@@ -574,11 +578,11 @@ class Way(object):
                 break
             pages.append(answer)
             nxt = gp.next_call(tool, answer)
-            if nxt is None or len(pages) >= gp.max_pages(paging):
+            if not gp.more(tool, paging, pages, given):
                 break
         rec["elapsed_ms"] = round(rec["elapsed_ms"], 3)
-        if error is None and paging == "all" and nxt is not None:
-            error = {"code": "paging_runaway", "fields": {"pages": len(pages)}}
+        if error is None:
+            error = gp.loop_error(tool, paging, pages, given)
         if error is None:
             try:
                 answer = gp.assemble(tool, pages, nxt is None)

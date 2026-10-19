@@ -38,6 +38,30 @@ class LoopTests(unittest.TestCase):
         self.assertFalse(gp.paging_complete("graphlet_sequence", {"sequence": "A", "next_from": 1}, {"sequence": "A"}))
         self.assertTrue(gp.paging_complete("graphlet_summary", {"summary": {}}, {"summary": {}}))
 
+    def test_runaway(self):
+        """VL6: a continuation that repeats stops the loop at once; "all" stops at MAX_PAGES; a pages cap is none."""
+        a, b = {"rows": [1], "next_cursor": "c"}, {"rows": [2], "next_cursor": "c"}
+        self.assertTrue(gp.more("graphlet_walks", "all", [a]))
+        self.assertIsNone(gp.loop_error("graphlet_walks", "all", [a]))
+        self.assertFalse(gp.more("graphlet_walks", "all", [a, b]))
+        self.assertEqual(gp.loop_error("graphlet_walks", "all", [a, b]),
+                         {"code": "paging_runaway", "fields": {"pages": 2, "reason": "repeats"}})
+        # the first page against the op's own cursor; paging "none" or a reached pages cap asks for no more
+        self.assertEqual(gp.loop_error("graphlet_walks", "all", [a], ("cursor", "c"))["fields"]["reason"], "repeats")
+        self.assertIsNone(gp.loop_error("graphlet_walks", "none", [a], ("cursor", "c")))
+        self.assertIsNone(gp.loop_error("graphlet_walks", {"pages": 2}, [a, b]))
+        self.assertFalse(gp.more("graphlet_walks", {"pages": 2}, [a, {"rows": [2], "next_cursor": "d"}]))
+        # a sequence's next_from must go beyond the page's own start
+        seq = [{"from": 5, "to": 9, "sequence": "ACGT", "next_from": 5}]
+        self.assertEqual(gp.loop_error("graphlet_sequence", "all", seq)["fields"]["reason"], "repeats")
+        seq[0]["next_from"] = 9
+        self.assertIsNone(gp.loop_error("graphlet_sequence", "all", seq))
+        self.assertTrue(gp.more("graphlet_sequence", "all", seq))
+        many = [{"rows": [i], "next_cursor": "c%d" % i} for i in range(gp.MAX_PAGES)]
+        self.assertEqual(gp.loop_error("graphlet_walks", "all", many),
+                         {"code": "paging_runaway", "fields": {"pages": gp.MAX_PAGES, "reason": "max_pages"}})
+        self.assertIsNone(gp.loop_error("graphlet_walks", "all", many[:-1] + [{"rows": [0]}]))
+
     def test_error_pages(self):
         page = {"error": "local_budget_exceeded", "message": "m", "hint": "h", "stop": {"resource": "work"},
                 "max_bytes": 64}

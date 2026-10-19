@@ -4814,8 +4814,11 @@ Nothing here touches staging; every test is offline.
   slice_past_end, label_entered_at_merge, top_label, first_arm, second_arm_or_none, each defined in its docstring
   over the library's answer shapes. A failure is a `SelectorError` naming the argument, the op and the rule.
 - `graphlet_paging.py` (FORMAT v2 A2): the paging loop's helpers (`paging_problem`, `max_pages`, `next_call`,
-  `error_page`, `error_record`) and `assemble(tool, pages, complete)` with its tables, pure and stdlib: async's runner
-  vendors it, so both sides follow and assemble pages identically by construction.
+  `more`, `loop_error`, `error_page`, `error_record`, `paging_complete`) and `assemble(tool, pages, complete,
+  volatile=())` with its tables, pure and stdlib: async's runner vendors it, so both sides follow and assemble pages
+  identically by construction. `loop_error` is the `paging_runaway` rule (VERIFY-L VL6): a cursor or next_from that
+  repeats one already asked for stops the loop at once (reason `repeats`), paging "all" stops at 10,000 pages
+  (reason `max_pages`); a `pages` cap reached is no error.
 - `run_graphlet_local.py`: the ways W1 (arms/dl-lib), W2 (arms/dr-lib), W4 (arms/mcp-lib) and drift
   (arms/drift-lib) over a run directory and a manifest, or offline over `--doc [ID=]PATH ... --plan PLAN`;
   `--export-library COMMIT --to DIR` (`git archive COMMIT metagraph/api/python | tar -x`, DIR/LIBRARY_COMMIT);
