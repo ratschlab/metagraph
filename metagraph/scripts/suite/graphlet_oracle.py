@@ -1608,8 +1608,10 @@ def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: st
     - comparable is one of true, qualified, unverifiable, unknown, false; never false (one index identity, one
       oriented seed);
     - without index_fp in H: unverifiable ("unverifiable, never equal", DESIGN §3.1), or unknown only where a rule of
-      unknown applies too (no bases in a mode that spells, DESIGN §5.2.5; or no common certified depth, complete_to_bp
-      0 on a covered arm), since DESIGN states no precedence between the two; with index_fp never unverifiable;
+      unknown applies too: no bases in a mode that spells (DESIGN §5.2.5), or no common certified depth, complete_to_bp
+      0 on a covered arm (library-defined: the tool's comparability, INVENTORY §2.14; DESIGN §5 only restricts a
+      compare to min(complete_to_bp)), since DESIGN states no precedence between the two; with index_fp never
+      unverifiable;
     - with index_fp, no bases in a mode that spells: unknown (DESIGN §5.2.5);
     - no difference under any verdict (counts zero or null, no rows); equal true exactly when comparable true; not
       true when the label evidence is a lower bound (DESIGN §5.2.5: what cannot be exact is qualified).
@@ -1629,8 +1631,9 @@ def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: st
     if no_fp:
         allowed = ("unverifiable", "unknown") if (no_bases or depth0) else ("unverifiable",)
         if comp not in allowed or isinstance(comp, bool):
-            probs.append("comparable %r without index_fp: %s (SPEC §7.5.7, DESIGN §3.1%s)" % (
-                comp, " or ".join(allowed), ", §5.2.5" if no_bases or depth0 else ""))
+            probs.append("comparable %r without index_fp: %s (SPEC §7.5.7, DESIGN §3.1%s%s)" % (
+                comp, " or ".join(allowed), ", §5.2.5" if no_bases else "",
+                "; depth 0: library-defined, INVENTORY §2.14" if depth0 and not no_bases else ""))
     else:
         if comp == "unverifiable":
             probs.append("comparable unverifiable with index_fp set (SPEC §7.5.7, DESIGN §3.1)")
