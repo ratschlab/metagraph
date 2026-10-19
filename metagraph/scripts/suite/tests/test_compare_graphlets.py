@@ -682,6 +682,26 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W3-W5")["outcome"], "not_comparable")
         self.assertEqual(e["disagreeing"], ["W3-W4"])
 
+    def test_a_torn_w1_line_is_w5s_inconclusive_not_differing_args(self):
+        import graphlet_oracle as go
+        cg.graphlet_oracle = go
+        self.make()
+        self.five(w5=False)
+        self.run_.record("W5", SID, "walks-len", "graphlet_walks", {}, answer=None,
+                         oracle={"checked": {}, "consistency_only": ["/*"], "declared": "unreadable_w1",
+                                 "note": "W1's line 3 is torn: its record cannot be read"})
+        path = os.path.join(self.run_.dir, "arms", "oracle", "graphlet_ops.jsonl")
+        with open(path) as fh:
+            rec = json.loads(fh.read())
+        rec["args_resolved"] = None
+        with open(path, "w") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        e = self.op_entry()
+        p = next(p for p in e["pairs"] if p["pair"] == "W1-W5")
+        self.assertNotEqual(p.get("kind"), "args_resolved")
+        self.assertEqual(e["outcome"], "inconclusive")
+        self.assertIn("W5 could not judge the call", e["reason"])
+
     def test_lane_os_compare_on_the_vo4_cases(self):
         import graphlet_oracle as go
         if not callable(getattr(go, "compare", None)):

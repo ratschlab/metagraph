@@ -713,7 +713,9 @@ def compare_w5(x, rx, r5):
     if runner_error(rx) or runner_error(r5):
         return _pair(x, "W5", W5_WHAT, "not_compared", "%s did not run the call (runner: %s)" % (
             x if runner_error(rx) else "W5", runner_error(rx) or runner_error(r5)), kind="runner_error")
-    d = _args_difference(rx, r5)
+    # a W5 record without args_resolved (lane O: a torn W1 line, declared unreadable_w1) is no differing argument:
+    # compare's inconclusive names it
+    d = _args_difference(rx, r5) if r5.get("args_resolved") is not None else None
     if d:
         return _pair(x, "W5", W5_WHAT, "disagree", "args_resolved differ (W5 takes W1's)", d, kind="args_resolved")
     code = (rx.get("error") or {}).get("code") if isinstance(rx.get("error"), dict) else None
