@@ -4826,23 +4826,36 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   per-tool answer keys, frozen here and held to the library's answers on the mini_refseq fixtures by
   tests/test_compare_graphlets.py), handles to symbols (graphlet_compare's a and b by role, at the top only), cursors
   removed (a runner's symbols kept, FORMAT v2 B1), `local` compared only within one commit, interpreter, work model
-  and configuration, an export's path and bytes left out and its file compared by content at file.raw (B3); a row
-  the service cut (_cut_fields, A3) is judged against a library way as a cut of that way's row;
+  and configuration, an export's path and bytes left out and its file compared by content at file.raw (B3); on a
+  pair with W3 a row marked _cut_fields (A3), on either side, is judged by lane O's cut rule
+  (graphlet_oracle.cut_problem) on the fields it names only, never empty for a non-empty value, two cut rows on
+  their common leading part, every other field equal (VERIFY-C VC1); every way an op runs in is reached by a
+  compared pair (VC7); a record without answer or error, and a paging "all" listing with paging_complete false,
+  leave the op inconclusive (VC6);
   errors by code and structured fields (no message, hint; no result_too_large bytes). A deliberate cut (op field
-  `cut_of`: the uncut op) is judged per way against that way's uncut answer: every string or list a prefix, every
-  key it lacks optional (OPTIONAL_KEYS or named in its fields_cut / cut_fields), every key it adds a cut marker.
+  `cut_of`: the uncut op) is judged per way against that way's uncut answer: it must show a cut (a marker,
+  paging_complete false, fewer rows than total; else "not cut", a failure: VC4); a key it lacks optional or named in
+  its fields_cut; a field a row names cut by lane O's rule; the page's rows and the tool's optional lists leading
+  parts; every other value equal.
   Outcomes per op: agree, disagree (naming the pairs), service_by_design, inconclusive, precondition_failed; the
   scenario fails on a failed pre-check or a disagreement. graphlet_list / graphlet_free are a smoke outside the
   counts; the drift lane is compared with W4, report-only; W5's checked and consistency-only pointers give the
-  coverage table. `load_or_compute` recomputes a comparison whose inputs (manifest, records) changed.
+  coverage table, with lane O's "re-derived from DESIGN" mark (oracle.rederived, VC5). The gate and the report
+  recompute the comparison from the run's files every time (VC3); `--reuse` takes graphlet_compare.json only when
+  every input it read is unchanged (records, documents, twin, job and identity records, export files, the
+  by-design table, the code).
 - `graphlet_service_checks.py`: two stages of the comparison. The positive service checks of DESIGN-v8 §5:
   walk_display, label_evidence, qualified_cause (each side's cap stated, "no difference within the recorded
   evidence" exactly when the library counts none), hint (more than 64 labels per node), in_service (over 8 MiB),
   max_bytes_refused (262,145 refused on W3, answered by the library ways), forbidden and bad_handle (op field `probe`:
-  wrong_token / bad_handle, FORMAT v2 D2, W3 only), library_commit; each pass, fail naming the calls, or inconclusive (not
-  exercised). And by-design pairs: an op naming a case (`by_design`) whose `graphlet` block (compare.
-  graphlet_case_problems validates it at load: tools, path predicates over args_resolved, library and service
-  sides) holds is service_by_design; a pair that does not hold is a disagreement naming its side.
+  wrong_token / bad_handle, FORMAT v2 D2, W3 only), library_commit; each pass, fail naming the calls, n/a (its
+  precondition held on no call, the reason stated) or inconclusive; any failed check blocks the gate unless the
+  declared file sets it aside (graphlet_service_checks_not_required), a required one must pass (VC2). And by-design
+  pairs: an op naming a case (`by_design`) whose `graphlet` block (compare.graphlet_case_problems validates it at
+  load: tools, path predicates over args_resolved, library and service sides, an answered/answered case only with
+  service_fields) holds on every way's arguments is service_by_design; it excuses only a W3-W4 / W3-W5 difference
+  of kind error or answer, never differing args_resolved (VC11); a pair that does not hold is a disagreement naming
+  its side.
 - gate: a manifest whose selection holds graphlet scenarios gives the policy a `graphlets` block (every applicable
   way of every op call, the pre-checks, the service checks the op plan exercises, the library_commit pin; declared
   `graphlet_not_required` op calls with their reasons); `gate.py` judges it (kind graphlet; missing ways as
