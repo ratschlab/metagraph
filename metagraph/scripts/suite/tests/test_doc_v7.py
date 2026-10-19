@@ -25,6 +25,10 @@ PROSE_DIR = os.path.join(DOC, "prose")
 V7_CONTENT_SHA = "e89708cb795e098225d76ac8a69e75a116f9029549a8613c96325e8ee6a36238"
 
 
+def latex_plain(text):
+    return text.replace("*", "")
+
+
 def prose(name):
     return sc.read_json(os.path.join(PROSE_DIR, "%s.json" % name))
 
@@ -224,6 +228,28 @@ class MemoryEpisodeTest(unittest.TestCase):
         self.assertIn("inside, W-1 direct-local r0 (above); outside, and not attributed to it: O-1 (direct-local r0: "
                       "inconclusive; 02:52:00 to 02:52:01 UTC", text)
         self.assertNotIn("likely the same episode", text)
+
+    def test_pointers(self):
+        # RV1, V9: I.1's sentence, Timing 1's observation and the chapters' Timing line, computed from the episode
+        run = self._run()
+        units = _Stub(chapters=["R", "P", "X", "M", "C"],
+                      chapter_scenarios=lambda ch: [s for s in run.order if run.scenario(s)["area"] == ch])
+        ctx = _Stub(run=run, units=units)
+        lead = sections.memory_lead_text(ctx)
+        self.assertIn("From 02:20 to 02:30 UTC the engine's container stood at its 128 GiB memory limit on the host: 3 "
+                      "executions ran then (chapters P and M), and searches that ran then were slower than the same "
+                      "tests elsewhere; 2 passed, and W-1 direct-local r0 ended in a 503 deadline, inconclusive "
+                      "(Timing 6). It is an operational note about the host, not a finding of the service.",
+                      latex_plain(lead))
+        self.assertIn("placed in Timing 6: 3, of which 2 passed", sections.memory_timing_bullet(ctx))
+        self.assertEqual(sections.memory_chapter_note(ctx, "M"), "2 of this chapter's executions ran while the "
+                         "engine's container stood at its memory limit, 02:20 to 02:30 UTC (Timing 6)")
+        self.assertEqual(sections.memory_chapter_note(ctx, "X"), "The host answered X-1 mcp r1 late, with the "
+                         "container at 93 % of its memory limit (Timing 6)")
+        self.assertEqual(sections.memory_chapter_note(ctx, "R"), "")
+        quiet = _Stub(run=self._run(peak=100), units=units)
+        self.assertEqual((sections.memory_lead_text(quiet), sections.memory_timing_bullet(quiet),
+                          sections.memory_chapter_note(quiet, "M")), ("", "", ""))
 
     def test_two_episodes(self):
         eps = sections.memory_episodes(self._run(two=True))

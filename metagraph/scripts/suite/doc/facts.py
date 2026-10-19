@@ -1548,6 +1548,10 @@ def chapter_facts(ctx, ch):
                 and cells._num(l.get("mcp_phases", {}).get("backend_ms")) is not None]
     v["backend_p50_warm_mcp"] = cells.fmt_exec_text(cells.percentile(backends, 50)) if backends else "–"
     v["n_backend_warm_mcp"] = len(backends)
+    # the chapter's executions in the host's memory episodes, for its Timing paragraph (RV1, V9; sections, read late:
+    # it imports this module)
+    import sections as _sections
+    v["memory_note"] = _sections.memory_chapter_note(ctx, ch) if getattr(ctx, "run", None) is not None else ""
     cold_by_family = [(fam[fid]["n_cold_dl"], fid) for fid in fams if fam[fid]["n_cold_dl"]]
     v["cold_dl_families"] = ", ".join("%s %d" % (fid, n) for n, fid in sorted(cold_by_family, key=lambda t: (-t[0], t[1])))
     held, unsupported, items = _claims(ctx, ch, fam)

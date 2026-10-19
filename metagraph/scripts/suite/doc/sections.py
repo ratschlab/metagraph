@@ -1733,6 +1733,10 @@ def decision_summary(ctx):
     groups = principal_findings(ctx)
     # the actual result before the definitions (the external review of the v6 document, V6-003)
     out += inline(findings_lead_text(ctx, groups)) + "\n\n"
+    # the host's memory episodes, said where a reader of the summary meets the result (RV1, V9)
+    lead = memory_lead_text(ctx)
+    if lead:
+        out += inline(lead) + "\n\n"
     out += ctx.prose_paragraphs("decision", "findings", optional=True)
     for title, items in groups:
         out += "\\noindent\\textbf{%s}\\par\\nopagebreak\n\\begin{itemize}\\setlength\\itemsep{0pt}\n" % esc(title)
@@ -3307,9 +3311,18 @@ def attention_table(ctx):
             for ch, v in per if v["n_attention_property"]]
     prop_text = ("; of the not implemented via MCP, by a property-level mark alone (the MCP access path not standing "
                  "\\gni, the cell carrying the mark): %s" % "; ".join(prop)) if prop else ""
-    if totals.get("time_budget") and memory_episode(ctx.run) is not None:
-        # the run's time-budget issues read against the host's memory episode (Timing 6)
-        prop_text += "; the time-budget issues are read beside the host's memory in Timing 6"
+    if totals.get("time_budget"):
+        # the chapters whose time-budget counts include executions in the host's memory episodes (RV1)
+        mem = memory_summary(ctx)
+        chs = []
+        for m in mem:
+            for ch in m["tb_chapters"]:
+                if ch not in chs:
+                    chs.append(ch)
+        if chs:
+            prop_text += ("; the time-budget counts of %s include executions that ran while the engine's container "
+                          "stood at its memory limit, %s UTC (Timing 6)" % (
+                              facts._join(chs), " and ".join(m["window"] for m in mem)))
     return latex.plain_table(spec, header, rows,
                              "needs attention: the tests of each chapter by kind, red where any (a test counts once "
                              "per kind and may count under several; the kinds are defined in appendix F's vocabulary, and the "
@@ -3460,6 +3473,112 @@ def memory_episodes(run):
                                                          for l in flight))}
         out.append(ep)
     return out
+
+
+MEMORY_SLOWER_FACTOR = 2.0    # an execution in an episode at twice its test's time elsewhere or more is "slower"
+
+
+def memory_summary(ctx):
+    """Per memory episode the facts the summary lines read (I.1, Timing 1, the attention caption): the window
+    (HH:MM to HH:MM), the limit, the executions that ran in it, their chapters, those that did not pass, the chapters
+    of the time-budget tests among them, and whether some passing search in it took MEMORY_SLOWER_FACTOR times its
+    test's time elsewhere or more (this run outside every episode, or the previous edition's run when given)."""
+    run = ctx.run
+    eps = memory_episodes(run)
+    if not eps:
+        return []
+    chapters = list(getattr(ctx.units, "chapters", None) or [])
+    def area(l):
+        return str(run.scenario(l.get("scenario")).get("area") or l.get("area") or "?")
+    def ch_sort(xs):
+        return sorted(set(xs), key=lambda x: (chapters.index(x) if x in chapters else 99, x))
+    in_any = set(id(l) for ep in eps for l, _ in ep["rows"])
+    prev = getattr(run, "previous", None)
+    out = []
+    for ep in eps:
+        rows = [l for l, _ in ep["rows"]]
+        slower = False
+        for l in rows:
+            sv = _server_ms(l)
+            if l.get("outcome") != "pass" or sv is None:
+                continue
+            ref = [_server_ms(x) for x in run.rows if x.get("scenario") == l.get("scenario") and id(x) not in in_any]
+            ref += [_server_ms(x) for x in (prev.rows if prev is not None else []) if x.get("scenario") == l.get("scenario")]
+            ref = [x for x in ref if x is not None and x > 0]
+            if ref and sv >= MEMORY_SLOWER_FACTOR * max(ref):
+                slower = True
+                break
+        out.append({"window": "%s to %s" % (ep["start"][:5], ep["end"][:5]), "limit_gib": ep["limit_gib"],
+                    "rows": rows, "chapters": ch_sort(area(l) for l in rows),
+                    "bad": [l for l in rows if l.get("outcome") != "pass"],
+                    "tb_chapters": ch_sort(area(l) for l in rows if facts.time_budget_issue(l)), "slower": slower})
+    return out
+
+
+def _memory_outcomes_text(m):
+    """'30 passed, and P-warm-0004 direct-local r0 ended in a 503 deadline (inconclusive)' of an episode's
+    executions."""
+    bad = m["bad"]
+    if not bad:
+        return "every one passed"
+    words = "; ".join("%s %s" % (_exec_name(l), ("ended in a 503 deadline, %s" % _stop_word(l).rsplit(", ", 1)[-1])
+                                 if l.get("http") == 503 else "was %s" % _stop_word(l)) for l in bad[:MEMORY_LIST_MAX])
+    return "%d passed, and %s" % (len(m["rows"]) - len(bad), words)
+
+
+def memory_lead_text(ctx):
+    """I.1's sentence on the host's memory episodes, after the result (the reader review of the v7 document, RV1;
+    the fact verifier, V9): when, the executions that ran then and their outcomes, whether searches were slower, and
+    what it is; '' without an episode."""
+    mem = memory_summary(ctx)
+    if not mem:
+        return ""
+    parts = []
+    for m in mem:
+        parts.append("from %s UTC the engine's container stood at its %s GiB memory limit on the host: %d execution%s "
+                     "ran then (chapter%s %s)%s; %s" % (
+                         m["window"], fmt_n(m["limit_gib"]), len(m["rows"]), "" if len(m["rows"]) == 1 else "s",
+                         "" if len(m["chapters"]) == 1 else "s", facts._join(m["chapters"]),
+                         ", and searches that ran then were slower than the same tests elsewhere" if m["slower"] else "",
+                         _memory_outcomes_text(m)))
+    text = "; ".join(parts)
+    return ("*The host's memory.* %s%s (Timing 6). It is an operational note about the host, not a finding of the "
+            "service." % (text[0].upper(), text[1:]))
+
+
+def memory_timing_bullet(ctx):
+    """Timing 1's observation on the host's memory episodes (RV1, V9); '' without one."""
+    mem = memory_summary(ctx)
+    if not mem:
+        return ""
+    return ("The engine's container stood at its %s GiB memory limit from %s UTC; the executions that ran then are "
+            "placed in Timing 6: %s." % (fmt_n(mem[0]["limit_gib"]), " and ".join(m["window"] for m in mem), "; ".join(
+                "%s: %d, %s" % (m["window"], len(m["rows"]), _memory_outcomes_text(m)) if len(mem) > 1 else
+                "%d, of which %s" % (len(m["rows"]), _memory_outcomes_text(m)) for m in mem)))
+
+
+def memory_chapter_note(ctx, ch):
+    """A chapter's line on the host's memory for its Timing paragraph (RV1, V9): how many of its executions ran
+    while the container stood at its memory limit, and its MCP executions the host answered late; '' when none."""
+    run = ctx.run
+    eps = memory_episodes(run)
+    if not eps:
+        return ""
+    sids = set(ctx.units.chapter_scenarios(ch))
+    parts = []
+    for ep in eps:
+        mine = [l for l, _ in ep["rows"] if l.get("scenario") in sids]
+        if mine:
+            parts.append("%d of this chapter's executions ran while the engine's container stood at its memory limit, "
+                         "%s to %s UTC" % (len(mine), ep["start"][:5], ep["end"][:5]))
+    for l, share, _, _ in _late_host(run, _mem_samples(run)):
+        if l.get("scenario") in sids:
+            parts.append("the host answered %s late, with the container at %d %% of its memory limit" % (
+                _exec_name(l), int(share * 100)))
+    if not parts:
+        return ""
+    text = "; ".join(parts)
+    return "%s%s (Timing 6)" % (text[0].upper(), text[1:])
 
 
 def memory_episode(run):
@@ -4237,6 +4356,10 @@ def closing(ctx):
     out += paragraphs([ctx.fill(p, closing_values(ctx)) for p in ([intro] if isinstance(intro, str) else intro)]) \
         if intro else latex.placeholder("(closing intro: to be written)") + "\n\n"
     obs = observations(ctx)
+    # the host's memory episodes, where a reader of the closing section looks first (RV1, V9)
+    mem_bullet = memory_timing_bullet(ctx)
+    if mem_bullet:
+        obs.append(inline(mem_bullet))
     if obs:
         out += "\\begin{itemize}\\setlength\\itemsep{1pt}\n" + "".join("\\item %s\n" % o for o in obs) + "\\end{itemize}\n"
     else:
