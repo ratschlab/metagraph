@@ -561,6 +561,20 @@ class NotCoveredTest(unittest.TestCase):
         self.assertIn("tested by its own offline test suite, not by this run", text)
 
 
+class PluralsTest(unittest.TestCase):
+    """RV12: the headline boxes print counts in their number, never report.py's "(s)"."""
+
+    def test_plural_counts(self):
+        self.assertEqual(sections.plural_counts("FAIL (0 failed or errored execution(s), 1 direct and 0 MCP "
+                                                "disagreement(s)); 34 inconclusive execution(s)"),
+                         "FAIL (0 failed or errored executions, 1 direct and 0 MCP disagreements); 34 inconclusive "
+                         "executions")
+        self.assertEqual(sections.plural_counts("1 relation(s) failed; 1 inconclusive execution(s)"),
+                         "1 relation failed; 1 inconclusive execution")
+        self.assertEqual(sections._count_phrase(0, "execution", "none in this run"), "none in this run")
+        self.assertEqual(sections._count_phrase(2, "execution", "none", " in this run: x"), "2 executions in this run: x")
+
+
 class SincePreviousTest(unittest.TestCase):
     """I.4's 'Since the previous edition' (RV7), computed from the previous edition's run given as an input: the
     scenarios, the MCP marks removed and moved, a check argument gained, the outcomes changed and the inconclusive

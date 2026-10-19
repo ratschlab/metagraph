@@ -1337,12 +1337,12 @@ def _count_phrase(n, noun, zero, tail=""):
     return zero if not n else "%d %s%s%s" % (n, noun, "" if n == 1 else "s", tail)
 
 
-_PLURAL_RE = re.compile(r"\b(\d+) ((?:[a-z-]+ )*?)(execution|relation)\(s\)")
+_PLURAL_RE = re.compile(r"\b(\d+) ((?:[A-Za-z-]+ )*?)([a-z]+)\(s\)")
 
 
 def plural_counts(text):
-    """'11 inconclusive execution(s)' -> '11 inconclusive executions', '1 relation(s) failed' -> '1 relation failed':
-    the counts of a generated line in their proper number (RV12)."""
+    """'11 inconclusive execution(s)' -> '11 inconclusive executions', '1 relation(s) failed' -> '1 relation failed',
+    '0 MCP disagreement(s)' -> '0 MCP disagreements': the counts of a generated line in their proper number (RV12)."""
     return _PLURAL_RE.sub(lambda m: "%s %s%s%s" % (m.group(1), m.group(2), m.group(3),
                                                    "" if m.group(1) == "1" else "s"), text)
 
