@@ -1381,25 +1381,34 @@ def graphlet_data(run_dir, manifest):
 
 
 def graphlet_verdict(g):
-    """(word, reason) of area G: FAIL (a scenario failed: a pre-check or a disagreement; a required service check
-    failed), INCONCLUSIVE (a scenario inconclusive or precondition_failed, a required service check not passed), PASS;
-    ERROR when the comparison could not be computed."""
+    """(word, reason) of area G: FAIL (a scenario failed: a pre-check or a disagreement; any service check failed,
+    VERIFY-C VC2), INCONCLUSIVE (a scenario inconclusive or precondition_failed, a required service check not passed,
+    an exercised one inconclusive), PASS; ERROR when the comparison could not be computed. The reason counts the
+    service checks by outcome, n/a included (a check whose precondition held on no call).
+    (The declared file's set-aside checks are the gate's: the report's verdict does not read the policy.)"""
     if g.get("error"):
         return "ERROR", "the graphlet comparison could not be computed: %s" % g["error"]
     s = g.get("summary") or {}
     sc_ = s.get("scenarios") or {}
     ops = s.get("ops") or {}
+    import graphlet_service_checks as gs
     req = set(g.get("required_service_checks") or [])
-    checks = [c for c in g.get("service_checks") or [] if c.get("check") in req]
-    failed = [c["check"] for c in checks if c.get("outcome") == "fail"]
-    open_ = [c["check"] for c in checks if c.get("outcome") != "pass" and c["check"] not in failed]
-    reason = "%d scenario(s): %s; op calls: %s%s" % (
+    checks = g.get("service_checks") or []
+    blocking = gs.blocking_service_checks(checks, req)
+    failed = [name for name, why in blocking if why.startswith("fail")]
+    open_ = [name for name, why in blocking if not why.startswith("fail")]
+    by_outcome = {}
+    for c in checks:
+        by_outcome[c.get("outcome")] = by_outcome.get(c.get("outcome"), 0) + 1
+    reason = "%d scenario(s): %s; op calls: %s; service checks: %s%s" % (
         sum(sc_.values()), ", ".join("%d %s" % (sc_.get(k, 0), k.replace("_", " ")) for k in
                                      ("pass", "fail", "precondition_failed", "inconclusive") if sc_.get(k)) or "none",
         ", ".join("%d %s" % (ops.get(k, 0), k.replace("_", " ")) for k in
                   ("agree", "disagree", "service_by_design", "inconclusive", "precondition_failed") if ops.get(k))
-        or "none", ("; service checks failed: %s" % ", ".join(failed)) if failed else
-        (("; service checks not passed: %s" % ", ".join(open_)) if open_ else ""))
+        or "none", ", ".join("%d %s" % (by_outcome[k], k) for k in ("pass", "fail", "inconclusive", "n/a")
+                             if by_outcome.get(k)) or "none",
+        ("; failed: %s" % ", ".join(failed)) if failed else
+        (("; not passed: %s" % ", ".join(open_)) if open_ else ""))
     if sc_.get("fail") or failed:
         return "FAIL", reason
     if sc_.get("inconclusive") or sc_.get("precondition_failed") or open_:

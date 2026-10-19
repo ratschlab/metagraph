@@ -270,6 +270,66 @@ class ArmDirs(GateG):
         self.assertEqual([n for n, _ in merge_run.arm_dirs(self.d)], ["direct-local", "mcp"])
 
 
+class ServiceChecksBlock(GateG):
+    """VC2: a failed service check outside the policy's required list blocks; the declared file sets one aside."""
+    SUMMARY = {"id": "summary", "tool": "graphlet_summary", "args": {"detail": "summary", "max_bytes": 2048},
+               "ways": ["W1", "W2", "W3", "W4"]}
+
+    def build_with_summary(self, in_service, name="run"):
+        self.build(ops=[WALKS, self.SUMMARY], records=False, name=name)
+        self.g.complete_scenario(GID, ops=[])
+        self.put_all({("summary", "W3"): lambda kw: kw.update(service_fields={"in_service": in_service})})
+
+    def put_all(self, change):
+        import graphlet_precheck as gp
+        mod, text = gf.install_graphlet_doc_stub(), self.g.fixture.doc(0)
+        doc = {"body_digest": mod.body_digest(text), "envelope_digest": mod.envelope_digest(text)}
+        scen = next(s for s in self.m["scenarios"] if s["id"] == GID)
+        for op in gp.scenario_ops(scen):
+            for way in gp.op_ways(scen, op):
+                ans = gf.walks_answer() if op["tool"] == "graphlet_walks" else \
+                    {"handle": "g_0123456789ab", "summary": {"seed": {}}, "evidence": {}}
+                kw = {"answer": ans, "doc": doc, "service_fields": None}
+                if way == "W3":
+                    kw["answer"] = dict(ans, handle=UUID)
+                    kw["service_fields"] = {"walk_display": "first_parent"}
+                if way == "W5":
+                    kw = {"answer": {}, "oracle": {"checked": {}}}
+                fn = change.get((op["id"], way))
+                if fn:
+                    fn(kw)
+                self.g.record(way, GID, op["id"], op["tool"], op["args"], **kw)
+
+    def test_a_failed_check_the_policy_does_not_list_blocks(self):
+        self.build_with_summary(False)   # in_service false on a body within 8 MiB
+        pol = tg.policy_of(self.m)
+        self.assertNotIn("in_service", pol["graphlets"]["service_checks"])
+        v = self.judge(pol)
+        self.assertTrue(any(p["detail"].startswith("service check in_service fail: 1 of 1 call(s) break it")
+                            for p in self.kinds(v, "graphlet")), gate.render(v))
+        # the owner sets it aside with a reason: a note
+        declared = {"declared_version": 1, "manifest": {"content_sha256": self.m["content_sha256"]},
+                    "graphlet_service_checks_not_required": [{"check": "in_service", "reason": "service bug SB-1"}]}
+        v = self.judge(tg.policy_of(self.m, declared=declared))
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertTrue(any("service check in_service fail, set aside by the declared file: service bug SB-1" in n
+                            for n in v["notes"]))
+        bad = dict(declared, graphlet_service_checks_not_required=[{"check": "nope", "reason": ""}])
+        with self.assertRaises(ValueError) as cm:
+            tg.policy_of(self.m, declared=bad)
+        self.assertIn("'nope' is not a service check", str(cm.exception))
+
+    def test_a_check_whose_precondition_never_holds_is_na_and_passes(self):
+        self.build_with_summary(True)
+        v = self.judge()
+        self.assertTrue(v["passed"], gate.render(v))
+        import report
+        g = cg.load_or_compute(self.d)
+        word, reason = report.graphlet_verdict(g)
+        self.assertEqual(word, "PASS")
+        self.assertIn("service checks: 2 pass, 7 n/a", reason)
+
+
 class LibraryIdentity(GateG):
     def test_expect_library_commit(self):
         self.build()

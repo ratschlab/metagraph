@@ -19,8 +19,10 @@ by the suite's own reader, a scenario's graphlet.facts stating them where the co
   forbidden          a W3 call the op plan sends with a wrong access_token (op probe "wrong_token") is forbidden;
   bad_handle         a W3 call with a malformed handle (op probe "bad_handle", FORMAT v2 D2) is bad_handle;
   library_commit     every W3 call reports the deployed library_commit and the manifest's pin (the pre-checks).
-Each check: pass, fail (naming every call that breaks it), or inconclusive (exercised false: no call of the run
-exercises it; or a fact it needs is unknown).
+Each check: pass, fail (naming every call that breaks it), n/a (its precondition holds on no call of the run: no
+compare call, no body over 8 MiB, no probe; the detail says which), or inconclusive (a fact it needs is unknown).
+blocking_service_checks says which outcomes block (VERIFY-C VC2): any fail, a required check that did not pass, an
+exercised check that is inconclusive; a check the declared file sets aside is a note.
 
 By-design pairs: an op naming a case (`by_design`: an id or a list) of the by-design table (compare.table_for: the
 run's snapshot table, else service_by_design.json) whose `graphlet` block states the pair (compare.graphlet_case_
@@ -126,8 +128,9 @@ def _result(check, calls, failures, unknown=None, what=""):
                 "detail": "%d of %d call(s) break it: %s" % (len(failures), calls, "; ".join(
                     "%s %s: %s" % (f["scenario"], f["op"], f["detail"]) for f in failures[:3]))}
     if not calls:
-        return {"check": check, "outcome": "inconclusive", "exercised": False, "calls": 0, "failures": [],
-                "detail": "not exercised: no W3 call of the run %s" % what}
+        # the check's precondition holds on no call of the run (VERIFY-C VC2: n/a, never a failure)
+        return {"check": check, "outcome": "n/a", "exercised": False, "calls": 0, "failures": [],
+                "detail": "n/a: no W3 call of the run %s" % what}
     if unknown:
         return {"check": check, "outcome": "inconclusive", "exercised": True, "calls": calls, "failures": [],
                 "detail": "%d call(s) without the fact they need: %s" % (len(unknown), "; ".join(unknown[:3]))}
@@ -246,17 +249,17 @@ def check_in_service(recs, manifest, facts):
     for sid, op, r in _w3_calls(recs, manifest, ("graphlet_summary",)):
         if r.get("error"):
             continue
+        calls += 1
         sf = service_fields(r)
         if facts.get(sid, {}).get("over_8mib"):
             over += 1
-            calls += 1
             if sf.get("in_service") is not False or not sf.get("download"):
                 bad.append(_fail(sid, op, "a body over 8 MiB: in_service %s, download %s" % (
                     gp.compact(sf.get("in_service", gp.MISSING)), "present" if sf.get("download") else "absent")))
         elif sf.get("in_service") is False:
             bad.append(_fail(sid, op, "in_service false on a body within 8 MiB"))
-    res = _result("in_service", over, bad, what="of graphlet_summary on a body over 8 MiB")
-    return res
+    # a summary within 8 MiB that says in_service false fails the check; without one over 8 MiB it is n/a otherwise
+    return _result("in_service", calls if bad else over, bad, what="of graphlet_summary on a body over 8 MiB")
 
 
 def check_max_bytes_refused(recs, manifest, facts):
@@ -311,6 +314,27 @@ def service_checks(recs, manifest, facts, prechecks):
             _check_probe("forbidden", "wrong_token", "forbidden", recs, manifest),
             _check_probe("bad_handle", "bad_handle", "bad_handle", recs, manifest),
             check_library_commit(prechecks)]
+
+
+def blocking_service_checks(checks, required=(), set_aside=()):
+    """[(check, why)] of the service checks that block the gate and the report's verdict (VERIFY-C VC2): every check
+    that failed, whether or not the op plan was expected to exercise it; a required check (required_service_checks)
+    that did not pass (n/a included: the plan meant to exercise it); an exercised check that is inconclusive. A check
+    in |set_aside| (the declared file's graphlet_service_checks_not_required) never blocks."""
+    out = []
+    for c in checks or []:
+        name, o = c.get("check"), c.get("outcome")
+        if name in set_aside:
+            continue
+        if o == "fail":
+            out.append((name, "fail: %s" % c.get("detail")))
+        elif name in required and o != "pass":
+            out.append((name, "required, %s: %s" % (o, c.get("detail"))))
+        elif o == "inconclusive" and c.get("exercised"):
+            out.append((name, "inconclusive: %s" % c.get("detail")))
+        elif o not in ("pass", "fail", "n/a", "inconclusive"):
+            out.append((name, "outcome %r outside the vocabulary" % (o,)))
+    return out
 
 
 def required_service_checks(manifest):

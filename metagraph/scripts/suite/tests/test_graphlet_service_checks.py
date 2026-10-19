@@ -93,8 +93,9 @@ class WalkDisplay(ServiceBase):
         res = self.result()
         c = self.check(res, "walk_display")
         self.assertEqual((c["outcome"], c["calls"]), ("pass", 1))
-        self.assertEqual(self.check(res, "hint")["outcome"], "inconclusive")
+        self.assertEqual(self.check(res, "hint")["outcome"], "n/a")   # no compare call: its precondition (VC2)
         self.assertFalse(self.check(res, "hint")["exercised"])
+        self.assertIn("n/a: no W3 call of the run of graphlet_compare answered", self.check(res, "hint")["detail"])
         # the runner left it in the answer: read as a service field all the same
         self.put(SID, self.OP, {"*": lib, "W3": dict(lib, handle=UUID, walk_display="last_parent")}, sf={})
         c = self.check(self.result(), "walk_display")
@@ -180,7 +181,7 @@ class InService(ServiceBase):
         res = self.result()
         self.assertEqual(res["facts"][SID]["over_8mib"], False)   # read from W1's document
         c = self.check(res, "in_service")
-        self.assertEqual((c["outcome"], c["exercised"]), ("inconclusive", False))
+        self.assertEqual((c["outcome"], c["exercised"]), ("n/a", False))
         self.put(SID, self.OP, {"*": lib, "W3": dict(lib, handle=UUID)}, sf={"in_service": False})
         self.assertIn("in_service false on a body within 8 MiB", self.check(self.result(), "in_service")["detail"])
 
@@ -226,6 +227,26 @@ class MaxBytesAndProbes(ServiceBase):
         self.run_.record("W3", SID, "walks", "graphlet_walks", op["args"], answer=dict(gf.walks_answer(), handle=UUID),
                          service_fields={"walk_display": "first_parent"}, library={"commit": "e" * 40})
         self.assertEqual(self.check(self.result(), "library_commit")["outcome"], "fail")
+
+
+class Blocking(unittest.TestCase):
+    """VC2: any failed service check blocks; a required one must pass; n/a blocks only when required."""
+
+    def test_rules(self):
+        checks = [{"check": "in_service", "outcome": "fail", "detail": "in_service false on a body within 8 MiB"},
+                  {"check": "hint", "outcome": "n/a", "exercised": False, "detail": "n/a: no compare call"},
+                  {"check": "walk_display", "outcome": "n/a", "exercised": False, "detail": "n/a: no walks call"},
+                  {"check": "label_evidence", "outcome": "inconclusive", "exercised": True, "detail": "facts"},
+                  {"check": "library_commit", "outcome": "pass"}]
+        out = dict(gs.blocking_service_checks(checks, required=["walk_display", "library_commit"]))
+        self.assertEqual(sorted(out), ["in_service", "label_evidence", "walk_display"])
+        self.assertTrue(out["in_service"].startswith("fail"))
+        self.assertTrue(out["walk_display"].startswith("required, n/a"))
+        self.assertNotIn("hint", out)
+        self.assertEqual([n for n, _ in gs.blocking_service_checks(checks, (), set_aside=["in_service",
+                                                                                         "label_evidence"])], [])
+        self.assertEqual(gs.blocking_service_checks([{"check": "hint", "outcome": "error"}]),
+                         [("hint", "outcome 'error' outside the vocabulary")])
 
 
 class Required(unittest.TestCase):

@@ -75,8 +75,9 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   verified service_by_design pair, W3's not_exposed per the policy being no gap: a disagreement, an inconclusive or a
   precondition_failed blocks, unless the declared file sets the op call aside (graphlets.not_required, with its
   reason: a note); every pre-check of every graphlet scenario passed (library_commit not_exposed without a W3 call);
-  every service check the policy requires passed; the drift lane is a note. The deployed library's identity
-  (library_identity_problems over merge_run.library_identity, the library_commit the MCP runner read per
+  no service check failed, and every one the policy requires passed (graphlet_service_checks.
+  blocking_service_checks; a check the declared file sets aside is a note); the drift lane is a note. The deployed
+  library's identity (library_identity_problems over merge_run.library_identity, the library_commit the MCP runner read per
   invocation), checked like the service's: given --expect-library-commit, every invocation read it and the policy's
   pin is it; with a graphlets block, every invocation's commit is the pin; in any case more than one commit blocks.
   Without a graphlets block and without --expect-library-commit nothing of this is judged or stated (a v4..v7
@@ -754,14 +755,19 @@ def graphlet_problems(run_dir, policy, manifest, notes):
             out.append(_problem("graphlet", "pre-check %s %s%s: %s" % (
                 name, c.get("outcome"), " (a determinism finding)" if name in ("body", "envelope", "twin")
                 and c.get("outcome") == "fail" else "", str(c.get("detail"))[:240]), sid))
+    import graphlet_service_checks as gs
+    aside = dict((x.get("check"), x) for x in block.get("service_checks_not_required") or [])
+    for name, why in gs.blocking_service_checks(comp.get("service_checks"), block.get("service_checks") or [],
+                                                aside):
+        out.append(_problem("graphlet", "service check %s %s" % (name, why[:280])))
+    for c in comp.get("service_checks") or []:
+        if c.get("check") in aside and c.get("outcome") != "pass":
+            notes.append("area G: service check %s %s, set aside by the declared file: %s" % (
+                c["check"], c.get("outcome"), aside[c["check"]].get("reason")))
     checks = dict((c.get("check"), c) for c in comp.get("service_checks") or [])
     for name in block.get("service_checks") or []:
-        c = checks.get(name)
-        if c is None:
+        if name not in checks:
             out.append(_problem("graphlet", "service check %s: not evaluated" % name))
-        elif c.get("outcome") != "pass":
-            out.append(_problem("graphlet", "service check %s %s: %s" % (name, c.get("outcome"),
-                                                                          str(c.get("detail"))[:240])))
     d = comp.get("drift") or {}
     if d.get("calls"):
         notes.append("area G drift lane (report-only): %d of %d compared answer(s) of the branch head's library "

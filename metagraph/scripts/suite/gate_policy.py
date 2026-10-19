@@ -48,7 +48,8 @@ policy's `graphlets` block requires every applicable way of every op call of eac
 graphlet_list / graphlet_free is not required), the six pre-checks of each scenario, the service checks its op plan
 exercises (graphlet_service_checks.required_service_checks) and the manifest's library_commit pin; the drift lane is
 report-only. A declared file may add graphlet_not_required [{scenario, op, reason}]: an op call the owner sets aside
-(a library defect declared until its fix is re-vendored, D-R11), each with its reason. A policy of a manifest without
+(a library defect declared until its fix is re-vendored, D-R11), and graphlet_service_checks_not_required [{check,
+reason}]: a service check whose failure the owner sets aside; each with its reason. A policy of a manifest without
 graphlet scenarios has no `graphlets` block (v4..v7's policies are unchanged).
 A relation is required on an arm when both of its scenarios are selected and neither is excluded there; the others are
 listed with the reason. The policy pins the manifest's content_sha256, relations_sha256 and index_fp and
@@ -261,6 +262,17 @@ def check_declared(declared, manifest, selected):
                             if isinstance(x, dict)]
                 if e.get("check") not in expected:
                     problems.append("%s: %s expects no check %r" % (where, e.get("scenario"), e.get("check")))
+    import graphlet_service_checks as gs
+    for i, e in enumerate(declared.get("graphlet_service_checks_not_required") or []):
+        where = "graphlet_service_checks_not_required[%d]" % i
+        if not isinstance(e, dict):
+            problems.append("%s is not an object" % where)
+            continue
+        if not str(e.get("reason") or "").strip():
+            problems.append("%s states no reason" % where)
+        if e.get("check") not in gs.SERVICE_CHECKS:
+            problems.append("%s: %r is not a service check (%s)" % (where, e.get("check"),
+                                                                   ", ".join(gs.SERVICE_CHECKS)))
     gscen = dict((x.get("id"), x) for x in manifest.get("scenarios", []) if isinstance(x, dict)
                  and isinstance(x.get("graphlet"), dict))
     for i, e in enumerate(declared.get("graphlet_not_required") or []):
@@ -308,6 +320,8 @@ def graphlet_block(manifest, selected, declared=None):
             "prechecks": list(gp.CHECKS), "service_checks": gs.required_service_checks(sub),
             "library_commit": pins[0] if len(pins) == 1 else (pins or None),
             "not_required": [dict(e, rules=["declared"]) for e in (declared or {}).get("graphlet_not_required") or []],
+            "service_checks_not_required": [dict(e, rules=["declared"]) for e in (declared or {}).get(
+                "graphlet_service_checks_not_required") or []],
             "whitelist_sha256": cg.whitelist_sha256(), "drift": "report_only",
             "rules": "every applicable way of every op call and every pre-check is required; a disagreement, a failed "
                      "pre-check, a precondition_failed or an inconclusive blocks; W3 not_exposed per the manifest is "
