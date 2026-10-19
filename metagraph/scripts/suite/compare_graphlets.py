@@ -759,6 +759,10 @@ def compare_cut(way, rec, ref, optional):
     (cut_evidence: the scenario was designed to cut; without one it is "not cut", a failure, VERIFY-C VC4)."""
     if ref is None:
         return {"way": way, "outcome": "not_compared", "detail": "%s recorded no uncut reference" % way}
+    code = (rec.get("error") or {}).get("code") if isinstance(rec.get("error"), dict) else None
+    if code in fit_errors(way) and not ref.get("error"):
+        # the coordinator's R2-7: an op with cut_of keeps F3's rule, the ceiling's fitting error is its cut
+        return {"way": way, "outcome": "agree", "detail": "the ceiling's fitting error %s (FORMAT v2 F3)" % code}
     if rec.get("error") or ref.get("error"):
         same = gp.first_difference(comparable_view(way, rec), comparable_view(way, ref)) is None
         return {"way": way, "outcome": "agree" if same else "disagree",
@@ -871,7 +875,19 @@ def compare_op(scenario, op, recs, precheck, manifest):
         for x in ("W1", "W2", "W3", "W4"):
             if x in present and not (cut_of and x == "W3"):
                 entry["pairs"].append(compare_w5(x, present[x], r5))
+    fits = [(w, (r.get("error") or {}).get("code")) for w, r in sorted(present.items())
+            if w != "W5" and isinstance(r.get("error"), dict) and r["error"].get("code") in fit_errors(w)]
     disagree = [p["pair"] for p in entry["pairs"] if p["outcome"] == "disagree"]
+    if fits and not cut_of:
+        # the coordinator's decision on R2-7: the plan failed to fit, the op tested nothing (blocks); an op with
+        # cut_of keeps F3's rule
+        entry["outcome"] = "inconclusive"
+        entry["reason"] = "the plan failed to fit: %s (an op without cut_of must fit its ceiling)%s" % (
+            ", ".join("%s answered %s" % f for f in fits),
+            ("; the pairs %s differ besides" % ", ".join(disagree)) if disagree else "")
+        if disagree:
+            entry["disagreeing"] = disagree
+        return entry
     disagree += ["%s-uncut" % c["way"] for c in entry.get("cuts") or [] if c["outcome"] == "disagree"]
     missing = [w for w in ways if w not in present]
     all_selector = present and all(r.get("selector_error") for r in present.values())
