@@ -175,7 +175,7 @@ class TestVF1AQualifiedAnswerFitsAsBefore(unittest.TestCase):
     def test_the_phrases_are_bounded(self):
         for k, v in R.items():
             self.assertLessEqual(len(v.encode('utf-8')), 80, k)
-        for k in ('lower_bound', 'overstated', 'incomplete', 'scopes', 'parents', 'inexact'):
+        for k in ('lower_bound', 'overstated', 'scopes', 'parents', 'inexact'):
             self.assertLessEqual(len(R[k].encode('utf-8')), len(R['same']), k)
 
 
@@ -216,16 +216,21 @@ class TestVF4EveryRuleAnswersItsPhrase(unittest.TestCase):
                                          'different rules') for n in c.notes), c.notes)
         self.assert_once(c)
 
-    def test_label_evidence_incomplete_by_the_outcome_alone(self):
-        a, b = T.graphlet('merge'), T.graphlet('merge')
-        for g in (a, b):
-            g.index_fp = 'f' * 64
-        b.limitations = []
-        b.outcome.label_evidence = 'qualified'
-        c = a.compare(b, mode='labels')
-        self.assertEqual(('qualified', R['incomplete']), (c.comparable, c.reason))
-        self.assertIn('b: label_evidence qualified', c.notes)
-        self.assert_once(c)
+    def test_label_evidence_by_the_outcome_alone(self):
+        # R2-3: the outcome's lower_bound understates, its qualified may overstate (SPEC
+        # §7.0); the parser admits no third value besides complete
+        for value, phrase in (('lower_bound', R['lower_bound']),
+                              ('qualified', R['overstated'])):
+            a, b = T.graphlet('merge'), T.graphlet('merge')
+            for g in (a, b):
+                g.index_fp = 'f' * 64
+            b.limitations = []
+            b.outcome.label_evidence = value
+            c = a.compare(b, mode='labels')
+            self.assertEqual(('qualified', phrase), (c.comparable, c.reason), value)
+            self.assertIn('b: label_evidence %s' % value, c.notes)
+            self.assert_once(c)
+        self.assertNotIn('incomplete', R)
 
     def test_an_inexact_restriction(self):
         # test_traverse_review3's construction: a merge partition without b.fa

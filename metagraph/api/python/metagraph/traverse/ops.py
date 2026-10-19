@@ -3403,7 +3403,6 @@ COMPARE_REASONS = {
     'cancelled': 'stopped by cancellation',
     'lower_bound': 'labels: lower bound',
     'overstated': 'labels: overstated',
-    'incomplete': 'labels: incomplete',
     'scopes': 'scopes differ',
     'parents': 'displayed parents',
     'inexact': 'inexact restriction',
@@ -3571,7 +3570,7 @@ def _label_evidence_notes(g, sides):
     """Why |g|'s label evidence is not complete on |sides| -> [(phrase, note)]: one note
     per stated label-class limitation, else the outcome dimension or the cut lists
     themselves (a graphlet whose K records were lost still says so through O and A), each
-    with its fixed phrase (COMPARE_REASONS: a lower bound, overstated, incomplete)."""
+    with its fixed phrase (COMPARE_REASONS: a lower bound, or overstated)."""
     notes = []
     seen = set()
     for lim in g.limitations:
@@ -3591,7 +3590,11 @@ def _label_evidence_notes(g, sides):
                       'label_lists (labels.max_labels_per_node): %d recorded lists cut, the '
                       'oracle is a lower bound' % cut))
     if not notes and g.outcome is not None and g.outcome.label_evidence != 'complete':
-        notes.append((COMPARE_REASONS['incomplete'],
+        # the outcome's dimension is complete, lower_bound or qualified (the parser's O
+        # codes admit no other): a lower bound understates, qualified evidence may
+        # overstate (SPEC §7.0)
+        over = g.outcome.label_evidence == 'qualified'
+        notes.append((COMPARE_REASONS['overstated' if over else 'lower_bound'],
                       'label_evidence %s' % g.outcome.label_evidence))
     return notes
 
