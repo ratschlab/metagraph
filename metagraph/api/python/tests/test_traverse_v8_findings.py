@@ -14,7 +14,7 @@ import traverse_testlib as T  # noqa: E402
 from metagraph.traverse import (  # noqa: E402
     GraphletStore, derive, from_response, ops, parse,
 )
-from metagraph.traverse.mcp_tools import GraphletTools  # noqa: E402
+from metagraph.traverse.mcp_tools import GraphletTools, ToolLimits  # noqa: E402
 
 MODES = ('claims', 'walks', 'labels', 'prefix_subset')
 R = ops.COMPARE_REASONS
@@ -489,6 +489,62 @@ class TestVF2TheEndsSortIsCharged(unittest.TestCase):
         self.assertGreaterEqual(b.used_work, sorts)
         # the charge changes nothing in the rows
         self.assertEqual(GraphletTools._walk_rows(g, a, p), rows)
+
+
+class TestVR4ASliceCarriesABaseOrIsRefused(unittest.TestCase):
+    """VR4 (VERIFY-L-R2): under local limits with a small sequence ceiling (900 bytes),
+    graphlet_sequence answered an empty slice whose next_from was its from, so paging it
+    never advanced, instead of result_too_large. A result that cannot be made to fit is
+    result_too_large (mcp_tools' contract, DESIGN §6): a cut slice carries at least one
+    base, and where not one fits beside the frame the whole slice is answered when it
+    fits the ceiling, else refused."""
+
+    def tools(self, d, ceiling, limited):
+        return GraphletTools(GraphletStore(d), {}, sequence_max_bytes=ceiling,
+                             local_limits=ToolLimits() if limited else None)
+
+    def test_rep0_cut1_at_900_under_local_limits(self):
+        with tempfile.TemporaryDirectory() as d:
+            t = self.tools(d, 900, True)
+            h = t.store.put_graphlet(_coords('rep0_cut1'))
+            for side in ('left', 'right'):
+                out = t.graphlet_sequence(h, side, walk=0)
+                # the 300 bases fit beside the local block as answered: the whole slice
+                self.assertNotIn('error', out, out)
+                self.assertEqual((0, 300, 300), (out['from'], out['to'], len(out['sequence'])))
+                self.assertNotIn('next_from', out)
+            t = self.tools(d, 700, True)
+            out = t.graphlet_sequence(h, 'left', walk=0)
+            self.assertEqual('result_too_large', out.get('error'), out)
+
+    def test_every_slice_advances_or_is_refused(self):
+        n = refused = 0
+        for name in ('rep0_cut1', 'rep0_kmer_null', 'rep0_lower_bound'):
+            g = _coords(name)
+            with tempfile.TemporaryDirectory() as d:
+                for limited in (False, True):
+                    for ceiling in (450, 600, 700, 900, 1200):
+                        t = self.tools(d, ceiling, limited)
+                        h = t.store.put_graphlet(g)
+                        for side in g.arms:
+                            whole = g.spell(side, 0)
+                            got, start = '', 0
+                            while True:
+                                out = t.graphlet_sequence(h, side, walk=0, start=start)
+                                n += 1
+                                if out.get('error'):
+                                    self.assertEqual('result_too_large', out['error'], out)
+                                    refused += 1
+                                    break
+                                self.assertEqual(start, out['from'])
+                                got += out['sequence']
+                                if 'next_from' not in out:
+                                    self.assertEqual(whole, got, (name, side, ceiling))
+                                    break
+                                self.assertGreater(out['next_from'], start, out)
+                                start = out['next_from']
+        self.assertGreater(refused, 0)
+        self.assertGreater(n, refused)
 
 
 if __name__ == '__main__':

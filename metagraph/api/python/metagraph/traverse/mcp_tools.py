@@ -2111,7 +2111,9 @@ class GraphletTools:
     def graphlet_sequence(self, handle, arm, walk=None, segment=None, start=0, end=None,
                           orientation='natural', with_seed=False, budget=None):
         """A slice [start, end) of a walk's (or a segment's) bases, at most 16 KB; the
-        result states the ceiling and where to continue."""
+        result states the ceiling and where to continue. A cut slice carries at least one
+        base: where not one fits beside the frame (a small ceiling), the answer is
+        result_too_large."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         if (walk is None) == (segment is None):
@@ -2166,7 +2168,12 @@ class GraphletTools:
         if _size(out) > room:
             # the ceiling holds for the whole result, the continuation keys included
             frame = _size(dict(out, sequence='', truncated=True, to=end, next_from=end))
-            part = part[:max(0, room - frame)]
+            if room - frame < 1:
+                # not one base fits beside the frame: a slice cannot be made to fit, so
+                # the whole one is answered and the wrapper refuses it (result_too_large)
+                # where it does not fit -- never an empty slice whose next_from is its from
+                return out
+            part = part[:room - frame]
             out.update(sequence=part, truncated=True, to=start + len(part),
                        next_from=start + len(part))
         return out
