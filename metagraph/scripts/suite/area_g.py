@@ -427,6 +427,56 @@ def twin_strategy(strategy: dict) -> dict:
     return twin
 
 
+# The owner's decision of 2026-10-19: the long walk gets warm-up resolves of its region right before it, as the P-warm
+# scenarios do (direct-local only, timing_class long: the MCP arm's first call meets warm rows). The rehearsal of that
+# day: its cold MCP walks took 14.7 s and 13.1 s against the walk preset's 15 s (25 % is 3.75 s), warm ~0.2 s.
+LONG_WARM_IDS = ("G-warm-0001", "G-warm-0002")
+LONG_WARM_MAX_QUERY_BP = 10000     # the host's max_query_bp (its /traverse/capabilities): a direct-local resolve's cap
+LONG_WARM_MARGIN_BP = 45           # areas.WARM_MARGIN_BP: what a warm-up reads beyond the walk
+
+
+def long_walk_warm_ups(ctx: Any, c: dict, target_id: str) -> List[dict]:
+    """The warm-ups of the long walk |c| (LONG_WARM_IDS): its seed and its right arm's radius plus
+    LONG_WARM_MARGIN_BP, in two contiguous pieces of at most LONG_WARM_MAX_QUERY_BP overlapping by k - 1, each resolved
+    against the walk's own label (a column: its rows), every k-mer supported; direct-local only (timing_class long, the
+    MCP mapping not implemented: bounds.max_query_bp above the service's 2,000), budget_stress and machine-dependent
+    as the P-warm warm-ups (their own cold run meets the cold host by design)."""
+    from manifest_lib import RESOLVE_TIME_BUDGET_MS, resolve_request
+    t = c["truth"]
+    rec = ctx.rec(t["genome"])
+    label = c["seed"]["labels"][0]
+    radius = c["overrides"]["bounds"]["max_extension_bp"]
+    s0 = t["start"] - rec.offset
+    a, b = s0, min(len(rec.seq), s0 + t["length"] + radius + LONG_WARM_MARGIN_BP)
+    k = 31
+    n = len(LONG_WARM_IDS)
+    piece = -(-(b - a + (n - 1) * (k - 1)) // n)
+    assert piece <= LONG_WARM_MAX_QUERY_BP, "a long-walk warm-up within the host's max_query_bp"
+    out = []
+    for i, sid in enumerate(LONG_WARM_IDS):
+        start = a + i * (piece - (k - 1))
+        end = min(b, start + piece) if i + 1 < n else b
+        region = ctx.truth_at(rec, start, end - start, flank=0)
+        region["flank"] = ""
+        query = region.pop("window")
+        region["window_sha256"] = hashlib.sha256(query.encode()).hexdigest()
+        region["warm_up"] = ("the rows of %s's walk (piece %d of %d: its %s bp seed and %s bp right arm + %d), read "
+                             "right before it on direct-local so that its MCP arm's first call meets them warm; the "
+                             "rehearsal of 2026-10-19: cold MCP walks 14.7 s / 13.1 s against 15 s, warm ~0.2 s" % (
+                                 target_id, i + 1, n, format(t["length"], ","), format(radius, ","),
+                                 LONG_WARM_MARGIN_BP))
+        region["budget_stress"] = {"reason": "a warm-up's first run meets the cold host by design"}
+        req = resolve_request(query, labels=[label], time_budget_ms=RESOLVE_TIME_BUDGET_MS,
+                              max_query_bp=LONG_WARM_MAX_QUERY_BP)
+        out.append(scenario(sid, AREA, "warm-up of %s: %s bp of its region resolved against %s on direct-local" % (
+                                target_id, format(len(query), ","), label), "POST /resolve", req, region,
+                            [{"check": "status", "args": {"http": 200}}, {"check": "invariants", "args": {}},
+                             {"check": "resolve_runs", "args": {"label": label, "full": True}}],
+                            timing_class="long", tags=("warm-up", "budget_stress", "machine-dependent", "area-g"),
+                            warms=target_id))
+    return out
+
+
 def candidate_strategy(c: dict) -> dict:
     """The exact strategy of a candidate's request: the preset's, the overrides deep-merged, output {detail:
     graphlet, timing: true}, then the direct-only keys (manifest_lib.traverse_request)."""
@@ -1131,7 +1181,12 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
                                                                                          ps["a"]),
                               pc, corpus, library_commit, ops, ["pair", "pair-" + ps["pair"]]))
     # partners first: a compare's b must have run (its MCP job) before the op that names it
-    return reorder_pairs(out, pair_specs)
+    out = reorder_pairs(out, pair_specs)
+    if "long_walk" in present:
+        # the long walk's warm-ups right before it (the owner, 2026-10-19)
+        i = next(j for j, s in enumerate(out) if s["id"] == ids["long_walk"])
+        out[i:i] = long_walk_warm_ups(ctx, present["long_walk"], ids["long_walk"])
+    return out
 
 
 def _variant(c: dict, cid: str, overrides: Optional[dict] = None, seed: Optional[dict] = None,

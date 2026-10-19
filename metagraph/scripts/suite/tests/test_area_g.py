@@ -28,6 +28,11 @@ needs_library = unittest.skipIf(sys.version_info < (3, 10), "the traversal libra
 V7 = os.path.join(SUITE, "manifest", "suite_v7.json")
 
 
+def areas_mod():
+    import areas
+    return areas
+
+
 def have_cache():
     return os.path.isdir(truth.CACHE_DIR) and bool(os.listdir(truth.CACHE_DIR))
 
@@ -437,18 +442,40 @@ class PlansOnRealGraphlets(unittest.TestCase):
 
 @unittest.skipUnless(have_cache(), "no record cache")
 class BuiltV8(unittest.TestCase):
-    def test_v8_is_v7_then_area_g(self):
+    def test_v8_is_v7_with_t_walk_0024s_warm_ups_then_area_g(self):
+        # the owner's decisions of 2026-10-19: v8 differs from v7 only by T-walk-0024's warm-ups and area G
         import build_manifest as bm
         m = bm.build(bm.DEFAULT_SEED, fetch=False, manifest_version=8)
         v7 = sc.read_json(V7)
         n = len(v7["scenarios"])
         self.assertEqual(m["manifest_version"], 8)
-        self.assertEqual(ml.canonical_json(m["scenarios"][:n]), ml.canonical_json(v7["scenarios"]))
+        ids7 = [s["id"] for s in v7["scenarios"]]
+        i = ids7.index("T-walk-0024")
+        warm = list(areas_mod().T_WALK_0024_REGION["ids"])
+        self.assertEqual(len(warm) % 10, 0)   # a multiple of ten keeps every later index's warm repeat
+        head = m["scenarios"][:i] + m["scenarios"][i + len(warm):n + len(warm)]
+        self.assertEqual(ml.canonical_json(head), ml.canonical_json(v7["scenarios"]))
+        self.assertEqual([s["id"] for s in m["scenarios"][i:i + len(warm)]], warm)
+        for s in m["scenarios"][i:i + len(warm)]:
+            self.assertEqual((s["route"], s["warms"], s["request"]["labels"]), ("POST /resolve", "T-walk-0024",
+                                                                                ["243273"]))
+            self.assertEqual(s["mcp"]["tool"], "traverse_resolve")
         self.assertEqual(m["relations_sha256"], v7["relations_sha256"])
-        self.assertTrue(all(s["area"] == "G" for s in m["scenarios"][n:]))
-        self.assertTrue(any(s["id"] == "G-long-0001" for s in m["scenarios"][n:]))
+        rest = m["scenarios"][n + len(warm):]
+        self.assertTrue(all(s["area"] == "G" for s in rest))
+        ids = [s["id"] for s in rest]
+        k = ids.index("G-long-0001")
+        self.assertEqual(ids[k - 2:k], ["G-warm-0001", "G-warm-0002"])
+        for s in rest[k - 2:k]:
+            self.assertEqual((s["timing_class"], s["warms"], s["route"]), ("long", "G-long-0001", "POST /resolve"))
+            self.assertIn("not_implemented", s["mcp"])
+            self.assertLessEqual(len(s["request"]["sequence"]), 10000)
         self.assertEqual(bm.smoke_of(m)["content_sha256"], bm.smoke_of(v7)["content_sha256"])
         self.assertTrue(m["graphlets"]["corpus"]["provisional"])
+        # the paired plan's warm repeats of every v7 scenario unchanged
+        w7 = dict((s["id"], k % 10 == 0) for k, s in enumerate(v7["scenarios"]))
+        w8 = dict((s["id"], k % 10 == 0) for k, s in enumerate(m["scenarios"]))
+        self.assertEqual([x for x in ids7 if w7[x] != w8[x]], [])
 
 
 if __name__ == "__main__":

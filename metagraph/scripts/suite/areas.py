@@ -2505,6 +2505,50 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     return out
 
 
+# ================================================================================================= v8: T-walk-0024's warm-ups
+# The owner's decision of 2026-10-19 (lane D's proposal (b)): T-walk-0024, a 200 bp seed of mge under its column
+# 243273, both arms, 10,000 bp, walk preset (15 s), took 4.2, 4.2, 0.14, 6.5, 18.6 (time-stopped at 3,098 bp) and
+# 6.8 s cold via MCP in the runs of 2026-10-17..19 and ~0.1 s warm. Its paths end at stated branches 2,398 bp left
+# and 3,916 bp right of the seed in every v5-v7 run (complete_to_bp 10,000 on both arms), so its cost is the cold reads
+# of that region: warm-up resolves of it, against the column (a column walk reads rows), right before it. TEN pieces,
+# not the four the proposal named: the paired plan gives every tenth scenario of the manifest a warm repeat, by index
+# (suite_common.repeat_count), so inserting a multiple of ten keeps every later v7 scenario's index residue, hence
+# its warm repeat, and the builder's single-execution and gate-warm-repeat placements move nothing (with four, 120 of
+# v7's warm repeats moved, 27 on the gate's routes, and T-attempts-0002 / -0003 and N-negative-0007.. were re-placed).
+T_WALK_0024_REGION = {"target": "T-walk-0024", "left_bp": 2398, "right_bp": 3916, "label": "243273",
+                      "ids": tuple("R-warm-%04d" % n for n in range(9, 19))}
+
+
+def t_walk_0024_warm_ups(ctx: Ctx, scenarios: List[dict]) -> List[dict]:
+    """The ten warm-ups of T_WALK_0024_REGION (v8 only; build_manifest adds them, place_warm_ups puts them right
+    before the walk): the seed with WARM_MARGIN_BP beyond each arm's paths' ends, cut at a base outside ACGT, in ten
+    contiguous pieces of at most RESOLVE_MAX_QUERY_BP (the MCP's traverse_resolve sends them too) overlapping by k - 1
+    so that every k-mer of the region is read, each resolved against the column, every k-mer supported."""
+    spec = T_WALK_0024_REGION
+    target = _by_id(scenarios, spec["target"])
+    t = target["truth"]
+    rec = ctx.rec(t["genome"])
+    assert spec["label"] == rec.column, "T-walk-0024's column"
+    s0 = t["start"] - rec.offset
+    a, _, _ = acgt_flank(rec, s0, t["length"], spec["left_bp"] + WARM_MARGIN_BP)
+    _, b, _ = acgt_flank(rec, s0, t["length"], spec["right_bp"] + WARM_MARGIN_BP)
+    n = len(spec["ids"])
+    piece = -(-(b - a + (n - 1) * (K - 1)) // n)   # ceil: n pieces overlapping by k - 1 cover [a, b)
+    assert piece <= RESOLVE_MAX_QUERY_BP, "a T-walk-0024 warm-up the MCP can send"
+    out = []
+    for i, sid in enumerate(spec["ids"]):
+        start = a + i * (piece - (K - 1))
+        end = min(b, start + piece) if i + 1 < n else b
+        region = ctx.truth_at(rec, start, end - start, flank=0)
+        region["flank"] = ""
+        why = ("the rows of T-walk-0024's column walk (piece %d of %d of the seed and %s bp left / %s bp right, its "
+               "paths' ends + %d): its cold MCP call took 4.2-18.6 s against the walk preset's 15,000 ms" % (
+                   i + 1, n, format(spec["left_bp"], ","), format(spec["right_bp"], ","), WARM_MARGIN_BP))
+        out.append(warm_up(ctx, sid, region["window"], spec["label"], region, spec["target"], why,
+                           tags=("column-label",)))
+    return out
+
+
 # ================================================================================================= G: graphlet tools (v8)
 def gen_G(ctx: Ctx, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,
           include_direct_only: bool = False) -> List[dict]:

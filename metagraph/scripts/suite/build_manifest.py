@@ -180,6 +180,9 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         if only_areas and area not in only_areas:
             continue
         scenarios += gen(ctx)
+        if area == "T" and manifest_version >= GRAPHLET_VERSION:
+            # v8 (the owner, 2026-10-19): T-walk-0024's ten warm-ups (areas.T_WALK_0024_REGION), right before it
+            scenarios += areas.t_walk_0024_warm_ups(ctx, scenarios)
     if not only_areas or "C" in only_areas:
         scenarios += areas.gen_C(ctx, caps)
     if not only_areas:
