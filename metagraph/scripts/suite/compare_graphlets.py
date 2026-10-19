@@ -202,7 +202,8 @@ def _canon(obj, roles, drop_local, top=False, tool=None):
         out = {}
         for k in sorted(obj, key=str):
             v = obj[k]
-            if k in CURSOR_KEYS or (drop_local and k == "local") or (top and k in ENV_KEYS.get(tool, ())):
+            # the local block is the answer's (or an error's) top-level key; evidence.limitations.local below
+            if k in CURSOR_KEYS or (drop_local and top and k == "local") or (top and k in ENV_KEYS.get(tool, ())):
                 continue
             if top and tool == "graphlet_compare" and k in TOP_HANDLE_KEYS and isinstance(v, str):
                 out[k] = "<handle>" if k == "a" else "<handle_b>"
@@ -247,7 +248,7 @@ def canonical_error(error, keep_local=False):
         fields = {}
     skip = set(ERROR_TEXT_FIELDS) | set(ERROR_ENV_FIELDS.get(code, ()))
     fields = dict((k, v) for k, v in fields.items() if k not in skip)
-    return {"code": code, "fields": _canon(fields, {}, not keep_local)}
+    return {"code": code, "fields": _canon(fields, {}, not keep_local, top=True)}
 
 
 def canonical_args(args):
@@ -330,9 +331,15 @@ def is_symbol(value):
 
 
 def runner_error(rec):
-    """The runner-side code of a record whose way did not run the call (RUNNER_ERRORS), or None."""
+    """The runner-side code of a record whose way did not run the call (RUNNER_ERRORS), "no_answer" for a record
+    with neither an answer nor an error nor a selector error (a runner bug or a lost call, VERIFY-C VC6), or None."""
     err = rec.get("error") if isinstance(rec.get("error"), dict) else None
-    return err.get("code") if err and err.get("code") in RUNNER_ERRORS else None
+    if err and err.get("code") in RUNNER_ERRORS:
+        return err.get("code")
+    if not rec.get("error") and not rec.get("selector_error") and rec.get("answer") is None \
+            and not isinstance(rec.get("oracle"), dict):   # a W5 record may declare instead of answering
+        return "no_answer"
+    return None
 
 
 def comparable_view(way, rec, keep_local=False):
@@ -817,6 +824,13 @@ def compare_op(scenario, op, recs, precheck, manifest):
     disagree += ["%s-uncut" % c["way"] for c in entry.get("cuts") or [] if c["outcome"] == "disagree"]
     missing = [w for w in ways if w not in present]
     all_selector = present and all(r.get("selector_error") for r in present.values())
+    if op.get("paging", "all") == "all":
+        # FORMAT v2 A4: a listing that stopped before its last page is not the whole list (VERIFY-C VC6); an op that
+        # declares a page cap ({"pages": N}) or one page ("none") states its own extent
+        for w, r in sorted(present.items()):
+            if r.get("paging_complete") is False:
+                entry["problems"].append("%s's listing stopped before its last page (paging_complete false) on a "
+                                         "paging \"all\" op" % w)
     unread = [p for p in entry["pairs"] if p["outcome"] == "not_compared" and p.get("kind") in UNREAD_KINDS]
     if disagree:
         entry["outcome"] = "disagree"

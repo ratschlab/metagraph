@@ -557,6 +557,36 @@ class FiveWay(unittest.TestCase):
         self.assertFalse(cg.same_library_env(r1, r2))
         self.assertTrue(cg.same_library_env(r1, copy.deepcopy(r1)))
 
+    def test_vc6_empty_records_and_incomplete_listings(self):
+        self.make(ways=["W1", "W2", "W3", "W4"])
+        for way in ("W1", "W2", "W3", "W4"):
+            self.run_.record(way, SID, "walks-len", "graphlet_walks", self.op["args"], answer=None)
+        e = self.op_entry()
+        self.assertEqual((e["outcome"], e["ways"]["W1"]), ("inconclusive", "runner_error"))
+        self.assertIn("did not run the call (runner: no_answer)", e["reason"])
+        self.run_.cleanup()
+        self.make(ways=["W1", "W2", "W3", "W4"])
+        self.five(w5=False)
+        path = os.path.join(self.run_.dir, "arms", "dl-lib", "graphlet_ops.jsonl")
+        with open(path) as fh:
+            rec = json.loads(fh.read())
+        rec["paging_complete"] = False
+        with open(path, "w") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        e = self.op_entry()
+        self.assertEqual(e["outcome"], "inconclusive")
+        self.assertIn("W1's listing stopped before its last page", e["reason"])
+        # an op with a declared page cap states its own extent
+        scen = gf.scenario(ops=[dict(self.op, paging={"pages": 1})], ways=["W1", "W2", "W3", "W4"])
+        recs = gp.all_records(self.run_.dir)[0]
+        pre = {"outcome": "pass", "preconditions": {"outcome": "pass"}}
+        self.assertEqual(cg.compare_op(scen, scen["graphlet"]["ops"][0], recs, pre, None)["outcome"], "agree")
+
+    def test_local_is_dropped_only_where_the_library_puts_it(self):
+        a = {"handle": "h", "local": {"usage": 1}, "rows": [{"local": 1}], "evidence": {"limitations": {"local": ["x"]}}}
+        self.assertEqual(cg.canonical_answer("graphlet_walks", a),
+                         {"handle": "<handle>", "rows": [{"local": 1}], "evidence": {"limitations": {}}})
+
     def test_the_oracle_on_an_error(self):
         self.make()
         err = {"code": "bad_argument", "fields": {}}
