@@ -86,6 +86,22 @@ class Section(tsc.ServiceBase):
         self.assertIn("## G.7 Drift lane (report-only)", text)
         self.assertIn("at /answer/total: W4 2, drift 9", text)
 
+    def test_the_rederived_mark(self):
+        self.make([gf.scenario(ops=[self.WALKS])])
+        lib = gf.walks_answer()
+        self.put(SID, self.WALKS, {"*": lib, "W3": dict(lib, handle=UUID)}, sf={"walk_display": "first_parent"},
+                 ways=["W1", "W2", "W3", "W4"])
+        self.run_.record("W5", SID, "walks-len", "graphlet_walks", self.WALKS["args"],
+                         answer={"rows": [{"length_bp": 120, "n_full": 2}]},
+                         oracle={"checked": {"/rows/0/length_bp": "SPEC-core §7.5.6",
+                                             "/rows/0/n_full": "DESIGN §5.1 labels_full"},
+                                 "rederived": ["/rows/0/n_full"], "consistency_only": []})
+        g = self.result()
+        self.assertEqual(g["coverage"]["graphlet_walks"]["checked"]["/rows/*/n_full"]["rederived"], 1)
+        text = report.graphlet_section(g)
+        self.assertIn("| graphlet\\_walks | /rows/\\*/n\\_full | checked, re-derived from DESIGN | DESIGN S5.1", text)
+        self.assertIn("| graphlet\\_walks | /rows/\\*/length\\_bp | checked | SPEC-core S7.5.6", text)
+
     def test_an_uncomputable_comparison(self):
         self.assertEqual(report.graphlet_verdict({"error": "x"})[0], "ERROR")
         self.assertIn("could not be computed", report.graphlet_section({"error": "boom"}))

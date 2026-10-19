@@ -879,16 +879,21 @@ def _norm_pointer(ptr):
 
 
 def coverage(recs):
-    """{tool: {"checked": {pointer: {"clause", "calls"}}, "consistency_only": {pointer: calls}}} over W5's records,
-    list indices written *."""
+    """{tool: {"checked": {pointer: {"clause", "calls", "rederived"}}, "consistency_only": {pointer: calls}}} over
+    W5's records, list indices written *; `rederived` counts the calls where W5's record marks the pointer re-derived
+    from DESIGN (oracle.rederived, DESIGN-v8 §2, D-R5).
+    """
     out = {}
     for (sid, oid), r in sorted(recs.get("W5", {}).items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
         oracle = r.get("oracle") if isinstance(r.get("oracle"), dict) else {}
         t = out.setdefault(r.get("tool"), {"checked": {}, "consistency_only": {}})
+        rederived = set(oracle.get("rederived") or []) if isinstance(oracle.get("rederived"), list) else set()
         for ptr, clause in sorted((oracle.get("checked") or {}).items()) if isinstance(oracle.get("checked"),
                                                                                       dict) else []:
-            c = t["checked"].setdefault(_norm_pointer(ptr), {"clause": clause, "calls": 0})
+            c = t["checked"].setdefault(_norm_pointer(ptr), {"clause": clause, "calls": 0, "rederived": 0})
             c["calls"] += 1
+            # DESIGN-v8 §2 (D-R5): a value W5 computes with a DESIGN formula, not read from an engine value
+            c["rederived"] += 1 if ptr in rederived else 0
             if clause not in c.setdefault("clauses", [c["clause"]]):
                 c["clauses"].append(clause)
         for ptr in oracle.get("consistency_only") or [] if isinstance(oracle.get("consistency_only"), list) else []:

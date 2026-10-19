@@ -1535,11 +1535,15 @@ def graphlet_section(g, max_items=200):
     cov = g.get("coverage") or {}
     out.append("W1 = W2 = W3 = W4 is consistency; W5 is the only correctness check. Per tool, the fields W5 checks, "
                "with the SPEC / DESIGN clause each rests on, and the fields it leaves to consistency (list indices "
-               "written *).\n")
+               "written *). A field W5 computes with a DESIGN formula from engine values, rather than reading it from "
+               "an engine value, is marked \"checked, re-derived from DESIGN\" (DESIGN-v8 §2): it catches slips of "
+               "the library's implementation, not a wrong rule.\n")
     crow = []
     for tool in sorted(cov):
         for ptr, c in sorted((cov[tool].get("checked") or {}).items()):
-            crow.append([md(tool), md(ptr), "checked", md("; ".join(c.get("clauses") or [c.get("clause")]), 120),
+            how = "checked" if not c.get("rederived") else "checked, re-derived from DESIGN" + (
+                "" if c["rederived"] == c.get("calls") else " (%d of %d calls)" % (c["rederived"], c.get("calls", 0)))
+            crow.append([md(tool), md(ptr), md(how), md("; ".join(c.get("clauses") or [c.get("clause")]), 120),
                          str(c.get("calls", 0))])
         for ptr, n in sorted((cov[tool].get("consistency_only") or {}).items()):
             crow.append([md(tool), md(ptr), "consistency only", "-", str(n)])
