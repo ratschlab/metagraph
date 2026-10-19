@@ -1,4 +1,4 @@
-"""W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phase A.
+"""W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phases A and B.
 
     answer(tool, args_resolved, full_answer, mgt_text, context=None) -> record
     compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked | inconclusive, "detail",
@@ -31,8 +31,8 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
   list's end (the list's length, VO7).
 - `rederived`: the checked pointers whose value W5 computes with a DESIGN formula from engine values, rather than
   reading an engine value (DESIGN-v8 §2: the report marks them "re-derived from DESIGN").
-- `declared` says why a record checks no value: not_implemented_phase_b (graphlet_support, graphlet_claims,
-  graphlet_labels name=: DESIGN-v8 §8), properties_only (graphlet_compare: the compare_* functions below),
+- `declared` says why a record checks no value: not_implemented_phase_b (no tool today: DESIGN-v8 §8's phase B
+  is answered), properties_only (graphlet_compare: the compare_* functions below),
   not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view): W5 makes no claim
   (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
   twin pre-check), no_input (the run step found no twin or document), unresolved_handle (a handle symbol naming no
@@ -63,7 +63,7 @@ with no definition outside the library, or only DESIGN pseudocode the twin does 
 Values a clock measured (a time limitation's observed, a time resource stop's amounts) differ between the twin's
 execution and the graphlet's (SPEC §6.8) and are never checked.
 
-Coverage (phase A; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2, [L] library-defined (an expected
+Coverage (phases A and B; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2, [L] library-defined (an expected
 error's code); [R] re-derived from DESIGN (oracle.rederived); c/o = consistency-only). Every whole list's length is
 checked (VO7); refusals are expected errors with their code [L].
   every answer's evidence: complete_to_bp, scope [S §7.4], support, reconverge [S §7.5.2 H], outcome [S §7.0],
@@ -109,7 +109,22 @@ checked (VO7); refusals are expected errors with their code [L].
       overrides (their merge [L]); execute=True (backend)
   graphlet_compare: properties only (compare_self_properties, compare_swap_properties, compare_walks_properties,
       compare_prefix_subset_properties; each takes the compare's arm) [D §5, §5.2.5, §3.1, §9 T39, S §6.10, §7.5.7]
-  phase B (declared): graphlet_support, graphlet_claims, graphlet_labels name=
+  graphlet_claims (phase B): one claim per run end in run id order [S §6.9]: label, from_bp, to_bp, entered_by,
+      from_label, cost, loss, branches, reason [S §7.1 runs[], §7.5.2 R], qualifier [S §7.5.1], path_id of a run
+      ending at a leaf [S §7.5.6], kind boundary of a zero-length run [D §5.1], route_bp where R's stamp is the
+      displayed one [S §7.1; PB2], evidence_from [D §5.1][R] (null for a boundary claim, PB1), total and filtered
+      (labels [D §5], route_consistent: merge_entered / route_only [D §6, §5.1][R], min_bp [P §2.11][R]) | c/o:
+      other kinds, end_class, support, exact, path_id of inner runs, route_bp where R and T differ (PB2), filtered
+      with min_bp > 0 (PB3), labels=[], coordinate columns, hint, caveat; annotate claims (D §5.2.1 witness rule)
+  graphlet_labels name= (phase B): the label's runs per arm (left first) in run id order: arm, from_bp, to_bp [S
+      §7.1], end (the qualifier's text or the enum [S §7.5.6]), evidence_from [D §5.1][R] (the formula also for a
+      zero-length run, PB4), merged_into [S §7.5.2 R m, D §4], walks_below (leaves reachable from the anchor) [D §5,
+      S §7.5.6], route [D §5 routes][R]; name, ref, total; unknown / ambiguous name [L] | c/o: the end of Lw and m
+      runs, coordinate columns; annotate (D §5.2.1 witness route)
+  graphlet_support (phase B): total, rows from_bp, to_bp, n_labels, n_labels_total, joined, left after the first row:
+      constrain, displayed support along the walk [D §5, §6; §5.1 with the walk as displayed path][R] (PB5);
+      annotate, the recorded label sets along the walk [S §7.4] | c/o: the first row's lists, why, exact, step=, who
+      joined or left across a cut list, n_labels_total on a constrain arm with cut lists
 """
 
 from __future__ import annotations

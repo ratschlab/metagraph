@@ -87,6 +87,9 @@ def _calls(res):
         out += [("graphlet_labels", {"name": res["label_dict"][0]["name"], "max_bytes": WIDE}),
                 ("graphlet_labels", {"name": {"id": 0}, "coordinates": True, "max_bytes": WIDE}),
                 ("graphlet_labels", {"name": "no-such-label"}), ("graphlet_labels", {"name": {"id": 0}})]
+        names = [e.get("name") for e in res["label_dict"]]
+        out += [("graphlet_labels", {"name": x, "max_bytes": WIDE}) for x in sorted({x for x in names
+                                                                                       if names.count(x) > 1})]
     if len(sides) == 1:   # an arm this retrieval did not walk
         other = "left" if sides == ["right"] else "right"
         out += [("graphlet_walks", {"arm": other}), ("graphlet_summary", {"arm": other})]

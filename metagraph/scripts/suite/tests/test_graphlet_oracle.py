@@ -447,6 +447,11 @@ class LabelWalkGoldens(unittest.TestCase):
         self.assertEqual([x["arm"] for x in both["rows"]], ["left", "right"])
         self.assertEqual((both["name"], both["ref"], both["total"]), ("acc1", "h:0:0", 2))
         self.assertEqual(rec("graphlet_labels", {"name": "nope"}, "fork")["oracle"]["expected_error"], "unknown_label")
+        # documents/same_name records two headers ACC1 from different columns: a bare name is ambiguous (DESIGN §5
+        # Graphlet.label: select by ref), the refs are not
+        self.assertEqual(rec("graphlet_labels", {"name": "ACC1"}, "same_name")["oracle"]["expected_error"],
+                         "ambiguous_label")
+        self.assertNotIn("declared", rec("graphlet_labels", {"name": {"ref": "h:0:0"}}, "same_name")["oracle"])
         self.assertEqual(rec("graphlet_labels", {"name": "acc1", "coordinates": True}, "fork")["oracle"]
                          ["expected_error"], "no_coordinates")
 
