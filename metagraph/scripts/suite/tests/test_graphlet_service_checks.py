@@ -393,5 +393,34 @@ class Facts(unittest.TestCase):
         self.assertEqual(gs.document_facts(None, checks)["cut_lists"], None)
 
 
+class CutListsAsTheEngineStatesThem(unittest.TestCase):
+    """F-D3 (lane D, 2026-10-19): two real documents of the area G rehearsal on staging (tests/data/area_g): a graphlet
+    under labels.max_labels_per_node 2 whose K records state 10 + 9 cut lists and whose O record says lower_bound,
+    while no segment's entry list is cut; and one without cut lists."""
+
+    @staticmethod
+    def doc(name):
+        import gzip as gz
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "area_g",
+                            "rehearsal-20261019-%s.mgt.gz" % name)
+        with gz.open(path, "rt", encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_cut_lists_from_the_k_and_o_records(self):
+        import checks
+        cut, whole = self.doc("G-cut-c1"), self.doc("G-arms2-c2")
+        segs = [x for a in checks.graphlet_arms(cut).values() for x in a["segments"]]
+        self.assertFalse(any(x["labels_truncated"] for x in segs))     # what the old reading looked at
+        self.assertTrue(gs.engine_states_cut_lists(cut))
+        self.assertTrue(gs.document_facts(cut, checks)["cut_lists"])
+        self.assertFalse(gs.engine_states_cut_lists(whole))
+        self.assertFalse(gs.document_facts(whole, checks)["cut_lists"])
+        # either statement alone suffices
+        k_only = "\n".join(l for l in cut.split("\n") if not l.startswith("O "))
+        o_only = "\n".join(l for l in cut.split("\n") if not (l.startswith("K ") and " label_lists " in l))
+        self.assertTrue(gs.engine_states_cut_lists(k_only))
+        self.assertTrue(gs.engine_states_cut_lists(o_only))
+
+
 if __name__ == "__main__":
     unittest.main()

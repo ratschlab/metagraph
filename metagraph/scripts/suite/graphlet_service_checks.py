@@ -77,9 +77,23 @@ def document_facts(text, checks_mod):
         return out
     segs = [s for a in arms.values() for s in a.get("segments") or []]
     if segs and all("labels_total" in s for s in segs):
-        out["cut_lists"] = any(s.get("labels_truncated") for s in segs)
+        out["cut_lists"] = any(s.get("labels_truncated") for s in segs) or engine_states_cut_lists(text)
         out["max_labels_per_node"] = max(s.get("labels_total") or 0 for s in segs)
     return out
+
+
+def engine_states_cut_lists(text):
+    """Whether the document states cut label lists as the engine writes them (F-D3, the rehearsal of 2026-10-19):
+    a K record of kind label_lists ("N recorded label list(s) are cut at the cap", SPEC-core §7.5.2 K) or the O
+    record's label_evidence `l` (lower_bound). A segment's entry list can be whole (labels_truncated false) while other
+    recorded lists (end sets, events) are cut: on every cut-list graphlet of that rehearsal no segment showed one."""
+    for line in text.split("\n"):
+        f = line.split(" ")
+        if f[0] == "K" and len(f) > 2 and f[2] == "label_lists":
+            return True
+        if f[0] == "O" and len(f) > 3 and f[3] == "l":
+            return True
+    return False
 
 
 def scenario_facts(run_dir, manifest, checks_mod=None):
