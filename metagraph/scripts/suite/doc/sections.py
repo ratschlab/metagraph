@@ -1521,6 +1521,23 @@ def stale_gate_text(run):
         "PASS" if rec.get("passed") else "FAIL", ", ".join(run.gate_stale))
 
 
+IDENTITY_HELD_CLAUSE = "; the recorded service commit was held to the deployed commit (I.4)"
+
+
+def identity_held(run):
+    """Whether the gate held the service commit the MCP runner recorded to a deployed commit and found it equal on
+    every invocation (gate record service_identity: an expected commit, every recorded one matching, no identity
+    problem; W8)."""
+    gate = run.gate if isinstance(getattr(run, "gate", None), dict) else {}
+    si = gate.get("service_identity") if isinstance(gate.get("service_identity"), dict) else {}
+    rec = si.get("recorded") if isinstance(si.get("recorded"), dict) else None
+    expected = si.get("expected")
+    if not expected or not rec or not rec.get("recorded") or not rec.get("service_commits"):
+        return False
+    problems, _ = gate_mod.service_identity_problems(rec, expected, (gate.get("policy") or {}).get("arms") or ["mcp"])
+    return not problems
+
+
 def gate_line(ctx):
     """The deploy gate on the cover, as prominent as the run verdict (the owner's review, point 2): the word, then
     the plain decision, the problems by group and kind, the executions judged, the scope read from the policy and
@@ -1530,16 +1547,17 @@ def gate_line(ctx):
         return "\\textbf{\\large Deploy gate: %s}\\ (%s)" % (esc(word), esc(how))
     run = ctx.run
     passed = bool((run.gate or {}).get("passed"))
+    held = IDENTITY_HELD_CLAUSE if identity_held(run) else ""
     if passed:
         # "by design" never hyphenated in the box (RV12)
-        return "\\textbf{\\large %s}: nothing blocks (%s); %s; the gate covers %s; %s" % (
-            esc(word), esc(problems_text), esc(counts_text).replace("by design", "\\mbox{by design}"),
+        return "\\textbf{\\large %s}: nothing blocks (%s); %s%s; the gate covers %s; %s" % (
+            esc(word), esc(problems_text), esc(counts_text).replace("by design", "\\mbox{by design}"), esc(held),
             esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run)))
     head, kinds = _problems_head_and_kinds(problems_text)
     return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s, by what would clear them: %s (by the "
             "gate's kinds: %s); the count is not a count of service defects; %s; the gate covers %s; %s" % (
                 esc(word), esc(head[:1].upper() + head[1:]), esc(gate_groups_text(run)), esc(kinds),
-                esc(counts_text).replace("by design", "\\mbox{by design}"), esc(gate_scope(run)["text"]),
+                esc(counts_text).replace("by design", "\\mbox{by design}") + esc(held), esc(gate_scope(run)["text"]),
                 esc(_without_access_paths(how, run))))
 
 
@@ -5558,7 +5576,8 @@ def gate_problems(ctx):
     word, how, counts_text, problems_text = gate_summary(ctx)
     if not isinstance(gate, dict):
         return "\\textbf{%s}: %s.\n\n" % (esc(word), esc(how))
-    out = "\\textbf{%s}: %s; %s; %s.\n\n" % (esc(word), esc(how), esc(counts_text), esc(problems_text))
+    out = "\\textbf{%s}: %s; %s; %s%s.\n\n" % (esc(word), esc(how), esc(counts_text), esc(problems_text),
+                                             esc(IDENTITY_HELD_CLAUSE) if identity_held(run) else "")
     out += "%s What the gate read: %s.\n\n" % (inline(gate_decision_text(run)), esc(gate_read_text(run)))
     out += gate_ledger(ctx)
     problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]

@@ -409,6 +409,14 @@ class DeployedIdentityTest(unittest.TestCase):
         run = _Stub(gate={"service_identity": {"expected": None, "recorded": {"recorded": False}}}, identity=None)
         self.assertEqual(sections.identity_note_text(_Stub(run=run)), ("", []))
 
+    def test_gate_box_clause(self):
+        # W8: the gate box and F's gate paragraph say the identity was held, only when it was
+        self.assertTrue(sections.identity_held(_Stub(gate=self._gate(self.SHA))))
+        self.assertFalse(sections.identity_held(_Stub(gate=self._gate(None))))
+        self.assertFalse(sections.identity_held(_Stub(gate=self._gate("0" * 40))))
+        self.assertEqual(sections.IDENTITY_HELD_CLAUSE,
+                         "; the recorded service commit was held to the deployed commit (I.4)")
+
     def test_identity_input_validated(self):
         import tempfile
         import reader
