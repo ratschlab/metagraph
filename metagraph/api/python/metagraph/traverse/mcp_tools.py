@@ -1816,7 +1816,9 @@ class GraphletTools:
                          budget=None):
         """Support runs along a walk with who left / joined and why (an end code, a
         switch, "split: labels took C", a merge); n_labels_total is the true count where
-        a recorded list was cut."""
+        a recorded list was cut. Constrain: displayed evidence (DESIGN §5.1) -- each run's
+        label from its evidence_from, as its claim states it, not every label present on
+        the walk's nodes."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         walk = _int('walk', walk)

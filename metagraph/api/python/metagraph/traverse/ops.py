@@ -459,11 +459,13 @@ def alive_at(g, arm, seg, pos):
 
 
 def _alive_profile(g, arm, leaf_seg, b=None):
-    """Constrain: the labels alive at each base of the leaf's first-parent chain, as
-    maximal runs [(from, to, frozenset)]. Entry sets, then per segment the run ends
-    anchored there (removed from to_bp on) and the switch-ins (added from at_bp on) in
-    the chronological order of the G.end rule. |b|: each segment charged before it is
-    read (its pieces and their sets)."""
+    """Constrain: the labels alive (present) at each base of the leaf's first-parent
+    chain, as maximal runs [(from, to, frozenset)]. Entry sets, then per segment the run
+    ends anchored there (removed from to_bp on) and the switch-ins (added from at_bp on)
+    in the chronological order of the G.end rule. |b|: each segment charged before it is
+    read (its pieces and their sets). Presence, not displayed evidence: support_profile
+    reads _displayed_profile (DESIGN §5.1); compare's walk keys read these pieces
+    (_iter_alive_pieces)."""
     out = []
     chain = derive.chain(arm, leaf_seg)
     if b is not None:
@@ -471,6 +473,73 @@ def _alive_profile(g, arm, leaf_seg, b=None):
         b.charge(sum([pw[x] for x in chain]), sum([pm[x] for x in chain]))
     for sid in chain:
         out.extend(_alive_pieces(arm, arm.segments[sid]))
+    return _merge_runs(out)
+
+
+# an evidence cache entry of derive.evidence(): its dict slot and (route_from, evidence_from)
+_EVIDENCE_ENTRY = DICT_KEY + TUPLE + 2 * INT
+
+
+def _evidence_prices(b, g, arm):
+    """Per run the price of its evidence walk (derive.evidence: the merges above its
+    anchor), structural and cached -- as a claim prices it."""
+    md = derive.merge_depth(arm)
+    return derive.price_list(b, g, arm, 'evidence_prices',
+                             lambda: [2 + 3 * md[r.segment] for r in arm.runs])
+
+
+def _displayed_profile(g, arm, leaf_seg, b=None):
+    """Constrain: the displayed-path evidence along the walk to |leaf_seg| (DESIGN §5.1),
+    as maximal runs [(from, to, frozenset)] over [0, length). A run's label supports the
+    bases from its evidence_from (derive.evidence, derived at its anchor) to its to_bp, on
+    the part of its displayed chain -- the first-parent chain to its anchor -- that the
+    walk shares (a prefix of the walk). A label merely present on the walk's nodes is not
+    counted: a lineage whose kept entry came through a non-first parent supports the
+    displayed bases from that merge on ("the displayed bases before s are not this
+    lineage's"). |b|: the evidence walks, the edges and their sort charged before they
+    are made, each piece before its set is built."""
+    segs = arm.segments
+    runs = arm.runs
+    chain = derive.chain(arm, leaf_seg)
+    length = segs[leaf_seg].end_bp
+    if b is not None:
+        derive.uses(b, g, arm, 'merge_above', 'merge_depth', 'partition_sets')
+        n = len(runs)
+        b.charge(W_ELEM * (len(chain) + len(segs)) + sum(_evidence_prices(b, g, arm))
+                 + 2 * n + sort_work(2 * n),
+                 set_bytes(len(chain)) + list_bytes(len(segs)) + n * _EVIDENCE_ENTRY
+                 + list_bytes(2 * n) + 2 * n * (TUPLE + 3 * INT))
+    on = set(chain)
+    # per segment, the deepest segment of the walk's chain on its first-parent chain
+    # (parents precede children; the root is on every chain)
+    shared = []
+    for s in segs:
+        shared.append(s.id if s.id in on else shared[s.parents[0]])
+    edges = []
+    for r in runs:
+        if r.to_bp <= r.from_bp:
+            continue
+        hi = min(r.to_bp, segs[shared[r.segment]].end_bp)
+        lo = derive.evidence(arm, r)[1]
+        if lo < hi:
+            edges.append((lo, 1, r.label))
+            edges.append((hi, -1, r.label))
+    edges.sort()
+    out = []
+    count = collections.Counter()
+    pos = i = 0
+    while pos < length:
+        while i < len(edges) and edges[i][0] <= pos:
+            _, d, lab = edges[i]
+            count[lab] += d
+            if not count[lab]:
+                del count[lab]
+            i += 1
+        nxt = min(edges[i][0], length) if i < len(edges) else length
+        if b is not None:
+            b.charge(W_ELEM + (len(count) >> 1), TUPLE + 2 * INT + set_bytes(len(count)))
+        out.append((pos, nxt, frozenset(count)))
+        pos = nxt
     return _merge_runs(out)
 
 
@@ -1758,8 +1827,10 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
 
 def support_profile(g, arm, leaf, kind='displayed', *, budget=None):
     """Maximal SupportRun(from_bp, to_bp, labels, exact) over the walk [0, length).
-    displayed: the labels supporting the displayed bases (§5.1); route: also every run
-    anchored on the walk over its own [from_bp, to_bp) (route support, scope-free).
+    displayed: the labels supporting the displayed bases (§5.1): each run's label from its
+    evidence_from (as its claim states it) on the part of its displayed chain the walk
+    shares -- not every label present on the walk's nodes; route: also every run anchored
+    on the walk over its own [from_bp, to_bp) (route support, scope-free).
     Annotate mode records one set per node: both kinds are the recorded sets.
 
     budget= (local limits): a stop raises LocalBudgetExceeded with no partial -- the last
@@ -1796,7 +1867,7 @@ def _support_profile(g, arm, leaf, kind, b):
         return _support_out(g, b, _presence_profile(a, seg_id, b, g),
                             lambda r: SupportRun(r[0], r[1], _labels(g, r[2]),
                                                  r[3] == len(r[2]), r[3]))
-    prof = _alive_profile(g, a, seg_id, b)
+    prof = _displayed_profile(g, a, seg_id, b)
     if kind == 'route':
         extra = []
         rbs = derive.runs_by_segment(a)
@@ -1859,9 +1930,27 @@ def _support_changes(g, arm, leaf, b):
     segs = a.segments
     prof = _support_profile(g, a, leaf, 'displayed', b)
     prev = set(segs[chain[0]].entry)
+    rbs = derive.runs_by_segment(a)
+    if g.mode == 'constrain':
+        # the start set is the displayed profile at base 0 (§5.1): a seed label never
+        # displayed on this walk was never there, from the walk's view, and does not leave;
+        # one whose displayed support starts later joins where it starts. A seed label
+        # with a run on the walk's chain ending at 0 keeps its end there (its K-coded end)
+        if b is not None:
+            # the runs of the chain scanned; the sets: the profile's first (n0), the
+            # labels ending at 0 (at most the chain's runs, k), their meet with the entry
+            # set and the start set (at most n0 plus that meet)
+            n0 = len(prof[0].labels) if prof else 0
+            k = sum([len(rbs[x]) for x in chain])
+            e = min(k, len(prev))
+            b.charge(W_ELEM * (len(chain) + k + n0 + len(prev)),
+                     set_bytes(n0) + set_bytes(k) + set_bytes(e) + set_bytes(n0 + e))
+        first = {l.id for l in prof[0].labels} if prof else set()
+        ended = {a.runs[r].label for x in chain for r in rbs[x]
+                 if a.runs[r].to_bp == 0 and not a.runs[r].merged}
+        prev = first | (prev & ended)
     out = []
     on_chain = set(chain)
-    rbs = derive.runs_by_segment(a)
     if b is not None:
         derive.uses(b, g, a, 'partition_sets')
         b.phase = 'changes'
@@ -4009,6 +4098,12 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                 est_m += cuts * (STR + depth + TUPLE + set_bytes(n0) + n0 * (STR + 24))
                 if mode == 'prefix_subset':
                     unpriced.append('prefix_scan:%s:%s' % (tag, side))
+                    if tag == 'b' and g.mode == 'constrain':
+                        # b's supported prefixes read its restricted claims' displayed
+                        # evidence (_displayed_prefix_maps): the claims priced, their
+                        # intervals and the pass not
+                        _price_restricted_claims(t, g, side, depth)
+                        unpriced.append('displayed_prefixes:b:%s' % side)
                 else:
                     # as many difference rows as keys, each with its labels
                     est_w += sort_work(cuts) + (2 + W_ROW) * cuts + 2 * cuts * n0
@@ -4976,25 +5071,139 @@ def _supported_prefixes(g, sides, depth, memo=None, cb=None, tag=None):
     """(side, ref) -> the walking-order prefixes w[:j] of every walk w (cut at depth) on
     which the label has displayed support over all of [0, j), j maximal per walk: a
     label that ends inside a walk (at a node where the walk goes on with other labels)
-    still supports the walk up to its end, which whole-walk pairs alone never see."""
+    still supports the walk up to its end, which whole-walk pairs alone never see.
+    Constrain: displayed evidence (DESIGN §5.1) in the DAG restricted to the depth
+    (_displayed_prefix_maps), not presence from base 0; annotate: the recorded sets."""
     memo = {} if memo is None else memo
     out = {}
     for side in sides:
         seen = set()
-        for p, m, info in _cuts(g, side, depth, memo, cb, tag):
-            if id(info) in seen:
+        cuts = _cuts(g, side, depth, memo, cb, tag)
+        maps = (_displayed_prefix_maps(g, side, depth, memo, cb, tag)
+                if g.mode == 'constrain' else [info[2] for _, _, info in cuts])
+        for (p, m, info), have in zip(cuts, maps):
+            if id(have) in seen:
                 continue
-            seen.add(id(info))
+            seen.add(id(have))
             if cb is not None:
                 # one prefix string per label the cut supports (the quadratic part of
                 # prefix_subset: a label per walk per base of its support)
-                n = len(info[2])
-                j = sum(info[2].values())
+                n = len(have)
+                j = sum(have.values())
                 cb.charge(W_ELEM * (1 + 2 * n) + (j >> 8),
                           n * (STR + SET_ITEM + TUPLE + 24) + j)
             w = _cut_prefix(info[0])
-            for l, j in info[2].items():
+            for l, j in have.items():
                 out.setdefault((side, g.labels[l].ref), set()).add(w[:j])
+    return out
+
+
+# a displayed interval filed under a segment, and a label's reach changed by the pass
+_COVER_BYTES = TUPLE + 3 * INT + LIST_ITEM
+_REACH_UNDO_BYTES = TUPLE + 2 * INT + LIST_ITEM
+
+
+def _displayed_prefix_maps(g, side, depth, memo, cb=None, tag=None):
+    """Constrain: per cut of _cuts(g, side, depth), in its order, {label: j} -- the longest
+    [0, j) over which the label has displayed evidence (DESIGN §5.1) on the cut walk in
+    the DAG restricted to [0, depth): each restricted claim's [evidence_from, to_bp)
+    (_restricted_claims: a run reaching past the depth anchored on its own route there)
+    on the part of its displayed chain -- the first-parent chain to its anchor -- the
+    walk shares; 0 for a root entry label displayed at no first base. The claims'
+    intervals are filed under the segments of their chains, then one pass over the cut
+    plan's tree (_cut_steps) extends each label's reach segment by segment and undoes it
+    on the way up. Cuts sharing a (segment, m) share one map. Memoized per comparison."""
+    key = ('displayed_prefixes', id(g) if tag is None else tag, side, depth)
+    got = memo.get(key)
+    if got is not None:
+        return got
+    a = g.arms[side]
+    segs = a.segments
+    entry = segs[0].entry if segs else ()
+    if depth <= 0:
+        # one empty cut with the boundary labels, as _cuts() makes it
+        out = [{l: 0 for l in entry}] if derive.paths(a) else []
+        memo[key] = out
+        return out
+    cover = {}
+    for c in _restricted_claims(g, side, depth, None, cb):
+        if c.evidence_from is None or c.to_bp <= c.from_bp:
+            continue
+        lo0, hi0, lab = c.evidence_from, c.to_bp, c.label.id
+        if cb is not None:
+            # at most one interval per segment of the claim's chain
+            n = segs[c.segment].depth + 1
+            cb.charge(W_STEP * n, n * _COVER_BYTES)
+        x = c.segment
+        while x is not None:
+            sx = segs[x]
+            if sx.end_bp <= lo0:
+                break
+            lo, hi = max(lo0, sx.from_bp), min(hi0, sx.end_bp)
+            if lo < hi:
+                cover.setdefault(x, []).append((lo, hi, lab))
+            x = sx.parents[0] if sx.parents else None
+    if cb is not None:
+        cb.charge(sum([sort_work(len(v)) for v in cover.values()]) + len(cover),
+                  dict_bytes(len(cover)))
+    for v in cover.values():
+        v.sort()
+    plan = _cut_plan(a, depth)
+    if cb is not None:
+        cb.charge((W_ELEM + W_STEP) * len(segs))
+    reach = {}
+
+    def apply(x, m):
+        """Extend the labels' reach by segment x's intervals up to m (None: all) -> undo."""
+        undo = []
+        iv = cover.get(x, ())
+        if cb is not None:
+            cb.charge(W_ELEM * (1 + len(iv)), len(iv) * _REACH_UNDO_BYTES)
+        for lo, hi, lab in iv:
+            if m is not None and lo >= m:
+                break
+            r = reach.get(lab, 0)
+            if r >= lo:
+                h = hi if m is None else min(hi, m)
+                if h > r:
+                    undo.append((lab, reach.get(lab)))
+                    reach[lab] = h
+        return undo
+
+    def restore(undo):
+        for lab, r in reversed(undo):
+            if r is None:
+                del reach[lab]
+            else:
+                reach[lab] = r
+
+    def snap(m):
+        if cb is not None:
+            n = len(entry) + len(reach)
+            cb.charge(W_ELEM * (1 + n), dict_bytes(n))
+        have = {l: 0 for l in entry}
+        for lab, r in reach.items():
+            have[lab] = min(r, m)
+        return have
+
+    maps = {}
+    undos = {}
+    for step, x, m, partial in _cut_steps(plan, segs):
+        if step == 'cut':
+            if x is None:
+                maps[(x, m)] = snap(0)        # a cut of nothing: the first steps
+            elif partial:
+                u = apply(x, m)
+                maps[(x, m)] = snap(m)
+                restore(u)
+            else:
+                maps[(x, m)] = snap(m)
+        elif step == 'enter':
+            undos[x] = apply(x, None)
+        else:
+            restore(undos.pop(x))
+    out = [maps[(k, m)] for _, k, m in plan['rows']]
+    memo[key] = out
     return out
 
 

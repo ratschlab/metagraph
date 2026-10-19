@@ -419,6 +419,8 @@ def _reference_keys(g, side, depth):
         walks.setdefault((side, w if side == 'right' else w[::-1]), set()).update(refs)
         for ref in refs:
             pairs.add((side, w, ref))
+        if g.mode == 'constrain' and depth > 0:
+            continue                  # displayed evidence, below
         have = {l: 0 for l in a.segments[0].entry}
         cur = None
         for f, t, ids in _reference_profile(g, a, leaf):
@@ -429,7 +431,35 @@ def _reference_keys(g, side, depth):
                 have[l] = min(t, m)
         for l, j in have.items():
             supported.setdefault((side, g.labels[l].ref), set()).add(w[:j])
+    if g.mode == 'constrain' and depth > 0:
+        supported = _reference_displayed_supported(g, side, depth)
     return walks, pairs, supported
+
+
+def _reference_displayed_supported(g, side, depth):
+    """Constrain (G5): the supported prefixes of compare's prefix_subset as displayed
+    evidence (DESIGN §5.1) in the DAG restricted to the depth -- read off the support
+    profiles of a retrieval walked to the depth (test_traverse_review3.truncated), each
+    label's longest displayed prefix from base 0 per walk, and '' for a root entry
+    label."""
+    from test_traverse_review3 import truncated
+    t = truncated(g, depth)
+    a = t.arms[side]
+    entry = g.arms[side].segments[0].entry
+    out = {}
+    for p in derive.paths(a):
+        prof = t.support_profile(side, p.id)
+        w = t.spell(side, p.id, 'walk') if prof else ''
+        reach = {l: 0 for l in entry}
+        alive = None
+        for r in prof:
+            ids = {l.id for l in r.labels}
+            alive = ids if alive is None else alive & ids
+            for l in alive:
+                reach[l] = r.to_bp
+        for l, j in reach.items():
+            out.setdefault((side, g.labels[l].ref), set()).add(w[:j])
+    return out
 
 
 class TestCompareKeysAreDepthBounded(unittest.TestCase):

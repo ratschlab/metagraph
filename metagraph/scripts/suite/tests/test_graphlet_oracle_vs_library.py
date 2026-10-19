@@ -30,7 +30,8 @@ from test_graphlet_oracle import DATA, NOT_TWINS, engine_pairs  # noqa: E402
 
 LIB = os.path.normpath(os.path.join(SUITE, "..", "..", "api", "python"))
 WIDE = 262144            # the service's largest page (DESIGN-v8 §5: whole-list calls fit uncut there)
-LIST_TOOLS = ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_splits")
+LIST_TOOLS = ("graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_labels", "graphlet_splits",
+              "graphlet_claims", "graphlet_support")
 SAME_SEED = [
     ["real/mini_refseq/mini_rep_00__trace_coords#0", "real/mini_refseq/mini_rep_00__trace_coords_column#0",
      "coords/rep0_column#0", "coords/rep0_cut1#0", "coords/rep0_kmer_null#0", "coords/rep0_lower_bound#0",
@@ -44,6 +45,60 @@ RADII = [("cli_bubbles_r60", "cli_bubbles_r100"), ("cli_bubbles_r60", "cli_bubbl
 # G1-G3 and VR4 landed with gr/v8-libfix (d39b6b38b): none is known now; a new one goes here with its call and
 # differences, and the test says when the fixed library arrives
 KNOWN_LIBRARY_DEFECTS = {}
+
+
+def _presence_sets(d, side, p):
+    """G4's reading, the library's presence profile: a run supports a base it covers where its own route (the merge
+    partitions) passes the walk's segment. Built here from W5's own route machinery, for the known-defect check only
+    (W5 itself follows DESIGN §5.1: _support_sets)."""
+    seg_at = []
+    for sid in p["segments"]:
+        seg_at += [sid] * d.segment(side, sid)["length_bp"]
+    sets = [set() for _ in range(p["length_bp"])]
+    for i, run in enumerate(d.runs(side)):
+        if run["from_bp"] == run["to_bp"]:
+            continue
+        route = d.route(side, i)
+        if route is None:
+            return None
+        on = set(route)
+        for b in range(run["from_bp"], min(run["to_bp"], p["length_bp"])):
+            if seg_at[b] in on:
+                sets[b].add(run["label"])
+    return sets
+
+
+# library defects of a READING (FORMAT v2 G): on the calls where the defect's reading and W5's differ, the library must
+# equal the W5 record built under the defect's reading (every other value as W5 checks it) and differ from W5's own,
+# so that exactly the defect's differences are excused (VERIFY-O-B VO-B1); elsewhere the library must agree with W5
+KNOWN_READING_DEFECTS = {
+    "G4": ("graphlet_support's displayed profile counts a run where its route passes the walk (node presence); DESIGN "
+           "§5.1 derives each run's evidence at its anchor and keeps it where that chain is the walk",
+           "graphlet_support", "_support_sets", _presence_sets),
+}
+
+
+def defect_alternative(tool, op, full, text, ctx):
+    """(defect id, the W5 record under that defect's reading) for a call a reading defect affects, else (None, None)."""
+    for k, (_, t, name, alt) in KNOWN_READING_DEFECTS.items():
+        if t != tool:
+            continue
+        own = getattr(O, name)
+        d = O._Doc(full, text, ctx.get("seed_index", 0))
+        side = op.get("arm") if op.get("arm") in d.arms else (d.sides[0] if len(d.sides) == 1 else None)
+        w = op.get("walk")
+        if side is None or not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < len(d.arms[side]["paths"]) \
+                or d.mode != "constrain" or not d.aligned(side):
+            continue
+        path = d.arms[side]["paths"][w]
+        if own(d, side, path) == alt(d, side, path):
+            continue
+        setattr(O, name, alt)
+        try:
+            return k, O.answer(tool, op, full, text, ctx)
+        finally:
+            setattr(O, name, own)
+    return None, None
 
 
 def excused(tool, args, diffs):
@@ -74,6 +129,21 @@ def _calls(res):
            ("graphlet_export", {"format": "fasta", "what": "walk"}), ("graphlet_subtrie", {"labels": ["no-such"]}),
            # fitting errors at small ceilings (INVENTORY §1.1 result_too_large): not_comparable against W5 (F3)
            ("graphlet_summary", {"max_bytes": 512}), ("graphlet_summary", {"detail": "limitations", "max_bytes": 300})]
+    # phase B, graphlet_labels name= (INVENTORY §3.1): 3 labels by name, by ref and as a bare string, per arm and
+    # both; coordinates=true with name; an unknown label
+    for k, lab in enumerate(sorted({0, len(res.get("label_dict") or [1]) - 1, len(res.get("label_dict") or [1]) // 2})):
+        e = (res.get("label_dict") or [{}])[lab] if res.get("label_dict") else {}
+        ref = "h:%s:%s" % (e.get("column"), e.get("seq_id")) if e.get("kind") == "header" else "c:%s" % e.get("column")
+        sel = [{"id": lab}, {"ref": ref}, {"name": e.get("name")}][k % 3] if e else {"id": lab}
+        out.append(("graphlet_labels", {"name": sel, "max_bytes": WIDE}))
+        out += [("graphlet_labels", {"name": sel, "arm": s, "max_bytes": WIDE}) for s in sides]
+    if res.get("label_dict"):
+        out += [("graphlet_labels", {"name": res["label_dict"][0]["name"], "max_bytes": WIDE}),
+                ("graphlet_labels", {"name": {"id": 0}, "coordinates": True, "max_bytes": WIDE}),
+                ("graphlet_labels", {"name": "no-such-label"}), ("graphlet_labels", {"name": {"id": 0}})]
+        names = [e.get("name") for e in res["label_dict"]]
+        out += [("graphlet_labels", {"name": x, "max_bytes": WIDE}) for x in sorted({x for x in names
+                                                                                       if names.count(x) > 1})]
     if len(sides) == 1:   # an arm this retrieval did not walk
         other = "left" if sides == ["right"] else "right"
         out += [("graphlet_walks", {"arm": other}), ("graphlet_summary", {"arm": other})]
@@ -153,6 +223,25 @@ def _calls(res):
                                            "reset_branches": True})]
         out += [("traverse_continue", {"arm": s, "walk": p["id"], "execute": False, "max_bytes": WIDE})
                 for p in a["paths"][:1] if not p.get("continuation")]
+        # phase B, graphlet_claims (INVENTORY §3.1): min_bp {0, mid} x route_consistent; labels one and a list; a
+        # paging pass at 2048; annotate and trace retrievals are among the documents
+        runs = a.get("runs") or []
+        labs = sorted({r["label"] for r in runs})[:3] or [0]
+        mid = sorted(r["to_bp"] - r["from_bp"] for r in runs)[len(runs) // 2] if runs else 10
+        for rc, mb in itertools.product((True, False), (0, mid)):
+            out.append(("graphlet_claims", {"arm": s, "route_consistent": rc, "min_bp": mb, "max_bytes": WIDE}))
+        out += [("graphlet_claims", {"arm": s, "labels": {"id": labs[0]}, "route_consistent": False, "max_bytes": WIDE}),
+                ("graphlet_claims", {"arm": s, "labels": [{"id": x} for x in labs], "max_bytes": WIDE}),
+                ("graphlet_claims", {"arm": s}), ("graphlet_claims", {"arm": s, "labels": []}),
+                ("graphlet_claims", {"arm": s, "min_bp": -1})]
+        # phase B, graphlet_support (INVENTORY §3.1): the walk sample of graphlet_walk, step None and step = k; a
+        # paging pass at 2048; a walk out of range
+        for w in (range(n) if n <= 12 else sorted({0, n - 1, n // 2} | {p["id"] for p in a["paths"]
+                                                                          if p.get("continuation")})):
+            out += [("graphlet_support", {"arm": s, "walk": w, "max_bytes": WIDE}),
+                    ("graphlet_support", {"arm": s, "walk": w, "step": 20, "max_bytes": WIDE})]
+        out += [("graphlet_support", {"arm": s, "walk": 0}), ("graphlet_support", {"arm": s, "walk": n}),
+                ("graphlet_support", {"arm": s, "walk": 0, "step": -1})]
     return out
 
 
@@ -236,6 +325,7 @@ class OracleVsLibrary(unittest.TestCase):
         groups = collections.defaultdict(list)
         outcomes = collections.Counter()
         defects = {}
+        reading, reading_gone = collections.Counter(), collections.Counter()
         n_calls = n_checked = 0
         declared = collections.Counter()
         for name, (h, f, i, text) in self.docs.items():
@@ -243,7 +333,7 @@ class OracleVsLibrary(unittest.TestCase):
                 continue
             for tool, args in _calls(f["results"][i]):
                 kw = dict(args, handle=h)
-                if tool == "graphlet_save":
+                if tool == "graphlet_save" and "path" not in args:
                     kw["path"] = "saved_%d.mgt" % n_calls
                 lib = self.assemble(tool, kw)
                 if tool in ("graphlet_export", "graphlet_save") and "error" not in lib:
@@ -260,6 +350,20 @@ class OracleVsLibrary(unittest.TestCase):
                     if rec["oracle"]["declared"] == "twin_mismatch":
                         self.assertIn(name.split("#")[0], NOT_TWINS)
                 verdict = O.compare(rec, lib)
+                gk, galt = defect_alternative(tool, op, f, text, {"seed_index": i, "max_bytes": args.get("max_bytes", 2048)})
+                if gk is not None:
+                    alt_v = O.compare(galt, lib)
+                    if verdict["outcome"] == "disagree" and alt_v["outcome"] == "agree":
+                        reading[gk] += 1               # exactly the defect's difference: excused
+                        outcomes["excused " + gk] += 1
+                        continue
+                    if verdict["outcome"] == "agree" and alt_v["outcome"] == "disagree":
+                        reading_gone[gk] += 1          # the library follows DESIGN on this affected call
+                    elif verdict["outcome"] == "disagree":
+                        for d in alt_v["differences"]:   # a difference the defect does not explain
+                            groups[(tool + " beyond " + gk, re.sub(r"/\d+", "/*", d["pointer"]))].append(
+                                (name, args, d))
+                        continue
                 outcomes[verdict["outcome"]] += 1
                 if verdict["outcome"] == "inconclusive":    # R2-5: only what W5 cannot judge, here the non-twins
                     self.assertIn(name.split("#")[0], NOT_TWINS, (name, tool, args, verdict["detail"]))
@@ -276,6 +380,12 @@ class OracleVsLibrary(unittest.TestCase):
                     name, json.dumps(args)[:120], json.dumps(d["oracle"])[:240],
                     "MISSING" if d.get("missing") else json.dumps(d.get("other", d.get("present")))[:240]))
         self.assertEqual(report, [], "W5 and the library disagree:\n" + "\n".join(report))
+        for k, (what, _, _, _) in KNOWN_READING_DEFECTS.items():
+            self.assertGreater(reading[k], 0, "known library defect %s no longer reproduces (%s): the fixed library is "
+                                              "here, remove it from KNOWN_READING_DEFECTS" % (k, what))
+            self.assertEqual(reading_gone[k], 0, "%s: %d affected calls where the library follows DESIGN: the fix is "
+                                                 "partial" % (k, reading_gone[k]))
+        print("\n[offline] known reading defects excused: %s" % dict(reading), file=sys.stderr)
         for k, (what, _, _) in KNOWN_LIBRARY_DEFECTS.items():
             self.assertGreater(defects.get(k, 0), 0, "known library defect %s no longer reproduces (%s): the fixed "
                                                     "library is here, remove it from KNOWN_LIBRARY_DEFECTS" % (k, what))
@@ -294,11 +404,13 @@ class OracleVsLibrary(unittest.TestCase):
         with tempfile.TemporaryDirectory() as run:
             for d in ("arms/direct-local/raw", "arms/direct-local/docs", "arms/dl-lib"):
                 os.makedirs(os.path.join(run, d))
-            w1 = []
+            w1, sources, cell_text = [], {}, {}
             for cell, i, g, f in self.pairs:
                 if cell in NOT_TWINS:
                     continue
                 sid = "G-%s-%d" % (re.sub(r"[^A-Za-z0-9]", "_", cell), i)
+                sources[sid] = (dict(f, results=[f["results"][i]]), i)
+                cell_text[sid] = g["results"][i]["graphlet"]
                 resp = dict(g, results=[g["results"][i]])
                 with gz.open(os.path.join(run, "arms/direct-local/raw/%s.direct-local.0.json.gz" % sid), "wt",
                              encoding="utf-8") as fh:
@@ -336,6 +448,13 @@ class OracleVsLibrary(unittest.TestCase):
         for a, b in zip(w1, w5):
             self.assertEqual((a["scenario"], a["op"], a["args_resolved"]), (b["scenario"], b["op"], b["args_resolved"]))
             v = O.compare(b, a)
+            if v["outcome"] == "disagree" and a["tool"] in {t for _, t, _, _ in KNOWN_READING_DEFECTS.values()}:
+                twin, _ = sources[a["scenario"]]     # the scenario's full twin, its one result (seed index 0)
+                op = {x: y for x, y in a["args_resolved"].items() if x != "handle"}
+                gk, galt = defect_alternative(a["tool"], op, twin, cell_text[a["scenario"]], {"seed_index": 0})
+                if gk is not None and O.compare(galt, a)["outcome"] == "agree":
+                    outcomes["excused " + gk] += 1
+                    continue
             outcomes[v["outcome"]] += 1
             _, rest = excused(a["tool"], {x: y for x, y in a["args_resolved"].items() if x != "handle"},
                               v["differences"])
@@ -362,6 +481,93 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertEqual((hit, [d["pointer"] for d in rest]), ({"G2"}, ["/rows/0/n_full", "/total"]))
         self.assertEqual(excused("graphlet_walks", dict(args, arm="left"), diffs[:1]), (set(), diffs[:1]))
         self.assertEqual(excused("graphlet_walks", dict(args, tail_bp=1), diffs[:1]), (set(), diffs[:1]))
+
+    def test_g4_on_every_walk(self):
+        """G4 on every walk of every twin (VERIFY-O-B VO-B1: 73 of the 399 non-empty constrain walks): where the
+        library's presence profile and DESIGN §5.1's displayed profile differ, the library equals W5's record under
+        the presence reading and differs from W5's own (it excuses exactly that difference); on every other walk the
+        library agrees with W5."""
+        counts = collections.Counter()
+        problems = []
+        for name, (h, f, i, text) in self.docs.items():
+            if f is None or name.split("#")[0] in NOT_TWINS:
+                continue
+            for side, a in f["results"][i]["arms"].items():
+                for p in a["paths"]:
+                    op = {"arm": side, "walk": p["id"]}
+                    lib = self.assemble("graphlet_support", dict(op, handle=h, max_bytes=WIDE))
+                    own = O.compare(O.answer("graphlet_support", op, f, text, {"seed_index": i}), lib)["outcome"]
+                    gk, galt = defect_alternative("graphlet_support", op, f, text, {"seed_index": i})
+                    if gk is None:
+                        counts["unaffected " + own] += 1
+                        if own not in ("agree", "not_checked"):
+                            problems.append("%s %s walk %d: %s on an unaffected walk" % (name, side, p["id"], own))
+                        continue
+                    alt = O.compare(galt, lib)["outcome"]
+                    counts["affected"] += 1
+                    if (own, alt) != ("disagree", "agree"):
+                        problems.append("%s %s walk %d: W5 %s, under G4 %s" % (name, side, p["id"], own, alt))
+        self.assertEqual(problems, [], "\n".join(problems[:10]))
+        self.assertEqual(counts["affected"], 73, counts)
+
+    def test_refused_arguments(self):
+        """F-D2 against the library: paths outside the export directory, a budget without local limits, a cursor of
+        another listing; W5 expects the tool's refusal (library-defined codes)."""
+        name = next(k for k in self.docs if k.startswith("documents/merge#"))
+        h, f, i, text = self.docs[name]
+        outside = os.path.join(self.tmp.name, "outside")
+        for tool, args in [("graphlet_export", {"format": "fasta", "path": outside + ".fa"}),
+                           ("graphlet_export", {"format": "fasta", "path": "../escape.fa"}),
+                           ("graphlet_save", {"path": outside + ".mgt"}),
+                           ("graphlet_walks", {"arm": "right", "budget": {"work_units": 1000}}),
+                           ("graphlet_summary", {"budget": {"work_units": 1000}})]:
+            lib = getattr(self.tools, tool)(handle=h, **args)
+            rec = O.answer(tool, args, f, text, {"seed_index": i})
+            self.assertEqual(O.compare(rec, lib)["outcome"], "agree", (tool, args, lib))
+            self.assertFalse(os.path.exists(outside + ".fa") or os.path.exists(outside + ".mgt"))
+        # R2B-2, the verifier's path probes: resolved inside the export directory the library answers (and W5 with
+        # it, the file compared through export_view); `~` (not expanded: io_error) makes no claim
+        for path, want in [("sub/../a.fa", "agree"), (os.path.join(self.exp, "b.fa"), "agree"), ("~/c.fa", "not_checked"),
+                           (os.path.join(self.exp, "..", "outside2.fa"), "agree")]:
+            args = {"format": "fasta", "path": path}
+            lib = self.tools.graphlet_export(handle=h, **args)
+            if "error" not in lib:
+                with open(lib["path"], encoding="utf-8") as fh:
+                    lib = O.export_view("fasta", lib, fh.read())
+            rec = O.answer("graphlet_export", args, f, text, {"seed_index": i, "export_dir": self.exp})
+            self.assertEqual(O.compare(rec, lib)["outcome"], want, (path, lib))
+        # a cursor of one listing (walks, one row a page) sent with other arguments, or to another tool: bad_cursor
+        name2 = next(k for k in self.docs if k.startswith("real/mini_refseq/mini_ndm1__trace#"))
+        h2, f2, i2, text2 = self.docs[name2]
+        page = self.tools.graphlet_walks(handle=h2, arm="right", rank="id", n=1, max_bytes=WIDE)
+        self.assertIn("next_cursor", page)
+        for lib_args in ({"rank": "length"}, {"rank": "id", "min_bp": 1}):
+            lib = self.tools.graphlet_walks(handle=h2, arm="right", n=1, max_bytes=WIDE, cursor=page["next_cursor"],
+                                            **lib_args)
+            op = dict(lib_args, arm="right", n=1, cursor="<cursor>")
+            rec = O.answer("graphlet_walks", op, f2, text2, {"seed_index": i2, "cursor_bound_elsewhere": True})
+            self.assertEqual(O.compare(rec, lib)["outcome"], "agree", (lib_args, lib))
+        # R2B-1, the verifier's four probes: the source op (walks, arm right, rank id, n 1) and its cursor reused;
+        # the library resumes where the arguments differ only in form (arm r, spell none named, n), refuses rank length
+        src = {"tool": "graphlet_walks", "args": {"handle": "<handle>", "arm": "right", "rank": "id", "n": 1}}
+        for extra, want in [({"arm": "r"}, "not_checked"), ({"arm": "right", "spell": "none"}, "not_checked"),
+                            ({"arm": "right", "n": 3}, "not_checked"), ({"arm": "right", "rank": "length"}, "agree")]:
+            args = dict({"rank": "id", "n": 1}, **extra)
+            lib = self.tools.graphlet_walks(handle=h2, max_bytes=WIDE, cursor=page["next_cursor"], **args)
+            self.assertEqual("error" in lib, want == "agree", (extra, lib))
+            rec = O.answer("graphlet_walks", dict(args, handle="<handle>", cursor="<cursor>"), f2, text2,
+                           {"seed_index": i2, "cursor_source": src})
+            self.assertEqual(O.compare(rec, lib)["outcome"], want, extra)
+        lib = self.tools.graphlet_labels(handle=h2, cursor=page["next_cursor"], max_bytes=WIDE)
+        rec = O.answer("graphlet_labels", {"cursor": "<cursor>"}, f2, text2, {"seed_index": i2,
+                                                                            "cursor_bound_elsewhere": True})
+        self.assertEqual(O.compare(rec, lib)["outcome"], "agree", lib)
+        # the same listing resumed: a page W5 makes no claim about
+        lib = self.tools.graphlet_walks(handle=h2, arm="right", rank="id", n=1, max_bytes=WIDE, cursor=page["next_cursor"])
+        self.assertNotIn("error", lib)
+        rec = O.answer("graphlet_walks", {"arm": "right", "rank": "id", "n": 1, "cursor": "<cursor>"}, f2, text2,
+                       {"seed_index": i2})
+        self.assertEqual(O.compare(rec, lib)["outcome"], "not_checked")
 
     def test_load_receipt_summary(self):
         """graphlet_load's summary, with a ceiling it fits under, is graphlet_summary's (W5 checks it only then)."""

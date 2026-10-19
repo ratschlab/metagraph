@@ -342,14 +342,221 @@ class HandGoldens(unittest.TestCase):
                          "view_consistency_only")
 
 
+class ClaimsGoldens(unittest.TestCase):
+    """graphlet_claims (phase B): one claim per run end (SPEC §6.9), the engine's run fields, DESIGN §5.1's displayed
+    evidence (re-derived), read off the CLI documents and DESIGN §5.1's own clipped-merge example."""
+
+    def test_merge_evidence_and_filter(self):
+        """merge: a.fa enters the displayed walk through the second parent at 62, b.fa at 36 (their leaf stamps);
+        both.fa's runs closed by the merges at 36 and 62 (code m) carry their route; route_consistent leaves a.fa
+        and b.fa out as merge_entered."""
+        r = rec("graphlet_claims", {"arm": "right", "route_consistent": False}, "merge")
+        rows = r["answer"]["rows"]
+        self.assertEqual([(x["label"]["name"], x["from_bp"], x["to_bp"], x["evidence_from"]) for x in rows],
+                         [("a.fa", 0, 100, 62), ("b.fa", 0, 100, 36), ("c.fa", 0, 100, 0), ("both.fa", 0, 62, 0),
+                          ("both.fa", 0, 36, 0), ("both.fa", 0, 100, 0)])
+        self.assertEqual([x.get("reason") for x in rows], ["max_extension_bp"] * 3 + [None, None, "max_extension_bp"])
+        self.assertEqual([x.get("path_id") for x in rows], [0, 0, 0, None, None, 0])
+        self.assertIn("/rows/0/evidence_from", r["oracle"]["rederived"])
+        self.assertIn("/rows/3/reason", r["oracle"]["consistency_only"])     # a merge's close states no end reason
+        on = rec("graphlet_claims", {"arm": "right"}, "merge")["answer"]
+        self.assertEqual((on["total"], on["filtered"]), (4, {"merge_entered": 2}))
+        one = rec("graphlet_claims", {"arm": "right", "labels": "both.fa", "route_consistent": False}, "merge")
+        self.assertEqual(one["answer"]["total"], 3)
+        mb = rec("graphlet_claims", {"arm": "right", "min_bp": 50, "route_consistent": False}, "merge")["answer"]
+        # a.fa shows 100 - 62 = 38 < 50 and both.fa's run to 36 shows 36: out; b.fa shows 64, c.fa 100, both.fa 62, 100
+        self.assertEqual([(x["label"]["name"], x["to_bp"]) for x in mb["rows"]],
+                         [("b.fa", 100), ("c.fa", 100), ("both.fa", 62), ("both.fa", 100)])
+        self.assertIn("/filtered", rec("graphlet_claims", {"arm": "right", "min_bp": 1}, "merge")["oracle"]
+                      ["consistency_only"])                                          # the filters' order (PB3)
+
+    def test_route_filter_on_stamps(self):
+        """VO-B2: route_consistent filters on the claim's SPEC §7.1 merge stamp (T at a leaf, R inside), as phase A's
+        walks filter does (F2), not on where the displayed evidence begins. merge, with c.fa's leaf stamps raised to
+        10 (T and R): filtered, although its evidence begins at 0; an inner run whose R stamp and displayed stamp
+        disagree (both.fa's run closed at 36: R raised to 5, displayed 0) leaves the selection open."""
+        g, f, mgt = doc("merge")
+        f = copy.deepcopy(f)
+        arm = f["results"][0]["arms"]["right"]
+        arm["runs"][2]["route_bp"] = 10
+        for e in arm["paths"][0]["end_labels"]:
+            if e["run"] == 2:
+                e["route_bp"] = 10
+        r = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)["answer"]
+        self.assertEqual((r["filtered"], [x["label"]["name"] for x in r["rows"]]),
+                         ({"merge_entered": 3}, ["both.fa", "both.fa", "both.fa"]))
+        arm["runs"][4]["route_bp"] = 5
+        open_ = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
+        # R2B-3: the rows before the undecided claim stay checked; it, every later row, the total and the counts
+        # are consistency-only, and the list has no length check
+        self.assertEqual([(x["label"]["name"], x["to_bp"]) for x in open_["answer"]["rows"]], [("both.fa", 62)])
+        self.assertIn("/rows/0/to_bp", open_["oracle"]["checked"])
+        self.assertTrue({"/total", "/filtered"} <= set(open_["oracle"]["consistency_only"]))
+        self.assertNotIn("total", open_["answer"])
+        self.assertNotIn("/rows/1", open_["oracle"].get("absent", {}))
+        extra = copy.deepcopy(open_["answer"])
+        extra["rows"].append({"label": {"name": "both.fa"}})
+        self.assertEqual(O.differences(open_, extra), [])
+        self.assertEqual(len(O.answer("graphlet_claims", {"arm": "right", "route_consistent": False}, f, mgt)
+                             ["answer"]["rows"]), 6)          # without the filter nothing is open
+
+    def test_switch_and_boundary(self):
+        """caps: hZ entered by a switch from hY at 103 (cost 0.5) holds [103, 126); linear: acc2 present at the
+        right boundary only, a zero-length run: a boundary claim without displayed bases (DESIGN §5.1, PB1)."""
+        rows = rec("graphlet_claims", {"arm": "right"}, "caps")["answer"]["rows"]
+        hz = rows[3]
+        self.assertEqual((hz["label"]["name"], hz["entered_by"], hz["from_label"], hz["cost"], hz["evidence_from"],
+                          hz["loss"], hz["qualifier"]),
+                         ("hZ", "switch", {"name": "hY", "ref": "h:0:1"}, 0.5, 103, 0.5, None))
+        self.assertEqual(rows[1]["reason"], "label_lost")
+        lin = rec("graphlet_claims", {"arm": "right", "route_consistent": False}, "linear")
+        b = lin["answer"]["rows"][1]
+        self.assertEqual((b["label"]["name"], b["from_bp"], b["to_bp"], b["evidence_from"], b["kind"], b["reason"]),
+                         ("acc2", 0, 0, None, "boundary", "branch"))
+        self.assertIn("/rows/0/kind", lin["oracle"]["consistency_only"])            # no clause for the other kinds
+        quorum = rec("graphlet_claims", {"arm": "right", "route_consistent": False}, "quorum")["answer"]["rows"]
+        self.assertIn("minority", [x["qualifier"] for x in quorum])                 # R's Rm (SPEC §7.5.1)
+
+    def test_design_clipped_merge_example(self):
+        """DESIGN §5.1's clipped-merge case (documents/clipped_merge: HAND-MADE, its claims vector hand-derived from the
+        walker's semantics, not the library): lineB enters the displayed path through the merge's second parent at
+        14, so its displayed evidence starts there; lineA's at 0."""
+        g, f, mgt = doc("clipped_merge")
+        with open(os.path.join(DATA, "documents", "clipped_merge.claims.json"), encoding="utf-8") as fh:
+            vec = json.load(fh)["claims"]["all"]
+        rows = O.answer("graphlet_claims", {"arm": "right", "route_consistent": False}, f, mgt)["answer"]["rows"]
+        self.assertEqual([(x["label"]["ref"], x["from_bp"], x["to_bp"], x["evidence_from"], x.get("route_bp"),
+                           x.get("reason"), x["loss"], x["branches"]) for x in rows],
+                         [(v["ref"], v["from_bp"], v["to_bp"], v["evidence_from"], v["route_bp"], v["reason"], v["loss"],
+                           v["branches"]) for v in vec])
+
+    def test_annotate_claims_are_consistency_only(self):
+        r = rec("graphlet_claims", {"arm": "right"}, "annotate")
+        self.assertEqual((r["oracle"]["checked"].keys() & {"/total"}, "/rows" in r["oracle"]["consistency_only"]),
+                         (set(), True))
+
+
+class LabelWalkGoldens(unittest.TestCase):
+    """graphlet_labels(name=) (phase B): the named label's runs with their routes (DESIGN §5 label_walks, routes)."""
+
+    def test_merge_routes_and_closes(self):
+        """merge: both.fa's lineage splits at 20 (A and T) and its copies are closed by the merges at 36 and 62 (code
+        m: merged into segments 3 and 6); the run that reaches the radius takes the displayed parents."""
+        r = rec("graphlet_labels", {"name": "both.fa"}, "merge")
+        rows = r["answer"]["rows"]
+        self.assertEqual([(x["arm"], x["from_bp"], x["to_bp"], x["merged_into"], x["route"]) for x in rows],
+                         [("right", 0, 62, 6, [0, 1, 3, 4]), ("right", 0, 36, 3, [0, 2]),
+                          ("right", 0, 100, None, [0, 1, 3, 5, 6])])
+        self.assertNotIn("walks_below", rows[0])            # DESIGN names leaves_below without defining it (VO-B3)
+        self.assertIn("/rows/*/walks_below", r["oracle"]["consistency_only"])
+        self.assertEqual(rows[2]["end"], "max_extension_bp")
+        self.assertIn("/rows/0/end", r["oracle"]["consistency_only"])      # a merge's close: no label_end event
+        self.assertEqual(set(r["oracle"]["rederived"]) >= {"/rows/0/route", "/rows/0/evidence_from"}, True)
+        a = rec("graphlet_labels", {"name": {"ref": "c:0"}}, "merge")["answer"]["rows"]
+        # a.fa enters segment 6 through its second parent (partitions [[1, 2, 3], [0]]): its own route passes 4
+        self.assertEqual((a[0]["evidence_from"], a[0]["route"]), (62, [0, 1, 3, 4, 6]))
+
+    def test_design_clipped_merge_routes(self):
+        """DESIGN §5.1's clipped-merge case (HAND-MADE fixture and vector): lineB's own route passes the merge's second
+        parent (segments 0, 2, 3), lineA's the first (0, 1, 3)."""
+        g, f, mgt = doc("clipped_merge")
+        with open(os.path.join(DATA, "documents", "clipped_merge.claims.json"), encoding="utf-8") as fh:
+            routes = json.load(fh)["routes"]
+        for ref, want in routes.items():
+            rows = O.answer("graphlet_labels", {"name": {"ref": ref}}, f, mgt)["answer"]["rows"]
+            self.assertEqual([x["route"] for x in rows], want, ref)
+
+    def test_switch_lineages(self):
+        """caps: hZ, switched in from hY at 103 on segment 1, its route through hY's segments; switch_chain: a silent
+        switch-source end (Lw) has no SPEC word for its end (consistency-only); both arms of fork, left first."""
+        hz = rec("graphlet_labels", {"name": "hZ"}, "caps")["answer"]["rows"]
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["evidence_from"], x["route"], x["end"]) for x in hz],
+                         [(103, 126, 103, [0, 1], "max_steps")])
+        sc = rec("graphlet_labels", {"name": {"id": 1}}, "switch_chain")
+        self.assertIn("/rows/0/end", sc["oracle"]["consistency_only"])
+        both = rec("graphlet_labels", {"name": "acc1"}, "fork")["answer"]
+        self.assertEqual([x["arm"] for x in both["rows"]], ["left", "right"])
+        self.assertEqual((both["name"], both["ref"], both["total"]), ("acc1", "h:0:0", 2))
+        self.assertEqual(rec("graphlet_labels", {"name": "nope"}, "fork")["oracle"]["expected_error"], "unknown_label")
+        # documents/same_name records two headers ACC1 from different columns: a bare name is ambiguous (DESIGN §5
+        # Graphlet.label: select by ref), the refs are not
+        self.assertEqual(rec("graphlet_labels", {"name": "ACC1"}, "same_name")["oracle"]["expected_error"],
+                         "ambiguous_label")
+        self.assertNotIn("declared", rec("graphlet_labels", {"name": {"ref": "h:0:0"}}, "same_name")["oracle"])
+        self.assertEqual(rec("graphlet_labels", {"name": "acc1", "coordinates": True}, "fork")["oracle"]
+                         ["expected_error"], "no_coordinates")
+
+
+class SupportGoldens(unittest.TestCase):
+    """graphlet_support (phase B): the displayed support profile along a walk (DESIGN §5, §6; re-derived from DESIGN
+    §5.1 with the walk as the displayed path)."""
+
+    def test_merge_profile(self):
+        """merge, walk 0 (segments 0, 1, 3, 5, 6), as W5's claims of the same document say (DESIGN §5.1): a.fa's kept
+        entry came through the second parent at 62, b.fa's at 36, so the displayed bases before those merges are not
+        theirs; c.fa and both.fa (its runs closed at 36 and 62 kept where their chains are the walk) span it."""
+        r = rec("graphlet_support", {"arm": "right", "walk": 0}, "merge")
+        rows = r["answer"]["rows"]
+        name = lambda xs: [x["name"] for x in xs]   # noqa: E731
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["n_labels"]) for x in rows], [(0, 36, 2), (36, 62, 3), (62, 100, 4)])
+        self.assertEqual([(name(x.get("joined", [])), name(x.get("left", []))) for x in rows[1:]],
+                         [(["b.fa"], []), (["a.fa"], [])])
+        claims = {x["label"]["name"]: x["evidence_from"] for x in rec("graphlet_claims", {
+            "arm": "right", "route_consistent": False}, "merge")["answer"]["rows"] if x["to_bp"] == 100}
+        self.assertEqual((claims["a.fa"], claims["b.fa"]), (rows[2]["from_bp"], rows[1]["from_bp"]))
+        self.assertIn("/rows/0/n_labels", r["oracle"]["rederived"])
+        stepped = rec("graphlet_support", {"arm": "right", "walk": 0, "step": 10}, "merge")["oracle"]
+        self.assertEqual(("/rows" in stepped["consistency_only"], stepped["checked"].keys() & {"/total"}),
+                         (True, set()))                     # step=: the tool's merging rule (consistency-only)
+
+    def test_switch_profile(self):
+        """caps, walk 0 (segments 0, 1): hX takes C at the split at 20; hY switches to hZ at 103 on segment 1."""
+        rows = rec("graphlet_support", {"arm": "right", "walk": 0}, "caps")["answer"]["rows"]
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["n_labels"], [y["name"] for y in x.get("joined", [])],
+                           [y["name"] for y in x.get("left", [])]) for x in rows],
+                         [(0, 20, 2, [], []), (20, 103, 1, [], ["hX"]), (103, 126, 1, ["hZ"], ["hY"])])
+
+    def test_design_clipped_merge_profile(self):
+        """DESIGN §5.1's clipped-merge case (HAND-MADE fixture and vector): the displayed profile."""
+        g, f, mgt = doc("clipped_merge")
+        with open(os.path.join(DATA, "documents", "clipped_merge.claims.json"), encoding="utf-8") as fh:
+            want = json.load(fh)["support_profile_displayed"]
+        rows = O.answer("graphlet_support", {"arm": "right", "walk": 0}, f, mgt)["answer"]["rows"]
+        self.assertEqual([[x["from_bp"], x["to_bp"], x["n_labels"]] for x in rows], [[a, b, len(c)] for a, b, c in want])
+        # which labels, not only how many (VO-B5): the per-base sets W5 derives, as refs, against the vector's
+        d = O._Doc(f, mgt)
+        sets = O._support_sets(d, "right", d.arms["right"]["paths"][0])
+        got = []
+        for b, cur in enumerate(sets):
+            refs = sorted(d.labels[x]["ref"] for x in cur)
+            if got and got[-1][2] == refs:
+                got[-1][1] = b + 1
+            else:
+                got.append([b, b + 1, refs])
+        self.assertEqual(got, [[a, b, sorted(c)] for a, b, c in want])
+        self.assertEqual([x["ref"] for x in rows[1]["joined"]], sorted(set(want[1][2]) - set(want[0][2])))
+
+    def test_errors_and_annotate(self):
+        self.assertEqual(rec("graphlet_support", {"arm": "right", "walk": 3}, "caps")["oracle"]["expected_error"],
+                         "bad_argument")
+        # annotate: the labels the engine recorded at the walk's nodes (SPEC §7.4 label_sets), checked, not
+        # re-derived; documents/annotate cuts lists at its cap, so who joined or left is not read across them
+        g, f, mgt = doc("annotate")
+        r = O.answer("graphlet_support", {"arm": "right", "walk": 0}, f, mgt)
+        sets = [ls for sid in f["results"][0]["arms"]["right"]["paths"][0]["segments"]
+                for ls in f["results"][0]["arms"]["right"]["segments"][sid].get("label_sets") or []]
+        self.assertEqual(r["answer"]["rows"][0]["n_labels_total"], sets[0]["labels_total"])
+        self.assertIn("/rows/0/n_labels", r["oracle"]["checked"])
+        self.assertNotIn("rederived", r["oracle"])
+        self.assertTrue(any(c.endswith("/joined") for c in r["oracle"]["consistency_only"] if c != "/rows/0/joined"))
+
+
 class RecordSemantics(unittest.TestCase):
     """The record contract (FORMAT-v8 §4 and its extensions) and that W5 is not vacuous: a wrong answer differs."""
 
     def test_declared_records(self):
         g, f, mgt = doc("fork")
-        for tool, args, why in [("graphlet_support", {"arm": "left", "walk": 0}, "not_implemented_phase_b"),
-                                ("graphlet_claims", {"arm": "left"}, "not_implemented_phase_b"),
-                                ("graphlet_labels", {"name": "acc1"}, "not_implemented_phase_b"),
+        for tool, args, why in [
                                 ("graphlet_compare", {"mode": "walks"}, "properties_only"),
                                 ("graphlet_list", {}, "not_applicable"), ("traverse_fetch", {}, "not_applicable"),
                                 ("graphlet_walk", {"arm": "left", "walk": 2}, "expected_error"),
@@ -416,7 +623,7 @@ class RecordSemantics(unittest.TestCase):
                          ["outcome"], "agree")
         self.assertEqual(O.compare(err, {"error": "bad_arm"})["outcome"], "disagree")
         self.assertEqual(O.compare(err, r["answer"])["outcome"], "disagree")
-        ph = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
+        ph = O._declared("not_implemented_phase_b")
         self.assertEqual(O.compare(ph, {"rows": []})["outcome"], "not_checked")
         # no bases (sequences: false): the tool refuses a FASTA (library-defined, any code); a GFA may carry `*`
         # sequences, so W5 makes no claim there; a record checking nothing makes no claim
@@ -464,6 +671,56 @@ class RecordSemantics(unittest.TestCase):
                           ["expected_error"])
         self.assertEqual(O.answer("traverse_fetch", {}, f, None, {"seed_index": 1})["oracle"]["declared"],
                          "not_applicable")
+
+    def test_refused_arguments(self):
+        """F-D2: a path outside the export directory (path_not_allowed), a budget without local limits (bad_argument),
+        a cursor of another listing (bad_cursor): expected errors, their codes library-defined; what W5 cannot
+        judge (a subdirectory path, a budget under local limits, a resumed page) makes no claim."""
+        g, f, mgt = doc("fork")
+        code = lambda tool, args, **ctx: O.answer(tool, args, f, mgt, ctx)["oracle"]   # noqa: E731
+        for tool, path in [("graphlet_export", "/etc/x.fa"), ("graphlet_export", "../x.fa"), ("graphlet_save", "/tmp/x.mgt"),
+                           ("graphlet_load", "../../x.mgt"), ("graphlet_export", "<export_dir>/../x.fa")]:
+            o = code(tool, {"format": "fasta", "path": path})
+            self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "path_not_allowed"), path)
+            self.assertIn("library-defined", o["note"])
+        for tool, path in [("graphlet_export", "x.fa"), ("graphlet_export", "<export_dir>/x.fa"),
+                           ("graphlet_load", "<spool_dir>/x.mgt"), ("graphlet_export", "sub/../a.fa"),
+                           ("graphlet_export", "<export_dir>/sub/../a.fa")]:
+            self.assertNotIn("declared", code(tool, {"format": "fasta", "path": path}), path)
+        # R2B-2: resolved against the export directory the context names: inside is answered, outside refused
+        self.assertNotIn("declared", code("graphlet_export", {"format": "fasta", "path": "/w/e/b.fa"}, export_dir="/w/e"))
+        self.assertEqual(code("graphlet_export", {"format": "fasta", "path": "/w/e/../b.fa"}, export_dir="/w/e")
+                         ["expected_error"], "path_not_allowed")
+        self.assertEqual(code("graphlet_export", {"format": "fasta", "path": "/w/f/b.fa"}, export_dir="/w/e")
+                         ["expected_error"], "path_not_allowed")
+        for path in ("sub/x.fa", "~/c.fa", "", "<export_dir>/sub/x.fa", "<other>/x.fa"):
+            self.assertEqual(code("graphlet_export", {"format": "fasta", "path": path})["declared"], "path_unknown", path)
+        o = code("graphlet_walks", {"arm": "left", "budget": {"work_units": 10}})
+        self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_argument"))
+        self.assertEqual(code("graphlet_walks", {"arm": "left", "budget": {"work_units": 10}},
+                              local_limits={"view": {}})["declared"], "local_limits")
+        self.assertNotIn("declared", code("graphlet_walks", {"arm": "left", "budget": None}))
+        self.assertEqual(code("graphlet_walks", {"arm": "left", "cursor": "<cursor>"})["declared"], "cursor_page")
+        o = code("graphlet_walks", {"arm": "left", "cursor": "<cursor>"}, cursor_bound_elsewhere=True)
+        self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_cursor"))
+        # R2B-1: the cursor's source op decides on normalised arguments (arm short forms, labels resolved, DESIGN
+        # §6's defaults): only another tool or another value is bad_cursor; the rest makes no claim
+        src = {"tool": "graphlet_walks", "args": {"handle": "<handle>", "arm": "right", "rank": "id", "n": 1}}
+        for extra, want in [({"arm": "r"}, "cursor_page"), ({"arm": "right", "spell": "none"}, "cursor_page"),
+                            ({"arm": "right", "n": 3}, "cursor_page"), ({"arm": "right", "rank": "length"}, "bad_cursor"),
+                            ({"arm": "right", "min_bp": 1}, "bad_cursor"), ({"arm": "left"}, "bad_cursor")]:
+            args = dict({"handle": "<handle>", "rank": "id", "n": 1, "cursor": "<cursor>"}, **extra)
+            o = code("graphlet_walks", args, cursor_source=src)
+            self.assertEqual(o.get("expected_error") or o["declared"], want, extra)
+        self.assertEqual(code("graphlet_labels", {"cursor": "<cursor>"}, cursor_source=src)["expected_error"], "bad_cursor")
+        by_name = {"tool": "graphlet_walks", "args": {"arm": "right", "label": "acc1"}}
+        self.assertEqual(code("graphlet_walks", {"arm": "right", "label": {"ref": "h:0:0"}, "cursor": "<cursor>"},
+                              cursor_source=by_name)["declared"], "cursor_page")       # one label, named two ways
+        no_arm = {"tool": "graphlet_walks", "args": {"rank": "id"}}
+        self.assertEqual(code("graphlet_walks", {"arm": "right", "rank": "id", "cursor": "<cursor>"},
+                              cursor_source=no_arm)["declared"], "cursor_page")      # arm has no documented default
+        for why in ("cursor_page", "path_unknown", "local_limits"):
+            self.assertEqual(O.compare(O._declared(why), {"rows": []})["outcome"], "not_checked")
 
     def test_patterns_and_position_order(self):
         """`*` patterns in checked, unordered and absent expand over the answers (FORMAT v2 F1); with
@@ -827,7 +1084,15 @@ class RunStep(unittest.TestCase):
              "error": {"code": "no_document", "fields": {}}},
             {"scenario": "G-fail", "op": "fail-walks", "tool": "graphlet_walks", "paging_complete": None,
              "args_resolved": {"handle": "<handle>", "arm": "left"}, "answer": None,
-             "error": {"code": "no_graphlet", "fields": {}}}]
+             "error": {"code": "no_graphlet", "fields": {}}},
+            # F-D2: a cursor from the one listing W1 did not read to its end (walks-1 above), with other arguments
+            # (bad_cursor) and with its own (a resumed page: no claim)
+            {"scenario": "G-caps", "op": "cur-other", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "<handle>", "arm": "right", "rank": "id", "n": 1, "cursor": "<cursor>"}},
+            {"scenario": "G-caps", "op": "cur-same", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "<handle>", "arm": "right", "rank": "length", "n": 5, "cursor": "<cursor>"}},
+            {"scenario": "G-caps", "op": "budget", "tool": "graphlet_walks", "library": {"limits": {"local_limits": None}},
+             "args_resolved": {"handle": "<handle>", "arm": "right", "budget": {"work_units": 5}}}]
         with open(os.path.join(root, "arms", "dl-lib", "graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
             for r in w1:
                 fh.write(json.dumps(dict(r, run_id="R", way="W1")) + "\n")
@@ -865,6 +1130,10 @@ class RunStep(unittest.TestCase):
             for op in ("q", "typo", "raw"):
                 self.assertEqual(lines[op]["oracle"]["declared"], "unresolved_handle", op)
             self.assertEqual(lines["noargs"]["oracle"]["declared"], "no_input")
+            o = lines["cur-other"]["oracle"]
+            self.assertEqual((o["declared"], o["expected_error"]), ("expected_error", "bad_cursor"))
+            self.assertEqual(lines["cur-same"]["oracle"]["declared"], "cursor_page")
+            self.assertEqual(lines["budget"]["oracle"]["expected_error"], "bad_argument")
             fail = lines["fail-walks"]["oracle"]
             self.assertEqual((fail["declared"], fail["expected_error"]), ("expected_error", "no_graphlet"))
             self.assertEqual(O.compare(lines["fail-walks"], dict(w1[-1], error={"code": "no_graphlet", "fields": {}}))
@@ -888,7 +1157,8 @@ class Independence(unittest.TestCase):
     suite_common only (checks imports suite_common; both stdlib only), and names no library file or function."""
 
     STDLIB = {"__future__", "copy", "hashlib", "json", "typing", "gzip", "math", "re", "datetime", "os", "shlex",
-              "sys", "zlib", "importlib", "importlib.util", "shutil", "time", "platform", "subprocess", "argparse"}
+              "sys", "zlib", "importlib", "importlib.util", "shutil", "time", "platform", "subprocess", "argparse",
+              "posixpath"}
 
     def imports(self, path):
         with open(path, encoding="utf-8") as fh:

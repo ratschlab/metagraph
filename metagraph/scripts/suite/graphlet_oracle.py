@@ -1,4 +1,4 @@
-"""W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phase A.
+"""W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phases A and B.
 
     answer(tool, args_resolved, full_answer, mgt_text, context=None) -> record
     compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked | inconclusive, "detail",
@@ -31,10 +31,11 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
   list's end (the list's length, VO7).
 - `rederived`: the checked pointers whose value W5 computes with a DESIGN formula from engine values, rather than
   reading an engine value (DESIGN-v8 §2: the report marks them "re-derived from DESIGN").
-- `declared` says why a record checks no value: not_implemented_phase_b (graphlet_support, graphlet_claims,
-  graphlet_labels name=: DESIGN-v8 §8), properties_only (graphlet_compare: the compare_* functions below),
-  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view): W5 makes no claim
-  (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
+- `declared` says why a record checks no value: not_implemented_phase_b (no tool today: DESIGN-v8 §8's phase B
+  is answered), properties_only (graphlet_compare: the compare_* functions below),
+  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view), cursor_page (a page
+  resumed from an opaque cursor), path_unknown (a file path W5 cannot place inside or outside the export directory),
+  local_limits (a budget under local limits): W5 makes no claim (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
   twin pre-check), no_input (the run step found no twin or document), unresolved_handle (a handle symbol naming no
   scenario or op), selector_error (W1's arguments did not resolve), unreadable_w1 (a torn W1 line): W5 could not
   judge (compare: inconclusive, which blocks); and expected_error: the arguments name no answer, or the full twin
@@ -63,7 +64,7 @@ with no definition outside the library, or only DESIGN pseudocode the twin does 
 Values a clock measured (a time limitation's observed, a time resource stop's amounts) differ between the twin's
 execution and the graphlet's (SPEC §6.8) and are never checked.
 
-Coverage (phase A; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2, [L] library-defined (an expected
+Coverage (phases A and B; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2, [L] library-defined (an expected
 error's code); [R] re-derived from DESIGN (oracle.rederived); c/o = consistency-only). Every whole list's length is
 checked (VO7); refusals are expected errors with their code [L].
   every answer's evidence: complete_to_bp, scope [S §7.4], support, reconverge [S §7.5.2 H], outcome [S §7.0],
@@ -109,7 +110,24 @@ checked (VO7); refusals are expected errors with their code [L].
       overrides (their merge [L]); execute=True (backend)
   graphlet_compare: properties only (compare_self_properties, compare_swap_properties, compare_walks_properties,
       compare_prefix_subset_properties; each takes the compare's arm) [D §5, §5.2.5, §3.1, §9 T39, S §6.10, §7.5.7]
-  phase B (declared): graphlet_support, graphlet_claims, graphlet_labels name=
+  graphlet_claims (phase B): one claim per run end in run id order [S §6.9]: label, from_bp, to_bp, entered_by,
+      from_label, cost, loss, branches, reason [S §7.1 runs[], §7.5.2 R], qualifier [S §7.5.1], path_id of a run
+      ending at a leaf [S §7.5.6], kind boundary of a zero-length run [D §5.1], route_bp where R's stamp is the
+      displayed one [S §7.1; PB2], evidence_from [D §5.1][R] (null for a boundary claim, PB1), total and filtered
+      (labels [D §5], route_consistent: merge_entered where the SPEC §7.1 stamp is above 0, T at a leaf, R inside
+      [D §6, S §7.1; F2, VO-B2], min_bp [P §2.11][R]) | c/o: other kinds, end_class, support, exact, path_id of
+      inner runs, route_bp where R and T differ (PB2), the selection where R's and the displayed stamp disagree,
+      filtered with min_bp > 0 (PB3), labels=[], coordinate columns, hint, caveat; annotate claims (D §5.2.1)
+  graphlet_labels name= (phase B): the label's runs per arm (left first) in run id order: arm, from_bp, to_bp [S
+      §7.1], end (the qualifier's text or the enum [S §7.5.6]), evidence_from [D §5.1][R] (the formula also for a
+      zero-length run, PB4), merged_into [S §7.5.2 R m, D §4], route [D §5 routes][R]; name, ref, total; unknown /
+      ambiguous name [L] | c/o: walks_below (undefined, VO-B3), the end of Lw and m runs, coordinate columns;
+      annotate (D §5.2.1 witness route)
+  graphlet_support (phase B): total, rows from_bp, to_bp, n_labels, n_labels_total, joined, left after the first row:
+      constrain, each run's displayed evidence from its anchor, kept on the walk [D §5, §5.1][R] (G4: the
+      library's presence profile is a defect);
+      annotate, the recorded label sets along the walk [S §7.4] | c/o: the first row's lists, why, exact, step=, who
+      joined or left across a cut list, n_labels_total on a constrain arm with cut lists
 """
 
 from __future__ import annotations
@@ -120,6 +138,7 @@ import gzip
 import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
 import time
@@ -141,7 +160,7 @@ LIST_CAP = 8      # the label lists a row shows (labels_full, in, out, ends): IN
 # allowance stay within the sequence ceiling (graphlet_sequence)
 _SEQ_PAGE_EXTRA = 512
 
-PHASE_B = ("graphlet_support", "graphlet_claims")
+PHASE_B: Tuple[str, ...] = ()   # every phase-B tool is answered (graphlet_support, graphlet_claims, labels name=)
 NOT_APPLICABLE = ("traverse_capabilities", "traverse_resolve", "traverse_fetch", "graphlet_list", "graphlet_free")
 
 # clauses cited by more than one tool
@@ -326,6 +345,98 @@ class _Doc:
         """The walk with the seed, natural orientation: natural(left) + seed or seed + natural(right) (SPEC §7.5.4)."""
         return flank + self.seed if side == "left" else self.seed + flank
 
+    # ------------------------------------------------------------------ lineages (phase B)
+    def r_records(self, side: str) -> List[List[str]]:
+        """The arm's R records in order (SPEC §7.5.2: run id = ordinal, aligned with the twin's runs[]): R <segment>
+        <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev_run|*> <structural_successors|*>
+        <branches> <loss> [<needed_budget>]."""
+        if not hasattr(self, "_r"):
+            self._r: Dict[str, List[List[str]]] = {"left": [], "right": []}
+            cur = None
+            for line in (self.mgt or "").split("\n"):
+                f = line.split(" ")
+                if f[0] == "A" and len(f) > 1:
+                    cur = "left" if f[1] == "l" else "right"
+                elif f[0] == "R" and cur is not None:
+                    self._r[cur].append(f)
+        return self._r.get(side, [])
+
+    def runs(self, side: str) -> List[dict]:
+        return self.arms[side].get("runs") or []
+
+    def aligned(self, side: str) -> bool:
+        """Whether the R records and the twin's runs[] are one run each, in one order (label, from_bp, to_bp)."""
+        r, runs = self.r_records(side), self.runs(side)
+        return len(r) == len(runs) and all(len(f) > 8 and f[2] == str(x["label"]) and f[3] == str(x["from_bp"])
+                                           and f[4] == str(x["to_bp"]) for f, x in zip(r, runs))
+
+    def prev_run(self, side: str, i: int) -> Optional[int]:
+        """The run a switch-entered run continues (SPEC §7.5.2 R prev_run; * = none)."""
+        f = self.r_records(side)[i]
+        return None if f[8] == "*" else int(f[8])
+
+    def end_code(self, side: str, i: int) -> str:
+        """The run's end token (SPEC §7.5.2 R end: code[+qualifier] | Lw | m)."""
+        return self.r_records(side)[i][5]
+
+    def segment(self, side: str, sid: int) -> dict:
+        return self.arms[side]["segments"][sid]
+
+    def chain(self, side: str, sid: int) -> List[int]:
+        """The first-parent chain root -> segment |sid| (SPEC §7.5.6: the displayed chain through parents[0])."""
+        out = [sid]
+        while self.segment(side, out[-1]).get("parents"):
+            out.append(self.segment(side, out[-1])["parents"][0])
+        return out[::-1]
+
+    def label_at(self, side: str, i: int, depth: int) -> int:
+        """The INCOMING label of run |i|'s lineage at outward depth |depth|, before any switch committed there
+        (DESIGN §5.1: walk R.prev_run back across switches while the run begins at or after the depth)."""
+        runs = self.runs(side)
+        while runs[i]["from_bp"] >= depth and self.prev_run(side, i) is not None:
+            i = self.prev_run(side, i)
+        return runs[i]["label"]
+
+    def evidence_from(self, side: str, i: int, merge_part: bool = False) -> Optional[int]:
+        """DESIGN §5.1 displayed-path evidence of run |i| (pseudocode, re-derived): p = the first-parent chain from the
+        root to the run's anchor segment, t = to_bp; the latest merge s on p with from_bp(s) <= t whose first
+        partition (the twin's labels_via_parent[0], SPEC §7.1) lacks the lineage's incoming label at from_bp(s); at
+        least the run's own from_bp. None where a merge on p states no partitions."""
+        run = self.runs(side)[i]
+        ef = 0
+        merges = [self.segment(side, sid) for sid in self.chain(side, run["segment"])
+                  if len(self.segment(side, sid).get("parents") or []) > 1]
+        for sg in sorted(merges, key=lambda x: -x["from_bp"]):
+            if sg["from_bp"] > run["to_bp"]:
+                continue
+            parts = sg.get("labels_via_parent")
+            if not isinstance(parts, list) or not parts:
+                return None
+            if self.label_at(side, i, sg["from_bp"]) not in parts[0]:
+                ef = sg["from_bp"]
+                break
+        return ef if merge_part else max(ef, run["from_bp"])
+
+    def route(self, side: str, i: int) -> Optional[List[int]]:
+        """Run |i|'s own route, root -> its anchor segment (DESIGN §5 routes: through merges via the partitions,
+        re-derived): at a merge, the parent whose partition (labels_via_parent, SPEC §7.1) holds the lineage's
+        incoming label there. None where a merge states no partition holding it."""
+        out = [self.runs(side)[i]["segment"]]
+        while True:
+            sg = self.segment(side, out[-1])
+            parents = sg.get("parents") or []
+            if not parents:
+                return out[::-1]
+            if len(parents) == 1:
+                out.append(parents[0])
+                continue
+            parts = sg.get("labels_via_parent") or []
+            lab = self.label_at(side, i, sg["from_bp"])
+            k = next((k for k, part in enumerate(parts) if lab in part), None)
+            if k is None or k >= len(parents):
+                return None
+            out.append(parents[k])
+
 
 # ---------------------------------------------------------------------------------------------- the record
 def _esc(key: Any) -> str:
@@ -439,7 +550,8 @@ def _canon(v: Any) -> str:
 FIT_ERRORS = ("result_too_large", "receipt_too_large", "too_large", "body_too_large", "op_busy", "op_timeout",
               "op_memory", "local_budget_exceeded")
 # declarations by which W5 makes no claim about the call, by design: compare() answers not_checked
-NO_CLAIM = ("not_implemented_phase_b", "properties_only", "not_applicable", "view_consistency_only")
+NO_CLAIM = ("not_implemented_phase_b", "properties_only", "not_applicable", "view_consistency_only", "cursor_page",
+            "path_unknown", "local_limits")
 # declarations by which W5 could not judge a call it should judge (an input missing or inconsistent, a handle or a
 # W1 line it cannot read): compare() answers inconclusive, which blocks (R2-5; owner policy 2026-10-14)
 CANNOT_JUDGE = ("no_input", "unresolved_handle", "twin_mismatch", "selector_error", "unreadable_w1")
@@ -1181,6 +1293,8 @@ def _holds_base(a: dict, label: int, at_bp: int, mode: str) -> Optional[bool]:
 
 
 def _graphlet_labels(d: _Doc, args: dict, ctx: dict) -> dict:
+    if args.get("name") is not None:
+        return _label_walks(d, args, ctx)
     side = d.arm(args.get("arm"), required=False)
     sides = [side] if side else d.sides
     rank = args.get("rank", "direct_bp")
@@ -1399,6 +1513,9 @@ def _walk_ids(d: _Doc, side: str, walks: Any) -> List[int]:
 def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     fmt = args.get("format", "fasta")
     what = args.get("what")
+    refused = _path_refused(args, ctx)
+    if refused is not None:
+        return refused
     if fmt not in ("fasta", "gfa", "json", "mgt") or (what is not None and fmt != "json"):
         raise _Refused("format %r / what %r" % (fmt, what))
     cons = ["/path", "/bytes", "/fields_cut", "/local", "/parsed", "/validation"]
@@ -1523,6 +1640,9 @@ def _graphlet_subtrie(d: _Doc, args: dict, ctx: dict) -> dict:
 
 
 def _graphlet_save(d: _Doc, args: dict, ctx: dict) -> dict:
+    refused = _path_refused(args, ctx)
+    if refused is not None:
+        return refused
     return _record({"body_digest": body_digest(d.mgt), "arms_digest": arms_digest(d.mgt)},
                    {"/body_digest": "SPEC §7.5.2: the saved file is H, J, the body unchanged (FORMAT-v8 §3 body_digest)",
                     "/arms_digest": "the saved file reads as the original (checks.graphlet_arms, SPEC §7.5)"},
@@ -1530,6 +1650,9 @@ def _graphlet_save(d: _Doc, args: dict, ctx: dict) -> dict:
 
 
 def _graphlet_load(d: _Doc, args: dict, ctx: dict) -> dict:
+    refused = _path_refused(args, ctx, spool=True)
+    if refused is not None:
+        return refused
     summ, clauses, cons = _summary_part(d, d.sides)
     cons = cons + ["/handle", "/fields_cut"]
     if ctx.get("max_bytes", 2048) < 16384:
@@ -1611,11 +1734,356 @@ def _traverse_continue(d: _Doc, args: dict, ctx: dict) -> dict:
                    note="overrides: their merge into the request is library-defined" if ov else None)
 
 
+# ---------------------------------------------------------------------------------------------- phase B
+# SPEC §7.5.1: a label end's text qualifier, the second letter of its code (Lw, a silent end, and m, a merge's
+# close, are end tokens of R, not qualifiers)
+_QUALIFIER = {"Rm": "minority", "Rb": "below_min_labels", "Rs": "split_limit", "Dh": "hairpin", "Ls": "superseded",
+              "Lx": "switch_sources"}
+C_EVIDENCE = "DESIGN §5.1 displayed-path evidence (pseudocode, re-derived): the latest merge on the first-parent " \
+             "chain to the run's anchor whose first partition (labels_via_parent[0], SPEC §7.1) lacks the lineage's " \
+             "incoming label (R prev_run), at least the run's from_bp"
+C_RUN = "SPEC §7.5.2 R / §7.1 runs[] (the engine's run, run id order)"
+
+
+def _constrain_runs(d: _Doc, side: str) -> bool:
+    """Whether the arm's runs can be read lineage by lineage: constrain mode, R records aligned with runs[]."""
+    return d.mode == "constrain" and d.aligned(side)
+
+
+def _selected_labels(d: _Doc, sel: Any) -> Optional[set]:
+    """DESIGN §5 Graphlet.claims(labels=): one selector or a list of them; None = every label."""
+    if sel is None:
+        return None
+    sels = sel if isinstance(sel, list) else [sel]
+    return {d.resolve(x) for x in sels}
+
+
+def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
+    """The arm's claims (DESIGN §5 Graphlet.claims; SPEC §6.9: one claim per RUN END): per run of the twin, in run id
+    order, its label, interval, route stamp, entry, switch source and cost, loss and branches (the engine's run),
+    the end reason (the run's end_reason; the qualifier from R's end code), the path a leaf run ends on, and its
+    displayed evidence (DESIGN §5.1, re-derived). Filters: labels (DESIGN §5), route_consistent (DESIGN §6: a claim
+    whose SPEC §7.1 merge stamp is above 0, T at a leaf and R inside, is left out and counted merge_entered: the
+    reading phase A's walks filter uses, F2, VO-B2; where R's and the displayed stamp disagree the selection is
+    consistency-only), min_bp (its displayed support to_bp - evidence_from at least: INVENTORY §2.11). Annotate claims (DESIGN §5.2.1's witness rule) are consistency-only."""
+    side = d.arm(args.get("arm"), required=True)
+    min_bp = _int_arg(args, "min_bp", 0, 0)
+    rc = _bool_arg(args, "route_consistent", True)
+    if args.get("labels") == []:
+        # DESIGN §5 defines labels=None as every label; what an empty selection means is the tool's
+        return _record({}, {}, ["/*"], note="labels=[]: library-defined, consistency-only")
+    labs = _selected_labels(d, args.get("labels"))
+    cons = ["/rows/*/end_class", "/rows/*/support", "/rows/*/exact", "/rows/*/coordinates",
+            "/rows/*/coordinates_total", "/rows/*/coordinates_truncated", "/rows/*/coordinates_kind",
+            "/rows/*/coordinates_lower_bound", "/hint", "/caveat", "/next_cursor", "/coordinates"]
+    ev, ecl, econ = _evidence(d, [side])
+    if not _constrain_runs(d, side):
+        return _record({"arm": side, "evidence": ev}, dict(ecl, **{"/arm": C_ARM_ECHO}),
+                       cons + econ + ["/total", "/rows", "/filtered", "/rows/*/kind"],
+                       note="annotate claims follow DESIGN §5.2.1's witness rule: consistency-only")
+    a = d.arms[side]
+    leaf_len = {p["segments"][-1]: p for p in a["paths"]}
+    # a run's R stamp is the earliest non-first-parent merge on its lineage's route, a leaf label's T stamp the latest
+    # (SPEC §7.1); DESIGN does not say which a claim carries (finding PB2): W5 checks route_bp where R's stamp equals
+    # the displayed one (T at a leaf, the evidence's merge part inside), and leaves it open where they differ
+    leaf_t = {e["run"]: e.get("route_bp", 0) for p in a["paths"] for e in p.get("end_labels") or []
+              if isinstance(e.get("run"), int)}
+    rows, filtered, absent = [], {}, {}
+    open_stamp = []
+    undecided_at: Optional[int] = None
+    for i, run in enumerate(d.runs(side)):
+        if labs is not None and run["label"] not in labs:
+            continue
+        ef = d.evidence_from(side, i)
+        if ef is None:
+            return _record({"arm": side, "evidence": ev}, dict(ecl, **{"/arm": C_ARM_ECHO}),
+                           cons + econ + ["/total", "/rows", "/filtered", "/rows/*/kind"],
+                           note="a merge on a claim's chain states no partitions: consistency-only")
+        if rc:
+            # one route filter for walks and claims (VO-B2, phase A F2): merge-entered where the claim's SPEC §7.1
+            # stamp is above 0 (a leaf label's T stamp, else the run's R stamp); where R's stamp and the displayed
+            # one (the evidence's merge part) disagree on that, no clause decides: the selection is open
+            stamp = leaf_t[i] if i in leaf_t else run.get("route_bp", 0)
+            other = leaf_t[i] if i in leaf_t else d.evidence_from(side, i, merge_part=True)
+            if (stamp > 0) != ((other or 0) > 0) or (i in leaf_t and (run.get("route_bp", 0) > 0) != (stamp > 0)):
+                undecided_at = len(rows)   # this claim and every later row: open (R2B-3)
+                break
+            if stamp > 0:
+                filtered["merge_entered"] = filtered.get("merge_entered", 0) + 1
+                continue
+        if run["to_bp"] - ef < min_bp:
+            continue
+        code = d.end_code(side, i)
+        boundary = run["from_bp"] == run["to_bp"]
+        row: dict = {"label": d.label(run["label"]), "from_bp": run["from_bp"], "to_bp": run["to_bp"],
+                     # a boundary claim has no bases, so no displayed interval: null (DESIGN §5.1; its clipped-merge
+                     # vector writes null wherever nothing is displayed; finding PB1)
+                     "route_bp": run.get("route_bp", 0), "evidence_from": None if boundary else ef,
+                     "entered_by": run["entered_by"],
+                     "from_label": d.label(run["from"]) if run.get("from") is not None else None,
+                     "cost": run.get("cost"), "loss": run.get("loss"), "branches": run.get("branches"),
+                     "qualifier": _QUALIFIER.get(code)}
+        if "end_reason" in run:
+            row["reason"] = run["end_reason"]
+        p = leaf_len.get(run["segment"])
+        if p is not None and p["length_bp"] == run["to_bp"] and code != "m":
+            row["path_id"] = p["id"]
+        if boundary:
+            row["kind"] = "boundary"
+        shown = leaf_t[i] if i in leaf_t else d.evidence_from(side, i, merge_part=True)
+        if shown != row["route_bp"]:
+            del row["route_bp"]
+            open_stamp.append(len(rows))
+        rows.append(row)
+    cons += ["/rows/%d/route_bp" % j for j in open_stamp]
+    for j, row in enumerate(rows):
+        if "path_id" not in row:
+            cons.append("/rows/%d/path_id" % j)
+        if "reason" not in row:
+            cons.append("/rows/%d/reason" % j)
+        if "kind" not in row:   # DESIGN names the other kinds without defining them
+            cons.append("/rows/%d/kind" % j)
+    ans: dict = {"arm": side, "total": len(rows), "rows": rows, "evidence": ev}
+    note = None
+    if undecided_at is not None:
+        # a claim whose R stamp and displayed stamp disagree on a non-first-parent entry (PB2, VO-B2): whether the
+        # filter keeps it is open, so it and every later row, the total and the counts are consistency-only; the
+        # rows before it stay checked (R2B-3)
+        del ans["total"]
+        cons += ["/total", "/filtered"]
+        note = "route_consistent: rows from %d on are consistency-only (an undecided claim)" % undecided_at
+    elif filtered and not min_bp:
+        ans["filtered"] = filtered
+    elif min_bp:
+        # whether the route filter counts before or after min_bp is the tool's order (finding PB3)
+        cons.append("/filtered")
+    clauses = {"/arm": C_ARM_ECHO,
+               "/total": "SPEC §6.9: one claim per run end, the filters kept (DESIGN §5 labels; route_consistent and "
+                         "min_bp on the displayed evidence, DESIGN §5.1, §6)",
+               "/filtered/*": "DESIGN §6: a filter never hides rows silently (merge_entered: the claim's SPEC §7.1 "
+                              "stamp is above 0, a leaf label's T stamp or the run's R stamp: phase A F2's reading)",
+               "/rows/*/label": "the run's label (" + C_RUN + "); " + C_LABEL,
+               "/rows/*/from_bp": C_RUN, "/rows/*/to_bp": C_RUN,
+               "/rows/*/route_bp": "SPEC §7.1, §7.5.2 R route_bp: the run's earliest non-first-parent merge stamp "
+                                   "(where the displayed stamp differs, the T stamp at a leaf or the evidence's merge "
+                                   "part inside, which one a claim carries is open: consistency-only, finding PB2)",
+               "/rows/*/evidence_from": C_EVIDENCE + "; null for a boundary claim (no bases, DESIGN §5.1)",
+               "/rows/*/entered_by": "SPEC §7.1 runs[].entered_by (seed | switch)",
+               "/rows/*/from_label": "SPEC §7.1 runs[].from (the switch source; null when entered by seed); " + C_LABEL,
+               "/rows/*/cost": "SPEC §7.5.2 R from_label:cost (null when entered by seed)",
+               "/rows/*/loss": "SPEC §7.1 runs[].loss (the lineage's at the end, §4)",
+               "/rows/*/branches": "SPEC §7.1 runs[].branches (the lineage's at the end)",
+               "/rows/*/reason": "SPEC §7.1 runs[].end_reason (the enum; a merge's close states none)",
+               "/rows/*/qualifier": "SPEC §7.5.1: the end code's text qualifier (Rm, Rb, Rs, Dh, Ls, Lx), else null",
+               "/rows/*/path_id": "SPEC §7.5.6: a run anchored at a leaf with to_bp = the path length is that path's "
+                                  "end label (the path a claim of an inner run is shown on: no clause)",
+               "/rows/*/kind": "DESIGN §5.1: a run of zero length is a boundary claim"}
+    clauses.update(ecl)
+    red = ["/rows/*/evidence_from"]
+    if min_bp:   # min_bp selects on the displayed evidence (DESIGN §5.1, re-derived); the route filter on stamps
+        red += ["/total", "/rows/*/label", "/rows/*/from_bp", "/rows/*/to_bp"]
+    partial = _cut_rows(ans, ctx, cons)
+    if undecided_at is not None:
+        partial = ["/rows"]
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=red, note=note)
+
+
+def _merged_into(d: _Doc, side: str, run: dict) -> Optional[int]:
+    """The merge that closed a run (R end m): the segment created at to_bp with the run's anchor among its parents
+    (SPEC §7.5.2 R m; DESIGN §4: every m run's anchor is a parent of the segment created at to_bp)."""
+    hits = [sg["id"] for sg in d.arms[side]["segments"]
+            if len(sg.get("parents") or []) > 1 and sg["from_bp"] == run["to_bp"] and run["segment"] in sg["parents"]]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
+    """graphlet_labels(name=): the named label's runs (DESIGN §5 label_walks, §6 "that label's runs/routes incl.
+    merge routes"), per arm (both, left first, when arm is None), in run id order: from_bp, to_bp and end (the
+    engine's run, SPEC §7.1 runs[]; the end named as SPEC §7.5.6 names a label end), evidence_from (DESIGN §5.1,
+    re-derived, also for a zero-length run: PB4), merged_into (the merge that closed it, SPEC §7.5.2 R m) and route
+    (DESIGN §5 routes, re-derived); walks_below is consistency-only (DESIGN names leaves_below without defining
+    it: VO-B3). rank, min_direct_bp and at_bp do not apply (INVENTORY §2.9). Annotate: the
+    witness route of DESIGN §5.2.1, consistency-only."""
+    lab = d.resolve(args["name"])
+    side = d.arm(args.get("arm"), required=False)
+    sides = [side] if side else d.sides
+    if _bool_arg(args, "coordinates", False) and not isinstance(d.result.get("coordinates"), dict):
+        raise _Refused("coordinates=true on a retrieval without record coordinates", "no_coordinates",
+                       "SPEC §7.1 record coordinates (null, coordinates_reason); the code no_coordinates is "
+                       "library-defined (INVENTORY §2.9)")
+    ev, ecl, econ = _evidence(d, sides)
+    base = {"name": d.labels[lab]["name"], "ref": d.labels[lab]["ref"]}
+    c_base = {"/name": "the label named (" + C_LABEL + ")", "/ref": "the label named (" + C_LABEL + ")"}
+    # walks_below: DESIGN §5 gives only the name leaves_below; leaves reachable from the anchor and leaves whose
+    # displayed chain passes it differ (on 184 of 3,730 fixture runs), and no clause chooses (VO-B3, a DESIGN gap)
+    cons = ["/rows/*/coordinates", "/rows/*/coordinates_total", "/rows/*/coordinates_truncated",
+            "/rows/*/coordinates_kind", "/rows/*/coordinates_lower_bound", "/next_cursor", "/coordinates",
+            "/rows/*/walks_below"]
+    if not all(_constrain_runs(d, s) for s in sides):
+        return _record(dict(base, evidence=ev), dict(ecl, **c_base), cons + econ + ["/total", "/rows"],
+                       note="annotate: the witness route of DESIGN §5.2.1, consistency-only")
+    rows, red_rows = [], []
+    for s in sides:
+        for i, run in enumerate(d.runs(s)):
+            if run["label"] != lab:
+                continue
+            ef = d.evidence_from(s, i)
+            route = d.route(s, i)
+            code = d.end_code(s, i)
+            # a run, not a claim: DESIGN §5.1's formula, also for a zero-length run (the boundary-claim rule is the
+            # claims'; finding PB4)
+            row: dict = {"arm": s, "from_bp": run["from_bp"], "to_bp": run["to_bp"], "evidence_from": ef,
+                         "merged_into": _merged_into(d, s, run) if code == "m" else None}
+            if "end_reason" in run and code not in ("Lw", "m"):
+                # SPEC §7.5.6: a label end's reason is the qualifier's text or the code's enum
+                row["end"] = _QUALIFIER.get(code) or run["end_reason"]
+            else:   # a silent switch-source end (Lw) and a merge's close have no label_end event: no SPEC word
+                cons.append("/rows/%d/end" % len(rows))
+            if route is not None:
+                row["route"] = route
+            else:
+                cons.append("/rows/%d/route" % len(rows))
+            if ef is None:
+                del row["evidence_from"]
+                cons.append("/rows/%d/evidence_from" % len(rows))
+            rows.append(row)
+    ans: dict = dict(base, total=len(rows), rows=rows, evidence=ev)
+    clauses = dict(c_base, **{
+        "/total": "the named label's runs on the arms asked (SPEC §7.5.2 R, §7.1 runs[])",
+        "/rows/*/arm": "the arm of the run (" + C_ARM_ECHO + "), left before right (SPEC §7.5.2 document order)",
+        "/rows/*/from_bp": C_RUN, "/rows/*/to_bp": C_RUN,
+        "/rows/*/end": "SPEC §7.5.6: the label end's reason, the qualifier's text (R's end code, SPEC §7.5.1) or "
+                       "the enum (runs[].end_reason); Lw and m have no label_end event: c/o",
+        "/rows/*/evidence_from": C_EVIDENCE + " (a run, not a claim: the formula also for a zero-length run, PB4)",
+        "/rows/*/merged_into": "SPEC §7.5.2 R m and DESIGN §4: the merge segment created at to_bp with the run's "
+                               "anchor among its parents; null when no merge closed the run",
+        "/rows/*/route": "DESIGN §5 routes (re-derived): root -> the run's anchor, at each merge the parent whose "
+                         "partition (labels_via_parent, SPEC §7.1) holds the lineage's incoming label"})
+    clauses.update(ecl)
+    partial = _cut_rows(ans, ctx, cons)
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=["/rows/*/evidence_from", "/rows/*/route"])
+
+
+def _support_sets(d: _Doc, side: str, p: dict) -> Optional[List[set]]:
+    """Per outward base of walk |p| (0 .. length-1), the labels with displayed support there (DESIGN §5 support
+    profile, kind displayed; re-derived from DESIGN §5.1): each run's displayed evidence, derived at its anchored
+    endpoint with p = the first-parent chain root -> its anchor ([evidence_from, to_bp), "the displayed bases before
+    s are not this lineage's"), kept where that chain is the walk (the walk's segment at the base lies on it). The
+    library's presence profile (a run's route passing the walk's segment) is library defect G4 (VERIFY-O-B VO-B1).
+    None where a merge states no partitions."""
+    seg_at: List[int] = []
+    for sid in p["segments"]:
+        seg_at += [sid] * d.segment(side, sid)["length_bp"]
+    sets: List[set] = [set() for _ in range(p["length_bp"])]
+    for i, run in enumerate(d.runs(side)):
+        if run["from_bp"] == run["to_bp"]:
+            continue
+        ef = d.evidence_from(side, i)
+        if ef is None:
+            return None
+        chain = set(d.chain(side, run["segment"]))
+        for b in range(ef, min(run["to_bp"], p["length_bp"])):
+            if seg_at[b] in chain:
+                sets[b].add(run["label"])
+    return sets
+
+
+def _recorded_sets(d: _Doc, side: str, p: dict) -> Optional[List[Tuple[Tuple[int, ...], int, bool]]]:
+    """annotate: per outward base of walk |p|, the label set recorded at the walk's node there (SPEC §7.4 label_sets:
+    [from_bp, to_bp) covers the nodes entered by steps from_bp + 1 .. to_bp), as (the recorded list, its true count,
+    cut). None where a base has no recorded set."""
+    per: List[Optional[Tuple[Tuple[int, ...], int, bool]]] = [None] * p["length_bp"]
+    for sid in p["segments"]:
+        for ls in d.segment(side, sid).get("label_sets") or []:
+            for b in range(ls["from_bp"], min(ls["to_bp"], p["length_bp"])):
+                per[b] = (tuple(ls.get("labels") or []), ls.get("labels_total", len(ls.get("labels") or [])),
+                          bool(ls.get("truncated")))
+    return None if any(x is None for x in per) else per  # type: ignore[return-value]
+
+
+def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
+    """graphlet_support: the support profile along a walk (DESIGN §5 support_profile(kind='displayed'), §6 "support
+    runs with who left / joined"): maximal stretches [from_bp, to_bp) of one set of labels with displayed support
+    (re-derived from DESIGN §5.1, _support_sets; a stretch no label supports is an empty set, as SPEC §6.11 records
+    one), each with
+    n_labels and, after the first, the labels that joined and left (ascending label id, first 8). Consistency-only:
+    the first row's lists, why, exact, n_labels_total on cut lists, every row with step= (its merging rule is the
+    tool's). In annotate mode the profile is the labels the engine recorded at the walk's nodes (SPEC §7.4
+    label_sets: engine-computed, not re-derived); who joined or left is not read across a cut list."""
+    side = d.arm(args.get("arm"), required=True)
+    w = args.get("walk")
+    paths = d.arms[side]["paths"]
+    if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < len(paths):
+        raise _Refused("walk %r of %d" % (w, len(paths)))
+    step = _int_arg(args, "step", None, 0)
+    ev, ecl, econ = _evidence(d, [side])
+    cons = ["/rows/*/why", "/rows/*/exact", "/rows/0/joined", "/rows/0/left", "/next_cursor", "/coordinates"]
+    base = {"arm": side, "walk": w}
+    c_base = {"/arm": C_ARM_ECHO, "/walk": C_PATHS}
+    annotate = d.mode == "annotate"
+    if annotate:
+        # SPEC §7.4: the labels recorded at every node of the walk (engine-computed), maximal runs of one (capped
+        # list, count); a cut list states its true count
+        rec_ = _recorded_sets(d, side, paths[w])
+        sets = None if rec_ is None else [(set(x[0]), x[1], x[2]) for x in rec_]
+    else:
+        lin = _support_sets(d, side, paths[w]) if _constrain_runs(d, side) else None
+        sets = None if lin is None else [(x, len(x), False) for x in lin]
+    if sets is None or step is not None:
+        why = "step=: the tool's merging rule" if sets is not None else "no recorded set or partition to read"
+        return _record(dict(base, evidence=ev), dict(ecl, **c_base), cons + econ + ["/total", "/rows"],
+                       note="%s: consistency-only" % why)
+    rows: List[dict] = []
+    for b, (cur, total, cut_list) in enumerate(sets):
+        if rows and (rows[-1]["_set"], rows[-1]["_total"]) == (cur, total):
+            rows[-1]["to_bp"] = b + 1
+            rows[-1]["_cut"] = rows[-1]["_cut"] or cut_list
+        else:
+            rows.append({"from_bp": b, "to_bp": b + 1, "_set": cur, "_total": total, "_cut": cut_list})
+    out, prev = [], None
+    cut = not annotate and (d.arms[side].get("labels_per_node") or {}).get("nodes_truncated", 0) > 0
+    for j, r in enumerate(rows):
+        row = {"from_bp": r["from_bp"], "to_bp": r["to_bp"], "n_labels": len(r["_set"])}
+        if not cut:
+            row["n_labels_total"] = r["_total"]
+        if prev is not None:
+            if r["_cut"] or prev["_cut"]:   # a cut list: who joined or left cannot be read from it
+                cons += ["/rows/%d/joined" % j, "/rows/%d/left" % j]
+            else:
+                for key, ids in (("joined", sorted(r["_set"] - prev["_set"])), ("left", sorted(prev["_set"] - r["_set"]))):
+                    if len(ids) > LIST_CAP:
+                        cons.append("/rows/%d/%s" % (j, key))
+                    elif ids:
+                        row[key] = [d.label(x) for x in ids]
+        prev = r
+        out.append(row)
+    ans: dict = dict(base, total=len(out), rows=out, evidence=ev)
+    c_sup = "DESIGN §5 support_profile (displayed; re-derived from DESIGN §5.1): each run's [evidence_from, to_bp) " \
+            "derived at its anchor (p = the first-parent chain to it), kept where that chain is the walk; maximal " \
+            "stretches of one label set (an empty set too, as SPEC §6.11 records one)"
+    if annotate:
+        c_sup = "SPEC §7.4 label_sets: the labels recorded at the walk's nodes (annotate), maximal runs of one " \
+                "(capped list, count)"
+    clauses = dict(c_base, **{"/total": c_sup, "/rows/*/from_bp": c_sup, "/rows/*/to_bp": c_sup,
+                              "/rows/*/n_labels": c_sup + ": the set's size",
+                              "/rows/*/n_labels_total": c_sup + ": the true count (no cut list on the arm)",
+                              "/rows/*/joined": "DESIGN §6 who joined (" + c_sup + "); " + C_LABEL_LIST,
+                              "/rows/*/left": "DESIGN §6 who left (" + c_sup + "); " + C_LABEL_LIST})
+    clauses.update(ecl)
+    if cut:
+        cons.append("/rows/*/n_labels_total")
+    partial = _cut_rows(ans, ctx, cons)
+    red = [] if annotate else ["/total", "/rows/*/from_bp", "/rows/*/to_bp", "/rows/*/n_labels",
+                               "/rows/*/n_labels_total", "/rows/*/joined", "/rows/*/left"]
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=red)
+
+
 _TOOLS: Dict[str, Callable[[_Doc, dict, dict], dict]] = {
     "graphlet_summary": _graphlet_summary, "graphlet_walks": _graphlet_walks, "graphlet_walk": _graphlet_walk,
     "graphlet_labels": _graphlet_labels, "graphlet_splits": _graphlet_splits, "graphlet_sequence": _graphlet_sequence,
     "graphlet_export": _graphlet_export, "graphlet_subtrie": _graphlet_subtrie, "graphlet_save": _graphlet_save,
-    "graphlet_load": _graphlet_load, "traverse_continue": _traverse_continue,
+    "graphlet_load": _graphlet_load, "traverse_continue": _traverse_continue, "graphlet_claims": _graphlet_claims,
+    "graphlet_support": _graphlet_support,
 }
 
 
@@ -1633,6 +2101,133 @@ def _failed_error(full_answer: dict, seed_index: int) -> Any:
     res = full_answer.get("results")
     r = res[seed_index] if isinstance(res, list) and seed_index < len(res) else full_answer
     return r.get("error")
+
+
+def _arguments_refused(tool: str, args: dict, ctx: dict) -> Optional[dict]:
+    """Arguments the tools refuse, or that W5 cannot judge, before any derivation:
+    - `budget` on a server without local limits: bad_argument (library-defined, INVENTORY §1.1); with local limits a
+      budget's stops are the tool's (DESIGN §5.4: deterministic, but library-defined): no claim (local_limits);
+    (a `cursor` is judged in answer(), _cursor_record: its label selectors resolve against the document)."""
+    if args.get("budget") is not None and tool not in NOT_APPLICABLE:
+        if not ctx.get("local_limits"):
+            return _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_argument",
+                           note="budget on a server without local limits (library-defined, INVENTORY §1.1)")
+        return _declared("local_limits", "a budget under local limits: its stops are the tool's (DESIGN §5.4)")
+    return None
+
+
+# the documented defaults of the arguments a cursor binds (DESIGN §6's tool signatures; INVENTORY §2)
+_DEFAULTS: Dict[str, dict] = {
+    "graphlet_summary": {"arm": None, "detail": "summary", "budget": None},
+    "graphlet_walks": {"rank": "support", "min_bp": 0, "label": None, "spell": "none", "tail_bp": 60,
+                       "route_consistent": True, "coordinates": False, "budget": None},
+    "graphlet_walk": {"budget": None},
+    "graphlet_support": {"step": None, "budget": None},
+    "graphlet_labels": {"arm": None, "rank": "direct_bp", "min_direct_bp": 0, "at_bp": None, "name": None,
+                        "coordinates": False, "budget": None},
+    "graphlet_splits": {"min_labels_before": 2, "budget": None},
+    "graphlet_claims": {"min_bp": 0, "route_consistent": True, "labels": None, "budget": None},
+    "graphlet_compare": {"arm": None, "mode": "claims", "budget": None},
+}
+_MISSING = object()
+
+
+def _bound_args(d: "_Doc", tool: str, args: dict) -> Optional[dict]:
+    """The arguments a cursor binds, normalised as the tool reads them (INVENTORY §1.2: all but cursor, max_bytes and
+    n): arm short forms named (INVENTORY §1.5), label selectors resolved to labels (DESIGN §5 Graphlet.label: a
+    label named by name, ref or id is one label), the documented defaults filled in (DESIGN §6). None where a
+    selector does not resolve."""
+    out = dict(_DEFAULTS.get(tool, {}))
+    for k, v in args.items():
+        if k in ("cursor", "max_bytes", "n", "access_token"):
+            continue
+        out[k] = v
+    if isinstance(out.get("arm"), str):
+        out["arm"] = _ARM_NAMES.get(out["arm"], out["arm"])
+    try:
+        for key in ("label", "name"):
+            if out.get(key) is not None:
+                out[key] = d.resolve(out[key])
+        if out.get("labels") is not None:
+            sel = out["labels"] if isinstance(out["labels"], list) else [out["labels"]]
+            out["labels"] = sorted({d.resolve(x) for x in sel})
+    except _Refused:
+        return None
+    return out
+
+
+def _cursor_record(d: "_Doc", tool: str, args: dict, ctx: dict) -> dict:
+    """A call that resumes a listing from a cursor (INVENTORY §1.2: opaque to W5, bound to the handle, the tool and
+    the normalised arguments other than cursor, max_bytes and n). Its source (context cursor_source: the tool and
+    arguments of the op that left it, found by the run step) decides: another tool, or an argument both name with
+    another value after normalising (_bound_args), and the tool must refuse it: bad_cursor (library-defined,
+    INVENTORY §1.2). Otherwise W5 makes no claim (cursor_page): a resumed page is the tool's, and an argument one
+    call names without a documented default cannot be compared."""
+    bad = _record(None, {}, ["/*"], declared="expected_error", expected_error="bad_cursor",
+                  note="a cursor of another listing (library-defined, INVENTORY §1.2)")
+    if ctx.get("cursor_bound_elsewhere"):
+        return bad
+    src = ctx.get("cursor_source")
+    if not isinstance(src, dict) or not isinstance(src.get("args"), dict):
+        return _declared("cursor_page", "a page resumed from an opaque cursor without a known source (INVENTORY §1.2)")
+    if src.get("tool") != tool:
+        return bad
+    a, b = _bound_args(d, tool, src["args"]), _bound_args(d, tool, args)
+    if a is None or b is None:
+        return _declared("cursor_page", "a cursor whose label selectors do not resolve: the tool's")
+    differs = False
+    for k in set(a) | set(b):
+        va, vb = a.get(k, _MISSING), b.get(k, _MISSING)
+        if va is _MISSING or vb is _MISSING:
+            return _declared("cursor_page", "%s: named by one call only, no documented default" % k)
+        differs = differs or not same(va, vb)
+    if differs:
+        return bad
+    return _declared("cursor_page", "a page resumed from the same listing: the tool's (INVENTORY §1.2)")
+
+
+def _path_refused(args: dict, ctx: dict, spool: bool = False) -> Optional[dict]:
+    """A file path of export, save or load (DESIGN §6: file names confined to the export directory; load also reads
+    the spool, INVENTORY §2.17), judged on the path normalised and resolved against that directory:
+    - inside, W5 answers (None): a plain file name once normalised (`sub/../a.fa` is `a.fa`), <export_dir>/<name>
+      (<spool_dir>/<name> for load) as the runners write them, or an absolute path under the directory the context
+      names (export_dir, spool_dir);
+    - outside for sure, an expected error path_not_allowed (the code library-defined, INVENTORY §2.13, §2.17): the
+      normalised path climbs out (`..`), or it is absolute and outside the directory (a runner writes any path inside
+      the export or spool directory as <export_dir>/... or <spool_dir>/..., FORMAT v2 B1, so a raw absolute path is
+      outside when the context names no directory);
+    - no claim (path_unknown): `~` (the tool does not expand it: an io_error), the empty path, a subdirectory (whether
+      it exists is the file system's)."""
+    path = args.get("path")
+    if path is None:
+        return None
+    unknown = _declared("path_unknown", "path %r: what the tool answers is its own" % (path,))
+    if not isinstance(path, str) or not path or path.startswith("~"):
+        return unknown
+    out = _record(None, {}, ["/*"], declared="expected_error", expected_error="path_not_allowed",
+                  note="path %r outside the export directory (DESIGN §6; the code library-defined, INVENTORY §2.13, "
+                       "§2.17)" % path)
+    symbols = ("<export_dir>", "<spool_dir>") if spool else ("<export_dir>",)
+    roots = [r for r in (ctx.get("export_dir"), ctx.get("spool_dir") if spool else None) if isinstance(r, str)]
+
+    def judge(rel: str) -> Optional[dict]:
+        rel = posixpath.normpath(rel) if rel else "."
+        if rel == ".." or rel.startswith("../"):
+            return out
+        return None if "/" not in rel and rel != "." else unknown
+
+    for sym in symbols:
+        if path == sym or path.startswith(sym + "/"):
+            return judge(path[len(sym) + 1:])
+    if path.startswith("<"):
+        return unknown
+    if posixpath.isabs(path):
+        for root in roots:
+            rel = posixpath.relpath(posixpath.normpath(path), posixpath.normpath(root))
+            if not (rel == ".." or rel.startswith("../")):
+                return judge(rel)
+        return out
+    return judge(path)
 
 
 def seed_failed(full_answer: Optional[dict], seed_index: int = 0) -> bool:
@@ -1659,8 +2254,11 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional
                            note="%s (%s; the code is library-defined)" % (why, C_FAILED_SEED))
         return _record(None, {}, ["/*"], declared="expected_error", expected_error="no_graphlet",
                        note="%s (%s)" % (why, C_FAILED_SEED))
-    if tool in PHASE_B or (tool == "graphlet_labels" and args.get("name") is not None):
+    if tool in PHASE_B:
         return _declared("not_implemented_phase_b", "%s: DESIGN-v8 §8 phase B" % tool)
+    pre = _arguments_refused(tool, args_resolved or {}, ctx)
+    if pre is not None:
+        return pre
     if tool in NOT_APPLICABLE:
         return _declared("not_applicable", "%s: a backend or store tool, outside graphlet processing" % tool)
     if tool == "graphlet_compare":
@@ -1674,6 +2272,8 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional
     if twin:
         return _declared("twin_mismatch", twin)
     d = _Doc(full_answer, mgt_text, ctx.get("seed_index", 0))
+    if (args_resolved or {}).get("cursor") is not None:
+        return _cursor_record(d, tool, args_resolved, ctx)
     try:
         return _TOOLS[tool](d, args, ctx)
     except _Refused as e:
@@ -1901,6 +2501,7 @@ def _context(rec: dict, view: bool, envelope: Optional[dict], full: dict) -> dic
     limits = (rec.get("library") or {}).get("limits") or {}
     args = rec.get("args_resolved") or {}
     ctx: dict = {"seed_index": 0, "paging": "all" if rec.get("paging_complete") is not False else "none",
+                 "local_limits": limits.get("local_limits"),
                  "max_bytes": args.get("max_bytes", limits.get("max_bytes", 2048)),
                  "sequence_max_bytes": limits.get("sequence_max_bytes", 16384),
                  "strategy": (envelope or {}).get("strategy") or (full or {}).get("strategy")}
@@ -1958,6 +2559,18 @@ def _target(hv: Any, sid: str, tools: Dict[Tuple[Any, Any], Any], scenarios: set
     return (name, False) if name in scenarios else (None, False)
 
 
+def _cursor_source(rec: dict, w1: List[dict]) -> Optional[dict]:
+    """The op a call's cursor comes from: the one earlier op of the scenario whose listing W1 did not read to its end
+    (paging_complete false: the op that left a next_cursor for a selector); None when there is not exactly one."""
+    earlier = []
+    for r in w1:
+        if r is rec:
+            break
+        if r.get("scenario") == rec.get("scenario") and r.get("paging_complete") is False and r.get("args_resolved"):
+            earlier.append(r)
+    return earlier[0] if len(earlier) == 1 else None
+
+
 def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> List[dict]:
     """W5's records of a run (FORMAT v2 F4): one per W1 record of arms/dl-lib/graphlet_ops.jsonl, the same line
     shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`; a torn W1 line gives a record
@@ -1993,7 +2606,12 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
             r = _declared("no_input", "missing %s for scenario %s" % (
                 " and ".join(k for k, v in (("the full twin", full), ("the MGT document", text)) if v is None), target))
         else:
-            r = answer(tool, rec["args_resolved"], full, text, _context(rec, view, envelope, full))
+            ctx = _context(rec, view, envelope, full)
+            if (rec.get("args_resolved") or {}).get("cursor") is not None:
+                src = _cursor_source(rec, w1)
+                if src is not None:
+                    ctx["cursor_source"] = {"tool": src.get("tool"), "args": src.get("args_resolved")}
+            r = answer(tool, rec["args_resolved"], full, text, ctx)
         line["answer"], line["oracle"] = r["answer"], r["oracle"]
         line["elapsed_ms"] = round((time.time() - started) * 1000.0, 3)
         line["started_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
