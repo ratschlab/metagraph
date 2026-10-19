@@ -731,20 +731,19 @@ the walk's `tail_bp` outermost bases, the last on the right arm and the first on
 `graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, label ends by `at_bp` and
 equal positions by label id, continuation; the chain is paged by `cursor` like a list); `graphlet_support(handle,
 arm, walk, step?)` (support runs with who left/joined and the reason: a `K`-coded end or "split: N labels took C");
-`graphlet_labels(handle, arm?, rank=direct_bp|reach_bp,
-n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that label's runs/routes incl. merge routes);
-`graphlet_splits(handle, arm, n=10, min_labels_before=2)`; `graphlet_claims(handle, arm, min_bp=0,
-route_consistent=True, labels?)`; `graphlet_sequence(handle, arm, walk|segment, from, to, orientation, with_seed)`
-(≤ 16 KiB slice); `graphlet_export(handle, format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes,
-records}`; `graphlet_compare(a, b, arm, mode, cursor?) -> Comparison dict` (preconditions: same index identity
-(§3.1) and the same oriented seed sequence, else `comparable: false`; differing completeness scopes →
-`comparable: qualified`; returns the counts and the first page of `only_in_a` / `only_in_b` / `differ`, with
-`next_cursor`; `graphlet_export(format=json, what=compare|walk, …)` writes the complete lists to a file — a truncated
-field is always recoverable by cursor or export); `graphlet_subtrie(handle, labels, arm?) -> derived handle`;
-`graphlet_list/free/save/load`. Unknown handle → "replay with traverse_fetch(replay=<handle>)" (the store keeps the
-request). Rows carry `labels_in_total`/`labels_out_total`/`n_labels_total`. `graphlet_claims` rows always carry
-record coordinates when the graphlet has them; `graphlet_walks` / `graphlet_labels` only with `coordinates=true`
-(§18.3).
+`graphlet_labels(handle, arm?, rank=direct_bp|reach_bp, n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that
+label's runs/routes incl. merge routes); `graphlet_splits(handle, arm, n=10, min_labels_before=2)`;
+`graphlet_claims(handle, arm, min_bp=0, route_consistent=True, labels?)`; `graphlet_sequence(handle, arm,
+walk|segment, from, to, orientation, with_seed)` (≤ 16 KiB slice); `graphlet_export(handle,
+format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes, records}`; `graphlet_compare(a, b, arm, mode,
+cursor?) -> Comparison dict` (preconditions: same index identity (§3.1) and the same oriented seed sequence, else
+`comparable: false`; differing completeness scopes → `comparable: qualified`; returns the counts and the first page
+of `only_in_a` / `only_in_b` / `differ`, with `next_cursor`; `graphlet_export(format=json, what=compare|walk, …)`
+writes the complete lists to a file — a truncated field is always recoverable by cursor or export);
+`graphlet_subtrie(handle, labels, arm?) -> derived handle`; `graphlet_list/free/save/load`. Unknown handle → "replay
+with traverse_fetch(replay=<handle>)" (the store keeps the request). Rows carry
+`labels_in_total`/`labels_out_total`/`n_labels_total`. `graphlet_claims` rows always carry record coordinates when
+the graphlet has them; `graphlet_walks` / `graphlet_labels` only with `coordinates=true` (§18.3).
 
 Errors are structured results with codes such as `unknown_label`, `backend_error`, `backend_unreachable`,
 `io_error`, `path_not_allowed`, `not_replayable`, `view_unsupported`, `not_in_view`, `result_too_large`,
