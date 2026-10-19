@@ -4847,6 +4847,11 @@ Nothing here touches staging; every test is offline.
   PYTHONHASHSEED (defaults W1 1001, W2 2002, W4 4004, drift 5005; distinct per run), sys.path the library root first.
   Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere; the
   parent refuses a child whose seed did not take effect.
+- Supervision (VERIFY-L VL3): each library call waits for its reply with select() up to the op's `timeout_s` (a
+  manifest op field; else --op-timeout, 120 s). A call over it is recorded `timeout` {timeout_s, page}, a child that
+  ends during a call `child_died` {exit, page}; the process is then killed and restarted with every document loaded
+  so far, and the next op runs (handles an op made are gone). An answer that is no JSON is `exception` {type}. A way
+  whose process does not start or restarts more than 20 times is reported, the next way runs, the exit code is 1.
 - Handles in records are symbols relative to the op's scenario: `<handle>` (its own graphlet, FORMAT's form),
   `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in
   args_resolved `<cursor>`; the way's directories `<export_dir>`, `<spool_dir>`. Raw pages keep everything.
@@ -4867,7 +4872,8 @@ Nothing here touches staging; every test is offline.
   graphlet_export / graphlet_save, `file` {name, bytes, sha256, raw} (FORMAT v2 B3: the file's text kept gzipped at
   `raw`, relative to the way's directory, with handles and directories as symbols like the rest of the record;
   `bytes` the file's own size, `sha256` the kept text's); `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
-  exception (the library raised), unknown_tool, paging_runaway, assembly_error and the three document codes. A plan
+  exception (the library raised, or its answer is no JSON), unknown_tool, paging_runaway, assembly_error, timeout,
+  child_died and the three document codes. A plan
   names a cursor by `{"cursor_of": "<op id>"}` (graphlet_select, VERIFY-L VL5): the last next_cursor of that op's
   listing when its paging stopped early, kept by `graphlet_paging.selector_view` in the answers selectors read.
 

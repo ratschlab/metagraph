@@ -737,6 +737,80 @@ class DocumentErrorTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+FAKE_LIB = os.path.join(HERE, "data", "fake_graphlet_library")
+
+
+class SupervisionTests(unittest.TestCase):
+    """VERIFY-L VL3: the way's process supervised, with a fake library whose graphlet_walks(mode=...) hangs, answers
+    what is no JSON, ends the process, repeats a cursor, prints, or reads stdin: each op gets its record, the process
+    is restarted after a hang or a death with its documents reloaded, and later ops and ways still run."""
+
+    def test_misbehaving_library(self):
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            def walks_op(oid, mode, expect="ok", **kw):
+                o = op(oid, "graphlet_walks", {"arm": "left", "mode": mode, "max_bytes": 2048}, expect, **kw)
+                return o
+            ops = [walks_op("ok1", "ok"), dict(walks_op("sleep", "sleep", "timeout"), timeout_s=1.5),
+                   walks_op("ok2", "ok"), walks_op("set", "set", "exception"), walks_op("ok3", "ok"),
+                   walks_op("die", "die", "child_died"), walks_op("ok4", "ok"),
+                   walks_op("loop", "loop", "paging_runaway", paging="all"), walks_op("print", "print"),
+                   walks_op("stdin", "stdin"),
+                   op("sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048})]
+            plan = {"scenarios": [{"id": "G-a", "graphlet": {"ops": ops}}, {"id": "G-b", "graphlet": {"ops": [
+                walks_op("b-ok", "ok")]}}]}
+            docs = {"G-a": DOCS["G-body"], "G-b": DOCS["G-body"]}
+            out = os.path.join(tmp, "run")
+            recs = run_offline(out, plan, docs=docs, ways="W1,W2", extra=["--library-root", FAKE_LIB,
+                                                                          "--library-commit", "fake"])
+            planned = dict((o["id"], o["expect"]) for s in plan["scenarios"] for o in s["graphlet"]["ops"])
+            for way in ("W1", "W2"):
+                with self.subTest(way):
+                    got = dict((r["op"], r) for r in recs[way])
+                    self.assertEqual(set(got), set(planned))
+                    self.assertEqual(dict((k, outcome(r)) for k, r in got.items()), planned)
+                    self.assertEqual(got["sleep"]["error"], {"code": "timeout", "fields": {"timeout_s": 1.5,
+                                                                                           "page": 0}})
+                    self.assertEqual(got["die"]["error"], {"code": "child_died", "fields": {"exit": 3, "page": 0}})
+                    self.assertEqual(got["set"]["error"], {"code": "exception", "fields": {"type": "TypeError"}})
+                    self.assertEqual(got["loop"]["error"], {"code": "paging_runaway", "fields": {
+                        "pages": 2, "reason": "repeats"}})
+                    self.assertEqual(got["loop"]["pages"], 2)
+                    # after each restart the document is reloaded: the scenario's handle works again
+                    for name in ("ok2", "ok4", "sum"):
+                        self.assertEqual(got[name]["answer"]["handle"], "<handle>")
+                    self.assertEqual(got["sum"]["answer"]["summary"], {"loaded": 1})   # the new process: G-a reloaded
+                    run = sc.read_json(os.path.join(out, "arms", rgl.WAY_DIRS[way], "run.json"))
+                    self.assertEqual([r["reason"] for r in run["child"]["restarts"]], ["timeout", "child_died"])
+                    self.assertEqual(run["state"], "done")
+                    with open(os.path.join(out, "arms", rgl.WAY_DIRS[way], "child.log"), encoding="utf-8") as fh:
+                        log = fh.read()
+                    self.assertIn("noise on stdout", log)
+                    self.assertIn("noise on fd 1", log)
+                    raw = sc.read_gz_json(os.path.join(out, "arms", rgl.WAY_DIRS[way], "raw", "G-a.sleep.0.json.gz"))
+                    self.assertEqual(raw["reply"]["supervised"], "timeout")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @needs_library
+    def test_a_way_that_fails_leaves_the_others(self):
+        """A way whose library does not start (the fake refuses max_bytes 77) is reported and the run goes on with
+        the next way (here drift, on the real library); the invocation then exits 1."""
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            out = os.path.join(tmp, "run")
+            plan = {"scenarios": [{"id": "G-body", "graphlet": {"ops": [
+                op("w", "graphlet_walks", walks("left", max_bytes=77))]}}]}
+            argv = ["--plan", write_json(os.path.join(tmp, "plan.json"), plan), "--doc", "G-body=" + DOCS["G-body"],
+                    "--library-root", FAKE_LIB, "--drift-library-root", LIB, "--out", out, "--ways", "W4,drift",
+                    "--limits", write_json(os.path.join(tmp, "limits.json"), {"max_bytes": 77}), "--quiet"]
+            self.assertEqual(rgl.main(argv), 1)
+            self.assertFalse(os.path.exists(os.path.join(out, "arms", "mcp-lib", "graphlet_ops.jsonl")))
+            self.assertEqual([r["op"] for r in records(out, "drift")], ["w"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 @needs_library
 class PagingTests(unittest.TestCase):
     """Paging assembly over small max_bytes equals the uncut one-page answer of a large max_bytes, for every list

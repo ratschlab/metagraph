@@ -35,6 +35,14 @@ suite. Not `python3 -I`: -I implies -E, which ignores PYTHONHASHSEED (measured o
 seed is what makes a set or dict order leaking into an answer show up as a W1/W2/W4 difference (DESIGN §2, D-R2).
 The child checks that the library it imported lies under the root, and the parent that the seed took effect.
 
+Supervision (VERIFY-L VL3): every call waits for its reply with select() up to the op's `timeout_s` (else
+--op-timeout, default 120 s). A call that does not answer in time is recorded `timeout` {timeout_s, page}, a process
+that ends during a call `child_died` {exit, page}; either way the process is killed and restarted, the documents
+loaded so far reloaded into it, and the next op runs (handles an op made are gone with the old process). An answer
+that is no JSON is that call's `exception` {type}. The child reads its requests from a duplicate of fd 0 and points
+fd 0 at /dev/null, as it points fd 1 at its log. A way whose process does not start, or restarts more than 20
+times, is reported and the next way runs; the invocation then exits 1.
+
 Op execution (FORMAT §1-§2): per way, scenarios in manifest order, each scenario's ops in order; an op runs on a way
 when its `ways` (else the scenario's graphlet.ways.default, else every way) names the way (drift runs W4's ops).
 Arguments are resolved by graphlet_select.resolve from this way's earlier assembled answers; {"graphlet": "<id>"}
@@ -63,6 +71,7 @@ import json
 import os
 import platform
 import re
+import select
 import subprocess
 import sys
 import time
@@ -84,6 +93,13 @@ DEFAULT_LIMITS = {"max_bytes": 2048, "sequence_max_bytes": 16384, "local_limits"
 # fixed, so that a cursor (raw pages only) is the same string in every process of one commit
 CURSOR_SECRET = "metagraph-suite-v8-local-cursors"
 ENV_KEEP = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE")
+# supervision of a way's process (VERIFY-L VL3): a call that answers within no time limit is a `timeout`, a process
+# that ends in a call `child_died`; either restarts the process (its documents reloaded) and the run goes on. An op's
+# own limit is its manifest field `timeout_s` (the rehearsal's per-op medians, DESIGN-v8 §4), else --op-timeout; the
+# heavy lane's 120 s is the default (DESIGN-v8 §3: every op <= 1/3 of its lane)
+DEFAULT_OP_TIMEOUT_S = 120.0
+STARTUP_TIMEOUT_S = 120.0
+MAX_RESTARTS = 20
 
 # the argument naming the graphlet a tool reads; graphlet_list, graphlet_load and the backend tools read none
 HANDLE_ARG = dict([(t, "handle") for t in (
@@ -108,16 +124,22 @@ def child_main(argv):
     sys.path[:] = [p for p in sys.path if p and os.path.realpath(p) != here]
     sys.path.insert(0, root)
     channel = os.fdopen(os.dup(1), "wb")
+    requests = os.fdopen(os.dup(0), "rb")
     os.dup2(2, 1)          # whatever the library prints goes to the log, never into the protocol
     sys.stdout = sys.stderr
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)       # and whatever it reads from stdin is nothing, never a request
+    os.close(null)
+    sys.stdin = open(os.devnull, "r")
     state = {"root": root}
-    for line in sys.stdin.buffer:
+    for line in requests:
         req = json.loads(line.decode("utf-8"))
-        try:
-            msg = {"ok": True, "result": _child_do(state, req)}
+        try:   # the answer serialised inside: one that is no JSON is that call's exception, not the way's end
+            data = json.dumps({"ok": True, "result": _child_do(state, req)}, ensure_ascii=False)
         except Exception as e:  # a library exception is the op's error (code exception), not the way's end
-            msg = {"ok": False, "type": type(e).__name__, "error": str(e), "traceback": traceback.format_exc(limit=12)}
-        channel.write((json.dumps(msg, ensure_ascii=False) + "\n").encode("utf-8"))
+            data = json.dumps({"ok": False, "type": type(e).__name__, "error": str(e),
+                               "traceback": traceback.format_exc(limit=12)}, ensure_ascii=False)
+        channel.write((data + "\n").encode("utf-8"))
         channel.flush()
         if req.get("cmd") == "quit":
             break
@@ -268,8 +290,34 @@ def read_text(path):
 
 
 # ============================================================================================ the child, parent side
+class ChildTimeout(Exception):
+    """The way's process gave no answer within the call's time limit."""
+
+
+class ChildDied(Exception):
+    """The way's process ended during a call."""
+
+    def __init__(self, exit_code):
+        super().__init__("the way's process ended (exit %s)" % exit_code)
+        self.exit = exit_code
+
+
+class Supervised(Exception):
+    """A call the supervision ended (timeout, child_died): the process was restarted, the call has no answer."""
+
+    def __init__(self, code, fields):
+        super().__init__(code)
+        self.code = code
+        self.fields = fields
+
+
+class WayFailed(Exception):
+    """A way that cannot go on (its process does not start, or restarts too often): later ways still run."""
+
+
 class Child(object):
-    """One way's process (child_main), driven over its stdin/stdout."""
+    """One way's process (child_main), driven over its stdin/stdout; a reply is awaited with select() up to the
+    call's time limit (ChildTimeout), a closed stdout is ChildDied."""
 
     def __init__(self, python, root, hashseed, cwd, log_path):
         flags = ["-s", "-B"] + (["-P"] if python_version(python) >= (3, 11) else [])
@@ -278,29 +326,45 @@ class Child(object):
         self.env["PYTHONHASHSEED"] = str(hashseed)
         self.log = open(log_path, "ab")
         self.proc = subprocess.Popen(self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
-                                     cwd=cwd, env=self.env)
+                                     cwd=cwd, env=self.env, bufsize=0)
+        self.buf = b""
 
-    def ask(self, req):
-        self.proc.stdin.write((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
-        self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
-        if not line:
-            raise SystemExit("run_graphlet_local: the way's process ended (exit %s); its log is %s"
-                             % (self.proc.wait(), self.log.name))
+    def ask(self, req, timeout=None):
+        try:
+            self.proc.stdin.write((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            raise ChildDied(self.proc.wait()) from None
+        fd = self.proc.stdout.fileno()
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while b"\n" not in self.buf:
+            wait = None if deadline is None else deadline - time.monotonic()
+            if wait is not None and wait <= 0:
+                raise ChildTimeout()
+            ready, _, _ = select.select([fd], [], [], wait)
+            if not ready:
+                raise ChildTimeout()
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                raise ChildDied(self.proc.wait())
+            self.buf += chunk
+        line, _, self.buf = self.buf.partition(b"\n")
         return json.loads(line.decode("utf-8"))
 
-    def close(self):
-        if self.proc.poll() is None:
+    def close(self, kill=False):
+        if self.proc.poll() is None and not kill:
             try:
-                self.ask({"cmd": "quit"})
-            except (OSError, SystemExit, ValueError):
+                self.ask({"cmd": "quit"}, 10.0)
+            except (ChildTimeout, ChildDied, OSError, ValueError):
                 pass
             self.proc.stdin.close()
             try:
                 self.proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.proc.wait()
+                kill = True
+        if kill and self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
         for pipe in (self.proc.stdin, self.proc.stdout):
             if not pipe.closed:
                 pipe.close()
@@ -323,19 +387,9 @@ class Way(object):
         self.hashseed = runner.hashseeds[name]
         self.spool = os.path.realpath(os.path.join(self.dir, "work", "spool"))
         self.exports = os.path.realpath(os.path.join(self.dir, "work", "exports"))
-        self.child = Child(runner.python, library_path(self.root), self.hashseed, os.path.join(self.dir, "work"),
-                           os.path.join(self.dir, "child.log"))
-        msg = self.child.ask({"cmd": "init", "limits": runner.limits, "spool_dir": self.spool,
-                              "export_dir": self.exports, "secret": CURSOR_SECRET})
-        if not msg["ok"]:
-            self.child.close()
-            raise SystemExit("run_graphlet_local: [%s] the library at %s does not start: %s: %s"
-                             % (name, self.root, msg["type"], msg["error"]))
-        self.info = msg["result"]
-        if self.info["hashseed"] != str(self.hashseed) or self.info["hash_randomization"] != 1:
-            self.child.close()
-            raise SystemExit("run_graphlet_local: [%s] the child runs with hash seed %r (randomization %r), not %d"
-                             % (name, self.info["hashseed"], self.info["hash_randomization"], self.hashseed))
+        self.child = None
+        self.restarts = []   # [{reason, utc}] of every restart of the way's process (supervision)
+        self.start_child()
         self.library = {"commit": runner.commits[name], "python": self.info["python"], "hashseed": self.hashseed,
                         "work_model": self.info["work_model"], "limits": runner.limits}
         self.handles = {}    # scenario -> its graphlet's handle in this process
@@ -347,6 +401,63 @@ class Way(object):
         self.ops_file = open(self.ops_path, "w", encoding="utf-8")
         self.docs_file = open(os.path.join(self.dir, "graphlet_docs.jsonl"), "w", encoding="utf-8")
         self.write_run("running")
+
+    # -- the way's process ------------------------------------------------------------------------------------
+    def start_child(self):
+        """Start (or restart) the way's process and initialise the library in it; WayFailed when it does not start."""
+        self.child = Child(self.r.python, library_path(self.root), self.hashseed, os.path.join(self.dir, "work"),
+                           os.path.join(self.dir, "child.log"))
+        try:
+            msg = self.child.ask({"cmd": "init", "limits": self.r.limits, "spool_dir": self.spool,
+                                  "export_dir": self.exports, "secret": CURSOR_SECRET}, STARTUP_TIMEOUT_S)
+        except (ChildTimeout, ChildDied) as e:
+            self.child.close(kill=True)
+            raise WayFailed("[%s] the way's process does not start: %s" % (self.name, type(e).__name__)) from None
+        if not msg["ok"]:
+            self.child.close()
+            raise WayFailed("[%s] the library at %s does not start: %s: %s"
+                            % (self.name, self.root, msg["type"], msg["error"]))
+        info = msg["result"]
+        if info["hashseed"] != str(self.hashseed) or info["hash_randomization"] != 1:
+            self.child.close()
+            raise WayFailed("[%s] the child runs with hash seed %r (randomization %r), not %d"
+                            % (self.name, info["hashseed"], info["hash_randomization"], self.hashseed))
+        self.info = info
+
+    def restart(self, reason):
+        """After a timeout or a death: a new process, every document loaded before reloaded into it (the handles a
+        scenario's ops made are gone: later ops naming them get the library's answer to an unknown handle)."""
+        self.restarts.append({"reason": reason, "utc": iso(time.time())})
+        self.child.close(kill=True)
+        if len(self.restarts) > MAX_RESTARTS:
+            raise WayFailed("[%s] the way's process was restarted %d times" % (self.name, len(self.restarts) - 1))
+        self.start_child()
+        self.minted.clear()
+        for sid in list(self.handles):
+            path = os.path.join(self.spool, "inputs", safe(sid) + ".mgt")
+            try:
+                msg = self.child.ask({"cmd": "call", "tool": "graphlet_load", "args": {"path": path}},
+                                     self.r.op_timeout)
+            except (ChildTimeout, ChildDied) as e:
+                raise WayFailed("[%s] reloading %s after a restart: %s" % (self.name, sid, type(e).__name__)) from None
+            answer = msg["result"].get("answer") if msg["ok"] else None
+            if not isinstance(answer, dict) or not isinstance(answer.get("handle"), str):
+                raise WayFailed("[%s] reloading %s after a restart failed" % (self.name, sid))
+            self.handles[sid] = answer["handle"]
+            self.owner[answer["handle"]] = (sid, None)
+        self.write_run("running")
+
+    def ask(self, req, timeout):
+        """The child's reply to |req| within |timeout| seconds; a timeout or a death restarts the process and raises
+        Supervised(code, fields) for the call in flight (its op is recorded with that error, the run goes on)."""
+        try:
+            return self.child.ask(req, timeout)
+        except ChildTimeout:
+            code, fields = "timeout", {"timeout_s": timeout}
+        except ChildDied as e:
+            code, fields = "child_died", {"exit": e.exit}
+        self.restart(code)
+        raise Supervised(code, fields)
 
     # -- records ----------------------------------------------------------------------------------------------
     @staticmethod
@@ -361,12 +472,12 @@ class Way(object):
                                                                       file=self.info["library_file"]),
             "interpreter": dict((k, self.info[k]) for k in ("python", "implementation", "executable", "hashseed",
                                                             "hash_randomization", "hash_probe")),
-            "child": {"argv": self.child.cmd, "env_keys": sorted(self.child.env)},
+            "child": {"argv": self.child.cmd, "env_keys": sorted(self.child.env), "restarts": self.restarts},
             "limits": self.r.limits, "counts": self.counts, "started_utc": iso(self.started),
             "updated_utc": iso(time.time()), "runner": os.path.basename(__file__)})
 
     def close(self, state="done"):
-        self.child.close()
+        self.child.close(kill=state != "done")
         for fh in (self.ops_file, self.docs_file):
             fh.flush()
             os.fsync(fh.fileno())
@@ -487,7 +598,11 @@ class Way(object):
                 line["error_text"] = err.get("text") if isinstance(err, dict) else None
                 return None
             resp = answer.get("body")
-        msg = self.child.ask({"cmd": "convert", "response": resp, "index": 0})
+        try:
+            msg = self.ask({"cmd": "convert", "response": resp, "index": 0}, self.r.op_timeout)
+        except Supervised as e:
+            line["error"] = {"code": e.code, "fields": dict(e.fields, stage="convert")}
+            return None
         if not msg["ok"]:
             line["error"] = {"code": "document_refused", "fields": {"stage": "convert", "type": msg["type"]}}
             line["error_text"] = msg["error"]
@@ -514,7 +629,11 @@ class Way(object):
         path = os.path.join(self.spool, "inputs", safe(sid) + ".mgt")
         with open(path, "wb") as fh:
             fh.write(data)
-        msg = self.child.ask({"cmd": "call", "tool": "graphlet_load", "args": {"path": path}})
+        try:
+            msg = self.ask({"cmd": "call", "tool": "graphlet_load", "args": {"path": path}}, self.r.op_timeout)
+        except Supervised as e:
+            line["error"] = {"code": e.code, "fields": dict(e.fields, stage="load")}
+            return
         answer = msg["result"].get("answer") if msg["ok"] else None
         if not msg["ok"]:
             line["error"] = {"code": "document_refused", "fields": {"stage": "load", "type": msg["type"]}}
@@ -577,18 +696,25 @@ class Way(object):
         # runaway rule compares the first page's continuation with it
         given = (("start", send.get("start")) if tool == gp.SEQUENCE_TOOL else ("cursor", send.get("cursor"))) \
             if (send.get("start") if tool == gp.SEQUENCE_TOOL else send.get("cursor")) is not None else None
+        timeout = op.get("timeout_s") or self.r.op_timeout
         pages, nxt, error = [], None, None
         while True:   # graphlet_paging's loop: follow next_call() while more(), stop at an error page
             call = dict(send)
             if nxt is not None:
                 call[nxt[0]] = nxt[1]
-            msg = self.child.ask({"cmd": "call", "tool": tool, "args": call})
+            try:
+                msg = self.ask({"cmd": "call", "tool": tool, "args": call}, timeout)
+            except Supervised as e:
+                msg = {"ok": False, "supervised": e.code, "fields": e.fields}
             sc.write_gz_json(os.path.join(self.dir, "raw", "%s.%s.%d.json.gz" % (safe(sid), safe(op["id"]),
                                                                                 rec["pages"])),
                              {"run_id": self.r.run_id, "scenario": sid, "way": self.name, "op": op["id"],
                               "tool": tool, "page": rec["pages"], "args": call, "reply": msg})
             self.counts["calls"] += 1
             rec["pages"] += 1
+            if "supervised" in msg:   # the call in flight when the process hung or died (restarted since)
+                error = {"code": msg["supervised"], "fields": dict(msg["fields"], page=rec["pages"] - 1)}
+                break
             if not msg["ok"]:
                 error = {"code": "exception", "fields": {"type": msg["type"]}}
                 break
@@ -651,6 +777,7 @@ class Runner(object):
         self.args = args
         self.limits = read_limits(args.limits)
         self.python = args.python or sys.executable
+        self.op_timeout = args.op_timeout
         self.ways = args.ways
         self.hashseeds = dict(DEFAULT_HASHSEEDS, **args.hashseeds)
         if len(set(self.hashseeds[w] for w in self.ways)) < len(self.ways):
@@ -721,22 +848,36 @@ class Runner(object):
                 "template": None if way in ("W1", "W2") else self.args.mgt_template}
 
     def run(self):
+        """Every way in turn; a way that fails (its process does not start or restarts too often) is reported and
+        the next way runs. -> {way: its counts, or {"failed": why}}."""
         summary = {}
         for name in self.ways:
-            way = Way(self, name)
+            try:
+                way = Way(self, name)
+            except WayFailed as e:
+                summary[name] = {"failed": str(e)}
+                print("run_graphlet_local: %s" % e, file=sys.stderr)
+                continue
             state = "failed"
             try:
                 for scenario in self.selected:
                     way.run_scenario(scenario)
                 state = "done"
+            except WayFailed as e:
+                summary[name] = {"failed": str(e)}
+                print("run_graphlet_local: %s" % e, file=sys.stderr)
             finally:
                 way.close(state)
-            summary[name] = dict(way.counts, seconds=round(time.time() - way.started, 2), dir=way.dir)
+            if state != "done":
+                continue
+            summary[name] = dict(way.counts, seconds=round(time.time() - way.started, 2), dir=way.dir,
+                                 restarts=len(way.restarts))
             if not self.args.quiet:
                 c = way.counts
-                print("[%s] %d scenarios, %d ops: %d answered, %d errors, %d selector errors, %d calls, %.1f s; %s"
-                      % (name, len(self.selected), c["ops"], c["answered"], c["error"], c["selector_error"],
-                         c["calls"], summary[name]["seconds"], way.ops_path))
+                print("[%s] %d scenarios, %d ops: %d answered, %d errors, %d selector errors, %d calls, %d restarts, "
+                      "%.1f s; %s" % (name, len(self.selected), c["ops"], c["answered"], c["error"],
+                                       c["selector_error"], c["calls"], len(way.restarts), summary[name]["seconds"],
+                                       way.ops_path))
         return summary
 
 
@@ -802,6 +943,9 @@ def plan_problems(scenarios):
                 out.append("%s: %s" % (where, problem))
             if "ways" in op and not isinstance(op["ways"], list):
                 out.append("%s: ways is a list" % where)
+            limit = op.get("timeout_s")
+            if "timeout_s" in op and (isinstance(limit, bool) or not isinstance(limit, (int, float)) or limit <= 0):
+                out.append("%s: timeout_s is a number of seconds > 0, not %r" % (where, limit))
     return out
 
 
@@ -910,6 +1054,9 @@ def parse_args(argv):
     ap.add_argument("--hashseed", default=None, help="WAY=N,... (defaults %s)" % ",".join(
         "%s=%d" % kv for kv in sorted(DEFAULT_HASHSEEDS.items())))
     ap.add_argument("--python", help="the interpreter of the ways (default: this one)")
+    ap.add_argument("--op-timeout", type=float, default=DEFAULT_OP_TIMEOUT_S,
+                    help="seconds a library call may take when its op states no timeout_s (%g); a call over it is "
+                         "recorded `timeout` and the way's process restarted" % DEFAULT_OP_TIMEOUT_S)
     ap.add_argument("--run-id", default=None)
     ap.add_argument("--export-library", metavar="COMMIT", help="export COMMIT's metagraph/api/python to --to")
     ap.add_argument("--to", help="with --export-library: the (empty) target directory")
@@ -948,8 +1095,8 @@ def main(argv=None):
     if args.drift_report:
         drift_report(os.path.abspath(args.out), args.quiet)
         return 0
-    Runner(args).run()
-    return 0
+    summary = Runner(args).run()
+    return 1 if any("failed" in v for v in summary.values()) else 0
 
 
 if __name__ == "__main__":
