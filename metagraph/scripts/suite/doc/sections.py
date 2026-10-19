@@ -3738,6 +3738,15 @@ def closing(ctx):
 
 # -- appendices --------------------------------------------------------------------------------------------------
 
+def _versioned(ctx, text):
+    """A catalogue text with its manifest-version conditionals resolved (`[[manifest_version >= 7 ? a | b]]`: the v7
+    delta), and nothing else filled: a text without one, or one carrying braces of its own, is returned as it is."""
+    text = str(text)
+    if "[[manifest_version" not in text or "{" in text:
+        return text
+    return facts.fill(text, {"manifest_version": (ctx.run.manifest or {}).get("manifest_version")}, unresolved=[])
+
+
 def _catalogue_entry(ctx, name, entry, chapters_text, generic):
     """One entry of the check catalogue from checks.json: the title line, the SPEC references, then asserts /
     inconclusive / fails / args and the per-route rules as hanging lines."""
@@ -3750,7 +3759,7 @@ def _catalogue_entry(ctx, name, entry, chapters_text, generic):
     for key, label in (("asserts", "asserts"), ("inconclusive", "inconclusive"), ("fails", "fails"),
                        ("args", "arguments")):
         if entry.get(key):
-            out += latex.catline(label, inline(entry[key])) + "\n"
+            out += latex.catline(label, inline(_versioned(ctx, entry[key]))) + "\n"
     table = entry.get("decision_table")
     if isinstance(table, dict) and table.get("rows"):
         # a compact decision table (READ-014: the cases of budget_respected with the clock each uses), from the

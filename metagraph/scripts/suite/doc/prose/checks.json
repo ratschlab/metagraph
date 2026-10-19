@@ -277,7 +277,7 @@
    "args": "pattern: the entry's index (0 when absent); equals: dotted paths of the entry with the value each must hold (a number such as `information_bits` compared up to rounding, `tolerance`); present: paths that must exist; absent: paths that must not.",
    "asserts": "Each named path of the entry holds the given value, exists, or is absent: `absence_scope`, `scope`, `strands`, `palindromic`, `returned`, `cut`, `information_bits`, `counts.paths.extension`, `counts.paths.relation`, `counts.supported_paths.level`, `length`, `residues`, `work.steps`, `determinism`, `selection.pass` and `counts.selected.value` (chapter Q: a constant false selects nothing), the absence of `error`, `max_mismatches` or `counts.contexts.by_mismatches`, as the scenario names them.",
    "inconclusive": "Only by the common rule.",
-   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the entry (a failure on a direct access path; not exposed on the MCP access path, whose answer carries no `absence_scope` and no `timing.elapsed_ms`)."
+   "fails": "A value differs from the one expected (both in the detail); a path expected absent is present; a path expected present or compared is missing from the entry (a failure on a direct access path; not exposed on the MCP access path, whose answer carries no [[manifest_version >= 7 ? | `absence_scope` and no]] `timing.elapsed_ms`)."
   },
   "label_dict_contains": {
    "generic": false,
