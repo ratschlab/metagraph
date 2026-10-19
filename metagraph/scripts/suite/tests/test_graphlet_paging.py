@@ -74,6 +74,22 @@ class AssembleTests(unittest.TestCase):
         with self.assertRaises(gp.AssemblyError):
             gp.assemble("graphlet_walk", pages, True)
 
+    def test_keys_of_later_pages_kept(self):
+        """VL1: a key page 0 lacks is taken from the first page stating it; hint and filtered from the last page (a
+        budget-resumed claims listing states both only once it has filtered something)."""
+        pages = [{"handle": "h", "arm": "left", "total_at_least": 1, "complete": False, "rows": [1], "next_cursor": "a"},
+                 {"handle": "h", "arm": "left", "total_at_least": 2, "complete": False, "rows": [2],
+                  "filtered_so_far": {"merge_entered": 1}, "hint": "x", "caveat": "c", "next_cursor": "b"},
+                 {"handle": "h", "arm": "left", "total": 3, "complete": True, "rows": [3],
+                  "filtered": {"merge_entered": 2}, "hint": "x", "caveat": "c"}]
+        self.assertEqual(gp.assemble("graphlet_claims", pages, True),
+                         {"handle": "h", "arm": "left", "total": 3, "complete": True, "rows": [1, 2, 3],
+                          "filtered": {"merge_entered": 2}, "hint": "x", "caveat": "c"})
+        pages[2]["caveat"] = "other"
+        with self.assertRaises(gp.AssemblyError):
+            gp.assemble("graphlet_claims", pages, True)
+        self.assertIn("hint", gp.END_FIELDS)
+
     def test_compare_cuts_merged(self):
         pages = [{"a": "x", "mode": "claims", "rows": [1], "total": 3, "fields_cut": ["evidence"], "export": "e",
                   "next_cursor": "c"},

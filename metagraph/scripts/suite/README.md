@@ -4843,13 +4843,15 @@ Nothing here touches staging; every test is offline.
   `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in
   args_resolved `<cursor>`; the way's directories `<export_dir>`, `<spool_dir>`. Raw pages keep everything.
 - Assembly (graphlet_paging.assemble): every paged library list is `rows` (mcp_tools._page / _page_cut; the table is
-  checked against the source by a test); rows concatenated, other fields from the first page, the fields that say how a listing ended from the
-  last, `evidence` from the last page that states it (a page its budget stopped marks it `limitations.local`),
-  compare's per-page `fields_cut` merged (a field is cut only if every page cut it), `row_truncated` /
-  `cut_fields` merged and every row of a page that cut its row marked `"_cut_fields": [that page's cut_fields]`
-  (FORMAT v2 A3: W5 and the compare stage judge such a row as a cut of the uncut one), next_cursor removed; graphlet_sequence concatenates `sequence`, takes `to` from the last page
-  and drops next_from (and `truncated` when the loop reached the end). Pages that state a base field differently are
-  `assembly_error`.
+  checked against the source by a test). Rows are concatenated; every other field comes from the first page that
+  states it (page 0's, and a key page 0 lacks from the first later page carrying it: nothing a page states is
+  dropped, VERIFY-L VL1); the fields that say how a listing ended (total, total_at_least, complete, filtered,
+  filtered_so_far, hint, local, stop) from the last page; `evidence` from the last page that states it (a page its
+  budget stopped marks it `limitations.local`); compare's `fields_cut` then names only what no page carried;
+  `row_truncated` / `cut_fields` merged and every row of a page that cut its row marked
+  `"_cut_fields": [that page's cut_fields]` (FORMAT v2 A3); next_cursor removed. graphlet_sequence concatenates
+  `sequence`, takes `to` from the last page and drops next_from (and `truncated` when the loop reached the end).
+  A base field two pages state differently is `assembly_error`.
 - Records add `paging_complete` (FORMAT v2 A4, graphlet_paging.paging_complete: false when the last page still
   names a next one or the answer states complete false; null on a record without an answer) and, for
   graphlet_export / graphlet_save, `file` {name, bytes, sha256, raw} (FORMAT v2 B3: the file's text kept gzipped at

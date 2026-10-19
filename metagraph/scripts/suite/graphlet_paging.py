@@ -44,8 +44,9 @@ LIST_FIELDS = {
 }
 SEQUENCE_TOOL = "graphlet_sequence"
 # the fields that say how a listing ended (a budgeted list's total_at_least, complete, filtered_so_far, its local block
-# and stop, :1008-1014): the last page's
-END_FIELDS = ("total", "total_at_least", "complete", "filtered", "filtered_so_far", "local", "stop")
+# and stop, :1008-1014; the hint that goes with `filtered`, walks :1669-1675, claims :2087-2089, which a budgeted
+# claims listing states only once its resumed pages have filtered something): the last page's
+END_FIELDS = ("total", "total_at_least", "complete", "filtered", "filtered_so_far", "hint", "local", "stop")
 # fields of one page's fitting, merged over the pages
 PAGE_FIELDS = ("next_cursor", "fields_cut", "row_truncated", "cut_fields")
 # A3: the marker on each row of a page whose one row was cut to fit the page alone (_page :1068-1079: row_truncated
@@ -113,9 +114,11 @@ def unmarked(evidence: Any) -> Any:
 
 def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
     """FORMAT v2 A2: the pages of one op as one answer. A list tool's `rows` concatenated in page order, every other
-    field from the first page, except: the END_FIELDS from the last page; `evidence` from the last page that states it
-    (an interrupted page's carries limitations.local, the completing page's not); compare's base fields that a page
-    cut (fields_cut) taken from any page that carries them, fields_cut then naming only those no page carried;
+    field from the first page that states it (page 0's, and a key page 0 lacks from the first later page carrying it:
+    nothing a page states is dropped), except: the END_FIELDS from the last page; `evidence` from the last page that
+    states it (an interrupted page's carries limitations.local, the completing page's not); compare's base fields that
+    a page cut (fields_cut) thereby taken from any page that carries them, fields_cut then naming only those no page
+    carried;
     `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged,
     and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor removed.
     graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
@@ -154,9 +157,12 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
         else:
             rows.extend(p[field])
         for k, v in p.items():
-            if i and k in first and k not in END_FIELDS + PAGE_FIELDS + (field,) and (
-                    unmarked(v) != unmarked(first[k]) if k == "evidence" else v != first[k]):
-                raise AssemblyError("page %d of %s states %s otherwise than page 0" % (i, tool, k))
+            if k in END_FIELDS or k in PAGE_FIELDS or k == field:
+                continue
+            if k not in first:   # page 0 lacks it (cut there, or stated only later): the first page stating it
+                first[k] = v
+            elif unmarked(v) != unmarked(first[k]) if k == "evidence" else v != first[k]:
+                raise AssemblyError("page %d of %s states %s otherwise than an earlier page" % (i, tool, k))
     first[field] = rows
     for p in reversed(pages):
         if "evidence" in p:
@@ -171,13 +177,8 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
     cut = []
     for p in pages:
         for k in p.get("fields_cut") or []:
-            if k not in cut:
+            if k not in cut and k not in first:
                 cut.append(k)
-    for p in pages[1:]:
-        for k, v in p.items():
-            if k not in first and k in cut:
-                first[k] = v
-    cut = [k for k in cut if k not in first]
     if cut:
         first["fields_cut"] = cut
     else:

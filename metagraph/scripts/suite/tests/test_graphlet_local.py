@@ -821,12 +821,16 @@ class PagingTests(unittest.TestCase):
 class BudgetTests(unittest.TestCase):
     def test_budgeted_pages_resume_to_the_whole_list(self):
         """Under local limits a small work budget stops a list after a few rows (complete false, a resume cursor);
-        paging "all" resumes it page by page, each under its own budget, and the assembly takes total, complete and the
-        local block from the last page: the rows are the unbudgeted call's."""
+        paging "all" resumes it page by page, each under its own budget, and the assembly takes total, complete, the
+        filter counts, their hint and the local block from the last page: the WHOLE answer (but for the local block,
+        whose usage is per call) is the unbudgeted call's. claims-rc is VERIFY-L VL1's reproduction: its first budget
+        segment filters nothing, so `filtered` and `hint` appear on later pages only."""
         tmp = tempfile.mkdtemp(prefix="graphlet-local-")
         try:
             lists = {"claims": ("graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": False,
                                                     "labels": None}, 800),
+                     "claims-rc": ("graphlet_claims", {"arm": "left", "min_bp": 0, "route_consistent": True,
+                                                       "labels": None}, 800),
                      "walks": ("graphlet_walks", walks("left", spell="full"), 1000),
                      "splits": ("graphlet_splits", {"arm": "left", "n": 100, "min_labels_before": 0}, 600),
                      "walk": ("graphlet_walk", {"arm": "left", "walk": 9}, 700)}
@@ -847,10 +851,14 @@ class BudgetTests(unittest.TestCase):
                     self.assertFalse(by[name + "-b1"]["paging_complete"])
                     self.assertTrue(paged["complete"])
                     self.assertTrue(paged["local"]["complete"])
-                    self.assertEqual(paged["rows"], whole["rows"])
-                    self.assertEqual(paged["total"], whole["total"])
+                    self.assertEqual(dict((k, v) for k, v in paged.items() if k != "local"),
+                                     dict((k, v) for k, v in whole.items() if k != "local"))
                     self.assertEqual(first["rows"], whole["rows"][:len(first["rows"])])
                     self.assertEqual(by[name]["library"]["limits"]["local_limits"], {})
+            # the reproduction: page 0 states neither filtered_so_far nor hint, the assembled answer both
+            raw0 = sc.read_gz_json(os.path.join(tmp, "run", "arms", "mcp-lib", "raw", "G-switch.claims-rc-b.0.json.gz"))
+            self.assertFalse({"filtered_so_far", "hint"} & set(raw0["reply"]["result"]["answer"]))
+            self.assertEqual(set(by["claims-rc-b"]["answer"]) & {"filtered", "hint"}, {"filtered", "hint"})
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
