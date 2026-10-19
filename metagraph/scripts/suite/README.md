@@ -4922,6 +4922,91 @@ Nothing here touches staging; every test is offline.
   names a cursor by `{"cursor_of": "<op id>"}` (graphlet_select, VERIFY-L VL5): the last next_cursor of that op's
   listing when its paging stopped early, kept by `graphlet_paging.selector_view` in the answers selectors read.
 
+## Manifest v8, area G: pre-checks, the five-way compare, service checks, gate and report (lane C, 2026-10-19)
+
+Design: DESIGN-v8 (approved) and the records of FORMAT-v8 §3-§5 (both in the v8 plans, outside the repository).
+The graphlet tools are compared five ways per op call: W1 `dl+lib` (direct-local's graphlet, the library at the
+deployed commit), W2 `dr+lib` (direct-remote's), W3 `mcp` (the service's tools), W4 `mcp+lib` (the MCP's export, the
+library), W5 `oracle` (the suite's own reading, no library). Records: `arms/<way dir>/graphlet_ops.jsonl` with the way
+directories dl-lib, dr-lib, mcp (W3 in the MCP arm's directory), mcp-lib, oracle, drift-lib; `merge_run.arm_dirs`
+leaves those (and `precheck`) out, so the arms' identity checks never read them as arms.
+
+### Files
+- `graphlet_precheck.py RUN_DIR`: per graphlet scenario (a `graphlet` block) the six pre-checks into
+  `arms/precheck/graphlet_prechecks.jsonl`: body (W1/W2/W4's body digests one, else the pair and the first differing
+  record of the kept documents, H's seed_index masked, J and Z out), envelope (the J lines without the per-request
+  values, graphlet_doc.envelope_view; a kept document without J fails), twin (checks.graphlet_arms of W1's document
+  against the `detail: full` twin's arms, segments, paths, lengths and end reasons), strategy (the MCP echo
+  traverse_status.overrides against request.strategy, the twin's against it with output.detail full), preconditions
+  (arms, walks_min, segments_min, merges_min, labels_present, walk_bp_min, bases on W1's document:
+  precondition_failed) and library_commit (every W3 call against the deployed one and the manifest's pin). A failed
+  body, envelope or twin check fails the scenario as a determinism finding; what cannot be checked is inconclusive.
+  The digests are graphlet_doc's (lane L); the record-level reading that names a difference is this module's.
+- `compare_graphlets.py RUN_DIR`: `graphlet_compare.json` (and the pre-check records). Per op call: the ways (W3
+  left out is `not_exposed` with the owner's reason: the op's not_exposed, else the scenario's graphlet.not_exposed
+  by tool or tool.argument, both inside content_sha256 (FORMAT v2 D2); without a reason a manifest problem; a way
+  whose runner failed, FORMAT v2 B2, is not compared), args_resolved
+  equal first, then the canonical answers by pairs W1-W2 (transport), W1-W4 (fetch path), W3-W4 (service wrapper) and
+  each against W5 through lane O's `graphlet_oracle.compare` (FORMAT v2 F2: one comparison of an answer against a W5
+  record; a fitting error is not comparable against W5, F3). Canonical: W3's service fields stripped by `ANSWER_KEYS` (the library's
+  per-tool answer keys, frozen here and held to the library's answers on the mini_refseq fixtures by
+  tests/test_compare_graphlets.py), handles to symbols (graphlet_compare's a and b by role, at the top only), cursors
+  removed (a runner's symbols kept, FORMAT v2 B1), `local` compared only within one commit, interpreter, work model
+  and configuration, an export's path and bytes left out and its file compared by content at file.raw (B3); on a
+  pair with W3 a row marked _cut_fields (A3), on either side, is judged by lane O's cut rule
+  (graphlet_oracle.cut_problem, the one cut rule) on the fields it names only, an empty value included, two cut
+  rows on their common leading part, every other field equal (VERIFY-C VC1); every way an op runs in is reached by a
+  compared pair (VC7); a record without answer or error, and a paging "all" listing with paging_complete false,
+  leave the op inconclusive (VC6); every runner-side code of FORMAT v2.3 B2 (no_graphlet aside, a failed seed's
+  answer compared by code) is inconclusive, never compared (VERIFY-C-R2 VR1); a row the library cut where W3's is
+  whole is accepted and noted in chapter G (VR7);
+  errors by code and structured fields (no message, hint; no result_too_large bytes). A deliberate cut (op field
+  `cut_of`: the uncut op) is judged per way against that way's uncut answer: it must show a cut (a marker,
+  paging_complete false, fewer rows than total; else "not cut", a failure: VC4); a key it lacks optional or named in
+  its fields_cut; a field a row names cut by lane O's rule; the page's rows and the tool's optional lists leading
+  parts; every other value equal. Only a ceiling's refusal (result_too_large, receipt_too_large, too_large,
+  body_too_large) is a way's cut; op_busy, op_timeout, op_memory leave the op inconclusive (VR2). A slice of
+  graphlet_sequence is cut by its own form: truncated and next_from, its sequence a leading part, its `to` no
+  greater (VR6).
+  Outcomes per op: agree, disagree (naming the pairs), service_by_design, inconclusive, precondition_failed; the
+  scenario fails on a failed pre-check or a disagreement. graphlet_list / graphlet_free are a smoke outside the
+  counts; the drift lane is compared with W4, report-only; W5's checked and consistency-only pointers give the
+  coverage table, with lane O's "re-derived from DESIGN" mark (oracle.rederived, VC5). The gate and the report
+  recompute the comparison from the run's files every time (VC3); `--reuse` takes graphlet_compare.json only when
+  every input it read is unchanged (records, documents, twin, job and identity records, export files, the
+  by-design table, the code).
+- `graphlet_service_checks.py`: two stages of the comparison. The positive service checks of DESIGN-v8 §5:
+  walk_display, label_evidence, qualified_cause (each side's cap stated, "no difference within the recorded
+  evidence" exactly when the library counts none), hint (more than 64 labels per node), in_service (over 8 MiB),
+  max_bytes_refused (262,145 refused on W3, answered by the library ways), forbidden and bad_handle (op field `probe`:
+  wrong_token / bad_handle, FORMAT v2 D2, W3 only), library_commit; each pass, fail naming the calls, n/a (its
+  precondition held on no call, the reason stated) or inconclusive; any failed check blocks the gate unless the
+  declared file sets it aside (graphlet_service_checks_not_required), a required one must pass (VC2). And by-design
+  pairs: an op naming a case (`by_design`) whose `graphlet` block (compare.graphlet_case_problems validates it at
+  load: tools, path predicates over args_resolved, library and service sides, an answered/answered case only with
+  service_fields) holds on every way's arguments is service_by_design; it excuses only a W3-W4 / W3-W5 difference
+  of kind error or answer, never differing args_resolved (VC11); a pair that does not hold is a disagreement naming
+  its side.
+- gate: a manifest whose selection holds graphlet scenarios gives the policy a `graphlets` block (every applicable
+  way of every op call, the pre-checks, the service checks the op plan exercises, the library_commit pin; declared
+  `graphlet_not_required` op calls with their reasons); `gate.py` judges it (kind graphlet; missing ways as
+  missing) and checks the deployed library's identity like the service's (`--expect-library-commit SHA`, the
+  library_commit the MCP runner reads per invocation, and the pin). Without the block and the flag nothing is judged or
+  stated: v4..v7 verdicts and policies are unchanged.
+- report: chapter G (per tool, disagreements with both answers compactly, pre-checks, service checks, correctness
+  coverage, by-design pairs, drift lane) and a headline beside the verdict, only for a manifest with graphlet
+  scenarios.
+
+### Validation (offline; the main tree's v7 baseline only read)
+- The v7 baseline re-judged with this lane's gate.py (policy_v7_rtp_mcp.json, --expect-service-commit 26a52cb6...):
+  GATE PASS, 2,073 judged / 1,955 passed, the verdict's text and JSON identical to the code before (judged_utc
+  aside); its report built in-process identical (the date and generation time aside); the run directory unchanged
+  (file list and mtimes). policy_v6_rtp_mcp, policy_v7_rt_mcp and policy_v7_rtp_mcp regenerate identical.
+- The places FORMAT-v8 left open are settled by FORMAT v2 (A-G): documents arms/<way dir>/docs (W4 else the MCP's
+  own arms/mcp/docs), the twin arms/direct-local/docs/<s>.full.json.gz, the job record arms/mcp/graphlet_jobs.jsonl
+  (echo, library_commit), the pin graphlet.library_commit, op fields not_exposed / cut_of / by_design / probe, a
+  failed seed's preconditions {"no_graphlet": true}.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

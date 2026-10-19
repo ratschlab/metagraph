@@ -2,6 +2,7 @@
 """The strict deploy gate of a suite run, and the run's persisted plan.
 
     gate.py RUN_DIR POLICY [--reevaluated] [--out FILE] [--max-lines N] [--expect-service-commit SHA]
+                           [--expect-library-commit SHA] [--reuse]
     gate.py plan RUN_DIR --manifest M --arms A,B [--areas P,M] [--limit N] [--ids LIST] [--warm-every N] [--mode M]
     gate.py ids FILE --manifest M          print FILE's scenario ids, comma-separated in manifest order
     gate.py policy-ids POLICY [--arms A]  print the ids the policy's arms run (its selection less their exclusions)
@@ -66,7 +67,22 @@ GATE PASS only when every one of these holds (each failure is listed, grouped by
   record does not reproduce a problem), the runner's recorded mismatches, the advanced_path premise checked live and
   well-formed request_evidence; the per-line evidence is one problem per reference path;
 - something passed: on each policy arm, an execution of the selection (a gate whose MCP selection is all excluded
-  verified nothing via MCP, whatever a direct arm passed).
+  verified nothing via MCP, whatever a direct arm passed);
+- area G (a policy with a `graphlets` block, manifest v8; gate_policy.graphlet_block), over the run's graphlet
+  comparison, recomputed from the run's files every time (compare_graphlets.load_or_compute; with --reuse,
+  graphlet_compare.json when every input it read is current: records, documents, twin, job and identity records,
+  export files, the by-design table, the code), kind "graphlet" unless named otherwise: the comparison is of the policy's manifest (identity); every op
+  call the policy requires has an entry and every way it requires a record (missing); its outcome is agree or a
+  verified service_by_design pair, W3's not_exposed per the policy being no gap: a disagreement, an inconclusive or a
+  precondition_failed blocks, unless the declared file sets the op call aside (graphlets.not_required, with its
+  reason: a note); every pre-check of every graphlet scenario passed (library_commit not_exposed without a W3 call);
+  no service check failed, and every one the policy requires passed (graphlet_service_checks.
+  blocking_service_checks; a check the declared file sets aside is a note); the drift lane is a note. The deployed
+  library's identity (library_identity_problems over merge_run.library_identity, the library_commit the MCP runner read per
+  invocation), checked like the service's: given --expect-library-commit, every invocation read it and the policy's
+  pin is it; with a graphlets block, every invocation's commit is the pin; in any case more than one commit blocks.
+  Without a graphlets block and without --expect-library-commit nothing of this is judged or stated (a v4..v7
+  verdict is unchanged).
 """
 
 import argparse
@@ -88,7 +104,7 @@ PLAN_VERSION = 1
 POLICY_VERSIONS = (1,)
 # A gate problem's kinds, in the order they are listed.
 KINDS = ("identity", "configuration", "missing", "outcome", "property", "disagreement", "agreement", "relation",
-         "nothing_passed")
+         "graphlet", "nothing_passed")
 # The check names of checks.GENERIC_CHECKS, for a checks.py that does not load: every other check is a property.
 GENERIC_CHECKS = sc.GENERIC_CHECKS
 # request_evidence sources that are no evidence of the deployment under the gate.
@@ -626,10 +642,156 @@ def service_identity_problems(identity, expected=None, policy_arms=()):
     return problems, notes
 
 
-def judge(run_dir, policy, reevaluated=False, expect_service_commit=None):
+def library_identity_problems(identity, expected=None, policy_arms=(), pin=None, graphlets=False):
+    """([problem detail], [note]) of the deployed graphlet library's identity (|identity|: merge_run.library_identity,
+    None without an MCP arm) against the deployed commit |expected| (--expect-library-commit; None: not given) and
+    the manifest's pin |pin| (the policy's graphlets.library_commit), as service_identity_problems judges the
+    service's: given a commit, a run without an MCP arm (the policy's arms naming it), a run recording no
+    library_commit, an invocation without one and another commit each block, and so does a pin other than the given
+    commit; with a graphlets block (|graphlets|), every recorded commit is the pin, and recording none blocks; more
+    than one commit blocks in any case."""
+    problems, notes = [], []
+    want = (" the deployed library commit %s (--expect-library-commit)" % expected) if expected else ""
+    pins = [pin] if isinstance(pin, str) else list(pin or [])
+    if expected:
+        for p_ in pins:
+            if not commit_matches(p_, expected):
+                problems.append("the manifest pins the library commit %s, not%s" % (p_, want))
+    if identity is None:
+        if (expected or graphlets) and "mcp" in policy_arms:
+            problems.append("no MCP arm recorded: the library identity cannot be confirmed")
+        return problems, notes
+    src = identity.get("source") or "arms/mcp"
+    n = identity.get("invocations") or 0
+    commits = identity.get("library_commits") or {}
+    if not identity.get("recorded"):
+        if expected or graphlets:
+            problems.append("the MCP arm records no library_commit (%s): the gate cannot confirm the graphlet library "
+                            "it judged%s" % (src, (" against" + want) if want else ""))
+        return problems, notes
+    if identity.get("without_commit") and (expected or graphlets):
+        problems.append("%d of %d MCP invocation(s) record no library_commit (%s)" % (
+            identity["without_commit"], n, src))
+    if len(commits) > 1:
+        problems.append("the MCP invocations recorded %d library commits (%s): the run met more than one library" % (
+            len(commits), ", ".join("%s on %d" % kv for kv in commits.items())))
+    for commit, count in commits.items():
+        if expected and not commit_matches(commit, expected):
+            problems.append("the MCP arm recorded the library commit %s (%d invocation(s)), not%s" % (
+                commit, count, want))
+        elif graphlets and pins and not any(commit_matches(commit, p_) for p_ in pins):
+            problems.append("the MCP arm recorded the library commit %s (%d invocation(s)), not the manifest's pin "
+                            "%s" % (commit, count, ", ".join(pins)))
+    if not problems:
+        notes.append("the MCP arm recorded the library commit %s on its %d invocation(s) (%s)%s" % (
+            ", ".join(commits) or "-", n, src, "" if expected else "; no deployed library commit given "
+            "(--expect-library-commit)"))
+    return problems, notes
+
+
+def graphlet_problems(run_dir, policy, manifest, notes, reuse=False):
+    """([problem], counts) of area G (module docstring) for a policy with a graphlets block; |reuse|: --reuse."""
+    import compare_graphlets as cg
+    block = policy.get("graphlets") or {}
+    out = []
+    try:
+        comp = cg.load_or_compute(run_dir, manifest, reuse)
+    except Exception as e:   # never take the gate down: an uncomputable comparison blocks
+        return [_problem("graphlet", "the graphlet comparison could not be computed (%s: %s)" % (
+            type(e).__name__, str(e)[:200]))], {}
+    want = policy.get("manifest") or {}
+    if (comp.get("manifest") or {}).get("content_sha256") != want.get("content_sha256"):
+        out.append(_problem("identity", "graphlet_compare.json compared the manifest content %s, the policy's is %s" % (
+            str((comp.get("manifest") or {}).get("content_sha256"))[:16], str(want.get("content_sha256"))[:16])))
+    if block.get("whitelist_sha256") and comp.get("whitelist_sha256") != block["whitelist_sha256"]:
+        notes.append("the library's answer keys (compare_graphlets.ANSWER_KEYS) differ from the table the policy was "
+                     "generated with (%s vs %s)" % (str(comp.get("whitelist_sha256"))[:12],
+                                                   str(block["whitelist_sha256"])[:12]))
+    for r in comp.get("run_level") or []:
+        # lane O's run-level record: W1 lines no op can be found for, so area G cannot be whole (blocks)
+        out.append(_problem("graphlet", "%s's run-level record: %s: %s" % (r.get("way"), r.get("declared"),
+                                                                          str(r.get("note"))[:240])))
+    aside = dict(((x.get("scenario"), x.get("op")), x) for x in block.get("not_required") or [])
+    counts = dict((k, 0) for k in ("required", "judged", "agree", "service_by_design", "not_required"))
+    scen = comp.get("scenarios") or {}
+    for item in block.get("required") or []:
+        sid, oid = item.get("scenario"), item.get("op")
+        counts["required"] += 1
+        entry = ((scen.get(sid) or {}).get("ops") or {}).get(oid)
+        where = "op %s (%s)" % (oid, item.get("tool"))
+        if entry is None:
+            out.append(_problem("missing", "%s: no entry in the graphlet comparison" % where, sid))
+            continue
+        counts["judged"] += 1
+        if (sid, oid) in aside:
+            counts["not_required"] += 1
+            notes.append("area G: %s %s %s, set aside by the declared file: %s" % (
+                sid, where, entry.get("outcome"), aside[(sid, oid)].get("reason")))
+            continue
+        for w in item.get("ways") or []:
+            if (entry.get("ways") or {}).get(w) == "missing":
+                out.append(_problem("missing", "%s: no record of %s (%s)" % (where, w, gp_way_name(w)), sid))
+        ne = item.get("not_exposed") or {}
+        if "not_exposed" in item and not ne.get("W3"):
+            out.append(_problem("graphlet", "%s: W3 left out without the owner's reason" % where, sid))
+        o = entry.get("outcome")
+        if o == "agree":
+            counts["agree"] += 1
+        elif o == "service_by_design" and all(r.get("verified") for r in entry.get("by_design") or [{}]):
+            counts["service_by_design"] += 1
+        elif o == "disagree":
+            out.append(_problem("graphlet", "%s disagrees (%s): %s" % (
+                where, ", ".join(entry.get("disagreeing") or []), cg.disagreement_text(entry)[:300]), sid))
+        else:
+            reason = str(entry.get("reason") or "")
+            if not (o == "inconclusive" and reason.startswith("no record of") and ";" not in reason):
+                # (an op inconclusive only for missing records is named by those missing problems)
+                out.append(_problem("graphlet", "%s %s%s" % (where, o, (": %s" % reason[:240]) if reason else ""),
+                                    sid))
+    for sid in block.get("scenarios") or []:
+        pre = (scen.get(sid) or {}).get("precheck")
+        if not isinstance(pre, dict):
+            out.append(_problem("missing", "no pre-check record", sid))
+            continue
+        for name in block.get("prechecks") or []:
+            c = pre.get(name) or {}
+            if c.get("outcome") == "pass" or (name == "library_commit" and c.get("outcome") == "not_exposed"):
+                continue
+            out.append(_problem("graphlet", "pre-check %s %s%s: %s" % (
+                name, c.get("outcome"), " (a determinism finding)" if name in ("body", "envelope", "twin")
+                and c.get("outcome") == "fail" else "", str(c.get("detail"))[:240]), sid))
+    import graphlet_service_checks as gs
+    aside = dict((x.get("check"), x) for x in block.get("service_checks_not_required") or [])
+    for name, why in gs.blocking_service_checks(comp.get("service_checks"), block.get("service_checks") or [],
+                                                aside):
+        out.append(_problem("graphlet", "service check %s %s" % (name, why[:280])))
+    for c in comp.get("service_checks") or []:
+        if c.get("check") in aside and c.get("outcome") != "pass":
+            notes.append("area G: service check %s %s, set aside by the declared file: %s" % (
+                c["check"], c.get("outcome"), aside[c["check"]].get("reason")))
+    checks = dict((c.get("check"), c) for c in comp.get("service_checks") or [])
+    for name in block.get("service_checks") or []:
+        if name not in checks:
+            out.append(_problem("graphlet", "service check %s: not evaluated" % name))
+    d = comp.get("drift") or {}
+    if d.get("calls"):
+        notes.append("area G drift lane (report-only): %d of %d compared answer(s) of the branch head's library "
+                     "differ from the deployed commit's" % (len(d.get("differ") or []), d.get("compared") or 0))
+    notes.append("area G: %d op call(s) required, %d agree, %d by design (verified), %d set aside by the declared file"
+                 % (counts["required"], counts["agree"], counts["service_by_design"], counts["not_required"]))
+    return out, counts
+
+
+def gp_way_name(way):
+    import graphlet_precheck as gp
+    return gp.WAY_NAMES.get(way, way)
+
+
+def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect_library_commit=None, reuse=False):
     """The gate's verdict on a merged (and compared) run directory: {passed, problems, notes, counts}; with
     |expect_service_commit| (the deployed commit), the service identity the MCP arm recorded is held to it
-    (service_identity_problems)."""
+    (service_identity_problems); with |expect_library_commit| or a policy with a graphlets block, the deployed
+    library's (library_identity_problems), and with the block area G is judged (graphlet_problems)."""
     problems, notes = [], []
     name_of = lambda n: sc.reevaluated_name(n, reevaluated)  # noqa: E731
     manifest = sc.read_json(os.path.join(run_dir, "manifest.json"))
@@ -674,6 +836,14 @@ def judge(run_dir, policy, reevaluated=False, expect_service_commit=None):
     sp, sn = service_identity_problems(service, expect_service_commit, arms)
     problems.extend(_problem("identity", x, arm="mcp") for x in sp)
     notes.extend(sn)
+    graphlets = bool(policy.get("graphlets"))
+    library = None
+    if graphlets or expect_library_commit:
+        library = merge_run.library_identity(run_dir, arm_runs)
+        lp, ln = library_identity_problems(library, expect_library_commit, arms,
+                                           (policy.get("graphlets") or {}).get("library_commit"), graphlets)
+        problems.extend(_problem("identity", x, arm="mcp") for x in lp)
+        notes.extend(ln)
     selected = set(policy["selection"].get("scenarios") or [])
     problems.extend(configuration_problems(run_dir, rows, policy, reevaluated, notes))
 
@@ -880,16 +1050,26 @@ def judge(run_dir, policy, reevaluated=False, expect_service_commit=None):
         if not passed_by_arm.get(arm):
             problems.append(_problem("nothing_passed", "no execution of arm %s passed in the policy's selection" % arm,
                                      arm=arm))
+    gcounts = None
+    if graphlets:
+        gprobs, gcounts = graphlet_problems(run_dir, policy, manifest, notes, reuse)
+        problems.extend(gprobs)
     order = dict((k, i) for i, k in enumerate(KINDS))
     problems.sort(key=lambda p: order.get(p["kind"], len(order)))
-    return {"passed": not problems, "problems": problems, "notes": notes,
-            "counts": {"judged": judged, "passed": passed, "planned": len(planned), "required": len(need),
-                       "recorded": len(recorded)},
-            "policy": {"name": policy.get("name"), "policy_version": policy.get("policy_version"),
-                       "sha256": policy_sha256(policy)},
-            "run_dir": os.path.abspath(run_dir), "reevaluated": reevaluated, "judged_utc": sc.iso_utc(time.time()),
-            "inputs": inputs_digest(run_dir, reevaluated),
-            "service_identity": {"expected": expect_service_commit, "recorded": service}}
+    verdict = {"passed": not problems, "problems": problems, "notes": notes,
+               "counts": {"judged": judged, "passed": passed, "planned": len(planned), "required": len(need),
+                          "recorded": len(recorded)},
+               "policy": {"name": policy.get("name"), "policy_version": policy.get("policy_version"),
+                          "sha256": policy_sha256(policy)},
+               "run_dir": os.path.abspath(run_dir), "reevaluated": reevaluated, "judged_utc": sc.iso_utc(time.time()),
+               "inputs": inputs_digest(run_dir, reevaluated, graphlets),
+               "service_identity": {"expected": expect_service_commit, "recorded": service}}
+    if graphlets:
+        verdict["counts"]["graphlet_ops"] = gcounts
+    if library is not None or expect_library_commit:
+        verdict["library_identity"] = {"expected": expect_library_commit, "recorded": library,
+                                       "pin": (policy.get("graphlets") or {}).get("library_commit")}
+    return verdict
 
 
 def uncompared_properties(sid, recorded, ref_arm, scenario, is_property):
@@ -983,11 +1163,18 @@ def compared_with_checks_problems(run_dir, comp, reevaluated=False):
                   for key, f in HASH_KEYS if jw.get(key) != want[f]]
 
 
-def inputs_digest(run_dir, reevaluated=False):
+GRAPHLET_INPUTS = ("graphlet_inputs",)
+
+
+def inputs_digest(run_dir, reevaluated=False, graphlets=False):
     """{file: sha256 or None} of what a verdict judged: the merged lines, the comparison, the manifest and the plan
     (a report compares it with the files it reads: a run changed after the verdict, e.g. by a later resume without
-    --gate, makes the verdict stale)."""
+    --gate, makes the verdict stale); with |graphlets| also `graphlet_inputs`, the sha256 of every input the graphlet
+    comparison reads (compare_graphlets.input_digests)."""
     out = {}
+    if graphlets:
+        import compare_graphlets as cg
+        out["graphlet_inputs"] = hashlib.sha256(sc.canonical_json(cg.input_digests(run_dir))).hexdigest()
     for name in (sc.reevaluated_name("executions.jsonl", reevaluated), sc.reevaluated_name("compare.json", reevaluated),
                  "manifest.json", PLAN_FILE):
         path = os.path.join(run_dir, name)
@@ -1002,8 +1189,8 @@ def inputs_digest(run_dir, reevaluated=False):
 def stale_inputs(run_dir, verdict, reevaluated=False):
     """The files whose content differs from what |verdict| judged ([] when it is current; every file for a verdict
     that records none)."""
-    now = inputs_digest(run_dir, reevaluated)
     was = verdict.get("inputs") if isinstance(verdict.get("inputs"), dict) else {}
+    now = inputs_digest(run_dir, reevaluated, any(n in was for n in GRAPHLET_INPUTS))
     return [name for name in now if was.get(name, "unrecorded") != now[name]]
 
 
@@ -1134,11 +1321,17 @@ def main(argv=None):
     ap.add_argument("--max-lines", type=int, default=400)
     ap.add_argument("--expect-service-commit", metavar="SHA", default=None,
                     help="the deployed service commit (run-gate's LIVE line): every MCP invocation must have read it")
+    ap.add_argument("--reuse", action="store_true",
+                    help="area G: reuse graphlet_compare.json when every input it read is current (default: recompute)")
+    ap.add_argument("--expect-library-commit", metavar="SHA", default=None,
+                    help="the deployed graphlet library commit (the service's library_commit): every MCP invocation "
+                         "must have read it, and the manifest's pin must be it")
     a = ap.parse_args(argv)
-    if a.expect_service_commit is not None and not COMMIT_RE.match(a.expect_service_commit):
-        sys.stderr.write("gate.py: --expect-service-commit %r is not a git commit (7 to 40 hex digits)\n"
-                         % a.expect_service_commit)
-        return 2
+    for flag, value in (("--expect-service-commit", a.expect_service_commit),
+                        ("--expect-library-commit", a.expect_library_commit)):
+        if value is not None and not COMMIT_RE.match(value):
+            sys.stderr.write("gate.py: %s %r is not a git commit (7 to 40 hex digits)\n" % (flag, value))
+            return 2
     try:
         policy = load_policy(a.policy)
     except (OSError, ValueError) as e:
@@ -1147,7 +1340,7 @@ def main(argv=None):
     if not os.path.isdir(a.run_dir):
         sys.stderr.write("gate.py: %s is not a run directory\n" % a.run_dir)
         return 2
-    verdict = judge(a.run_dir, policy, a.reevaluated, a.expect_service_commit)
+    verdict = judge(a.run_dir, policy, a.reevaluated, a.expect_service_commit, a.expect_library_commit, a.reuse)
     verdict["policy"]["path"] = os.path.abspath(a.policy)
     sc.write_json_atomic(a.out or os.path.join(a.run_dir, gate_file(a.reevaluated)), verdict)
     sys.stdout.write(render(verdict, a.max_lines))
