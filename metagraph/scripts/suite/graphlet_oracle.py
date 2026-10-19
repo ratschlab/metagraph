@@ -141,7 +141,7 @@ LIST_CAP = 8      # the label lists a row shows (labels_full, in, out, ends): IN
 # allowance stay within the sequence ceiling (graphlet_sequence)
 _SEQ_PAGE_EXTRA = 512
 
-PHASE_B = ("graphlet_support",)
+PHASE_B: Tuple[str, ...] = ()   # every phase-B tool is answered (graphlet_support, graphlet_claims, labels name=)
 NOT_APPLICABLE = ("traverse_capabilities", "traverse_resolve", "traverse_fetch", "graphlet_list", "graphlet_free")
 
 # clauses cited by more than one tool
@@ -1936,11 +1936,97 @@ def _label_walks(d: _Doc, args: dict, ctx: dict) -> dict:
     return _record(ans, clauses, cons + econ, partial=partial, rederived=["/rows/*/evidence_from", "/rows/*/route"])
 
 
+def _support_sets(d: _Doc, side: str, p: dict) -> Optional[List[set]]:
+    """Per outward base of walk |p| (0 .. length-1), the labels with displayed support there (DESIGN §5 support
+    profile, kind displayed; re-derived): DESIGN §5.1's evidence with the walk itself as the displayed path. A run
+    supports base b when it covers b (from_bp <= b < to_bp) and its own route (DESIGN §5 routes, through the merge
+    partitions) passes the walk's segment at b: a lineage that entered a merge through a non-first parent was off the
+    walk just before it, so its displayed support restarts at the merge (§5.1's clipping), and one that left at a
+    split no longer supports the walk (finding PB5). None where a route cannot be read (no partition holds a label)."""
+    seg_at: List[int] = []
+    for sid in p["segments"]:
+        seg_at += [sid] * d.segment(side, sid)["length_bp"]
+    sets: List[set] = [set() for _ in range(p["length_bp"])]
+    for i, run in enumerate(d.runs(side)):
+        if run["from_bp"] == run["to_bp"]:
+            continue
+        route = d.route(side, i)
+        if route is None:
+            return None
+        on = set(route)
+        for b in range(run["from_bp"], min(run["to_bp"], p["length_bp"])):
+            if seg_at[b] in on:
+                sets[b].add(run["label"])
+    return sets
+
+
+def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
+    """graphlet_support: the support profile along a walk (DESIGN §5 support_profile(kind='displayed'), §6 "support
+    runs with who left / joined"): maximal stretches [from_bp, to_bp) of one set of labels with displayed support
+    (re-derived from DESIGN §5.1 along the walk, _support_sets; a stretch no label supports is an empty set, as SPEC
+    §6.11 records one), each with
+    n_labels and, after the first, the labels that joined and left (ascending label id, first 8). Consistency-only:
+    the first row's lists, why, exact, n_labels_total on cut lists, every row with step= (its merging rule is the
+    tool's), annotate (DESIGN §5.2.1)."""
+    side = d.arm(args.get("arm"), required=True)
+    w = args.get("walk")
+    paths = d.arms[side]["paths"]
+    if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < len(paths):
+        raise _Refused("walk %r of %d" % (w, len(paths)))
+    step = _int_arg(args, "step", None, 0)
+    ev, ecl, econ = _evidence(d, [side])
+    cons = ["/rows/*/why", "/rows/*/exact", "/rows/0/joined", "/rows/0/left", "/next_cursor", "/coordinates"]
+    base = {"arm": side, "walk": w}
+    c_base = {"/arm": C_ARM_ECHO, "/walk": C_PATHS}
+    sets = _support_sets(d, side, paths[w]) if _constrain_runs(d, side) else None
+    if sets is None or step is not None:
+        why = "step=: the tool's merging rule" if sets is not None else "annotate (DESIGN §5.2.1) or no partitions"
+        return _record(dict(base, evidence=ev), dict(ecl, **c_base), cons + econ + ["/total", "/rows"],
+                       note="%s: consistency-only" % why)
+    rows: List[dict] = []
+    for b, cur in enumerate(sets):
+        if rows and rows[-1]["_set"] == cur:
+            rows[-1]["to_bp"] = b + 1
+        else:
+            rows.append({"from_bp": b, "to_bp": b + 1, "_set": cur})
+    out, prev = [], None
+    cut = (d.arms[side].get("labels_per_node") or {}).get("nodes_truncated", 0) > 0
+    for j, r in enumerate(rows):
+        row = {"from_bp": r["from_bp"], "to_bp": r["to_bp"], "n_labels": len(r["_set"])}
+        if not cut:
+            row["n_labels_total"] = len(r["_set"])
+        if prev is not None:
+            for key, ids in (("joined", sorted(r["_set"] - prev)), ("left", sorted(prev - r["_set"]))):
+                if len(ids) > LIST_CAP:
+                    cons.append("/rows/%d/%s" % (j, key))
+                elif ids:
+                    row[key] = [d.label(x) for x in ids]
+        prev = r["_set"]
+        out.append(row)
+    ans: dict = dict(base, total=len(out), rows=out, evidence=ev)
+    c_sup = "DESIGN §5 support_profile (displayed; re-derived from DESIGN §5.1 with the walk as the displayed path): " \
+            "a run supports a base it covers where its own route (DESIGN §5 routes) passes the walk's segment; " \
+            "maximal stretches of one label set (an empty set too, as SPEC §6.11 records one)"
+    clauses = dict(c_base, **{"/total": c_sup, "/rows/*/from_bp": c_sup, "/rows/*/to_bp": c_sup,
+                              "/rows/*/n_labels": c_sup + ": the set's size",
+                              "/rows/*/n_labels_total": c_sup + ": the true count (no cut list on the arm)",
+                              "/rows/*/joined": "DESIGN §6 who joined (" + c_sup + "); " + C_LABEL_LIST,
+                              "/rows/*/left": "DESIGN §6 who left (" + c_sup + "); " + C_LABEL_LIST})
+    clauses.update(ecl)
+    if cut:
+        cons.append("/rows/*/n_labels_total")
+    partial = _cut_rows(ans, ctx, cons)
+    return _record(ans, clauses, cons + econ, partial=partial,
+                   rederived=["/total", "/rows/*/from_bp", "/rows/*/to_bp", "/rows/*/n_labels",
+                              "/rows/*/n_labels_total", "/rows/*/joined", "/rows/*/left"])
+
+
 _TOOLS: Dict[str, Callable[[_Doc, dict, dict], dict]] = {
     "graphlet_summary": _graphlet_summary, "graphlet_walks": _graphlet_walks, "graphlet_walk": _graphlet_walk,
     "graphlet_labels": _graphlet_labels, "graphlet_splits": _graphlet_splits, "graphlet_sequence": _graphlet_sequence,
     "graphlet_export": _graphlet_export, "graphlet_subtrie": _graphlet_subtrie, "graphlet_save": _graphlet_save,
     "graphlet_load": _graphlet_load, "traverse_continue": _traverse_continue, "graphlet_claims": _graphlet_claims,
+    "graphlet_support": _graphlet_support,
 }
 
 

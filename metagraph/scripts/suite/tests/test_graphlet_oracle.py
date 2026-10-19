@@ -451,12 +451,53 @@ class LabelWalkGoldens(unittest.TestCase):
                          ["expected_error"], "no_coordinates")
 
 
+class SupportGoldens(unittest.TestCase):
+    """graphlet_support (phase B): the displayed support profile along a walk (DESIGN §5, §6; re-derived from DESIGN
+    §5.1 with the walk as the displayed path)."""
+
+    def test_merge_profile(self):
+        """merge, walk 0 (segments 0, 1, 3, 5, 6): b.fa takes the T branch at the split at 20 and rejoins through the
+        merge at 36 (its partition is the second parent's); a.fa takes C at 46 and rejoins at 62."""
+        r = rec("graphlet_support", {"arm": "right", "walk": 0}, "merge")
+        rows = r["answer"]["rows"]
+        name = lambda xs: [x["name"] for x in xs]   # noqa: E731
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["n_labels"]) for x in rows],
+                         [(0, 20, 4), (20, 36, 3), (36, 46, 4), (46, 62, 3), (62, 100, 4)])
+        self.assertEqual([(name(x.get("joined", [])), name(x.get("left", []))) for x in rows[1:]],
+                         [([], ["b.fa"]), (["b.fa"], []), ([], ["a.fa"]), (["a.fa"], [])])
+        self.assertIn("/rows/0/n_labels", r["oracle"]["rederived"])
+        stepped = rec("graphlet_support", {"arm": "right", "walk": 0, "step": 10}, "merge")["oracle"]
+        self.assertEqual(("/rows" in stepped["consistency_only"], stepped["checked"].keys() & {"/total"}),
+                         (True, set()))                     # step=: the tool's merging rule (consistency-only)
+
+    def test_switch_profile(self):
+        """caps, walk 0 (segments 0, 1): hX takes C at the split at 20; hY switches to hZ at 103 on segment 1."""
+        rows = rec("graphlet_support", {"arm": "right", "walk": 0}, "caps")["answer"]["rows"]
+        self.assertEqual([(x["from_bp"], x["to_bp"], x["n_labels"], [y["name"] for y in x.get("joined", [])],
+                           [y["name"] for y in x.get("left", [])]) for x in rows],
+                         [(0, 20, 2, [], []), (20, 103, 1, [], ["hX"]), (103, 126, 1, ["hZ"], ["hY"])])
+
+    def test_design_clipped_merge_profile(self):
+        """DESIGN §5.1's clipped-merge case (HAND-MADE fixture and vector): the displayed profile."""
+        g, f, mgt = doc("clipped_merge")
+        with open(os.path.join(DATA, "documents", "clipped_merge.claims.json"), encoding="utf-8") as fh:
+            want = json.load(fh)["support_profile_displayed"]
+        rows = O.answer("graphlet_support", {"arm": "right", "walk": 0}, f, mgt)["answer"]["rows"]
+        self.assertEqual([[x["from_bp"], x["to_bp"], x["n_labels"]] for x in rows], [[a, b, len(c)] for a, b, c in want])
+
+    def test_errors_and_annotate(self):
+        self.assertEqual(rec("graphlet_support", {"arm": "right", "walk": 3}, "caps")["oracle"]["expected_error"],
+                         "bad_argument")
+        r = rec("graphlet_support", {"arm": "right", "walk": 0}, "annotate")
+        self.assertIn("/rows", r["oracle"]["consistency_only"])
+
+
 class RecordSemantics(unittest.TestCase):
     """The record contract (FORMAT-v8 §4 and its extensions) and that W5 is not vacuous: a wrong answer differs."""
 
     def test_declared_records(self):
         g, f, mgt = doc("fork")
-        for tool, args, why in [("graphlet_support", {"arm": "left", "walk": 0}, "not_implemented_phase_b"),
+        for tool, args, why in [
                                 ("graphlet_compare", {"mode": "walks"}, "properties_only"),
                                 ("graphlet_list", {}, "not_applicable"), ("traverse_fetch", {}, "not_applicable"),
                                 ("graphlet_walk", {"arm": "left", "walk": 2}, "expected_error"),
@@ -523,7 +564,7 @@ class RecordSemantics(unittest.TestCase):
                          ["outcome"], "agree")
         self.assertEqual(O.compare(err, {"error": "bad_arm"})["outcome"], "disagree")
         self.assertEqual(O.compare(err, r["answer"])["outcome"], "disagree")
-        ph = O.answer("graphlet_support", {"arm": "right", "walk": 0}, f, mgt)
+        ph = O._declared("not_implemented_phase_b")
         self.assertEqual(O.compare(ph, {"rows": []})["outcome"], "not_checked")
         # no bases (sequences: false): the tool refuses a FASTA (library-defined, any code); a GFA may carry `*`
         # sequences, so W5 makes no claim there; a record checking nothing makes no claim

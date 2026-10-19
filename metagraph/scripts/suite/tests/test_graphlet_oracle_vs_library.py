@@ -177,6 +177,14 @@ def _calls(res):
                 ("graphlet_claims", {"arm": s, "labels": [{"id": x} for x in labs], "max_bytes": WIDE}),
                 ("graphlet_claims", {"arm": s}), ("graphlet_claims", {"arm": s, "labels": []}),
                 ("graphlet_claims", {"arm": s, "min_bp": -1})]
+        # phase B, graphlet_support (INVENTORY §3.1): the walk sample of graphlet_walk, step None and step = k; a
+        # paging pass at 2048; a walk out of range
+        for w in (range(n) if n <= 12 else sorted({0, n - 1, n // 2} | {p["id"] for p in a["paths"]
+                                                                          if p.get("continuation")})):
+            out += [("graphlet_support", {"arm": s, "walk": w, "max_bytes": WIDE}),
+                    ("graphlet_support", {"arm": s, "walk": w, "step": 20, "max_bytes": WIDE})]
+        out += [("graphlet_support", {"arm": s, "walk": 0}), ("graphlet_support", {"arm": s, "walk": n}),
+                ("graphlet_support", {"arm": s, "walk": 0, "step": -1})]
     return out
 
 
