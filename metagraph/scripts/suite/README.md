@@ -4807,8 +4807,8 @@ Nothing here touches staging; every test is offline.
   `timing` and `usage`, results[*].`timing`, FORMAT v2 E1's results[*].annotation lookahead counters
   `direct_reads` and `keys_mapped`, and VERIFY-L VL16's results[*].seed.seed_id (the caller's own seed name);
   strategy settings such as output.timing and annotation.batch_kmers stay),
-  `digests` (FORMAT's `doc` block). A broken frame (no final LF, no H of MGT v1 first, J anywhere but line 2, no Z counting the lines) is
-  a ValueError, never a digest.
+  `digests` (FORMAT's `doc` block). A broken frame (no final LF, no H of MGT v1 first, J anywhere but line 2, no Z
+  counting the lines) is a ValueError, never a digest.
 - `graphlet_select.py`: run-time selectors, pure and stdlib (async vendors it): `resolve(value, answers)` replaces
   `{ref, path}` (an RFC 6901 pointer into an earlier assembled answer), `{select, args}` and `{cursor_of}` at any
   depth; a label
@@ -4852,9 +4852,10 @@ Nothing here touches staging; every test is offline.
 - Supervision (VERIFY-L VL3): each library call waits for its reply with select() up to the op's `timeout_s` (a
   manifest op field; else --op-timeout, 120 s). A call over it is recorded `timeout` {timeout_s, page}, a child that
   ends during a call `child_died` {exit, page}; the process is then killed and restarted with every document loaded
-  so far, and the next op runs (handles an op made are gone). An answer that is no JSON is `exception` {type}, one holding a NaN or an infinity `non_finite` {pointer, page}
-  (VERIFY-L VL9: records are strict JSON). A way
-  whose process does not start or restarts more than 20 times is reported, the next way runs, the exit code is 1.
+  so far, and the next op runs (handles an op made are gone). An answer that is no JSON is `exception` {type}, one
+  holding a NaN or an infinity `non_finite` {pointer, page} (VERIFY-L VL9: records are strict JSON). A way whose
+  process does not start or restarts more than 20 times is reported, the next way runs, the exit code is 1. Each
+  way's work/ (the library's spool and export directory) is removed after the run unless --keep-work.
 - Handles in records are symbols relative to the op's scenario: `<handle>` (its own graphlet, FORMAT's form),
   `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in
   args_resolved `<cursor>`; the way's directories `<export_dir>`, `<spool_dir>`. Raw pages keep everything.

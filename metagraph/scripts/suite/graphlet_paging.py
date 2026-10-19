@@ -50,6 +50,8 @@ LIST_FIELDS = {
     "graphlet_list": "rows",       # :2400
 }
 SEQUENCE_TOOL = "graphlet_sequence"
+# a sequence page's own slice: where it starts and ends, its bases, whether and where it goes on
+SEQUENCE_PAGE_FIELDS = ("from", "to", "sequence", "truncated", "next_from")
 # the fields that say how a listing ended (a budgeted list's total_at_least, complete, filtered_so_far, its local block
 # and stop, :1008-1014; the hint that goes with `filtered`, walks :1669-1675, claims :2087-2089, which a budgeted
 # claims listing states only once its resumed pages have filtered something): the last page's
@@ -184,6 +186,15 @@ def assemble(tool: str, pages: List[Any], complete: bool, volatile: Tuple[str, .
     if tool == SEQUENCE_TOOL:
         if not all(isinstance(p, dict) and isinstance(p.get("sequence"), str) for p in pages):
             raise AssemblyError("a page of graphlet_sequence without its sequence")
+        for i, p in enumerate(pages[1:], 1):   # the slice's own fields aside, the pages describe one call
+            for k, v in p.items():
+                if k not in SEQUENCE_PAGE_FIELDS + PAGE_FIELDS and k not in volatile and k in first and v != first[k]:
+                    raise AssemblyError("page %d of %s states %s otherwise than page 0" % (i, tool, k))
+        for k in volatile:
+            for p in reversed(pages):
+                if k in p:
+                    first[k] = p[k]
+                    break
         first["sequence"] = "".join(p["sequence"] for p in pages)
         first["to"] = pages[-1].get("to")
         first.pop("next_from", None)

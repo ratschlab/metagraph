@@ -114,7 +114,8 @@ class AssembleTests(unittest.TestCase):
     def test_keys_of_later_pages_kept(self):
         """VL1: a key page 0 lacks is taken from the first page stating it; hint and filtered from the last page (a
         budget-resumed claims listing states both only once it has filtered something)."""
-        pages = [{"handle": "h", "arm": "left", "total_at_least": 1, "complete": False, "rows": [1], "next_cursor": "a"},
+        pages = [{"handle": "h", "arm": "left", "total_at_least": 1, "complete": False, "rows": [1],
+                  "next_cursor": "a"},
                  {"handle": "h", "arm": "left", "total_at_least": 2, "complete": False, "rows": [2],
                   "filtered_so_far": {"merge_entered": 1}, "hint": "x", "caveat": "c", "next_cursor": "b"},
                  {"handle": "h", "arm": "left", "total": 3, "complete": True, "rows": [3],
@@ -185,6 +186,13 @@ class AssembleTests(unittest.TestCase):
                          {"from": 0, "to": 7, "length": 7, "sequence": "ACGTACG"})
         self.assertEqual(gp.assemble("graphlet_sequence", pages[:2], False),
                          {"from": 0, "to": 6, "length": 7, "sequence": "ACGTAC", "truncated": True})
+        # VL15: the pages of one slice agree on everything but the slice itself
+        pages[2]["length"] = 8
+        with self.assertRaises(gp.AssemblyError):
+            gp.assemble("graphlet_sequence", pages, True)
+        pages[2]["length"] = 7
+        pages[1]["elapsed_ms"], pages[2]["elapsed_ms"] = 3, 4
+        self.assertEqual(gp.assemble("graphlet_sequence", pages, True, volatile=("elapsed_ms",))["elapsed_ms"], 4)
 
     def test_single_objects_pass(self):
         self.assertEqual(gp.assemble("graphlet_summary", [{"summary": {"a": 1}}], True), {"summary": {"a": 1}})
@@ -206,6 +214,35 @@ class ListTableTests(unittest.TestCase):
         self.assertIn("row_truncated=True, cut_fields=", page)
         sequence = src[src.index("    def graphlet_sequence(self"):src.index("    def graphlet_export(self")]
         self.assertIn("next_from=start + len(part)", sequence)
+
+    def test_end_and_page_fields_match_the_library(self):
+        """VL13: every END_FIELDS / PAGE_FIELDS key is one the library's paging states where the tables say: _page
+        (total, total_at_least, complete, filtered renamed filtered_so_far, stop, next_cursor, row_truncated,
+        cut_fields), _finish_local (the local block), _cuts (fields_cut), the walks and claims bases (filtered, hint);
+        `cursor` is the per-page echo FORMAT §3 removes, which the library never states."""
+        with open(os.path.join(LIB, "metagraph", "traverse", "mcp_tools.py"), encoding="utf-8") as fh:
+            src = fh.read()
+
+        def body(start, end):
+            i = src.index(start)
+            return src[i:src.index(end, i + len(start))]
+        page = body("    def _page(self", "    def _page_cut(self")
+        walks = body("    def graphlet_walks(self", "    def _ranked_ids(self")
+        claims = body("    def graphlet_claims(self", "    def graphlet_sequence(self")
+        stated = {
+            "total": "total=len(rows)" in page, "total_at_least": "total_at_least=" in page,
+            "complete": "complete=True" in page and "complete=False" in page,
+            "filtered_so_far": "out['filtered_so_far'] = out.pop('filtered')" in page,
+            "stop": "out['stop'] = " in page, "next_cursor": "out['next_cursor'] = " in page,
+            "row_truncated": "row_truncated=True" in page, "cut_fields": "cut_fields=cut" in page,
+            "local": "cand = dict(out, local=local)" in body("    def _finish_local(self", "    # ====="),
+            "fields_cut": "fields_cut=list(cut)" in body("def _cuts(", "class _Receipt"),
+            "filtered": "base['filtered'] = " in walks and "base['filtered'] = " in claims,
+            "hint": "base['hint'] = " in walks and "base['hint'] = " in claims,
+        }
+        self.assertEqual(set(gp.END_FIELDS) | set(gp.PAGE_FIELDS), set(stated) | {"cursor"})
+        self.assertEqual([k for k, ok in stated.items() if not ok], [])
+        self.assertNotIn("'cursor':", page)
 
 
 if __name__ == "__main__":

@@ -67,7 +67,8 @@ Files of a way's directory: graphlet_ops.jsonl (one record per op, FORMAT §3, p
 graphlet_export / graphlet_save, `file`), graphlet_docs.jsonl (one line per document: its source, digests, load
 receipt or error), raw/<scenario>.<op>.<page>.json.gz (page 0 first) and raw/<scenario>.<op>.file<.ext>.gz (an
 export's text, handles as symbols), docs/<scenario>.mgt.gz (the document the way processed), run.json, child.log,
-work/ (the spool and the export directory). An existing graphlet_ops.jsonl is never appended to: use another --out.
+and, during the run only (--keep-work keeps it), work/ (the spool and the export directory). An existing
+graphlet_ops.jsonl is never appended to: use another --out.
 """
 
 import argparse
@@ -78,6 +79,7 @@ import os
 import platform
 import re
 import select
+import shutil
 import subprocess
 import sys
 import time
@@ -278,7 +280,12 @@ def library_commit(root, explicit=None):
     if explicit:
         return explicit
     path = library_path(root)
-    for d in (os.path.abspath(root), os.path.normpath(os.path.join(path, "..", "..", ".."))):
+    dirs = [os.path.abspath(root)]
+    if path == os.path.abspath(root) and path.endswith(os.path.join("metagraph", "api", "python")):
+        # a root given as the export's own metagraph/api/python: the export directory three levels up (only then;
+        # a root that is some other package directory has no export above it, VERIFY-L VL15)
+        dirs.append(os.path.normpath(os.path.join(path, "..", "..", "..")))
+    for d in dirs:
         marker = os.path.join(d, "LIBRARY_COMMIT")
         if os.path.isfile(marker):
             with open(marker, "r", encoding="utf-8") as fh:
@@ -520,11 +527,16 @@ class Way(object):
                 "python", "implementation", "executable", "hashseed", "hash_randomization", "ignore_environment",
                 "hash_probe", "hash_probe_launch")),
             "child": {"argv": self.child.cmd, "env_keys": sorted(self.child.env), "restarts": self.restarts},
-            "limits": self.r.limits, "limits_not_applied": self.r.limits_not_applied, "counts": self.counts, "started_utc": iso(self.started),
+            "limits": self.r.limits, "limits_not_applied": self.r.limits_not_applied, "counts": self.counts,
+            "started_utc": iso(self.started),
             "updated_utc": iso(time.time()), "runner": os.path.basename(__file__)})
 
     def close(self, state="done"):
         self.child.close(kill=state != "done")
+        if not self.r.args.keep_work:
+            # the library's scratch (its spool and export directory): every export is kept under raw/, every
+            # document under docs/ (VERIFY-L VL15); --keep-work leaves it for inspection
+            shutil.rmtree(os.path.join(self.dir, "work"), ignore_errors=True)
         for fh in (self.ops_file, self.docs_file):
             fh.flush()
             os.fsync(fh.fileno())
@@ -1113,6 +1125,8 @@ def parse_args(argv):
     ap.add_argument("--to", help="with --export-library: the (empty) target directory")
     ap.add_argument("--repo", help="with --export-library: the repository (default: this script's)")
     ap.add_argument("--drift-report", action="store_true", help="list the drift way's differences from W4 (--out)")
+    ap.add_argument("--keep-work", action="store_true",
+                    help="keep each way's work/ (the library's spool and export directory) after the run")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     if args.export_library or args.drift_report:

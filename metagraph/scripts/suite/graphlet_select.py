@@ -297,8 +297,8 @@ def label_entered_at_merge(answers: Mapping[str, Any], walk: Any, form: str = "s
     displayed walk shows it from the merge on (a merge-entered label). The previous row's `out` must be shown whole
     (its list as long as labels_out_total, the true count: a list cut to the row's 8 labels, or a recorded list cut
     by a label cap, labels_out < labels_out_total in annotate mode, VERIFY-L VL12), else absence there proves nothing
-    and the selector fails; a merge whose shown `in` labels all come from the first parent is passed over. -> the label (form "selector" {"ref"}, "ref",
-    "name")."""
+    and the selector fails; a merge whose shown `in` labels all come from the first parent is passed over.
+    -> the label (form "selector" {"ref"}, "ref", "name")."""
     _choice("form", form, LABEL_FORMS)
     names = _ops(walk, "walk")
     seen = []

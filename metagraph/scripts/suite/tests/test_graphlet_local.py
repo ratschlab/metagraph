@@ -291,6 +291,8 @@ def every_tool_plan():
            "bad_argument"),
         op("walk-sel", "graphlet_walk", {"arm": "left", "walk": ref("walks-id-l", "/rows/40/walk"),
                                          "max_bytes": 2048}, "selector"),
+        op("walk-sel-name", "graphlet_walk", {"arm": "left", "walk": {"select": ["walk_through_merge"]},
+                                              "max_bytes": 2048}, "selector"),
         op("walks-label-merge", "graphlet_walks", walks("left", label=ENTERED)),
         op("support-merge", "graphlet_support", {"arm": "left", "walk": MERGE, "step": None, "max_bytes": 262144}),
         op("support-step", "graphlet_support", {"arm": "left", "walk": MERGE, "step": 50, "max_bytes": 1500},
@@ -565,6 +567,7 @@ class EveryToolTests(unittest.TestCase):
         self.assertIn("followed to its end", by["walks-done"]["selector_error"])
         self.assertTrue(by["walks-done"]["selector_error"].startswith("args.cursor: "))
         self.assertTrue(by["walk-sel"]["selector_error"].startswith("args.walk: "))
+        self.assertIn("named by a string", by["walk-sel-name"]["selector_error"])   # VL8, through the runner
         top = by["labels-tab"]["answer"]["rows"]
         left = [r for r in top if r["arm"] == "left"]
         self.assertEqual(by["walks-label"]["args_resolved"]["label"], {"ref": left[0]["ref"]})
@@ -577,8 +580,6 @@ class EveryToolTests(unittest.TestCase):
         self.assertEqual((past["args_resolved"]["start"], past["args_resolved"]["end"]), (length - 20, length + 50))
         self.assertEqual((past["answer"]["from"], past["answer"]["to"], len(past["answer"]["sequence"])),
                          (length - 20, length, 20))
-        self.assertEqual(by["seq-walk"]["answer"]["sequence"], by["seq-past-end"]["answer"]["sequence"][-20:]
-                         if False else by["seq-walk"]["answer"]["sequence"])
         self.assertEqual(by["seq-walk"]["answer"]["sequence"][-20:], past["answer"]["sequence"])
         self.assertEqual(len(by["seq-walk"]["answer"]["sequence"]), length)
         merge = dict((r["op"], r) for r in self.recs["W1"] if r["scenario"] == "G-merge")
@@ -677,6 +678,8 @@ class EveryToolTests(unittest.TestCase):
         self.assertFalse([k for k in runs[0]["child"]["env_keys"] if k.startswith("PYTHON") and k != "PYTHONHASHSEED"])
         self.assertEqual(runs[0]["state"], "done")
         self.assertEqual(runs[0]["limits_not_applied"]["max_graphlet_mb"]["value"], 8)
+        for d in ("dl-lib", "dr-lib"):   # VL15: the library's scratch goes with the run (--keep-work keeps it)
+            self.assertFalse(os.path.exists(os.path.join(self.out, "arms", d, "work")))
         for way in ("W1", "W2"):
             files = sorted(os.listdir(os.path.join(self.out, "arms", rgl.WAY_DIRS[way], "raw")))
             self.assertEqual(len(files), len(os.listdir(os.path.join(self.out, "arms", "dl-lib", "raw"))))
@@ -1122,6 +1125,10 @@ class ExportAndDriftTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(lib, "metagraph", "api", "python", "metagraph", "traverse",
                                                         "mcp_tools.py")))
             self.assertEqual(rgl.library_commit(lib), head)
+            # VL15: a root given as the export's metagraph/api/python finds the export's LIBRARY_COMMIT three levels
+            # up; a root that is no such directory looks there for none
+            self.assertEqual(rgl.library_commit(os.path.join(lib, "metagraph", "api", "python")), head)
+            self.assertEqual(rgl.library_commit(FAKE_LIB, "fake"), "fake")
             # the same commit again: left as it is
             self.assertEqual(rgl.export_library(head, lib, repo, quiet=True), head)
             with self.assertRaises(SystemExit):
@@ -1135,7 +1142,9 @@ class ExportAndDriftTests(unittest.TestCase):
             report = rgl.drift_report(out, quiet=True)
             self.assertEqual((report["compared"], report["differ"]), (len(w4), []))
             # the exported copy runs too, and a drift record that differs is listed
-            run_offline(os.path.join(tmp, "copy"), plan, docs=docs, ways="W4", extra=["--library-root", lib])
+            run_offline(os.path.join(tmp, "copy"), plan, docs=docs, ways="W4", extra=["--library-root", lib,
+                                                                                    "--keep-work"])
+            self.assertTrue(os.path.isdir(os.path.join(tmp, "copy", "arms", "mcp-lib", "work", "spool")))
             self.assertEqual(set(r["library"]["commit"] for r in records(os.path.join(tmp, "copy"), "W4")), {head})
             path = os.path.join(out, "arms", "drift-lib", "graphlet_ops.jsonl")
             rows = records(out, "drift")
