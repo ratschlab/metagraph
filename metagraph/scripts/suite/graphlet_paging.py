@@ -157,23 +157,50 @@ def unmarked(evidence: Any) -> Any:
     return evidence
 
 
+def _base_fields(tool: str, pages: List[dict], first: dict, own: Tuple[str, ...], volatile: Tuple[str, ...]) -> None:
+    """The fields the pages of one listing or slice share, into |first| (page 0's copy): a key page 0 lacks from the
+    first later page stating it, each checked against the pages after it (the evidence but for its local-stop mark);
+    `evidence` and the |volatile| keys from the last page stating them; the END_FIELDS exactly the last page's (a
+    per-call `local` block, a budget's counts). |own|: the page's own fields (the list, the slice), set apart by the
+    caller. One rule for lists and sequences (VERIFY-L VL1, VR1)."""
+    for i, p in enumerate(pages):
+        for k, v in p.items():
+            if k in END_FIELDS or k in PAGE_FIELDS or k in own or k in volatile:
+                continue
+            if k not in first:   # page 0 lacks it (cut there, or stated only later): the first page stating it
+                first[k] = v
+            elif unmarked(v) != unmarked(first[k]) if k == "evidence" else v != first[k]:
+                raise AssemblyError("page %d of %s states %s otherwise than an earlier page" % (i, tool, k))
+    for k in ("evidence",) + tuple(volatile):
+        for p in reversed(pages):
+            if k in p:
+                first[k] = p[k]
+                break
+    last = pages[-1]
+    for k in END_FIELDS:
+        if k in last:
+            first[k] = last[k]
+        else:
+            first.pop(k, None)
+
+
 def assemble(tool: str, pages: List[Any], complete: bool, volatile: Tuple[str, ...] = ()) -> Any:
     """FORMAT v2 A2: the pages of one op as one answer. A list tool's `rows` concatenated in page order, every other
     field from the first page that states it (page 0's, and a key page 0 lacks from the first later page carrying it:
     nothing a page states is dropped), except: the END_FIELDS from the last page; `evidence` from the last page that
     states it (an interrupted page's carries limitations.local, the completing page's not); compare's base fields that
     a page cut (fields_cut) thereby taken from any page that carries them, fields_cut then naming only those no page
-    carried;
-    `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged,
-    and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor and cursor removed.
-    |volatile|: keys a runner's pages may state differently page by page, taken from the last page that states them
-    and exempt from the check below. The library's own pages have none (the local runner passes none); a service
-    that adds per-page fields of its own (an elapsed time, a lane, an op id) names them here, and only them, so that
-    a field the library states differently on two pages is still an AssemblyError (VERIFY-L VL4).
-    graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
-    next_from removed and `truncated` too when the loop reached the end (|complete|). A base field two pages state
-    differently (the evidence but for that mark) is an AssemblyError: a listing's pages describe one answer. The pages
-    are not changed."""
+    carried; `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields
+    merged, and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor and cursor
+    removed. graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page, next_from
+    removed and `truncated` too when the loop reached the end (|complete|); its other fields by the same rule as a
+    list's (_base_fields: the END_FIELDS, such as a per-call local block, from the last page; a key only later pages
+    state kept; VERIFY-L VR1). |volatile|: keys a runner's pages may state differently page by page, taken from the
+    last page that states them and exempt from the check below. The library's own pages have none (the local runner
+    passes none); a service that adds per-page fields of its own (an elapsed time, a lane, an op id) names them here,
+    and only them, so that a field the library states differently on two pages is still an AssemblyError (VERIFY-L
+    VL4). A base field two pages state differently (the evidence but for that mark) is an AssemblyError: a listing's
+    pages describe one answer. The pages are not changed."""
     if not pages:
         raise AssemblyError("no page of %s to assemble" % tool)
     first = dict(pages[0]) if isinstance(pages[0], dict) else pages[0]
@@ -186,15 +213,7 @@ def assemble(tool: str, pages: List[Any], complete: bool, volatile: Tuple[str, .
     if tool == SEQUENCE_TOOL:
         if not all(isinstance(p, dict) and isinstance(p.get("sequence"), str) for p in pages):
             raise AssemblyError("a page of graphlet_sequence without its sequence")
-        for i, p in enumerate(pages[1:], 1):   # the slice's own fields aside, the pages describe one call
-            for k, v in p.items():
-                if k not in SEQUENCE_PAGE_FIELDS + PAGE_FIELDS and k not in volatile and k in first and v != first[k]:
-                    raise AssemblyError("page %d of %s states %s otherwise than page 0" % (i, tool, k))
-        for k in volatile:
-            for p in reversed(pages):
-                if k in p:
-                    first[k] = p[k]
-                    break
+        _base_fields(tool, pages, first, SEQUENCE_PAGE_FIELDS, volatile)
         first["sequence"] = "".join(p["sequence"] for p in pages)
         first["to"] = pages[-1].get("to")
         first.pop("next_from", None)
@@ -215,25 +234,8 @@ def assemble(tool: str, pages: List[Any], complete: bool, volatile: Tuple[str, .
             rows.extend(dict(r, **{ROW_CUT_MARKER: mark}) if isinstance(r, dict) else r for r in p[field])
         else:
             rows.extend(p[field])
-        for k, v in p.items():
-            if k in END_FIELDS or k in PAGE_FIELDS or k == field or k in volatile:
-                continue
-            if k not in first:   # page 0 lacks it (cut there, or stated only later): the first page stating it
-                first[k] = v
-            elif unmarked(v) != unmarked(first[k]) if k == "evidence" else v != first[k]:
-                raise AssemblyError("page %d of %s states %s otherwise than an earlier page" % (i, tool, k))
+    _base_fields(tool, pages, first, (field,), volatile)
     first[field] = rows
-    for k in ("evidence",) + tuple(volatile):
-        for p in reversed(pages):
-            if k in p:
-                first[k] = p[k]
-                break
-    last = pages[-1]
-    for k in END_FIELDS:
-        if k in last:
-            first[k] = last[k]
-        else:
-            first.pop(k, None)
     cut = []
     for p in pages:
         for k in p.get("fields_cut") or []:

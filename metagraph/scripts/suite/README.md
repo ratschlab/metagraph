@@ -4870,7 +4870,9 @@ Nothing here touches staging; every test is offline.
   `"_cut_fields": [that page's cut_fields]` (FORMAT v2 A3); next_cursor and cursor removed. `volatile=` names keys a
   runner's pages may state differently (taken from the last page stating them): the local runner passes none, async
   the service's own per-page fields (VERIFY-L VL4). graphlet_sequence concatenates
-  `sequence`, takes `to` from the last page and drops next_from (and `truncated` when the loop reached the end).
+  `sequence`, takes `to` from the last page and drops next_from (and `truncated` when the loop reached the end); its
+  other fields follow the list's rule (END_FIELDS such as a per-call `local` block from the last page, keys only later
+  pages state kept: VERIFY-L VR1).
   A base field two pages state differently is `assembly_error`.
 - Records add `paging_complete` (FORMAT v2 A4, graphlet_paging.paging_complete: false when the last page still
   names a next one or the answer states complete false; null on a record without an answer) and, for

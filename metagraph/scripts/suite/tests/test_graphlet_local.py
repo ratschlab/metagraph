@@ -1009,6 +1009,53 @@ class BudgetTests(unittest.TestCase):
 
 
 @needs_library
+class ReparsedSequenceTests(unittest.TestCase):
+    def test_a_reparse_between_sequence_pages(self):
+        """VERIFY-L VR1's reproduction, in process: local limits, a store that drops the body from RAM between two
+        pages (ttl_ram_s 0.5, a clock one second on per page), a 1,200-byte sequence ceiling: page 1's `local` gains
+        `parsed` (the body re-parsed). The pages assemble into the one-slice answer, `local` from the last page."""
+        if LIB not in sys.path:
+            sys.path.insert(0, LIB)
+        import graphlet_paging as gp
+        from metagraph.traverse import GraphletStore, parser
+        from metagraph.traverse.mcp_tools import GraphletTools, ToolLimits
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        try:
+            now = [1000.0]
+            store = GraphletStore(os.path.join(tmp, "spool"), ttl_ram_s=0.5, clock=lambda: now[0])
+            tools = GraphletTools(store, secret=b"k" * 32, export_dir=os.path.join(tmp, "x"),
+                                  sequence_max_bytes=1200, local_limits=ToolLimits())
+            resp = read_json(DOCS["G-switch"])
+            r = resp["results"][0]
+            path = os.path.join(tmp, "spool", "doc.mgt")
+            with open(path, "w", encoding="utf-8", newline="") as fh:
+                fh.write(parser.standalone_text(r["graphlet"], r, resp))
+            handle = tools.graphlet_load(path=path)["handle"]
+            args = dict(handle=handle, arm="left", walk=9)
+            pages = [tools.graphlet_sequence(**args)]
+            while gp.more("graphlet_sequence", "all", pages):
+                now[0] += 1.0
+                arg, value = gp.next_call("graphlet_sequence", pages[-1])
+                pages.append(tools.graphlet_sequence(**dict(args, **{arg: value})))
+            self.assertGreater(len(pages), 10)
+            parsed = ["parsed" in (p.get("local") or {}) for p in pages]
+            self.assertTrue(any(parsed[1:]), parsed)
+            self.assertNotEqual(pages[0]["local"], pages[1]["local"])
+            answer = gp.assemble("graphlet_sequence", pages, True)
+            self.assertEqual(answer["local"], pages[-1]["local"])
+            whole = GraphletTools(GraphletStore(os.path.join(tmp, "spool2")), secret=b"k" * 32,
+                                  export_dir=os.path.join(tmp, "x2"), sequence_max_bytes=1 << 20)
+            path2 = os.path.join(tmp, "spool2", "doc.mgt")   # graphlet_load reads its own spool or export dir
+            shutil.copy(path, path2)
+            one = whole.graphlet_sequence(**dict(args, handle=whole.graphlet_load(path=path2)["handle"]))
+            self.assertEqual(answer["sequence"], one["sequence"])
+            self.assertEqual((answer["from"], answer["to"], answer["length"]), (one["from"], one["to"], one["length"]))
+            self.assertNotIn("truncated", answer)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@needs_library
 class ConversionTests(unittest.TestCase):
     def test_response_equals_file(self):
         """A W1-style document (the response, converted in the way's process by standalone_text) and the same

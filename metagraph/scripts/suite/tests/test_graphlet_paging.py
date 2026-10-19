@@ -194,6 +194,22 @@ class AssembleTests(unittest.TestCase):
         pages[1]["elapsed_ms"], pages[2]["elapsed_ms"] = 3, 4
         self.assertEqual(gp.assemble("graphlet_sequence", pages, True, volatile=("elapsed_ms",))["elapsed_ms"], 4)
 
+    def test_sequence_end_fields_and_later_keys(self):
+        """VR1: a sequence's pages follow the list's rule: a per-call `local` block (here a re-parse on page 1 adds
+        `parsed`) comes from the last page, a key only a later page states is kept, any other difference refused."""
+        pages = [{"from": 0, "to": 3, "length": 7, "sequence": "ACG", "truncated": True, "next_from": 3,
+                  "local": {"complete": True, "usage": {"work_units": 5}}},
+                 {"from": 3, "to": 6, "length": 7, "sequence": "TAC", "truncated": True, "next_from": 6,
+                  "local": {"complete": True, "usage": {"work_units": 9}, "parsed": {"work_units": 4}}, "note": "n"},
+                 {"from": 6, "to": 7, "length": 7, "sequence": "G", "local": {"complete": True,
+                                                                             "usage": {"work_units": 2}}}]
+        self.assertEqual(gp.assemble("graphlet_sequence", pages, True),
+                         {"from": 0, "to": 7, "length": 7, "sequence": "ACGTACG", "note": "n",
+                          "local": {"complete": True, "usage": {"work_units": 2}}})
+        pages[2]["note"] = "other"
+        with self.assertRaises(gp.AssemblyError):
+            gp.assemble("graphlet_sequence", pages, True)
+
     def test_single_objects_pass(self):
         self.assertEqual(gp.assemble("graphlet_summary", [{"summary": {"a": 1}}], True), {"summary": {"a": 1}})
         self.assertEqual(gp.assemble("graphlet_export", [{"path": "p", "bytes": 3}], True), {"path": "p", "bytes": 3})
