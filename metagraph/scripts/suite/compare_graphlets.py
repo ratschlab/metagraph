@@ -155,6 +155,9 @@ UNREAD_KINDS = ("oracle_unavailable", "oracle_error", "no_file", "runner_error")
 # between W1..W4 they are compared as usual (W3 calls are designed to fit, DESIGN-v8 §5)
 FIT_ERRORS = ("result_too_large", "receipt_too_large")
 FIT_ERRORS_W3 = FIT_ERRORS + ("op_busy",)
+# the codes of a ceiling refusing an answer: on a cut_of op these, and only these, are the way's cut (VERIFY-C-R2 VR2);
+# a worker state (op_busy), a time or memory stop (op_timeout, op_memory) or a budget stop is no cut: inconclusive
+CEILING_CODES = ("result_too_large", "receipt_too_large", "too_large", "body_too_large")
 OP_OUTCOMES = ("agree", "disagree", "service_by_design", "inconclusive", "precondition_failed")
 SCENARIO_OUTCOMES = ("fail", "precondition_failed", "inconclusive", "pass")
 
@@ -765,8 +768,8 @@ def compare_cut(way, rec, ref, optional):
     if ref is None:
         return {"way": way, "outcome": "not_compared", "detail": "%s recorded no uncut reference" % way}
     code = (rec.get("error") or {}).get("code") if isinstance(rec.get("error"), dict) else None
-    if code in fit_errors(way) and not ref.get("error"):
-        # the coordinator's R2-7: an op with cut_of keeps F3's rule, the ceiling's fitting error is its cut
+    if code in CEILING_CODES and not ref.get("error"):
+        # the coordinator's R2-7: an op with cut_of keeps F3's rule, the ceiling's refusal is its cut (VR2: only it)
         return {"way": way, "outcome": "agree", "detail": "the ceiling's fitting error %s (FORMAT v2 F3)" % code}
     if rec.get("error") or ref.get("error"):
         same = gp.first_difference(comparable_view(way, rec), comparable_view(way, ref)) is None
@@ -883,6 +886,14 @@ def compare_op(scenario, op, recs, precheck, manifest):
     fits = [(w, (r.get("error") or {}).get("code")) for w, r in sorted(present.items())
             if w != "W5" and isinstance(r.get("error"), dict) and r["error"].get("code") in fit_errors(w)]
     disagree = [p["pair"] for p in entry["pairs"] if p["outcome"] == "disagree"]
+    unfit = [f for f in fits if f[1] not in CEILING_CODES] if cut_of else []
+    if unfit:
+        # VERIFY-C-R2 VR2: on a cut_of op only a ceiling's refusal is a cut; a worker state, a time or memory stop
+        # tested nothing (blocks)
+        entry["outcome"] = "inconclusive"
+        entry["reason"] = "not a cut: %s (only a ceiling's refusal, %s, is the cut of a cut_of op)" % (
+            ", ".join("%s answered %s" % f for f in unfit), ", ".join(CEILING_CODES))
+        return entry
     if fits and not cut_of:
         # the coordinator's decision on R2-7: the plan failed to fit, the op tested nothing (blocks); an op with
         # cut_of keeps F3's rule

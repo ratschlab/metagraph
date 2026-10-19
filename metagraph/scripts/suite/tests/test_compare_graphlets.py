@@ -750,6 +750,26 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(getattr(self.oracle, "calls", []), [])
         self.assertNotIn("W3-W5", [p["pair"] for p in e["pairs"]])   # a cut op's W3 is judged by its own cut check
 
+    def test_vr2_only_a_ceilings_refusal_is_a_cut(self):
+        uncut_op = dict(self.op, id="walks-all", args=dict(self.op["args"], max_bytes=262144))
+        cut_op = dict(self.op, id="walks-page", args=dict(self.op["args"], max_bytes=64), paging="none",
+                      cut_of="walks-all")
+        fit = {"code": "result_too_large", "fields": {"bytes": 3000, "max_bytes": 64}}
+        for code in ("op_busy", "op_timeout", "op_memory"):
+            self.make(ops=[uncut_op, cut_op])
+            self.five(op=uncut_op)
+            self.five(op=cut_op, errors={"W1": fit, "W2": fit, "W4": fit, "W3": {"code": code, "fields": {}}})
+            e = self.op_entry(oid="walks-page")
+            self.assertEqual(e["outcome"], "inconclusive", (code, e))
+            self.assertIn("not a cut: W3 answered %s" % code, e["reason"])
+            self.run_.cleanup()
+        self.make(ops=[uncut_op, cut_op])
+        self.five(op=uncut_op)
+        too = {"code": "body_too_large", "fields": {}}
+        self.five(op=cut_op, errors={"W1": fit, "W2": fit, "W4": fit, "W3": too})
+        e = self.op_entry(oid="walks-page")
+        self.assertEqual(next(c for c in e["cuts"] if c["way"] == "W3")["outcome"], "agree")
+
     def test_a_torn_w1_line_is_w5s_inconclusive_not_differing_args(self):
         import graphlet_oracle as go
         cg.graphlet_oracle = go
