@@ -444,6 +444,27 @@ class RecordSemantics(unittest.TestCase):
         r = O.answer("graphlet_summary", {}, f, g["results"][0]["graphlet"])
         self.assertEqual(O.compare(r, {"summary": {}})["outcome"], "inconclusive")
 
+    def test_failed_seed(self):
+        """VR4: a seed the full twin states failed (SPEC §7.1: {seed, outcome walks failed, error}, no arms) has no
+        graphlet: every op that reads one expects no_graphlet (lane L's code for the same answer), without any
+        document; graphlet_load any code; backend tools stay not applicable."""
+        f = _load(os.path.join(DATA, "real", "sra", "sra_batch3__batch_refuse.full.json.gz"))
+        self.assertTrue(O.seed_failed(f, 1) and not O.seed_failed(f, 0))
+        for tool, args in [("graphlet_walks", {"arm": "left"}), ("graphlet_summary", {}),
+                           ("graphlet_export", {"format": "mgt"}), ("graphlet_claims", {"arm": "left"}),
+                           ("graphlet_compare", {"mode": "walks"})]:
+            r = O.answer(tool, args, f, None, {"seed_index": 1})
+            self.assertEqual((r["oracle"]["declared"], r["oracle"]["expected_error"]), ("expected_error", "no_graphlet"))
+            self.assertIn("SPEC §7.1", r["oracle"]["note"])
+            w1 = {"way": "W1", "args_resolved": dict(args, handle="<handle>"), "answer": None,
+                  "error": {"code": "no_graphlet", "fields": {}}}
+            self.assertEqual(O.compare(r, w1)["outcome"], "agree", tool)
+            self.assertEqual(O.compare(r, {"error": "bad_argument"})["outcome"], "disagree", tool)
+        self.assertIsNone(O.answer("graphlet_load", {"path": "x.mgt"}, f, None, {"seed_index": 1})["oracle"]
+                          ["expected_error"])
+        self.assertEqual(O.answer("traverse_fetch", {}, f, None, {"seed_index": 1})["oracle"]["declared"],
+                         "not_applicable")
+
     def test_patterns_and_position_order(self):
         """`*` patterns in checked, unordered and absent expand over the answers (FORMAT v2 F1); with
         ENDS_UNORDERED off (G3) a row's ends compare sorted by position only (SPEC §7.1)."""
@@ -757,6 +778,15 @@ class RunStep(unittest.TestCase):
             with gz.open(os.path.join(root, "arms", "direct-local", "docs", "%s.full.json.gz" % sid), "wt",
                          encoding="utf-8") as fh:
                 json.dump(f, fh)
+        # a failed seed (VR4): its full twin and its graphlet answer, neither with a graphlet, no W1 document
+        g = _load(os.path.join(DATA, "real", "sra", "sra_batch3__batch_refuse.graphlet.json.gz"))
+        f = _load(os.path.join(DATA, "real", "sra", "sra_batch3__batch_refuse.full.json.gz"))
+        with gz.open(os.path.join(root, "arms", "direct-local", "raw", "G-fail.direct-local.0.json.gz"), "wt",
+                     encoding="utf-8") as fh:
+            json.dump({"answer": {"body": dict(g, results=[g["results"][1]])}}, fh)
+        with gz.open(os.path.join(root, "arms", "direct-local", "docs", "G-fail.full.json.gz"), "wt",
+                     encoding="utf-8") as fh:
+            json.dump(dict(f, results=[f["results"][1]]), fh)
         caps_walks = O.answer("graphlet_walks", {"arm": "right", "rank": "length"}, *doc("caps")[1:])["answer"]
         w1 = [
             {"scenario": "G-caps", "op": "walks", "tool": "graphlet_walks", "paging_complete": True,
@@ -787,7 +817,10 @@ class RunStep(unittest.TestCase):
             {"scenario": "G-caps", "op": "raw", "tool": "graphlet_walks",
              "args_resolved": {"handle": "g_0123456789ab", "arm": "right"}},
             {"scenario": "G-caps", "op": "noargs", "tool": "graphlet_walks", "args_resolved": None,
-             "error": {"code": "no_document", "fields": {}}}]
+             "error": {"code": "no_document", "fields": {}}},
+            {"scenario": "G-fail", "op": "fail-walks", "tool": "graphlet_walks", "paging_complete": None,
+             "args_resolved": {"handle": "<handle>", "arm": "left"}, "answer": None,
+             "error": {"code": "no_graphlet", "fields": {}}}]
         with open(os.path.join(root, "arms", "dl-lib", "graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
             for r in w1:
                 fh.write(json.dumps(dict(r, run_id="R", way="W1")) + "\n")
@@ -825,6 +858,10 @@ class RunStep(unittest.TestCase):
             for op in ("q", "typo", "raw"):
                 self.assertEqual(lines[op]["oracle"]["declared"], "unresolved_handle", op)
             self.assertEqual(lines["noargs"]["oracle"]["declared"], "no_input")
+            fail = lines["fail-walks"]["oracle"]
+            self.assertEqual((fail["declared"], fail["expected_error"]), ("expected_error", "no_graphlet"))
+            self.assertEqual(O.compare(lines["fail-walks"], dict(w1[-1], error={"code": "no_graphlet", "fields": {}}))
+                             ["outcome"], "agree")
             self.assertEqual((lines["torn"]["scenario"], lines["torn"]["tool"], lines["torn"]["oracle"]["declared"]),
                              ("G-merge", "graphlet_walks", "unreadable_w1"))
             run_level = lines[None]
