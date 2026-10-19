@@ -4817,13 +4817,17 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   body, envelope or twin check fails the scenario as a determinism finding; what cannot be checked is inconclusive.
   The digests are graphlet_doc's (lane L); the record-level reading that names a difference is this module's.
 - `compare_graphlets.py RUN_DIR`: `graphlet_compare.json` (and the pre-check records). Per op call: the ways (W3
-  left out is `not_exposed` with the owner's reason: the op's not_exposed.W3, else graphlet.not_exposed or the
-  manifest's graphlets.not_exposed by tool or tool.argument; without a reason a manifest problem), args_resolved
+  left out is `not_exposed` with the owner's reason: the op's not_exposed, else the scenario's graphlet.not_exposed
+  by tool or tool.argument, both inside content_sha256 (FORMAT v2 D2); without a reason a manifest problem; a way
+  whose runner failed, FORMAT v2 B2, is not compared), args_resolved
   equal first, then the canonical answers by pairs W1-W2 (transport), W1-W4 (fetch path), W3-W4 (service wrapper) and
-  each against W5 on its checked pointers. Canonical: W3's service fields stripped by `ANSWER_KEYS` (the library's
+  each against W5 through lane O's `graphlet_oracle.compare` (FORMAT v2 F2: one comparison of an answer against a W5
+  record; a fitting error is not comparable against W5, F3). Canonical: W3's service fields stripped by `ANSWER_KEYS` (the library's
   per-tool answer keys, frozen here and held to the library's answers on the mini_refseq fixtures by
   tests/test_compare_graphlets.py), handles to symbols (graphlet_compare's a and b by role, at the top only), cursors
-  removed, `local` compared only within one commit, interpreter and work model, an export's path and bytes left out;
+  removed (a runner's symbols kept, FORMAT v2 B1), `local` compared only within one commit, interpreter, work model
+  and configuration, an export's path and bytes left out and its file compared by content at file.raw (B3); a row
+  the service cut (_cut_fields, A3) is judged against a library way as a cut of that way's row;
   errors by code and structured fields (no message, hint; no result_too_large bytes). A deliberate cut (op field
   `cut_of`: the uncut op) is judged per way against that way's uncut answer: every string or list a prefix, every
   key it lacks optional (OPTIONAL_KEYS or named in its fields_cut / cut_fields), every key it adds a cut marker.
@@ -4835,7 +4839,7 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   walk_display, label_evidence, qualified_cause (each side's cap stated, "no difference within the recorded
   evidence" exactly when the library counts none), hint (more than 64 labels per node), in_service (over 8 MiB),
   max_bytes_refused (262,145 refused on W3, answered by the library ways), forbidden and bad_handle (op field `probe`:
-  wrong_token / malformed_handle, W3 only), library_commit; each pass, fail naming the calls, or inconclusive (not
+  wrong_token / bad_handle, FORMAT v2 D2, W3 only), library_commit; each pass, fail naming the calls, or inconclusive (not
   exercised). And by-design pairs: an op naming a case (`by_design`) whose `graphlet` block (compare.
   graphlet_case_problems validates it at load: tools, path predicates over args_resolved, library and service
   sides) holds is service_by_design; a pair that does not hold is a disagreement naming its side.
@@ -4854,8 +4858,10 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   GATE PASS, 2,073 judged / 1,955 passed, the verdict's text and JSON identical to the code before (judged_utc
   aside); its report built in-process identical (the date and generation time aside); the run directory unchanged
   (file list and mtimes). policy_v6_rtp_mcp, policy_v7_rt_mcp and policy_v7_rtp_mcp regenerate identical.
-- Where FORMAT-v8 leaves a place open (the kept documents, the twin, the echo, the pin, probes, cut_of, by_design,
-  export contents), the lane's reading is listed as a FORMAT question in its note.
+- The places FORMAT-v8 left open are settled by FORMAT v2 (A-G): documents arms/<way dir>/docs (W4 else the MCP's
+  own arms/mcp/docs), the twin arms/direct-local/docs/<s>.full.json.gz, the job record arms/mcp/graphlet_jobs.jsonl
+  (echo, library_commit), the pin graphlet.library_commit, op fields not_exposed / cut_of / by_design / probe, a
+  failed seed's preconditions {"no_graphlet": true}.
 
 ## Glossary
 

@@ -380,11 +380,13 @@ class FiveWay(unittest.TestCase):
         # by the manifest's table (by tool, or by tool.argument)
         op2 = dict(op)
         op2.pop("not_exposed")
-        scen = gf.scenario(ops=[op2])
-        man = {"graphlets": {"not_exposed": {"graphlet_splits": "not exposed by the service"}}}
-        self.assertEqual(cg.not_exposed_reason(scen, op2, man), "not exposed by the service")
-        man = {"graphlets": {"not_exposed": {"graphlet_splits.n": "an argument the service lacks"}}}
-        self.assertEqual(cg.not_exposed_reason(scen, op2, man), "an argument the service lacks")
+        scen = gf.scenario(ops=[op2], not_exposed={"graphlet_splits": "not exposed by the service"})
+        self.assertEqual(cg.not_exposed_reason(scen, op2), "not exposed by the service")
+        scen = gf.scenario(ops=[op2], not_exposed={"graphlet_splits.n": "an argument the service lacks"})
+        self.assertEqual(cg.not_exposed_reason(scen, op2), "an argument the service lacks")
+        # a manifest-level table would be outside content_sha256: not read (FORMAT v2 D2)
+        man = {"graphlets": {"not_exposed": {"graphlet_splits": "x"}}}
+        self.assertIsNone(cg.not_exposed_reason(gf.scenario(ops=[op2]), op2, man))
         self.run_.cleanup()
         self.make(ops=[op2])
         self.five(op=op2, ways=("W1", "W2", "W4"), answer={"handle": "g_0123456789ab", "arm": "left", "total": 0,
@@ -428,6 +430,29 @@ class FiveWay(unittest.TestCase):
         self.five(errors={"W1": err, "W2": err, "W3": {"code": "bad_arm", "fields": {}}, "W4": err}, w5=False)
         p = next(p for p in self.op_entry()["pairs"] if p["pair"] == "W3-W4")
         self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/error/code"))
+
+    def test_record_conventions_of_format_v2(self):
+        # B1: the runners' symbols are kept as they are
+        a = {"handle": "<handle>", "evidence": {"view": {"of": "<handle:walks-sub>"}}}
+        self.assertEqual(cg.canonical_answer("graphlet_walks", a), a)
+        # B2: a runner's own failure is not compared, the op inconclusive
+        self.make()
+        self.five(errors={"W2": {"code": "exception", "fields": {"type": "KeyError"}}})
+        e = self.op_entry()
+        self.assertEqual((e["outcome"], e["ways"]["W2"]), ("inconclusive", "runner_error"))
+        self.assertIn("W2 did not run the call (runner: exception)", e["reason"])
+        # D3: a failed seed's no_graphlet is compared by its code (the runner's and the service's fields differ)
+        self.run_.cleanup()
+        self.make(ways=["W1", "W2", "W3", "W4"])
+        lib = {"code": "no_graphlet", "fields": {"outcome": "failed"}}
+        self.five(errors={"W1": lib, "W2": lib, "W4": lib, "W3": {"code": "no_graphlet", "fields": {"reason": "x"}}},
+                  w5=False)
+        self.assertEqual(self.op_entry()["outcome"], "agree")
+        # B4: local is compared only within one library configuration (limits)
+        r1 = {"library": {"commit": "c", "python": "3", "work_model": 2, "limits": {"work_units": 5}}}
+        r2 = {"library": {"commit": "c", "python": "3", "work_model": 2, "limits": {"work_units": 6}}}
+        self.assertFalse(cg.same_library_env(r1, r2))
+        self.assertTrue(cg.same_library_env(r1, copy.deepcopy(r1)))
 
     def test_the_oracle_on_an_error(self):
         self.make()

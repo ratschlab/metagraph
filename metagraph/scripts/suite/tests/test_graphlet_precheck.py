@@ -286,12 +286,10 @@ class LibraryCommit(PrecheckBase):
         rec = self.check("library_commit")
         self.assertEqual(rec["outcome"], "inconclusive")
         self.assertIn("pins no library_commit", rec["detail"])
-        # the top-level pin is read, and said to be outside the content hash
+        # a top-level pin would be outside content_sha256: not read (FORMAT v2 D1)
         self.run_.manifest = gf.manifest(self.run_.scenarios, graphlets={"library_commit": gf.PIN})
         self.run_.write_json("manifest.json", self.run_.manifest)
-        rec = self.check("library_commit")
-        self.assertEqual(rec["outcome"], "pass")
-        self.assertIn("not covered by content_sha256", rec["pin_source"])
+        self.assertEqual(self.check("library_commit")["outcome"], "inconclusive")
 
     def test_without_a_w3_op_it_is_not_exposed(self):
         self.run_.scenarios[0]["graphlet"]["ways"]["default"] = ["W1", "W2", "W4", "W5"]
@@ -299,6 +297,52 @@ class LibraryCommit(PrecheckBase):
         self.run_.write_json("manifest.json", self.run_.manifest)
         self.run_.complete_scenario()
         self.assertEqual(self.check("library_commit")["outcome"], "not_exposed")
+
+
+class FormatV2(PrecheckBase):
+    def test_w4_reads_the_mcps_own_exported_file(self):
+        self.run_.complete_scenario()
+        src = os.path.join(self.run_.dir, "arms", "mcp-lib", "docs", SID + ".mgt.gz")
+        os.makedirs(os.path.join(self.run_.dir, "arms", "mcp", "docs"), exist_ok=True)
+        os.replace(src, os.path.join(self.run_.dir, "arms", "mcp", "docs", SID + ".mgt.gz"))
+        rec = self.check()
+        self.assertEqual(rec["documents"]["W4"], "arms/mcp/docs/%s.mgt.gz" % SID)
+        self.assertEqual(rec["body"]["outcome"], "pass")
+
+    def test_the_job_record(self):
+        self.run_.complete_scenario(echo=False)
+        echo = copy.deepcopy(self.run_.scenarios[0]["request"]["strategy"])
+        self.run_.append(os.path.join("arms", "mcp", "graphlet_jobs.jsonl"),
+                         {"scenario": SID, "job_id": "j1", "handle": "0d5b9b1a-1111-2222-3333-444455556666",
+                          "overrides_echo": echo, "service_commit": gf.SERVICE, "library_commit": gf.PIN})
+        rec = self.check()
+        self.assertEqual(rec["strategy"]["outcome"], "pass", rec["strategy"])
+        self.assertEqual((rec["library_commit"]["outcome"], rec["library_commit"]["job"]), ("pass", gf.PIN))
+        self.run_.append(os.path.join("arms", "mcp", "graphlet_jobs.jsonl"),
+                         {"scenario": SID, "job_id": "j1", "overrides": echo, "library_commit": "b" * 40})
+        rec = self.check("library_commit")
+        self.assertEqual(rec["outcome"], "fail")
+        self.assertIn("the scenario's MCP job reports the library_commit bbbbbbbbbbbb", rec["detail"])
+
+    def test_a_failed_seed(self):
+        scen = gf.scenario(pre={"no_graphlet": True})
+        self.run_.cleanup()
+        self.run_ = gf.GRun(scenarios=[scen])
+        self.run_.write_twin(SID, {"results": [{"seed": {"length_bp": 31}, "error": "seed_failed"}]})
+        self.run_.write_echo(SID, scen["request"]["strategy"])
+        self.run_.write_mcp_runs()
+        err = {"code": "no_graphlet", "fields": {}}
+        for way in ("W1", "W2", "W3", "W4"):
+            self.run_.record(way, SID, "walks-len", "graphlet_walks", scen["graphlet"]["ops"][0]["args"], error=err)
+        rec = self.check()
+        for name in ("body", "envelope", "twin", "preconditions"):
+            self.assertEqual(rec[name]["outcome"], "pass", (name, rec[name]))
+        self.assertEqual(rec["outcome"], "pass")
+        # the seed has a graphlet now: precondition_failed
+        self.run_.write_doc("W1", SID, self.run_.fixture.doc(0))
+        rec = self.check()
+        self.assertEqual(rec["preconditions"]["outcome"], "precondition_failed")
+        self.assertIn("the seed has a graphlet now", rec["preconditions"]["detail"])
 
 
 class Helpers(unittest.TestCase):

@@ -17,7 +17,7 @@ by the suite's own reader, a scenario's graphlet.facts stating them where the co
   max_bytes_refused  a W3 call with max_bytes above the service's 262,144 is refused bad_argument, and the library
                      ways answer the same call (the library's ceiling is 16 MiB);
   forbidden          a W3 call the op plan sends with a wrong access_token (op probe "wrong_token") is forbidden;
-  bad_handle         a W3 call with a malformed handle (op probe "malformed_handle") is bad_handle;
+  bad_handle         a W3 call with a malformed handle (op probe "bad_handle", FORMAT v2 D2) is bad_handle;
   library_commit     every W3 call reports the deployed library_commit and the manifest's pin (the pre-checks).
 Each check: pass, fail (naming every call that breaks it), or inconclusive (exercised false: no call of the run
 exercises it; or a fact it needs is unknown).
@@ -46,7 +46,8 @@ SERVICE_MAX_BYTES = 262144
 HINT_LABELS_PER_NODE = 64
 IN_SERVICE_BYTES = 8 * 1024 * 1024
 NO_DIFFERENCE = "no difference within the recorded evidence"
-PROBES = {"wrong_token": ("forbidden", "forbidden"), "malformed_handle": ("bad_handle", "bad_handle")}
+# FORMAT v2 D2: an op's probe "wrong_token" | "bad_handle" -> (the service check, the code W3 must answer)
+PROBES = {"wrong_token": ("forbidden", "forbidden"), "bad_handle": ("bad_handle", "bad_handle")}
 # the pairs a by-design case lets differ (the service side against the library and the oracle)
 BY_DESIGN_PAIRS = ("W3-W4", "W3-W5")
 
@@ -308,7 +309,7 @@ def service_checks(recs, manifest, facts, prechecks):
             check_qualified_cause(recs, manifest, facts), check_hint(recs, manifest, facts),
             check_in_service(recs, manifest, facts), check_max_bytes_refused(recs, manifest, facts),
             _check_probe("forbidden", "wrong_token", "forbidden", recs, manifest),
-            _check_probe("bad_handle", "malformed_handle", "bad_handle", recs, manifest),
+            _check_probe("bad_handle", "bad_handle", "bad_handle", recs, manifest),
             check_library_commit(prechecks)]
 
 

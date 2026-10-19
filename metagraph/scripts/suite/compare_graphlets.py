@@ -7,10 +7,11 @@ scenario, the answers of the ways that run it, after the scenario's pre-checks (
 
 Per op call, in this order:
 1. the ways it runs in (its `ways`, else the scenario's ways.default, else all five); W3 left out is `not_exposed`
-   with the owner's reason (the op's not_exposed.W3, else the scenario's or the manifest's graphlets.not_exposed by
-   tool or tool.argument); W3 left out without a reason is a manifest problem (inconclusive);
-2. a way that recorded nothing is missing; a selector that failed in a way did not run the call there (the same
-   failure in every way: inconclusive, the selector named; in some ways only: a disagreement);
+   with the owner's reason (FORMAT v2 D2: the op's not_exposed, else the scenario's graphlet.not_exposed by tool or
+   tool.argument); W3 left out without a reason is a manifest problem (inconclusive);
+2. a way that recorded nothing is missing; a way whose runner failed (FORMAT v2 B2: no_document, exception, ...)
+   did not run the call and is not compared (inconclusive); a selector that failed in a way did not run the call
+   there (the same failure in every way: inconclusive, the selector named; in some ways only: a disagreement);
 3. args_resolved equal across the ways (access tokens and cursors left out): a selector that resolved differently is
    a disagreement of the pair, named as such, and that pair's answers are not compared;
 4. each answer canonicalised (canonical_answer): W3's service fields (the keys outside ANSWER_KEYS, the library's
@@ -108,6 +109,12 @@ ERROR_TEXT_FIELDS = ("message", "hint")
 # per error code, structured fields that depend on the environment (result_too_large's size of what did not fit
 # counts the handle's own bytes)
 ERROR_ENV_FIELDS = {"result_too_large": ("bytes",)}
+# codes compared without their fields: a failed seed's no_graphlet is the runner's on W1/W2/W4 and the service's on
+# W3 (FORMAT v2 B2), each with fields of its own
+ERROR_CODE_ONLY = ("no_graphlet",)
+# the runners' own failures (FORMAT v2 B2): the way did not run the call (no document, a refused document, an
+# exception, an unknown tool, a runaway paging loop, an assembly error): never compared, the op inconclusive
+RUNNER_ERRORS = ("no_document", "document_refused", "exception", "unknown_tool", "paging_runaway", "assembly_error")
 # per tool, answer keys whose value depends on where the way ran, left out of the comparison
 ENV_KEYS = {"graphlet_export": ("path", "bytes"), "graphlet_save": ("path", "bytes")}
 # the tools that make a file (FORMAT v2 B3: the record's `file` {name, bytes, sha256, raw}, the text kept at
@@ -134,7 +141,7 @@ SMOKE_TOOLS = ("graphlet_list", "graphlet_free")
 PAIRS = (("W1", "W2", "transport"), ("W1", "W4", "fetch path"), ("W3", "W4", "service wrapper"))
 W5_WHAT = "library vs independent reading"
 # a pair not compared for one of these makes the op inconclusive (a missing way is named by its own reason)
-UNREAD_KINDS = ("oracle_unavailable", "oracle_error", "no_file")
+UNREAD_KINDS = ("oracle_unavailable", "oracle_error", "no_file", "runner_error")
 # errors of fitting an answer to a ceiling (FORMAT v2 F3, VO5): not comparable against W5, which makes no claim about
 # fitting (INVENTORY §1.1: result_too_large, receipt_too_large; on W3 also op_busy, the service's worker state);
 # between W1..W4 they are compared as usual (W3 calls are designed to fit, DESIGN-v8 §5)
@@ -197,6 +204,8 @@ def _canon(obj, roles, drop_local, top=False, tool=None):
                 continue
             if top and tool == "graphlet_compare" and k in TOP_HANDLE_KEYS and isinstance(v, str):
                 out[k] = "<handle>" if k == "a" else "<handle_b>"
+            elif (k in HANDLE_KEYS or (top and k in TOP_HANDLE_KEYS)) and isinstance(v, str) and is_symbol(v):
+                out[k] = v   # a runner's symbol already (FORMAT v2 B1: <handle>, <handle:S>, <handle:OP>)
             elif (k in HANDLE_KEYS or (top and k in TOP_HANDLE_KEYS)) and isinstance(v, str):
                 if v not in roles:
                     roles[v] = "<handle:%d>" % (sum(1 for s in roles.values() if s.startswith("<handle:")) + 1)
@@ -232,6 +241,8 @@ def canonical_error(error, keep_local=False):
         return error
     code = error.get("code")
     fields = error.get("fields") if isinstance(error.get("fields"), dict) else {}
+    if code in ERROR_CODE_ONLY:
+        fields = {}
     skip = set(ERROR_TEXT_FIELDS) | set(ERROR_ENV_FIELDS.get(code, ()))
     fields = dict((k, v) for k, v in fields.items() if k not in skip)
     return {"code": code, "fields": _canon(fields, {}, not keep_local)}
@@ -302,12 +313,24 @@ def attach_files(run_dir, recs):
 
 
 def same_library_env(ra, rb):
-    """Whether two library records ran one (commit, interpreter, work model): only then is `local` compared (D-R10)."""
+    """Whether two library records ran one (commit, interpreter, work model) with one configuration (FORMAT v2 B4:
+    library.limits, the GraphletTools configuration): only then is `local` compared (D-R10)."""
     la, lb = ra.get("library") or {}, rb.get("library") or {}
     if not isinstance(la, dict) or not isinstance(lb, dict):
         return False
     keys = ("commit", "python", "work_model")
-    return all(la.get(k) is not None for k in keys) and all(la.get(k) == lb.get(k) for k in keys)
+    return all(la.get(k) is not None for k in keys) and all(la.get(k) == lb.get(k) for k in keys + ("limits",))
+
+
+def is_symbol(value):
+    """A runner's handle symbol (FORMAT v2 B1): <handle>, <handle:S>, <handle:OP>."""
+    return isinstance(value, str) and value.startswith("<handle") and value.endswith(">")
+
+
+def runner_error(rec):
+    """The runner-side code of a record whose way did not run the call (RUNNER_ERRORS), or None."""
+    err = rec.get("error") if isinstance(rec.get("error"), dict) else None
+    return err.get("code") if err and err.get("code") in RUNNER_ERRORS else None
 
 
 def comparable_view(way, rec, keep_local=False):
@@ -422,10 +445,10 @@ def scenario_by_id(manifest):
     return dict((s.get("id"), s) for s in gp.graphlet_scenarios(manifest))
 
 
-def not_exposed_reason(scenario, op, manifest):
-    """The owner's reason W3 does not run |op| (FORMAT-v8 §1, DESIGN-v8 §2's table): the op's not_exposed (an object
-    {"W3": reason} or a text), else graphlet.not_exposed of the scenario, else the manifest's graphlets.not_exposed,
-    each keyed by the tool or by tool.argument for an argument the op sends; None without one."""
+def not_exposed_reason(scenario, op, manifest=None):
+    """The owner's reason W3 does not run |op| (FORMAT v2 D2: the op's not_exposed, a text or {"W3": reason}), else
+    the scenario's graphlet.not_exposed keyed by the tool or by tool.argument for an argument the op sends (both
+    inside content_sha256); None without one."""
     ne = op.get("not_exposed")
     if isinstance(ne, dict) and isinstance(ne.get("W3"), str) and ne["W3"].strip():
         return ne["W3"].strip()
@@ -433,9 +456,7 @@ def not_exposed_reason(scenario, op, manifest):
         return ne.strip()
     tool = op.get("tool")
     keys = [tool] + ["%s.%s" % (tool, a) for a in sorted(op.get("args") or {})]
-    for table in ((scenario.get("graphlet") or {}).get("not_exposed"),
-                  ((manifest or {}).get("graphlets") or {}).get("not_exposed")
-                  if isinstance((manifest or {}).get("graphlets"), dict) else None):
+    for table in ((scenario.get("graphlet") or {}).get("not_exposed"),):
         if isinstance(table, dict):
             for k in keys:
                 if isinstance(table.get(k), str) and table[k].strip():
@@ -470,6 +491,10 @@ def _args_difference(ra, rb):
 
 def compare_records(a, ra, b, rb, what):
     """A pair entry for two recorded calls of one op (selector, arguments, then answers)."""
+    ea, eb = runner_error(ra), runner_error(rb)
+    if ea or eb:
+        return _pair(a, b, what, "not_compared", "%s did not run the call (runner: %s)" % (
+            a if ea else b, ea or eb), kind="runner_error")
     sa, sb = ra.get("selector_error"), rb.get("selector_error")
     if sa or sb:
         if sa and sb and gp.compact(sa) == gp.compact(sb):
@@ -542,6 +567,9 @@ def compare_w5(x, rx, r5):
     if rx.get("selector_error") or r5.get("selector_error"):
         return _pair(x, "W5", W5_WHAT, "not_compared", "the selector failed in %s" % (
             x if rx.get("selector_error") else "W5"), kind="selector")
+    if runner_error(rx) or runner_error(r5):
+        return _pair(x, "W5", W5_WHAT, "not_compared", "%s did not run the call (runner: %s)" % (
+            x if runner_error(rx) else "W5", runner_error(rx) or runner_error(r5)), kind="runner_error")
     d = _args_difference(rx, r5)
     if d:
         return _pair(x, "W5", W5_WHAT, "disagree", "args_resolved differ (W5 takes W1's)", d, kind="args_resolved")
@@ -613,8 +641,8 @@ def compare_op(scenario, op, recs, precheck, manifest):
             entry["ways"][w] = "missing"
         else:
             present[w] = r
-            entry["ways"][w] = "selector_error" if r.get("selector_error") else (
-                "error" if r.get("error") else "answered")
+            entry["ways"][w] = "selector_error" if r.get("selector_error") else "runner_error" if runner_error(r) \
+                else "error" if r.get("error") else "answered"
     if tool in SMOKE_TOOLS:
         bad = [w for w, r in present.items() if r.get("error") or r.get("selector_error")]
         entry["smoke"] = True

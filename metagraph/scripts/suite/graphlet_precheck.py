@@ -33,13 +33,17 @@ gate (the owner, 2026-10-14). The scenario's outcome: fail > precondition_failed
 Where the inputs live (FORMAT-v8 §3 names the records; the rest is lane C's reading, listed as FORMAT questions):
   records         arms/<way dir>/graphlet_ops.jsonl (WAY_DIRS), a later line of one (scenario, op) winning;
   documents       arms/<way dir>/docs/<scenario>.mgt.gz (or .mgt): the text the way processed (W1/W2 the standalone
-                  text of the engine's answer, W4 the MCP's export as downloaded);
+                  text of the engine's answer); W4 without a copy of its own reads the MCP's own exported file,
+                  arms/mcp/docs/<scenario>.mgt.gz (FORMAT v2 C1);
   twin            arms/direct-local/docs/<scenario>.full.json.gz: the engine's `detail: full` answer (the body, or
                   the normalised {http, body} answer);
-  echo            arms/mcp/graphlet_jobs.jsonl {scenario, overrides}, else the MCP execution line of the scenario
-                  (its raw record's traverse_status call, payload.overrides, as v7's runner records it);
-  pin             graphlet.library_commit of the scenario (covered by the manifest's content_sha256), else the
-                  manifest's top-level graphlets.library_commit.
+  echo            the scenario's MCP job record, arms/mcp/graphlet_jobs.jsonl {scenario, job_id, handle, overrides,
+                  service_commit, library_commit} (FORMAT v2 C3), else the MCP execution line of the scenario (its raw
+                  record's traverse_status call, payload.overrides, as v7's runner records it);
+  pin             graphlet.library_commit of the scenario (FORMAT v2 D1, covered by the manifest's content_sha256);
+                  the job's library_commit is held to it too.
+A failed seed (FORMAT v2 D3: preconditions {"no_graphlet": true}) passes its body, envelope and twin checks when no
+way has a document and the twin walked no arm either.
 The suite imports nothing of metagraph.traverse here: the digests a record states are graphlet_doc's (lane L's MGT
 document reader), recomputed from a kept document to hold the record to it; the record-level reading that names a
 difference (body_records, envelope_of, first_difference) is this module's own.
@@ -135,11 +139,15 @@ def _read_text(path):
 
 
 def doc_path(run_dir, way, sid):
-    """The document way |way| kept for scenario |sid| (arms/<way dir>/docs/<sid>.mgt.gz or .mgt), or None."""
-    for ext in (".mgt.gz", ".mgt"):
-        p = os.path.join(run_dir, "arms", WAY_DIRS[way], "docs", sid + ext)
-        if os.path.exists(p):
-            return p
+    """The document way |way| kept for scenario |sid| (FORMAT v2 C1: arms/<way dir>/docs/<sid>.mgt.gz, or .mgt), or
+    None; W4 (and W3) without a copy of its own: the MCP's own exported file, arms/mcp/docs/<sid>.mgt.gz, which W4
+    reads."""
+    dirs = [WAY_DIRS[way]] + (["mcp"] if way in ("W4", "W3") else [])
+    for d in dirs:
+        for ext in (".mgt.gz", ".mgt"):
+            p = os.path.join(run_dir, "arms", d, "docs", sid + ext)
+            if os.path.exists(p):
+                return p
     return None
 
 
@@ -502,14 +510,30 @@ def _payload_value(v):
     return v
 
 
+# FORMAT v2 C3: the MCP job record, one line per scenario in arms/mcp/graphlet_jobs.jsonl: job id, handle (the
+# record's UUID), the traverse_status.overrides echo, service_commit, library_commit
+ECHO_KEYS = ("overrides", "overrides_echo", "echo")
+
+
+def mcp_job(run_dir, sid):
+    """The scenario's MCP job record (the last line naming it), or {}."""
+    rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", "mcp", JOBS_FILE))
+    out = {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("scenario") == sid:
+            out = r
+    return out
+
+
 def mcp_echo(run_dir, sid):
     """(the strategy the service sent for scenario |sid| (traverse_status.overrides), where it was read) or (None,
     why): arms/mcp/graphlet_jobs.jsonl first, else the scenario's first MCP execution's raw record."""
-    rows, _ = sc.read_jsonl(os.path.join(run_dir, "arms", "mcp", JOBS_FILE))
     echo = None
-    for r in rows:
-        if isinstance(r, dict) and r.get("scenario") == sid and r.get("overrides") is not None:
-            echo = _payload_value(r["overrides"])
+    job = mcp_job(run_dir, sid)
+    for key in ECHO_KEYS:
+        if job.get(key) is not None:
+            echo = _payload_value(job[key])
+            break
     if isinstance(echo, dict):
         return echo, "arms/mcp/%s" % JOBS_FILE
     arm_dir = os.path.join(run_dir, "arms", "mcp")
@@ -573,6 +597,7 @@ PRECONDITION_FACTS = {
     "labels_present": "[name]: each name in the label dictionary (L records)",
     "walk_bp_min": "{arm: bp}: the arm's longest walk at least bp long",
     "bases": "true / false: the segments carry their bases (a sequences: false retrieval does not)",
+    "no_graphlet": "true: a failed seed, W1 has no graphlet (FORMAT v2 D3)",
 }
 
 
@@ -624,12 +649,26 @@ def precondition_facts(text, pre, checks_mod):
     return out
 
 
+def no_graphlet(scenario):
+    """Whether the scenario is a failed seed (FORMAT v2 D3: graphlet.preconditions {"no_graphlet": true})."""
+    pre = (scenario.get("graphlet") or {}).get("preconditions")
+    return isinstance(pre, dict) and pre.get("no_graphlet") is True
+
+
 def preconditions_check(scenario, docs, checks_mod):
     pre = (scenario.get("graphlet") or {}).get("preconditions")
     if not pre:
         return _check("pass", "the scenario states no preconditions", facts=[])
     if not isinstance(pre, dict):
         return _check("inconclusive", "graphlet.preconditions is not an object")
+    if no_graphlet(scenario):
+        # a failed seed: the fact is that W1 has no graphlet (no document; its calls answer no_graphlet)
+        fact = {"fact": "no_graphlet", "want": True, "seen": docs.get("W1") is None,
+                "outcome": "pass" if docs.get("W1") is None else "fail"}
+        if fact["outcome"] == "fail":
+            return _check("precondition_failed", "no_graphlet: want true, seen a document of W1 (the seed has a "
+                                                 "graphlet now)", facts=[fact])
+        return _check("pass", "the seed has no graphlet on W1, as the scenario states", facts=[fact])
     text = docs.get("W1")
     if text is None:
         return _check("inconclusive", "W1 kept no document to check the preconditions on")
@@ -649,15 +688,12 @@ def preconditions_check(scenario, docs, checks_mod):
     return _check("pass", "%d fact(s) hold on W1's document" % len(facts), facts=facts)
 
 
-def library_pin(scenario, manifest):
-    """(the manifest's library_commit pin, where it is stated) for a scenario, or (None, None)."""
+def library_pin(scenario, manifest=None):
+    """(the manifest's library_commit pin, where it is stated) for a scenario, or (None, None): FORMAT v2 D1,
+    graphlet.library_commit per scenario, inside content_sha256 (a top-level block would be outside it)."""
     pin = (scenario.get("graphlet") or {}).get("library_commit")
     if isinstance(pin, str) and pin.strip():
         return pin.strip(), "graphlet.library_commit"
-    top = ((manifest or {}).get("graphlets") or {}).get("library_commit") \
-        if isinstance((manifest or {}).get("graphlets"), dict) else None
-    if isinstance(top, str) and top.strip():
-        return top.strip(), "graphlets.library_commit (top level: not covered by content_sha256)"
     return None, None
 
 
@@ -716,6 +752,11 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
     if pin and any(not commit_matches(d, pin) for d in commits):
         return _check("fail", "the deployed library_commit %s is not the manifest's pin %s" % (
             ", ".join(d[:12] for d in sorted(commits)), pin[:12]), **extra)
+    job_commit = mcp_job(run_dir, sid).get("library_commit")
+    extra["job"] = job_commit
+    if pin and job_commit and not commit_matches(job_commit, pin):
+        return _check("fail", "the scenario's MCP job reports the library_commit %s, not the manifest's pin %s" % (
+            str(job_commit)[:12], pin[:12]), **extra)
     if missing:
         return _check("inconclusive", "%d W3 call(s) report no library_commit (%s)" % (
             len(missing), ", ".join(missing[:10])), **extra)
@@ -747,14 +788,36 @@ def scenario_outcome(checks):
     return "pass", None
 
 
+def failed_seed_checks(run_dir, recs, sid, docs):
+    """The body, envelope and twin checks of a failed seed (FORMAT v2 D3): no way has a document or states a digest,
+    and the twin found no graphlet either (its result states no arms)."""
+    kept = [w for w in LIBRARY_WAYS if docs.get(w) is not None or _way_digests(recs, sid, w, "body_digest")]
+    ident = _check("fail", "a failed seed, yet %s has a document" % ", ".join(kept)) if kept else \
+        _check("pass", "a failed seed: no way has a document")
+    full, why = read_twin(run_dir, sid)
+    if full is None:
+        twin = _check("pass", "a failed seed: the twin has no graphlet either (%s)" % why) \
+            if why and "states no results" in why else _check("inconclusive", why)
+    elif any((r or {}).get("arms") for r in full.get("results") or []):
+        twin = _check("fail", "a failed seed, yet the full twin walked arms")
+    else:
+        twin = _check("pass", "a failed seed: the twin's result has no arms either")
+    return ident, dict(ident), twin
+
+
 def precheck_scenario(run_dir, scenario, recs, manifest, checks_mod, deployed=None):
     """The pre-check record of one area G scenario (FORMAT-v8 §5)."""
     sid = scenario.get("id")
     docs = dict((w, read_doc(run_dir, w, sid)) for w in LIBRARY_WAYS)
+    if no_graphlet(scenario) and docs.get("W1") is None:
+        body, envelope, twin = failed_seed_checks(run_dir, recs, sid, docs)
+    else:
+        body, envelope = body_check(run_dir, recs, sid, docs), envelope_check(run_dir, recs, sid, docs)
+        twin = twin_check(run_dir, sid, docs, checks_mod)
     checks = {
-        "body": body_check(run_dir, recs, sid, docs),
-        "envelope": envelope_check(run_dir, recs, sid, docs),
-        "twin": twin_check(run_dir, sid, docs, checks_mod),
+        "body": body,
+        "envelope": envelope,
+        "twin": twin,
         "strategy": strategy_check(run_dir, scenario),
         "preconditions": preconditions_check(scenario, docs, checks_mod),
         "library_commit": library_commit_check(run_dir, recs, scenario, manifest, deployed),

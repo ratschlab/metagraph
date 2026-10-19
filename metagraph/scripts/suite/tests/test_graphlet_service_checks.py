@@ -202,7 +202,7 @@ class MaxBytesAndProbes(ServiceBase):
         ops = [{"id": "tok", "tool": "graphlet_summary", "args": {"max_bytes": 2048}, "ways": ["W3"],
                 "probe": "wrong_token"},
                {"id": "bad", "tool": "graphlet_summary", "args": {"max_bytes": 2048}, "ways": ["W3"],
-                "probe": "malformed_handle"}]
+                "probe": "bad_handle"}]
         self.make([gf.scenario(ops=ops)])
         self.put(SID, ops[0], {}, errors={"W3": {"code": "forbidden", "fields": {}}}, ways=["W3"])
         self.put(SID, ops[1], {}, errors={"W3": {"code": "unknown_handle", "fields": {}}}, ways=["W3"])
@@ -210,12 +210,12 @@ class MaxBytesAndProbes(ServiceBase):
         self.assertEqual(self.check(res, "forbidden")["outcome"], "pass")
         c = self.check(res, "bad_handle")
         self.assertEqual(c["outcome"], "fail")
-        self.assertIn("malformed_handle: error unknown_handle", c["detail"])
+        self.assertIn("bad_handle: error unknown_handle", c["detail"])
         self.assertEqual(res["required_service_checks"], ["forbidden", "bad_handle", "library_commit"])
         ops_ = res["scenarios"][SID]["ops"]
         self.assertEqual((ops_["tok"]["outcome"], ops_["tok"]["probe"]), ("agree", "wrong_token"))
         self.assertEqual((ops_["bad"]["outcome"], ops_["bad"]["disagreeing"]),
-                         ("disagree", ["W3-probe malformed_handle"]))
+                         ("disagree", ["W3-probe bad_handle"]))
 
     def test_library_commit_from_the_prechecks(self):
         op = WalkDisplay.OP
