@@ -1109,7 +1109,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
         self.assertEqual(lines, sorted(lines[:1]) + sorted(lines[1:], key=lambda l: self.runobj.order.index(l.split(",")[0])))
         with open(os.path.join(self.out, "plot_phases.csv"), encoding="utf-8") as fh:
             phases = fh.read().splitlines()
-        self.assertEqual(phases[0], "phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms")
+        self.assertEqual(phases[0], "phase,n,n_zero,p10_ms,p25_ms,p50_ms,p75_ms,p90_ms,n_negative")
         main = self.tex()
         self.assertIn("table[x=dl_ms,y=mcp_ms,col sep=comma]{plot_paired_dl_mcp.csv}", main)
         self.assertNotIn("stacked", main)
@@ -1178,7 +1178,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
             glyph_key = "inconclusive"
         self.assertEqual(sections._arm_reason([line], S()), "503 deadline (allowed)")
         main = self.tex()
-        self.assertIn("\\parhead{Properties still untested}", main)
+        self.assertIn("\\parhead{Properties not shown on any access path}", main)
         self.assertIn("Every property check of the built chapters was passed", main)
 
     def test_timing_legends_and_record_key(self):
@@ -1232,7 +1232,7 @@ class ReviewRoundTwoTest(unittest.TestCase):
             ctx.footnotes[ch] = cells.Footnotes()
         text = sections.decision_summary(ctx)
         order = ["SCOPE Chapter R sample; whole-run summary shown for context.", "\\bline{run verdict}", "VERDICT-SLOT",
-                 "\\parhead{Principal findings}", "FINDINGS-SLOT 0", "\\parhead{Properties still untested}",
+                 "\\parhead{Principal findings}", "FINDINGS-SLOT 0", "\\parhead{Properties not shown on any access path}",
                  "UNTESTED-SLOT", "CLOSING-SLOT"]
         positions = [text.find(s) for s in order]
         self.assertTrue(all(p >= 0 for p in positions), list(zip(order, positions)))
@@ -1338,8 +1338,11 @@ class VerifyRoundTwoTest(unittest.TestCase):
         gp = sections.gate_outcome_counts(R())
         self.assertEqual(gp, {"judged": True, "outcome": 3, "inconclusive": 2, "finding": 1, "pairs": 2})
         clause = sections.gate_inconclusive_clause(R())
-        self.assertTrue(clause.startswith("2 of them block the deploy gate: those on a gated access path, in the policy's selection"), clause)
-        self.assertIn("the others are on an ungated access path, outside the selection or exempt", clause)
+        # V6-001: the criterion names the policy's required population, its automatic exclusions included
+        self.assertTrue(clause.startswith("2 of them block the deploy gate: those the policy requires on that access "
+                                          "path and repeat"), clause)
+        self.assertIn("the others are on an ungated access path, outside the selection, removed by the policy's "
+                      "automatic exclusions or declared exempt", clause)
 
         class N(object):
             gate = None
@@ -1415,9 +1418,10 @@ class VerifyRoundTwoTest(unittest.TestCase):
         for key in ("submit_ms", "backend_ms", "paging_ms"):
             if key in ph:
                 self.assertEqual(len(pop[key]), ph[key]["n"], key)
-        for name, p10, p25, p50, p75, p90, n, n_zero in sections.phase_quantiles(ctx):
+        # V6-006 (the external review of the v6 document): the values below 0 ms are counted apart too
+        for name, p10, p25, p50, p75, p90, n, n_zero, n_negative in sections.phase_quantiles(ctx):
             key = dict((v_, k) for k, v_ in sections.PHASES)[name]
-            self.assertEqual(n + n_zero, len(pop[key]))
+            self.assertEqual(n + n_zero + n_negative, len(pop[key]))
             self.assertTrue(p10 > 0)
         self.assertEqual(v["phase_paging_zero_n"], str(sum(1 for x in pop["paging_ms"] if x == 0)) if pop["paging_ms"] else None)
         # N-2: a two-line tick label (the phase, then its n; `n 10 of 13` where zeros are left out), centred
@@ -1574,7 +1578,9 @@ class VerifyRoundTwoTest(unittest.TestCase):
         self.assertIn("JUDGING %d" % len(self.runobj.order), text)
         overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json")) or {}
         heads = [p.split("*")[1] for p in overview["sections"]["methods"]["paragraphs"]]
-        self.assertEqual(heads, ["The three access paths.", "Execution order.", "Ground truth.", "Times and load."])
+        # RV14: what the suite does not cover via MCP follows the access paths (manifest v7 and later)
+        self.assertEqual(heads, ["The three access paths.", "Not covered.", "Execution order.", "Ground truth.",
+                                 "Times and load."])
         self.assertEqual(len(overview["appendix_F"]["rules"]), 2)
         self.assertNotIn("*Coverage.*", json.dumps(overview["sections"]["provenance"]))
 
@@ -1710,7 +1716,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
         ctx = self.ctx(prose)
         whole = sections.chapter(ctx, "R")
         conclusion = whole.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
-        gap = whole.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        gap = whole.split("\\parhead{Coverage and remaining limits}", 1)[1].split("\\parhead{Background}", 1)[0]
         texts.append(("chapter", conclusion + gap))
         for where, text in texts:
             for lit in V4_LITERALS:
@@ -1944,7 +1950,7 @@ class VerifyRoundThreeTest(unittest.TestCase):
         self.assertIn("each footnoted in its chapter's tables", sections.limitations_table(ctx))
         glossary = sc.read_json(os.path.join(PROSE_DIR, "glossary.json"))
         inc = [e for e in glossary["entries"] if e["term"] == "inconclusive"][0]
-        self.assertIn("in the policy's selection and not declared exempt", inc["definition"])
+        self.assertIn("not removed by the policy's automatic exclusions nor declared exempt", inc["definition"])
         # L-e: the by-design row of F says the table was found by its sha
         ctx.run.table_meta = {"path": "/w/service_by_design.json", "version": 1, "cases": 5, "service_commit": "abc",
                               "sha256": "d" * 64, "replayed": True, "warnings": []}
@@ -2084,7 +2090,7 @@ class OwnerReviewTwoTest(unittest.TestCase):
         text = sections.chapter(ctx, "R")
         self.last_whole = text  # the whole chapter, for the evidence map after the conclusion (READ-101)
         conclusion = text.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
-        gap = text.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        gap = text.split("\\parhead{Coverage and remaining limits}", 1)[1].split("\\parhead{Background}", 1)[0]
         family = text.split("fam:R-budget", 1)[1].split("\\unithead", 1)[0]
         return ctx, conclusion, gap, family
 
@@ -2766,7 +2772,8 @@ class RebasedFieldsTest(unittest.TestCase):
         word, how, summary = report.gate_headline_parts(verdict)
         main, _ = self.build("gated", gated)
         cover = main.split("\\coverbox{Run verdict}{", 1)[1].split("\n", 1)[0]
-        self.assertIn(latex.esc(report.exploratory_label("beside")), cover)
+        self.assertIn(latex.esc(sections.EXPLORATORY_LABEL), cover)
+        self.assertNotIn("which is the gate's beside", cover)
         gate_box = main.split("\\coverbox{Deploy gate}{", 1)[1].split("\n", 1)[0]
         self.assertIn("\\textbf{\\large %s}" % word, gate_box)
         self.assertIn(latex.esc(how), gate_box)
@@ -2933,7 +2940,7 @@ class V5ScaffoldTest(unittest.TestCase):
         self.assertEqual(run.marked_aside("T-labels-0003", run.arm_lines("T-labels-0003", "mcp")[0]),
                          {("label_dict_contains", 0): {"mark": "not_implemented",
                                                       "reason": "the MCP traverse answers carry no label dictionary"}})
-        self.assertNotIn("label\\_dict\\_contains", main.split("Properties still untested", 1)[1].split("\\parhead", 1)[0])
+        self.assertNotIn("label\\_dict\\_contains", main.split("Properties not shown on any access path", 1)[1].split("\\parhead", 1)[0])
         # the warm-up's re-run is timing evidence in the provenance and appendix F, not an execution
         self.assertEqual(len(run.reruns), 1)
         self.assertIn("Warm-ups run again for a resume", main)
@@ -3353,7 +3360,7 @@ class FullDocumentTest(unittest.TestCase):
     @staticmethod
     def parts(text):
         conclusion = text.split("\\parhead{Conclusion}", 1)[1].split("\\begingroup", 1)[0]
-        gap = text.split("\\parhead{What this chapter leaves untested}", 1)[1].split("\\parhead{Background}", 1)[0]
+        gap = text.split("\\parhead{Coverage and remaining limits}", 1)[1].split("\\parhead{Background}", 1)[0]
         return conclusion, gap
 
     def test_every_chapter_renders_from_computed_facts(self):
@@ -3978,7 +3985,10 @@ class TimeTintTest(unittest.TestCase):
         import sections
         g = sections.grammar_lines(None)
         self.assertLess(g.index("\\bline{aggregates}"), g.index("\\bline{edge tables}"))
-        self.assertLess(g.index("\\bline{edge tables}"), g.index("\\bline{times}"))
+        # V6-003: the tint and attention rules are appendix F's; I.3 keeps a short colour key
+        self.assertLess(g.index("\\bline{edge tables}"), g.index("\\bline{colour}"))
+        self.assertNotIn("\\bline{times}", g)
+        self.assertIn("\\bline{times}", sections.colour_rules(None))
         self.assertIn("members never exercised read not exercised: n, never ok 0/0; the coverage line under the "
                       "table counts per access path}", g)
         self.assertIn("derived from the evidence, never from prose}", g)
@@ -4278,7 +4288,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("The count is not a count of service defects: 2 release evidence problems", decision)
         self.assertIn("judged offline by gate.py when this document was built", sections.gate_read_text(stub))
         stub.gate = {"problems": [], "passed": True}
-        self.assertTrue(sections.gate_decision_text(stub).startswith("The gate passed: every planned and required execution"))
+        # V6-001 (the external review of the v6 document): with a policy, the passed decision names the required
+        # population after the policy's automatic exclusions
+        self.assertTrue(sections.gate_decision_text(stub).startswith(
+            "The gate passed: every planned execution was recorded, every execution the policy requires passed"))
         self.assertIn("not the whole service", sections.gate_decision_text(stub))
         # the ungated fake run: no decision judged, and the cover says so
         ctx = self.ctx(overview=self.overview)
@@ -4408,9 +4421,9 @@ class ReadabilityReviewTest(unittest.TestCase):
                                      "request; no failure, no disagreement); 2 inconclusive execution(s) (not counted as pass)",
                              order=perturbed.order, arm_lines=perturbed.arm_lines)
         doc_verdict = sections.doc_verdict_text(findings_run)
-        self.assertEqual(doc_verdict, "FINDINGS (1 execution(s) with a finding, a stated bound broken on the clock the "
+        self.assertEqual(doc_verdict, "FINDINGS (1 execution with a finding, a stated bound broken on the clock the "
                                       "check reads: 1 late 503 deadline (no results carried; beyond the suite's tolerance "
-                                      "on the client's clock); no failure, no disagreement); 2 inconclusive execution(s) "
+                                      "on the client's clock); no failure, no disagreement); 2 inconclusive executions "
                                       "(not counted as pass)")
         self.assertNotIn("without failing the request", doc_verdict)
         pctx = self.ctx(run=perturbed, units=units_mod.resolve(perturbed.manifest, self.budget_mappings["perturbed"]))
@@ -4485,7 +4498,9 @@ class ReadabilityReviewTest(unittest.TestCase):
         finding_gap = dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["finding"]
         self.assertIn("which carried no answer", finding_gap)
         self.assertNotIn("while the request was answered", finding_gap)
-        self.assertIn("a late 503 deadline that is a finding", dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["unverified"])
+        # V6-302 (the external review of the v6 document): the entry names each test's recorded reason, never a menu
+        self.assertIn("for the recorded reason named after each test",
+                      dict((k, g) for k, _, g in sections.EXCEPTION_GROUPS)["unverified"])
         # the detail block: requested, observed, unverified first, then the technical record; the artifacts keyed once
         block = blocks.detail_block(self.runobj, "R-001", st, 1, self.units, property_text="the claim in words")
         self.assertIn("\\bline{requested}{the claim in words}", block)
@@ -4520,8 +4535,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         ctx = self.ctx(overview=self.overview)
         text = sections.methods_section(ctx)
         self.assertIn("the scope of a time budget per route", text)
-        self.assertIn("route & the budget & its clock starts & what it covers & what it does not cover & possible answers & "
-                      "what the suite verified", text)
+        # V6-003: one full-width block per route, its six statements labelled (no seven-column table)
+        self.assertIn("\\textbf{POST /resolve.} \\emph{The budget:}", text)
+        for label in ("Its clock starts", "It covers", "It does not cover", "Possible answers", "What the suite verified"):
+            self.assertEqual(text.count("\\emph{%s:}" % label), len(rows), label)
         self.assertLess(text.find("\\emph{Times and load.}"), text.find("the scope of a time budget per route"))
         self.assertEqual(sections.budget_scope_table(self.ctx()), "")
         entry = self.checks["checks"]["budget_respected"]
@@ -4675,7 +4692,7 @@ class ReadabilityReviewTest(unittest.TestCase):
         finally:
             rel_ctx.run.relations = []
         # the glossary labels the later manifest's mark as not exercised by this run
-        entry = [e for e in self.glossary["entries"] if e["term"] == "property-level mark (manifest v5)"][0]
+        entry = [e for e in self.glossary["entries"] if e["term"] == "property-level mark (manifest v5 and later)"][0]
         self.assertIn("[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest", entry["definition"])
         self.assertIn("supplies no evidence about it on that path", entry["definition"])
         rendered = facts.fill(entry["definition"], {"manifest_version": 4})
@@ -4739,7 +4756,10 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertLess(summary.find("where to look: the chapters"), summary.find("\\bline{run verdict}"))
         self.assertIn("MCP, the Model Context Protocol", summary)
         self.assertNotIn("UNRESOLVED", summary)
-        self.assertIn("Three classifications are distinct", summary)
+        # V6-003 (the external review of the v6 document): the result first; the three classifications' full text is
+        # appendix F's vocabulary, I.1 names them and points there
+        self.assertIn("three classifications, never read for one another (appendix F's vocabulary)", summary)
+        self.assertLess(summary.find("\\emph{The result.}"), summary.find("A \\emph{finding} is the suite's category"))
         self.assertIn("one claim is one property check of one scenario", summary)
 
 
@@ -5257,7 +5277,7 @@ class ChapterMQCNDTest(unittest.TestCase):
         self.assertIn("the first entry reports forward-only strands", title4)
         self.assertNotIn("both", title4)
         self.assertIn("both entries report + and both are counted", facts.fill(n_details["N-usecase-0005"]["title"], {"manifest_version": 5}))
-        self.assertIn("I.2's budget table", n_details["N-hard-0022"]["note"])
+        self.assertIn("I.2's budget scope", n_details["N-hard-0022"]["note"])
         self.assertIn("not about end-to-end latency", n_details["N-hard-0022"]["note"])
         self.assertEqual(set(self.prose["D"]["details"]), {"D-P-scope-0004"})
         self.assertIn("repeatability and the source property", self.prose["D"]["details"]["D-P-scope-0004"]["note"])
@@ -5368,7 +5388,9 @@ class ChapterMQCNDTest(unittest.TestCase):
         self.assertIn("a count of two is not two copies", N["families"]["N-hard"]["prose"])
         self.assertIn("test no amplicon", N["families"]["N-usecase"]["prose"])
         self.assertTrue(N["units"]["N-usecase-defect"]["property"].startswith("Diagnostic pin of a known index defect"))
-        self.assertIn("a failure signals the repair, not a regression", N["units"]["N-usecase-defect"]["note"])
+        # V6-304 (the external review of the v6 document): a failure is consistent with the repair only under the
+        # stated observation, never by itself
+        self.assertIn("a failed test alone does not establish the repair", N["units"]["N-usecase-defect"]["note"])
         # the gate relation stated from the policy, never left as a condition for the reader (READ-318)
         note = N["units"]["N-usecase-defect"]["note"]
         self.assertNotIn("Where the gate's selection includes this scenario", note)
@@ -5568,7 +5590,7 @@ class IntegrationRoundTest(unittest.TestCase):
         verdict = report.verdict_text({"arms": {"direct-local": {"state": "done"}}}, comp, [])[0]
         self.assertTrue(sections._FINDINGS_VERDICT.match(verdict), verdict)
         doc = sections.doc_verdict_text(_Stub(verdict=verdict, order=[]))
-        self.assertTrue(doc.startswith("FINDINGS (1 execution(s) with a finding, a stated bound broken"), doc)
+        self.assertTrue(doc.startswith("FINDINGS (1 execution with a finding, a stated bound broken"), doc)
 
 
 class ColourRoundTwoTest(unittest.TestCase):
@@ -5980,12 +6002,14 @@ class V6DeltaTest(unittest.TestCase):
         # v5's inconclusive branch unchanged
         prose = sc.read_json(os.path.join(PROSE_DIR, "P.json"))["families"]["P-scope"]["prose"]
         ne = {"mcp": {"standing": "not exercised"}}
-        filled = facts.fill(prose, {"x": {"P-scope-0004": ne, "P-scope-0006": ne}, "n_relations": 0})
+        filled = facts.fill(prose, {"x": {"P-scope-0004": ne, "P-scope-0006": ne}, "n_relations": 0,
+                                    "manifest_version": 6})
         self.assertIn("so via MCP neither is run (!!not implemented yet via MCP!!: the MCP answer lacks that field), and "
                       "the two relations are not judged there.", filled)
         inc = {"mcp": {"standing": "inconclusive"}}
         self.assertIn("they read inconclusive (the check not exposed",
-                      facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0}))
+                      facts.fill(prose, {"x": {"P-scope-0004": inc, "P-scope-0006": inc}, "n_relations": 0,
+                                         "manifest_version": 5}))
 
     def test_verify_round_plurals_and_limits(self):
         """The delta verifier's L5 / L6 (2026-10-18): a count carried as text takes its plural from the number; the
@@ -6100,8 +6124,12 @@ class V6DeltaTest(unittest.TestCase):
         self.assertIn("by design", v6)
         self.assertIn("the frozen v6 manifest", v6)
         self.assertIn("the next manifest revision corrects it", v6)
-        for version in (4, 5, 7):
+        for version in (4, 5):
             self.assertEqual(facts.fill(note, {"manifest_version": version}).strip(), "")
+        # the v7 delta: manifest v7 marks the check service-side by design, which the note says instead
+        v7 = facts.fill(note, {"manifest_version": 7})
+        self.assertIn("via MCP the entry_fields check is set aside as service-side by design (manifest v7's", v7)
+        self.assertNotIn("the next manifest revision corrects it", v7)
         self.assertIn('note_text = ctx.fill(note, facts.unit_facts(ctx, uid)).strip() if note else ""',
                       inspect.getsource(sections.unit_section))
 

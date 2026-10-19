@@ -383,14 +383,16 @@ def _budget_text(run, sid):
     return ("{:,} ms".format(int(b)) if isinstance(b, (int, float)) else "none")
 
 
-def _property_cell(line, is_property, aside=None):
+def _property_cell(line, is_property, aside=None, refusal=True):
     """The 'property tested?' cell: what the execution tested of its property checks; the items a property-level
-    mark of the manifest sets aside (|aside|, suite_common.checks_marked_aside) are counted apart."""
+    mark of the manifest sets aside (|aside|, suite_common.checks_marked_aside) are counted apart. A test without a
+    property check reads 'status is the claim' only when it expects a refusal (`refusal`), else 'no property
+    declared' (a warm-up, whose generic checks are all it asks: the external review of the v6 document, V6-204)."""
     word, passed, total = cells.property_tested(line, is_property, aside)
     marked = len(aside or ())
     suffix = ("; %d marked not shown via MCP" % marked) if marked else ""
     if word == "n/a":
-        return ("n/a (status is the claim)" if total else "n/a") + suffix
+        return (("n/a (status is the claim)" if refusal else "n/a (no property declared)") if total else "n/a") + suffix
     if word == "yes":
         return "yes (%d of %d)%s" % (passed, total, suffix)
     if word == "partly":
@@ -731,7 +733,7 @@ def _execution_rows(st, run, sid, arm, is_property):
             wall += " (%s)" % esc(HC_SHORT.get(hc, hc))
         aside = run.marked_aside(sid, l) if (arm == "mcp" and hasattr(run, "marked_aside")) else None
         tested = "–" if outcome in ("not_implemented_mcp", "service_by_design") else _property_cell(
-            l, is_property, aside)
+            l, is_property, aside, refusal=host_expects_refusal(run.scenario(sid)))
         if aside and tested != "–":
             # the marked items counted apart make the cell long: a top-aligned box that wraps, so that the block's
             # table stays within the margin (the v6 delta: D-P-scope-0004's MCP rows; no v5 detail row has one)
@@ -1216,14 +1218,31 @@ def estimate_lines(body_lines, chars_per_line=150):
 SHORT_BLOCK_LINES = 28
 
 
-def interpretation(run, sid, states, property_text=None):
-    """The first lines of a detail block in the reader's terms (READ-114): what was requested (the unit's
-    property line, else the scenario's title), what each access path did (facts.exec_phrase, one phrase per
-    path) and what remains unverified (the property checks no execution of the test passed, or the statement that
-    every one was shown somewhere); plain LaTeX."""
+def interpretation(run, sid, states, property_text=None, title=None):
+    """The first lines of a detail block in the reader's terms (READ-114): what was requested (the property line of
+    a unit of one test, else this scenario's own title, the chapter's reader-facing `title` where it has one, with
+    the property checks it names: V6-302), what each access path did (facts.exec_phrase, one phrase per path) and
+    what remains unverified (the property checks no execution of the test passed, or the statement that every one
+    was shown somewhere, then the access paths and repeats that did not show one, with the recorded reason);
+    plain LaTeX."""
     import facts  # the facts module imports this one: a lazy import
     sc_ = run.scenario(sid)
-    requested = inline(property_text) if property_text else esc(sc_.get("title"), 200)
+    props = []
+    for e in sc_.get("expect") or []:
+        name = e.get("check") if isinstance(e, dict) else None
+        if name and run.is_property(name) and name not in props:
+            props.append(name)
+    if property_text:
+        requested = inline(property_text)
+    else:
+        requested = inline(title) if title else esc(sc_.get("title"), 200)
+        if props:
+            requested += " (property check%s %s)" % ("" if len(props) == 1 else "s", ", ".join(tt(n) for n in props))
+        elif host_expects_refusal(sc_):
+            requested += " (no property check: the refusal's status, code and text are the claim)"
+        else:
+            requested += " (no property check: the generic checks alone%s)" % (
+                ("; the property is its target's, %s" % esc(sc_["warms"])) if sc_.get("warms") else "")
     observed = []
     for arm in cells.ARMS:
         st = states[arm]
@@ -1252,16 +1271,21 @@ def interpretation(run, sid, states, property_text=None):
         if st.ne:
             text += " (DISAGREES with the reference access path)"
         observed.append("%s: %s" % (esc(arm), latex.join_units(esc(text))))
-    props = []
-    for e in sc_.get("expect") or []:
-        name = e.get("check") if isinstance(e, dict) else None
-        if name and run.is_property(name) and name not in props:
-            props.append(name)
     unshown = [name for name in props if not any(
         c.get("check") == name and c.get("outcome") == "pass" for arm in cells.ARMS for l in states[arm].lines
         for c in (l.get("checks") or []) if isinstance(c, dict))]
-    if not props:
+    if not props and host_expects_refusal(sc_):
         unverified = "none: the status, code and text are the claim, judged by the rows below"
+    elif not props:
+        # a test that declares no property of its own (a warm-up asks only what every answer must hold): nothing
+        # source-specific is verified or unverified here, and an allowed 503 leaves even the generic checks
+        # inconclusive; never 'the status is the claim', which is a refusal's (V6-204)
+        gaps = facts.unshown_reasons_text(run, sid, states)
+        unverified = "no property of its own declared: the test asks only the generic checks every answer must hold"
+        if gaps:
+            unverified += ", left undecided on %s" % esc(gaps)
+        if sc_.get("warms"):
+            unverified += "; the property is its target's, %s, shown or not by that test" % esc(sc_["warms"])
     elif unshown:
         shown_on = []
         for arm in cells.ARMS:
@@ -1272,8 +1296,18 @@ def interpretation(run, sid, states, property_text=None):
             ", ".join(tt(n) for n in unshown),
             ("; the other property check%s passed on %s" % ("" if len(props) - len(unshown) == 1 else "s",
                                                              esc(", ".join(shown_on)))) if shown_on else "")
+        gaps = facts.unshown_reasons_text(run, sid, states)
+        if gaps:
+            unverified += "; the recorded reasons: %s" % esc(gaps)
     else:
-        unverified = "none of the property checks: each passed on some access path or repeat (the block explains the exception)"
+        # the access paths and repeats that did not show the property, each with its recorded reason (V6-302: the
+        # aggregate 'none' never hides the gap the block exists for)
+        gaps = facts.unshown_reasons_text(run, sid, states)
+        if gaps:
+            unverified = ("on every access path: none, each property check passed on some access path or repeat; "
+                          "not shown on %s" % esc(gaps))
+        else:
+            unverified = "none: each property check passed on every execution that evaluated it"
     return (latex.bline("requested", requested), latex.bline("observed", "; ".join(observed) or "no execution"),
             latex.bline("unverified", unverified))
 
@@ -1294,6 +1328,7 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
     `note`: a `reading` line after the interpretation, the chapter prose's explanation of this block (READ-319,
     READ-320: what a budget governs beside a longer wall, repeatability apart from an unexposed property)."""
     sc_ = run.scenario(sid)
+    title_text = title
     title = inline(title) if title else esc(sc_.get("title"), 200)
     meta = [esc(sc_.get("route") or "")]
     if sc_.get("timing_class"):
@@ -1302,9 +1337,17 @@ def detail_block(run, sid, states, number, units, short_reasons=None, unit_note=
         meta.append(esc(", ".join(str(t) for t in sc_["tags"]), 120))
     rep = sc_.get("repeat")
     if rep:
-        meta.append("%s repeat%s" % (rep, "" if rep == 1 else "s"))
+        # the manifest's repeat count is not the count of the rows below: the paired loop adds the MCP warm call and
+        # the extra direct repeat of every tenth scenario (I.2), so the recorded executions are named beside it where
+        # they differ (the external review of the v6 document, V6-105)
+        counts = [(cells.ARM_SHORT.get(arm, arm), len(states[arm].lines)) for arm in cells.ARMS
+                  if states[arm].present and states[arm].lines]
+        text = "%s repeat%s in the manifest" % (rep, "" if rep == 1 else "s")
+        if any(n != rep for _, n in counts):
+            text += "; recorded executions %s (the rows below)" % ", ".join("%s %d" % c for c in counts)
+        meta.append(text)
     body = ["{\\color{black!60}\\small " + " · ".join(m for m in meta if m) + "}"]
-    body.extend(interpretation(run, sid, states, property_text))
+    body.extend(interpretation(run, sid, states, property_text, title=title_text))
     if note:
         body.append(latex.bline("reading", inline(note)))
     # its own paragraph, so that the label does not run on at the end of the unverified line (READ-114; the

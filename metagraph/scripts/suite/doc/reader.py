@@ -113,9 +113,85 @@ def depth_over_compared_repeats(comp, rows, is_property, manifest=None):
     return depth
 
 
+# the MCP runner's steps beside the MCP tools in its raw records: the download of an export's link
+NON_MCP_STEPS = ("download",)
+
+
+def sc_time(text):
+    """Epoch seconds of an ISO UTC time ('2026-10-19T02:34:58Z', a fraction kept), None when not one."""
+    import calendar
+    import time as _time
+    try:
+        text = str(text)
+        whole = calendar.timegm(_time.strptime(text[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
+    frac = re.match(r"\.(\d+)", text[19:])
+    return whole + (float("0." + frac.group(1)) if frac else 0.0)
+
+
+def run_start(run_id, rows):
+    """Epoch seconds of a run's start: its run id's time ('20261019T005230Z_...'), else its first execution's start;
+    None when neither is known."""
+    m = re.match(r"\A(\d{8}T\d{6}Z)", str(run_id or ""))
+    if m:
+        import calendar
+        import time as _time
+        return calendar.timegm(_time.strptime(m.group(1), "%Y%m%dT%H%M%SZ"))
+    starts = [sc_time(r.get("started_utc")) for r in rows or []]
+    starts = [t for t in starts if t is not None]
+    return min(starts) if starts else None
+
+
+class PreviousRun(object):
+    """The previous edition's run, read only for the comparison of this document's 'Since the previous edition'
+    (make_doc --previous; the reader review of the v7 document, RV7: the v6 baseline given as an input, never a figure
+    of it hard-coded): its manifest, its executions (the re-evaluated set when present, as its own document read it),
+    its run.json and the sha256 of the executions file read."""
+
+    def __init__(self, run_dir, current_dir=None, current=None):
+        """|current|: {run_id, manifest_version, started} of this document's run; a previous run that is not earlier
+        (its run id's time, else its first execution) or has a higher manifest version is refused (W6: the change list
+        would read backwards)."""
+        self.dir = os.path.abspath(run_dir)
+        if not os.path.isdir(self.dir):
+            raise RunError("--previous: not a directory: %s" % run_dir)
+        if current_dir and os.path.abspath(current_dir) == self.dir:
+            raise RunError("--previous names this document's own run: %s" % run_dir)
+        self.manifest = sc.read_json(os.path.join(self.dir, "manifest.json"))
+        if not isinstance(self.manifest, dict) or not isinstance(self.manifest.get("scenarios"), list):
+            raise RunError("--previous %s: manifest.json missing or without scenarios" % run_dir)
+        self.scenarios = dict((s["id"], s) for s in self.manifest["scenarios"] if isinstance(s, dict) and s.get("id"))
+        self.reevaluated = os.path.exists(os.path.join(self.dir, "executions.reevaluated.jsonl"))
+        self.executions_file = sc.reevaluated_name("executions.jsonl", self.reevaluated)
+        path = os.path.join(self.dir, self.executions_file)
+        if not os.path.exists(path):
+            raise RunError("--previous %s: no executions file" % run_dir)
+        rows, _ = sc.read_jsonl(path)
+        self.rows = sc.judged_lines(rows) if hasattr(sc, "judged_lines") else rows
+        self.executions_sha256 = sha256_of(path)
+        self.run = (sc.read_json(os.path.join(self.dir, sc.reevaluated_name("run.json", self.reevaluated)))
+                    or sc.read_json(os.path.join(self.dir, "run.json")) or {})
+        if current:
+            mine, theirs = self.manifest.get("manifest_version"), current.get("manifest_version")
+            if isinstance(mine, int) and isinstance(theirs, int) and mine > theirs:
+                raise RunError("--previous %s: manifest version %d is above this run's %d" % (run_dir, mine, theirs))
+            t_prev, t_cur = run_start(self.run_id(), self.rows), current.get("started")
+            if t_prev is not None and t_cur is not None and t_prev >= t_cur:
+                raise RunError("--previous %s: run %s is not earlier than this run %s" % (
+                    run_dir, self.run_id(), current.get("run_id")))
+
+    def run_id(self):
+        return self.run.get("run_id") or os.path.basename(self.dir)
+
+    def lines(self):
+        """{(scenario, arm, repeat): line}."""
+        return dict(((r.get("scenario"), r.get("arm"), r.get("repeat")), r) for r in self.rows)
+
+
 class Run(object):
     def __init__(self, run_dir, recorded=False, by_design=None, checks_dir=None, declared=None, policy=None,
-                 identity=None, also_policies=None):
+                 identity=None, also_policies=None, previous=None):
         self.dir = os.path.abspath(run_dir)
         if not os.path.isdir(self.dir):
             raise RunError("not a directory: %s" % run_dir)
@@ -174,6 +250,14 @@ class Run(object):
         self.service_identity = recorded if isinstance(recorded, dict) else (
             merge_run.service_identity(self.dir, {"mcp": self.mcp_run}) if self.mcp_run else None)
         self.identity = self._load_identity(identity)
+        # the previous edition's run (make_doc --previous), None without one; read once this run's identity is known
+        self.previous = PreviousRun(previous, self.dir, {
+            "run_id": self.run_id_early(), "manifest_version": self.manifest.get("manifest_version"),
+            "started": run_start(self.run_id_early(), self.rows)}) if previous else None
+        # the deployed commit the gate holds the recorded identity to (gate.py --expect-service-commit), from the
+        # identity input's deployment record, never from the run's own records (RV3, V3); None without one
+        dep = (self.identity or {}).get("deployed_service_commit")
+        self.expected_service_commit = dep.get("commit") if isinstance(dep, dict) else None
         self.orchestrator = sc.read_json(os.path.join(self.dir, "orchestrator.json")) or {}
         judged = cmp.judging_checks(self.dir, reevaluated) or {}
         self.judged = judged
@@ -198,7 +282,8 @@ class Run(object):
             # no verdict recorded in the run: the gate is evaluated offline from the run directory (gate.judge
             # reads the merged lines, compare.json, the manifest and the plan; it writes nothing)
             try:
-                self.gate = gate_mod.judge(self.dir, self.policy, reevaluated)
+                self.gate = gate_mod.judge(self.dir, self.policy, reevaluated,
+                                           expect_service_commit=self.expected_service_commit)
                 self.gate["policy"]["path"] = self.policy_path
                 self.gate_offline = True
             except Exception as e:  # a run the gate cannot judge: the document says why, never a crash
@@ -211,7 +296,8 @@ class Run(object):
             entry = {"path": os.path.abspath(path), "policy": None, "verdict": None, "error": None}
             try:
                 entry["policy"] = gate_mod.load_policy(path)
-                entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated)
+                entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated,
+                                                  expect_service_commit=self.expected_service_commit)
             except Exception as e:  # a policy the gate cannot read or judge: the document says why, never a crash
                 entry["error"] = "%s: %s" % (type(e).__name__, e)
             self.also_gates.append(entry)
@@ -314,6 +400,34 @@ class Run(object):
         rec = [c for c in ((self.service_identity or {}).get("service_commits") or {})]
         if rec and not any(gate_mod.commit_matches(c, data["service_commit"]) for c in rec):
             problems.append("service_commit %s, the MCP runner recorded %s" % (data["service_commit"], ", ".join(rec)))
+        # the service's log (an observation the run does not record, printed in Timing 6): plain text and explicit
+        # UTC times, each within the run's span (the review of the v7 document, V4)
+        log = data.get("service_log")
+        if log is not None:
+            if not isinstance(log, dict) or not str(log.get("text") or "").strip():
+                problems.append("service_log is not {text, times[, source]}")
+            else:
+                starts = [sc_time(r.get("started_utc")) for r in self.rows]
+                ends = [sc_time(r.get("ended_utc")) for r in self.rows]
+                starts = [t for t in starts if t is not None]
+                ends = [t for t in ends + starts if t is not None]
+                for t in log.get("times") or []:
+                    v = sc_time(t)
+                    if v is None or not re.search(r"(Z|\+00:00)\Z", str(t)):
+                        # only UTC: an offset would be read as UTC (sc_time reads the first 19 characters; W6)
+                        problems.append("service_log time %r is not an ISO UTC time ending in Z" % (t,))
+                    elif starts and not (min(starts) <= v <= max(ends)):
+                        problems.append("service_log time %s lies outside the run (%s to %s)" % (
+                            t, min(r.get("started_utc") for r in self.rows if r.get("started_utc")),
+                            max(r.get("ended_utc") or "" for r in self.rows)))
+        # the deployed commit from the deployment record (the deploy's own record), with its source: the gate compares
+        # the recorded identity with it (RV3, V3); a commit the run recorded otherwise is the gate's problem, not a
+        # refusal here
+        dep = data.get("deployed_service_commit")
+        if dep is not None:
+            if not isinstance(dep, dict) or not gate_mod.COMMIT_RE.match(str(dep.get("commit") or "")) \
+                    or not str(dep.get("source") or "").strip():
+                problems.append("deployed_service_commit is not {commit (a git sha), source}")
         content = re.search(r"\b[0-9a-f]{64}\b", str(data.get("manifest") or ""))
         if content and self.manifest.get("content_sha256") and content.group(0) != self.manifest["content_sha256"]:
             problems.append("manifest content %s, the run's is %s" % (content.group(0), self.manifest["content_sha256"]))
@@ -380,6 +494,47 @@ class Run(object):
 
     def run_id(self):
         return self.run.get("run_id") or self.comp.get("run_id") or os.path.basename(self.dir)
+
+    def run_id_early(self):
+        """The run id before the comparison is read (run.json, else the directory's name)."""
+        return self.run.get("run_id") or os.path.basename(self.dir)
+
+    def mcp_tool_calls(self):
+        """{tool: {"n": calls, "formats": {format argument: calls}}} of the MCP runner's raw records
+        (arms/mcp/raw/*.json[.gz]: every object naming a `tool`), read once; the HTTP reads the runner makes beside the
+        tools (a name with a '/', the export's download) are left out. {} without raw records."""
+        if getattr(self, "_mcp_tools", None) is not None:
+            return self._mcp_tools
+        import glob
+        import gzip
+        out = {}
+
+        def walk(o):
+            if isinstance(o, dict):
+                tool = o.get("tool")
+                if isinstance(tool, str) and re.match(r"\A[a-z_]+\Z", tool) and tool not in NON_MCP_STEPS:
+                    e = out.setdefault(tool, {"n": 0, "formats": {}})
+                    e["n"] += 1
+                    fmt = (o.get("args") or {}).get("format") if isinstance(o.get("args"), dict) else None
+                    if fmt is not None:
+                        e["formats"][str(fmt)] = e["formats"].get(str(fmt), 0) + 1
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+        files = sorted(glob.glob(os.path.join(self.dir, "arms", "mcp", "raw", "*.json"))
+                       + glob.glob(os.path.join(self.dir, "arms", "mcp", "raw", "*.json.gz")))
+        for path in files:
+            try:
+                opener = gzip.open if path.endswith(".gz") else open
+                with opener(path, "rb") as fh:
+                    walk(json.loads(fh.read().decode("utf-8")))
+            except (OSError, ValueError):
+                continue
+        self._mcp_tools = out
+        self.mcp_raw_files = len(files)
+        return out
 
     def line_no(self, line):
         """The physical line of an execution in the executions file (1-based), or None."""

@@ -75,6 +75,16 @@ _MARKERS_RE = re.compile("[\ue000-\ue003]")
 
 # -- filling ------------------------------------------------------------------------------------------------------
 
+class _Blank(dict):
+    """The facts of a test the run does not have (a cross reference, `xr`): every field reads as empty."""
+
+    def __missing__(self, key):
+        return _Blank()
+
+    def __str__(self):
+        return ""
+
+
 class _Missing(object):
     def __init__(self, text):
         self.text = text
@@ -333,6 +343,11 @@ def exec_phrase(run, sid, line, arm, wall=None):
         checks = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
         if checks:
             return "inconclusive (%s: %s)" % (checks[0].get("check"), _clause(checks[0].get("detail"), 120))
+        hidden = not_exposed_text(run, line)
+        if hidden:
+            # the MCP answer lacks the field the property check reads (the external review of the v6 document,
+            # V6-302: the phrase names the cause, never a bare word)
+            return "inconclusive (%s)" % hidden
         return "inconclusive"
     if outcome == "fail":
         failed = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
@@ -346,6 +361,134 @@ def exec_phrase(run, sid, line, arm, wall=None):
     if outcome == "service_by_design":
         return "by design (http %s%s)" % (http, (" " + code) if code else "")
     return str(cells.WORD.get(outcome, outcome))
+
+
+def not_exposed_text(run, line):
+    """'capabilities_doc not exposed via MCP: field not in the answer: features' for the property checks of an
+    execution its answer did not expose (outcome not_exposed), '' when none (V6-302)."""
+    items = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "not_exposed"
+             and run.is_property(c.get("check"))]
+    if not items:
+        return ""
+    return "; ".join("%s not exposed via MCP: %s" % (c.get("check"), _cut(c.get("detail"), 100)) for c in items)
+
+
+def unshown_reason(run, sid, line, arm, short=False):
+    """Why one execution did not show the test's property, without its time (the detail block's unverified line,
+    V6-302): the scenario-level mark, a host state, a 503 deadline (allowed or late), another refusal, a failure, the
+    property check that could not decide (with its evidence clause; `short`: the check alone, the exception index's
+    grouping key) or that the MCP answer did not expose; '' for an execution that showed it."""
+    outcome = line.get("outcome")
+    code, _ = _err(line)
+    http = line.get("http")
+    if outcome == "finding":
+        if _late_ms(run, sid, line) is not None:
+            return "a 503 deadline past the budget (a finding, no answer)"
+        props = [c for c in (line.get("checks") or []) if isinstance(c, dict) and run.is_property(c.get("check"))]
+        if props and not any(c.get("outcome") == "pass" for c in props):
+            return "a finding without a passing property check"
+        return ""
+    if outcome == "fail":
+        failed = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "fail"]
+        if failed and short:
+            return "FAIL (%s)" % failed[0].get("check")
+        return "FAIL (%s: %s)" % (failed[0].get("check"), _cut(failed[0].get("detail"), 100)) if failed else "FAIL"
+    if outcome == "error":
+        return "ERROR (no HTTP answer to check)"
+    if outcome != "inconclusive":
+        return ""
+    if arm == "mcp" and line.get("inconclusive_reason") == sc.SCENARIO_LEVEL_MARK:
+        return "every property check marked as not shown via MCP (a scenario-level mark)"
+    if _overridden(line, arm == "mcp"):
+        return "the service's %s (a host state)" % line["inconclusive_reason"]
+    if http == 503 and code == "deadline":
+        return "an allowed 503 deadline (no answer to check)"
+    if http is not None and http != 200:
+        return "http %s%s (allowed: no answer to check)" % (http, (" " + code) if code else "")
+    items = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "inconclusive"]
+    props = [c for c in items if run.is_property(c.get("check"))] or items
+    if props:
+        if short:
+            return "%s could not decide" % props[0].get("check")
+        # every property check the execution left undecided (the verification of the review's fixes, L6)
+        return "; ".join("%s inconclusive: %s" % (c.get("check"), _clause(c.get("detail"), 110 if len(props) == 1
+                                                                            else 80)) for c in props)
+    if short:
+        hidden = [c for c in (line.get("checks") or []) if isinstance(c, dict) and c.get("outcome") == "not_exposed"
+                  and run.is_property(c.get("check"))]
+        if hidden:
+            fields = [str(c.get("detail") or "").split("field not in the answer: ", 1)[-1] for c in hidden]
+            return "%s not exposed via MCP (the answer lacks %s)" % (
+                ", ".join(str(c.get("check")) for c in hidden), ", ".join(_cut(f, 40) for f in fields))
+    return not_exposed_text(run, line) or "no check could decide"
+
+
+def unshown_reasons_text(run, sid, states):
+    """Per access path the reasons the test's property was not shown there (unshown_reason), repeats alike
+    grouped: 'mcp r0, r1: capabilities_doc not exposed via MCP: field not in the answer: features' (V6-302)."""
+    parts = []
+    for arm in ARMS:
+        st = states[arm]
+        if not st.present:
+            continue
+        by_reason = []
+        marked = set(run.check_marks(sid)) if hasattr(run, "check_marks") else set()
+        for l in st.lines:
+            why = unshown_reason(run, sid, l, arm)
+            if not why and l.get("outcome") == "pass":
+                # a passing repeat whose property check the MCP answer did not expose, unless the manifest's marks
+                # set that check aside (L6: v5's D-P-scope-0004 r1, r2 pass on deterministic alone)
+                hidden = [c for c in (l.get("checks") or []) if isinstance(c, dict) and c.get("outcome") ==
+                          "not_exposed" and run.is_property(c.get("check")) and c.get("check") not in marked]
+                if hidden:
+                    why = "; ".join("%s not exposed via MCP: %s" % (c.get("check"), _cut(c.get("detail"), 100))
+                                    for c in hidden)
+            if not why:
+                continue
+            for r in by_reason:
+                if r[0] == why:
+                    r[1].append(l.get("repeat"))
+                    break
+            else:
+                by_reason.append([why, [l.get("repeat")]])
+        for why, reps in by_reason:
+            many = len(st.lines) > 1
+            parts.append("%s%s: %s" % (arm, (" " + ", ".join("r%s" % r for r in reps)) if many else "", why))
+    return "; ".join(parts)
+
+
+def unshown_index_groups(run, sids, state_of):
+    """The exception index's 'property not shown' entry (V6-302): the tests grouped by their recorded reason and
+    the access paths it struck, [((access paths, reason), [ids])], e.g. (('mcp', 'capabilities_doc not exposed via
+    MCP (the answer lacks features)'), ['C-caps-0003'])."""
+    groups = []
+    for sid in sids:
+        states = state_of(sid)
+        by_reason = []
+        for arm in ARMS:
+            st = states[arm]
+            if not st.present:
+                continue
+            for l in st.lines:
+                why = unshown_reason(run, sid, l, arm, short=True)
+                if not why:
+                    continue
+                for r in by_reason:
+                    if r[0] == why:
+                        if arm not in r[1]:
+                            r[1].append(arm)
+                        break
+                else:
+                    by_reason.append([why, [arm]])
+        for why, arms in by_reason:
+            key = (_join(arms), why)
+            for g in groups:
+                if g[0] == key:
+                    g[1].append(sid)
+                    break
+            else:
+                groups.append([key, [sid]])
+    return [(key, ids) for key, ids in groups]
 
 
 def _status_text(line):
@@ -372,7 +515,7 @@ def arm_facts(ctx, sid, arm):
          "wall": "–", "walls": "–", "wall_cold": "–", "wall_warm": "–", "server": "–", "backend": "–",
          "http": "", "code": "", "host": "", "host_word": "", "late": "", "phrase": "", "phrase_cold": "",
          "phrase_warm": "", "detail": "", "evidence": "", "class": "", "class_word": "", "clean": bool(st.clean),
-         "time_limited": "", "checks": {}, "n_outside_case": 0, "outside_case_phrase": ""}
+         "time_limited": "", "checks": {}, "n_outside_case": 0, "outside_case_phrase": "", "seed_refusal": ""}
     if not st.present:
         f["phrase"] = "no execution recorded although the run planned one" if st.missing_planned else "no execution"
         return f
@@ -397,6 +540,12 @@ def arm_facts(ctx, sid, arm):
     if answered:
         f["http"] = str(answered.get("http"))
         f["code"] = _err(answered)[0] or ""
+        # which seed refusal of SPEC-labeled-traversal-core section 6.1 the answer gave, read from its text (the
+        # external review of the v6 document, V6-103): graph (step 2, a seed k-mer in no record of the graph: a plain
+        # absence) or label (step 3, no seed label supports every k-mer); '' otherwise
+        text = str(_err(answered)[1] or "")
+        f["seed_refusal"] = ("graph" if "not fully present in the graph" in text else
+                             "label" if "No seed label supports every k-mer" in text else "")
     f["host"] = str(cells.host_cache_of(first) or "").replace("_", " ")
     f["host_word"] = HOST_WORD.get(cells.host_cache_of(first), f["host"])
     lates = [_late_ms(run, sid, l) for l in lines]
@@ -534,6 +683,40 @@ def _ids_short(ids):
     if all(i.startswith(prefix) for i in ids):
         return _join([ids[0]] + ["-" + i[len(prefix):] for i in ids[1:]])
     return _join(ids)
+
+
+def ids_ranges(ids):
+    """Test ids with consecutive numbers as ranges, a shared prefix once per run of ids (the external review of the
+    v6 document, V6-003): 'P-exact-0001 to -0008, P-scope-0001 to -0003, -0005, -0007 to -0012, P-edge-0004'; every
+    id is still named, by its range."""
+    groups = []
+    for sid in ids:
+        prefix, _, num = str(sid).rpartition("-")
+        if not prefix or not num.isdigit():
+            groups.append([str(sid), None, []])
+            continue
+        if groups and groups[-1][0] == prefix and groups[-1][1] is not None:
+            groups[-1][2].append(num)
+        else:
+            groups.append([prefix, len(num), [num]])
+    parts = []
+    for prefix, width, nums in groups:
+        if width is None:
+            parts.append(prefix)
+            continue
+        runs = []
+        for n in nums:
+            if runs and int(n) == int(runs[-1][-1]) + 1:
+                runs[-1].append(n)
+            else:
+                runs.append([n])
+        texts = []
+        for i, r in enumerate(runs):
+            head = ("%s-%s" % (prefix, r[0])) if i == 0 else "-%s" % r[0]
+            texts.append(head if len(r) == 1 else "%s to -%s" % (head, r[-1]) if len(r) > 2 else
+                         "%s, -%s" % (head, r[-1]))
+        parts.append(", ".join(texts))
+    return ", ".join(parts)
 
 
 # -- family and chapter facts -------------------------------------------------------------------------------------
@@ -1067,6 +1250,11 @@ def family_facts(ctx, fid):
          "n_units": len(f.get("units") or []), "members": ", ".join(members)}
     x = dict((sid, scenario_facts(ctx, sid)) for sid in members)
     v["x"] = x
+    # the scenario facts of another family's test the prose names as `xr[<id>]` (a cross reference: R-rc reads
+    # T-strand's observed refusal, the verification of the review's fixes, L1), kept apart from the members' `x`
+    # a test another run lacks reads blank (every field empty), so that a condition on it takes its last branch
+    v["xr"] = dict((sid, scenario_facts(ctx, sid) if sid in (ctx.run.scenarios or {}) else _Blank())
+                   for sid in sorted(set(re.findall(r"xr\[([A-Za-z0-9_.-]+)\]", str(prose)))))
     v.update(_mcp_class_values(x, members))
     v.update(_standing_counts(ctx, members))
     footnoted = [sid for sid in members if x[sid]["footnoted"]]
@@ -1187,6 +1375,50 @@ def _claim(ctx, fid, fv, claim, wanted, held, unsupported, items=None):
                       "words": " / ".join(words) or "no execution"})
 
 
+MCP_FULL_DEF = "every property check evaluated on both"
+
+
+def mcp_full_definition(ctx, marked):
+    """What 'fully checked' covers in a chapter's MCP sentence (V6-201): every property check evaluated on both, or,
+    where agreeing pairs omit a check the manifest's property-level marks set aside, that exception with their count
+    by family; the marked check is not compared and stays unverified via MCP."""
+    if not marked:
+        return MCP_FULL_DEF
+    run = getattr(ctx, "run", None)
+    bd = [sid for sid in marked if hasattr(run, "check_marks")
+          and any(m.get("mark") == "by_design" for m in run.check_marks(sid).values())]
+    ni = [sid for sid in marked if sid not in bd]
+    text = MCP_FULL_DEF
+    if ni:
+        text = _full_def_ni(text, ni)
+    if bd:
+        # a check set aside as a documented service difference, told apart from the not-implemented kind (RV4)
+        named = ["%s's %s" % (sid, ", ".join(c for c, m in run.check_marks(sid).items() if m.get("mark") == "by_design"))
+                 for sid in bd[:3]]
+        text += "%s except %s, which appendix G lists as set aside service-side by design" % (
+            ";" if ni else ",", _join(named) + (" and %d more" % (len(bd) - 3) if len(bd) > 3 else ""))
+    return text
+
+
+def _full_def_ni(base, marked):
+    """'fully checked' with the exception of the not-implemented property-level marks (V6-201), by family when many."""
+    if len(marked) <= 3:
+        which = _ids_short(marked)
+    else:
+        fams = []
+        for sid in marked:
+            fid = sid.rsplit("-", 1)[0]
+            for f in fams:
+                if f[0] == fid:
+                    f[1] += 1
+                    break
+            else:
+                fams.append([fid, 1])
+        which = ", ".join("%s %d" % (f, k) for f, k in fams)
+    return ("%s, except a check a property-level mark of the manifest sets aside, not compared and unverified via MCP "
+            "(on %s of them: %s)" % (base, number_word(len(marked)), which))
+
+
 def chapter_facts(ctx, ch):
     """A chapter's values for its `summary` and `coverage_gap` prose: the counts by standing and by agreement, the
     timing of the summary's sources, the findings, the time limitations, the claims held and unsupported, the
@@ -1214,6 +1446,7 @@ def chapter_facts(ctx, ch):
     direct, mcp = {}, {}
     full, verified, unverified = 0, 0, 0
     fewer = []  # the fully checked pairs whose comparison left a repeat out (a host-state outcome)
+    full_marked = []  # the fully checked pairs with a property check a property-level mark sets aside (V6-201)
     for sid in sids:
         e = run.comp_entry(sid)
         dc = (e.get("direct_agreement") or {}).get("class")
@@ -1232,6 +1465,8 @@ def chapter_facts(ctx, ch):
             full += 1
             if d.get("repeats_excluded"):
                 fewer.append(sid)
+            if hasattr(run, "check_marks") and run.check_marks(sid):
+                full_marked.append(sid)
     for key in ("identical", "same_checks", "timing", "not_comparable", "disagree"):
         v["n_direct_%s" % key] = direct.get(key, 0)
     words = {"identical": "identical pair{s}", "timing": "differing by a time limitation alone",
@@ -1246,6 +1481,11 @@ def chapter_facts(ctx, ch):
     v["n_mcp_agree"] = mcp.get("agree", 0)
     v["n_mcp_full"] = full
     v["mcp_all_full"] = full == mcp.get("agree", 0)
+    # fully checked holds over the property checks the manifest's property-level marks do not set aside (the
+    # external review of the v6 document, V6-201): the pairs that omit a marked check, counted by family, so that
+    # the chapter's definition never claims the marked check was evaluated via MCP
+    v["n_mcp_full_marked"] = len(full_marked)
+    v["mcp_full_def"] = mcp_full_definition(ctx, full_marked)
     # the fully checked pairs compared on fewer repeats than recorded, each with the repeats compared and the
     # excluded one's reason (reader.depth_over_compared_repeats; the owner's second review, point 2)
     v["n_mcp_full_fewer_repeats"] = len(fewer)
@@ -1326,6 +1566,10 @@ def chapter_facts(ctx, ch):
                 and cells._num(l.get("mcp_phases", {}).get("backend_ms")) is not None]
     v["backend_p50_warm_mcp"] = cells.fmt_exec_text(cells.percentile(backends, 50)) if backends else "–"
     v["n_backend_warm_mcp"] = len(backends)
+    # the chapter's executions in the host's memory episodes, for its Timing paragraph (RV1, V9; sections, read late:
+    # it imports this module)
+    import sections as _sections
+    v["memory_note"] = _sections.memory_chapter_note(ctx, ch) if getattr(ctx, "run", None) is not None else ""
     cold_by_family = [(fam[fid]["n_cold_dl"], fid) for fid in fams if fam[fid]["n_cold_dl"]]
     v["cold_dl_families"] = ", ".join("%s %d" % (fid, n) for n, fid in sorted(cold_by_family, key=lambda t: (-t[0], t[1])))
     held, unsupported, items = _claims(ctx, ch, fam)
@@ -1339,7 +1583,7 @@ def chapter_facts(ctx, ch):
     # access paths and another not compared on some repeat (the detail block names which); the first such pair in
     # run order named with what it left uncompared, for the chapter summary's reading line
     v["n_mcp_agree_partial"] = max(0, v["n_mcp_agree"] - v["n_mcp_full"])
-    v.update(_mcp_agree_short(run, sids))
+    v.update(_mcp_agree_short(run, sids, footnoted=lambda sid: bool(x[sid]["footnoted"])))
     v["mcp_agree_partial_example"] = ""
     for sid in sids:
         e = run.comp_entry(sid)
@@ -1502,7 +1746,7 @@ AGREE_SHORT_PARTIAL = ("partial", "partial_non_pass")
 AGREE_SHORT_ON_FAILURE = ("on_failure",)
 
 
-def _mcp_agree_short(run, sids):
+def _mcp_agree_short(run, sids, footnoted=None):
     """The agreeing MCP pairs short of fully checked, by depth class (report.DEPTH_CLASSES): {n_mcp_agree_generic
     (generic checks only or a refusal: no property check compared), n_mcp_agree_partial_checked (partial or
     partial_non_pass: some property check compared and agreeing on both, another not compared on some repeat),
@@ -1510,6 +1754,7 @@ def _mcp_agree_short(run, sids):
     words, separated by semicolons since the first holds a relative clause (the re-verification L-j), the empty ones
     left out; '' when none)}."""
     counts = {"generic": 0, "partial": 0, "on_failure": 0}
+    partial_ids = []
     for sid in sids:
         e = run.comp_entry(sid)
         d = (run.depth or {}).get(sid)
@@ -1520,14 +1765,31 @@ def _mcp_agree_short(run, sids):
             counts["generic"] += 1
         elif cls in AGREE_SHORT_PARTIAL:
             counts["partial"] += 1
+            partial_ids.append(sid)
         elif cls in AGREE_SHORT_ON_FAILURE:
             counts["on_failure"] += 1
     parts = []
     if counts["generic"]:
         parts.append("%d on the generic checks or a refusal alone, which verifies no property" % counts["generic"])
     if counts["partial"]:
+        # the detail block names the uncompared check only where the test has one (`footnoted`: the chapter's
+        # footnoted tests); else the tests and their checks are named here (the verification of round 2, R5)
+        if footnoted is None or all(footnoted(sid) for sid in partial_ids):
+            which = "the detail block names which"
+        else:
+            by_reason = []
+            for sid in partial_ids:
+                why = blocks.not_compared_text((run.depth or {}).get(sid) or {}, list(run.check_marks(sid))
+                                               if hasattr(run, "check_marks") else []) or "a check not compared"
+                for r in by_reason:
+                    if r[0] == why:
+                        r[1].append(sid)
+                        break
+                else:
+                    by_reason.append([why, [sid]])
+            which = "; ".join("%s: %s" % (ids_ranges(ids), why) for why, ids in by_reason)
         parts.append("%d with some property check compared and agreeing on both access paths and another not "
-                     "compared on some repeat (the detail block names which)" % counts["partial"])
+                     "compared on some repeat (%s)" % (counts["partial"], which))
     if counts["on_failure"]:
         parts.append("%d with every property check compared on a failing answer" % counts["on_failure"])
     return {"n_mcp_agree_generic": counts["generic"], "n_mcp_agree_partial_checked": counts["partial"],

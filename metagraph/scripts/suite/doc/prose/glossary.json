@@ -121,7 +121,7 @@
   },
   {
    "term": "inconclusive",
-   "definition": "The answer could not show the property: an allowed 503 deadline (no results), a list a stated hiding shortened, a walk a stated limit stopped first, a stop that was the property and did not happen, nothing to compare, no property field exposed via MCP, a host state. Never a pass, never a failure; on a gated access path, in the policy's selection and not declared exempt, it blocks the gate (I.1 counts those).",
+   "definition": "The answer could not show the property: an allowed 503 deadline (no results), a list a stated hiding shortened, a walk a stated limit stopped first, a stop that was the property and did not happen, nothing to compare, no property field exposed via MCP, a host state. Never a pass, never a failure; where the policy requires it (a gated access path, in the selection, not removed by the policy's automatic exclusions nor declared exempt), it blocks the gate (I.1 counts those).",
    "see": [
     "host state"
    ]
@@ -141,7 +141,7 @@
    ]
   },
   {
-   "term": "property-level mark (manifest v5)",
+   "term": "property-level mark (manifest v5 and later)",
    "definition": "[[manifest_version >= 5 ? A mark of this run's manifest. | Not part of this run's manifest (version {manifest_version}): a mark of a later manifest version, exercised by no scenario of this run and read into none of its results; defined here so that the term is not misread where a reason or a plan names it.]] A mark of one check of a scenario (`mcp.not_implemented_checks`, `mcp.by_design_checks`): on the MCP path a marked check that reads not exposed is set aside, neither compared nor counted untested, while the rest of the scenario stays tested; a marked check that reads anything else is judged as any check. Setting a check aside changes how the comparison and the gate treat it and supplies no evidence about it on that path.",
    "see": [
     "service-side by design"
@@ -163,7 +163,7 @@
   },
   {
    "term": "agreement class, depth",
-   "definition": "The direct paths per scenario: identical (same digest), same checks, timing (a time limitation alone), not comparable, disagree. mcp against the reference path, check by check: agree, not comparable, disagree; not implemented and by design apart. Depth of an agreement, judged over the MCP repeats compared (a repeat inconclusive by a host state is left out and named): fully checked (every expected property check on both paths, on every compared repeat), partial, generic checks only, a refusal. An agreement compares answers with one another and is no second proof of the property; a disagreement fails the run.",
+   "definition": "The direct paths per scenario: identical (same digest), same checks, timing (a time limitation alone), not comparable, disagree. mcp against the reference path, check by check: agree, not comparable, disagree; not implemented and by design apart. Depth of an agreement, judged over the MCP repeats compared (a repeat inconclusive by a host state is left out and named): fully checked (every expected property check on both paths, on every compared repeat, but a check a property-level mark of the manifest sets aside, which is not compared and stays unverified via MCP), partial, generic checks only, a refusal. An agreement compares answers with one another and is no second proof of the property; a disagreement fails the run.",
    "see": [
     "access path (arm)"
    ]
@@ -177,7 +177,7 @@
   },
   {
    "term": "time budget, finalisation reserve",
-   "definition": "`bounds.time_budget_ms` of a /resolve (opt-in: without it no deadline), `time_budget_ms` of a /pattern, the strategy's budget of a /traverse (per seed): lowered to the server's cap and stated in limits.clamped when lowered. A /resolve keeps 250 ms to build the answer: the work stops at the budget less the reserve; a budget not above it is refused (SPEC 4.5). A budget bounds the host's work on the request or the seed, never the caller's latency or the service's queue (the scope per route in I.2).",
+   "definition": "`bounds.time_budget_ms` of a /resolve (opt-in: without it no deadline), `time_budget_ms` of a /pattern, the strategy's budget of a /traverse (per seed): lowered to the server's cap and stated in limits.clamped when lowered. A /resolve keeps 250 ms to build the answer: the work stops at the budget less the reserve; a budget not above it is refused (SPEC 4.5).[[manifest_version >= 7 ? A /pattern stop is held to the same 250 ms reserve, the host's finalisation reserve its capabilities state (manifest v7: budget_respected's reserve_ms).]] A budget bounds the host's work on the request or the seed, never the caller's latency or the service's queue (the scope per route in I.2).",
    "see": [
     "stated stop, prefix",
     "deadline (503)"
@@ -240,7 +240,7 @@
   },
   {
    "term": "deploy gate, policy, declared file",
-   "definition": "The release decision: a strict judgement of the run's records against a policy that pins the manifest, relations, index and by-design table, selects scenarios by route and names the gated access paths; it fails on anything missing, any non-pass on a gated path, any mark it cannot explain, any disagreement, any required relation not passed, configuration evidence not recorded live (the rules and the problems by group in appendix F). The declared file is the owner's reasoned exemptions: they change what the gate requires, not what the run observed (appendix G).",
+   "definition": "The release decision: a strict judgement of the run's records against a policy that pins the manifest, relations, index and by-design table, selects scenarios by route and names the gated access paths; it evaluates the executions remaining after its automatic exclusions and the owner's exemptions (the required executions), each of which must pass its checks or match its verified by-design case, and it fails on anything missing, any required execution that does neither, any mark it cannot explain, any disagreement, any required relation not passed, configuration evidence not recorded live (the rules and the problems by group in appendix F). The declared file is the owner's reasoned exemptions: they change what the gate requires, not what the run observed (appendix G)[[gate_policy_names ?; this document names the policies it reports by their short names: {gate_policy_names}]].",
    "see": [
     "verdict"
    ]

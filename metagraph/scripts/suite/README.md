@@ -435,7 +435,7 @@ offline instead ("Offline re-evaluation of a recorded run", lane S4).
   inconclusive > pass (an outcome outside the vocabulary is a fail), and `inconclusive` when there is no check,
   every check is not exposed, or every PROPERTY check could not test anything (not exposed) although the generic
   checks passed (the verification's H3: an MCP P-exact-0001 without counts is no pass); a scenario without a
-  property check (a refusal: its status, code and text are the claim) is judged by its generic checks. Both
+  property check (a refusal, whose status, code and text are the claim; a warm-up, which asks what every answer must hold) is judged by its generic checks. Both
   direct runners use it; merge_run applies it to the MCP arm's lines (above). `deterministic` is left out of a
   scenario's first repeat (nothing to compare yet), so that repeat's outcome rests on the other checks.
 - `budget_respected` (lane S1b, the integrator's decision 2; lane S3 after the verification of lane S1b, X1:
@@ -4614,6 +4614,39 @@ the text was wrong for v5 too:
   none skipped (744 s). The changed lines against the verifier's builds:
   `~/.cache/metagraph-traverse-plans/2026-10-17/doc-v6/CHANGED-LINES.md`.
 
+### The external review of the v6 document (2026-10-18)
+An external review of the v6 baseline document (30 findings V6-001 to V6-307, 12 major, 18 minor; and 13 comments of
+the earlier readability review only partly resolved, each mapped to one of them) was assessed against the PDF, its
+LaTeX, the generator and the run data, and every finding was fixed by a general rule, the v5 document changing
+wherever the same text was wrong there (dispositions, evidence and builds:
+`~/.cache/metagraph-traverse-plans/2026-10-18/doc-v6-review/`, REVIEW-INDEX.md and review-issues.json; tests:
+tests/test_doc_review_v6.py). In short:
+- The gate (V6-001): the decision defines the required population, the route selection less the policy's automatic
+  exclusions (gate_policy.py's rules: budget_stress, the requests the MCP tools cannot express, the advanced path, an
+  MCP repeat the marks cover) and the owner's exemptions, with the scenarios and executions required per gated access
+  path (v6: 686 / 793 on direct-local, 628 / 1275 on mcp); the judged executions split by outcome (1950 passed, 118
+  service-side by design); a blocking execution is one "the policy requires on that access path and repeat";
+  appendix F carries the ledger of the automatic exclusions, I.4 a row for them.
+- Wording at the evidence's strength: "fully checked" excludes a check a property-level mark sets aside, named per
+  chapter (V6-201); an exception summary names the scenario's own request and the recorded cause per access path,
+  the index groups the tests by cause (V6-302); a warm-up's allowed 503 reads "no property of its own declared", the
+  status being a refusal's claim only (V6-204); no causal claim on the warm-ups (V6-203); the admission-only
+  sentence names the cap and refusal tests (V6-202); the defect pin's failure is not by itself a repair (V6-304);
+  a seed-only traverse answer is a limit of budget_respected, not of the contract (V6-002); the junctions' header
+  runs rest on a whole-record look-up (V6-101); annotate mode's witness is no all-successor evidence (V6-102);
+  T-strand names the refusal it observed (facts' seed_refusal; V6-103); N-zero per query length (V6-305); the
+  completeness indicators against an independent enumeration (V6-008); the assumed human non-carrier (V6-301);
+  primer counts are contexts (V6-303); long peptides' positive recovery (V6-205); record boundaries (V6-206); a
+  correctly stated stop passes (V6-209); time-limited against work-limit stops (V6-306); a demonstrated stop under
+  the neutral heading "Coverage and remaining limits" (V6-106); the host-cold marker of a warmed stop (V6-107).
+- Presentation: I.1 leads with the result, the attention caption names ids by ranges, I.2's budget scope is one
+  full-width block per route, the tint and attention rules are appendix F's (V6-003); make_doc writes evidence.json
+  beside the PDF, every input with its path and sha256 (V6-004); a detail block names the manifest's repeat count
+  apart from the recorded executions (V6-105); the phase plot states every value a log scale leaves out (v6's eight
+  terminal-lag values below 0 ms; V6-006); appendix C prints the relations' arguments in full (V6-007); a unit
+  heading's key never runs into its title (doc.sty's \unithead; V6-108); the pairs legend defines be (V6-307);
+  M-planted's title names t and m (V6-208); one description of the dark-grey footnote digit (V6-005).
+
 ## Manifest v7 (2026-10-18)
 v7 = v6 plus exactly the owner's approved changes, each below; v6 (content 49907dbb...), v5 and every frozen policy
 stay byte-identical. build_manifest.py builds v7 by default (MANIFEST_VERSION 7) and the frozen v6 again, byte for
@@ -4802,7 +4835,7 @@ The full vocabulary of the suite and of its results document (`doc/make_doc.py`)
 
 Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d60e4eb5d0…`), by-design table version 1 (service commit `22d034ba`). Definitions follow `checks.py`, `compare.py`, `report.py`, `gate.py` and the SPECs they cite (SPEC-labeled-traversal-core section 4 for /resolve). Where a figure is the run's (the warm window of 60 s, the Logan thresholds of 400 % `sra_all` CPU and load1 48, k = 31) the document states the run's own value.
 
-- **agreement depth** — Of an agreeing MCP pair, how much was compared: fully checked (every property check the scenario expects was evaluated on both arms and agreed), partial (the MCP answer exposed only some of them; counted apart when the aggregate is not a pass), generic checks only (none of them), a refusal (both arms refused alike), on failure (both arms failed alike). The chapter lines of the results document count the fully checked pairs. *See:* MCP agreement class.
+- **agreement depth** — Of an agreeing MCP pair, how much was compared: fully checked (every property check the scenario expects was evaluated on both arms and agreed, except a check a property-level mark of the manifest sets aside, which is not compared and stays unverified via MCP; the document's chapter lines name the pairs that omit one), partial (the MCP answer exposed only some of them; counted apart when the aggregate is not a pass), generic checks only (none of them), a refusal (both arms refused alike), on failure (both arms failed alike). The chapter lines of the results document count the fully checked pairs. *See:* MCP agreement class.
 - **answer digest** — The sha256 of the canonical JSON of the normalised answer without its headers and without every key named timing (and, for a capabilities document, without its measured and observed figures); the determinism check and the direct agreement read it. *See:* normalised answer, direct agreement class.
 - **answer-triggered case** — A by-design case matched by the MCP answer itself rather than named by the scenario (e.g. the host's /pattern 503 deadline relayed by the service as a failed search): the execution is by design, verified when a direct execution matched the case's host side. *See:* by-design table.
 - **area, chapter** — The ten groups of scenarios by what they test, one letter each (R resolve, T traverse, P patterns up to k, L patterns longer than k, X peptides, M mismatches, Q predicates and motif, C capabilities and protocol, N negatives and near-misses, D determinism); Part II has one chapter per area. *See:* family, unit.
@@ -4820,7 +4853,7 @@ Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d
 - **connect time** — The set-up of a fresh connection (TCP, and TLS on the public URL), recorded per direct execution apart from the wall time and reported per arm as part of the front cost. *See:* the front, wall time.
 - **deadline (503)** — The 503 with code deadline that /resolve and /pattern answer when the answer cannot be built and written within the budget: nothing partial is sent. Where the request names a budget the SPECs allow it on any host under load, so the suite reads it as inconclusive (and as a finding when it comes more than max(1 s, the budget) late); on a /resolve without a budget it is a failure. *See:* inconclusive, finding, machine-dependent.
 - **declared file** — The owner's versioned list beside a policy: exclusions (a scenario on an arm, with a reason), checks not required (a property the MCP surface never exposes) and relations excluded. The only way past the gate for a scenario the rules do not exclude; Part I prints it. *See:* policy, deploy gate.
-- **deploy gate** — The strict judgement of a run against a policy (gate.py): it fails on any identity problem, any missing planned or required execution, any fail, error, finding or inconclusive on a gated arm, a mark the policy does not explain, a property check not passed, any disagreement between the gated arms, any required relation not passed, and configuration evidence not recorded live. The v4 gate runs two arms, mcp and direct-local, on the scenarios of POST /resolve, POST /traverse and GET /traverse/capabilities. *See:* policy, declared file, verdict.
+- **deploy gate** — The strict judgement of a run against a policy (gate.py): it evaluates the required executions (the policy's selection on its gated arms, less the policy's automatic exclusions and the owner's declared exemptions), each of which must pass its checks or match its verified by-design case, and it fails on any identity problem, any missing planned or required execution, any required execution that does neither (a fail, an error, a finding, an inconclusive execution), a mark the policy does not explain, a property check not passed, any disagreement between the gated arms, any required relation not passed, and configuration evidence not recorded live. The v4 gate runs two arms, mcp and direct-local, on the scenarios of POST /resolve, POST /traverse and GET /traverse/capabilities. *See:* policy, declared file, verdict.
 - **detail block** — The explanation printed after a unit's table for every test that is not clean: the mark, the id and title, the route, timing class, tags and repeats; the expected line; per arm that is not clean its outcome, status, error, times and every check that did not pass with its detail; the agreement classes; the relations involved; and for a finding the rule it broke. *See:* clean, footnote mark.
 - **direct agreement class** — How direct-local and direct-remote compare on a scenario: identical (the same answer digest and no check differing other than through the execution's own clock or repeats), same checks (another answer, the same check outcomes), timing (the outcomes differ only because one arm's answer states a time limitation the other's does not, and the stopped answer is consistent with the complete one), not comparable (no check evaluated on both), disagree. A disagreement fails the run. *See:* MCP agreement class, answer digest.
 - **direct-local** — The runner on mex sending the request to the container's own port: no proxy, no network; the cleanest server timing and the reference arm of the MCP comparison. *See:* arm, reference arm.
@@ -4858,7 +4891,7 @@ Pinned to: checks commit `c11db9dd`, manifest version 4 (content sha256 `3a7417d
 - **not exercised** — The results document's wording for an MCP cell, aggregate or count whose executions the tools could not express (agreement class not implemented via MCP): never ok, never passed, since no property was tested there. *See:* not implemented via MCP.
 - **not implemented via MCP** — The request cannot be asked through the MCP tools: the manifest marks it (`mcp.not_implemented` naming the field: support, `bounds.max_query_bp`, an unknown field, a protocol body), or a case of the by-design table with that agreement names the missing argument (e.g. a 10 kb resolve: the service always sends its own 2,000 bp cap). The results document prints such a cell as *not exercised*, never as ok; the service's own refusal, when one was recorded, is under the row or in appendix B. A known limit of the tools, not a failure and not coverage. *See:* service-side by design, by-design table.
 - **paired loop** — The run's order per scenario: MCP cold, direct-local, direct-remote, MCP warm, one request in flight against the host at a time. It makes the direct executions host-warm by construction wherever the MCP cold call reached the host. *See:* host cache state, cold / warm.
-- **policy** — The deploy gate's pinned selection: the manifest's content and relations hashes, the index fingerprint and the by-design table's hash; the scenarios by route; the arms; the exclusions derived from the manifest and the table (a request the MCP has no argument for, an advanced traverse override) with the owner's declared entries; the executions and relations each arm must record. *See:* deploy gate, declared file.
+- **policy** — The deploy gate's pinned selection: the manifest's content and relations hashes, the index fingerprint and the by-design table's hash; the scenarios by route; the arms; the automatic exclusions its rules derive from the manifest, its tags and the table (a request the MCP has no argument for or whose answer the manifest marks, an advanced traverse override, a scenario tagged budget_stress, an MCP repeat whose property checks the marks all set aside), apart from the owner's declared entries; the executions and relations each arm must record. *See:* deploy gate, declared file.
 - **prefix** — The part of the query a stated stop resolved: its first `resolved_kmers` k-mers; a client resolves the rest from base `remainder_from_bp`. The relation `prefix_equals` compares a stopped answer with the full one on their common k-mers. *See:* stated stop, relation.
 - **property check** — Every check that is not generic: the claim the scenario was built to test (`resolve_runs`, `contains_source_context`, `walk_in_record`, ...). An execution whose property checks all could not test anything is inconclusive even when its generic checks passed; a scenario with no property check (a refusal) is judged by its generic checks. *See:* generic check, inconclusive.
 - **property line** — The one sentence above a unit's table that states the claim every member of the unit tests; the family prose before the units says what the family checks and why. *See:* unit.

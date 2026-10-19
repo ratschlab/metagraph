@@ -316,6 +316,10 @@ class ArmState(object):
         # property-level mark not implemented via MCP (property_not_implemented): the cell carries the small red ○
         # (doc.sty's \gnip) and the test counts under not implemented via MCP (facts.not_implemented_issue)
         self.ni_marked = False
+        # an MCP arm one of whose executions had a property check set aside by the manifest's property-level mark
+        # service-side by design (property_by_design): the cell carries the small blue diamond (doc.sty's \gbdp); not
+        # an attention kind (the reader review of the v7 document, RV4)
+        self.bd_marked = False
 
     @property
     def glyph(self):
@@ -356,6 +360,8 @@ class ArmState(object):
             out += "\\gne"
         if self.ni_marked:
             out += "\\gnip"
+        if self.bd_marked:
+            out += "\\gbdp"
         if footnote:
             out += "\\fn{%d}" % footnote
         return out
@@ -380,12 +386,26 @@ def property_not_implemented(run, sid, lines):
     return False
 
 
+def property_by_design(run, sid, lines):
+    """Whether an MCP execution of the scenario among `lines` had a property check set aside by the manifest's
+    property-level mark service-side by design (manifest v7's mcp.by_design_checks; the check read not_exposed)."""
+    marks = run.check_marks(sid) if hasattr(run, "check_marks") else {}
+    if not any(m.get("mark") == "by_design" for m in marks.values()):
+        return False
+    for l in lines:
+        aside = run.marked_aside(sid, l) if hasattr(run, "marked_aside") else {}
+        if any(m.get("mark") == "by_design" for m in aside.values()):
+            return True
+    return False
+
+
 def arm_state(run, sid, arm):
     """The ArmState of a scenario on an arm (_arm_state), with the property-level mark of an MCP arm that does not
     stand ○ (ArmState.ni_marked)."""
     st = _arm_state(run, sid, arm)
     if arm == "mcp" and st.present and st.glyph_key != "not_implemented_mcp":
         st.ni_marked = property_not_implemented(run, sid, st.lines)
+        st.bd_marked = property_by_design(run, sid, st.lines)
     return st
 
 
@@ -713,9 +733,12 @@ TIMING_LEGEND = {
     "list": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
             "warm); [ ] the host's own server time; be the host call as the service timed it; c a i: host-cold, "
             "aged, warm after an interrupted execution",
+    # a pairs table of tests run once per access path (the repeated ones take repeats_texts): be defined as under the
+    # other layouts, the digest marks left out, a test of one repeat printing none (the external review of the v6
+    # document, V6-307)
     "pairs": "times: the wall time of each execution in repeat order, a / b = repeat 0 / repeat 1 (via MCP cold / "
-             "warm); [ ] the host's own server time; c a i: host-cold, aged, warm after an interrupted execution; = "
-             "and ≠ on a repeated test: equal / different answer digests",
+             "warm); [ ] the host's own server time; be the host call as the service timed it, in the same repeat "
+             "order (MCP only); c a i: host-cold, aged, warm after an interrupted execution",
     "replicates": "times: a / b = the median / the maximum of the group's walls, one wall per test (each test's "
                   "first host-warm execution, else its only one), never cold / warm; n counts the group's tests; "
                   "[ ] the median server time",

@@ -36,10 +36,11 @@ CHECK_OUTCOMES = (
 
 # layer 2: the outcome of one execution (suite_common.OUTCOMES), with how it is decided and what it means
 EXECUTION_OUTCOMES = (
-    {"key": "pass", "legend": "every check that ran passed and at least one tested the claim (a property check, or a refusal's generic checks)",
+    {"key": "pass", "legend": "every check that ran passed and at least one tested the claim (a property check, or the generic checks of a test without one)",
      "glyph": "\\gpass", "word": "pass", "decided": "by the checks",
      "meaning": "every check that ran passed and at least one of them tested the claim: a property check, or, for a "
-                "scenario without one (a refusal: its status, code and text are the claim), its generic checks; a "
+                "scenario without one, its generic checks (a refusal: its status, code and text are the claim; a "
+                "warm-up: what every answer must hold); a "
                 "check that did not apply to the answer, or that a property-level mark of the manifest set aside, "
                 "is not counted",
      "consequence": "the property was shown on this execution"},
@@ -47,7 +48,7 @@ EXECUTION_OUTCOMES = (
      "glyph": "\\gfail", "word": "fail", "decided": "by the checks",
      "meaning": "a check failed (its claim did not hold, a required field was missing on a direct access path, a "
                 "stated stop or hiding could not have happened, or a check could not run as a check)",
-     "consequence": "a functional failure: the verdict is FAIL and the gate fails"},
+     "consequence": "a functional failure: the verdict is FAIL, and the gate fails where the policy requires the execution"},
     {"key": "error", "legend": 'no HTTP answer (a transport failure, a client time-out, an undecodable body); the evaluation itself (checks.evaluate) raised on a direct access path; a recorded outcome outside the vocabulary',
      "glyph": "\\gerr", "word": "error", "decided": "by the runner, without the checks",
      "meaning": "no HTTP answer to check: a transport failure, a client time-out or an undecodable body; where the "
@@ -64,7 +65,7 @@ EXECUTION_OUTCOMES = (
                 "its budget or run past it beyond its pieces. The HTTP status may be a 503 that carried no results: "
                 "finding is the suite's category for a resource-budget breach, apart from the functional-check "
                 "failures",
-     "consequence": "the verdict reads FINDINGS; on a gated access path it fails the gate"},
+     "consequence": "the verdict reads FINDINGS; where the policy requires the execution it fails the gate"},
     {"key": "inconclusive", "legend": 'the answer could not show the property (an allowed 503 deadline without results, a shortened list, a walk a stated limit stopped, a stop that did not happen, nothing to compare, no field exposed via MCP, a host state): never a pass, never a failure',
      "glyph": "\\ginc", "word": "inconclusive", "decided": "by the checks",
      "meaning": "the answer could not show the property: an allowed 503 deadline (no results; the SPEC allows it "
@@ -72,7 +73,7 @@ EXECUTION_OUTCOMES = (
                 "limit stopped first, a stop that was the property and did not happen, nothing to compare, no "
                 "property field exposed via MCP, or a host state (the service ended the call by its own limit). "
                 "Also when no check could test anything",
-     "consequence": "never a pass and never a failure; on a gated access path it blocks the gate"},
+     "consequence": "never a pass and never a failure; where the policy requires the execution it blocks the gate"},
     {"key": "not_implemented_mcp", "legend": "not exercised via MCP: the tools cannot express the request (the manifest's mark or a table case): a known limit, not a failure and not coverage",
      "glyph": "\\gni", "word": "not implemented via MCP",
      "decided": "by the runner, without the checks",
