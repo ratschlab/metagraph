@@ -3636,7 +3636,8 @@ def memory_episodes(run):
                 ep["drop"] = {"from_gib": _gib(s1["mem_bytes"]), "to_gib": _gib(sn["mem_bytes"]), "s": tn - t1,
                               "at": tn, "in_flight": flight,
                               "in_flight_completed": bool(flight) and all(
-                                  l.get("outcome") != "error" and l.get("http") == 200 for l in flight)}
+                                  l.get("outcome") != "error" and l.get("http") == 200 for l in flight),
+                              "same_instance": same_server_instance(run)}
         out.append(ep)
     return out
 
@@ -3745,6 +3746,27 @@ def memory_chapter_note(ctx, ch):
         return ""
     text = "; ".join(parts)
     return "%s%s (Timing 6)" % (text[0].upper(), text[1:])
+
+
+def same_server_instance(run):
+    """Whether run.json shows one server instance for the whole run (W1: the one observed fact printed beside a memory
+    drop): the run's server_instance, every arm that records one naming it, none recording server_instance_changed
+    true or an end instance other than its start; False when no arm records the instance."""
+    r = getattr(run, "run", None) or {}
+    inst = r.get("server_instance")
+    if not isinstance(inst, str) or not inst:
+        return False
+    seen = False
+    for info in (r.get("arms") or {}).values():
+        info = info or {}
+        if "server_instance" not in info and "server_instance_changed" not in info:
+            continue
+        seen = True
+        if info.get("server_instance_changed") is not False:
+            return False
+        if info.get("server_instance") not in (None, inst) or info.get("server_instance_end") not in (None, inst):
+            return False
+    return seen
 
 
 def memory_episode(run):
@@ -3880,6 +3902,9 @@ def memory_episode_text(ctx):
             elif n_fl:
                 flight = "; in flight across it: %s" % "; ".join("%s (%s)" % (_exec_name(l), _stop_word(l))
                                                                for l in d["in_flight"])
+            if d.get("same_instance"):
+                # observed in run.json, not inferred from the memory (W1)
+                flight += "; the server instance was the same before and after"
             text += (". At the end of the window, reported container memory fell from %s to %s GiB within %s s%s. "
                      "These observations do not establish the cause of the drop" % (
                          fmt_n(d["from_gib"]), fmt_n(d["to_gib"]), fmt_n(d["s"]), flight))

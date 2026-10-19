@@ -239,6 +239,16 @@ class MemoryEpisodeTest(unittest.TestCase):
                       "in-flight request completed. These observations do not establish the cause of the drop.", text)
         for claim in ("cached index pages", "no restart", "restarted"):
             self.assertNotIn(claim, text)
+        # W1: the one observed fact beside the drop, only when run.json shows one instance throughout
+        self.assertNotIn("server instance", text)
+        run.run = {"server_instance": "abc", "arms": {"direct-local": {
+            "server_instance": "abc", "server_instance_end": "abc", "server_instance_changed": False}}}
+        self.assertIn("the in-flight request completed; the server instance was the same before and after. These "
+                      "observations do not establish the cause of the drop.", self._text(run))
+        run.run["arms"]["direct-local"].update(server_instance_end="def", server_instance_changed=True)
+        self.assertNotIn("server instance", self._text(run))
+        self.assertFalse(sections.same_server_instance(run))
+        run.run = {"server_instance": "abc"}
         self.assertIn("The latency comparisons use the same test's other executions; they do not isolate the cause "
                       "of the slowdown.", text)
         self.assertNotIn("not measured", text)
