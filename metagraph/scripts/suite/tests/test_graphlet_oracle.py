@@ -552,6 +552,15 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(O.cut_problem({"segment": 3}, full, ["in"]), "in: missing in the cut")
         self.assertTrue(O.is_cut_of("ACG", "ACGTT") and O.is_cut_of([1], [1, 2]) and not O.is_cut_of([2], [1, 2]))
         self.assertTrue(O.is_cut_of([2], [1, 2], unordered=[""]))
+        # an empty cut is a cut: the library's row cut takes a string's tail with v[:max(0, len(v) - over - 1)] and
+        # halves a list with v[:len(v) // 2], so a field can end as "" or [] (mcp_tools.py _shrink, :2713-2733,
+        # called for a row larger than its page at :1068-1079); lane C follows this rule
+        self.assertIsNone(O.cut_problem({"in": [], "seq": "", "segment": 3}, {"in": [7], "seq": "ACGT", "segment": 3},
+                                        ["in", "seq"]))
+        self.assertTrue(O.is_cut_of([], [{"at_bp": 1}], unordered=[""]) and O.is_cut_of("", "A"))
+        self.assertTrue(O.is_cut_of([], [{"at_bp": 1}], position_ordered=[""]))
+        self.assertEqual(O.cut_problem({"in": [], "segment": 3}, {"in": [7], "segment": 3}, []),
+                         "in: differs and is not named cut")      # but only for a field named cut
 
     def test_paging_context(self):
         g, f, mgt = doc("caps")
