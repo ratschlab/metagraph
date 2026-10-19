@@ -520,6 +520,49 @@ def _is_cut_of(mine: Any, theirs: Any, order: str) -> bool:
     return same(mine, theirs)
 
 
+_CUT_MARKERS = ("_cut_fields", "row_truncated", "cut_fields")
+
+
+def cut_problem(cut_value: Any, full_value: Any, cut_fields: Sequence[str] = (), unordered: Sequence[str] = (),
+                position_ordered: Sequence[str] = ()) -> Optional[str]:
+    """The suite's one cut rule (REVIEW D-R8, DESIGN §6 row_truncated / cut_fields; FORMAT v2 A3): why |cut_value|
+    is NOT a cut of |full_value|, or None when it is. Used by differences() and by the compare stage's cut-row checks
+    across ways (lane C).
+
+    - Two objects (a row, or a page base): every key of |full_value| is in |cut_value| (the cut markers
+      `_cut_fields`, `row_truncated`, `cut_fields` are ignored on both sides); a key named in |cut_fields| holds a cut
+      of the full value, every other key the same value (json_equal).
+    - A string: a prefix of the full one. A list: a prefix; for a field named in |unordered|, a sub-multiset; in
+      |position_ordered| (events sorted by position only, SPEC §7.1), a sub-multiset in non-decreasing at_bp that
+      keeps the smallest positions. A scalar is never cut (INVENTORY §1.2): equal.
+    |unordered| / |position_ordered| name fields of an object, or, for a bare list, use "" for the list itself."""
+    def order(key: str) -> str:
+        return "unordered" if key in unordered else "position" if key in position_ordered else "ordered"
+
+    if isinstance(full_value, dict) and isinstance(cut_value, dict):
+        for k, v in full_value.items():
+            if k in _CUT_MARKERS:
+                continue
+            if k not in cut_value:
+                return "%s: missing in the cut" % k
+            if k in cut_fields:
+                if not _is_cut_of(v, cut_value[k], order(k)):
+                    return "%s: not a cut of the full value (%s)" % (k, order(k))
+            elif not same(v, cut_value[k]):
+                return "%s: differs and is not named cut" % k
+        extra = [k for k in cut_value if k not in full_value and k not in _CUT_MARKERS]
+        return "%s: only in the cut" % extra[0] if extra else None
+    if not _is_cut_of(full_value, cut_value, order("")):
+        return "not a cut of the full value (%s)" % order("")
+    return None
+
+
+def is_cut_of(cut_value: Any, full_value: Any, cut_fields: Sequence[str] = (), unordered: Sequence[str] = (),
+              position_ordered: Sequence[str] = ()) -> bool:
+    """Whether |cut_value| is a cut of |full_value| (cut_problem() is None): the suite's one cut rule."""
+    return cut_problem(cut_value, full_value, cut_fields, unordered, position_ordered) is None
+
+
 def differences(record: dict, other: Optional[dict]) -> List[dict]:
     """Where |other| (another way's assembled answer, service fields removed) departs from W5: [{pointer, clause,
     oracle, other | missing | present}]. Every checked pointer (a pattern expanded over W5's answer) must resolve in

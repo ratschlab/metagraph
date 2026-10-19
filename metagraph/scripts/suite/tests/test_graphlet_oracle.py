@@ -538,6 +538,21 @@ class RecordSemantics(unittest.TestCase):
         top["rows"][0]["_cut_fields"] = ["out"]
         self.assertEqual(O.differences(r, top), [])
 
+    def test_public_cut_rule(self):
+        """is_cut_of / cut_problem, the one cut rule lane C also uses (VERIFY-C VC1)."""
+        full = {"segment": 3, "in": [1, 2, 3], "ends": [{"at_bp": 5, "l": 1}, {"at_bp": 2, "l": 2}], "seq": "ACGT"}
+        cut = {"segment": 3, "in": [1, 2], "ends": [{"at_bp": 2, "l": 2}], "seq": "AC", "_cut_fields": ["in", "seq"]}
+        self.assertTrue(O.is_cut_of(cut, full, ["in", "seq", "ends"], unordered=["ends"]))
+        self.assertIsNone(O.cut_problem(cut, full, ["in", "seq", "ends"], position_ordered=["ends"]))
+        self.assertEqual(O.cut_problem(cut, full, ["in", "seq"]), "ends: differs and is not named cut")
+        self.assertEqual(O.cut_problem(dict(cut, segment=4), full, ["in", "seq", "ends"], unordered=["ends"]),
+                         "segment: differs and is not named cut")
+        self.assertIn("in: not a cut", O.cut_problem(dict(cut, **{"in": [2]}), full, ["in", "seq", "ends"],
+                                                     unordered=["ends"]))
+        self.assertEqual(O.cut_problem({"segment": 3}, full, ["in"]), "in: missing in the cut")
+        self.assertTrue(O.is_cut_of("ACG", "ACGTT") and O.is_cut_of([1], [1, 2]) and not O.is_cut_of([2], [1, 2]))
+        self.assertTrue(O.is_cut_of([2], [1, 2], unordered=[""]))
+
     def test_paging_context(self):
         g, f, mgt = doc("caps")
         whole = O.answer("graphlet_walks", {"arm": "right", "rank": "length"}, f, mgt)
