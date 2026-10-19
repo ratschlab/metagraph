@@ -301,7 +301,12 @@ def not_exposed_reason(scenario, op, manifest):
 # ---------------------------------------------------------------------------------------------------------------
 # the comparison of one op call
 
-def _pair(a, b, what, outcome, detail=None, diff=None, kind="answer"):
+ANSWER_CUT = 240
+
+
+def _pair(a, b, what, outcome, detail=None, diff=None, kind="answer", views=None):
+    """A pair entry; a disagreeing one names the first difference (pointer, both values) and, with |views|, both
+    whole canonical answers compactly (`answers`, cut at ANSWER_CUT characters)."""
     out = {"pair": "%s-%s" % (a, b), "what": what, "outcome": outcome, "kind": kind}
     if detail:
         out["detail"] = detail
@@ -309,6 +314,8 @@ def _pair(a, b, what, outcome, detail=None, diff=None, kind="answer"):
         out["pointer"] = diff[0] or "/"
         out[a] = gp.compact(diff[1])
         out[b] = gp.compact(diff[2])
+    if views is not None and outcome == "disagree":
+        out["answers"] = {a: gp.compact(views[0], ANSWER_CUT), b: gp.compact(views[1], ANSWER_CUT)}
     return out
 
 
@@ -335,10 +342,10 @@ def compare_records(a, ra, b, rb, what):
         err, ok = (a, b) if "error" in va else (b, a)
         code = (va.get("error") or vb.get("error") or {}).get("code")
         return _pair(a, b, what, "disagree", "%s answered the error %s, %s an answer" % (err, code, ok),
-                     ("/", va, vb), kind="error")
+                     ("/", va, vb), kind="error", views=(va, vb))
     d = gp.first_difference(va, vb)
     if d:
-        return _pair(a, b, what, "disagree", None, d, kind="error" if "error" in va else "answer")
+        return _pair(a, b, what, "disagree", None, d, kind="error" if "error" in va else "answer", views=(va, vb))
     return _pair(a, b, what, "agree")
 
 
@@ -478,6 +485,28 @@ def compare_op(scenario, op, recs, precheck, manifest):
     else:
         entry["outcome"] = "agree"
     return entry
+
+
+def pair_text(p):
+    """One pair entry as text: what it isolates, its detail, and the first difference with both values."""
+    a, _, b = p.get("pair", "-").partition("-")
+    parts = [x for x in (p.get("detail"),) if x]
+    if p.get("pointer"):
+        parts.append("%s: %s %s, %s %s" % (p["pointer"], a, p.get(a), b, p.get(b)))
+    return "%s (%s)%s" % (p.get("pair"), p.get("what"), (": " + "; ".join(parts)) if parts else "")
+
+
+def disagreement_text(entry, limit=3):
+    """What an op entry's disagreements are, as text: each disagreeing pair (pair_text), cut check, by-design pair or
+    probe, the first |limit| of them."""
+    out = [pair_text(p) for p in entry.get("pairs") or [] if p.get("outcome") == "disagree"]
+    out += ["%s-uncut: %s%s" % (c["way"], c.get("detail"), (" at %s" % c["pointer"]) if c.get("pointer") else "")
+            for c in entry.get("cuts") or [] if c.get("outcome") == "disagree"]
+    out += ["by-design %s (%s side): %s" % (r.get("case"), r.get("side"), r.get("detail"))
+            for r in entry.get("by_design") or [] if not r.get("verified")]
+    if entry.get("probe") and entry.get("outcome") == "disagree" and entry.get("reason"):
+        out.append("probe %s: %s" % (entry["probe"], entry["reason"]))
+    return "; ".join(out[:limit]) + ("; ..." if len(out) > limit else "")
 
 
 def scenario_outcome(precheck, ops):

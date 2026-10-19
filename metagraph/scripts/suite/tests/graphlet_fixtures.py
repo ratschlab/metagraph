@@ -155,6 +155,16 @@ class GRun(object):
         self.manifest = manifest(self.scenarios, **manifest_top)
         self.write_json("manifest.json", self.manifest)
 
+    @classmethod
+    def attach(cls, run_dir, manifest, fixture=None):
+        """A GRun writing into an existing run directory whose manifest.json is |manifest| (not rewritten)."""
+        self = cls.__new__(cls)
+        self.dir = run_dir
+        self.fixture = fixture or Fixture()
+        self.manifest = manifest
+        self.scenarios = [s for s in manifest["scenarios"] if isinstance(s.get("graphlet"), dict)]
+        return self
+
     def cleanup(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 

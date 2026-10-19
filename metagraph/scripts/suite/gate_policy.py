@@ -42,6 +42,14 @@ reason}]}; an exclusion has the rule `declared`, a not_required entry exempts a 
 those arms (the MCP never exposes it: it stays required on direct-local); each entry needs a reason, names a selected
 scenario (a manifest relation) and (not_required) a check the scenario expects, and the file names the manifest it
 was written for. No property check is exempt otherwise.
+Area G (manifest v8, DESIGN-v8 §6), only when the selection holds graphlet scenarios (a `graphlet` block): the
+policy's `graphlets` block requires every applicable way of every op call of each selected graphlet scenario
+(graphlet_required: the op's ways; W3 left out is not_exposed with the owner's reason, which is no gap; the smoke of
+graphlet_list / graphlet_free is not required), the six pre-checks of each scenario, the service checks its op plan
+exercises (graphlet_service_checks.required_service_checks) and the manifest's library_commit pin; the drift lane is
+report-only. A declared file may add graphlet_not_required [{scenario, op, reason}]: an op call the owner sets aside
+(a library defect declared until its fix is re-vendored, D-R11), each with its reason. A policy of a manifest without
+graphlet scenarios has no `graphlets` block (v4..v7's policies are unchanged).
 A relation is required on an arm when both of its scenarios are selected and neither is excluded there; the others are
 listed with the reason. The policy pins the manifest's content_sha256, relations_sha256 and index_fp and
 the by-design table's sha256 (gate.py fails on another), and lists the executions each arm must record (the paired
@@ -253,8 +261,57 @@ def check_declared(declared, manifest, selected):
                             if isinstance(x, dict)]
                 if e.get("check") not in expected:
                     problems.append("%s: %s expects no check %r" % (where, e.get("scenario"), e.get("check")))
+    gscen = dict((x.get("id"), x) for x in manifest.get("scenarios", []) if isinstance(x, dict)
+                 and isinstance(x.get("graphlet"), dict))
+    for i, e in enumerate(declared.get("graphlet_not_required") or []):
+        where = "graphlet_not_required[%d]" % i
+        if not isinstance(e, dict):
+            problems.append("%s is not an object" % where)
+            continue
+        if not str(e.get("reason") or "").strip():
+            problems.append("%s states no reason" % where)
+        if e.get("scenario") not in selected or e.get("scenario") not in gscen:
+            problems.append("%s: %s is not a selected graphlet scenario" % (where, e.get("scenario")))
+        elif e.get("op") not in [o.get("id") for o in (gscen[e["scenario"]]["graphlet"].get("ops") or [])
+                                 if isinstance(o, dict)]:
+            problems.append("%s: %s has no op %r" % (where, e.get("scenario"), e.get("op")))
     if problems:
         raise ValueError("; ".join(problems))
+
+
+def graphlet_block(manifest, selected, declared=None):
+    """The policy's area G block (module docstring) for the selected graphlet scenarios, or None without one."""
+    import graphlet_precheck as gp
+    import compare_graphlets as cg
+    import graphlet_service_checks as gs
+    chosen = [s for s in gp.graphlet_scenarios(manifest) if s.get("id") in selected]
+    if not chosen:
+        return None
+    required, pins, smoke = [], [], []
+    for scen in chosen:
+        for op in gp.scenario_ops(scen):
+            if op.get("tool") in cg.SMOKE_TOOLS:
+                smoke.append({"scenario": scen["id"], "op": op["id"]})
+                continue
+            ways = gp.op_ways(scen, op)
+            item = {"scenario": scen["id"], "op": op["id"], "tool": op.get("tool"), "ways": ways}
+            if "W3" not in ways:
+                item["not_exposed"] = {"W3": cg.not_exposed_reason(scen, op, manifest)}
+            if op.get("by_design"):
+                item["by_design"] = op["by_design"]
+            required.append(item)
+        pin, _ = gp.library_pin(scen, manifest)
+        if pin and pin not in pins:
+            pins.append(pin)
+    sub = dict(manifest, scenarios=chosen)
+    return {"scenarios": [s["id"] for s in chosen], "required": required, "smoke_report_only": smoke,
+            "prechecks": list(gp.CHECKS), "service_checks": gs.required_service_checks(sub),
+            "library_commit": pins[0] if len(pins) == 1 else (pins or None),
+            "not_required": [dict(e, rules=["declared"]) for e in (declared or {}).get("graphlet_not_required") or []],
+            "whitelist_sha256": cg.whitelist_sha256(), "drift": "report_only",
+            "rules": "every applicable way of every op call and every pre-check is required; a disagreement, a failed "
+                     "pre-check, a precondition_failed or an inconclusive blocks; W3 not_exposed per the manifest is "
+                     "no gap; library_commit equals the deployed one and the pin; the drift lane is report-only"}
 
 
 def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.DEFAULT_BY_DESIGN,
@@ -359,6 +416,9 @@ def build_policy(manifest, routes=DEFAULT_ROUTES, arms=("mcp",), table_path=cmp.
                                                    "declared_version": declared.get("declared_version"),
                                                    "sha256": hashlib.sha256(sc.canonical_json(declared)).hexdigest()},
     }
+    graphlets = graphlet_block(manifest, set(selected), declared)
+    if graphlets is not None:
+        policy["graphlets"] = graphlets
     policy["counts"] = counts(manifest, policy)
     return policy
 
@@ -382,7 +442,18 @@ def counts(manifest, policy):
     return {"selected": len(policy["selection"]["scenarios"]), "by_route": by_route, "by_area": by_area,
             "excluded": len(policy["exclusions"]), "exclusions_by_rule": rules, "required": per_arm,
             "relations_required": len(policy["relations"]), "relations_excluded": len(policy["relations_excluded"]),
-            "properties_not_required": len(policy["properties"]["not_required"])}
+            "properties_not_required": len(policy["properties"]["not_required"]),
+            **({"graphlets": graphlet_counts(policy["graphlets"])} if policy.get("graphlets") else {})}
+
+
+def graphlet_counts(block):
+    ways = {}
+    for item in block["required"]:
+        for w in item["ways"]:
+            ways[w] = ways.get(w, 0) + 1
+    return {"scenarios": len(block["scenarios"]), "op_calls": len(block["required"]), "ways": ways,
+            "w3_not_exposed": sum(1 for x in block["required"] if "not_exposed" in x),
+            "service_checks": len(block["service_checks"]), "not_required": len(block["not_required"])}
 
 
 def describe(policy):
@@ -412,6 +483,19 @@ def describe(policy):
     for r in policy["relations_excluded"]:
         out.append("    %s %s excluded on %s: %s" % ("declared:" if "declared" in (r.get("rules") or ()) else "",
                                                     r["relation"], ", ".join(r["arms"]), r["reason"]))
+    if policy.get("graphlets"):
+        g, gc = policy["graphlets"], c.get("graphlets") or graphlet_counts(policy["graphlets"])
+        out.append("  area G: %d scenario(s), %d op call(s) required (ways %s; W3 not_exposed on %d), pre-checks %s, "
+                   "service checks %s, library_commit %s; drift report-only" % (
+                       gc["scenarios"], gc["op_calls"], ", ".join("%s %d" % kv for kv in sorted(gc["ways"].items())),
+                       gc["w3_not_exposed"], ", ".join(g["prechecks"]), ", ".join(g["service_checks"]) or "none",
+                       g["library_commit"] or "not pinned"))
+        for x in g["required"]:
+            if "not_exposed" in x:
+                out.append("    W3 not_exposed: %s %s (%s): %s" % (x["scenario"], x["op"], x["tool"],
+                                                                 x["not_exposed"]["W3"] or "NO REASON"))
+        for nr in g["not_required"]:
+            out.append("    declared: %s %s not required: %s" % (nr.get("scenario"), nr.get("op"), nr.get("reason")))
     out.append("  property checks not required: %d" % c["properties_not_required"])
     for nr in policy["properties"]["not_required"]:
         out.append("    %s%s %s not required on %s: %s" % ("declared: " if "declared" in (nr.get("rules") or ()) else "",

@@ -216,11 +216,21 @@ def stricter_outcomes(rows, arm_runs, outcome_fn, scenarios=None, run_dir=None):
     return changed
 
 
+# The directories of area G's ways under arms/ (manifest v8, FORMAT-v8 §3: W1 dl-lib, W2 dr-lib, W4 mcp-lib, W5 oracle,
+# the drift lane drift-lib, the pre-check records precheck; graphlet_precheck.WAY_DIRS): per-call records of the
+# graphlet tools, read by compare_graphlets.py, never execution lines of an arm. W3 writes into the MCP arm's own
+# directory (arms/mcp/graphlet_ops.jsonl), which stays an arm.
+GRAPHLET_DIRS = ("dl-lib", "dr-lib", "mcp-lib", "oracle", "drift-lib", "precheck")
+
+
 def arm_dirs(run_dir):
+    """[(arm, its directory)] under RUN_DIR/arms, in arm order: every directory but a hidden one and area G's
+    (GRAPHLET_DIRS)."""
     root = os.path.join(run_dir, "arms")
     if not os.path.isdir(root):
         return []
-    names = [n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)) and not n.startswith(".")]
+    names = [n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)) and not n.startswith(".")
+             and n not in GRAPHLET_DIRS]
     names.sort(key=lambda n: (ARM_ORDER.get(n, 9), n))
     return [(n, os.path.join(root, n)) for n in names]
 
@@ -425,6 +435,34 @@ def service_identity(run_dir, arm_runs):
     if invocations:
         return identity_summary(run, invocations, "arms/mcp/run.json invocations")
     return identity_summary(run, [run], "arms/mcp/run.json")
+
+
+def library_identity(run_dir, arm_runs):
+    """The deployed graphlet library's identity as the MCP arm recorded it (manifest v8: async's runner states
+    `library_commit` beside service_commit per invocation, arms/mcp/mcp_runs.jsonl, else run.json invocations[], else
+    run.json alone): {recorded (a record states library_commit), source, library_commits {commit: invocations},
+    library_commit (the one commit, else None), invocations, without_commit}; None without an MCP arm."""
+    run = arm_runs.get("mcp")
+    if run is None:
+        return None
+    lines, _ = sc.read_jsonl(os.path.join(run_dir, "arms", "mcp", "mcp_runs.jsonl"))
+    records, source = [r for r in lines if isinstance(r, dict)], "arms/mcp/mcp_runs.jsonl"
+    if not records:
+        records = [r for r in (run.get("invocations") or []) if isinstance(r, dict)] \
+            if isinstance(run.get("invocations"), list) else []
+        source = "arms/mcp/run.json invocations"
+    if not records:
+        records, source = [run], "arms/mcp/run.json"
+    commits, without = {}, 0
+    for r in records:
+        c = _commit(r.get("library_commit"))
+        if c is None:
+            without += 1
+        else:
+            commits[c] = commits.get(c, 0) + 1
+    return {"recorded": any("library_commit" in r for r in records), "source": source, "library_commits": commits,
+            "library_commit": next(iter(commits)) if len(commits) == 1 else None, "invocations": len(records),
+            "without_commit": without}
 
 
 def checks_identity(run_dir, arm_runs):
