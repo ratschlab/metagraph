@@ -1766,7 +1766,8 @@ class GraphletTools:
             if b is not None:
                 n = min(len(s.entry), cut or len(s.entry)) + min(len(s.end), cut or len(s.end))
                 ne = len(lee.get(sid, ()))
-                b.charge(_B.W_ROW + n + 2 * ne,
+                # the ends sorted by position (DESIGN §5.4: a sort is charged as one)
+                b.charge(_B.W_ROW + n + 2 * ne + (_B.sort_work(ne) if ne > 1 else 0),
                          _B.dict_bytes(12) + (n + min(ne, cut or ne)) * _B.dict_bytes(3))
             out_total = (s.presence[-1].total if s.presence else s.entry_total) \
                 if g.mode != 'constrain' else len(s.end)

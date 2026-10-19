@@ -295,5 +295,28 @@ class TestG3AWalkRowsEndsInPositionOrder(unittest.TestCase):
             self.assertEqual(want, [(e['at_bp'], e['ref']) for e in seg['ends']], path)
 
 
+class TestVF2TheEndsSortIsCharged(unittest.TestCase):
+    """VF2 (VERIFY-F): G3 sorts a walk row's ends by position, and a budgeted walk did not
+    charge the sort (DESIGN §5.4: work units count what an algorithm visits, admitted
+    before the work). Each row now charges sort_work(ends) with it: sra_hairpin's left
+    root has 977 ends, whose sort (17,586 units) the rest of the walk's charge does not
+    cover."""
+
+    def test_a_budgeted_walk_charges_its_sorts(self):
+        from metagraph.traverse import budget as B
+        g = _real('real/sra/sra_hairpin__left_only')
+        a = g.arms['left']
+        p = derive.paths(a)[0]
+        ends = derive.label_end_events(a)
+        sorts = sum(B.sort_work(len(ends.get(sid, ()))) for sid in p.segments
+                    if len(ends.get(sid, ())) > 1)
+        self.assertGreater(max(len(ends.get(sid, ())) for sid in p.segments), 900)
+        b = B.LocalBudget()
+        rows = GraphletTools._walk_rows(g, a, p, out=[], b=b)
+        self.assertGreaterEqual(b.used_work, sorts)
+        # the charge changes nothing in the rows
+        self.assertEqual(GraphletTools._walk_rows(g, a, p), rows)
+
+
 if __name__ == '__main__':
     unittest.main()
