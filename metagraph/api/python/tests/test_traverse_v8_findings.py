@@ -1,6 +1,8 @@
 """The library defects the v8 test suite found (FORMAT-v8 §G), each reproduced offline on a
 fixture of data/traverse/documents. One class per finding, named by its id there."""
 
+import gzip
+import json
 import os
 import sys
 import tempfile
@@ -9,7 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
 
-from metagraph.traverse import GraphletStore, parse  # noqa: E402
+from metagraph.traverse import GraphletStore, derive, from_response, parse  # noqa: E402
 from metagraph.traverse.mcp_tools import GraphletTools  # noqa: E402
 
 MODES = ('claims', 'walks', 'labels', 'prefix_subset')
@@ -129,6 +131,81 @@ class TestG2ATailOfZeroIsEmptyOnBothArms(unittest.TestCase):
         h = self.store.put_graphlet(T.graphlet('fork'))
         out = self.tools.graphlet_walks(h, 'right', spell='tail', tail_bp=-1)
         self.assertEqual('bad_argument', out.get('error'), out)
+
+
+def _real(path):
+    """A committed real retrieval (data/traverse/<path>.graphlet.json.gz) as a client sees it."""
+    with gzip.open(os.path.join(T.DATA, path + '.graphlet.json.gz')) as f:
+        resp = json.loads(f.read())
+    return from_response(resp['results'][0], resp)
+
+
+def _by_position(g, a, sid):
+    """The label ends of segment |sid| as (at_bp, ref) in position order, ties by label id."""
+    runs = sorted((a.runs[r] for r in derive.label_end_events(a).get(sid, ())),
+                  key=lambda r: (r.to_bp, r.label))
+    return [(r.to_bp, g.labels[r.label].ref) for r in runs]
+
+
+class TestG3AWalkRowsEndsInPositionOrder(unittest.TestCase):
+    """G3 (VO9): a walk row's ends came in run order (linear's left root: at_bp 40, 40, 1).
+    SPEC §7.1 sorts events by position ("events at one at_bp are unordered: the list is
+    sorted by position only") and DESIGN §2.5 has the walker sort them by at_bp. The
+    ends are ordered by at_bp; equal positions by label id (the dictionary order, in
+    which end_labels are listed, DESIGN §2.5), so which 8 of more a row shows follows the
+    positions and never the run numbering, which at one position is not information."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = GraphletStore(self.tmp.name)
+        self.tools = GraphletTools(self.store)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def walk_rows(self, h, side, pid):
+        out = self.tools.graphlet_walk(h, side, pid, max_bytes=1 << 22)
+        self.assertNotIn('error', out, out)
+        self.assertNotIn('next_cursor', out)
+        return out['rows']
+
+    def test_linear_root_ends(self):
+        g = T.graphlet('linear')
+        h = self.store.put_graphlet(g)
+        want = {'left': [(1, 'h:0:2'), (40, 'h:0:0'), (40, 'h:0:1')],
+                'right': [(0, 'h:0:1'), (40, 'h:0:0'), (40, 'h:0:2')]}
+        for side in ('left', 'right'):
+            row = self.walk_rows(h, side, 0)[0]
+            self.assertEqual(0, row['segment'])
+            self.assertEqual(want[side], [(e['at_bp'], e['ref']) for e in row['ends']], side)
+
+    def test_the_rows_shown_and_exported_follow_the_positions(self):
+        # segments with more than 8 label ends whose first 8 in run order are not the
+        # first 8 by position
+        cases = (('real/sra/sra_rand50_00__limit1', 'right', 8),
+                 ('real/sra/sra_rand50_00__limit1', 'left', 12),
+                 ('coords/rep0_kmer_null', 'right', 0),
+                 ('coords/rep0_cut1', 'right', 7))
+        for path, side, sid in cases:
+            g = _real(path)
+            a = g.arms[side]
+            want = _by_position(g, a, sid)
+            runs = [a.runs[r] for r in derive.label_end_events(a)[sid]]
+            self.assertGreater(len(want), 8, path)
+            self.assertNotEqual(set(want[:8]),
+                                {(r.to_bp, g.labels[r.label].ref) for r in runs[:8]}, path)
+            pid = next(i for i, p in enumerate(derive.paths(a)) if sid in p.segments)
+            h = self.store.put_graphlet(g)
+            row, = [r for r in self.walk_rows(h, side, pid) if r['segment'] == sid]
+            self.assertEqual(want[:8], [(e['at_bp'], e['ref']) for e in row['ends']], path)
+            # the export of the walk lists them all, in the same order
+            res = self.tools.graphlet_export(h, format='json', what='walk', arm=side,
+                                             walks=[pid], path='w.json')
+            self.assertNotIn('error', res, res)
+            with open(res['path'], encoding='utf-8') as f:
+                doc = json.load(f)
+            seg, = [x for x in doc['walks'][0]['segments'] if x['segment'] == sid]
+            self.assertEqual(want, [(e['at_bp'], e['ref']) for e in seg['ends']], path)
 
 
 if __name__ == '__main__':

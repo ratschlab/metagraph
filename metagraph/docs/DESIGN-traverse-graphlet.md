@@ -726,9 +726,10 @@ execute=True) -> new summary + parent:{handle, arm, walk, overlap_bp}` (or the r
 Local over a handle: `graphlet_summary(handle, arm?, detail?)` (`detail='limitations'`); `graphlet_walks(handle, arm,
 rank=support|length|loss, n=10, min_bp=0, label?, spell=none|tail|full, tail_bp=60, route_consistent)` (a tail is
 the walk's `tail_bp` outermost bases, the last on the right arm and the first on the left: none for 0);
-`graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, continuation; the chain is
-paged by `cursor` like a list); `graphlet_support(handle, arm, walk, step?)` (support runs with who left/joined and
-the reason: a `K`-coded end or "split: N labels took C"); `graphlet_labels(handle, arm?, rank=direct_bp|reach_bp,
+`graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, label ends by `at_bp` and
+equal positions by label id, continuation; the chain is paged by `cursor` like a list); `graphlet_support(handle,
+arm, walk, step?)` (support runs with who left/joined and the reason: a `K`-coded end or "split: N labels took C");
+`graphlet_labels(handle, arm?, rank=direct_bp|reach_bp,
 n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that label's runs/routes incl. merge routes);
 `graphlet_splits(handle, arm, n=10, min_labels_before=2)`; `graphlet_claims(handle, arm, min_bp=0,
 route_consistent=True, labels?)`; `graphlet_sequence(handle, arm, walk|segment, from, to, orientation, with_seed)`

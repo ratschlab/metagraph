@@ -1755,7 +1755,8 @@ class GraphletTools:
     @staticmethod
     def _walk_rows(g, a, p, cut=_LABELS_IN_ROW, out=None, start=0, b=None, chain=None):
         """One row per segment of walk |p|: labels in and out with their TRUE totals (a
-        recorded list may be cut: entry_total, the last P total), merges, label ends.
+        recorded list may be cut: entry_total, the last P total), merges, label ends (by
+        at_bp, equal positions by label id; the first |cut| of them).
         |b| (local limits): each row charged before it is built, appended to |out| from chain
         position |start|."""
         rows = [] if out is None else out
@@ -1777,7 +1778,11 @@ class GraphletTools:
                    'out': _labels_json([g.labels[l] for l in s.end], cut)}
             if len(s.parents) > 1:
                 row['merge_of'] = list(s.parents)
-            ends = [a.runs[r] for r in derive.label_end_events(a).get(sid, ())]
+            # by position (SPEC §7.1, DESIGN §2.5), equal positions by label id (the order
+            # of end_labels): the order among equal positions is not information, so the
+            # ends a cut row shows must not follow the run numbering
+            ends = sorted((a.runs[r] for r in derive.label_end_events(a).get(sid, ())),
+                          key=lambda r: (r.to_bp, r.label, r.id))
             if ends:
                 row['ends'] = [dict(g.labels[r.label].as_dict(), at_bp=r.to_bp,
                                     why=r.event_reason)
