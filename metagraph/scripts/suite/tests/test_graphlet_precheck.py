@@ -344,6 +344,23 @@ class LibraryCommit(PrecheckBase):
         self.run_.write_json("manifest.json", self.run_.manifest)
         self.assertEqual(self.check("library_commit")["outcome"], "inconclusive")
 
+    def test_a_record_without_a_commit_takes_its_invocations(self):
+        self.run_.complete_scenario(echo=False)
+        self.run_.record("W3", SID, "walks-len", "graphlet_walks", {"arm": "left"},
+                         error={"code": "no_graphlet", "fields": {}}, library={})
+        rec = self.check("library_commit")
+        self.assertEqual(rec["outcome"], "pass", rec)   # the one deployed commit (mcp_runs.jsonl)
+        self.assertIn("took the invocation's identity's: walks-len", rec["detail"])
+        echo = copy.deepcopy(self.run_.scenarios[0]["request"]["strategy"])
+        self.run_.append(os.path.join("arms", "mcp", "graphlet_jobs.jsonl"),
+                         {"scenario": SID, "overrides": echo, "library_commit": gf.PIN})
+        rec = self.check("library_commit")
+        self.assertIn("took the job record's", rec["detail"])
+        # neither a job commit nor one deployed commit: still inconclusive
+        os.remove(os.path.join(self.run_.dir, "arms", "mcp", "graphlet_jobs.jsonl"))
+        os.remove(os.path.join(self.run_.dir, "arms", "mcp", "mcp_runs.jsonl"))
+        self.assertEqual(self.check("library_commit")["outcome"], "inconclusive")
+
     def test_without_a_w3_op_it_is_not_exposed(self):
         self.run_.scenarios[0]["graphlet"]["ways"]["default"] = ["W1", "W2", "W4", "W5"]
         self.run_.manifest = gf.manifest(self.run_.scenarios)

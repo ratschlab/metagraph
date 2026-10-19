@@ -23,7 +23,8 @@ One line per scenario with a `graphlet` block, each check an outcome of the suit
                   precondition_failed, naming the fact and the value seen;
   library_commit  every W3 call's library.commit (as the service reported it) is the deployed one (what the MCP
                   runner read per invocation, mcp_runs.jsonl / run.json `library_commit`) and the manifest's pin;
-                  otherwise fail; not_exposed when the op plan sends no call to W3.
+                  otherwise fail; not_exposed when the op plan sends no call to W3. A W3 record without one (a
+                  runner-side error, a probe) takes its invocation's: the job record's, else the one deployed commit.
 A failed body, envelope or twin pre-check fails the scenario as a determinism finding (DESIGN-v8 §2, §3: with the
 rehearsal's headroom a body mismatch is a finding, and a twin that differs leaves W5's answers unattributable); a
 failed strategy or library_commit check fails it under its own name. A check that cannot be made (a way recorded
@@ -766,13 +767,21 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
         return _check("not_exposed", "the op plan sends no call to W3")
     pin, where = library_pin(scenario, manifest)
     commits, without = deployed if deployed is not None else deployed_library_commits(run_dir)
-    seen, missing, bad, unrecorded = {}, [], [], []
+    job_commit = mcp_job(run_dir, sid).get("library_commit")
+    # a W3 record without library.commit (a runner-side error, a probe: no service answer to report it) takes the
+    # commit of its invocation (VERIFY-C VC10): the scenario's job record, else the MCP runner's one deployed commit
+    fallback = (job_commit, "the job record") if isinstance(job_commit, str) and job_commit.strip() else \
+        (next(iter(commits)), "the invocation's identity") if len(commits) == 1 else (None, None)
+    seen, missing, bad, unrecorded, borrowed = {}, [], [], [], []
     for op in w3_ops:
         r = recs.get("W3", {}).get((sid, op))
         if r is None:
             unrecorded.append(op)
             continue
         c = (r.get("library") or {}).get("commit") if isinstance(r.get("library"), dict) else None
+        if not c and fallback[0]:
+            c = fallback[0]
+            borrowed.append(op)
         if not c:
             missing.append(op)
             continue
@@ -781,7 +790,8 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
             bad.append("%s: %s" % (op, c[:12]))
         elif any(not commit_matches(c, d) for d in commits):
             bad.append("%s: %s, deployed %s" % (op, c[:12], ", ".join(d[:12] for d in sorted(commits))))
-    extra = {"pin": pin, "pin_source": where, "deployed": commits, "calls": seen, "unrecorded": unrecorded}
+    extra = {"pin": pin, "pin_source": where, "deployed": commits, "calls": seen, "unrecorded": unrecorded,
+             "from_identity": borrowed}
     gap = (" (%d of the %d W3 op(s) recorded nothing: %s; the compare stage names them missing)" % (
         len(unrecorded), len(w3_ops), ", ".join(unrecorded[:5]))) if unrecorded else ""
     if bad:
@@ -790,7 +800,6 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
     if pin and any(not commit_matches(d, pin) for d in commits):
         return _check("fail", "the deployed library_commit %s is not the manifest's pin %s" % (
             ", ".join(d[:12] for d in sorted(commits)), pin[:12]), **extra)
-    job_commit = mcp_job(run_dir, sid).get("library_commit")
     extra["job"] = job_commit
     if pin and job_commit and not commit_matches(job_commit, pin):
         return _check("fail", "the scenario's MCP job reports the library_commit %s, not the manifest's pin %s" % (
@@ -804,8 +813,10 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
         return _check("inconclusive", "the manifest pins no library_commit (graphlet.library_commit)", **extra)
     if not commits:
         return _check("inconclusive", "the MCP runner recorded no deployed library_commit (mcp_runs.jsonl)", **extra)
-    return _check("pass", "every recorded W3 call (%d) reports the pinned and deployed library_commit %s%s" % (
-        sum(seen.values()), pin[:12], gap), **extra)
+    taken = (" (%d without library.commit took %s's: %s)" % (len(borrowed), fallback[1], ", ".join(borrowed[:5]))
+             if borrowed else "")
+    return _check("pass", "every recorded W3 call (%d) reports the pinned and deployed library_commit %s%s%s" % (
+        sum(seen.values()), pin[:12], taken, gap), **extra)
 
 
 def scenario_outcome(checks):
