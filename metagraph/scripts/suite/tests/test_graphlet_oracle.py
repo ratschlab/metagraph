@@ -488,8 +488,16 @@ class SupportGoldens(unittest.TestCase):
     def test_errors_and_annotate(self):
         self.assertEqual(rec("graphlet_support", {"arm": "right", "walk": 3}, "caps")["oracle"]["expected_error"],
                          "bad_argument")
-        r = rec("graphlet_support", {"arm": "right", "walk": 0}, "annotate")
-        self.assertIn("/rows", r["oracle"]["consistency_only"])
+        # annotate: the labels the engine recorded at the walk's nodes (SPEC §7.4 label_sets), checked, not
+        # re-derived; documents/annotate cuts lists at its cap, so who joined or left is not read across them
+        g, f, mgt = doc("annotate")
+        r = O.answer("graphlet_support", {"arm": "right", "walk": 0}, f, mgt)
+        sets = [ls for sid in f["results"][0]["arms"]["right"]["paths"][0]["segments"]
+                for ls in f["results"][0]["arms"]["right"]["segments"][sid].get("label_sets") or []]
+        self.assertEqual(r["answer"]["rows"][0]["n_labels_total"], sets[0]["labels_total"])
+        self.assertIn("/rows/0/n_labels", r["oracle"]["checked"])
+        self.assertNotIn("rederived", r["oracle"])
+        self.assertTrue(any(c.endswith("/joined") for c in r["oracle"]["consistency_only"] if c != "/rows/0/joined"))
 
 
 class RecordSemantics(unittest.TestCase):

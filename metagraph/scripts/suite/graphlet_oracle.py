@@ -1960,6 +1960,19 @@ def _support_sets(d: _Doc, side: str, p: dict) -> Optional[List[set]]:
     return sets
 
 
+def _recorded_sets(d: _Doc, side: str, p: dict) -> Optional[List[Tuple[Tuple[int, ...], int, bool]]]:
+    """annotate: per outward base of walk |p|, the label set recorded at the walk's node there (SPEC §7.4 label_sets:
+    [from_bp, to_bp) covers the nodes entered by steps from_bp + 1 .. to_bp), as (the recorded list, its true count,
+    cut). None where a base has no recorded set."""
+    per: List[Optional[Tuple[Tuple[int, ...], int, bool]]] = [None] * p["length_bp"]
+    for sid in p["segments"]:
+        for ls in d.segment(side, sid).get("label_sets") or []:
+            for b in range(ls["from_bp"], min(ls["to_bp"], p["length_bp"])):
+                per[b] = (tuple(ls.get("labels") or []), ls.get("labels_total", len(ls.get("labels") or [])),
+                          bool(ls.get("truncated")))
+    return None if any(x is None for x in per) else per  # type: ignore[return-value]
+
+
 def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
     """graphlet_support: the support profile along a walk (DESIGN §5 support_profile(kind='displayed'), §6 "support
     runs with who left / joined"): maximal stretches [from_bp, to_bp) of one set of labels with displayed support
@@ -1967,7 +1980,8 @@ def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
     §6.11 records one), each with
     n_labels and, after the first, the labels that joined and left (ascending label id, first 8). Consistency-only:
     the first row's lists, why, exact, n_labels_total on cut lists, every row with step= (its merging rule is the
-    tool's), annotate (DESIGN §5.2.1)."""
+    tool's). In annotate mode the profile is the labels the engine recorded at the walk's nodes (SPEC §7.4
+    label_sets: engine-computed, not re-derived); who joined or left is not read across a cut list."""
     side = d.arm(args.get("arm"), required=True)
     w = args.get("walk")
     paths = d.arms[side]["paths"]
@@ -1978,35 +1992,50 @@ def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
     cons = ["/rows/*/why", "/rows/*/exact", "/rows/0/joined", "/rows/0/left", "/next_cursor", "/coordinates"]
     base = {"arm": side, "walk": w}
     c_base = {"/arm": C_ARM_ECHO, "/walk": C_PATHS}
-    sets = _support_sets(d, side, paths[w]) if _constrain_runs(d, side) else None
+    annotate = d.mode == "annotate"
+    if annotate:
+        # SPEC §7.4: the labels recorded at every node of the walk (engine-computed), maximal runs of one (capped
+        # list, count); a cut list states its true count
+        rec_ = _recorded_sets(d, side, paths[w])
+        sets = None if rec_ is None else [(set(x[0]), x[1], x[2]) for x in rec_]
+    else:
+        lin = _support_sets(d, side, paths[w]) if _constrain_runs(d, side) else None
+        sets = None if lin is None else [(x, len(x), False) for x in lin]
     if sets is None or step is not None:
-        why = "step=: the tool's merging rule" if sets is not None else "annotate (DESIGN §5.2.1) or no partitions"
+        why = "step=: the tool's merging rule" if sets is not None else "no recorded set or partition to read"
         return _record(dict(base, evidence=ev), dict(ecl, **c_base), cons + econ + ["/total", "/rows"],
                        note="%s: consistency-only" % why)
     rows: List[dict] = []
-    for b, cur in enumerate(sets):
-        if rows and rows[-1]["_set"] == cur:
+    for b, (cur, total, cut_list) in enumerate(sets):
+        if rows and (rows[-1]["_set"], rows[-1]["_total"]) == (cur, total):
             rows[-1]["to_bp"] = b + 1
+            rows[-1]["_cut"] = rows[-1]["_cut"] or cut_list
         else:
-            rows.append({"from_bp": b, "to_bp": b + 1, "_set": cur})
+            rows.append({"from_bp": b, "to_bp": b + 1, "_set": cur, "_total": total, "_cut": cut_list})
     out, prev = [], None
-    cut = (d.arms[side].get("labels_per_node") or {}).get("nodes_truncated", 0) > 0
+    cut = not annotate and (d.arms[side].get("labels_per_node") or {}).get("nodes_truncated", 0) > 0
     for j, r in enumerate(rows):
         row = {"from_bp": r["from_bp"], "to_bp": r["to_bp"], "n_labels": len(r["_set"])}
         if not cut:
-            row["n_labels_total"] = len(r["_set"])
+            row["n_labels_total"] = r["_total"]
         if prev is not None:
-            for key, ids in (("joined", sorted(r["_set"] - prev)), ("left", sorted(prev - r["_set"]))):
-                if len(ids) > LIST_CAP:
-                    cons.append("/rows/%d/%s" % (j, key))
-                elif ids:
-                    row[key] = [d.label(x) for x in ids]
-        prev = r["_set"]
+            if r["_cut"] or prev["_cut"]:   # a cut list: who joined or left cannot be read from it
+                cons += ["/rows/%d/joined" % j, "/rows/%d/left" % j]
+            else:
+                for key, ids in (("joined", sorted(r["_set"] - prev["_set"])), ("left", sorted(prev["_set"] - r["_set"]))):
+                    if len(ids) > LIST_CAP:
+                        cons.append("/rows/%d/%s" % (j, key))
+                    elif ids:
+                        row[key] = [d.label(x) for x in ids]
+        prev = r
         out.append(row)
     ans: dict = dict(base, total=len(out), rows=out, evidence=ev)
     c_sup = "DESIGN §5 support_profile (displayed; re-derived from DESIGN §5.1 with the walk as the displayed path): " \
             "a run supports a base it covers where its own route (DESIGN §5 routes) passes the walk's segment; " \
             "maximal stretches of one label set (an empty set too, as SPEC §6.11 records one)"
+    if annotate:
+        c_sup = "SPEC §7.4 label_sets: the labels recorded at the walk's nodes (annotate), maximal runs of one " \
+                "(capped list, count)"
     clauses = dict(c_base, **{"/total": c_sup, "/rows/*/from_bp": c_sup, "/rows/*/to_bp": c_sup,
                               "/rows/*/n_labels": c_sup + ": the set's size",
                               "/rows/*/n_labels_total": c_sup + ": the true count (no cut list on the arm)",
@@ -2016,9 +2045,9 @@ def _graphlet_support(d: _Doc, args: dict, ctx: dict) -> dict:
     if cut:
         cons.append("/rows/*/n_labels_total")
     partial = _cut_rows(ans, ctx, cons)
-    return _record(ans, clauses, cons + econ, partial=partial,
-                   rederived=["/total", "/rows/*/from_bp", "/rows/*/to_bp", "/rows/*/n_labels",
-                              "/rows/*/n_labels_total", "/rows/*/joined", "/rows/*/left"])
+    red = [] if annotate else ["/total", "/rows/*/from_bp", "/rows/*/to_bp", "/rows/*/n_labels",
+                               "/rows/*/n_labels_total", "/rows/*/joined", "/rows/*/left"]
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=red)
 
 
 _TOOLS: Dict[str, Callable[[_Doc, dict, dict], dict]] = {
