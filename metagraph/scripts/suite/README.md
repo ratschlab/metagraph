@@ -4849,7 +4849,9 @@ Nothing here touches staging; every test is offline.
   filtered_so_far, hint, local, stop) from the last page; `evidence` from the last page that states it (a page its
   budget stopped marks it `limitations.local`); compare's `fields_cut` then names only what no page carried;
   `row_truncated` / `cut_fields` merged and every row of a page that cut its row marked
-  `"_cut_fields": [that page's cut_fields]` (FORMAT v2 A3); next_cursor removed. graphlet_sequence concatenates
+  `"_cut_fields": [that page's cut_fields]` (FORMAT v2 A3); next_cursor and cursor removed. `volatile=` names keys a
+  runner's pages may state differently (taken from the last page stating them): the local runner passes none, async
+  the service's own per-page fields (VERIFY-L VL4). graphlet_sequence concatenates
   `sequence`, takes `to` from the last page and drops next_from (and `truncated` when the loop reached the end).
   A base field two pages state differently is `assembly_error`.
 - Records add `paging_complete` (FORMAT v2 A4, graphlet_paging.paging_complete: false when the last page still

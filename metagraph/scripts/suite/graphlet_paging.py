@@ -8,7 +8,8 @@ I/O, no library import, stdlib only, Python 3.8+.
     error_page(page)                  -> whether a page is a tool error ({"error": "<code>", ...})
     error_record(page)                -> FORMAT's {"code", "fields"} of an error page (its text left out)
     next_call(tool, page)             -> (argument, value) of the next page's call, or None after the last page
-    assemble(tool, pages, complete)   -> the pages as one answer (AssemblyError when they do not make one)
+    assemble(tool, pages, complete, volatile=())
+                                      -> the pages as one answer (AssemblyError when they do not make one)
     paging_complete(tool, last, answer) -> FORMAT v2 A4's record field: whether the listing was followed to its end
 
 The library's tools (metagraph/api/python/metagraph/traverse/mcp_tools.py) page every list as `rows` with a
@@ -47,8 +48,9 @@ SEQUENCE_TOOL = "graphlet_sequence"
 # and stop, :1008-1014; the hint that goes with `filtered`, walks :1669-1675, claims :2087-2089, which a budgeted
 # claims listing states only once its resumed pages have filtered something): the last page's
 END_FIELDS = ("total", "total_at_least", "complete", "filtered", "filtered_so_far", "hint", "local", "stop")
-# fields of one page's fitting, merged over the pages
-PAGE_FIELDS = ("next_cursor", "fields_cut", "row_truncated", "cut_fields")
+# fields of one page's fitting, merged over the pages; `cursor` (FORMAT §3: "next_cursor/cursor removed") is a page's
+# own echo where a service states one
+PAGE_FIELDS = ("next_cursor", "cursor", "fields_cut", "row_truncated", "cut_fields")
 # A3: the marker on each row of a page whose one row was cut to fit the page alone (_page :1068-1079: row_truncated
 # and cut_fields; _shrink :2713-2733: a string loses its tail, a list its second half, scalars never): that page's own
 # cut_fields, so that a reader knows which assembled row is a cut of the uncut row
@@ -112,7 +114,7 @@ def unmarked(evidence: Any) -> Any:
     return evidence
 
 
-def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
+def assemble(tool: str, pages: List[Any], complete: bool, volatile: Tuple[str, ...] = ()) -> Any:
     """FORMAT v2 A2: the pages of one op as one answer. A list tool's `rows` concatenated in page order, every other
     field from the first page that states it (page 0's, and a key page 0 lacks from the first later page carrying it:
     nothing a page states is dropped), except: the END_FIELDS from the last page; `evidence` from the last page that
@@ -120,7 +122,11 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
     a page cut (fields_cut) thereby taken from any page that carries them, fields_cut then naming only those no page
     carried;
     `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged,
-    and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor removed.
+    and each row of such a page marked "_cut_fields": that page's cut_fields (A3); next_cursor and cursor removed.
+    |volatile|: keys a runner's pages may state differently page by page, taken from the last page that states them
+    and exempt from the check below. The library's own pages have none (the local runner passes none); a service
+    that adds per-page fields of its own (an elapsed time, a lane, an op id) names them here, and only them, so that
+    a field the library states differently on two pages is still an AssemblyError (VERIFY-L VL4).
     graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
     next_from removed and `truncated` too when the loop reached the end (|complete|). A base field two pages state
     differently (the evidence but for that mark) is an AssemblyError: a listing's pages describe one answer. The pages
@@ -133,6 +139,7 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
             raise AssemblyError("%d pages of %s that are no objects" % (len(pages), tool))
         return first
     first.pop("next_cursor", None)
+    first.pop("cursor", None)
     if tool == SEQUENCE_TOOL:
         if not all(isinstance(p, dict) and isinstance(p.get("sequence"), str) for p in pages):
             raise AssemblyError("a page of graphlet_sequence without its sequence")
@@ -157,17 +164,18 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
         else:
             rows.extend(p[field])
         for k, v in p.items():
-            if k in END_FIELDS or k in PAGE_FIELDS or k == field:
+            if k in END_FIELDS or k in PAGE_FIELDS or k == field or k in volatile:
                 continue
             if k not in first:   # page 0 lacks it (cut there, or stated only later): the first page stating it
                 first[k] = v
             elif unmarked(v) != unmarked(first[k]) if k == "evidence" else v != first[k]:
                 raise AssemblyError("page %d of %s states %s otherwise than an earlier page" % (i, tool, k))
     first[field] = rows
-    for p in reversed(pages):
-        if "evidence" in p:
-            first["evidence"] = p["evidence"]
-            break
+    for k in ("evidence",) + tuple(volatile):
+        for p in reversed(pages):
+            if k in p:
+                first[k] = p[k]
+                break
     last = pages[-1]
     for k in END_FIELDS:
         if k in last:

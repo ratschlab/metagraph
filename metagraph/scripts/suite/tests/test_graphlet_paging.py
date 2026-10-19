@@ -90,6 +90,21 @@ class AssembleTests(unittest.TestCase):
             gp.assemble("graphlet_claims", pages, True)
         self.assertIn("hint", gp.END_FIELDS)
 
+    def test_cursor_removed_and_volatile_keys(self):
+        """VL4: cursor goes with next_cursor; |volatile| keys may differ page by page and come from the last page
+        stating them; any other key that differs is still an AssemblyError."""
+        pages = [{"handle": "h", "rows": [1], "total": 2, "cursor": None, "elapsed_ms": 3, "lane": "fast",
+                  "next_cursor": "c"},
+                 {"handle": "h", "rows": [2], "total": 2, "cursor": "c", "elapsed_ms": 4}]
+        with self.assertRaises(gp.AssemblyError):
+            gp.assemble("graphlet_walks", pages, True)
+        self.assertEqual(gp.assemble("graphlet_walks", pages, True, volatile=("elapsed_ms", "lane")),
+                         {"handle": "h", "rows": [1, 2], "total": 2, "elapsed_ms": 4, "lane": "fast"})
+        pages[1]["handle"] = "k"
+        with self.assertRaises(gp.AssemblyError):
+            gp.assemble("graphlet_walks", pages, True, volatile=("elapsed_ms", "lane"))
+        self.assertNotIn("cursor", gp.assemble("graphlet_summary", [{"summary": {}, "cursor": "x"}], True))
+
     def test_compare_cuts_merged(self):
         pages = [{"a": "x", "mode": "claims", "rows": [1], "total": 3, "fields_cut": ["evidence"], "export": "e",
                   "next_cursor": "c"},
