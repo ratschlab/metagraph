@@ -1937,7 +1937,14 @@ def _support_changes(g, arm, leaf, b):
         # one whose displayed support starts later joins where it starts. A seed label
         # with a run on the walk's chain ending at 0 keeps its end there (its K-coded end)
         if b is not None:
-            b.charge(W_ELEM * len(a.runs) + len(prev), 2 * set_bytes(len(prev)))
+            # the runs of the chain scanned; the sets: the profile's first (n0), the
+            # labels ending at 0 (at most the chain's runs, k), their meet with the entry
+            # set and the start set (at most n0 plus that meet)
+            n0 = len(prof[0].labels) if prof else 0
+            k = sum([len(rbs[x]) for x in chain])
+            e = min(k, len(prev))
+            b.charge(W_ELEM * (len(chain) + k + n0 + len(prev)),
+                     set_bytes(n0) + set_bytes(k) + set_bytes(e) + set_bytes(n0 + e))
         first = {l.id for l in prof[0].labels} if prof else set()
         ended = {a.runs[r].label for x in chain for r in rbs[x]
                  if a.runs[r].to_bp == 0 and not a.runs[r].merged}
