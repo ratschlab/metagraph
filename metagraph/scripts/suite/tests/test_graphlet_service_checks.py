@@ -47,6 +47,7 @@ def compare_answer(handle_a="g_0000000000aa", handle_b="g_0000000000bb", counts=
 class ServiceBase(unittest.TestCase):
     def setUp(self):
         gf.install_graphlet_doc_stub()
+        gf.install_oracle_stub()
         self.run_ = None
 
     def tearDown(self):

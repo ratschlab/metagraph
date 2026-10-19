@@ -19,8 +19,10 @@ Per op call, in this order:
    only between library ways of one (commit, interpreter, work model) (D-R10); an export's `path` and `bytes` left
    out (the export directory, the handle and the envelope's timing make them differ by construction);
 5. whole assembled answers compared by pairs: W1-W2 (transport), W1-W4 (fetch path), W3-W4 (service wrapper), and
-   each of them against W5 (library vs independent reading) on W5's `checked` pointers only; W5's other pointers
-   are consistency-only and listed;
+   each of them against W5 (library vs independent reading) by graphlet_oracle.compare (lane O's one comparison of an
+   answer against a W5 record, FORMAT v2 F2: checked pointers, unordered lists, absent keys, expected_error, cut
+   rows); W5's other pointers are consistency-only and listed; without lane O's module a W5 pair is not compared
+   and the op is inconclusive;
 6. errors by code and structured fields (never message or hint text; result_too_large's `bytes` depends on the
    handle's length);
 7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in the suite's words, in each
@@ -47,6 +49,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import graphlet_precheck as gp  # noqa: E402
 import suite_common as sc  # noqa: E402
+
+try:   # lane O's W5 module: its compare() is the one comparison of an answer against a W5 record (FORMAT v2 F2)
+    import graphlet_oracle  # noqa: E402
+except ImportError:   # pragma: no cover - before lane O's commit lands: W5 pairs are not compared, named
+    graphlet_oracle = None
 
 COMPARE_FILE = "graphlet_compare.json"
 COMPARE_VERSION = 1
@@ -111,6 +118,8 @@ SMOKE_TOOLS = ("graphlet_list", "graphlet_free")
 # the pairs whose agreement makes W1 = W2 = W3 = W4 (a spanning tree), each with what it isolates
 PAIRS = (("W1", "W2", "transport"), ("W1", "W4", "fetch path"), ("W3", "W4", "service wrapper"))
 W5_WHAT = "library vs independent reading"
+# a pair not compared for one of these makes the op inconclusive (a missing way is named by its own reason)
+UNREAD_KINDS = ("oracle_unavailable", "oracle_error")
 OP_OUTCOMES = ("agree", "disagree", "service_by_design", "inconclusive", "precondition_failed")
 SCENARIO_OUTCOMES = ("fail", "precondition_failed", "inconclusive", "pass")
 
@@ -349,42 +358,62 @@ def compare_records(a, ra, b, rb, what):
     return _pair(a, b, what, "agree")
 
 
+def oracle_compare_fn():
+    """graphlet_oracle.compare (lane O's module; FORMAT v2 F2: the one comparison of an answer against a W5 record), or
+    None when the module or the function is absent."""
+    fn = getattr(graphlet_oracle, "compare", None) if graphlet_oracle is not None else None
+    return fn if callable(fn) else None
+
+
+def oracle_view(way, rec):
+    """What a way's call gives the W5 comparison: {"error": its canonical error} for an error (a W5 record declaring
+    expected_error requires one), else its assembled answer without the service fields, canonical (compare_records'
+    reading)."""
+    if rec.get("error"):
+        return {"error": canonical_error(rec["error"])}
+    return canonical_answer(rec.get("tool"), library_part(way, rec))
+
+
+def _oracle_result(res):
+    """(outcome or None, [difference]) of what graphlet_oracle.compare returned: a list of differences (lane O's
+    `differences` shape: {pointer, clause, oracle, other | missing | present}), or an object {outcome?, differences}."""
+    if isinstance(res, dict):
+        diffs = res.get("differences") if isinstance(res.get("differences"), list) else []
+        return res.get("outcome"), diffs
+    return None, list(res or [])
+
+
 def compare_w5(x, rx, r5):
-    """The pair entry of way |x| against W5 on W5's checked pointers (FORMAT-v8 §4), with the pointers it checked."""
-    oracle = r5.get("oracle") if isinstance(r5.get("oracle"), dict) else {}
-    checked = oracle.get("checked") if isinstance(oracle.get("checked"), dict) else {}
+    """The pair entry of way |x| against W5: graphlet_oracle.compare(W5's record, x's view) decides (FORMAT v2 F2;
+    lane O's rules: checked pointers, unordered lists, absent keys, expected_error, cut rows); this stage adds only
+    the selector and args_resolved readings and names the first difference with both values."""
     if rx.get("selector_error") or r5.get("selector_error"):
         return _pair(x, "W5", W5_WHAT, "not_compared", "the selector failed in %s" % (
             x if rx.get("selector_error") else "W5"), kind="selector")
     d = _args_difference(rx, r5)
     if d:
         return _pair(x, "W5", W5_WHAT, "disagree", "args_resolved differ (W5 takes W1's)", d, kind="args_resolved")
-    if r5.get("error") or rx.get("error"):
-        ca = (canonical_error(rx.get("error")) or {}).get("code") if rx.get("error") else None
-        c5 = (r5.get("error") or {}).get("code") if r5.get("error") else None
-        if ca != c5:
-            return _pair(x, "W5", W5_WHAT, "disagree", "error %s vs W5's %s" % (ca, c5), ("/error/code", ca, c5),
-                         kind="error")
-        if r5.get("error"):
-            return _pair(x, "W5", W5_WHAT, "agree", "the same error code %s" % c5)
-    if not checked:
-        return _pair(x, "W5", W5_WHAT, "agree", "W5 checks no pointer of this call")
-    mine = canonical_answer(rx.get("tool"), library_part(x, rx)) if not rx.get("error") else {}
-    theirs = canonical_answer(r5.get("tool"), r5.get("answer")) if isinstance(r5.get("answer"), dict) else {}
-    for ptr in sorted(checked):
-        f5, v5 = gp.pointer_get(theirs, ptr)
-        fx, vx = gp.pointer_get(mine, ptr)
-        if not f5:
-            return _pair(x, "W5", W5_WHAT, "disagree", "W5 checks %s but its answer lacks it" % ptr,
-                         (ptr, vx if fx else gp.MISSING, gp.MISSING), kind="oracle")
-        if not fx:
-            return _pair(x, "W5", W5_WHAT, "disagree", "%s (%s): absent in %s" % (ptr, checked[ptr], x),
-                         (ptr, gp.MISSING, v5), kind="oracle")
-        d = gp.first_difference(vx, v5)
-        if d:
-            return _pair(x, "W5", W5_WHAT, "disagree", "%s (%s)" % (ptr, checked[ptr]), (ptr + d[0], d[1], d[2]),
-                         kind="oracle")
-    return _pair(x, "W5", W5_WHAT, "agree", "%d checked pointer(s)" % len(checked))
+    fn = oracle_compare_fn()
+    if fn is None:
+        return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare (lane O, FORMAT v2 F2) is not "
+                                                       "available", kind="oracle_unavailable")
+    try:
+        outcome, diffs = _oracle_result(fn(r5, oracle_view(x, rx)))
+    except Exception as e:   # a W5 record the comparison cannot read: nothing compared, named
+        return _pair(x, "W5", W5_WHAT, "not_compared", "graphlet_oracle.compare raised %s: %s" % (
+            type(e).__name__, str(e)[:200]), kind="oracle_error")
+    oracle = r5.get("oracle") if isinstance(r5.get("oracle"), dict) else {}
+    if outcome == "not_comparable":
+        return _pair(x, "W5", W5_WHAT, "not_comparable", "graphlet_oracle.compare: not comparable", kind="oracle")
+    if diffs:
+        first = diffs[0] if isinstance(diffs[0], dict) else {"pointer": "/", "clause": str(diffs[0])}
+        theirs = first["other"] if "other" in first else first["present"] if "present" in first else gp.MISSING
+        return _pair(x, "W5", W5_WHAT, "disagree", "%d difference(s); %s" % (len(diffs), first.get("clause")),
+                     (first.get("pointer") or "/", theirs, first.get("oracle", gp.MISSING)), kind="oracle")
+    declared = oracle.get("declared")
+    n = len(oracle.get("checked") or {}) if isinstance(oracle.get("checked"), dict) else 0
+    return _pair(x, "W5", W5_WHAT, "agree", "W5 declares %s" % declared if declared else
+                 "%d checked pointer(s)" % n)
 
 
 def compare_cut(way, rec, ref, optional):
@@ -460,6 +489,9 @@ def compare_op(scenario, op, recs, precheck, manifest):
                        "consistency_only": sorted(oracle.get("consistency_only") or [])
                        if isinstance(oracle.get("consistency_only"), list) else [],
                        "inputs": oracle.get("inputs")}
+        for key in ("declared", "unordered", "absent", "note"):
+            if oracle.get(key):
+                entry["w5"][key] = oracle[key]
         for x in ("W1", "W2", "W3", "W4"):
             if x in present and not (cut_of and x == "W3"):
                 entry["pairs"].append(compare_w5(x, present[x], r5))
@@ -467,10 +499,11 @@ def compare_op(scenario, op, recs, precheck, manifest):
     disagree += ["%s-uncut" % c["way"] for c in entry.get("cuts") or [] if c["outcome"] == "disagree"]
     missing = [w for w in ways if w not in present]
     all_selector = present and all(r.get("selector_error") for r in present.values())
+    unread = [p for p in entry["pairs"] if p["outcome"] == "not_compared" and p.get("kind") in UNREAD_KINDS]
     if disagree:
         entry["outcome"] = "disagree"
         entry["disagreeing"] = disagree
-    elif missing or all_selector or entry["problems"] or any(
+    elif missing or all_selector or entry["problems"] or unread or any(
             c["outcome"] == "not_compared" for c in entry.get("cuts") or []):
         entry["outcome"] = "inconclusive"
         why = []
@@ -479,6 +512,7 @@ def compare_op(scenario, op, recs, precheck, manifest):
         if all_selector:
             why.append("the selector failed in every way: %s" % gp.compact(
                 next(iter(present.values())).get("selector_error")))
+        why.extend(sorted(set(str(p.get("detail")) for p in unread)))
         why.extend(entry["problems"])
         why.extend(c["detail"] for c in entry.get("cuts") or [] if c["outcome"] == "not_compared")
         entry["reason"] = "; ".join(why)

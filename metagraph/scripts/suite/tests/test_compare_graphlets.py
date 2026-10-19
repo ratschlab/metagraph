@@ -212,6 +212,7 @@ class Cut(unittest.TestCase):
 class FiveWay(unittest.TestCase):
     def setUp(self):
         gf.install_graphlet_doc_stub()
+        self.oracle = gf.install_oracle_stub()
         self.op = {"id": "walks-len", "tool": "graphlet_walks",
                    "args": {"arm": "left", "rank": "length", "n": 10, "max_bytes": 2048}, "paging": "all"}
         self.ops = [self.op]
@@ -412,14 +413,57 @@ class FiveWay(unittest.TestCase):
         self.make()
         err = {"code": "bad_argument", "fields": {}}
         self.five(errors=dict((w, err) for w in ("W1", "W2", "W3", "W4")), w5=False)
-        self.run_.record("W5", SID, "walks-len", "graphlet_walks", self.op["args"], error={"code": "bad_argument"},
-                         oracle={"checked": {"/error/code": "DESIGN-graphlet §5.2"}})
+        # FORMAT v2 F1: W5 states an expected error by declaring it (answer null)
+        self.run_.record("W5", SID, "walks-len", "graphlet_walks", self.op["args"], answer=None,
+                         oracle={"checked": {}, "consistency_only": ["/*"], "declared": "expected_error",
+                                 "note": "a walk id out of range"})
         e = self.op_entry()
         self.assertEqual(e["outcome"], "agree", e)
-        self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W1-W5")["detail"], "the same error code bad_argument")
-        self.run_.record("W5", SID, "walks-len", "graphlet_walks", self.op["args"], error={"code": "bad_arm"},
-                         oracle={"checked": {}})
+        self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W1-W5")["detail"], "W5 declares expected_error")
+        self.assertEqual(e["w5"]["declared"], "expected_error")
+        # every way answered where W5 expects an error
+        self.run_.cleanup()
+        self.make()
+        self.five(w5=False)
+        self.run_.record("W5", SID, "walks-len", "graphlet_walks", self.op["args"], answer=None,
+                         oracle={"checked": {}, "declared": "expected_error"})
         self.assertEqual(self.op_entry()["disagreeing"], ["W1-W5", "W2-W5", "W3-W5", "W4-W5"])
+
+    def test_w5_is_judged_by_lane_os_compare(self):
+        self.make()
+        self.five()
+        self.op_entry()
+        # one call per way, with W5's whole record and the way's view (service fields stripped, handles symbolised)
+        self.assertEqual(len(self.oracle.calls), 4)
+        record, view = next((r, v) for r, v in self.oracle.calls if v.get("handle") == "<handle>")
+        self.assertEqual(record["way"], "W5")
+        self.assertEqual(record["oracle"]["checked"], {"/rows/0/length_bp": "SPEC-core §7.1 path length"})
+        self.assertNotIn("walk_display", json.dumps([v for _, v in self.oracle.calls]))
+        # what compare returns decides: a difference, not comparable, a failure to read
+        cg.graphlet_oracle = gf.OracleStub([{"pointer": "/rows/0/ends", "clause": "SPEC §7.5.6 (unordered)",
+                                             "oracle": ["a", "b"], "other": ["b"]}])
+        e = self.op_entry()
+        p = next(p for p in e["pairs"] if p["pair"] == "W1-W5")
+        self.assertEqual((p["outcome"], p["pointer"], p["W1"], p["W5"]),
+                         ("disagree", "/rows/0/ends", '["b"]', '["a","b"]'))
+        self.assertIn("1 difference(s); SPEC §7.5.6 (unordered)", p["detail"])
+        cg.graphlet_oracle = gf.OracleStub({"outcome": "not_comparable", "differences": []})
+        e = self.op_entry()
+        self.assertEqual((e["outcome"], next(p for p in e["pairs"] if p["pair"] == "W1-W5")["outcome"]),
+                         ("agree", "not_comparable"))
+        cg.graphlet_oracle = gf.OracleStub(ValueError("no oracle block"))
+        e = self.op_entry()
+        self.assertEqual(e["outcome"], "inconclusive")
+        self.assertIn("graphlet_oracle.compare raised ValueError: no oracle block", e["reason"])
+
+    def test_without_lane_os_module_w5_is_not_compared(self):
+        self.make()
+        self.five()
+        cg.graphlet_oracle = None
+        e = self.op_entry()
+        self.assertEqual(e["outcome"], "inconclusive")
+        self.assertIn("graphlet_oracle.compare (lane O, FORMAT v2 F2) is not available", e["reason"])
+        self.assertEqual(next(p for p in e["pairs"] if p["pair"] == "W1-W2")["outcome"], "agree")
 
     def test_cli(self):
         import contextlib

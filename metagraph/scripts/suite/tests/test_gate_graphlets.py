@@ -49,6 +49,7 @@ def g_scenario(ops=None):
 class GateG(unittest.TestCase):
     def setUp(self):
         gf.install_graphlet_doc_stub()
+        gf.install_oracle_stub()
         self.tmp = tempfile.mkdtemp(prefix="lane_c_gate_")
 
     def tearDown(self):

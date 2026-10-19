@@ -63,6 +63,49 @@ def install_graphlet_doc_stub():
     return mod
 
 
+class OracleStub(object):
+    """A stand-in for lane O's graphlet_oracle.compare (FORMAT v2 F2) until its commit lands: a test double of its
+    documented semantics on the cases the tests use (checked pointers equal as JSON values, a checked pointer the
+    other answer lacks, expected_error requiring an error), recording every call it gets."""
+
+    def __init__(self, result=None):
+        self.calls = []
+        self.result = result   # a fixed result to return instead (a list, or {outcome, differences})
+
+    def compare(self, record, other):
+        import graphlet_precheck as gp
+        self.calls.append((record, other))
+        if self.result is not None:
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+        o = record.get("oracle") or {}
+        if o.get("declared") == "expected_error":
+            return [] if isinstance(other, dict) and "error" in other else [
+                {"pointer": "/error", "clause": "an error expected", "oracle": "an error", "missing": True}]
+        out = []
+        for ptr, clause in sorted((o.get("checked") or {}).items()):
+            _, mine = gp.pointer_get(record.get("answer"), ptr)
+            found, theirs = gp.pointer_get(other, ptr)
+            if not found:
+                out.append({"pointer": ptr, "clause": clause, "oracle": mine, "missing": True})
+            elif gp.first_difference(mine, theirs):
+                out.append({"pointer": ptr, "clause": clause, "oracle": mine, "other": theirs})
+        return out
+
+
+def install_oracle_stub(result=None):
+    """Point compare_graphlets at an OracleStub (returned) unless lane O's graphlet_oracle with compare() loads."""
+    import compare_graphlets as cg
+    real = sys.modules.get("graphlet_oracle")
+    if real is not None and callable(getattr(real, "compare", None)) and result is None:
+        cg.graphlet_oracle = real
+        return real
+    stub = OracleStub(result)
+    cg.graphlet_oracle = stub
+    return stub
+
+
 def load_fixture(cell, kind):
     with gzip.open(os.path.join(MINI, "%s.%s.json.gz" % (cell, kind))) as fh:
         return json.load(fh)
