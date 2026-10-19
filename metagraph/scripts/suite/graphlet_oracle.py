@@ -109,6 +109,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import checks
+import suite_common
 
 ARMS = ("left", "right")
 _ARM_NAMES = {"left": "left", "right": "right", "l": "left", "r": "right"}
@@ -118,8 +119,10 @@ _RECONVERGE = {"m": "merge", "k": "keep"}         # SPEC §7.5.2 H <reconverge m
 # Until the library is fixed (a separate lane), W5 compares them as a set; then flip to False: position-ordered
 ENDS_UNORDERED = True
 LIST_CAP = 8      # the label lists a row shows (labels_full, in, out, ends): INVENTORY §2.6/§2.7 (presentation)
-_SEQ_MARGIN = 2048   # bytes of a sequence page that are not the slice (evidence, handle, keys): a slice shorter
-                     # than the ceiling by this much is answered uncut
+# bytes of a sequence page beyond the fields W5 answers: the handle (a UUID at most), ceiling_bytes, truncated and
+# next_from with their keys, and the JSON frame; a slice fits when it, W5's own page without the slice and this
+# allowance stay within the sequence ceiling (graphlet_sequence)
+_SEQ_PAGE_EXTRA = 512
 
 PHASE_B = ("graphlet_support", "graphlet_claims")
 NOT_APPLICABLE = ("traverse_capabilities", "traverse_resolve", "traverse_fetch", "graphlet_list", "graphlet_free")
@@ -289,11 +292,18 @@ class _Doc:
         return side
 
     def flanks(self, side: str) -> Optional[List[str]]:
-        """Per path id, the flank in natural orientation (SPEC §7.1, §7.5.4), or None without sequences."""
-        try:
-            return [x for _, x in checks._arm_flanks(self.arms[side], side)]
-        except checks.Missing:
-            return None
+        """Per path id, the flank in natural orientation, or None without sequences (SPEC §7.1: `sequence` holds the
+        bases a segment adds, natural orientation; a right flank is the concatenation root -> leaf, a left flank
+        leaf -> root)."""
+        a = self.arms[side]
+        segs = {sg["id"]: sg for sg in a.get("segments") or []}
+        out = []
+        for p in a.get("paths") or []:
+            parts = [segs.get(i, {}).get("sequence") for i in p.get("segments") or []]
+            if any(x is None for x in parts):
+                return None
+            out.append("".join(parts) if side == "right" else "".join(reversed(parts)))
+        return out
 
     def molecule(self, side: str, flank: str) -> str:
         """The walk with the seed, natural orientation: natural(left) + seed or seed + natural(right) (SPEC §7.5.4)."""
@@ -312,7 +322,8 @@ def _matches(pattern: str, pointer: str) -> bool:
 
 def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[str],
             inputs: Sequence[str] = ("full", "mgt"), unordered: Sequence[str] = (), absent: Any = (),
-            position_ordered: Sequence[str] = (), partial: Sequence[str] = (), **extra: Any) -> dict:
+            position_ordered: Sequence[str] = (), partial: Sequence[str] = (), rederived: Sequence[str] = (),
+            **extra: Any) -> dict:
     """The W5 record: every value of |ans| claimed by the first clause pattern that matches its pointer (a pattern
     naming an object or a list claims it whole). A value no clause claims is a bug of this module: W5 answers only
     what it checks (FORMAT-v8 §4). |unordered|: patterns of checked lists compared as multisets (a tool list whose
@@ -351,6 +362,9 @@ def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[
     posord = sorted(p for p in checked if any(_matches(u, p) for u in position_ordered))
     if posord:
         oracle["position_ordered"] = posord
+    red = sorted(p for p in checked if any(_matches(u, p) for u in rederived))
+    if red:
+        oracle["rederived"] = red
     absent = dict(absent, **lengths)
     if absent:
         oracle["absent"] = absent
@@ -382,18 +396,8 @@ def resolve_pointer(doc: Any, pointer: str) -> Any:
     return cur
 
 
-def same(a: Any, b: Any) -> bool:
-    """JSON value equality as the suite compares parsed values: booleans only with booleans, numbers by value
-    (an integral float equals its integer), objects by keys, lists in order."""
-    if isinstance(a, bool) or isinstance(b, bool):
-        return isinstance(a, bool) and isinstance(b, bool) and a == b
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return float(a) == float(b)
-    if isinstance(a, dict) and isinstance(b, dict):
-        return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
-    if isinstance(a, list) and isinstance(b, list):
-        return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
-    return type(a) is type(b) and a == b
+# JSON value equality as the suite compares parsed values (booleans only with booleans, numbers by value)
+same = suite_common.json_equal
 
 
 def error_code(other: Any) -> Optional[str]:
@@ -604,7 +608,7 @@ def twin_difference(full_answer: dict, mgt_text: str, seed_index: int = 0) -> Op
     res = full_answer["results"][seed_index] if isinstance(full_answer.get("results"), list) else full_answer
     try:
         arms = checks.graphlet_arms(mgt_text)
-    except (checks.Missing, ValueError, KeyError, IndexError) as e:
+    except (checks.Missing, ValueError, KeyError, IndexError) as e:   # checks.graphlet_arms' refusals
         return "the MGT text does not read: %s" % e
     # the seed and the permitted labels: a time-stopped derivation (SPEC §7.0 D3) can read another number of k-mers in
     # the other execution and walk another label set with the same trie (VO11)
@@ -670,13 +674,21 @@ def arms_digest(mgt_text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _drop_timing(o: Any) -> Any:
+    if isinstance(o, dict):
+        return {k: _drop_timing(v) for k, v in o.items() if k != "timing"}
+    if isinstance(o, list):
+        return [_drop_timing(x) for x in o]
+    return o
+
+
 def normalise_full_result(result: dict) -> dict:
     """A `detail: full` result as two executions of one walk state it alike (the suite's normalisation, not the
     library's): `timing` removed everywhere and segment events sorted within equal at_bp, needed_budgets sorted
     (DESIGN §9 T37; SPEC §7.1 "events at one at_bp are unordered", §7.2 needed_budgets a histogram); growth
     label_ends null read as {} (DESIGN §2.5); annotation's direct_reads and keys_mapped dropped (SPEC §8.3: they
     count lookahead work, which differs between executions)."""
-    r = checks._strip(copy.deepcopy(result), ())
+    r = _drop_timing(copy.deepcopy(result))
     ann = r.get("annotation")
     if isinstance(ann, dict):
         for k in ("direct_reads", "keys_mapped"):
@@ -920,7 +932,8 @@ def _graphlet_walks(d: _Doc, args: dict, ctx: dict) -> dict:
                      "length": (-p["length_bp"], p["id"]), "id": (p["id"],), "loss": (p["id"],)}[rank])
     rows = [r for _, r in sorted(zip(keys, rows), key=lambda kr: kr[0])]
     order = {"support": "DESIGN §5 walks(by='support'): (-|labels_full|, -n_alive, -length_bp, path_id)",
-             "length": "DESIGN §5 walks(by='length'): longest first, ties by path_id",
+             "length": "DESIGN §5 names by='length' without a key: longest first, ties by path_id (INVENTORY "
+                       "§2.6, presentation)",
              "id": "path id order", "loss": ""}[rank]
     ans: dict = {"arm": side, "total": len(rows), "rows": rows}
     clauses = {"/arm": C_ARM_ECHO,
@@ -961,7 +974,14 @@ def _graphlet_walks(d: _Doc, args: dict, ctx: dict) -> dict:
     ev, ecl, econ = _evidence(d, [side])
     ans["evidence"] = ev
     clauses.update(ecl)
-    return _record(ans, clauses, cons + econ, partial=partial)
+    # computed with DESIGN §5.1's displayed-evidence formula from engine values (end_labels[].route_bp, runs'
+    # from_bp), rather than read from the engine: the report marks them "re-derived from DESIGN" (DESIGN-v8 §2)
+    red = ["/rows/*/n_full", "/rows/*/labels_full", "/rows/*/labels_full_truncated", "/filtered/merge_entered"]
+    if rank == "support":
+        red.append("/rows/*/walk")
+    if lab is not None and rc:
+        red += ["/total", "/rows/*/walk"]
+    return _record(ans, clauses, cons + econ, partial=partial, rederived=red)
 
 
 def _chain_rows(d: _Doc, side: str, p: dict, cap: Optional[int]) -> List[dict]:
@@ -1198,7 +1218,9 @@ def _graphlet_sequence(d: _Doc, args: dict, ctx: dict) -> dict:
                             "natural(left) + seed | seed + natural(right); the slice [start, end) (DESIGN §6)",
                "/to": "the end of an uncut slice: min(end, length)"}
     cons = ["/ceiling_bytes"]
-    fits = stop - start <= ctx.get("sequence_max_bytes", 16384) - _SEQ_MARGIN
+    ev, ecl, econ = _evidence(d, [side])
+    page = len(json.dumps(dict(ans, evidence=ev, to=stop), separators=(",", ":"))) + _SEQ_PAGE_EXTRA
+    fits = stop - start + page <= ctx.get("sequence_max_bytes", 16384)
     if fits or ctx.get("paging", "all") == "all":
         ans["sequence"] = text[start:stop]
     else:
@@ -1210,7 +1232,6 @@ def _graphlet_sequence(d: _Doc, args: dict, ctx: dict) -> dict:
     if orientation == "walk" and side == "left" and with_seed:
         ans.pop("sequence", None)
         cons.append("/sequence")
-    ev, ecl, econ = _evidence(d, [side])
     ans["evidence"] = ev
     clauses.update(ecl)
     return _record(ans, clauses, cons + econ)
@@ -1231,7 +1252,8 @@ def parse_fasta(text: str) -> List[dict]:
 
 
 def _cigar_overlap(c: str) -> Optional[int]:
-    return int(c[:-1]) if c and c[-1] == "M" and c[:-1].isdigit() else (0 if c in ("0M",) else None)
+    """The overlap of a GFA CIGAR `nM`, else None."""
+    return int(c[:-1]) if c and c[-1] == "M" and c[:-1].isdigit() else None
 
 
 def gfa_paths(text: str) -> List[str]:

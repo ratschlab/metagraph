@@ -281,8 +281,14 @@ class HandGoldens(unittest.TestCase):
 
     def test_merge_displayed_evidence(self):
         """DESIGN §5.1: a.fa entered the displayed walk through a non-first parent at 62, b.fa at 36 (their end
-        labels' route_bp): neither carries the whole walk; c.fa and both.fa do."""
-        w = rec("graphlet_walks", {"arm": "right"}, "merge")["answer"]["rows"][0]
+        labels' route_bp): neither carries the whole walk; c.fa and both.fa do. These values are re-derived from
+        DESIGN's formula (oracle.rederived, DESIGN-v8 §2)."""
+        r = rec("graphlet_walks", {"arm": "right"}, "merge")
+        self.assertEqual(r["oracle"]["rederived"], ["/rows/0/labels_full", "/rows/0/n_full", "/rows/0/walk"])
+        by_length = rec("graphlet_walks", {"arm": "right", "rank": "length"}, "caps")["oracle"]["rederived"]
+        self.assertNotIn("/rows/0/walk", by_length)      # the length order uses no DESIGN formula
+        self.assertIn("/rows/0/n_full", by_length)
+        w = r["answer"]["rows"][0]
         self.assertEqual((w["n_alive"], w["n_full"], w["labels_full"]),
                          (4, 2, [{"name": "c.fa", "ref": "c:2"}, {"name": "both.fa", "ref": "c:3"}]))
         a = rec("graphlet_walks", {"arm": "right", "label": {"name": "a.fa"}}, "merge")["answer"]
@@ -611,8 +617,10 @@ class CompareProperties(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         d = os.path.join(DATA, "documents", "compare")
-        cls.r60 = open(os.path.join(d, "cli_bubbles_r60.mgt"), encoding="utf-8").read()
-        cls.r100 = open(os.path.join(d, "cli_bubbles_r100.mgt"), encoding="utf-8").read()
+        with open(os.path.join(d, "cli_bubbles_r60.mgt"), encoding="utf-8") as fh:
+            cls.r60 = fh.read()
+        with open(os.path.join(d, "cli_bubbles_r100.mgt"), encoding="utf-8") as fh:
+            cls.r100 = fh.read()
 
     def test_self(self):
         g, f, mgt = doc("fork")      # no index_fp in H: a join is unverifiable (SPEC §7.5.7)
@@ -684,14 +692,15 @@ class CompareProperties(unittest.TestCase):
 
 
 class Independence(unittest.TestCase):
-    """DESIGN-v8 §2 / REVIEW D-R5, mechanically: the oracle imports the standard library and the suite's checks only
-    (checks imports suite_common, stdlib only), and names no library file or function."""
+    """DESIGN-v8 §2 / REVIEW D-R5, mechanically: the oracle imports the standard library and the suite's checks and
+    suite_common only (checks imports suite_common; both stdlib only), and names no library file or function."""
 
     STDLIB = {"__future__", "copy", "hashlib", "json", "typing", "gzip", "math", "re", "datetime", "os", "shlex",
-              "sys", "zlib", "importlib", "importlib.util", "shutil", "time", "platform", "subprocess"}
+              "sys", "zlib", "importlib", "importlib.util", "shutil", "time", "platform", "subprocess", "argparse"}
 
     def imports(self, path):
-        tree = ast.parse(open(path, encoding="utf-8").read())
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
         out = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -701,12 +710,13 @@ class Independence(unittest.TestCase):
         return out
 
     def test_imports(self):
-        self.assertEqual(self.imports(os.path.join(SUITE, "graphlet_oracle.py")) - self.STDLIB, {"checks"})
+        self.assertEqual(self.imports(os.path.join(SUITE, "graphlet_oracle.py")) - self.STDLIB, {"checks", "suite_common"})
         self.assertEqual(self.imports(os.path.join(SUITE, "checks.py")) - self.STDLIB, {"suite_common"})
         self.assertEqual(self.imports(os.path.join(SUITE, "suite_common.py")) - self.STDLIB, set())
 
     def test_no_library_citation(self):
-        text = open(os.path.join(SUITE, "graphlet_oracle.py"), encoding="utf-8").read()
+        with open(os.path.join(SUITE, "graphlet_oracle.py"), encoding="utf-8") as fh:
+            text = fh.read()
         for word in ("derive.py", "ops.py", "export.py", "mcp_tools", "model.py", "parser.py", "normalize_result",
                      "metagraph.traverse", "import metagraph", "from metagraph"):
             self.assertNotIn(word, text)
