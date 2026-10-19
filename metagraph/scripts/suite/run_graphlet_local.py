@@ -590,7 +590,7 @@ class Way(object):
             self.minted[(sid, op["id"])] = answer["handle"]
             self.owner[answer["handle"]] = (sid, op["id"])
         rec["answer"] = self.symbolise(answer, sid)
-        rec["paging_complete"] = nxt is None
+        rec["paging_complete"] = gp.paging_complete(tool, pages[-1], answer)
         if tool in FILE_TOOLS:
             rec["file"] = self.keep_file(sid, op["id"], answer)
         view = rec["answer"]

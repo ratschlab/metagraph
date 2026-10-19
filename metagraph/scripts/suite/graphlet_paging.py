@@ -9,6 +9,7 @@ I/O, no library import, stdlib only, Python 3.8+.
     error_record(page)                -> FORMAT's {"code", "fields"} of an error page (its text left out)
     next_call(tool, page)             -> (argument, value) of the next page's call, or None after the last page
     assemble(tool, pages, complete)   -> the pages as one answer (AssemblyError when they do not make one)
+    paging_complete(tool, last, answer) -> FORMAT v2 A4's record field: whether the listing was followed to its end
 
 The library's tools (metagraph/api/python/metagraph/traverse/mcp_tools.py) page every list as `rows` with a
 `next_cursor` (GraphletTools._page :989-1085, the page at :1008-1013; graphlet_compare by _page_cut :1087-1123, whose
@@ -19,8 +20,9 @@ than the ceiling is cut; the next page is the same call with start = next_from).
     while not error_page(page) and len(pages) < max_pages(paging) and next_call(tool, page):
         arg, value = next_call(tool, page); page = call(dict(args, **{arg: value})); pages.append(page)
     answer = assemble(tool, pages, complete=next_call(tool, pages[-1]) is None)
+    record["paging_complete"] = paging_complete(tool, pages[-1], answer)
 
-(an error page ends the op: its record states error_record(page) and no answer).
+(an error page ends the op: its record states error_record(page), no answer, and paging_complete null).
 """
 
 from __future__ import annotations
@@ -190,3 +192,10 @@ def assemble(tool: str, pages: List[Any], complete: bool) -> Any:
         first.pop("row_truncated", None)
         first.pop("cut_fields", None)
     return first
+
+
+def paging_complete(tool: str, last: Any, answer: Any) -> bool:
+    """FORMAT v2 A4: whether the op followed its listing to the end: false when the last page fetched still names a
+    next page (a `pages` cap, paging "none" on a longer list) or the assembled answer states complete false (a stop
+    of its local budget the pages did not get past); true for an answer that is no listing."""
+    return next_call(tool, last) is None and not (isinstance(answer, dict) and answer.get("complete") is False)

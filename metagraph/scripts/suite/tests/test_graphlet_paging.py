@@ -28,6 +28,16 @@ class LoopTests(unittest.TestCase):
         self.assertIsNone(gp.next_call("graphlet_sequence", {"sequence": "A", "next_cursor": "x"}))
         self.assertIsNone(gp.next_call("graphlet_walks", None))
 
+    def test_paging_complete(self):
+        self.assertTrue(gp.paging_complete("graphlet_walks", {"rows": [1]}, {"rows": [1]}))
+        self.assertFalse(gp.paging_complete("graphlet_walks", {"rows": [1], "next_cursor": "c"}, {"rows": [1]}))
+        self.assertFalse(gp.paging_complete("graphlet_claims", {"rows": [1], "complete": False},
+                                            {"rows": [1], "complete": False}))
+        self.assertTrue(gp.paging_complete("graphlet_claims", {"rows": [1], "complete": True},
+                                           {"rows": [1], "complete": True}))
+        self.assertFalse(gp.paging_complete("graphlet_sequence", {"sequence": "A", "next_from": 1}, {"sequence": "A"}))
+        self.assertTrue(gp.paging_complete("graphlet_summary", {"summary": {}}, {"summary": {}}))
+
     def test_error_pages(self):
         page = {"error": "local_budget_exceeded", "message": "m", "hint": "h", "stop": {"resource": "work"},
                 "max_bytes": 64}

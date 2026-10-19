@@ -4848,8 +4848,9 @@ Nothing here touches staging; every test is offline.
   (FORMAT v2 A3: W5 and the compare stage judge such a row as a cut of the uncut one), next_cursor removed; graphlet_sequence concatenates `sequence`, takes `to` from the last page
   and drops next_from (and `truncated` when the loop reached the end). Pages that state a base field differently are
   `assembly_error`.
-- Records add `paging_complete` and, for graphlet_export / graphlet_save, `file` {bytes, sha256 of the text with
-  symbols, raw}; `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
+- Records add `paging_complete` (FORMAT v2 A4, graphlet_paging.paging_complete: false when the last page still
+  names a next one or the answer states complete false; null on a record without an answer) and, for
+  graphlet_export / graphlet_save, `file` {bytes, sha256 of the text with symbols, raw}; `library` adds `limits`; `error.fields` leaves out `message` and `hint`. Runner-side error codes:
   exception (the library raised), unknown_tool, paging_runaway, assembly_error and the three document codes. A later
   op's selectors also see a listing's last next_cursor when its paging stopped early.
 
