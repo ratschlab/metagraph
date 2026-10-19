@@ -75,10 +75,12 @@ class V7ProseTest(unittest.TestCase):
                       facts.fill(intro, {"manifest_version": 6}, unresolved=[]))
         note = p["units"]["P-edge"]["note"]
         # RV4: one reason, told plainly: the answer carries no pattern text; the case documents the upper-casing
-        self.assertIn("via MCP the `entry_fields` check is set aside as service-side by design (manifest v7's "
+        # no code span: the unit note is set in italics, and Fira Mono has no italic (e29e8edc0)
+        self.assertIn("via MCP the entry_fields check is set aside as service-side by design (manifest v7's "
                       "mcp.by_design_checks", facts.fill(note, {"manifest_version": 7}, unresolved=[]))
         self.assertIn("the tool's answer carries no pattern text", facts.fill(note, {"manifest_version": 7},
                                                                              unresolved=[]))
+        self.assertNotIn("`", facts.fill(note, {"manifest_version": 7}, unresolved=[]))
         self.assertNotIn("the next manifest revision corrects it", facts.fill(note, {"manifest_version": 7},
                                                                               unresolved=[]))
         self.assertIn("the next manifest revision corrects it", facts.fill(note, {"manifest_version": 6},
