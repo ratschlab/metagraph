@@ -299,20 +299,30 @@ class CutRows(unittest.TestCase):
         self.assertTrue(p["pointer"].startswith("/answer/rows/0/labels_full"), p)
         self.assertIn("a field no row names cut", p["detail"])
 
-    def test_p3_a_library_side_cut_to_empty(self):
+    def test_an_empty_cut_of_a_named_field_agrees(self):
+        # the library's _shrink can cut a named field to empty (a one-item list to []): lane O's one rule accepts it
         lib, w3 = self.answers()
-        lib["rows"][0].update(labels_full=[], _cut_fields=["labels_full"])
-        p = self.pair(w3, lib)
-        self.assertEqual(p["outcome"], "disagree")
-        self.assertIn("empty for a non-empty value", p["detail"])
+        w3["rows"][0].update(labels_full=[], sequence="", _cut_fields=["labels_full", "sequence"])
+        self.assertEqual(self.pair(w3, lib)["outcome"], "agree")
+        lib2, w32 = self.answers()   # the same rule in the other direction (P3), and both rows cut (P2)
+        lib2["rows"][0].update(labels_full=[], _cut_fields=["labels_full"])
+        self.assertEqual(self.pair(w32, lib2)["outcome"], "agree")
+        lib3, w33 = self.answers()
+        lib3["rows"][0].update(labels_full=self.LABELS[:1], _cut_fields=["labels_full"])
+        w33["rows"][0].update(labels_full=[], _cut_fields=["labels_full"])
+        self.assertEqual(self.pair(w33, lib3)["outcome"], "agree")
 
-    def test_p2_both_cut_and_one_side_emptied(self):
+    def test_an_empty_value_in_an_unnamed_field_is_refused(self):
         lib, w3 = self.answers()
-        lib["rows"][0].update(labels_full=self.LABELS[:1], _cut_fields=["labels_full"])
-        w3["rows"][0].update(labels_full=[], _cut_fields=["labels_full"])
+        w3["rows"][0].update(labels_full=[], sequence="ACGT", _cut_fields=["sequence"])
         p = self.pair(w3, lib)
         self.assertEqual(p["outcome"], "disagree")
-        self.assertIn("both rows cut labels_full: empty for a non-empty value", p["detail"])
+        self.assertTrue(p["pointer"].startswith("/answer/rows/0/labels_full"), p)
+        self.assertIn("a field no row names cut", p["detail"])
+        lib2, w32 = self.answers()
+        w32["rows"][0].update(sequence="", _cut_fields=["labels_full"])
+        p = self.pair(w32, lib2)
+        self.assertEqual((p["outcome"], p["pointer"]), ("disagree", "/answer/rows/0/sequence"))
 
     def test_a_scalar_named_cut_and_library_pairs_strict(self):
         lib, w3 = self.answers()

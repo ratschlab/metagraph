@@ -4828,8 +4828,8 @@ leaves those (and `precheck`) out, so the arms' identity checks never read them 
   removed (a runner's symbols kept, FORMAT v2 B1), `local` compared only within one commit, interpreter, work model
   and configuration, an export's path and bytes left out and its file compared by content at file.raw (B3); on a
   pair with W3 a row marked _cut_fields (A3), on either side, is judged by lane O's cut rule
-  (graphlet_oracle.cut_problem) on the fields it names only, never empty for a non-empty value, two cut rows on
-  their common leading part, every other field equal (VERIFY-C VC1); every way an op runs in is reached by a
+  (graphlet_oracle.cut_problem, the one cut rule) on the fields it names only, an empty value included, two cut
+  rows on their common leading part, every other field equal (VERIFY-C VC1); every way an op runs in is reached by a
   compared pair (VC7); a record without answer or error, and a paging "all" listing with paging_complete false,
   leave the op inconclusive (VC6);
   errors by code and structured fields (no message, hint; no result_too_large bytes). A deliberate cut (op field

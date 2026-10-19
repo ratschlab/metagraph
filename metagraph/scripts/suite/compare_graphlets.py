@@ -29,9 +29,9 @@ Per op call, in this order:
    handle's length); a fitting error (FIT_ERRORS) is not comparable against W5 (FORMAT v2 F3), compared as usual
    between W1..W4;
    on a pair with W3 a row marked _cut_fields (FORMAT v2 A3), on either side, is judged by lane O's cut rule on the
-   fields it names only (cut_aware_difference: a string's leading part, a list's leading whole items, never empty for
-   a non-empty value; both rows cut: their common leading part), every other field equal; W3's longer handle moves
-   the cut; library ways compare strictly;
+   fields it names only (cut_aware_difference: a string's leading part, a list's leading whole items, an empty value
+   included; both rows cut: their common leading part), every other field equal; W3's longer handle moves the cut;
+   library ways compare strictly;
 7. a deliberate cut (the op's `cut_of`: the op id of the same call uncut) is judged in each way against that way's
    uncut answer (is_cut): it must show a cut (a marker, paging_complete false, fewer rows than total; else "not
    cut", a failure); a key it lacks optional (OPTIONAL_KEYS) or named in its fields_cut; a key it adds a cut marker;
@@ -387,7 +387,7 @@ def is_cut(cut, uncut, optional=frozenset(), pointer="", fn=None):
       fields_cut;
     - a key only the cut has: a cut marker (CUT_MARKERS);
     - a field this object names cut (a row's _cut_fields, FORMAT v2 A3): lane O's rule (field_cut_problem: a
-      string's leading part, a list's leading whole items, never empty for a non-empty value);
+      string's leading part, a list's leading whole items, an empty value included);
     - a page's rows and the tool's optional lists (summary top_labels, caveats): a leading part, each item a cut of
       the uncut item (so a caveat may lack its optional effect);
     - every other list: the same length, item by item; every other value, strings included, equal.
@@ -488,11 +488,10 @@ def oracle_is_cut_of():
 
 
 def field_cut_problem(whole, cut, fn):
-    """Why |cut| is no cut of |whole| for a field a row names cut ('' when it is): lane O's rule (|fn|: a string's
-    leading part, a list's leading whole items, never a nested prefix inside an item), and never an empty value for a
-    non-empty one (the coordinator's VC1 decision: empty-for-full is no cut)."""
-    if isinstance(whole, (str, list)) and isinstance(cut, (str, list)) and whole and not cut:
-        return "empty for a non-empty value"
+    """Why |cut| is no cut of |whole| for a field a row names cut ('' when it is): lane O's rule alone (|fn|:
+    graphlet_oracle.cut_problem, the suite's one cut rule: a string's leading part, a list's leading whole items,
+    never a nested prefix inside an item; an empty value is a cut, as the library's _shrink can cut a named field
+    to empty, mcp_tools.py:2713-2733)."""
     why = fn(whole, cut)
     return "not a leading part: %s" % why if why else ""
 
@@ -536,10 +535,10 @@ def cut_aware_difference(a, b):
     """The first difference of two ways' canonical answers when a row of either is marked cut (FORMAT v2 A3), else
     first_difference's: (pointer, value in a, value in b[, why]). The page markers (row_truncated, cut_fields) are
     left to the rows; rows are compared one by one, a row carrying _cut_fields by row_cut_difference: only the fields
-    it names may be a cut (lane O's rule, in either direction), every other field equal. For pairs whose ceilings or
-    handle lengths differ (W3 against a library way: INVENTORY §1.2, the cut moves with the handle's length), never
-    between library ways, which cut identically. Without lane O's rule a cut row is not compared: ("", ..., why)
-    with why starting "uncomparable"."""
+    it names may be a cut (lane O's rule, in either direction, an empty value included), every other field equal.
+    For pairs whose ceilings or handle lengths differ (W3 against a library way: INVENTORY §1.2, the cut moves with
+    the handle's length), never between library ways, which cut identically. Without lane O's rule a cut row is
+    not compared: ("", ..., why) with why starting "uncomparable"."""
     if not (_rows_cut(a) or _rows_cut(b)):
         return gp.first_difference(a, b)
     fn = oracle_is_cut_of()
