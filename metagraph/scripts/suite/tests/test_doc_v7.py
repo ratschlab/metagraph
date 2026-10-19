@@ -124,6 +124,51 @@ class V7RealRunTest(unittest.TestCase):
         self.assertIn("esc_wrap(latex.public_paths(str(n)), 300)", src)
 
 
+class MemoryEpisodeTest(unittest.TestCase):
+    """The v7 baseline's host memory episode (Timing 6) beside its time-budget issues: a window at the container's
+    memory limit is read from samples.jsonl; the time-budget issues are grouped as budget_stress, a stated stop by
+    the test's own budget, inside the window, just before it (time between the service and the host); none for a
+    run whose memory never reached its limit."""
+
+    def _run(self, peak=128):
+        gib = float(1 << 30)
+        samples = []
+        for i, minute in enumerate(range(0, 60)):
+            mem = (peak if 20 <= minute <= 40 else 80) * gib
+            samples.append({"container": "eng", "mem_bytes": mem, "mem_limit_bytes": 128 * gib,
+                            "blk_read": 1e9 * minute, "t_utc": "2026-10-19T02:%02d:00.000Z" % minute})
+        def line(sid, arm, rep, minute, server, backend=None, outcome="pass", tl="", wall=None):
+            l = {"scenario": sid, "arm": arm, "repeat": rep, "outcome": outcome, "http": 200, "time_limited": tl,
+                 "started_utc": "2026-10-19T02:%02d:00.000Z" % minute, "server": {"elapsed_ms": server},
+                 "wall_ms": wall if wall is not None else server}
+            if backend is not None:
+                l["mcp_phases"] = {"backend_ms": backend}
+            return l
+        rows = [line("M-1", "direct-local", 0, 25, 96000.0), line("M-1", "direct-local", 1, 50, 500.0),
+                line("X-1", "mcp", 1, 10, 34.0, backend=66000.0, wall=70000.0),
+                line("R-1", "direct-local", 0, 5, 300.0, tl="resolve stopped by time"),
+                line("W-1", "direct-local", 0, 30, 60000.0)]
+        scen = {"M-1": {"tags": []}, "X-1": {"tags": []}, "R-1": {"tags": []}, "W-1": {"tags": ["budget_stress"]}}
+        return _Stub(samples=samples, rows=rows, order=list(scen), scenario=scen.get)
+
+    def test_episode_and_text(self):
+        ep = sections.memory_episode(self._run())
+        self.assertEqual((ep["start"], ep["end"], ep["n"]), ("02:20:00", "02:40:00", 21))
+        self.assertEqual(sorted(ep["inside"]), ["M-1"])
+        self.assertEqual(sorted(ep["before"]), ["X-1"])
+        self.assertEqual(ep["stops"], ["R-1"])
+        self.assertEqual(ep["stress"], ["W-1"])
+        text = sections.memory_episode_text(_Stub(run=self._run()))
+        self.assertIn("stood at its memory limit of 128~GiB from 02:20:00 to 02:40:00 UTC", text)
+        self.assertIn("M-1 (96~s server time on 1 execution; outside the window 0.5~s)", text)
+        self.assertIn("likely the same episode, not established", text)
+        self.assertIn("not a finding of the service", text)
+
+    def test_no_episode(self):
+        self.assertIsNone(sections.memory_episode(self._run(peak=100)))
+        self.assertEqual(sections.memory_episode_text(_Stub(run=self._run(peak=100))), "")
+
+
 class RecordedIdentityEvidenceTest(unittest.TestCase):
     def test_recorded_identity_in_evidence(self):
         run = _Stub(service_identity={"recorded": True, "service_commits": {"abc1234": 3}, "service_commit": "abc1234",
