@@ -6,7 +6,8 @@ MGT v1 frame (SPEC-labeled-traversal-core.md §7.5.1, §7.5.2), never by the lib
     body_digest(text)       -> sha256 hex of the body: H with its seed_index masked, J and Z left out
     envelope(text)          -> the J line's object, or None for a server body (no J)
     envelope_digest(text)   -> sha256 hex of the envelope without its per-request values (timing, usage, results[*]
-                               .timing, results[*].annotation.direct_reads/keys_mapped), or None (no J)
+                               .timing, results[*].annotation.direct_reads/keys_mapped, results[*].seed.seed_id), or
+                               None (no J)
 
 A server body (`detail: graphlet`, results[i].graphlet) is `H S X* L* O Q? K* (A B* V* (G P* E* T? C?)* R*)* Z`; the
 standalone file of the same seed (the library's save/standalone_text, the MCP's mgt export) has the J line right after
@@ -42,6 +43,9 @@ SUMMARY_DROP = ("timing",)
 # request (SPEC-labeled-traversal-core.md §8.3: direct_reads and keys_mapped "count lookahead work"; INVENTORY §4.1).
 # The strategy's own `annotation` block (batch_kmers) is a setting and stays, as do access_path and rows_requested.
 ANNOTATION_DROP = ("direct_reads", "keys_mapped")
+# VERIFY-L VL16 (the coordinator's decision): the seed summary's seed.seed_id is request metadata (the caller's own
+# name for the seed; the service may send its own, the direct G requests none); validated_seed_id and the rest stay
+SEED_DROP = ("seed_id",)
 
 
 def _text(text: Any) -> str:
@@ -129,14 +133,17 @@ def _summary_view(r: Any) -> Any:
     out = {k: v for k, v in r.items() if k not in SUMMARY_DROP}
     if isinstance(out.get("annotation"), dict):
         out["annotation"] = {k: v for k, v in out["annotation"].items() if k not in ANNOTATION_DROP}
+    if isinstance(out.get("seed"), dict):
+        out["seed"] = {k: v for k, v in out["seed"].items() if k not in SEED_DROP}
     return out
 
 
 def envelope_view(env: dict) -> dict:
     """|env| without its per-request values (FORMAT v2 E1): the top-level `timing` and `usage`, every seed summary's
-    `timing` (results[*].timing) and its annotation's lookahead counters (results[*].annotation.direct_reads,
-    .keys_mapped). Everything else is kept as it is: the strategy (output.timing and annotation.batch_kmers included),
-    the capabilities, the release, the rest of the seed summary."""
+    `timing` (results[*].timing), its annotation's lookahead counters (results[*].annotation.direct_reads,
+    .keys_mapped) and the caller's seed name (results[*].seed.seed_id, VERIFY-L VL16). Everything else is kept as it
+    is: the strategy (output.timing and annotation.batch_kmers included), the capabilities, the release, the rest of
+    the seed summary (validated_seed_id, seed_id_mismatch, ...)."""
     out = {k: v for k, v in env.items() if k not in ENVELOPE_DROP}
     if isinstance(out.get("results"), list):
         out["results"] = [_summary_view(r) for r in out["results"]]
