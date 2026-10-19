@@ -418,11 +418,31 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(O.compare(err, r["answer"])["outcome"], "disagree")
         ph = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
         self.assertEqual(O.compare(ph, {"rows": []})["outcome"], "not_checked")
-        # no bases (sequences: false): no FASTA (SPEC §7.1), any code; a record checking nothing makes no claim
+        # no bases (sequences: false): the tool refuses a FASTA (library-defined, any code); a GFA may carry `*`
+        # sequences, so W5 makes no claim there; a record checking nothing makes no claim
         fa = O.answer("graphlet_export", {"format": "fasta"}, f, mgt)
         self.assertEqual((fa["oracle"]["declared"], fa["oracle"]["expected_error"]), ("expected_error", None))
+        self.assertIn("library-defined", fa["oracle"]["note"])
+        gfa = O.answer("graphlet_export", {"format": "gfa"}, f, mgt)
+        self.assertEqual((gfa["oracle"]["checked"], O.compare(gfa, {"error": "bad_argument"})["outcome"]),
+                         ({}, "not_checked"))
         nothing = O.answer("graphlet_export", {"format": "gfa", "arm": "right"}, f, mgt)
         self.assertEqual(O.compare(nothing, {"error": "bad_argument"})["outcome"], "not_checked")
+
+    def test_declarations_in_compare(self):
+        """R2-5: a declaration by which W5 makes no claim is not_checked; one by which it could not judge is
+        inconclusive (it blocks); so is anything that is no W5 record."""
+        for why in O.NO_CLAIM:
+            self.assertEqual(O.compare(O._declared(why), {"rows": []})["outcome"], "not_checked", why)
+        for why in O.CANNOT_JUDGE:
+            self.assertEqual(O.compare(O._declared(why), {"rows": []})["outcome"], "inconclusive", why)
+        self.assertEqual(O.compare(O._declared("something_new"), {})["outcome"], "inconclusive")
+        self.assertEqual(O.compare({"answer": None}, {})["outcome"], "inconclusive")
+        # a twin mismatch from answer() itself
+        g = _load(os.path.join(DATA, "real", "sra", "sra_16s_OK510341__time_tight.graphlet.json.gz"))
+        f = _load(os.path.join(DATA, "real", "sra", "sra_16s_OK510341__time_tight.full.json.gz"))
+        r = O.answer("graphlet_summary", {}, f, g["results"][0]["graphlet"])
+        self.assertEqual(O.compare(r, {"summary": {}})["outcome"], "inconclusive")
 
     def test_patterns_and_position_order(self):
         """`*` patterns in checked, unordered and absent expand over the answers (FORMAT v2 F1); with
@@ -517,6 +537,21 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual([d["pointer"] for d in O.differences(r, top)], ["/rows/0/out"])
         top["rows"][0]["_cut_fields"] = ["out"]
         self.assertEqual(O.differences(r, top), [])
+
+    def test_public_cut_rule(self):
+        """is_cut_of / cut_problem, the one cut rule lane C also uses (VERIFY-C VC1)."""
+        full = {"segment": 3, "in": [1, 2, 3], "ends": [{"at_bp": 5, "l": 1}, {"at_bp": 2, "l": 2}], "seq": "ACGT"}
+        cut = {"segment": 3, "in": [1, 2], "ends": [{"at_bp": 2, "l": 2}], "seq": "AC", "_cut_fields": ["in", "seq"]}
+        self.assertTrue(O.is_cut_of(cut, full, ["in", "seq", "ends"], unordered=["ends"]))
+        self.assertIsNone(O.cut_problem(cut, full, ["in", "seq", "ends"], position_ordered=["ends"]))
+        self.assertEqual(O.cut_problem(cut, full, ["in", "seq"]), "ends: differs and is not named cut")
+        self.assertEqual(O.cut_problem(dict(cut, segment=4), full, ["in", "seq", "ends"], unordered=["ends"]),
+                         "segment: differs and is not named cut")
+        self.assertIn("in: not a cut", O.cut_problem(dict(cut, **{"in": [2]}), full, ["in", "seq", "ends"],
+                                                     unordered=["ends"]))
+        self.assertEqual(O.cut_problem({"segment": 3}, full, ["in"]), "in: missing in the cut")
+        self.assertTrue(O.is_cut_of("ACG", "ACGTT") and O.is_cut_of([1], [1, 2]) and not O.is_cut_of([2], [1, 2]))
+        self.assertTrue(O.is_cut_of([2], [1, 2], unordered=[""]))
 
     def test_paging_context(self):
         g, f, mgt = doc("caps")
@@ -734,10 +769,23 @@ class RunStep(unittest.TestCase):
              "args_resolved": {"handle": "<handle>", "arm": "right", "walk": 0}},
             {"scenario": "G-merge", "op": "cmp", "tool": "graphlet_compare", "paging_complete": True,
              "args_resolved": {"a": "<handle>", "b": "<handle:G-caps>", "mode": "walks"}},
-            {"scenario": "G-none", "op": "x", "tool": "graphlet_summary", "args_resolved": {"handle": "<handle>"}}]
+            {"scenario": "G-none", "op": "x", "tool": "graphlet_summary", "args_resolved": {"handle": "<handle>"}},
+            # R2-5: symbols naming nothing, W1 without arguments
+            {"scenario": "G-caps", "op": "q", "tool": "graphlet_walks", "args_resolved": {"handle": "<handle:?>",
+                                                                                          "arm": "right"}},
+            {"scenario": "G-caps", "op": "typo", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "<handle:G-cpas/sub>", "arm": "right"}},
+            {"scenario": "G-caps", "op": "raw", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "g_0123456789ab", "arm": "right"}},
+            {"scenario": "G-caps", "op": "noargs", "tool": "graphlet_walks", "args_resolved": None,
+             "error": {"code": "no_document", "fields": {}}}]
         with open(os.path.join(root, "arms", "dl-lib", "graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
             for r in w1:
                 fh.write(json.dumps(dict(r, run_id="R", way="W1")) + "\n")
+            # two torn lines (a kill mid-write): one still names its scenario and op, one names nothing
+            fh.write('{"run_id": "R", "scenario": "G-merge", "way": "W1", "op": "torn", "tool": "graphlet_walks", '
+                     '"answer": {"rows": [\n')
+            fh.write('{"answer": {"rows": [{"walk": 0, "len\n')
         return w1
 
     def test_run_dir(self):
@@ -749,7 +797,7 @@ class RunStep(unittest.TestCase):
                 O.write_run(root, quiet=True)
             with open(path, encoding="utf-8") as fh:
                 lines = {r["op"]: r for r in map(json.loads, fh)}
-            self.assertEqual(len(lines), len(w1))
+            self.assertEqual(len(lines), len(w1) + 2)      # the two torn lines
             walks = lines["walks"]
             self.assertEqual((walks["way"], walks["args_resolved"], walks["library"]),
                              ("W5", w1[0]["args_resolved"], None))
@@ -764,6 +812,21 @@ class RunStep(unittest.TestCase):
             self.assertEqual(lines["walk"]["answer"]["walk"], 0)
             self.assertEqual(lines["cmp"]["oracle"]["declared"], "properties_only")
             self.assertEqual(lines["x"]["oracle"]["declared"], "no_input")
+            # R2-5: what W5 cannot judge is declared so, and compares inconclusive (it blocks)
+            for op in ("q", "typo", "raw"):
+                self.assertEqual(lines[op]["oracle"]["declared"], "unresolved_handle", op)
+            self.assertEqual(lines["noargs"]["oracle"]["declared"], "no_input")
+            self.assertEqual((lines["torn"]["scenario"], lines["torn"]["tool"], lines["torn"]["oracle"]["declared"]),
+                             ("G-merge", "graphlet_walks", "unreadable_w1"))
+            run_level = lines[None]
+            self.assertEqual((run_level["run_level"], run_level["scenario"], run_level["error"]["fields"]["lines"]),
+                             (True, None, 1))
+            for op in ("q", "typo", "raw", "noargs", "torn", "x", "bad", None):
+                self.assertEqual(O.compare(lines[op], {"rows": []})["outcome"], "inconclusive", op)
+            for op in ("on-view", "cmp"):
+                self.assertEqual(O.compare(lines[op], {"rows": []})["outcome"], "not_checked", op)
+            with open(os.path.join(root, "arms", "oracle", "run.json"), encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["unreadable_w1_lines"], 2)
             self.assertEqual(O.main(["--run-dir", root, "--force", "--quiet"]), 0)
 
 

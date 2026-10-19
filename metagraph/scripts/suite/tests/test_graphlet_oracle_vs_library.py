@@ -40,10 +40,25 @@ SAME_SEED = [
 RADII = [("cli_bubbles_r60", "cli_bubbles_r100"), ("cli_bubbles_r60", "cli_bubbles_steps150")]
 # library defects W5 finds, fixed on gr/labeled-traversal by a separate lane (FORMAT v2 G): each must still reproduce
 # here until the fixed library is vendored, then its entry is removed (the test says so)
+# (what, the calls it affects, the differences it excuses on them: nothing else on those calls is excused, R2-6)
 KNOWN_LIBRARY_DEFECTS = {
     "G2": ("graphlet_walks spell=tail tail_bp=0 gives the whole right flank (DESIGN §6: the last 0 outward bases)",
-           lambda tool, args: tool == "graphlet_walks" and args.get("spell") == "tail" and args.get("tail_bp") == 0),
+           lambda tool, args: tool == "graphlet_walks" and args.get("spell") == "tail" and args.get("tail_bp") == 0
+           and args.get("arm") == "right",
+           lambda d: re.match(r"/rows/\d+/sequence\Z", d["pointer"]) is not None),
 }
+
+
+def excused(tool, args, diffs):
+    """(the known defects that excuse some of |diffs|, the differences no known defect excuses)."""
+    hit, rest = set(), []
+    for d in diffs:
+        ks = [k for k, (_, call, diff) in KNOWN_LIBRARY_DEFECTS.items() if call(tool, args) and diff(d)]
+        if ks:
+            hit.update(ks)
+        else:
+            rest.append(d)
+    return hit, rest
 
 
 def _calls(res):
@@ -103,7 +118,13 @@ def _calls(res):
                 ("graphlet_export", {"format": "json", "what": "walk", "arm": s}),
                 ("graphlet_sequence", {"arm": s, "walk": 0, "segment": 0}), ("graphlet_sequence", {"arm": s}),
                 ("graphlet_sequence", {"arm": s, "walk": 0, "start": 5, "end": 2}),
-                ("graphlet_sequence", {"arm": s, "segment": 0, "with_seed": True})]
+                ("graphlet_sequence", {"arm": s, "segment": 0, "with_seed": True}),
+                # R2-4: argument types as the tool checks them
+                ("graphlet_sequence", {"arm": s, "walk": 0, "with_seed": "yes"}),
+                ("graphlet_sequence", {"arm": s, "walk": True}), ("graphlet_sequence", {"arm": s, "segment": False}),
+                ("graphlet_sequence", {"arm": s, "walk": 0, "start": True}),
+                ("graphlet_sequence", {"arm": s, "walk": 0, "end": True}),
+                ("graphlet_sequence", {"arm": s, "walk": -1})]
         out += [("graphlet_labels", {"arm": s, "rank": "direct_bp", "n": 1000, "max_bytes": WIDE}),
                 ("graphlet_labels", {"arm": s, "rank": "reach_bp", "n": 1000, "min_direct_bp": 1, "max_bytes": WIDE})]
         for at in (0, lens[-1] // 2, lens[-1] + 5):
@@ -243,12 +264,11 @@ class OracleVsLibrary(unittest.TestCase):
                         self.assertIn(name.split("#")[0], NOT_TWINS)
                 verdict = O.compare(rec, lib)
                 outcomes[verdict["outcome"]] += 1
-                diffs = verdict["differences"]
-                known = [k for k, (_, hit) in KNOWN_LIBRARY_DEFECTS.items() if hit(tool, op)]
-                if known:
-                    defects.setdefault(known[0], 0)
-                    defects[known[0]] += bool(diffs)
-                    continue
+                if verdict["outcome"] == "inconclusive":    # R2-5: only what W5 cannot judge, here the non-twins
+                    self.assertIn(name.split("#")[0], NOT_TWINS, (name, tool, args, verdict["detail"]))
+                known, diffs = excused(tool, op, verdict["differences"])
+                for k in known:
+                    defects[k] = defects.get(k, 0) + 1
                 for d in diffs:
                     groups[(tool, re.sub(r"/\d+", "/*", d["pointer"]))].append((name, args, d))
         report = []
@@ -259,7 +279,7 @@ class OracleVsLibrary(unittest.TestCase):
                     name, json.dumps(args)[:120], json.dumps(d["oracle"])[:240],
                     "MISSING" if d.get("missing") else json.dumps(d.get("other", d.get("present")))[:240]))
         self.assertEqual(report, [], "W5 and the library disagree:\n" + "\n".join(report))
-        for k, (what, _) in KNOWN_LIBRARY_DEFECTS.items():
+        for k, (what, _, _) in KNOWN_LIBRARY_DEFECTS.items():
             self.assertGreater(defects.get(k, 0), 0, "known library defect %s no longer reproduces (%s): the fixed "
                                                     "library is here, remove it from KNOWN_LIBRARY_DEFECTS" % (k, what))
         self.assertGreater(n_calls, 3500)
@@ -320,14 +340,24 @@ class OracleVsLibrary(unittest.TestCase):
             self.assertEqual((a["scenario"], a["op"], a["args_resolved"]), (b["scenario"], b["op"], b["args_resolved"]))
             v = O.compare(b, a)
             outcomes[v["outcome"]] += 1
-            known = [k for k, (_, hit) in KNOWN_LIBRARY_DEFECTS.items()
-                     if hit(a["tool"], {x: y for x, y in a["args_resolved"].items() if x != "handle"})]
-            if v["outcome"] == "disagree" and not known:
+            _, rest = excused(a["tool"], {x: y for x, y in a["args_resolved"].items() if x != "handle"},
+                              v["differences"])
+            if v["outcome"] == "disagree" and (rest or not v["differences"]):
                 problems.append("%s %s %s: %s" % (a["scenario"], a["tool"], json.dumps(a["args_resolved"])[:100],
                                                   v["detail"][:200]))
         self.assertEqual(problems, [], "\n".join(problems[:10]))
         self.assertGreater(outcomes["agree"], 3000)
         self.assertGreater(outcomes["not_comparable"], 40)
+
+    def test_known_defects_excuse_only_their_difference(self):
+        """R2-6: G2 excuses /rows/*/sequence on the right arm's tail_bp=0 calls, and nothing else."""
+        args = {"arm": "right", "spell": "tail", "tail_bp": 0, "rank": "id"}
+        diffs = [{"pointer": "/rows/0/sequence"}, {"pointer": "/rows/3/sequence"}, {"pointer": "/rows/0/n_full"},
+                 {"pointer": "/total"}]
+        hit, rest = excused("graphlet_walks", args, diffs)
+        self.assertEqual((hit, [d["pointer"] for d in rest]), ({"G2"}, ["/rows/0/n_full", "/total"]))
+        self.assertEqual(excused("graphlet_walks", dict(args, arm="left"), diffs[:1]), (set(), diffs[:1]))
+        self.assertEqual(excused("graphlet_walks", dict(args, tail_bp=1), diffs[:1]), (set(), diffs[:1]))
 
     def test_load_receipt_summary(self):
         """graphlet_load's summary, with a ceiling it fits under, is graphlet_summary's (W5 checks it only then)."""

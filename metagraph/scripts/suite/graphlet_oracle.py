@@ -1,8 +1,9 @@
 """W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phase A.
 
     answer(tool, args_resolved, full_answer, mgt_text, context=None) -> record
-    compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked, "detail", "checked",
-                                "differences"}
+    compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked | inconclusive, "detail",
+                                "checked", "differences"}
+    is_cut_of(cut_value, full_value, cut_fields) / cut_problem(...)   # the suite's one cut rule
     python3 graphlet_oracle.py --run-dir RUN      # writes arms/oracle/graphlet_ops.jsonl (FORMAT v2 F4)
 
 answer() gives the answer a library tool should give on the graphlet whose MGT text is |mgt_text| (the engine's
@@ -32,9 +33,12 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
   reading an engine value (DESIGN-v8 §2: the report marks them "re-derived from DESIGN").
 - `declared` says why a record checks no value: not_implemented_phase_b (graphlet_support, graphlet_claims,
   graphlet_labels name=: DESIGN-v8 §8), properties_only (graphlet_compare: the compare_* functions below),
-  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view), twin_mismatch (the
-  full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's twin pre-check), selector_error (W1's
-  arguments did not resolve) and expected_error: the arguments name no answer, the tool must refuse; then
+  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view): W5 makes no claim
+  (compare: not_checked); twin_mismatch (the full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's
+  twin pre-check), no_input (the run step found no twin or document), unresolved_handle (a handle symbol naming no
+  scenario or op), selector_error (W1's arguments did not resolve), unreadable_w1 (a torn W1 line): W5 could not
+  judge (compare: inconclusive, which blocks); and expected_error: the arguments name no answer, the tool must
+  refuse; then
   `expected_error` is the code W5 expects (null: any code), the note gives why and the clause (most codes are the
   library's vocabulary, so "library-defined").
 - Cut rows: a field the other answer marks cut to fit its page (FORMAT v2 A3: `_cut_fields` on each row of a page
@@ -90,8 +94,9 @@ checked (VO7); refusals are expected errors with their code [L].
       ceiling_bytes, truncated/next_from/to of a cut slice, left-arm walk orientation with the seed
   graphlet_export: fasta records, ids and sequences [D §5 to_fasta, S §7.5.4]; gfa P count and the walks the paths
       spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37]; json what=walk chains (arm and
-      walks required, D §6); mgt body digest [S §7.5.2, FORMAT §3]; no bases: an expected error [S §7.1] | c/o:
-      header tags, gfa S/L lines and gfa with arm, records of gfa/json/mgt, what=compare, fasta walks without arm
+      walks required [L §2.13]); mgt body digest [S §7.5.2, FORMAT §3]; fasta without bases: an expected error [L] | c/o:
+      header tags, gfa S/L lines, gfa with arm or without bases, records of gfa/json/mgt, what=compare, fasta walks
+      without arm
   graphlet_subtrie: view selectors, mode, arm, summary labels, per-arm complete_to_bp, scope, qualified [D §5
       subgraph] | c/o: the view's walk and segment counts; every tool on the view handle
   graphlet_save / graphlet_load: the saved text's body digest and its graphlet_arms (round trip) [S §7.5.2];
@@ -153,8 +158,8 @@ C_SPELL = "SPEC §7.5.4 natural orientation (right flank root -> leaf, left flan
 
 C_BAD_ARM = "library-defined: an arm not retrieved, or none of two, is bad_arm (INVENTORY §1.5)"
 C_NO_BASES = "SPEC §7.1 sequences: false omits the strings; the code no_bases is library-defined (INVENTORY §2.12)"
-C_NO_BASES_EXPORT = "SPEC §7.1 sequences: false omits the strings, so no walk can be written; the code is " \
-                    "library-defined"
+C_NO_BASES_EXPORT = "library-defined: the tool refuses a FASTA of a retrieval whose strings SPEC §7.1 omits " \
+                    "(sequences: false), with a code of its own"
 C_WHOLE_LIST = "the whole list W5 derives (every page assembled, FORMAT-v8 §3): no element beyond it"
 C_BAD_ARG = "library-defined: an argument outside the tool's domain is bad_argument (INVENTORY §1.1)"
 
@@ -432,6 +437,11 @@ def _canon(v: Any) -> str:
 # about the graphlet): `not_comparable` against W5, which makes no claim about fitting (FORMAT v2 F3, VO5)
 FIT_ERRORS = ("result_too_large", "receipt_too_large", "too_large", "body_too_large", "op_busy", "op_timeout",
               "op_memory", "local_budget_exceeded")
+# declarations by which W5 makes no claim about the call, by design: compare() answers not_checked
+NO_CLAIM = ("not_implemented_phase_b", "properties_only", "not_applicable", "view_consistency_only")
+# declarations by which W5 could not judge a call it should judge (an input missing or inconsistent, a handle or a
+# W1 line it cannot read): compare() answers inconclusive, which blocks (R2-5; owner policy 2026-10-14)
+CANNOT_JUDGE = ("no_input", "unresolved_handle", "twin_mismatch", "selector_error", "unreadable_w1")
 
 
 def expand(pattern: str, doc: Any) -> List[str]:
@@ -511,6 +521,49 @@ def _is_cut_of(mine: Any, theirs: Any, order: str) -> bool:
     return same(mine, theirs)
 
 
+_CUT_MARKERS = ("_cut_fields", "row_truncated", "cut_fields")
+
+
+def cut_problem(cut_value: Any, full_value: Any, cut_fields: Sequence[str] = (), unordered: Sequence[str] = (),
+                position_ordered: Sequence[str] = ()) -> Optional[str]:
+    """The suite's one cut rule (REVIEW D-R8, DESIGN §6 row_truncated / cut_fields; FORMAT v2 A3): why |cut_value|
+    is NOT a cut of |full_value|, or None when it is. Used by differences() and by the compare stage's cut-row checks
+    across ways (lane C).
+
+    - Two objects (a row, or a page base): every key of |full_value| is in |cut_value| (the cut markers
+      `_cut_fields`, `row_truncated`, `cut_fields` are ignored on both sides); a key named in |cut_fields| holds a cut
+      of the full value, every other key the same value (json_equal).
+    - A string: a prefix of the full one. A list: a prefix; for a field named in |unordered|, a sub-multiset; in
+      |position_ordered| (events sorted by position only, SPEC §7.1), a sub-multiset in non-decreasing at_bp that
+      keeps the smallest positions. A scalar is never cut (INVENTORY §1.2): equal.
+    |unordered| / |position_ordered| name fields of an object, or, for a bare list, use "" for the list itself."""
+    def order(key: str) -> str:
+        return "unordered" if key in unordered else "position" if key in position_ordered else "ordered"
+
+    if isinstance(full_value, dict) and isinstance(cut_value, dict):
+        for k, v in full_value.items():
+            if k in _CUT_MARKERS:
+                continue
+            if k not in cut_value:
+                return "%s: missing in the cut" % k
+            if k in cut_fields:
+                if not _is_cut_of(v, cut_value[k], order(k)):
+                    return "%s: not a cut of the full value (%s)" % (k, order(k))
+            elif not same(v, cut_value[k]):
+                return "%s: differs and is not named cut" % k
+        extra = [k for k in cut_value if k not in full_value and k not in _CUT_MARKERS]
+        return "%s: only in the cut" % extra[0] if extra else None
+    if not _is_cut_of(full_value, cut_value, order("")):
+        return "not a cut of the full value (%s)" % order("")
+    return None
+
+
+def is_cut_of(cut_value: Any, full_value: Any, cut_fields: Sequence[str] = (), unordered: Sequence[str] = (),
+              position_ordered: Sequence[str] = ()) -> bool:
+    """Whether |cut_value| is a cut of |full_value| (cut_problem() is None): the suite's one cut rule."""
+    return cut_problem(cut_value, full_value, cut_fields, unordered, position_ordered) is None
+
+
 def differences(record: dict, other: Optional[dict]) -> List[dict]:
     """Where |other| (another way's assembled answer, service fields removed) departs from W5: [{pointer, clause,
     oracle, other | missing | present}]. Every checked pointer (a pattern expanded over W5's answer) must resolve in
@@ -571,10 +624,12 @@ def compare(record_w5: dict, answer: Any) -> dict:
     bare tool answer (an error is {"error": "<code>", ...}), service fields already removed (DESIGN-v8 §5). For
     graphlet_export and graphlet_save the answer to pass is export_view(format, receipt, the file's text) (FORMAT v2
     B3: the file kept under the way's raw/), the shape W5 answers for a file.
-    -> {"outcome": "agree" | "disagree" | "not_comparable" | "not_checked", "detail": str, "checked": n,
-        "differences": [...]}:
-    - not_checked: W5 declares no claim (phase B, properties only, not applicable, a view, a twin mismatch, a W1
-      selector error);
+    -> {"outcome": "agree" | "disagree" | "not_comparable" | "not_checked" | "inconclusive", "detail": str,
+        "checked": n, "differences": [...]}:
+    - not_checked: W5 makes no claim about the call by design (NO_CLAIM: phase B, properties only, not applicable,
+      a view; or a record that checks nothing: consistency-only);
+    - inconclusive (blocks): W5 could not judge a call it should (CANNOT_JUDGE: no input, an unresolved handle
+      symbol, a twin mismatch, a W1 selector error, an unreadable W1 line), or the record is no W5 record;
     - not_comparable: the other way answered a fitting error (FIT_ERRORS: F3), about which W5 says nothing;
     - otherwise differences() decides: an expected error must be one (of W5's code when stated); an answer W5
       derives must hold every checked value (cut fields as cuts, unordered and position-ordered lists as such) and
@@ -586,8 +641,15 @@ def compare(record_w5: dict, answer: Any) -> dict:
         other = answer
     declared = o.get("declared")
     n = len(o.get("checked") or {})
-    if declared and declared != "expected_error":
-        return {"outcome": "not_checked", "detail": "W5 declares %s%s" % (
+    if not isinstance(record_w5.get("oracle"), dict) or not isinstance(o.get("checked"), dict) or \
+            (declared and declared not in NO_CLAIM + CANNOT_JUDGE + ("expected_error",)):
+        return {"outcome": "inconclusive", "detail": "not a W5 record W5 can be judged by (declared %r)" % declared,
+                "checked": 0, "differences": []}
+    if declared in CANNOT_JUDGE:
+        return {"outcome": "inconclusive", "detail": "W5 could not judge the call: %s%s" % (
+            declared, ": %s" % o["note"] if o.get("note") else ""), "checked": 0, "differences": []}
+    if declared in NO_CLAIM:
+        return {"outcome": "not_checked", "detail": "W5 makes no claim: %s%s" % (
             declared, ": %s" % o["note"] if o.get("note") else ""), "checked": 0, "differences": []}
     if not declared and not n and not o.get("absent"):
         return {"outcome": "not_checked", "detail": "W5 checks nothing of this call (consistency-only)%s" % (
@@ -1194,25 +1256,25 @@ def _graphlet_splits(d: _Doc, args: dict, ctx: dict) -> dict:
 
 def _graphlet_sequence(d: _Doc, args: dict, ctx: dict) -> dict:
     side = d.arm(args.get("arm"), required=True)
-    walk, segment = args.get("walk"), args.get("segment")
+    # typed as the tool types them (library-defined, INVENTORY §1.1, §2.12): integers never booleans
+    walk, segment = _int_arg(args, "walk", None, 0), _int_arg(args, "segment", None, 0)
     orientation = args.get("orientation", "natural")
-    with_seed = bool(args.get("with_seed", False))
-    start, end = args.get("start", 0), args.get("end")
+    with_seed = _bool_arg(args, "with_seed", False)
+    start, end = _int_arg(args, "start", 0, 0), _int_arg(args, "end", None, 0)
     a = d.arms[side]
     if (walk is None) == (segment is None) or orientation not in ("natural", "walk") or \
-            (with_seed and segment is not None) or not isinstance(start, int) or start < 0 or \
-            (end is not None and (not isinstance(end, int) or end < start)):
+            (with_seed and segment is not None) or (end is not None and end < start):
         raise _Refused("walk %r / segment %r / orientation %r / with_seed %r / [%r, %r)" % (
             walk, segment, orientation, with_seed, start, end))
     if walk is not None:
-        if not isinstance(walk, int) or not 0 <= walk < len(a["paths"]):
+        if not walk < len(a["paths"]):
             raise _Refused("walk %r" % (walk,))
         flanks = d.flanks(side)
         if flanks is None:
             raise _Refused("no bases (sequences: false)", "no_bases", C_NO_BASES)
         natural = d.molecule(side, flanks[walk]) if with_seed else flanks[walk]
     else:
-        if not isinstance(segment, int) or not 0 <= segment < len(a["segments"]):
+        if not segment < len(a["segments"]):
             raise _Refused("segment %r" % (segment,))
         if "sequence" not in a["segments"][segment]:
             raise _Refused("no bases (sequences: false)", "no_bases", C_NO_BASES)
@@ -1348,8 +1410,8 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     if fmt == "json" and what == "walk":
         if args.get("arm") is None or args.get("walks") is None:
             raise _Refused("what=walk without arm and walks", "bad_argument",
-                           "DESIGN §6: what=walk with arm and walks writes their chains; the code is library-defined "
-                           "(INVENTORY §2.13)")
+                           "library-defined: what=walk needs arm and walks, and the code (INVENTORY §2.13); DESIGN §6 "
+                           "only says what=walk writes the complete chains")
         side = d.arm(args.get("arm"), required=True)
         ids = _walk_ids(d, side, args.get("walks"))
         walks, absent = [], {}
@@ -1400,7 +1462,9 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
         for s in d.sides:
             fl = d.flanks(s)
             if fl is None:
-                raise _Refused("gfa of a retrieval without bases", None, C_NO_BASES_EXPORT)
+                # a GFA 1.0 file can carry `*` sequences: whether the tool writes one or refuses is its own choice
+                return _record({}, {}, cons + ["/records", "/gfa"], note="gfa of a retrieval without bases: "
+                                                                         "consistency-only (GFA allows `*`)")
             mols += [d.molecule(s, f) for f in fl]
         return _record({"gfa": {"n_paths": len(mols), "paths": sorted(mols)}},
                        {"/gfa/n_paths": "DESIGN §5 to_gfa: one P line per walk (both arms)",
@@ -1605,8 +1669,10 @@ def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: st
     - comparable is one of true, qualified, unverifiable, unknown, false; never false (one index identity, one
       oriented seed);
     - without index_fp in H: unverifiable ("unverifiable, never equal", DESIGN §3.1), or unknown only where a rule of
-      unknown applies too (no bases in a mode that spells, DESIGN §5.2.5; or no common certified depth, complete_to_bp
-      0 on a covered arm), since DESIGN states no precedence between the two; with index_fp never unverifiable;
+      unknown applies too: no bases in a mode that spells (DESIGN §5.2.5), or no common certified depth, complete_to_bp
+      0 on a covered arm (library-defined: the tool's comparability, INVENTORY §2.14; DESIGN §5 only restricts a
+      compare to min(complete_to_bp)), since DESIGN states no precedence between the two; with index_fp never
+      unverifiable;
     - with index_fp, no bases in a mode that spells: unknown (DESIGN §5.2.5);
     - no difference under any verdict (counts zero or null, no rows); equal true exactly when comparable true; not
       true when the label evidence is a lower bound (DESIGN §5.2.5: what cannot be exact is qualified).
@@ -1626,8 +1692,9 @@ def compare_self_properties(ans: dict, full_answer: Optional[dict], mgt_text: st
     if no_fp:
         allowed = ("unverifiable", "unknown") if (no_bases or depth0) else ("unverifiable",)
         if comp not in allowed or isinstance(comp, bool):
-            probs.append("comparable %r without index_fp: %s (SPEC §7.5.7, DESIGN §3.1%s)" % (
-                comp, " or ".join(allowed), ", §5.2.5" if no_bases or depth0 else ""))
+            probs.append("comparable %r without index_fp: %s (SPEC §7.5.7, DESIGN §3.1%s%s)" % (
+                comp, " or ".join(allowed), ", §5.2.5" if no_bases else "",
+                "; depth 0: library-defined, INVENTORY §2.14" if depth0 and not no_bases else ""))
     else:
         if comp == "unverifiable":
             probs.append("comparable unverifiable with index_fp set (SPEC §7.5.7, DESIGN §3.1)")
@@ -1807,11 +1874,61 @@ def _context(rec: dict, view: bool, envelope: Optional[dict], full: dict) -> dic
     return ctx
 
 
+_TORN_KEY = re.compile(r'"(scenario|op|tool)":\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _read_w1(path: str) -> Tuple[List[dict], List[dict], int]:
+    """(records, torn, unkeyed) of W1's graphlet_ops.jsonl: the parsed lines; the torn lines whose scenario and op
+    can still be read from the text (each becomes a W5 record declaring unreadable_w1); the number of torn lines
+    with neither (one run-level record states them)."""
+    recs, torn, unkeyed = [], [], 0
+    if not os.path.exists(path):
+        return recs, torn, unkeyed
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for no, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+                if not isinstance(obj, dict):
+                    raise ValueError("not an object")
+                recs.append(obj)
+            except ValueError:
+                keys = dict(_TORN_KEY.findall(line))
+                if keys.get("scenario") and keys.get("op"):
+                    torn.append(dict(keys, line=no))
+                else:
+                    unkeyed += 1
+    return recs, torn, unkeyed
+
+
+def _target(hv: Any, sid: str, tools: Dict[Tuple[Any, Any], Any], scenarios: set) -> Tuple[Optional[str], bool]:
+    """(the scenario whose graphlet a call reads, whether through a subtrie's view) from its handle symbol (FORMAT
+    v2 B1): <handle> the scenario's, <handle:S> scenario S's, <handle:OP> / <handle:S/OP> the one op OP made (a
+    subtrie's: a view; a load's: the same graphlet). (None, False) for a symbol naming no scenario or op (<handle:?>,
+    a raw handle, a mistyped name)."""
+    m = _SYMBOL.match(hv) if isinstance(hv, str) else None
+    if not m:
+        return None, False
+    name = m.group(1)
+    if name is None:
+        return sid, False
+    if "/" in name:
+        owner, _, op = name.rpartition("/")
+        return (owner, tools[(owner, op)] == "graphlet_subtrie") if (owner, op) in tools else (None, False)
+    if (sid, name) in tools:
+        return sid, tools[(sid, name)] == "graphlet_subtrie"
+    return (name, False) if name in scenarios else (None, False)
+
+
 def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> List[dict]:
     """W5's records of a run (FORMAT v2 F4): one per W1 record of arms/dl-lib/graphlet_ops.jsonl, the same line
-    shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`."""
-    w1, bad = suite_common.read_jsonl(os.path.join(run, "arms", W1_DIR, "graphlet_ops.jsonl"))
+    shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`; a torn W1 line gives a record
+    declaring unreadable_w1 under its scenario and op where the text still names them, and the rest one run-level
+    record (scenario and op null, run_level true) that the compare stage reports as inconclusive (R2-5)."""
+    w1, torn, unkeyed = _read_w1(os.path.join(run, "arms", W1_DIR, "graphlet_ops.jsonl"))
     tools = {(r.get("scenario"), r.get("op")): r.get("tool") for r in w1}
+    scenarios = {r.get("scenario") for r in w1}
     cache: Dict[str, tuple] = {}
     out = []
     for rec in w1:
@@ -1824,23 +1941,17 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
         # whose graphlet the call reads (FORMAT v2 B1): <handle> the scenario's, <handle:S> scenario S's,
         # <handle:OP> / <handle:S/OP> the one an op made (a subtrie's view; a load's round trip of the same graphlet)
         hv = (rec.get("args_resolved") or {}).get("a" if tool == "graphlet_compare" else "handle", "<handle>")
-        m = _SYMBOL.match(hv) if isinstance(hv, str) else None
-        target, view = sid, False
-        if m and m.group(1):
-            owner, _, op = m.group(1).rpartition("/") if "/" in m.group(1) else ("", "", m.group(1))
-            owner = owner or sid
-            if (owner, op) in tools:
-                target, view = owner, tools[(owner, op)] == "graphlet_subtrie"
-            else:
-                target = m.group(1)
-        if target not in cache:
+        target, view = _target(hv, sid, tools, scenarios)
+        if target is not None and target not in cache:
             cache[target] = _inputs(run, target, repeat)
-        full, text, envelope, src = cache[target]
+        full, text, envelope, src = cache[target] if target is not None else (None, None, None, {})
         line["sources"] = src
         if rec.get("selector_error"):
             r = _declared("selector_error", "W1's arguments did not resolve: %s" % rec["selector_error"])
         elif rec.get("args_resolved") is None:
-            r = _declared("not_applicable", "W1 recorded no arguments (%s)" % ((rec.get("error") or {}).get("code")))
+            r = _declared("no_input", "W1 recorded no arguments (%s)" % ((rec.get("error") or {}).get("code")))
+        elif target is None:
+            r = _declared("unresolved_handle", "the handle symbol %r names no scenario or op of this run" % (hv,))
         elif full is None or text is None:
             r = _declared("no_input", "missing %s for scenario %s" % (
                 " and ".join(k for k, v in (("the full twin", full), ("the MGT document", text)) if v is None), target))
@@ -1850,8 +1961,18 @@ def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> L
         line["elapsed_ms"] = round((time.time() - started) * 1000.0, 3)
         line["started_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
         out.append(line)
-    if bad:
-        out.append({"way": "W5", "error": {"code": "unreadable_w1_lines", "fields": {"lines": bad}}})
+    for t in torn:
+        r = _declared("unreadable_w1", "W1's line %d is torn: its record cannot be read" % t["line"])
+        out.append({"run_id": run_id, "scenario": t["scenario"], "way": "W5", "op": t["op"], "tool": t.get("tool"),
+                    "args_resolved": None, "selector_error": None, "pages": None, "paging_complete": None,
+                    "answer": None, "error": None, "service_fields": None, "doc": None, "library": None,
+                    "elapsed_ms": 0.0, "started_utc": None, "sources": None, "oracle": r["oracle"]})
+    if unkeyed:
+        r = _declared("unreadable_w1", "%d torn W1 line(s) name no scenario and op: their ops have no W5 record"
+                      % unkeyed)
+        out.append({"run_id": run_id, "scenario": None, "way": "W5", "op": None, "tool": None, "run_level": True,
+                    "args_resolved": None, "answer": None,
+                    "error": {"code": "unreadable_w1_lines", "fields": {"lines": unkeyed}}, "oracle": r["oracle"]})
     return out
 
 
@@ -1875,7 +1996,11 @@ def write_run(run: str, repeat: int = 0, force: bool = False, quiet: bool = Fals
         k = (line.get("oracle") or {}).get("declared") or ("error" if line.get("error") else "answered")
         counts[k] = counts.get(k, 0) + 1
     summary = {"way": "W5", "records": len(lines), "outcomes": counts, "repeat": repeat,
-               "seconds": round(time.time() - started, 3), "w1": "arms/%s/graphlet_ops.jsonl" % W1_DIR}
+               "seconds": round(time.time() - started, 3), "w1": "arms/%s/graphlet_ops.jsonl" % W1_DIR,
+               "unreadable_w1_lines": sum(int(((x.get("error") or {}).get("fields") or {}).get("lines", 0))
+                                          for x in lines if x.get("run_level"))
+               + sum(1 for x in lines if (x.get("oracle") or {}).get("declared") == "unreadable_w1"
+                     and not x.get("run_level"))}
     with open(os.path.join(out_dir, "run.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, sort_keys=True, indent=1)
     if not quiet:
