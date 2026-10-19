@@ -103,7 +103,13 @@ def _calls(res):
                 ("graphlet_export", {"format": "json", "what": "walk", "arm": s}),
                 ("graphlet_sequence", {"arm": s, "walk": 0, "segment": 0}), ("graphlet_sequence", {"arm": s}),
                 ("graphlet_sequence", {"arm": s, "walk": 0, "start": 5, "end": 2}),
-                ("graphlet_sequence", {"arm": s, "segment": 0, "with_seed": True})]
+                ("graphlet_sequence", {"arm": s, "segment": 0, "with_seed": True}),
+                # R2-4: argument types as the tool checks them
+                ("graphlet_sequence", {"arm": s, "walk": 0, "with_seed": "yes"}),
+                ("graphlet_sequence", {"arm": s, "walk": True}), ("graphlet_sequence", {"arm": s, "segment": False}),
+                ("graphlet_sequence", {"arm": s, "walk": 0, "start": True}),
+                ("graphlet_sequence", {"arm": s, "walk": 0, "end": True}),
+                ("graphlet_sequence", {"arm": s, "walk": -1})]
         out += [("graphlet_labels", {"arm": s, "rank": "direct_bp", "n": 1000, "max_bytes": WIDE}),
                 ("graphlet_labels", {"arm": s, "rank": "reach_bp", "n": 1000, "min_direct_bp": 1, "max_bytes": WIDE})]
         for at in (0, lens[-1] // 2, lens[-1] + 5):

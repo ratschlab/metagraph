@@ -1195,25 +1195,25 @@ def _graphlet_splits(d: _Doc, args: dict, ctx: dict) -> dict:
 
 def _graphlet_sequence(d: _Doc, args: dict, ctx: dict) -> dict:
     side = d.arm(args.get("arm"), required=True)
-    walk, segment = args.get("walk"), args.get("segment")
+    # typed as the tool types them (library-defined, INVENTORY §1.1, §2.12): integers never booleans
+    walk, segment = _int_arg(args, "walk", None, 0), _int_arg(args, "segment", None, 0)
     orientation = args.get("orientation", "natural")
-    with_seed = bool(args.get("with_seed", False))
-    start, end = args.get("start", 0), args.get("end")
+    with_seed = _bool_arg(args, "with_seed", False)
+    start, end = _int_arg(args, "start", 0, 0), _int_arg(args, "end", None, 0)
     a = d.arms[side]
     if (walk is None) == (segment is None) or orientation not in ("natural", "walk") or \
-            (with_seed and segment is not None) or not isinstance(start, int) or start < 0 or \
-            (end is not None and (not isinstance(end, int) or end < start)):
+            (with_seed and segment is not None) or (end is not None and end < start):
         raise _Refused("walk %r / segment %r / orientation %r / with_seed %r / [%r, %r)" % (
             walk, segment, orientation, with_seed, start, end))
     if walk is not None:
-        if not isinstance(walk, int) or not 0 <= walk < len(a["paths"]):
+        if not walk < len(a["paths"]):
             raise _Refused("walk %r" % (walk,))
         flanks = d.flanks(side)
         if flanks is None:
             raise _Refused("no bases (sequences: false)", "no_bases", C_NO_BASES)
         natural = d.molecule(side, flanks[walk]) if with_seed else flanks[walk]
     else:
-        if not isinstance(segment, int) or not 0 <= segment < len(a["segments"]):
+        if not segment < len(a["segments"]):
             raise _Refused("segment %r" % (segment,))
         if "sequence" not in a["segments"][segment]:
             raise _Refused("no bases (sequences: false)", "no_bases", C_NO_BASES)
