@@ -125,6 +125,28 @@ class Envelope(PrecheckBase):
                                           "W4": f.doc(0, timing={"elapsed_ms": 7})})
         self.assertEqual(self.check("envelope")["outcome"], "pass")
 
+    def test_lookahead_counters_alone_differ_passes(self):
+        # FORMAT v2 E1 (lane L's envelope_digest and envelope_view): direct_reads / keys_mapped count lookahead work
+        f = self.run_.fixture
+        res = copy.deepcopy(f.envelope["results"])
+        res[0].setdefault("annotation", {}).update(direct_reads=123456, keys_mapped=999)
+        self.run_.complete_scenario(docs={"W1": f.doc(0), "W2": f.doc(0), "W4": f.doc(0, results=res)})
+        self.assertEqual(self.check("envelope")["outcome"], "pass")
+        # another annotation value is named
+        res[0]["annotation"]["access_path"] = "other"
+        self.run_.write_doc("W4", SID, f.doc(0, results=res))
+        import graphlet_doc
+        path = os.path.join(self.run_.dir, "arms", "mcp-lib", "graphlet_ops.jsonl")
+        with open(path) as fh:
+            rows = [json.loads(x) for x in fh]
+        for r in rows:
+            r["doc"]["envelope_digest"] = graphlet_doc.envelope_digest(f.doc(0, results=res))
+        with open(path, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in rows))
+        rec = self.check("envelope")
+        self.assertEqual(rec["outcome"], "fail")
+        self.assertEqual(rec["difference"]["pointer"], "/results/0/annotation/access_path")
+
     def test_a_feature_level_difference_is_named(self):
         f = self.run_.fixture
         caps = copy.deepcopy(f.envelope["capabilities"])
