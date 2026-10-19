@@ -33,7 +33,10 @@ scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus the way's PYTHONHASHSEED (distinct p
 library root first (the script's directory and the working directory removed); the child imports nothing of the
 suite. Not `python3 -I`: -I implies -E, which ignores PYTHONHASHSEED (measured on CPython 3.15), and the per-way hash
 seed is what makes a set or dict order leaking into an answer show up as a W1/W2/W4 difference (DESIGN §2, D-R2).
-The child checks that the library it imported lies under the root, and the parent that the seed took effect.
+The child checks that the library it imported lies under the root. The parent checks the seed (VERIFY-L VL7): the
+child states the seed it was given, hash randomization on (sys.flags.hash_randomization 1) and the environment read
+(sys.flags.ignore_environment 0), and its hash of a probe string equals the hash a separate launch of the same
+interpreter with the same flags and seed computes; else the way does not start.
 
 Supervision (VERIFY-L VL3): every call waits for its reply with select() up to the op's `timeout_s` (else
 --op-timeout, default 120 s). A call that does not answer in time is recorded `timeout` {timeout_s, page}, a process
@@ -41,8 +44,8 @@ that ends during a call `child_died` {exit, page}; either way the process is kil
 loaded so far reloaded into it, and the next op runs (handles an op made are gone with the old process). An answer
 that is no JSON is that call's `exception` {type}, one holding a NaN or an infinity `non_finite` {pointer, page}
 (VL9: the records are strict JSON, as the service refuses such numbers with number_not_finite). The child reads its
-requests from a duplicate of fd 0 and points fd 0 at /dev/null, as it points fd 1 at its log. A way whose process does not start, or restarts more than 20
-times, is reported and the next way runs; the invocation then exits 1.
+requests from a duplicate of fd 0 and points fd 0 at /dev/null, as it points fd 1 at its log. A way whose process
+does not start, or restarts more than 20 times, is reported and the next way runs; the invocation then exits 1.
 
 Op execution (FORMAT §1-§2): per way, scenarios in manifest order, each scenario's ops in order; an op runs on a way
 when its `ways` (else the scenario's graphlet.ways.default, else every way) names the way (drift runs W4's ops).
@@ -94,6 +97,9 @@ DEFAULT_LIMITS = {"max_bytes": 2048, "sequence_max_bytes": 16384, "local_limits"
 # fixed, so that a cursor (raw pages only) is the same string in every process of one commit
 CURSOR_SECRET = "metagraph-suite-v8-local-cursors"
 ENV_KEEP = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE")
+# the child's interpreter flags (-P added from 3.11): no user site, no bytecode written into the library root
+CHILD_FLAGS = ("-s", "-B")
+HASH_PROBE = "metagraph suite v8"
 # supervision of a way's process (VERIFY-L VL3): a call that answers within no time limit is a `timeout`, a process
 # that ends in a call `child_died`; either restarts the process (its documents reloaded) and the run goes on. An op's
 # own limit is its manifest field `timeout_s` (the rehearsal's per-op medians, DESIGN-v8 §4), else --op-timeout; the
@@ -201,7 +207,8 @@ def _child_do(state, req):
         state["parser"] = parser
         return {"python": platform.python_version(), "implementation": platform.python_implementation(),
                 "executable": sys.executable, "hashseed": os.environ.get("PYTHONHASHSEED"),
-                "hash_randomization": sys.flags.hash_randomization, "hash_probe": hash("metagraph suite v8"),
+                "hash_randomization": sys.flags.hash_randomization,
+                "ignore_environment": sys.flags.ignore_environment, "hash_probe": hash(HASH_PROBE),
                 "work_model": getattr(budget, "WORK_MODEL", None), "library_file": lib,
                 "tools": sorted(state["names"])}
     if cmd == "convert":
@@ -338,8 +345,8 @@ class Child(object):
     call's time limit (ChildTimeout), a closed stdout is ChildDied."""
 
     def __init__(self, python, root, hashseed, cwd, log_path):
-        flags = ["-s", "-B"] + (["-P"] if python_version(python) >= (3, 11) else [])
-        self.cmd = [python] + flags + [os.path.abspath(__file__), CHILD, "--library-root", root]
+        self.flags = list(CHILD_FLAGS) + (["-P"] if python_version(python) >= (3, 11) else [])
+        self.cmd = [python] + self.flags + [os.path.abspath(__file__), CHILD, "--library-root", root]
         self.env = dict((k, os.environ[k]) for k in ENV_KEEP if k in os.environ)
         self.env["PYTHONHASHSEED"] = str(hashseed)
         self.log = open(log_path, "ab")
@@ -436,10 +443,22 @@ class Way(object):
             raise WayFailed("[%s] the library at %s does not start: %s: %s"
                             % (self.name, self.root, msg["type"], msg["error"]))
         info = msg["result"]
-        if info["hashseed"] != str(self.hashseed) or info["hash_randomization"] != 1:
+        # the seed took effect: stated, randomization on, the environment read, and the probe's hash that of a
+        # separate launch with the same interpreter, flags and seed (an echo of the variable alone proves nothing)
+        try:
+            probe = int(subprocess.check_output(
+                [self.r.python] + self.child.flags + ["-c", "print(hash(%r))" % HASH_PROBE], env=self.child.env,
+                timeout=STARTUP_TIMEOUT_S))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            probe = None
+        info["hash_probe_launch"] = probe
+        if info["hashseed"] != str(self.hashseed) or info["hash_randomization"] != 1 \
+                or info.get("ignore_environment") != 0 or probe != info["hash_probe"]:
             self.child.close()
-            raise WayFailed("[%s] the child runs with hash seed %r (randomization %r), not %d"
-                            % (self.name, info["hashseed"], info["hash_randomization"], self.hashseed))
+            raise WayFailed("[%s] the child's hash seed did not take effect (seed %r, randomization %r, environment "
+                            "ignored %r, probe %r vs a separate launch's %r; wanted seed %d)"
+                            % (self.name, info["hashseed"], info["hash_randomization"],
+                               info.get("ignore_environment"), info["hash_probe"], probe, self.hashseed))
         self.info = info
 
     def restart(self, reason):
@@ -488,8 +507,9 @@ class Way(object):
             "run_id": self.r.run_id, "way": self.name, "way_dir": WAY_DIRS[self.name], "state": state,
             "source": self.r.source_note(self.name), "library": dict(self.library, root=os.path.abspath(self.root),
                                                                       file=self.info["library_file"]),
-            "interpreter": dict((k, self.info[k]) for k in ("python", "implementation", "executable", "hashseed",
-                                                            "hash_randomization", "hash_probe")),
+            "interpreter": dict((k, self.info.get(k)) for k in (
+                "python", "implementation", "executable", "hashseed", "hash_randomization", "ignore_environment",
+                "hash_probe", "hash_probe_launch")),
             "child": {"argv": self.child.cmd, "env_keys": sorted(self.child.env), "restarts": self.restarts},
             "limits": self.r.limits, "counts": self.counts, "started_utc": iso(self.started),
             "updated_utc": iso(time.time()), "runner": os.path.basename(__file__)})

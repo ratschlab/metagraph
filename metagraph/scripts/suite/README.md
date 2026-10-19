@@ -4845,8 +4845,10 @@ Nothing here touches staging; every test is offline.
   `no_graphlet` only for a 2xx answer whose seed failed (results[0] carries `error`, SPEC-core §7.1) (VERIFY-L VL2).
 - Isolation: one child per way, `python -s -B [-P]`, its environment scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus
   PYTHONHASHSEED (defaults W1 1001, W2 2002, W4 4004, drift 5005; distinct per run), sys.path the library root first.
-  Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere; the
-  parent refuses a child whose seed did not take effect.
+  Not `-I`: it implies -E, which ignores PYTHONHASHSEED. The child refuses a library imported from elsewhere. The
+  parent starts a way only when the child states the seed it was given, hash randomization on and the environment
+  read (sys.flags.ignore_environment 0), and its hash of a probe string equals that of a separate launch of the same
+  interpreter, flags and seed (VERIFY-L VL7: an echo of the variable alone proves nothing under -E).
 - Supervision (VERIFY-L VL3): each library call waits for its reply with select() up to the op's `timeout_s` (a
   manifest op field; else --op-timeout, 120 s). A call over it is recorded `timeout` {timeout_s, page}, a child that
   ends during a call `child_died` {exit, page}; the process is then killed and restarted with every document loaded

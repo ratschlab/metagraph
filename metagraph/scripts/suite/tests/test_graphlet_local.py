@@ -667,6 +667,9 @@ class EveryToolTests(unittest.TestCase):
         runs = [sc.read_json(os.path.join(self.out, "arms", d, "run.json")) for d in ("dl-lib", "dr-lib")]
         self.assertEqual([r["interpreter"]["hashseed"] for r in runs], ["11", "12345"])
         self.assertNotEqual(runs[0]["interpreter"]["hash_probe"], runs[1]["interpreter"]["hash_probe"])
+        for run in runs:   # VL7: the probe equals a separate launch's with that seed, the environment was read
+            self.assertEqual(run["interpreter"]["hash_probe"], run["interpreter"]["hash_probe_launch"])
+            self.assertEqual(run["interpreter"]["ignore_environment"], 0)
         self.assertEqual(runs[0]["child"]["env_keys"].count("PYTHONHASHSEED"), 1)
         self.assertFalse([k for k in runs[0]["child"]["env_keys"] if k.startswith("PYTHON") and k != "PYTHONHASHSEED"])
         self.assertEqual(runs[0]["state"], "done")
@@ -799,6 +802,26 @@ class SupervisionTests(unittest.TestCase):
                     raw = sc.read_gz_json(os.path.join(out, "arms", rgl.WAY_DIRS[way], "raw", "G-a.sleep.0.json.gz"))
                     self.assertEqual(raw["reply"]["supervised"], "timeout")
         finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_a_seed_that_does_not_take_effect(self):
+        """VL7: a child launched with -E echoes the seed it was given, but ignores it: the way does not start."""
+        tmp = tempfile.mkdtemp(prefix="graphlet-local-")
+        saved = rgl.CHILD_FLAGS
+        try:
+            rgl.CHILD_FLAGS = saved + ("-E",)
+            plan = {"scenarios": [{"id": "G-a", "graphlet": {"ops": [
+                op("w", "graphlet_walks", {"arm": "left", "mode": "ok", "max_bytes": 2048})]}}]}
+            argv = ["--plan", write_json(os.path.join(tmp, "plan.json"), plan), "--doc", "G-a=" + DOCS["G-body"],
+                    "--library-root", FAKE_LIB, "--library-commit", "fake", "--out", os.path.join(tmp, "run"),
+                    "--ways", "W1", "--quiet"]
+            self.assertEqual(rgl.main(argv), 1)
+            self.assertFalse(os.path.exists(os.path.join(tmp, "run", "arms", "dl-lib", "graphlet_ops.jsonl")))
+            rgl.CHILD_FLAGS = saved
+            again = argv[:-5] + ["--out", os.path.join(tmp, "run2"), "--ways", "W1", "--quiet"]
+            self.assertEqual(rgl.main(again), 0)
+        finally:
+            rgl.CHILD_FLAGS = saved
             shutil.rmtree(tmp, ignore_errors=True)
 
     @needs_library
