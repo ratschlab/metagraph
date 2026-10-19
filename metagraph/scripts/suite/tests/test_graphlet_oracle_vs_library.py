@@ -268,6 +268,67 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertGreater(outcomes["not_comparable"], 40)      # result_too_large at 512 and 300 bytes (F3)
         self.assertGreater(outcomes["agree"], 3000)
 
+    def test_run_step_on_library_records(self):
+        """FORMAT v2 F4 end to end: W1 records made from the library's answers (lane L's record shape: args_resolved
+        with "<handle>", the assembled answer, paging_complete, library.limits; an error as {code, fields}; an export
+        as export_view of its file), the run step over a run directory, and compare() of every W5 line with its W1
+        record: no disagreement."""
+        import gzip as gz
+        with tempfile.TemporaryDirectory() as run:
+            for d in ("arms/direct-local/raw", "arms/direct-local/docs", "arms/dl-lib"):
+                os.makedirs(os.path.join(run, d))
+            w1 = []
+            for cell, i, g, f in self.pairs:
+                if cell in NOT_TWINS:
+                    continue
+                sid = "G-%s-%d" % (re.sub(r"[^A-Za-z0-9]", "_", cell), i)
+                resp = dict(g, results=[g["results"][i]])
+                with gz.open(os.path.join(run, "arms/direct-local/raw/%s.direct-local.0.json.gz" % sid), "wt",
+                             encoding="utf-8") as fh:
+                    json.dump({"answer": {"body": resp}}, fh)
+                with gz.open(os.path.join(run, "arms/direct-local/docs/%s.full.json.gz" % sid), "wt",
+                             encoding="utf-8") as fh:
+                    json.dump(dict(f, results=[f["results"][i]]), fh)
+                h = self.docs["%s#%d" % (cell, i)][0]
+                for k, (tool, args) in enumerate(_calls(f["results"][i])):
+                    kw = dict(args, handle=h)
+                    if tool == "graphlet_save":
+                        kw["path"] = "run_saved_%s_%d.mgt" % (sid, k)
+                    lib = self.assemble(tool, kw)
+                    rec = {"run_id": "R", "scenario": sid, "way": "W1", "op": "op%d" % k, "tool": tool,
+                           "args_resolved": dict(args, handle="<handle>"), "selector_error": None,
+                           "paging_complete": True, "answer": None, "error": None,
+                           "library": {"limits": {"max_bytes": 2048, "sequence_max_bytes": 16384}}}
+                    if "error" in lib:
+                        rec["error"] = {"code": lib["error"], "fields": {}}
+                    elif tool in ("graphlet_export", "graphlet_save"):
+                        with open(lib["path"], encoding="utf-8") as fh:
+                            rec["answer"] = O.export_view("save" if tool == "graphlet_save" else args["format"],
+                                                          lib, fh.read(), args.get("what"))
+                    else:
+                        rec["answer"] = lib
+                    w1.append(rec)
+            with open(os.path.join(run, "arms/dl-lib/graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
+                for rec in w1:
+                    fh.write(json.dumps(rec) + "\n")
+            path = O.write_run(run, quiet=True)
+            with open(path, encoding="utf-8") as fh:
+                w5 = [json.loads(x) for x in fh]
+        self.assertEqual(len(w5), len(w1))
+        outcomes, problems = collections.Counter(), []
+        for a, b in zip(w1, w5):
+            self.assertEqual((a["scenario"], a["op"], a["args_resolved"]), (b["scenario"], b["op"], b["args_resolved"]))
+            v = O.compare(b, a)
+            outcomes[v["outcome"]] += 1
+            known = [k for k, (_, hit) in KNOWN_LIBRARY_DEFECTS.items()
+                     if hit(a["tool"], {x: y for x, y in a["args_resolved"].items() if x != "handle"})]
+            if v["outcome"] == "disagree" and not known:
+                problems.append("%s %s %s: %s" % (a["scenario"], a["tool"], json.dumps(a["args_resolved"])[:100],
+                                                  v["detail"][:200]))
+        self.assertEqual(problems, [], "\n".join(problems[:10]))
+        self.assertGreater(outcomes["agree"], 3000)
+        self.assertGreater(outcomes["not_comparable"], 40)
+
     def test_load_receipt_summary(self):
         """graphlet_load's summary, with a ceiling it fits under, is graphlet_summary's (W5 checks it only then)."""
         from metagraph.traverse.mcp_tools import GraphletTools

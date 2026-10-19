@@ -102,10 +102,15 @@ Coverage (phase A; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2; c/o
 
 from __future__ import annotations
 
+import argparse
 import copy
+import gzip
 import hashlib
 import json
+import os
 import re
+import sys
+import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import checks
@@ -557,7 +562,9 @@ def compare(record_w5: dict, answer: Any) -> dict:
 
     |record_w5|: answer()'s record or a W5 line of arms/oracle/graphlet_ops.jsonl (both carry `answer` and `oracle`).
     |answer|: the other way's per-call record (FORMAT §3: its `answer`, or its `error` {"code", "fields"}, B2) or a
-    bare tool answer (an error is {"error": "<code>", ...}), service fields already removed (DESIGN-v8 §5).
+    bare tool answer (an error is {"error": "<code>", ...}), service fields already removed (DESIGN-v8 §5). For
+    graphlet_export and graphlet_save the answer to pass is export_view(format, receipt, the file's text) (FORMAT v2
+    B3: the file kept under the way's raw/), the shape W5 answers for a file.
     -> {"outcome": "agree" | "disagree" | "not_comparable" | "not_checked", "detail": str, "checked": n,
         "differences": [...]}:
     - not_checked: W5 declares no claim (phase B, properties only, not applicable, a view, a twin mismatch, a W1
@@ -1736,3 +1743,151 @@ def compare_prefix_subset_properties(ans: dict, full_small: Optional[dict], mgt_
     if any(counts.get(k) for k in ("only_in_a", "only_in_b", "differ")) or ans.get("rows"):
         probs.append("one trie within depth %d, yet counts %s and %d rows" % (D, counts, len(ans.get("rows") or [])))
     return probs
+
+
+# ---------------------------------------------------------------------------------------------- the run step
+W1_DIR = "dl-lib"          # FORMAT-v8 §3: W1's records, arms/dl-lib/graphlet_ops.jsonl
+OUT_DIR = "oracle"         # W5's, arms/oracle/graphlet_ops.jsonl
+_SYMBOL = re.compile(r"<handle(?::([^<>]+))?>\Z")
+
+
+def _read_json(path: str) -> Any:
+    with (gzip.open(path, "rt", encoding="utf-8") if path.endswith(".gz") else open(path, encoding="utf-8")) as fh:
+        return json.load(fh)
+
+
+def _inputs(run: str, sid: str, repeat: int) -> Tuple[Optional[dict], Optional[str], Optional[dict], dict]:
+    """(the full twin, the MGT text, the graphlet response's envelope or None, the sources) of scenario |sid|: the
+    twin at arms/direct-local/docs/<sid>.full.json.gz (FORMAT v2 C2); the engine's body from the direct-local raw
+    answer of the graphlet request (VO12), else W1's document arms/dl-lib/docs/<sid>.mgt.gz (C1)."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(sid))
+    src: dict = {}
+    full = text = envelope = None
+    rel = "arms/direct-local/docs/%s.full.json.gz" % safe
+    if os.path.isfile(os.path.join(run, rel)):
+        full = _read_json(os.path.join(run, rel))
+        full = full["answer"]["body"] if isinstance(full, dict) and isinstance(full.get("answer"), dict) else full
+        src["full"] = rel
+    rel = "arms/direct-local/" + suite_common.raw_name(sid, "direct-local", repeat)
+    if os.path.isfile(os.path.join(run, rel)):
+        obj = _read_json(os.path.join(run, rel))
+        resp = obj["answer"]["body"] if isinstance(obj, dict) and isinstance(obj.get("answer"), dict) else obj
+        res = (resp or {}).get("results") if isinstance(resp, dict) else None
+        if isinstance(res, list) and res and isinstance(res[0], dict) and isinstance(res[0].get("graphlet"), str):
+            text, envelope, src["mgt"] = res[0]["graphlet"], resp, rel + " (the engine's body)"
+    if text is None:
+        rel = "arms/%s/docs/%s.mgt.gz" % (W1_DIR, safe)
+        if os.path.isfile(os.path.join(run, rel)):
+            with gzip.open(os.path.join(run, rel), "rt", encoding="utf-8") as fh:
+                text = fh.read()
+            src["mgt"] = rel + " (W1's document)"
+    return full, text, envelope, src
+
+
+def _context(rec: dict, view: bool, envelope: Optional[dict], full: dict) -> dict:
+    """W5's context from W1's record (FORMAT-v8 §3 and v2 A4, B4): a listing W1 read to its end (paging_complete) is
+    whole, else W5 checks W1's row count; the ceilings W1's library ran under; area G's one seed (seed_index 0)."""
+    ans = rec.get("answer") if isinstance(rec.get("answer"), dict) else {}
+    limits = (rec.get("library") or {}).get("limits") or {}
+    args = rec.get("args_resolved") or {}
+    ctx: dict = {"seed_index": 0, "paging": "all" if rec.get("paging_complete") is not False else "none",
+                 "max_bytes": args.get("max_bytes", limits.get("max_bytes", 2048)),
+                 "sequence_max_bytes": limits.get("sequence_max_bytes", 16384),
+                 "strategy": (envelope or {}).get("strategy") or (full or {}).get("strategy")}
+    if isinstance(ans.get("rows"), list):
+        ctx["rows"] = len(ans["rows"])
+    if view:
+        ctx["view"] = True
+    return ctx
+
+
+def oracle_records(run: str, repeat: int = 0, run_id: Optional[str] = None) -> List[dict]:
+    """W5's records of a run (FORMAT v2 F4): one per W1 record of arms/dl-lib/graphlet_ops.jsonl, the same line
+    shape (FORMAT-v8 §3) with way W5, W1's args_resolved, no library, and `oracle`."""
+    w1, bad = suite_common.read_jsonl(os.path.join(run, "arms", W1_DIR, "graphlet_ops.jsonl"))
+    tools = {(r.get("scenario"), r.get("op")): r.get("tool") for r in w1}
+    cache: Dict[str, tuple] = {}
+    out = []
+    for rec in w1:
+        started = time.time()
+        sid, tool = rec.get("scenario"), rec.get("tool")
+        line = {"run_id": run_id or rec.get("run_id"), "scenario": sid, "way": "W5", "op": rec.get("op"),
+                "tool": tool, "args_resolved": rec.get("args_resolved"), "selector_error": rec.get("selector_error"),
+                "pages": None, "paging_complete": None, "answer": None, "error": None, "service_fields": None,
+                "doc": None, "library": None, "elapsed_ms": 0.0, "started_utc": None, "sources": None}
+        # whose graphlet the call reads (FORMAT v2 B1): <handle> the scenario's, <handle:S> scenario S's,
+        # <handle:OP> / <handle:S/OP> the one an op made (a subtrie's view; a load's round trip of the same graphlet)
+        hv = (rec.get("args_resolved") or {}).get("a" if tool == "graphlet_compare" else "handle", "<handle>")
+        m = _SYMBOL.match(hv) if isinstance(hv, str) else None
+        target, view = sid, False
+        if m and m.group(1):
+            owner, _, op = m.group(1).rpartition("/") if "/" in m.group(1) else ("", "", m.group(1))
+            owner = owner or sid
+            if (owner, op) in tools:
+                target, view = owner, tools[(owner, op)] == "graphlet_subtrie"
+            else:
+                target = m.group(1)
+        if target not in cache:
+            cache[target] = _inputs(run, target, repeat)
+        full, text, envelope, src = cache[target]
+        line["sources"] = src
+        if rec.get("selector_error"):
+            r = _declared("selector_error", "W1's arguments did not resolve: %s" % rec["selector_error"])
+        elif rec.get("args_resolved") is None:
+            r = _declared("not_applicable", "W1 recorded no arguments (%s)" % ((rec.get("error") or {}).get("code")))
+        elif full is None or text is None:
+            r = _declared("no_input", "missing %s for scenario %s" % (
+                " and ".join(k for k, v in (("the full twin", full), ("the MGT document", text)) if v is None), target))
+        else:
+            r = answer(tool, rec["args_resolved"], full, text, _context(rec, view, envelope, full))
+        line["answer"], line["oracle"] = r["answer"], r["oracle"]
+        line["elapsed_ms"] = round((time.time() - started) * 1000.0, 3)
+        line["started_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
+        out.append(line)
+    if bad:
+        out.append({"way": "W5", "error": {"code": "unreadable_w1_lines", "fields": {"lines": bad}}})
+    return out
+
+
+def write_run(run: str, repeat: int = 0, force: bool = False, quiet: bool = False) -> str:
+    """Writes arms/oracle/graphlet_ops.jsonl (FORMAT v2 F4) and arms/oracle/run.json; an existing file is replaced
+    only with |force| (never appended). -> the path written."""
+    out_dir = os.path.join(run, "arms", OUT_DIR)
+    path = os.path.join(out_dir, "graphlet_ops.jsonl")
+    if os.path.exists(path) and not force:
+        raise SystemExit("graphlet_oracle: %s exists (never appended): remove it or pass --force" % path)
+    os.makedirs(out_dir, exist_ok=True)
+    started = time.time()
+    lines = oracle_records(run, repeat)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        for line in lines:
+            fh.write(json.dumps(line, sort_keys=True, ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
+    counts: Dict[str, int] = {}
+    for line in lines:
+        k = (line.get("oracle") or {}).get("declared") or ("error" if line.get("error") else "answered")
+        counts[k] = counts.get(k, 0) + 1
+    summary = {"way": "W5", "records": len(lines), "outcomes": counts, "repeat": repeat,
+               "seconds": round(time.time() - started, 3), "w1": "arms/%s/graphlet_ops.jsonl" % W1_DIR}
+    with open(os.path.join(out_dir, "run.json"), "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, sort_keys=True, indent=1)
+    if not quiet:
+        print("[W5] %d records %s -> %s" % (len(lines), json.dumps(counts, sort_keys=True), path))
+    return path
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser(description="W5: write arms/oracle/graphlet_ops.jsonl of a run directory from W1's "
+                                             "records, the full twins and the graphlet documents (FORMAT v2 F4)")
+    ap.add_argument("--run-dir", required=True, help="the run directory")
+    ap.add_argument("--repeat", type=int, default=0, help="the direct-local repeat holding the graphlet answer")
+    ap.add_argument("--force", action="store_true", help="replace an existing arms/oracle/graphlet_ops.jsonl")
+    ap.add_argument("--quiet", action="store_true")
+    a = ap.parse_args(argv)
+    write_run(a.run_dir, a.repeat, a.force, a.quiet)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

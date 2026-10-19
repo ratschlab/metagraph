@@ -691,6 +691,82 @@ class CompareProperties(unittest.TestCase):
         self.assertTrue(O.compare_walks_properties(dict(ans, rows=rows[0] + rows[1]), fa, ta, fb, tb, arm="left"))
 
 
+class RunStep(unittest.TestCase):
+    """FORMAT v2 F4: graphlet_oracle.py --run-dir RUN writes arms/oracle/graphlet_ops.jsonl from W1's records, the
+    full twins (C2) and the engine's body (the direct-local raw answer; W1's document C1 otherwise)."""
+
+    def make_run(self, root):
+        import gzip as gz
+        for sid, name in (("G-caps", "caps"), ("G-merge", "merge")):
+            g, f, mgt = doc(name)
+            os.makedirs(os.path.join(root, "arms", "direct-local", "raw"), exist_ok=True)
+            os.makedirs(os.path.join(root, "arms", "direct-local", "docs"), exist_ok=True)
+            os.makedirs(os.path.join(root, "arms", "dl-lib", "docs"), exist_ok=True)
+            if sid == "G-caps":   # the engine's body from the raw answer
+                with gz.open(os.path.join(root, "arms", "direct-local", "raw", "%s.direct-local.0.json.gz" % sid),
+                             "wt", encoding="utf-8") as fh:
+                    json.dump({"answer": {"body": g}}, fh)
+            else:                 # W1's document only
+                with gz.open(os.path.join(root, "arms", "dl-lib", "docs", "%s.mgt.gz" % sid), "wt",
+                             encoding="utf-8") as fh:
+                    fh.write(mgt)
+            with gz.open(os.path.join(root, "arms", "direct-local", "docs", "%s.full.json.gz" % sid), "wt",
+                         encoding="utf-8") as fh:
+                json.dump(f, fh)
+        caps_walks = O.answer("graphlet_walks", {"arm": "right", "rank": "length"}, *doc("caps")[1:])["answer"]
+        w1 = [
+            {"scenario": "G-caps", "op": "walks", "tool": "graphlet_walks", "paging_complete": True,
+             "args_resolved": {"handle": "<handle>", "arm": "right", "rank": "length", "n": 10, "max_bytes": 2048},
+             "answer": caps_walks, "library": {"limits": {"max_bytes": 2048, "sequence_max_bytes": 16384}}},
+            {"scenario": "G-caps", "op": "walks-1", "tool": "graphlet_walks", "paging_complete": False,
+             "args_resolved": {"handle": "<handle>", "arm": "right", "rank": "length", "n": 1},
+             "answer": dict(caps_walks, rows=caps_walks["rows"][:1])},
+            {"scenario": "G-caps", "op": "bad", "tool": "graphlet_walk", "selector_error": "no /rows/9/walk",
+             "args_resolved": None},
+            {"scenario": "G-caps", "op": "sub", "tool": "graphlet_subtrie",
+             "args_resolved": {"handle": "<handle>", "labels": ["hX"]}},
+            {"scenario": "G-caps", "op": "on-view", "tool": "graphlet_walks",
+             "args_resolved": {"handle": "<handle:sub>", "arm": "right"}},
+            {"scenario": "G-caps", "op": "load", "tool": "graphlet_load", "args_resolved": {"path": "x.mgt"}},
+            {"scenario": "G-caps", "op": "on-load", "tool": "graphlet_summary",
+             "args_resolved": {"handle": "<handle:load>", "max_bytes": 262144}},
+            {"scenario": "G-merge", "op": "walk", "tool": "graphlet_walk", "paging_complete": True,
+             "args_resolved": {"handle": "<handle>", "arm": "right", "walk": 0}},
+            {"scenario": "G-merge", "op": "cmp", "tool": "graphlet_compare", "paging_complete": True,
+             "args_resolved": {"a": "<handle>", "b": "<handle:G-caps>", "mode": "walks"}},
+            {"scenario": "G-none", "op": "x", "tool": "graphlet_summary", "args_resolved": {"handle": "<handle>"}}]
+        with open(os.path.join(root, "arms", "dl-lib", "graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
+            for r in w1:
+                fh.write(json.dumps(dict(r, run_id="R", way="W1")) + "\n")
+        return w1
+
+    def test_run_dir(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            w1 = self.make_run(root)
+            path = O.write_run(root, quiet=True)
+            with self.assertRaises(SystemExit):     # never appended
+                O.write_run(root, quiet=True)
+            with open(path, encoding="utf-8") as fh:
+                lines = {r["op"]: r for r in map(json.loads, fh)}
+            self.assertEqual(len(lines), len(w1))
+            walks = lines["walks"]
+            self.assertEqual((walks["way"], walks["args_resolved"], walks["library"]),
+                             ("W5", w1[0]["args_resolved"], None))
+            self.assertIn("the engine's body", walks["sources"]["mgt"])
+            self.assertEqual(O.compare(walks, dict(w1[0], error=None))["outcome"], "agree")
+            self.assertEqual(len(lines["walks-1"]["answer"]["rows"]), 1)       # W1 did not read to the end
+            self.assertEqual(O.compare(lines["walks-1"], dict(w1[1], error=None))["outcome"], "agree")
+            self.assertEqual(lines["bad"]["oracle"]["declared"], "selector_error")
+            self.assertEqual(lines["on-view"]["oracle"]["declared"], "view_consistency_only")
+            self.assertEqual(lines["on-load"]["answer"]["summary"]["arms"]["right"]["walks"], 3)  # the same graphlet
+            self.assertIn("W1's document", lines["walk"]["sources"]["mgt"])
+            self.assertEqual(lines["walk"]["answer"]["walk"], 0)
+            self.assertEqual(lines["cmp"]["oracle"]["declared"], "properties_only")
+            self.assertEqual(lines["x"]["oracle"]["declared"], "no_input")
+            self.assertEqual(O.main(["--run-dir", root, "--force", "--quiet"]), 0)
+
+
 class Independence(unittest.TestCase):
     """DESIGN-v8 §2 / REVIEW D-R5, mechanically: the oracle imports the standard library and the suite's checks and
     suite_common only (checks imports suite_common; both stdlib only), and names no library file or function."""
