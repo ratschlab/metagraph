@@ -39,8 +39,9 @@ Op execution (FORMAT §1-§2): per way, scenarios in manifest order, each scenar
 when its `ways` (else the scenario's graphlet.ways.default, else every way) names the way (drift runs W4's ops).
 Arguments are resolved by graphlet_select.resolve from this way's earlier assembled answers; {"graphlet": "<id>"}
 anywhere in them is that scenario's graphlet, loaded in the same process (compare's `b`, export's `other`); the
-graphlet's own handle is filled in as `handle` (compare: `a`) when the plan names none. Paging: "none" one call,
-"all" every page (next_cursor; graphlet_sequence: next_from as start), {"pages": N} at most N.
+graphlet's own handle is filled in as `handle` (compare: `a`) when the plan names none. Paging and assembly are
+graphlet_paging's (FORMAT v2 A2, shared with async's runner): "none" one call, "all" every page (next_cursor;
+graphlet_sequence: next_from as start), {"pages": N} at most N, the pages assembled into one answer.
 
 Handles in records: a way's random `g_` handles are written as symbols, relative to the op's scenario: "<handle>" the
 scenario's own graphlet (FORMAT's args_resolved form), "<handle:S>" scenario S's, "<handle:OP>" the one op OP of this
@@ -80,34 +81,8 @@ DEFAULT_MGT_TEMPLATE = "arms/mcp/raw/{id}.mcp.{repeat}.mgt.gz"
 DEFAULT_LIMITS = {"max_bytes": 2048, "sequence_max_bytes": 16384, "local_limits": None, "max_graphlet_mb": 1e6}
 # fixed, so that a cursor (raw pages only) is the same string in every process of one commit
 CURSOR_SECRET = "metagraph-suite-v8-local-cursors"
-MAX_PAGES = 10000
 ENV_KEEP = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE")
 
-# FORMAT §3's assembly table: the list field of each paged tool. Every paged list of the library is built by
-# GraphletTools._page (mcp_tools.py:989-1085, the page `rows` at :1008-1013) or by _page_cut (graphlet_compare only,
-# :1087-1123, whose base fields give way per page: fields_cut); tests/test_graphlet_local.py checks this table against
-# the library's source (every self._page/_page_cut call names one of these tools).
-LIST_FIELDS = {
-    "graphlet_summary": "rows",    # detail="limitations" (:1595); detail="summary" is one object
-    "graphlet_walks": "rows",      # :1676
-    "graphlet_walk": "rows",       # :1802; budgeted :1748
-    "graphlet_support": "rows",    # :1838
-    "graphlet_labels": "rows",     # table :1930, name= :1896; budgeted name= :1961
-    "graphlet_splits": "rows",     # :1986; budgeted :2018
-    "graphlet_claims": "rows",     # :2094; budgeted :2097
-    "graphlet_compare": "rows",    # _page_cut :2361
-    "graphlet_list": "rows",       # :2400
-}
-# graphlet_sequence pages by next_from (:2150-2161): a slice longer than the sequence ceiling is cut, `to` and
-# `next_from` say where; the next page is the same call with start = next_from
-SEQUENCE_TOOL = "graphlet_sequence"
-# the fields that say how a listing ended (a budgeted list's total_at_least, complete, filtered_so_far, its local block
-# and stop, :1008-1014): the last page's
-END_FIELDS = ("total", "total_at_least", "complete", "filtered", "filtered_so_far", "local", "stop")
-# fields of one page's fitting, merged over the pages (assemble)
-PAGE_FIELDS = ("next_cursor", "fields_cut", "row_truncated", "cut_fields")
-# the evidence block: a page its budget stopped marks it limitations.local (mcp_tools._mark_interrupted :248-262), the
-# page that completes the listing does not; taken from the last page that states it, compared without the mark
 # the argument naming the graphlet a tool reads; graphlet_list, graphlet_load and the backend tools read none
 HANDLE_ARG = dict([(t, "handle") for t in (
     "graphlet_summary", "graphlet_walks", "graphlet_walk", "graphlet_support", "graphlet_labels", "graphlet_splits",
@@ -116,8 +91,6 @@ HANDLE_ARG = dict([(t, "handle") for t in (
 # the tools whose answer's `handle` is a new one (subtrie :2390, load :2470; fetch and continue need a backend)
 MINTING = ("graphlet_subtrie", "graphlet_load", "traverse_fetch", "traverse_continue")
 FILE_TOOLS = ("graphlet_export", "graphlet_save")
-# an error's text, kept in the raw page only (FORMAT §3: errors by code and structured fields)
-ERROR_TEXT = ("error", "message", "hint")
 HANDLE_RE = re.compile(r"g_[0-9a-f]{12}")
 SYMBOL_RE = re.compile(r"<handle(?::([^<>]+))?>\Z")
 
@@ -214,6 +187,7 @@ def _child_do(state, req):
 if sys.argv[1:2] != [CHILD]:   # the runner (and the tests): the suite's own modules; the child imports none of them
     sys.path.insert(0, HERE)
     import graphlet_doc  # noqa: E402
+    import graphlet_paging as gp  # noqa: E402
     import graphlet_select  # noqa: E402
     import suite_common as sc  # noqa: E402
 
@@ -287,97 +261,6 @@ def read_text(path):
     if data[:2] == b"\x1f\x8b":
         data = gzip.decompress(data)
     return data.decode("utf-8")
-
-
-def error_of(answer):
-    """A library error answer -> FORMAT §3's {code, fields} (its text in the raw page only)."""
-    return {"code": answer["error"], "fields": dict((k, v) for k, v in answer.items() if k not in ERROR_TEXT)}
-
-
-class AssemblyError(Exception):
-    """Pages that do not assemble into one answer (a list page without its list, base fields that differ)."""
-
-
-def _unmarked(evidence):
-    """An evidence block without the local-stop mark of an interrupted page (limitations.local)."""
-    if isinstance(evidence, dict) and isinstance(evidence.get("limitations"), dict) \
-            and "local" in evidence["limitations"]:
-        lims = dict(evidence["limitations"])
-        lims.pop("local")
-        return dict(evidence, limitations=lims)
-    return evidence
-
-
-def assemble(tool, pages, complete):
-    """FORMAT §3: the pages of one op as one answer. A list tool's `rows` concatenated in page order, every other field
-    from the first page, except: the END_FIELDS from the last page; `evidence` from the last page that states it (an
-    interrupted page's carries limitations.local, the completing page's not); compare's base fields that a page cut
-    (fields_cut) taken from any page that carries them, fields_cut then naming only those no page carried;
-    `row_truncated` / `cut_fields` (a row cut to fit its page alone) kept when any page has them, the fields merged;
-    next_cursor removed. graphlet_sequence: `sequence` concatenated over the next_from loop, `to` from the last page,
-    next_from removed and `truncated` too when the loop reached the end (|complete|). A base field two pages state
-    differently (the evidence but for that mark) is an AssemblyError: a listing's pages describe one answer."""
-    first = dict(pages[0])
-    first.pop("next_cursor", None)
-    if tool == SEQUENCE_TOOL:
-        if not all(isinstance(p.get("sequence"), str) for p in pages):
-            raise AssemblyError("a page of graphlet_sequence without its sequence")
-        first["sequence"] = "".join(p["sequence"] for p in pages)
-        first["to"] = pages[-1].get("to")
-        first.pop("next_from", None)
-        if complete:
-            first.pop("truncated", None)
-        return first
-    field = LIST_FIELDS.get(tool)
-    if field is None or field not in first:
-        if len(pages) > 1:
-            raise AssemblyError("%d pages of %s, the first without a list" % (len(pages), tool))
-        return first
-    rows = []
-    for i, p in enumerate(pages):
-        if not isinstance(p.get(field), list):
-            raise AssemblyError("page %d of %s has no %s list" % (i, tool, field))
-        rows.extend(p[field])
-        for k, v in p.items():
-            if i and k in first and k not in END_FIELDS + PAGE_FIELDS + (field,) and (
-                    _unmarked(v) != _unmarked(first[k]) if k == "evidence" else v != first[k]):
-                raise AssemblyError("page %d of %s states %s otherwise than page 0" % (i, tool, k))
-    first[field] = rows
-    for p in reversed(pages):
-        if "evidence" in p:
-            first["evidence"] = p["evidence"]
-            break
-    last = pages[-1]
-    for k in END_FIELDS:
-        if k in last:
-            first[k] = last[k]
-        else:
-            first.pop(k, None)
-    cut = []
-    for p in pages:
-        for k in p.get("fields_cut") or []:
-            if k not in cut:
-                cut.append(k)
-    for p in pages[1:]:
-        for k, v in p.items():
-            if k not in first and k in cut:
-                first[k] = v
-    cut = [k for k in cut if k not in first]
-    if cut:
-        first["fields_cut"] = cut
-    else:
-        first.pop("fields_cut", None)
-    cut_fields = []
-    for p in pages:
-        if p.get("row_truncated"):
-            cut_fields += [k for k in p.get("cut_fields") or [] if k not in cut_fields]
-    if cut_fields or any(p.get("row_truncated") for p in pages):
-        first["row_truncated"] = True
-        first["cut_fields"] = cut_fields
-    else:
-        first.pop("row_truncated", None)
-        first.pop("cut_fields", None)
-    return first
 
 
 # ============================================================================================ the child, parent side
@@ -664,12 +547,11 @@ class Way(object):
             return rec, None
         send = self.unsymbolise(args, sid)
         paging = op.get("paging", "none")
-        most = 1 if paging == "none" else MAX_PAGES if paging == "all" else paging["pages"]
-        pages, cursor, error = [], None, None
-        while True:
+        pages, nxt, error = [], None, None
+        while True:   # graphlet_paging's loop: follow next_call() up to max_pages(), stop at an error page
             call = dict(send)
-            if cursor is not None:
-                call["start" if tool == SEQUENCE_TOOL else "cursor"] = cursor
+            if nxt is not None:
+                call[nxt[0]] = nxt[1]
             msg = self.child.ask({"cmd": "call", "tool": tool, "args": call})
             sc.write_gz_json(os.path.join(self.dir, "raw", "%s.%s.%d.json.gz" % (safe(sid), safe(op["id"]),
                                                                                 rec["pages"])),
@@ -685,21 +567,20 @@ class Way(object):
                 break
             rec["elapsed_ms"] += msg["result"]["call_ms"]
             answer = msg["result"]["answer"]
-            if isinstance(answer, dict) and isinstance(answer.get("error"), str):
-                error = error_of(answer)
+            if gp.error_page(answer):
+                error = gp.error_record(answer)
                 break
             pages.append(answer)
-            cursor = answer.get("next_from" if tool == SEQUENCE_TOOL else "next_cursor") \
-                if isinstance(answer, dict) else None
-            if cursor is None or len(pages) >= most:
+            nxt = gp.next_call(tool, answer)
+            if nxt is None or len(pages) >= gp.max_pages(paging):
                 break
         rec["elapsed_ms"] = round(rec["elapsed_ms"], 3)
-        if error is None and paging == "all" and cursor is not None:
+        if error is None and paging == "all" and nxt is not None:
             error = {"code": "paging_runaway", "fields": {"pages": len(pages)}}
         if error is None:
             try:
-                answer = assemble(tool, pages, cursor is None)
-            except AssemblyError as e:
+                answer = gp.assemble(tool, pages, nxt is None)
+            except gp.AssemblyError as e:
                 error = {"code": "assembly_error", "fields": {"reason": str(e)}}
         if error is not None:
             rec["error"] = self.symbolise(error, sid)
@@ -709,12 +590,12 @@ class Way(object):
             self.minted[(sid, op["id"])] = answer["handle"]
             self.owner[answer["handle"]] = (sid, op["id"])
         rec["answer"] = self.symbolise(answer, sid)
-        rec["paging_complete"] = cursor is None
+        rec["paging_complete"] = nxt is None
         if tool in FILE_TOOLS:
             rec["file"] = self.keep_file(sid, op["id"], answer)
         view = rec["answer"]
-        if cursor is not None and tool != SEQUENCE_TOOL:
-            view = dict(view, next_cursor=cursor)
+        if nxt is not None and nxt[0] == "cursor":
+            view = dict(view, next_cursor=nxt[1])
         return rec, view
 
     def keep_file(self, sid, op, answer):
@@ -885,12 +766,9 @@ def plan_problems(scenarios):
                 out.append("%s: tool is a tool name" % where)
             if not isinstance(op.get("args", {}), dict):
                 out.append("%s: args is an object" % where)
-            paging = op.get("paging", "none")
-            if paging not in ("none", "all") and not (isinstance(paging, dict) and set(paging) == {"pages"}
-                                                     and isinstance(paging["pages"], int)
-                                                     and not isinstance(paging["pages"], bool)
-                                                     and paging["pages"] >= 1):
-                out.append("%s: paging is \"none\", \"all\" or {\"pages\": N >= 1}, not %r" % (where, paging))
+            problem = gp.paging_problem(op.get("paging", "none"))
+            if problem:
+                out.append("%s: %s" % (where, problem))
             if "ways" in op and not isinstance(op["ways"], list):
                 out.append("%s: ways is a list" % where)
     return out

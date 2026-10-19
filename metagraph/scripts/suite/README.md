@@ -4812,6 +4812,9 @@ Nothing here touches staging; every test is offline.
   selector `{"ref": "c:3"}` (no `path`) stays a literal. Named: walk_through_merge, walk_with_continuation,
   slice_past_end, label_entered_at_merge, top_label, first_arm, second_arm_or_none, each defined in its docstring
   over the library's answer shapes. A failure is a `SelectorError` naming the argument, the op and the rule.
+- `graphlet_paging.py` (FORMAT v2 A2): the paging loop's helpers (`paging_problem`, `max_pages`, `next_call`,
+  `error_page`, `error_record`) and `assemble(tool, pages, complete)` with its tables, pure and stdlib: async's runner
+  vendors it, so both sides follow and assemble pages identically by construction.
 - `run_graphlet_local.py`: the ways W1 (arms/dl-lib), W2 (arms/dr-lib), W4 (arms/mcp-lib) and drift
   (arms/drift-lib) over a run directory and a manifest, or offline over `--doc [ID=]PATH ... --plan PLAN`;
   `--export-library COMMIT --to DIR` (`git archive COMMIT metagraph/api/python | tar -x`, DIR/LIBRARY_COMMIT);
@@ -4821,7 +4824,8 @@ Nothing here touches staging; every test is offline.
   mode and an error case each; paging assembly against the uncut answer for every list tool and the sequence; hash
   seeds; budgeted pages resumed under local limits; a response against the same document from a file; the manifest
   mode; export and drift),
-  `tests/test_graphlet_select.py`. The library-backed classes skip below Python 3.10 (the library's own floor).
+  `tests/test_graphlet_select.py`, `tests/test_graphlet_paging.py`. The library-backed classes skip below Python 3.10
+  (the library's own floor).
 
 ### Decisions where FORMAT-v8 is silent
 - Documents: W1/W2 take `answer.body` of the direct raw record and convert it in the way's process with
@@ -4836,8 +4840,8 @@ Nothing here touches staging; every test is offline.
 - Handles in records are symbols relative to the op's scenario: `<handle>` (its own graphlet, FORMAT's form),
   `<handle:S>` (scenario S's), `<handle:OP>` (made by op OP: subtrie, load), `<handle:S/OP>`, `<handle:?>`; cursors in
   args_resolved `<cursor>`; the way's directories `<export_dir>`, `<spool_dir>`. Raw pages keep everything.
-- Assembly: every paged library list is `rows` (mcp_tools._page / _page_cut; the table is checked against the source
-  by a test); rows concatenated, other fields from the first page, the fields that say how a listing ended from the
+- Assembly (graphlet_paging.assemble): every paged library list is `rows` (mcp_tools._page / _page_cut; the table is
+  checked against the source by a test); rows concatenated, other fields from the first page, the fields that say how a listing ended from the
   last, `evidence` from the last page that states it (a page its budget stopped marks it `limitations.local`),
   compare's per-page `fields_cut` merged (a field is cut only if every page cut it), `row_truncated` /
   `cut_fields` merged, next_cursor removed; graphlet_sequence concatenates `sequence`, takes `to` from the last page
