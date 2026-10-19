@@ -1,27 +1,45 @@
 """W5, the suite's independent oracle of the graphlet processing tools (manifest v8, DESIGN-v8 §2), phase A.
 
-    answer(tool, args_resolved, full_answer, mgt_text, context=None)
-        -> {"answer": {...} | None,
-            "oracle": {"checked": {pointer: clause}, "consistency_only": [pattern, ...], "inputs": [...],
-                       "declared"?: str, "note"?: str}}
+    answer(tool, args_resolved, full_answer, mgt_text, context=None) -> record
+    compare(record, answer) -> {"outcome": agree | disagree | not_comparable | not_checked, "detail", "checked",
+                                "differences"}
+    python3 graphlet_oracle.py --run-dir RUN      # writes arms/oracle/graphlet_ops.jsonl (FORMAT v2 F4)
 
-The answer a library tool should give on the graphlet whose MGT text is |mgt_text| (W1's document: the server body,
-or the standalone text with its J line) and whose `detail: full` twin is |full_answer| (the direct-local response,
-or one result of it), for the arguments W1 sent (FORMAT-v8 §2: W5 takes W1's args_resolved). `answer` holds only
-what W5 derives; `checked` names every value of it by its RFC 6901 pointer with the SPEC/DESIGN clause it rests on;
-`consistency_only` names, as pointer patterns (`*` = any list index or object key), the fields of the tool's answer
-W5 does not check: those are judged only by the agreement of W1..W4 (FORMAT-v8 §4). Two extensions (FORMAT
-questions): `unordered` lists checked pointers whose list is compared as a multiset (a tool list no clause orders),
-`absent` maps pointers that must not exist in the other answer to their clause. `differences(record, other)` is the
-comparison the compare stage and the offline layer run; `export_view` turns an export's receipt and file into the
-shape W5 answers.
+answer() gives the answer a library tool should give on the graphlet whose MGT text is |mgt_text| (the engine's
+body, or W1's standalone document: W5 reads no J line) and whose `detail: full` twin is |full_answer| (the
+direct-local response, or one result of it), for the arguments W1 sent (FORMAT-v8 §2: W5 takes W1's args_resolved).
+compare() is THE comparison of another way's answer with a W5 record (FORMAT v2 F2): the compare stage calls it.
 
-`declared` says why a record checks nothing: `not_implemented_phase_b` (graphlet_support, graphlet_claims,
-graphlet_labels name=: DESIGN-v8 §8 phase B), `properties_only` (graphlet_compare: the compare_* functions below),
-`not_applicable` (backend and store tools), `view_consistency_only` (a tool on a subtrie view), `twin_mismatch`
-(the full twin is not the graphlet's walk: twin_difference, the DESIGN-v8 §2 twin pre-check; nothing W5 says is
-attributable then) and `expected_error` (the arguments name no answer, e.g. a walk id out of range: `differences`
-then requires an error, of any code: the codes are the library's vocabulary, not the SPEC's).
+The record (FORMAT-v8 §4 and FORMAT v2 F1):
+    {"answer": {...} | None,
+     "oracle": {"checked": {pointer: clause}, "consistency_only": [pattern], "inputs": [...],
+                "unordered"?: [pointer], "position_ordered"?: [pointer], "absent"?: {pointer: clause},
+                "rederived"?: [pointer], "declared"?: str, "expected_error"?: code | null, "note"?: str}}
+- `answer` holds only what W5 derives; `checked` names each value by its RFC 6901 pointer with the SPEC/DESIGN
+  clause it rests on (a clause saying "library-defined" or "INVENTORY §2 (presentation)" marks the few values whose
+  only definition is the tool's own contract).
+- Pointer patterns: in `consistency_only` (and accepted anywhere by compare()) a token `*` is any one list index or
+  object key, e.g. "/rows/*/complete"; no tool answer has a key named `*`. Concrete pointers escape `~` and `/` as
+  `~0` and `~1` (RFC 6901).
+- `consistency_only`: the fields of the tool's answer W5 does not check (judged by W1..W4 agreeing only).
+- `unordered`: checked lists compared as multisets (a tool list no clause orders). `position_ordered`: lists of
+  events compared as sorted by position only (SPEC §7.1: "events at one at_bp are unordered"): non-decreasing at_bp,
+  equal as multisets.
+- `absent`: pointers (patterns expanded over the other answer) that must not exist there, each with its clause: an
+  annotate continuation's seeds[].labels, merge_of or ends where SPEC says none, and every element past a whole
+  list's end (the list's length, VO7).
+- `rederived`: the checked pointers whose value W5 computes with a DESIGN formula from engine values, rather than
+  reading an engine value (DESIGN-v8 §2: the report marks them "re-derived from DESIGN").
+- `declared` says why a record checks no value: not_implemented_phase_b (graphlet_support, graphlet_claims,
+  graphlet_labels name=: DESIGN-v8 §8), properties_only (graphlet_compare: the compare_* functions below),
+  not_applicable (backend and store tools), view_consistency_only (a tool on a subtrie view), twin_mismatch (the
+  full twin is not the graphlet's walk: twin_difference, DESIGN-v8 §2's twin pre-check), selector_error (W1's
+  arguments did not resolve) and expected_error: the arguments name no answer, the tool must refuse; then
+  `expected_error` is the code W5 expects (null: any code), the note gives why and the clause (most codes are the
+  library's vocabulary, so "library-defined").
+- Cut rows: a field the other answer marks cut to fit its page (FORMAT v2 A3: `_cut_fields` on each row of a page
+  with row_truncated) must be a cut of W5's value (REVIEW D-R8: a prefix; a sub-multiset of a set).
+- Fitting errors (FIT_ERRORS: result_too_large and kin) are not_comparable against W5 (FORMAT v2 F3).
 
 `context` (all optional): seed_index (0); paging ("all", the default: lists are the whole list, every page
 concatenated; otherwise rows are checked up to `rows`, the reference way's row count, and are consistency-only
@@ -96,6 +114,9 @@ ARMS = ("left", "right")
 _ARM_NAMES = {"left": "left", "right": "right", "l": "left", "r": "right"}
 _SUPPORT = {"k": "kmer", "t": "trace"}            # SPEC §7.5.2 H <support k|t>
 _RECONVERGE = {"m": "merge", "k": "keep"}         # SPEC §7.5.2 H <reconverge m|k>
+# G3 (VO9, F5): the library lists a walk row's `ends` in run order; SPEC §7.1 / DESIGN §2.5 order events by position.
+# Until the library is fixed (a separate lane), W5 compares them as a set; then flip to False: position-ordered
+ENDS_UNORDERED = True
 LIST_CAP = 8      # the label lists a row shows (labels_full, in, out, ends): INVENTORY §2.6/§2.7 (presentation)
 _SEQ_MARGIN = 2048   # bytes of a sequence page that are not the slice (evidence, handle, keys): a slice shorter
                      # than the ceiling by this much is answered uncut
@@ -118,6 +139,8 @@ C_SPELL = "SPEC §7.5.4 natural orientation (right flank root -> leaf, left flan
 
 C_BAD_ARM = "library-defined: an arm not retrieved, or none of two, is bad_arm (INVENTORY §1.5)"
 C_NO_BASES = "SPEC §7.1 sequences: false omits the strings; the code no_bases is library-defined (INVENTORY §2.12)"
+C_NO_BASES_EXPORT = "SPEC §7.1 sequences: false omits the strings, so no walk can be written; the code is " \
+                    "library-defined"
 C_BAD_ARG = "library-defined: an argument outside the tool's domain is bad_argument (INVENTORY §1.1)"
 
 
@@ -287,8 +310,8 @@ def _matches(pattern: str, pointer: str) -> bool:
 
 
 def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[str],
-            inputs: Sequence[str] = ("full", "mgt"), unordered: Sequence[str] = (), absent: Sequence[str] = (),
-            **extra: Any) -> dict:
+            inputs: Sequence[str] = ("full", "mgt"), unordered: Sequence[str] = (), absent: Any = (),
+            position_ordered: Sequence[str] = (), **extra: Any) -> dict:
     """The W5 record: every value of |ans| claimed by the first clause pattern that matches its pointer (a pattern
     naming an object or a list claims it whole). A value no clause claims is a bug of this module: W5 answers only
     what it checks (FORMAT-v8 §4). |unordered|: patterns of checked lists compared as multisets (a tool list whose
@@ -317,6 +340,9 @@ def _record(ans: Optional[dict], clauses: Dict[str, str], consistency: Sequence[
     unord = sorted(p for p in checked if any(_matches(u, p) for u in unordered))
     if unord:
         oracle["unordered"] = unord
+    posord = sorted(p for p in checked if any(_matches(u, p) for u in position_ordered))
+    if posord:
+        oracle["position_ordered"] = posord
     if absent:
         oracle["absent"] = dict(absent)
     oracle.update({k: v for k, v in extra.items() if v is not None or k == "expected_error"})
@@ -378,45 +404,97 @@ def _canon(v: Any) -> str:
     return json.dumps(v, sort_keys=True, separators=(",", ":"))
 
 
+# The compare stage's error codes of fitting (an answer that did not fit a ceiling or a service lane, not a statement
+# about the graphlet): `not_comparable` against W5, which makes no claim about fitting (FORMAT v2 F3, VO5)
+FIT_ERRORS = ("result_too_large", "receipt_too_large", "too_large", "body_too_large", "op_busy", "op_timeout",
+              "op_memory", "local_budget_exceeded")
+
+
+def expand(pattern: str, doc: Any) -> List[str]:
+    """The concrete pointers of |doc| that a pointer pattern names: a token `*` is any list index or object key (no
+    tool answer has a key named `*`); a pattern without `*` is itself, whether or not it resolves."""
+    if "*" not in pattern.split("/"):
+        return [pattern]
+    out: List[str] = []
+
+    def walk(node: Any, toks: List[str], ptr: str) -> None:
+        if not toks:
+            out.append(ptr)
+            return
+        t, rest = toks[0], toks[1:]
+        if t == "*":
+            items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+            for k, v in items:
+                walk(v, rest, ptr + "/" + _esc(k))
+            return
+        key = t.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and key in node:
+            walk(node[key], rest, ptr + "/" + t)
+        elif isinstance(node, list) and t.isdigit() and int(t) < len(node):
+            walk(node[int(t)], rest, ptr + "/" + t)
+
+    walk(doc, pattern.split("/")[1:], "")
+    return out
+
+
 def _cut_by_other(other: Any, ptr: str) -> bool:
     """Whether |other| names the field at |ptr| as cut to fit its page (DESIGN §6: a row larger than max_bytes comes
-    alone with row_truncated and the fields cut named): on the object that holds the field, or, for a page of one
-    row, on the page (FORMAT question Q5: an assembled answer keeps only the first page's marker)."""
+    alone with row_truncated and the fields cut named): FORMAT v2 A3 marks each row of such a page with
+    `_cut_fields`, read on the object that holds the field (a row's own row_truncated + cut_fields too)."""
     parent, key = ptr.rsplit("/", 1)
     try:
         holder = resolve_pointer(other, parent)
     except KeyError:
         return False
-    if isinstance(holder, dict) and holder.get("row_truncated") and key in (holder.get("cut_fields") or ()):
-        return True
-    m = re.match(r"/rows/0/[^/]+\Z", ptr)
-    return bool(m and isinstance(other, dict) and other.get("row_truncated") and len(other.get("rows") or []) == 1
-                and key in (other.get("cut_fields") or ()))
+    if not isinstance(holder, dict):
+        return False
+    return key in (holder.get("_cut_fields") or ()) or bool(holder.get("row_truncated")
+                                                            and key in (holder.get("cut_fields") or ()))
 
 
-def _is_cut_of(mine: Any, theirs: Any, unordered: bool) -> bool:
-    """|theirs| a cut of |mine| in the suite's words (REVIEW D-R8): a string or a list a prefix, an unordered list a
-    sub-multiset."""
+def _sub_multiset(small: list, big: list) -> bool:
+    pool = [_canon(x) for x in big]
+    for x in small:
+        if _canon(x) not in pool:
+            return False
+        pool.remove(_canon(x))
+    return True
+
+
+def _at(x: Any) -> Any:
+    return x.get("at_bp", 0) if isinstance(x, dict) else 0
+
+
+def _position_equal(mine: list, theirs: list) -> bool:
+    """A list of events sorted by position only (SPEC §7.1: "events at one at_bp are unordered"): |theirs| in
+    non-decreasing at_bp and, as a multiset, |mine|."""
+    return all(_at(a) <= _at(b) for a, b in zip(theirs, theirs[1:])) and len(mine) == len(theirs) \
+        and _sub_multiset(theirs, mine)
+
+
+def _is_cut_of(mine: Any, theirs: Any, order: str) -> bool:
+    """|theirs| a cut of |mine| in the suite's words (REVIEW D-R8): a string or a list a prefix; an unordered list a
+    sub-multiset; a position-ordered list a sub-multiset in position order that keeps the smallest positions."""
     if isinstance(mine, str) and isinstance(theirs, str):
         return mine.startswith(theirs)
     if isinstance(mine, list) and isinstance(theirs, list):
-        if unordered:
-            pool = [_canon(x) for x in mine]
-            for x in theirs:
-                if _canon(x) not in pool:
-                    return False
-                pool.remove(_canon(x))
-            return True
+        if order == "unordered":
+            return _sub_multiset(theirs, mine)
+        if order == "position":
+            ats = sorted(_at(x) for x in mine)[:len(theirs)]
+            return _sub_multiset(theirs, mine) and [_at(x) for x in theirs] == ats
         return len(theirs) <= len(mine) and all(same(x, y) for x, y in zip(mine, theirs))
     return same(mine, theirs)
 
 
 def differences(record: dict, other: Optional[dict]) -> List[dict]:
-    """Where |other| (another way's assembled answer, service fields removed) departs from W5 on a checked
-    pointer: [{pointer, clause, oracle, other | missing | present}]. Lists the record names `unordered` are compared
-    as multisets; a field |other| names cut to fit its page must be a cut of W5's (_is_cut_of); a pointer the record
-    names `absent` must not resolve in |other|. A record that declares `expected_error` requires an `error` key in
-    |other|; any other declaration checks nothing."""
+    """Where |other| (another way's assembled answer, service fields removed) departs from W5: [{pointer, clause,
+    oracle, other | missing | present}]. Every checked pointer (a pattern expanded over W5's answer) must resolve in
+    |other| with the same value; lists named `unordered` compare as multisets, `position_ordered` ones as events
+    sorted by position only; a field |other| marks cut to fit (FORMAT v2 A3 `_cut_fields`) must be a cut of W5's
+    (_is_cut_of); a pointer named `absent` (a pattern expanded over |other|) must not resolve. A record declaring
+    `expected_error` requires an error in |other|, of the code W5 states (oracle.expected_error, when not null);
+    any other declaration checks nothing. compare() is the entry the compare stage calls."""
     o = record["oracle"]
     if o.get("declared") == "expected_error":
         code = error_code(other)
@@ -426,31 +504,86 @@ def differences(record: dict, other: Optional[dict]) -> List[dict]:
         if o.get("expected_error") and code != o["expected_error"]:
             return [{"pointer": "/error/code", "clause": o.get("note"), "oracle": o["expected_error"], "other": code}]
         return []
+    ans = record.get("answer")
+    unord = {q for p in o.get("unordered", ()) for q in expand(p, ans)}
+    posord = {q for p in o.get("position_ordered", ()) for q in expand(p, ans)}
     out = []
-    for ptr, clause in o["checked"].items():
-        mine = resolve_pointer(record["answer"], ptr)
-        try:
-            theirs = resolve_pointer(other, ptr)
-        except KeyError:
-            out.append({"pointer": ptr, "clause": clause, "oracle": mine, "missing": True})
-            continue
-        unord = ptr in o.get("unordered", ())
-        if _cut_by_other(other, ptr):
-            if not _is_cut_of(mine, theirs, unord):
-                out.append({"pointer": ptr, "clause": clause + "; cut to fit (DESIGN §6, REVIEW D-R8): a prefix",
-                            "oracle": mine, "other": theirs})
-            continue
-        if unord and isinstance(mine, list) and isinstance(theirs, list):
-            mine, theirs = sorted(mine, key=_canon), sorted(theirs, key=_canon)
-        if not same(mine, theirs):
-            out.append({"pointer": ptr, "clause": clause, "oracle": mine, "other": theirs})
-    for ptr, clause in (o.get("absent") or {}).items():
-        try:
-            theirs = resolve_pointer(other, ptr)
-        except KeyError:
-            continue
-        out.append({"pointer": ptr, "clause": clause, "oracle": "absent", "present": theirs})
+    for pat, clause in o["checked"].items():
+        for ptr in expand(pat, ans):
+            mine = resolve_pointer(ans, ptr)
+            try:
+                theirs = resolve_pointer(other, ptr)
+            except KeyError:
+                out.append({"pointer": ptr, "clause": clause, "oracle": mine, "missing": True})
+                continue
+            order = "unordered" if ptr in unord else "position" if ptr in posord else "ordered"
+            if _cut_by_other(other, ptr):
+                if not _is_cut_of(mine, theirs, order):
+                    out.append({"pointer": ptr, "clause": clause + "; cut to fit (DESIGN §6, REVIEW D-R8): a prefix",
+                                "oracle": mine, "other": theirs})
+                continue
+            if isinstance(mine, list) and isinstance(theirs, list) and order != "ordered":
+                ok = _position_equal(mine, theirs) if order == "position" else \
+                    same(sorted(mine, key=_canon), sorted(theirs, key=_canon))
+            else:
+                ok = same(mine, theirs)
+            if not ok:
+                out.append({"pointer": ptr, "clause": clause, "oracle": mine, "other": theirs})
+    for pat, clause in (o.get("absent") or {}).items():
+        for ptr in expand(pat, other):
+            try:
+                theirs = resolve_pointer(other, ptr)
+            except KeyError:
+                continue
+            out.append({"pointer": ptr, "clause": clause, "oracle": "absent", "present": theirs})
     return out
+
+
+def compare(record_w5: dict, answer: Any) -> dict:
+    """THE comparison of one way's answer with a W5 record (FORMAT v2 F2; lane C's compare_w5 calls it).
+
+    |record_w5|: answer()'s record or a W5 line of arms/oracle/graphlet_ops.jsonl (both carry `answer` and `oracle`).
+    |answer|: the other way's per-call record (FORMAT §3: its `answer`, or its `error` {"code", "fields"}, B2) or a
+    bare tool answer (an error is {"error": "<code>", ...}), service fields already removed (DESIGN-v8 §5).
+    -> {"outcome": "agree" | "disagree" | "not_comparable" | "not_checked", "detail": str, "checked": n,
+        "differences": [...]}:
+    - not_checked: W5 declares no claim (phase B, properties only, not applicable, a view, a twin mismatch, a W1
+      selector error);
+    - not_comparable: the other way answered a fitting error (FIT_ERRORS: F3), about which W5 says nothing;
+    - otherwise differences() decides: an expected error must be one (of W5's code when stated); an answer W5
+      derives must hold every checked value (cut fields as cuts, unordered and position-ordered lists as such) and
+      none of the absent keys; an error where W5 answers disagrees."""
+    o = record_w5.get("oracle") or {}
+    if isinstance(answer, dict) and "answer" in answer and ("error" in answer or "args_resolved" in answer):
+        other = {"error": answer["error"]} if answer.get("error") else answer.get("answer")
+    else:
+        other = answer
+    declared = o.get("declared")
+    n = len(o.get("checked") or {})
+    if declared and declared != "expected_error":
+        return {"outcome": "not_checked", "detail": "W5 declares %s%s" % (
+            declared, ": %s" % o["note"] if o.get("note") else ""), "checked": 0, "differences": []}
+    if not declared and not n and not o.get("absent"):
+        return {"outcome": "not_checked", "detail": "W5 checks nothing of this call (consistency-only)%s" % (
+            ": %s" % o["note"] if o.get("note") else ""), "checked": 0, "differences": []}
+    code = error_code(other)
+    if code in FIT_ERRORS:
+        return {"outcome": "not_comparable", "detail": "%s answered %s: a fitting error, about which W5 makes no "
+                                                       "claim (FORMAT v2 F3)" % ("the way", code),
+                "checked": 0, "differences": []}
+    if code is not None and declared != "expected_error":
+        return {"outcome": "disagree", "detail": "the error %s where W5 answers (%d checked pointers)" % (code, n),
+                "checked": n, "differences": [{"pointer": "/error", "clause": "W5 derives an answer", "oracle":
+                                               "an answer", "other": code}]}
+    diffs = differences(record_w5, other)
+    if declared == "expected_error":
+        detail = "an expected error%s" % (" (%s)" % o["expected_error"] if o.get("expected_error") else "")
+    else:
+        detail = "%d checked pointer(s)" % n
+    if diffs:
+        d = diffs[0]
+        detail = "%s (%s)%s" % (d["pointer"], d.get("clause"), " and %d more" % (len(diffs) - 1) if diffs[1:] else "")
+    return {"outcome": "disagree" if diffs else "agree", "detail": detail, "checked": n, "differences": diffs}
 
 
 # ---------------------------------------------------------------------------------------------- shared derivations
@@ -824,6 +957,12 @@ def _walk_rows(d: _Doc, side: str, p: dict, cap: Optional[int]) -> List[dict]:
     return rows
 
 
+def _ends_order(pattern: str) -> dict:
+    """How a walk row's `ends` compare: as a set while ENDS_UNORDERED (G3), else sorted by position only (SPEC
+    §7.1)."""
+    return {"unordered": [pattern]} if ENDS_UNORDERED else {"position_ordered": [pattern]}
+
+
 def _walk_row_extras(rows: List[dict], prefix: str, cap: Optional[int]) -> Tuple[List[str], Dict[str, str]]:
     """Per walk row: the consistency-only pointer of an `ends` list longer than |cap| (cut there), and the keys that
     must be absent: merge_of on a segment with one parent, ends on a segment with no label end."""
@@ -886,7 +1025,7 @@ def _graphlet_walk(d: _Doc, args: dict, ctx: dict) -> dict:
     ev, ecl, econ = _evidence(d, [side])
     ans["evidence"] = ev
     clauses.update(ecl)
-    return _record(ans, clauses, cons + econ, unordered=["/rows/*/ends"], absent=absent)
+    return _record(ans, clauses, cons + econ, absent=absent, **_ends_order("/rows/*/ends"))
 
 
 def _alive_at(a: dict, label: int, at_bp: int) -> bool:
@@ -1134,7 +1273,7 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
             "checked when at most 8 (INVENTORY §2.7)", "uncut") for k, v in _WALK_ROW_CLAUSES.items()})
         return _record({"arm": side, "walks": walks}, clauses,
                        cons + ["/records", "/walks/*/sequence", "/walks/*/segments/*/exact", "/handle", "/evidence"],
-                       unordered=["/walks/*/segments/*/ends"], absent=absent)
+                       absent=absent, **_ends_order("/walks/*/segments/*/ends"))
     if fmt == "json":
         res = normalise_full_result(d.result)
         c_json = "SPEC §7.5.6: the full result is reproduced exactly from the text and its summary (the twin's " \
@@ -1171,7 +1310,7 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
         for s in d.sides:
             fl = d.flanks(s)
             if fl is None:
-                return _record({}, {}, cons + ["/records", "/gfa"])
+                raise _Refused("gfa of a retrieval without bases", None, C_NO_BASES_EXPORT)
             mols += [d.molecule(s, f) for f in fl]
         return _record({"gfa": {"n_paths": len(mols), "paths": sorted(mols)}},
                        {"/gfa/n_paths": "DESIGN §5 to_gfa: one P line per walk (both arms)",
@@ -1182,7 +1321,7 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
     for s in sides:
         fl = d.flanks(s)
         if fl is None:
-            return _record({}, {}, cons + ["/records", "/fasta"])
+            raise _Refused("fasta of a retrieval without bases", None, C_NO_BASES_EXPORT)
         for w in _walk_ids(d, s, args.get("walks")):
             recs.append({"id": "%s_%d" % (s, w), "sequence": d.molecule(s, fl[w])})
     return _record({"records": len(recs), "fasta": recs},

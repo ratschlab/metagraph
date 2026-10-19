@@ -389,6 +389,61 @@ class RecordSemantics(unittest.TestCase):
         other = dict(copy.deepcopy(w["answer"]), continuation={"length_bp": 1, "loss_used": 0, "labels": 1})
         self.assertEqual([d["pointer"] for d in O.differences(w, other)], ["/continuation"])
 
+    def test_compare_entry(self):
+        """FORMAT v2 F2: compare(record_w5, answer) on a per-call record or a bare answer; F3: a fitting error is
+        not_comparable; declarations are not_checked; an error where W5 answers disagrees; expected codes."""
+        g, f, mgt = doc("caps")
+        r = O.answer("graphlet_walks", {"arm": "right", "rank": "length"}, f, mgt)
+        self.assertEqual(O.compare(r, r["answer"])["outcome"], "agree")
+        line = {"way": "W1", "op": "w", "args_resolved": {}, "answer": copy.deepcopy(r["answer"]), "error": None}
+        self.assertEqual(O.compare(r, line)["outcome"], "agree")
+        line["answer"]["rows"][0]["length_bp"] = 1
+        v = O.compare(r, line)
+        self.assertEqual((v["outcome"], v["differences"][0]["pointer"]), ("disagree", "/rows/0/length_bp"))
+        fit = {"way": "W3", "answer": None, "error": {"code": "result_too_large", "fields": {"max_bytes": 512}}}
+        self.assertEqual(O.compare(r, fit)["outcome"], "not_comparable")
+        self.assertEqual(O.compare(r, {"error": "op_busy"})["outcome"], "not_comparable")
+        self.assertEqual(O.compare(r, {"error": "bad_arm"})["outcome"], "disagree")
+        err = O.answer("graphlet_walks", {"arm": "right", "n": 0}, f, mgt)
+        self.assertEqual(err["oracle"]["expected_error"], "bad_argument")
+        self.assertEqual(O.compare(err, {"way": "W1", "answer": None, "error": {"code": "bad_argument", "fields": {}}})
+                         ["outcome"], "agree")
+        self.assertEqual(O.compare(err, {"error": "bad_arm"})["outcome"], "disagree")
+        self.assertEqual(O.compare(err, r["answer"])["outcome"], "disagree")
+        ph = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
+        self.assertEqual(O.compare(ph, {"rows": []})["outcome"], "not_checked")
+        # no bases (sequences: false): no FASTA (SPEC §7.1), any code; a record checking nothing makes no claim
+        fa = O.answer("graphlet_export", {"format": "fasta"}, f, mgt)
+        self.assertEqual((fa["oracle"]["declared"], fa["oracle"]["expected_error"]), ("expected_error", None))
+        nothing = O.answer("graphlet_export", {"format": "gfa", "arm": "right"}, f, mgt)
+        self.assertEqual(O.compare(nothing, {"error": "bad_argument"})["outcome"], "not_checked")
+
+    def test_patterns_and_position_order(self):
+        """`*` patterns in checked, unordered and absent expand over the answers (FORMAT v2 F1); with
+        ENDS_UNORDERED off (G3) a row's ends compare sorted by position only (SPEC §7.1)."""
+        rec_ = {"answer": {"rows": [{"x": 1, "e": [{"at_bp": 2, "l": "a"}, {"at_bp": 2, "l": "b"}]},
+                                    {"x": 2, "e": []}]},
+                "oracle": {"checked": {"/rows/*/x": "c", "/rows/*/e": "c"}, "position_ordered": ["/rows/*/e"],
+                           "absent": {"/rows/*/bad": "c"}}}
+        same_set = {"rows": [{"x": 1, "e": [{"at_bp": 2, "l": "b"}, {"at_bp": 2, "l": "a"}]}, {"x": 2, "e": []}]}
+        self.assertEqual(O.differences(rec_, same_set), [])
+        self.assertEqual([d["pointer"] for d in O.differences(rec_, dict(same_set, rows=[
+            dict(same_set["rows"][0], bad=1), same_set["rows"][1]]))], ["/rows/0/bad"])
+        self.assertEqual(sorted(d["pointer"] for d in O.differences(rec_, {"rows": [{"x": 1}, {"x": 3, "e": []}]})),
+                         ["/rows/0/e", "/rows/1/x"])
+        g, f, mgt = doc("merge")
+        try:
+            O.ENDS_UNORDERED = False
+            r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
+        finally:
+            O.ENDS_UNORDERED = True
+        self.assertIn("/rows/4/ends", r["oracle"]["position_ordered"])
+        other = copy.deepcopy(r["answer"])
+        other["rows"][4]["ends"].reverse()      # all four at 100: ties unordered
+        self.assertEqual(O.differences(r, other), [])
+        other["rows"][4]["ends"][0] = dict(other["rows"][4]["ends"][0], at_bp=99)
+        self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/rows/4/ends"])
+
     def test_unordered_lists(self):
         g, f, mgt = doc("merge")
         r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
@@ -400,24 +455,24 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/rows/4/ends"])
 
     def test_cut_rows(self):
-        """A row cut to fit its page names the cut fields (DESIGN §6): each must be a cut of W5's value in the
-        suite's words (REVIEW D-R8: a prefix; a set field a subset), on the row or on a page of one row."""
+        """A row cut to fit its page names the cut fields (DESIGN §6; FORMAT v2 A3: `_cut_fields` on each row of such
+        a page): each must be a cut of W5's value in the suite's words (REVIEW D-R8: a prefix; a set field a
+        subset); a top-level marker alone does not excuse a row."""
         g, f, mgt = doc("merge")
         r = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt)
         other = copy.deepcopy(r["answer"])
         row = other["rows"][4]
-        row.update(row_truncated=True, cut_fields=["ends", "in"])
+        row["_cut_fields"] = ["ends", "in"]
         row["in"] = row["in"][:2]
         row["ends"] = row["ends"][2:3]
         self.assertEqual(O.differences(r, other), [])
         row["in"] = row["in"][1:]
         self.assertEqual([d["pointer"] for d in O.differences(r, other)], ["/rows/4/in"])
-        page = dict(copy.deepcopy(r["answer"]), row_truncated=True, cut_fields=["out"])
-        page["rows"] = [dict(page["rows"][0], out=page["rows"][0]["out"][:1])]
-        one = O.answer("graphlet_walk", {"arm": "right", "walk": 0}, f, mgt, {"paging": "none", "rows": 1})
-        self.assertEqual(O.differences(one, page), [])
-        page["cut_fields"] = []
-        self.assertEqual([d["pointer"] for d in O.differences(one, page)], ["/rows/0/out"])
+        top = dict(copy.deepcopy(r["answer"]), row_truncated=True, cut_fields=["out"])
+        top["rows"][0]["out"] = top["rows"][0]["out"][:1]
+        self.assertEqual([d["pointer"] for d in O.differences(r, top)], ["/rows/0/out"])
+        top["rows"][0]["_cut_fields"] = ["out"]
+        self.assertEqual(O.differences(r, top), [])
 
     def test_paging_context(self):
         g, f, mgt = doc("caps")

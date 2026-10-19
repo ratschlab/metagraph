@@ -59,7 +59,9 @@ def _calls(res):
            ("graphlet_labels", {"n": 0}), ("graphlet_labels", {"min_direct_bp": -1}),
            ("graphlet_labels", {"coordinates": True}), ("graphlet_labels", {"n": True}),
            ("graphlet_export", {"format": "fasta", "walks": [0]}), ("graphlet_summary", {"detail": "nope"}),
-           ("graphlet_export", {"format": "fasta", "what": "walk"}), ("graphlet_subtrie", {"labels": ["no-such"]})]
+           ("graphlet_export", {"format": "fasta", "what": "walk"}), ("graphlet_subtrie", {"labels": ["no-such"]}),
+           # fitting errors at small ceilings (INVENTORY §1.1 result_too_large): not_comparable against W5 (F3)
+           ("graphlet_summary", {"max_bytes": 512}), ("graphlet_summary", {"detail": "limitations", "max_bytes": 300})]
     if len(sides) == 1:   # an arm this retrieval did not walk
         other = "left" if sides == ["right"] else "right"
         out += [("graphlet_walks", {"arm": other}), ("graphlet_summary", {"arm": other})]
@@ -187,11 +189,12 @@ class OracleVsLibrary(unittest.TestCase):
             return out
         if tool in LIST_TOOLS or tool == "graphlet_compare":
             def page_rows(page):
-                # a row cut to fit comes alone, the cut named on its page (DESIGN §6): kept on the row, where an
-                # assembled answer can still say so (FORMAT question Q5)
+                # FORMAT v2 A3: each row of a page with row_truncated carries that page's cut_fields as _cut_fields
+                # (lane L's graphlet_paging.assemble; this test's stand-in until it lands on this branch)
                 rows_ = [dict(r) for r in page.get("rows") or []]
-                if page.get("row_truncated") and len(rows_) == 1:
-                    rows_[0].update(row_truncated=True, cut_fields=page.get("cut_fields") or [])
+                if page.get("row_truncated"):
+                    for r in rows_:
+                        r["_cut_fields"] = list(page.get("cut_fields") or [])
                 return rows_
             rows = page_rows(out)
             cur = out.pop("next_cursor", None)
@@ -211,6 +214,7 @@ class OracleVsLibrary(unittest.TestCase):
 
     def test_every_checked_pointer_agrees(self):
         groups = collections.defaultdict(list)
+        outcomes = collections.Counter()
         defects = {}
         n_calls = n_checked = 0
         declared = collections.Counter()
@@ -235,7 +239,9 @@ class OracleVsLibrary(unittest.TestCase):
                     declared[rec["oracle"]["declared"]] += 1
                     if rec["oracle"]["declared"] == "twin_mismatch":
                         self.assertIn(name.split("#")[0], NOT_TWINS)
-                diffs = O.differences(rec, lib)
+                verdict = O.compare(rec, lib)
+                outcomes[verdict["outcome"]] += 1
+                diffs = verdict["differences"]
                 known = [k for k, (_, hit) in KNOWN_LIBRARY_DEFECTS.items() if hit(tool, op)]
                 if known:
                     defects.setdefault(known[0], 0)
@@ -257,6 +263,8 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertGreater(n_calls, 3500)
         self.assertGreater(n_checked, 150000)
         self.assertEqual(declared["twin_mismatch"] > 0, True)
+        self.assertGreater(outcomes["not_comparable"], 40)      # result_too_large at 512 and 300 bytes (F3)
+        self.assertGreater(outcomes["agree"], 3000)
 
     def test_load_receipt_summary(self):
         """graphlet_load's summary, with a ceiling it fits under, is graphlet_summary's (W5 checks it only then)."""
