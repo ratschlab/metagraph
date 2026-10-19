@@ -669,8 +669,10 @@ class StrandsViaMcpTest(unittest.TestCase):
         n = [p for p in prose("N")["intro"] if "pattern.strands_vocabulary" in p][0]
         v7 = facts.fill(n, {"manifest_version": 7}, unresolved=[])
         v6 = facts.fill(n, {"manifest_version": 6}, unresolved=[])
-        self.assertIn("(`pattern.strands_vocabulary`). In v7 the service's answer carries each entry's `strands`, so "
-                      "N-usecase-0005 checks that field through MCP as well. Appendix B", v7)
+        # W9: credited as chapter P credits it, the service and the MCP runner's normaliser
+        self.assertIn("(`pattern.strands_vocabulary`). In v7 the service states each entry's `strands` per database and "
+                      "the MCP runner's normaliser (git head {mcp_runner_head}) copies the host's values onto the "
+                      "entry, so N-usecase-0005 checks that field through MCP as well. Appendix B", v7)
         self.assertNotIn("does not echo", v7)
         self.assertIn("(`pattern.strands_vocabulary`), and the service's answer does not echo an entry's `strands`, so "
                       "that field is not exposed there. Appendix B", v6)
