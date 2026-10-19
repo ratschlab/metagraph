@@ -562,6 +562,9 @@ def strategy_check(run_dir, scenario):
     if not isinstance(strategy, dict):
         return _check("inconclusive", "the scenario's request states no strategy")
     twin = ((scenario.get("graphlet") or {}).get("twin") or {}).get("strategy")
+    if not isinstance(twin, dict):
+        # the twin's request is W5's input: without it in the manifest it is never checked (VERIFY-C VC9)
+        return _check("inconclusive", "the manifest states no twin strategy (graphlet.twin.strategy)")
     drifts = []
     if isinstance(twin, dict):
         want = copy.deepcopy(strategy)
@@ -613,11 +616,43 @@ def _per_arm_or_total(want, values, name, out):
                     "outcome": "pass" if isinstance(want, int) and seen >= want else "fail"})
 
 
+def _int(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def precondition_value_problem(key, want):
+    """Why a precondition's value is not of the form PRECONDITION_FACTS states ('' when it is): a manifest problem,
+    inconclusive, never a silent pass or a failure (VERIFY-C VC9)."""
+    arm_ints = isinstance(want, dict) and want and all(a in ("left", "right") and _int(v) for a, v in want.items())
+    if key == "arms":
+        ok = isinstance(want, list) and want and all(a in ("left", "right") for a in want)
+    elif key in ("walks_min", "segments_min", "merges_min"):
+        ok = _int(want) or arm_ints
+    elif key == "walk_bp_min":
+        ok = arm_ints
+    elif key == "labels_present":
+        ok = (isinstance(want, str) and want) or (isinstance(want, list) and want and
+                                                  all(isinstance(x, str) and x for x in want))
+    elif key == "bases":
+        ok = isinstance(want, bool)
+    elif key == "no_graphlet":
+        ok = want is True
+    else:
+        return ""
+    return "" if ok else "%s: %s is not %s" % (key, compact(want), PRECONDITION_FACTS[key])
+
+
 def precondition_facts(text, pre, checks_mod):
-    """[{fact, want, seen, outcome pass | fail | inconclusive}] of graphlet.preconditions on an MGT document."""
+    """[{fact, want, seen, outcome pass | fail | inconclusive}] of graphlet.preconditions on an MGT document; a
+    value not of its fact's form is inconclusive (precondition_value_problem)."""
     out = []
     arms = checks_mod.graphlet_arms(text)
     for key, want in sorted(pre.items()):
+        bad = precondition_value_problem(key, want)
+        if bad:
+            out.append({"fact": key, "want": want, "seen": None, "outcome": "inconclusive",
+                        "detail": "a manifest problem: %s" % bad})
+            continue
         if key == "arms":
             seen = sorted(arms)
             out.append({"fact": key, "want": want, "seen": seen,
@@ -731,10 +766,11 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
         return _check("not_exposed", "the op plan sends no call to W3")
     pin, where = library_pin(scenario, manifest)
     commits, without = deployed if deployed is not None else deployed_library_commits(run_dir)
-    seen, missing, bad = {}, [], []
+    seen, missing, bad, unrecorded = {}, [], [], []
     for op in w3_ops:
         r = recs.get("W3", {}).get((sid, op))
         if r is None:
+            unrecorded.append(op)
             continue
         c = (r.get("library") or {}).get("commit") if isinstance(r.get("library"), dict) else None
         if not c:
@@ -745,7 +781,9 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
             bad.append("%s: %s" % (op, c[:12]))
         elif any(not commit_matches(c, d) for d in commits):
             bad.append("%s: %s, deployed %s" % (op, c[:12], ", ".join(d[:12] for d in sorted(commits))))
-    extra = {"pin": pin, "pin_source": where, "deployed": commits, "calls": seen}
+    extra = {"pin": pin, "pin_source": where, "deployed": commits, "calls": seen, "unrecorded": unrecorded}
+    gap = (" (%d of the %d W3 op(s) recorded nothing: %s; the compare stage names them missing)" % (
+        len(unrecorded), len(w3_ops), ", ".join(unrecorded[:5]))) if unrecorded else ""
     if bad:
         return _check("fail", "W3 call(s) report another library_commit than the %s: %s" % (
             "manifest's pin %s" % pin[:12] if pin else "deployed one", "; ".join(bad[:10])), **extra)
@@ -766,8 +804,8 @@ def library_commit_check(run_dir, recs, scenario, manifest, deployed=None):
         return _check("inconclusive", "the manifest pins no library_commit (graphlet.library_commit)", **extra)
     if not commits:
         return _check("inconclusive", "the MCP runner recorded no deployed library_commit (mcp_runs.jsonl)", **extra)
-    return _check("pass", "every W3 call (%d) reports the pinned and deployed library_commit %s" % (
-        sum(seen.values()), pin[:12]), **extra)
+    return _check("pass", "every recorded W3 call (%d) reports the pinned and deployed library_commit %s%s" % (
+        sum(seen.values()), pin[:12], gap), **extra)
 
 
 def scenario_outcome(checks):

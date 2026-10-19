@@ -282,6 +282,37 @@ class Preconditions(PrecheckBase):
         self.assertEqual((rec["outcome"], rec["finding"]), ("precondition_failed", None))
 
 
+class Vc9(PrecheckBase):
+    def test_malformed_precondition_values_are_inconclusive(self):
+        import checks
+        docs = {"W1": self.run_.fixture.doc(0)}
+        for pre in ({"walk_bp_min": 1e9}, {"walks_min": "3"}, {"bases": "yes"}, {"arms": "left"},
+                    {"labels_present": []}, {"segments_min": True}):
+            scen = copy.deepcopy(self.run_.scenarios[0])
+            scen["graphlet"]["preconditions"] = pre
+            rec = gp.preconditions_check(scen, docs, checks)
+            self.assertEqual(rec["outcome"], "inconclusive", (pre, rec))
+            self.assertIn("a manifest problem", rec["detail"])
+
+    def test_a_missing_twin_strategy_is_inconclusive(self):
+        self.run_.complete_scenario()
+        scen = copy.deepcopy(self.run_.scenarios[0])
+        del scen["graphlet"]["twin"]
+        rec = gp.strategy_check(self.run_.dir, scen)
+        self.assertEqual(rec["outcome"], "inconclusive")
+        self.assertIn("no twin strategy", rec["detail"])
+
+    def test_missing_w3_records_are_named(self):
+        ops = [{"id": "a", "tool": "graphlet_walks", "args": {"arm": "left"}},
+               {"id": "b", "tool": "graphlet_walks", "args": {"arm": "left"}}]
+        self.run_.cleanup()
+        self.run_ = gf.GRun(scenarios=[gf.scenario(ops=ops)])
+        self.run_.complete_scenario(ops=[("a", "graphlet_walks", {"arm": "left"}, gf.walks_answer())])
+        rec = self.check("library_commit")
+        self.assertEqual(rec["outcome"], "pass")
+        self.assertIn("1 of the 2 W3 op(s) recorded nothing: b", rec["detail"])
+
+
 class LibraryCommit(PrecheckBase):
     def test_another_commit_on_a_w3_call_fails(self):
         self.run_.complete_scenario()
