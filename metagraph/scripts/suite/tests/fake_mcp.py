@@ -22,7 +22,10 @@ Like async's runner it keeps the manifest's copy in DIR/manifest.json and writes
 identity, `service_capabilities` (the live read of the service's configuration; FAKE_MCP_CAPS `missing` leaves it
 out, `failed` records a failed read, `mismatch` a live / table mismatch; its sha256 service_document_sha256's) and the
 checks it judges with: `checks_dir` (--checks-dir, the run's snapshot under run_suite.sh's {checks_dir}),
-`checks_sha256` and `suite_common_sha256` of its files, and `checks_module` {file, stub}."""
+`checks_sha256` and `suite_common_sha256` of its files, and `checks_module` {file, stub}. FAKE_MCP_SERVICE_COMMIT set:
+the deployed service's identity as async's runner 684bb327 records it, on run.json's top level and a line of
+DIR/mcp_runs.jsonl per invocation: service_commit, identity_changed (false; FAKE_MCP_IDENTITY_CHANGED=1 true) and
+identity_error null."""
 
 import argparse
 import json
@@ -74,6 +77,10 @@ def main(argv=None):
             run["service_capabilities"]["error"] = "fake: connection refused"
         # the record's identity as async's runner states it (one definition: suite_common.service_document_sha256)
         run["service_capabilities"]["sha256"] = sc.service_document_sha256(run["service_capabilities"])
+    if os.environ.get("FAKE_MCP_SERVICE_COMMIT"):
+        run.update(service_commit=os.environ["FAKE_MCP_SERVICE_COMMIT"],
+                   identity_changed=os.environ.get("FAKE_MCP_IDENTITY_CHANGED") == "1", identity_error=None)
+        sc.append_jsonl(os.path.join(args.out, "mcp_runs.jsonl"), dict(run, ids=args.ids, repeat=args.repeat))
     sc.write_json_atomic(os.path.join(args.out, "run.json"), run)
     path = os.path.join(args.out, "executions.jsonl")
     done = set(sc.execution_key(r) for r in sc.read_jsonl(path)[0])

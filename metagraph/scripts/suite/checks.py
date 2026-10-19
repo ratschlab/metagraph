@@ -445,6 +445,44 @@ def check_status(sc, ans, a, arm, client=None):
 MCP_PATTERN_ENTRY_FIELDS = {"predicate": "predicate", "timing.load_ms": "load_ms"}
 
 
+# What the MCP arm's /pattern answer carries per database since the service bundle of 2026-10-18 (the owner's scope
+# addition for manifest v7): by_database[].absence_scope (the host answer's own answer-level value, verbatim: a string)
+# and by_database[].strands (the host's list, verbatim), both null for a database with several answers (graph chunks),
+# whose by_graph[].absence_scope / .strands state each graph's; a key is absent where the host's answer states none.
+# The entry's own absence_scope (the service's merged {scope, tasks_failed}) and the predicate block's strands are
+# other fields, never read for these. entry_fields reads them there on the MCP arm (_mcp_database_values).
+# {field: the host's type}
+MCP_PATTERN_DATABASE_FIELDS = {"absence_scope": str, "strands": list}
+
+
+def _mcp_database_values(e: dict, head: str) -> List[Tuple[str, Any]]:
+    """[(where, value)] an MCP /pattern entry |e| states for the host field |head| of MCP_PATTERN_DATABASE_FIELDS: each
+    by_database[] item's own value (not null), else its by_graph[] items' (not null), and the entry's own by_graph[]
+    items'; with neither list, the entry's own value (the live path: the runner's normaliser, fcf7ae49 on, puts the one
+    database's host values onto the host-shaped entry, as it does predicate and load_ms, and never copies the service's
+    merged absence_scope object; a value of another type there is a wrong value, held to the expectation, never "not
+    exposed"). [] when nothing states it (the field not exposed)."""
+    out: List[Tuple[str, Any]] = []
+
+    def graphs(x: dict, where: str) -> None:
+        for j, g in enumerate(x.get("by_graph") if isinstance(x.get("by_graph"), list) else []):
+            if isinstance(g, dict) and g.get(head) is not None:
+                out.append(("%sby_graph[%d]" % (where, j), g[head]))
+    dbs = e.get("by_database")
+    for i, b in enumerate(dbs if isinstance(dbs, list) else []):
+        if not isinstance(b, dict):
+            continue
+        if b.get(head) is not None:
+            out.append(("by_database[%d]" % i, b[head]))
+        else:
+            graphs(b, "by_database[%d]." % i)
+    graphs(e, "")
+    if not out and not isinstance(dbs, list) and not isinstance(e.get("by_graph"), list) and \
+            e.get(head) is not None:
+        out.append(("the entry", e[head]))
+    return out
+
+
 class _Differs(Exception):
     """The answered entries state a field of MCP_PATTERN_ENTRY_FIELDS differently."""
 
@@ -500,11 +538,36 @@ def check_answer_fields(sc, ans, a, arm):
 def check_entry_fields(sc, ans, a, arm):
     """The entry's fields: `equals` (a float within `tolerance`), `present`, `absent`. Every field the answer carries
     is compared before a missing one is reported (Missing: fail on a direct arm, not exposed on the MCP's), so a
-    missing field never hides a wrong one beside it (the MCP's entries carry `scope` but not the host's absence_scope:
-    a mark that sets the missing field aside never sets aside a failure; VERIFY of round 2, L3)."""
+    missing field never hides a wrong one beside it (the MCP's entries carry `scope` beside the host's absence_scope:
+    a mark that sets the missing field aside never sets aside a failure; VERIFY of round 2, L3). On the MCP arm the
+    host fields the service states per database (MCP_PATTERN_DATABASE_FIELDS: absence_scope, strands) are read there,
+    every stated value (a database's, or each graph's of a chunked one) held to the expectation."""
     e = _entry(ans, a.get("pattern", 0))
+    per_db = arm == "mcp" and sc.get("route") == "POST /pattern"
     missing = []
+
+    def database_values(path: str) -> Optional[List[Tuple[str, Any]]]:
+        """[(where, value)] of |path| from the MCP entry's per-database statements; None for a path read as usual."""
+        head = path.split(".", 1)[0]
+        if not per_db or head not in MCP_PATTERN_DATABASE_FIELDS:
+            return None
+        rest = path[len(head) + 1:]
+        out = []
+        for where, v in _mcp_database_values(e, head):
+            try:
+                out.append((where, _get(v, rest) if rest else v))
+            except Missing:
+                continue
+        return out
     for path, want in (a.get("equals") or {}).items():
+        stated = database_values(path)
+        if stated is not None:
+            if not stated:
+                missing.append(path)
+            for where, got in stated:
+                if got != want:
+                    return FAIL, "%s = %r (%s), expected %r" % (path, got, where, want)
+            continue
         try:
             got = _get(e, path)
         except Missing:
@@ -517,11 +580,21 @@ def check_entry_fields(sc, ans, a, arm):
         elif got != want:
             return FAIL, "%s = %r, expected %r" % (path, got, want)
     for path in a.get("present", []):
+        stated = database_values(path)
+        if stated is not None:
+            if not stated:
+                missing.append(path)
+            continue
         try:
             _get(e, path)
         except Missing:
             missing.append(path)
     for path in a.get("absent", []):
+        stated = database_values(path)
+        if stated is not None:
+            if stated:
+                return FAIL, "%s present (%s), expected absent" % (path, stated[0][0])
+            continue
         try:
             _get(e, path)
             return FAIL, "%s present, expected absent" % path
@@ -660,7 +733,10 @@ _DELIVERY_MBPS = (10.0, 50.0)
 # The finalisation reserves (ms): /resolve's is the host's constant (SPEC-labeled-traversal-core §4.5; capabilities
 # resolve.time_budget.finalize_reserve_ms, finalize_reserve_configurable false), so a reserve the answer states is
 # checked against it, never believed (suite_common's rule: never from the failing answer); /pattern's is the host's
-# configured one (SPEC-pattern-search §10.2, --pattern-finalize-ms, default 250), which only the answer states here
+# configured one (SPEC-pattern-search §10.2, --pattern-finalize-ms, default 250): from manifest v7 the scenario states
+# it, budget_respected's args.reserve_ms (the builder takes it from the capabilities snapshot it reads), and every
+# work-time bound reads it there (_scenario_pattern_reserve); a manifest without it (v5, v6) is judged as before, by
+# the reserve the answer states (limits.finalize_reserve_ms), else _PATTERN_RESERVE_MS
 _RESOLVE_RESERVE_MS = 250.0
 _PATTERN_RESERVE_MS = 250.0
 
@@ -678,16 +754,31 @@ def _limit(sc: dict, body: dict, name: str) -> Any:
     return req.get(name)
 
 
+def _scenario_pattern_reserve(sc: dict) -> Optional[float]:
+    """The host's /pattern finalisation reserve (ms) the scenario states: its budget_respected expectation's
+    args.reserve_ms (manifest v7: the capabilities snapshot's pattern finalize_reserve_ms), else None (v5, v6)."""
+    for e in sc.get("expect") or []:
+        if isinstance(e, dict) and e.get("check") == "budget_respected" and isinstance(e.get("args"), dict):
+            v = _number(e["args"].get("reserve_ms"))
+            if v is not None:
+                return v
+    return None
+
+
 def _pattern_work_time(sc: dict, body: dict) -> Optional[float]:
     """A lower bound of the work time of SPEC-pattern-search §7.6, time_budget_ms - finalize_reserve_ms - E: E is
     taken at twice its formula at the default (slowest) delivery rates, with every result the answer withholds
     counted at a generous size (_RESULT_BYTES), so an elapsed time below this bound is a time stop or a time
-    limitation that came before the work time had passed. None without a budget."""
+    limitation that came before the work time had passed. The reserve is the host's the scenario states
+    (_scenario_pattern_reserve: budget_respected's reserve_ms, manifest v7), else the one the answer states
+    (limits.finalize_reserve_ms), else _PATTERN_RESERVE_MS. None without a budget."""
     budget = _effective_budget(sc, body)
     if budget is None:
         return None
-    reserve = _number((body.get("limits") or {}).get("finalize_reserve_ms"))
-    reserve = _PATTERN_RESERVE_MS if reserve is None else reserve
+    reserve = _scenario_pattern_reserve(sc)
+    if reserve is None:
+        reserve = _number((body.get("limits") or {}).get("finalize_reserve_ms"))
+        reserve = _PATTERN_RESERVE_MS if reserve is None else reserve
     req = sc.get("request") if isinstance(sc.get("request"), dict) else {}
     labelled = (req.get("output") or {}).get("labels") in ("all", "predicate_only") or req.get("predicate") is not None
     per = _RESULT_BYTES["labelled" if labelled else "plain"]
@@ -5171,7 +5262,7 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "predicate_either_mirror": ((), ("pattern", "label", "min")),
     "motif": ((), ("pattern", "selected", "decided_by_in", "label_present")),
     "clamped": (("field", "requested", "effective"), ("where",)),
-    "budget_respected": ((), ("rule", "cap_ms")),
+    "budget_respected": ((), ("rule", "cap_ms", "reserve_ms")),
     "counts_consistent": ((), ("pattern",)),
     "invariants": ((), ()),
     "resolve_runs": (("label",), ("full", "prefix_if_stopped", "unless_stopped", "covers", "run_end_in",
@@ -5206,6 +5297,10 @@ def validate_expectation(exp: dict) -> List[str]:
     req, opt = CHECK_ARGS[name]
     probs = ["%s: argument %s missing" % (name, x) for x in req if x not in args]
     probs += ["%s: unknown argument %s" % (name, x) for x in args if x not in req and x not in opt and x != "any_status"]
+    if name == "budget_respected" and "reserve_ms" in args and _number(args["reserve_ms"]) is None:
+        probs.append("budget_respected: reserve_ms %s is no number" % json.dumps(args["reserve_ms"]))
+    elif name == "budget_respected" and "reserve_ms" in args and args["reserve_ms"] < 0:
+        probs.append("budget_respected: reserve_ms %s is below 0" % json.dumps(args["reserve_ms"]))
     if name == "count_relation":
         rels = args.get("relation")
         rels = set(rels if isinstance(rels, list) else [rels]) if rels is not None else None

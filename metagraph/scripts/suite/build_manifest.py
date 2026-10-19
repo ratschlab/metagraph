@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the suite's frozen scenario manifests (DESIGN §8.1): the full catalogue and the smoke selection.
 
-    build_manifest.py --out manifest/suite_v6.json --smoke-out manifest/suite_smoke_v6.json [--seed N] [--no-fetch]
-                      [--capabilities DIR]
+    build_manifest.py --out manifest/suite_v7.json --smoke-out manifest/suite_smoke_v7.json [--seed N] [--no-fetch]
+                      [--capabilities DIR] [--manifest-version 6|7]
 
 Network: E-utilities for record sequences not in truth/cache yet (truth.py); nothing else. The same seed and the
 same records give the same `content_sha256` (the sha256 of the canonical JSON of `scenarios`) and the same
@@ -21,6 +21,18 @@ six heavy /pattern scenarios tagged budget_stress (areas.tag_pattern_budget_stre
 executions kept by keep_gate_warm_repeats); no relation changed, and the gate's 237 resolve / traverse /
 capabilities scenarios are byte-identical with their warm repeats, so the v5 acceptance carries over. The MCP
 exposure baseline it reads is v4's with its request digests rebased (--exposure-rebase, below).
+
+v7 (the owner, 2026-10-18) is v6 with exactly these changes: P-edge-0004's entry_fields check, which reads the
+pattern text the MCP's /pattern answer leaves out by design (the service owner's statement, 2026-10-17), is classed
+service-side by design at property level (mcp.by_design_checks under the table's pattern.lowercase,
+areas.MCP_PATTERN_ENTRY_BY_DESIGN) instead of not implemented yet via MCP; v6 is built again, byte for byte, with
+--manifest-version 6 (build(manifest_version=6)); and every /pattern scenario's budget_respected states the host's
+finalisation reserve, reserve_ms, the snapshot's pattern_capabilities finalize_reserve_ms
+(areas.state_pattern_reserve), which checks._pattern_work_time reads instead of the reserve the answer states; and
+(the owner's scope addition of 2026-10-18, with the service bundle that carries them) the checks that read the
+entry's absence_scope or strands are no longer marked not implemented via MCP (areas.MCP_PATTERN_ENTRY_CARRIED_V7:
+the MCP's answer states them per database, checks.MCP_PATTERN_DATABASE_FIELDS), so P-scope-0004 / -0006 run on the
+MCP arm again.
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -55,7 +67,9 @@ import truth  # noqa: E402
 from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
-MANIFEST_VERSION = 6
+MANIFEST_VERSION = 7
+# the versions this builder makes: v6 (frozen; rebuilt byte for byte) and v7
+BUILDABLE_VERSIONS = (6, 7)
 # The smoke selection's version (SMOKE_TAG): v5's selection, kept by v6 (the tag is part of every scenario's tags, and
 # the gate's scenarios must stay byte-identical to v5's)
 SMOKE_SELECTION_VERSION = 5
@@ -128,7 +142,10 @@ def snapshot_digests(directory: str) -> dict:
 
 
 def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES,
-          exposure_file: Optional[str] = DEFAULT_EXPOSURE) -> dict:
+          exposure_file: Optional[str] = DEFAULT_EXPOSURE, manifest_version: int = MANIFEST_VERSION) -> dict:
+    if manifest_version not in BUILDABLE_VERSIONS:
+        raise SystemExit("manifest version %r: this builder makes %s" % (
+            manifest_version, " and ".join("v%d" % v for v in BUILDABLE_VERSIONS)))
     recs = truth.load_with_sequences(fetch=fetch)
     missing = [r.key for r in recs if r.fetch_error]
     ctx = Ctx(recs, seed)
@@ -154,7 +171,10 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     if not only_areas or "D" in only_areas:
         scenarios += areas.gen_D(ctx, scenarios)
     areas.state_chance_bounds(scenarios)
-    areas.mark_pattern_mcp_fields(scenarios)   # v6: what the MCP's /pattern answer cannot carry, at property level
+    # v6: what the MCP's /pattern answer cannot carry, at property level; v7: what it leaves out by design, classed so
+    # v7: absence_scope and strands carried per database (areas.MCP_PATTERN_ENTRY_CARRIED_V7), no longer marked
+    areas.mark_pattern_mcp_fields(scenarios, by_design=manifest_version >= 7,
+                                  carried=areas.MCP_PATTERN_ENTRY_CARRIED_V7 if manifest_version >= 7 else ())
     scenario_level_marks(scenarios)
     areas.tag_pattern_budget_stress(scenarios)   # v6: the heavy /pattern scenarios outside the gate
     # v6's /pattern warm-ups must not move the deploy gate's executions: the warm-repeat status of every scenario on
@@ -165,6 +185,9 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     scenarios = place_warm_ups(scenarios + areas.pattern_warm_ups(scenarios))
     keep_off_warm_repeat(scenarios)
     keep_gate_warm_repeats(scenarios, reference)
+    if manifest_version >= 7:
+        # v7: the host's /pattern finalisation reserve in budget_respected's arguments (the warm-ups' included)
+        areas.state_pattern_reserve(scenarios, caps["pattern_capabilities"])
     exposure = None
     if exposure_file:
         with open(exposure_file) as f:
@@ -178,7 +201,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         raise SystemExit("manifest invalid:\n  " + "\n  ".join(problems[:30]))
     tc = caps["traverse_capabilities"]
     manifest = {
-        "manifest_version": MANIFEST_VERSION,
+        "manifest_version": manifest_version,
         "content_sha256": sha256_json(scenarios),
         "created_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "seed": seed,
@@ -803,8 +826,10 @@ def manifest_path(path: str) -> bool:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(HERE, "manifest", "suite_v%d.json" % MANIFEST_VERSION))
-    ap.add_argument("--smoke-out", default=os.path.join(HERE, "manifest", "suite_smoke_v%d.json" % MANIFEST_VERSION))
+    ap.add_argument("--out", default=None, help="default manifest/suite_v<version>.json")
+    ap.add_argument("--smoke-out", default=None, help="default manifest/suite_smoke_v<version>.json")
+    ap.add_argument("--manifest-version", type=int, default=MANIFEST_VERSION, choices=BUILDABLE_VERSIONS,
+                    help="the version to build (default %d; 6 rebuilds the frozen v6)" % MANIFEST_VERSION)
     ap.add_argument("--capabilities", default=DEFAULT_CAPABILITIES,
                     help="the capabilities snapshot directory (default truth/staging_capabilities/)")
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -822,6 +847,8 @@ def main(argv=None) -> int:
     ap.add_argument("--exposure-source-manifest", metavar="MANIFEST",
                     help="the manifest --exposure-rebase's baseline was recorded against (manifest/suite_v4.json)")
     args = ap.parse_args(argv)
+    args.out = args.out or os.path.join(HERE, "manifest", "suite_v%d.json" % args.manifest_version)
+    args.smoke_out = args.smoke_out or os.path.join(HERE, "manifest", "suite_smoke_v%d.json" % args.manifest_version)
     if args.exposure_rebase:
         if not args.exposure_out or not args.exposure_source_manifest:
             raise SystemExit("--exposure-rebase needs --exposure-source-manifest and --exposure-out")
@@ -873,7 +900,7 @@ def main(argv=None) -> int:
         if why:
             raise SystemExit(why)
     m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities,
-              exposure_file=args.exposure or None)
+              exposure_file=args.exposure or None, manifest_version=args.manifest_version)
     if only:
         m["partial_build"] = True
     write(args.out, m)

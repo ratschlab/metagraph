@@ -25,12 +25,15 @@ def have_cache():
     return os.path.isdir(truth.CACHE_DIR) and bool(os.listdir(truth.CACHE_DIR))
 
 
-def built(areas_=None):
-    """The manifest the builder makes from the record cache (only |areas_| when given), built once per test run."""
+def built(areas_=None, version=None):
+    """The manifest the builder makes from the record cache (only |areas_| when given; the builder's version, or
+    |version|), built once per test run."""
     import build_manifest as bm
-    key = tuple(sorted(areas_)) if areas_ else ()
+    version = bm.MANIFEST_VERSION if version is None else version
+    key = (tuple(sorted(areas_)) if areas_ else (), version)
     if key not in _BUILDS:
-        _BUILDS[key] = bm.build(bm.DEFAULT_SEED, fetch=False, only_areas=set(areas_) if areas_ else None)
+        _BUILDS[key] = bm.build(bm.DEFAULT_SEED, fetch=False, only_areas=set(areas_) if areas_ else None,
+                                manifest_version=version)
     return _BUILDS[key]
 
 

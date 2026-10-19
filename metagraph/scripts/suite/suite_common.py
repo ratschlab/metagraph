@@ -2452,6 +2452,59 @@ def read_gz_json(path):
         return json.load(fh)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# the raw record of an execution (SD-093: one reader for every caller). A runner writes it as raw/<name>.json.gz
+# relative to its arm directory (run_direct, async's runner); merge_run rewrites a merged line's path to
+# arms/<arm>/raw/... relative to the run directory.
+
+def raw_record_path(line, run_dir=None, arm_dir=None):
+    """The file of the raw record an execution line names (its `raw`), the first that exists of: the path itself when
+    absolute; with |run_dir|, run_dir/<raw>, then run_dir/arms/<the line's arm>/<raw> (a line of an arm, its path
+    relative to the arm's directory); with |arm_dir|, arm_dir/<raw>, then, for a merged line's 'arms/...' path, the
+    run directory two levels up. None when the line names none or no candidate exists."""
+    raw = line.get("raw") if isinstance(line, dict) else None
+    if not isinstance(raw, str) or not raw:
+        return None
+    if os.path.isabs(raw):
+        candidates = [raw]
+    else:
+        candidates = []
+        if run_dir:
+            candidates += [os.path.join(run_dir, raw), os.path.join(run_dir, "arms", line.get("arm") or "", raw)]
+        if arm_dir:
+            candidates.append(os.path.join(arm_dir, raw))
+            if raw.startswith("arms/"):
+                candidates.append(os.path.join(os.path.dirname(os.path.dirname(arm_dir)), raw))
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
+def read_raw_record(line, run_dir=None, arm_dir=None, any_json=False, default=None):
+    """The raw record an execution line names (raw_record_path), decoded: a dict, else |default| (no `raw`, no file,
+    a truncated .gz, a cut JSON, a record that is no object). |any_json|: whatever JSON the file holds, |default| only
+    when it cannot be read (merge_run.renormalisation counts every record read)."""
+    path = raw_record_path(line, run_dir, arm_dir)
+    if path is None:
+        return default
+    try:
+        doc = read_gz_json(path)
+    except (OSError, ValueError, EOFError):
+        return default
+    return doc if any_json or isinstance(doc, dict) else default
+
+
+def raw_record_answer(line, run_dir=None, arm_dir=None):
+    """The normalised answer a raw record keeps (`answer`, a dict; both runners keep it), else None."""
+    doc = read_raw_record(line, run_dir, arm_dir)
+    answer = doc.get("answer") if isinstance(doc, dict) else None
+    return answer if isinstance(answer, dict) else None
+
+
+def raw_record_body(line, run_dir=None, arm_dir=None):
+    """The answer body a raw record keeps (`answer.body`, as it is), else None."""
+    answer = raw_record_answer(line, run_dir, arm_dir)
+    return answer.get("body") if answer is not None else None
+
+
 REEVALUATED_TAG = "reevaluated"
 
 

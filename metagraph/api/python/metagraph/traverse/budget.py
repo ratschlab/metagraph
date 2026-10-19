@@ -367,11 +367,80 @@ class _Scope:
         return self.b
 
     def __exit__(self, *exc):
-        self.b._depth -= 1
+        b = self.b
+        b._depth -= 1
+        if b._depth == 0:
+            # the owners of the call's keys are let go with it (_OncePerCall._keys)
+            b._held = None
         return False
 
 
-class LocalBudget:
+class _OncePerCall:
+    """The once-per-call keys of a charger (a LocalBudget, and the tally compare_cost()
+    prices with): a derivation of a model is charged, or a part of a call marked, once per
+    outermost call, remembered by its owner's id() and its name (and a depth, for one
+    priced per depth). The owner is held as long as its key is remembered: an id is
+    unique only among live objects, and a model freed during a scope the caller holds
+    open, with a new one at its address, would otherwise be charged nothing for what the
+    first one paid. Every key naming a model is built here (uses_of, first_of); uses()
+    and first() take a key that names no object."""
+
+    __slots__ = ()
+
+    def _keys(self):
+        held = self._held
+        if held is None:
+            # a charge outside any call, after the last one ended (its owners let go):
+            # a new key set, as an outermost call starts one
+            self._used = set()
+            held = self._held = {}
+        return self._used, held
+
+    def uses_of(self, owner, name, work, nbytes=0, *, depth=None):
+        """Charge |owner|'s derivation |name| (at |depth|) at its (cold) price, once per
+        outermost call however often the call's parts use it; True when this use charged
+        it. A stop raises before the key is remembered. |owner| is held until the
+        outermost scope ends; a charge made outside any scope (the library makes none)
+        holds it until the next outermost call starts."""
+        used, held = self._keys()
+        k = id(owner)
+        key = (k, name) if depth is None else (k, name, depth)
+        if key in used:
+            return False
+        self.charge(work, nbytes)
+        used.add(key)
+        held[k] = owner
+        return True
+
+    def first_of(self, owner, name, *, depth=None):
+        """True the first time |owner|'s part |name| (at |depth|) is seen in the current
+        outermost call (a part of the call to charge once), and marks it."""
+        used, held = self._keys()
+        k = id(owner)
+        key = (k, name) if depth is None else (k, name, depth)
+        if key in used:
+            return False
+        used.add(key)
+        held[k] = owner
+        return True
+
+    def uses(self, key, work, nbytes=0):
+        """uses_of() for a |key| that names no object (a part of the call itself)."""
+        used = self._keys()[0]
+        if key not in used:
+            self.charge(work, nbytes)
+            used.add(key)
+
+    def first(self, key):
+        """first_of() for a |key| that names no object (a part of the call itself)."""
+        used = self._keys()[0]
+        if key in used:
+            return False
+        used.add(key)
+        return True
+
+
+class LocalBudget(_OncePerCall):
     """A stateful budget: one call, or several sharing one allowance (work accumulates;
     the memory limit holds for each call). Not thread-safe, except cancel(), which another
     thread may call: the running call stops at its next charge."""
@@ -379,8 +448,8 @@ class LocalBudget:
     __slots__ = ('limits', '_work_limit', '_mem_limit', '_deadline_at', 'used_work',
                  'account_bytes', 'peak_bytes', 'largest_charge', 'stops', '_cancelled',
                  '_next_poll', '_depth', 'op', 'phase', 'done', 'levers', '_call_work0',
-                 '_call_peak', '_t0', '_used', 'sub_op', 'row_extra', '_wcap', '_mcap',
-                 '_base', '__weakref__')
+                 '_call_peak', '_t0', '_used', '_held', 'sub_op', 'row_extra', '_wcap',
+                 '_mcap', '_base', '__weakref__')
 
     work_model = WORK_MODEL
 
@@ -414,6 +483,7 @@ class LocalBudget:
         self._call_work0 = 0
         self._call_peak = 0
         self._used = set()
+        self._held = {}
         # the library operation running inside a caller's own scope (an MCP tool), named
         # in a stop; and what that caller adds to each row a list makes (its own row of a
         # page, built from the library's): charged with the row, so that a list stops
@@ -427,11 +497,10 @@ class LocalBudget:
     def scope(self, op, levers=()):
         """Enter an operation: the outermost one names the stop and starts a new memory
         account (nothing a previous call held is held now); a nested one (walks() calling
-        claims(), an export spelling walks) only counts its depth. A scope the caller
-        holds open around several operations must not outlive the models charged in it:
-        uses() and first() remember a derivation by its owner's id() until the outermost
-        scope ends, so a model freed inside the scope and a new one at the same address
-        would be charged nothing for what the first one paid."""
+        claims(), an export spelling walks) only counts its depth. The derivations a call
+        is charged for are remembered until the outermost scope ends, and the models that
+        own them held as long (uses_of): a scope the caller holds open around several
+        operations keeps every model charged in it alive until it ends."""
         if self._depth == 0:
             self.op = op
             self.sub_op = None
@@ -442,6 +511,7 @@ class LocalBudget:
             self._call_work0 = self.used_work
             self._call_peak = 0
             self._used = set()
+            self._held = {}
             self.row_extra = (0, 0)
             # what the call costs beside its elements (its setup, its frames and
             # temporaries): charged with its first charge, which the operation makes
@@ -501,22 +571,6 @@ class LocalBudget:
         if u > self._wcap or acc > self._mcap:
             return False
         self.charge(work, nbytes)
-        return True
-
-    def uses(self, key, work, nbytes=0):
-        """Charge a derivation the call uses at its (cold) price, once per outermost call
-        however often the call's parts use it: |key| names it (an arm's id and the
-        derivation's name; the arm must live as long as the scope, scope())."""
-        if key not in self._used:
-            self.charge(work, nbytes)
-            self._used.add(key)
-
-    def first(self, key):
-        """True the first time |key| is seen in the current outermost call (a part of
-        the call to charge once), and marks it."""
-        if key in self._used:
-            return False
-        self._used.add(key)
         return True
 
     def require(self, work=0, nbytes=0):

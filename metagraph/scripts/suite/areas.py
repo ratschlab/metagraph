@@ -3364,17 +3364,26 @@ MCP_PATTERN_ENTRY_NOT_EXPOSED = {
 }
 
 
+# v7 (the owner's scope addition, 2026-10-18, with the service bundle that carries the identity): the MCP's /pattern
+# answer carries, per by_database[] entry, the host answer's absence_scope (verbatim, a string) and strands (the
+# host's list), per by_graph[] entry for a database with several answers (checks.MCP_PATTERN_DATABASE_FIELDS, where
+# entry_fields reads them on the MCP arm). From v7 they are not among what the answer cannot carry: the checks that
+# read them run on the MCP arm, unmarked (v6's marks of P-exact-0001..0008, P-scope-0001..0003 / -0005 / -0007..0012,
+# N-usecase-0005, D-P-exact-0001, D-P-scope-0004, and the scenario-level ones of P-scope-0004 / -0006, are gone).
+MCP_PATTERN_ENTRY_CARRIED_V7 = ("absence_scope", "strands")
+
+
 def _expected_paths(args: dict) -> List[str]:
     """The paths an entry_fields / answer_fields expectation reads a value from (equals, present); `absent` reads
     an absence, which an unexposed field shows as well."""
     return list((args.get("equals") or {}).keys()) + list(args.get("present") or [])
 
 
-def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
+def pattern_mcp_unexposed(sc: dict, carried: Tuple[str, ...] = ()) -> Dict[str, List[str]]:
     """{check: [what the MCP's /pattern answer cannot carry that it reads]} of a scenario the MCP runs
-    (pattern_search): an entry_fields path whose first field is in MCP_PATTERN_ENTRY_NOT_EXPOSED (a refused slot's
-    mismatch keys are carried), an answer_fields path outside MCP_PATTERN_BODY_KEYS that the entries do not carry
-    either (MCP_PATTERN_PER_ENTRY)."""
+    (pattern_search): an entry_fields path whose first field is in MCP_PATTERN_ENTRY_NOT_EXPOSED and not in |carried|
+    (v7: MCP_PATTERN_ENTRY_CARRIED_V7; a refused slot's mismatch keys are carried), an answer_fields path outside
+    MCP_PATTERN_BODY_KEYS that the entries do not carry either (MCP_PATTERN_PER_ENTRY)."""
     if sc.get("route") != "POST /pattern" or (sc.get("mcp") or {}).get("tool") != "pattern_search":
         return {}
     refused = set((e.get("args") or {}).get("pattern", 0) for e in sc["expect"] if e["check"] == "pattern_slot_error")
@@ -3385,7 +3394,7 @@ def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
             slot = a.get("pattern", 0) in refused
             for p in _expected_paths(a):
                 head = p.split(".", 1)[0]
-                if head in MCP_PATTERN_ENTRY_NOT_EXPOSED and not (slot and "mismatch" in head):
+                if head in MCP_PATTERN_ENTRY_NOT_EXPOSED and head not in carried and not (slot and "mismatch" in head):
                     out.setdefault("entry_fields", [])
                     if MCP_PATTERN_ENTRY_NOT_EXPOSED[head] not in out["entry_fields"]:
                         out["entry_fields"].append(MCP_PATTERN_ENTRY_NOT_EXPOSED[head])
@@ -3399,15 +3408,85 @@ def pattern_mcp_unexposed(sc: dict) -> Dict[str, List[str]]:
     return out
 
 
-def mark_pattern_mcp_fields(scenarios: List[dict]) -> Dict[str, List[str]]:
+# v7 (the owner's decision on SD-021, README "Open items (the harness, 2026-10-17)"): the host's /pattern finalisation
+# reserve is configurable (--pattern-finalize-ms), and checks.evaluate sees no host document, so the manifest states it
+# in the check arguments: budget_respected's args.reserve_ms on every /pattern scenario, the pattern_capabilities
+# document's finalize_reserve_ms of the snapshot the builder reads. checks._pattern_work_time (the work-time bound of
+# every stated time stop or time limitation) reads it from the scenario, never from the answer it judges.
+def state_pattern_reserve(scenarios: List[dict], pattern_caps: dict) -> List[str]:
+    """Adds reserve_ms, the snapshot's /pattern finalisation reserve (|pattern_caps|' finalize_reserve_ms, a
+    number of at least 0, else SystemExit), to the args of every budget_respected expectation of a POST /pattern
+    scenario (a new expectation object: the args the builder shares between scenarios stay as they are); returns the
+    ids changed."""
+    reserve = (pattern_caps or {}).get("finalize_reserve_ms")
+    if not isinstance(reserve, (int, float)) or isinstance(reserve, bool) or reserve < 0:
+        raise SystemExit("the capabilities snapshot's pattern_capabilities states no finalize_reserve_ms (got %s): "
+                         "manifest v7 states the host's /pattern reserve in budget_respected's arguments" % (
+                             json.dumps(reserve),))
+    out = []
+    for s in scenarios:
+        if s.get("route") != "POST /pattern":
+            continue
+        changed = False
+        for i, e in enumerate(s["expect"]):
+            if e.get("check") == "budget_respected":
+                s["expect"][i] = dict(e, args=dict(e.get("args") or {}, reserve_ms=reserve))
+                changed = True
+        if changed:
+            out.append(s["id"])
+    return out
+
+
+# v7 (the service owner's statement, 2026-10-17): the MCP's /pattern answer leaves out the entry's pattern text BY
+# DESIGN, not for want of a feature. A check that reads nothing else of what the answer leaves out is classed
+# service-side by design at property level (mcp.by_design_checks [{check, case}], lane V5's manifest-side mechanism:
+# the mark sets a not_exposed reading of the check aside on the MCP arm, the check stays required on the direct arms)
+# instead of not implemented yet via MCP, under the by-design table's case that the scenario names (mcp.by_design)
+# for the service's handling of that field: pattern.lowercase for the pattern text (the service checks the text in
+# either case and upper-cases it before it is stored and sent, so the host never sees the caller's text from the MCP
+# arm; P-edge-0004 reads the host's upper-cased echo). T-edge-0008 is modelled through the table instead: its case
+# traverse.duplicate_seeds states an explains_checks entry {check, detail_matches} for the not_exposed answer_fields,
+# which the comparison verifies as a by-design pair; the same here would add such an entry to pattern.lowercase, a
+# change of the service's own file (service_by_design.json), which the suite does not make. A scenario that names
+# none of a field's cases keeps the not-implemented mark (the builder refuses a by_design_checks case outside the
+# table).
+MCP_PATTERN_ENTRY_BY_DESIGN = {"pattern": ("pattern.lowercase",)}
+
+
+def pattern_by_design_case(sc: dict, check: str, what: List[str]) -> Optional[str]:
+    """The by-design table's case under which the MCP's /pattern answer leaves out everything |check| of |sc| reads
+    of what it cannot carry (|what|: pattern_mcp_unexposed's descriptions), by MCP_PATTERN_ENTRY_BY_DESIGN: an
+    entry_fields check whose unexposed fields are all by design, each with a case the scenario names; else None."""
+    if check != "entry_fields" or not what:
+        return None
+    named = (sc.get("mcp") or {}).get("by_design") or []
+    heads = dict((MCP_PATTERN_ENTRY_NOT_EXPOSED[h], h) for h in MCP_PATTERN_ENTRY_NOT_EXPOSED)
+    cases = []
+    for w in what:
+        case = next((c for c in MCP_PATTERN_ENTRY_BY_DESIGN.get(heads.get(w), ()) if c in named), None)
+        if case is None:
+            return None
+        cases.append(case)
+    return cases[0] if len(set(cases)) == 1 else None
+
+
+def mark_pattern_mcp_fields(scenarios: List[dict], by_design: bool = False,
+                            carried: Tuple[str, ...] = ()) -> Dict[str, List[str]]:
     """Marks every property check of a /pattern scenario that reads what the MCP's answer cannot carry
-    (pattern_mcp_unexposed) not implemented yet via MCP (mcp_not_implemented_check, with the fields as its reason);
-    returns {id: [checks marked]}."""
+    (pattern_mcp_unexposed, less the fields in |carried|: v7's MCP_PATTERN_ENTRY_CARRIED_V7) not implemented yet via
+    MCP (mcp_not_implemented_check, with the fields as its reason), or, with |by_design| (manifest v7), service-side
+    by design where the service leaves out by design all it reads (pattern_by_design_case: mcp_by_design_check with
+    the case); returns {id: [checks marked]}."""
     out = {}
     for s in scenarios:
-        for check, what in pattern_mcp_unexposed(s).items():
-            if any(e.get("check") == check for e in (s["mcp"].get("not_implemented_checks") or [])):
+        for check, what in pattern_mcp_unexposed(s, carried).items():
+            if any(e.get("check") == check for key in ("not_implemented_checks", "by_design_checks")
+                   for e in (s["mcp"].get(key) or [])):
                 continue
-            mcp_not_implemented_check(s, check, "the MCP's /pattern answer does not carry %s" % "; ".join(what))
+            case = pattern_by_design_case(s, check, what) if by_design else None
+            if case:
+                mcp_by_design_check(s, check, case)
+            else:
+                mcp_not_implemented_check(s, check, "the MCP's /pattern answer does not carry %s" % "; ".join(what))
             out.setdefault(s["id"], []).append(check)
     return out

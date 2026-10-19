@@ -3,7 +3,9 @@ operations, the store's parses and the MCP tools. The tests, by the property eac
 
   T-L1/L20  off by default: no budget, no change -- and an unlimited budget changes no
             answer either (the golden digests of every operation)
-  T-L2      cold price: the same units cold, warm, and after other calls
+  T-L2      cold price: the same units cold, warm, and after other calls -- and inside a
+            scope the caller holds, a model freed in it is no alias of the next one (the
+            once-per-call keys hold their owners)
   T-L3      determinism: the same stop in this process and under other hash seeds
   T-L4      the account and the work never exceed their limits; needed_at_least is above
   T-L5      every operation stops at one unit (no uncharged path), and completes at its
@@ -22,6 +24,7 @@ operations, the store's parses and the MCP tools. The tests, by the property eac
   T-L22     the real offline retrievals under the default ToolLimits
 """
 
+import contextlib
 import gc
 import glob
 import json
@@ -33,6 +36,7 @@ import threading
 import time
 import tracemalloc
 import unittest
+import weakref
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
@@ -159,6 +163,96 @@ class TestColdPrice(unittest.TestCase):
                 b = LocalBudget()
                 op_table(warm)[n](budget=b)
                 self.assertEqual(cold[n], (b.used_work, b.peak_bytes), (item[0], n))
+
+
+class TestOncePerCallKeys(unittest.TestCase):
+    """T-L2 under a scope the caller holds open: a derivation is remembered by its owner's
+    id() for the outermost call (charged once however often the call uses it), and the
+    owner is held while the key is, so a model freed inside the scope and a new one at
+    the same address is charged its own cold price, not nothing (an alias)."""
+
+    OPS = ('claims', 'to_fasta', 'summary', 'label_summary', 'dump', 'to_json')
+
+    def _charge(self, item, op, b):
+        g = fresh(item)
+        ids = {id(g)} | {id(a) for a in g.arms.values()}
+        w0 = b.used_work
+        op_table(g)[op](budget=b)
+        return g, ids, b.used_work - w0
+
+    def test_a_model_freed_in_a_caller_held_scope(self):
+        bad = []
+        n = 0
+        for item in SAMPLE[:40]:
+            for op in self.OPS:
+                if not applicable(fresh(item), op):
+                    continue
+                held = LocalBudget()
+                with held.scope('session'):
+                    g1, _, _ = self._charge(item, op, held)
+                    g2, _, want = self._charge(item, op, held)
+                    del g1, g2
+                gc.collect()
+                b = LocalBudget()
+                with b.scope('session'):
+                    g1, ids1, _ = self._charge(item, op, b)
+                    del g1
+                    gc.collect()        # the first model freed: its addresses free for reuse
+                    g2, ids2, got = self._charge(item, op, b)
+                    del g2
+                n += 1
+                if got != want:
+                    bad.append((item[0], op, want, got, bool(ids1 & ids2)))
+        self.assertGreater(n, 100)
+        self.assertEqual([], bad)
+
+    def test_the_key_holds_its_owner_until_the_call_ends(self):
+        class Owner:
+            pass
+        for charger in ('budget', 'tally'):
+            with self.subTest(charger=charger):
+                b = LocalBudget() if charger == 'budget' else ops._Tally()
+                cm = b.scope('session') if charger == 'budget' else contextlib.nullcontext()
+                with cm:
+                    o = Owner()
+                    ref = weakref.ref(o)
+                    self.assertTrue(b.uses_of(o, 'x', 5, 8))
+                    self.assertFalse(b.uses_of(o, 'x', 5, 8))     # once per call
+                    self.assertTrue(b.uses_of(o, 'x', 5, 8, depth=3))
+                    self.assertTrue(b.first_of(o, 'y'))
+                    self.assertFalse(b.first_of(o, 'y'))
+                    self.assertTrue(b.first_of(o, 'y', depth=2))
+                    del o
+                    gc.collect()
+                    self.assertIsNotNone(ref())   # held: no new object can take its id
+                    # the key parts as charged before the helper: (id, name[, depth])
+                    self.assertIn((id(ref()), 'x'), b._used)
+                    self.assertIn((id(ref()), 'x', 3), b._used)
+                work = b.used_work if charger == 'budget' else b.work
+                self.assertEqual(10 + (B.W_CALL if charger == 'budget' else 0), work)
+                if charger == 'budget':
+                    gc.collect()
+                    self.assertIsNone(ref())      # let go when the outermost call ends
+                    # what the finished call charged stays readable ...
+                    self.assertEqual({'x', 'y'}, {k[1] for k in b._used})
+                    # ... and a charge outside any call starts a new key set
+                    o2 = Owner()
+                    self.assertTrue(b.uses_of(o2, 'x', 5))
+                    self.assertEqual({(id(o2), 'x')}, b._used)
+
+    def test_no_charge_key_is_built_by_hand(self):
+        """Every once-per-call key of a model goes through uses_of() / first_of() (which
+        hold the owner); uses() and first() take keys that name no object."""
+        import re
+        pkg = os.path.dirname(MT.__file__)
+        bad = []
+        for fn in sorted(glob.glob(os.path.join(pkg, '*.py'))):
+            with open(fn) as f:
+                for i, line in enumerate(f, 1):
+                    if re.search(r'\.(uses|first)\(\(\s*id\(', line) or \
+                            re.search(r'(?<!self)\._used\b', line):
+                        bad.append('%s:%d: %s' % (os.path.basename(fn), i, line.strip()))
+        self.assertEqual([], bad)
 
 
 class TestStops(unittest.TestCase):
