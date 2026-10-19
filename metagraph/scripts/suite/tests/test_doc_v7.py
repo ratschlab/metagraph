@@ -383,12 +383,12 @@ class DeployedIdentityTest(unittest.TestCase):
                 "notes": notes + ["plan: 5 execution(s)"]}
 
     def test_note(self):
-        ident = {"deployed_service_commit": {"commit": self.SHA, "source": "the deploy's LIVE line",
+        ident = {"deployed_service_commit": {"commit": self.SHA, "source": "the deployment record of the 18 October deploy",
                                              "railway_deployment_id": "6afb760e"}}
         run = _Stub(gate=self._gate(self.SHA), identity=ident)
         text, replaced = sections.identity_note_text(_Stub(run=run))
         self.assertIn("equals the deployed commit", text)
-        self.assertIn("(the deploy's LIVE line, Railway deployment 6afb760e) on all 5 MCP invocations", text)
+        self.assertIn("(the deployment record of the 18 October deploy, Railway deployment 6afb760e) on all 5 MCP invocations", text)
         self.assertIn("\\allowbreak{}", text)
         self.assertNotIn("--expect", text)
         self.assertNotIn("mcp\\_runs", text)

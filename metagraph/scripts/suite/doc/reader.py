@@ -393,7 +393,7 @@ class Run(object):
                         problems.append("service_log time %s lies outside the run (%s to %s)" % (
                             t, min(r.get("started_utc") for r in self.rows if r.get("started_utc")),
                             max(r.get("ended_utc") or "" for r in self.rows)))
-        # the deployed commit from the deployment record (the deploy's LIVE line), with its source: the gate compares
+        # the deployed commit from the deployment record (the deploy's own record), with its source: the gate compares
         # the recorded identity with it (RV3, V3); a commit the run recorded otherwise is the gate's problem, not a
         # refusal here
         dep = data.get("deployed_service_commit")
