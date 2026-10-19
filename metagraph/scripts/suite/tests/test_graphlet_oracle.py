@@ -370,6 +370,27 @@ class ClaimsGoldens(unittest.TestCase):
         self.assertIn("/filtered", rec("graphlet_claims", {"arm": "right", "min_bp": 1}, "merge")["oracle"]
                       ["consistency_only"])                                          # the filters' order (PB3)
 
+    def test_route_filter_on_stamps(self):
+        """VO-B2: route_consistent filters on the claim's SPEC §7.1 merge stamp (T at a leaf, R inside), as phase A's
+        walks filter does (F2), not on where the displayed evidence begins. merge, with c.fa's leaf stamps raised to
+        10 (T and R): filtered, although its evidence begins at 0; an inner run whose R stamp and displayed stamp
+        disagree (both.fa's run closed at 36: R raised to 5, displayed 0) leaves the selection open."""
+        g, f, mgt = doc("merge")
+        f = copy.deepcopy(f)
+        arm = f["results"][0]["arms"]["right"]
+        arm["runs"][2]["route_bp"] = 10
+        for e in arm["paths"][0]["end_labels"]:
+            if e["run"] == 2:
+                e["route_bp"] = 10
+        r = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)["answer"]
+        self.assertEqual((r["filtered"], [x["label"]["name"] for x in r["rows"]]),
+                         ({"merge_entered": 3}, ["both.fa", "both.fa", "both.fa"]))
+        arm["runs"][4]["route_bp"] = 5
+        open_ = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
+        self.assertEqual(("/rows" in open_["oracle"]["consistency_only"], "rows" in open_["answer"]), (True, False))
+        self.assertEqual(len(O.answer("graphlet_claims", {"arm": "right", "route_consistent": False}, f, mgt)
+                             ["answer"]["rows"]), 6)          # without the filter nothing is open
+
     def test_switch_and_boundary(self):
         """caps: hZ entered by a switch from hY at 103 (cost 0.5) holds [103, 126); linear: acc2 present at the
         right boundary only, a zero-length run: a boundary claim without displayed bases (DESIGN §5.1, PB1)."""

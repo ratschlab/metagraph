@@ -1770,9 +1770,9 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
     order, its label, interval, route stamp, entry, switch source and cost, loss and branches (the engine's run),
     the end reason (the run's end_reason; the qualifier from R's end code), the path a leaf run ends on, and its
     displayed evidence (DESIGN §5.1, re-derived). Filters: labels (DESIGN §5), route_consistent (DESIGN §6: a claim
-    whose displayed support begins past its run, entered through a non-first parent, is left out and counted:
-    merge_entered; route_only when nothing of it is displayed), min_bp (its displayed support to_bp -
-    evidence_from at least: INVENTORY §2.11). Annotate claims (DESIGN §5.2.1's witness rule) are consistency-only."""
+    whose SPEC §7.1 merge stamp is above 0, T at a leaf and R inside, is left out and counted merge_entered: the
+    reading phase A's walks filter uses, F2, VO-B2; where R's and the displayed stamp disagree the selection is
+    consistency-only), min_bp (its displayed support to_bp - evidence_from at least: INVENTORY §2.11). Annotate claims (DESIGN §5.2.1's witness rule) are consistency-only."""
     side = d.arm(args.get("arm"), required=True)
     min_bp = _int_arg(args, "min_bp", 0, 0)
     rc = _bool_arg(args, "route_consistent", True)
@@ -1797,6 +1797,7 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
               if isinstance(e.get("run"), int)}
     rows, filtered, absent = [], {}, {}
     open_stamp = []
+    undecided = False
     for i, run in enumerate(d.runs(side)):
         if labs is not None and run["label"] not in labs:
             continue
@@ -1805,10 +1806,17 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
             return _record({"arm": side, "evidence": ev}, dict(ecl, **{"/arm": C_ARM_ECHO}),
                            cons + econ + ["/total", "/rows", "/filtered", "/rows/*/kind"],
                            note="a merge on a claim's chain states no partitions: consistency-only")
-        if rc and ef > run["from_bp"]:
-            k = "route_only" if ef >= run["to_bp"] else "merge_entered"
-            filtered[k] = filtered.get(k, 0) + 1
-            continue
+        if rc:
+            # one route filter for walks and claims (VO-B2, phase A F2): merge-entered where the claim's SPEC §7.1
+            # stamp is above 0 (a leaf label's T stamp, else the run's R stamp); where R's stamp and the displayed
+            # one (the evidence's merge part) disagree on that, no clause decides: the selection is open
+            stamp = leaf_t[i] if i in leaf_t else run.get("route_bp", 0)
+            other = leaf_t[i] if i in leaf_t else d.evidence_from(side, i, merge_part=True)
+            if (stamp > 0) != ((other or 0) > 0) or (i in leaf_t and (run.get("route_bp", 0) > 0) != (stamp > 0)):
+                undecided = True
+            if stamp > 0:
+                filtered["merge_entered"] = filtered.get("merge_entered", 0) + 1
+                continue
         if run["to_bp"] - ef < min_bp:
             continue
         code = d.end_code(side, i)
@@ -1841,6 +1849,11 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
             cons.append("/rows/%d/reason" % j)
         if "kind" not in row:   # DESIGN names the other kinds without defining them
             cons.append("/rows/%d/kind" % j)
+    if undecided:
+        return _record({"arm": side, "evidence": ev}, dict(ecl, **{"/arm": C_ARM_ECHO}),
+                       cons + econ + ["/total", "/rows", "/filtered", "/rows/*/kind"],
+                       note="route_consistent: a claim's R stamp and its displayed stamp disagree on a non-first-parent "
+                            "entry (PB2, VO-B2): which claims the filter keeps is open, consistency-only")
     ans: dict = {"arm": side, "total": len(rows), "rows": rows, "evidence": ev}
     if filtered and not min_bp:
         ans["filtered"] = filtered
@@ -1850,8 +1863,8 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
     clauses = {"/arm": C_ARM_ECHO,
                "/total": "SPEC §6.9: one claim per run end, the filters kept (DESIGN §5 labels; route_consistent and "
                          "min_bp on the displayed evidence, DESIGN §5.1, §6)",
-               "/filtered/*": "DESIGN §6: a filter never hides rows silently (merge_entered: displayed support begins "
-                              "past the run's start; route_only: none displayed); DESIGN §5.1",
+               "/filtered/*": "DESIGN §6: a filter never hides rows silently (merge_entered: the claim's SPEC §7.1 "
+                              "stamp is above 0, a leaf label's T stamp or the run's R stamp: phase A F2's reading)",
                "/rows/*/label": "the run's label (" + C_RUN + "); " + C_LABEL,
                "/rows/*/from_bp": C_RUN, "/rows/*/to_bp": C_RUN,
                "/rows/*/route_bp": "SPEC §7.1, §7.5.2 R route_bp: the run's earliest non-first-parent merge stamp "
@@ -1870,8 +1883,8 @@ def _graphlet_claims(d: _Doc, args: dict, ctx: dict) -> dict:
                "/rows/*/kind": "DESIGN §5.1: a run of zero length is a boundary claim"}
     clauses.update(ecl)
     red = ["/rows/*/evidence_from"]
-    if rc or min_bp:
-        red += ["/total", "/filtered/*", "/rows/*/label", "/rows/*/from_bp", "/rows/*/to_bp"]
+    if min_bp:   # min_bp selects on the displayed evidence (DESIGN §5.1, re-derived); the route filter on stamps
+        red += ["/total", "/rows/*/label", "/rows/*/from_bp", "/rows/*/to_bp"]
     partial = _cut_rows(ans, ctx, cons)
     return _record(ans, clauses, cons + econ, partial=partial, rederived=red)
 
