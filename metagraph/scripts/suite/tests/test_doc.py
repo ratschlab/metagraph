@@ -2770,7 +2770,8 @@ class RebasedFieldsTest(unittest.TestCase):
         word, how, summary = report.gate_headline_parts(verdict)
         main, _ = self.build("gated", gated)
         cover = main.split("\\coverbox{Run verdict}{", 1)[1].split("\n", 1)[0]
-        self.assertIn(latex.esc(report.exploratory_label("beside")), cover)
+        self.assertIn(latex.esc(sections.EXPLORATORY_LABEL), cover)
+        self.assertNotIn("which is the gate's beside", cover)
         gate_box = main.split("\\coverbox{Deploy gate}{", 1)[1].split("\n", 1)[0]
         self.assertIn("\\textbf{\\large %s}" % word, gate_box)
         self.assertIn(latex.esc(how), gate_box)

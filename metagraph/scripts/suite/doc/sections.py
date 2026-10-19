@@ -1328,8 +1328,13 @@ def verdict_line(ctx):
     word, _, rest = v.partition(" ")
     out = "\\textbf{\\large %s}\\ %s" % (esc(word), esc(rest, 400))
     if ctx.run.gated:
-        out += "\\\\{\\small %s}" % esc(report.exploratory_label("beside"))
+        out += "\\\\{\\small %s}" % esc(EXPLORATORY_LABEL)
     return out
+
+
+# the run verdict's label beside a deploy gate on the cover and in I.1, where the gate's box follows it (the reader
+# review of the v7 document, RV10: report.py's "which is the gate's beside" is not English to a first reader)
+EXPLORATORY_LABEL = "Exploratory verdict; the deploy decision is the gate's, below"
 
 
 def gate_summary(ctx):
