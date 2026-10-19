@@ -155,6 +155,8 @@ def table_problems(cases, blocks=None):
         if "mcp_outcome" in case:   # an answer_match key: a top-level one would be read by no matcher
             out.append("%s: mcp_outcome is an answer_match key (answer_match.mcp_outcome), not a case key" % cid)
         out.extend("%s: %s" % (cid, x) for x in case_request_problems(case, blocks))
+        if "graphlet" in case:
+            out.extend("%s: %s" % (cid, x) for x in graphlet_case_problems(case))
         if "answer_match" not in case:
             continue
         am = case["answer_match"]
@@ -197,6 +199,77 @@ def table_problems(cases, blocks=None):
             if judged_by_checks(case):
                 out.append("%s: answer_match.mcp_outcome on a %s case (the checks decide an answered / clamped case)"
                            % (cid, (case.get("service_answer") or {}).get("outcome")))
+    return out
+
+
+# An area G case (manifest v8, D-R12): a declared per-way difference of the graphlet tools, a pair of the library ways'
+# answer (W1, W2, W4) and the service's (W3) to one op call, verified as a pair by graphlet_service_checks. Its
+# `graphlet` block: tools (the graphlet tools it is about), args (optional: request predicates over the call's
+# args_resolved, path subjects only), library and service (each {"answered": true} or {"error": {"code": "a | b",
+# "fields": {...}}}; service may add "service_fields": {...}, values W3 must carry). Such a case is a by_design pair.
+GRAPHLET_CASE_KEYS = ("tools", "args", "library", "service")
+GRAPHLET_SIDE_KEYS = ("answered", "error", "service_fields")
+
+
+def _graphlet_side_problems(name, side):
+    if not isinstance(side, dict):
+        return ["graphlet.%s must be an object" % name]
+    out = []
+    unknown = sorted(set(side) - set(GRAPHLET_SIDE_KEYS))
+    if unknown:
+        out.append("graphlet.%s: unknown key(s) %s (a side states %s)" % (name, unknown, list(GRAPHLET_SIDE_KEYS)))
+    if ("answered" in side) == ("error" in side):
+        out.append("graphlet.%s states exactly one of answered (true) and error" % name)
+    if "answered" in side and side["answered"] is not True:
+        out.append("graphlet.%s.answered takes true" % name)
+    if "error" in side:
+        e = side["error"]
+        if not isinstance(e, dict) or not isinstance(e.get("code"), str) or not e["code"].strip():
+            out.append("graphlet.%s.error must be an object with a code (a string, alternatives a | b)" % name)
+        elif sorted(set(e) - {"code", "fields"}) or not isinstance(e.get("fields", {}), dict):
+            out.append("graphlet.%s.error states code and fields (an object) only" % name)
+    if "service_fields" in side and (name != "service" or not isinstance(side["service_fields"], dict)):
+        out.append("graphlet.%s.service_fields: an object, on the service side only" % name)
+    return out
+
+
+def _path_only(preds):
+    for p in preds:
+        if isinstance(p, dict) and "any" in p:
+            if not all(_path_only(alt) for alt in p.get("any") or [] if isinstance(alt, list)):
+                return False
+        elif not (isinstance(p, dict) and "path" in p and "{field}" not in str(p.get("path"))):
+            return False
+    return True
+
+
+def graphlet_case_problems(case):
+    """What the load validation refuses in a case's `graphlet` block (GRAPHLET_CASE_KEYS)."""
+    g = case.get("graphlet")
+    if not isinstance(g, dict):
+        return ["graphlet must be an object"]
+    out = []
+    unknown = sorted(set(g) - set(GRAPHLET_CASE_KEYS))
+    if unknown:
+        out.append("graphlet: unknown key(s) %s (it states %s)" % (unknown, list(GRAPHLET_CASE_KEYS)))
+    if case.get("agreement") != "by_design":
+        out.append("an area G case (graphlet) is a pair: agreement by_design, not %r" % case.get("agreement"))
+    tools = g.get("tools")
+    if not isinstance(tools, list) or not tools or not all(isinstance(t, str) and t.startswith(("graphlet_",
+                                                                                                  "traverse_"))
+                                                           for t in tools):
+        out.append("graphlet.tools must be a non-empty list of graphlet tool names")
+    if "args" in g:
+        args = g["args"]
+        if not isinstance(args, list) or not args:
+            out.append("graphlet.args must be a non-empty list of predicates")
+        else:
+            out.extend("graphlet.%s" % x for i, p in enumerate(args) for x in [request_problem(p, "args[%d]" % i)]
+                       if x)
+            if not _path_only(args):
+                out.append("graphlet.args: path predicates over args_resolved only (no field, service, host)")
+    for name in ("library", "service"):
+        out.extend(_graphlet_side_problems(name, g.get(name)))
     return out
 
 

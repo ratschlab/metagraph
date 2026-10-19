@@ -541,56 +541,62 @@ def input_digests(run_dir):
 
 
 def compare_run(run_dir, manifest=None, checks_mod=None, extra=None):
-    """graphlet_compare.json's content for a run directory (and the pre-check records it judged with)."""
+    """graphlet_compare.json's content for a run directory (and the pre-check records it judged with); |extra|: the
+    stages run after the per-op comparison and before the summary (STAGES)."""
     manifest = manifest if manifest is not None else sc.read_json(os.path.join(run_dir, "manifest.json"))
     recs, warnings, _ = gp.all_records(run_dir)
     prechecks = gp.prechecks(run_dir, manifest, recs, checks_mod)
     pre_by = dict((p["scenario"], p) for p in prechecks)
-    scenarios, per_tool, gaps, unplanned = {}, {}, {}, []
+    scenarios, gaps, unplanned = {}, {}, []
     planned = set()
     for scen in gp.graphlet_scenarios(manifest):
         sid = scen.get("id")
         ops = {}
         for op in gp.scenario_ops(scen):
             planned.add((sid, op["id"]))
-            e = compare_op(scen, op, recs, pre_by.get(sid), manifest)
-            ops[op["id"]] = e
-            t = per_tool.setdefault(op.get("tool"), dict((k, 0) for k in ("calls",) + OP_OUTCOMES +
-                                                         ("not_exposed", "smoke")))
-            t["calls"] += 1
-            t[e["outcome"]] = t.get(e["outcome"], 0) + 1
-            t["not_exposed"] += 1 if e["ways"].get("W3") == "not_exposed" else 0
-            t["smoke"] += 1 if e.get("smoke") else 0
+            ops[op["id"]] = compare_op(scen, op, recs, pre_by.get(sid), manifest)
             for w in gp.LIBRARY_WAYS:
                 r = recs.get(w, {}).get((sid, op["id"]))
                 for k in whitelist_gaps(op.get("tool"), (r or {}).get("answer")):
                     if k not in gaps.setdefault(op.get("tool"), []):
                         gaps[op.get("tool")].append(k)
-        scenarios[sid] = {"title": scen.get("title"), "precheck": pre_by.get(sid),
-                          "outcome": scenario_outcome(pre_by.get(sid), ops), "ops": ops}
+        scenarios[sid] = {"title": scen.get("title"), "precheck": pre_by.get(sid), "ops": ops}
     for way in WAYS:
         for key in recs.get(way, {}):
             if key not in planned:
                 unplanned.append({"way": way, "scenario": key[0], "op": key[1]})
-    counts = dict((k, 0) for k in OP_OUTCOMES)
-    for s in scenarios.values():
-        for e in s["ops"].values():
-            if not e.get("smoke"):
-                counts[e["outcome"]] = counts.get(e["outcome"], 0) + 1
     out = {"compare_version": COMPARE_VERSION, "generated_utc": sc.iso_utc(time.time()),
            "manifest": sc.manifest_identity(manifest), "inputs": input_digests(run_dir),
            "prechecks_sha256": hashlib.sha256(sc.canonical_json(prechecks)).hexdigest(),
            "whitelist_sha256": whitelist_sha256(), "warnings": warnings,
            "scenarios": scenarios, "unplanned_records": unplanned[:200],
-           "summary": {"scenarios": dict((k, sum(1 for s in scenarios.values() if s["outcome"] == k))
-                                         for k in SCENARIO_OUTCOMES),
-                       "ops": counts, "per_tool": per_tool, "whitelist_gaps": gaps,
-                       "unplanned_records": len(unplanned)},
+           "summary": {"whitelist_gaps": gaps, "unplanned_records": len(unplanned)},
            "coverage": coverage(recs), "drift": drift(recs)}
-    if extra:
-        for fn in extra:
-            fn(out, run_dir, manifest, recs, prechecks)
+    for fn in extra or ():
+        fn(out, run_dir, manifest, recs, prechecks)
+    summarise(out)
     return out, prechecks
+
+
+def summarise(result):
+    """Each scenario's outcome (scenario_outcome over its pre-check and ops), the op counts and the per-tool table
+    of |result|, from its ops as they stand (after the stages)."""
+    per_tool, counts = {}, dict((k, 0) for k in OP_OUTCOMES)
+    for s in result["scenarios"].values():
+        s["outcome"] = scenario_outcome(s.get("precheck"), s["ops"])
+        for e in s["ops"].values():
+            t = per_tool.setdefault(e.get("tool"), dict((k, 0) for k in ("calls",) + OP_OUTCOMES +
+                                                        ("not_exposed", "smoke")))
+            t["calls"] += 1
+            t[e["outcome"]] = t.get(e["outcome"], 0) + 1
+            t["not_exposed"] += 1 if e["ways"].get("W3") == "not_exposed" else 0
+            t["smoke"] += 1 if e.get("smoke") else 0
+            if not e.get("smoke"):
+                counts[e["outcome"]] = counts.get(e["outcome"], 0) + 1
+    result["summary"].update({"scenarios": dict((k, sum(1 for s in result["scenarios"].values()
+                                                        if s["outcome"] == k)) for k in SCENARIO_OUTCOMES),
+                              "ops": counts, "per_tool": per_tool})
+    return result
 
 
 def whitelist_sha256():
@@ -605,6 +611,7 @@ STAGES = []
 def compute(run_dir, manifest=None, write=True, out_path=None):
     """Compares a run's area G (compare_run with STAGES) and writes graphlet_compare.json and the pre-check records
     (unless not |write|); returns the comparison."""
+    _load_stages()
     result, prechecks = compare_run(run_dir, manifest, extra=STAGES)
     if write:
         gp.write_prechecks(run_dir, prechecks)
@@ -637,7 +644,6 @@ def main(argv=None):
     if not isinstance(manifest, dict):
         sys.stderr.write("compare_graphlets.py: %s has no manifest.json\n" % a.run_dir)
         return 2
-    _load_stages()
     result = compute(a.run_dir, manifest, out_path=a.out)
     s = result["summary"]
     sys.stdout.write("graphlet compare %s: scenarios %s; ops %s\n" % (
