@@ -90,8 +90,9 @@ checked (VO7); refusals are expected errors with their code [L].
       ceiling_bytes, truncated/next_from/to of a cut slice, left-arm walk orientation with the seed
   graphlet_export: fasta records, ids and sequences [D §5 to_fasta, S §7.5.4]; gfa P count and the walks the paths
       spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37]; json what=walk chains (arm and
-      walks required [L §2.13]); mgt body digest [S §7.5.2, FORMAT §3]; no bases: an expected error [S §7.1] | c/o:
-      header tags, gfa S/L lines and gfa with arm, records of gfa/json/mgt, what=compare, fasta walks without arm
+      walks required [L §2.13]); mgt body digest [S §7.5.2, FORMAT §3]; fasta without bases: an expected error [L] | c/o:
+      header tags, gfa S/L lines, gfa with arm or without bases, records of gfa/json/mgt, what=compare, fasta walks
+      without arm
   graphlet_subtrie: view selectors, mode, arm, summary labels, per-arm complete_to_bp, scope, qualified [D §5
       subgraph] | c/o: the view's walk and segment counts; every tool on the view handle
   graphlet_save / graphlet_load: the saved text's body digest and its graphlet_arms (round trip) [S §7.5.2];
@@ -153,8 +154,8 @@ C_SPELL = "SPEC §7.5.4 natural orientation (right flank root -> leaf, left flan
 
 C_BAD_ARM = "library-defined: an arm not retrieved, or none of two, is bad_arm (INVENTORY §1.5)"
 C_NO_BASES = "SPEC §7.1 sequences: false omits the strings; the code no_bases is library-defined (INVENTORY §2.12)"
-C_NO_BASES_EXPORT = "SPEC §7.1 sequences: false omits the strings, so no walk can be written; the code is " \
-                    "library-defined"
+C_NO_BASES_EXPORT = "library-defined: the tool refuses a FASTA of a retrieval whose strings SPEC §7.1 omits " \
+                    "(sequences: false), with a code of its own"
 C_WHOLE_LIST = "the whole list W5 derives (every page assembled, FORMAT-v8 §3): no element beyond it"
 C_BAD_ARG = "library-defined: an argument outside the tool's domain is bad_argument (INVENTORY §1.1)"
 
@@ -1400,7 +1401,9 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
         for s in d.sides:
             fl = d.flanks(s)
             if fl is None:
-                raise _Refused("gfa of a retrieval without bases", None, C_NO_BASES_EXPORT)
+                # a GFA 1.0 file can carry `*` sequences: whether the tool writes one or refuses is its own choice
+                return _record({}, {}, cons + ["/records", "/gfa"], note="gfa of a retrieval without bases: "
+                                                                         "consistency-only (GFA allows `*`)")
             mols += [d.molecule(s, f) for f in fl]
         return _record({"gfa": {"n_paths": len(mols), "paths": sorted(mols)}},
                        {"/gfa/n_paths": "DESIGN §5 to_gfa: one P line per walk (both arms)",

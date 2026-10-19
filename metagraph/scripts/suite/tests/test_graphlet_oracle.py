@@ -418,9 +418,14 @@ class RecordSemantics(unittest.TestCase):
         self.assertEqual(O.compare(err, r["answer"])["outcome"], "disagree")
         ph = O.answer("graphlet_claims", {"arm": "right"}, f, mgt)
         self.assertEqual(O.compare(ph, {"rows": []})["outcome"], "not_checked")
-        # no bases (sequences: false): no FASTA (SPEC §7.1), any code; a record checking nothing makes no claim
+        # no bases (sequences: false): the tool refuses a FASTA (library-defined, any code); a GFA may carry `*`
+        # sequences, so W5 makes no claim there; a record checking nothing makes no claim
         fa = O.answer("graphlet_export", {"format": "fasta"}, f, mgt)
         self.assertEqual((fa["oracle"]["declared"], fa["oracle"]["expected_error"]), ("expected_error", None))
+        self.assertIn("library-defined", fa["oracle"]["note"])
+        gfa = O.answer("graphlet_export", {"format": "gfa"}, f, mgt)
+        self.assertEqual((gfa["oracle"]["checked"], O.compare(gfa, {"error": "bad_argument"})["outcome"]),
+                         ({}, "not_checked"))
         nothing = O.answer("graphlet_export", {"format": "gfa", "arm": "right"}, f, mgt)
         self.assertEqual(O.compare(nothing, {"error": "bad_argument"})["outcome"], "not_checked")
 
