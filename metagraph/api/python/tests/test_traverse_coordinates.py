@@ -436,8 +436,8 @@ class TestRejects(unittest.TestCase):
 class TestGolden(unittest.TestCase):
     """Every public operation and tool over the snapshots: the digests recorded with this
     library (data/traverse/golden/coordinates.json.gz; the opt-out gate over the committed
-    real fixtures, committed.json.gz, is test_traverse_speedups's and is unchanged). An
-    intended change of a coordinate output records them again (traverse_golden.py --out
+    real fixtures, committed.json.gz, is test_traverse_speedups's). An intended change of
+    a coordinate output records them again (traverse_golden.py --out
     data/traverse/golden/coordinates.json.gz data/traverse/coords
     data/traverse/real/mini_refseq/*__trace_coords*.graphlet.json.gz)."""
 

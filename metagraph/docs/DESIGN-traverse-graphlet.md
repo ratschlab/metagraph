@@ -402,8 +402,8 @@ the same hash, and a per-ref name check agrees too. So:
   loads it with `--index-manifest`.
 - `index_ns` (`--index-name`) names the index for humans and routing; it is not identity.
 - Without a manifest the server reports `index_fp: *`, and everything that joins labels across retrievals reports
-  *unverifiable* — never equal. The metadata hash is kept as `index_meta_fp`: a cheap **negative** check (a mismatch
-  proves different indexes), never a positive one.
+  *unverifiable* (or a weaker verdict, §5.2.5) — never equal. The metadata hash is kept as `index_meta_fp`: a cheap
+  **negative** check (a mismatch proves different indexes), never a positive one.
 - Tested: two indexes over the same records with identical counts and column names but swapped memberships get
   different `index_fp` and compare `unverifiable`/`different`, never equal; `scripts/traversal/build_mini_refseq.sh`
   writes the manifest so the fixture exercises the positive path.
@@ -621,9 +621,15 @@ for s in segments in id order:                                   # parents prece
 4. **Identity.** With a manifest on one side only, continue and replay refuse with `index_unverifiable` ("cannot be
    verified, not proven different"). A fallback needs the explicit opt-in `allow_unverified_index` (default off).
 5. **Comparison at a depth.** The DAG is restricted to the comparison depth, and merges at or beyond it are left out
-   (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`. Above
-   64 labels, "qualified" can come from the per-node label limit (`max_labels_per_node`), which the docs of
-   `compare()` state. Record coordinates are noted, never compared or clipped by `compare()`.
+   (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`, and so
+   does no common certified depth (`complete_to_bp` 0 on a side). The verdict is the weakest any rule gives
+   (`unknown` is weaker than `unverifiable`), and of the rules giving it the first in order decides (no common depth
+   before missing bases). `reason` is the deciding rule's fixed phrase (at most 80 bytes; a statement with values, a
+   namespace, release or label name, where it fits); `notes` state every other rule that applied (a missing
+   `index_fp` a weaker verdict decided over as a short note), and the deciding rule only where its reason says less,
+   so nothing is said twice. Above 64 labels, "qualified" can come from the per-node label limit
+   (`max_labels_per_node`), which the docs of `compare()` state. Record coordinates are noted, never compared or
+   clipped by `compare()`.
 6. **The displayed parent at a merge** is the server's (§11); the library checks the rule as it stands
    (`derive.carried_labels`) and never re-ranks parents.
 
@@ -722,23 +728,24 @@ summary + handle` (the probe is this with tight bounds); `traverse_continue(hand
 execute=True) -> new summary + parent:{handle, arm, walk, overlap_bp}` (or the request when `execute=False`).
 
 Local over a handle: `graphlet_summary(handle, arm?, detail?)` (`detail='limitations'`); `graphlet_walks(handle, arm,
-rank=support|length|loss, n=10, min_bp=0, label?, spell=none|tail|full, tail_bp=60, route_consistent)`;
-`graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, continuation; the chain is
-paged by `cursor` like a list); `graphlet_support(handle, arm, walk, step?)` (support runs with who left/joined and
-the reason: a `K`-coded end or "split: N labels took C"); `graphlet_labels(handle, arm?, rank=direct_bp|reach_bp,
-n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that label's runs/routes incl. merge routes);
-`graphlet_splits(handle, arm, n=10, min_labels_before=2)`; `graphlet_claims(handle, arm, min_bp=0,
-route_consistent=True, labels?)`; `graphlet_sequence(handle, arm, walk|segment, from, to, orientation, with_seed)`
-(≤ 16 KiB slice); `graphlet_export(handle, format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes,
-records}`; `graphlet_compare(a, b, arm, mode, cursor?) -> Comparison dict` (preconditions: same index identity
-(§3.1) and the same oriented seed sequence, else `comparable: false`; differing completeness scopes →
-`comparable: qualified`; returns the counts and the first page of `only_in_a` / `only_in_b` / `differ`, with
-`next_cursor`; `graphlet_export(format=json, what=compare|walk, …)` writes the complete lists to a file — a truncated
-field is always recoverable by cursor or export); `graphlet_subtrie(handle, labels, arm?) -> derived handle`;
-`graphlet_list/free/save/load`. Unknown handle → "replay with traverse_fetch(replay=<handle>)" (the store keeps the
-request). Rows carry `labels_in_total`/`labels_out_total`/`n_labels_total`. `graphlet_claims` rows always carry
-record coordinates when the graphlet has them; `graphlet_walks` / `graphlet_labels` only with `coordinates=true`
-(§18.3).
+rank=support|length|loss, n=10, min_bp=0, label?, spell=none|tail|full, tail_bp=60, route_consistent)` (a tail is
+the walk's `tail_bp` outermost bases, the last on the right arm and the first on the left: none for 0);
+`graphlet_walk(handle, arm, walk, cursor?)` (segment chain, labels in/out per segment, label ends by `at_bp` and
+equal positions by label id, continuation; the chain is paged by `cursor` like a list); `graphlet_support(handle,
+arm, walk, step?)` (support runs with who left/joined and the reason: a `K`-coded end or "split: N labels took C");
+`graphlet_labels(handle, arm?, rank=direct_bp|reach_bp, n=20, min_direct_bp=0, at_bp?, name?)` (table; `name` → that
+label's runs/routes incl. merge routes); `graphlet_splits(handle, arm, n=10, min_labels_before=2)`;
+`graphlet_claims(handle, arm, min_bp=0, route_consistent=True, labels?)`; `graphlet_sequence(handle, arm,
+walk|segment, from, to, orientation, with_seed)` (≤ 16 KiB slice); `graphlet_export(handle,
+format=fasta|gfa|json|mgt, arm?, walks?, path) -> {path, bytes, records}`; `graphlet_compare(a, b, arm, mode,
+cursor?) -> Comparison dict` (preconditions: same index identity (§3.1) and the same oriented seed sequence, else
+`comparable: false`; differing completeness scopes → `comparable: qualified`; returns the counts and the first page
+of `only_in_a` / `only_in_b` / `differ`, with `next_cursor`; `graphlet_export(format=json, what=compare|walk, …)`
+writes the complete lists to a file — a truncated field is always recoverable by cursor or export);
+`graphlet_subtrie(handle, labels, arm?) -> derived handle`; `graphlet_list/free/save/load`. Unknown handle → "replay
+with traverse_fetch(replay=<handle>)" (the store keeps the request). Rows carry
+`labels_in_total`/`labels_out_total`/`n_labels_total`. `graphlet_claims` rows always carry record coordinates when
+the graphlet has them; `graphlet_walks` / `graphlet_labels` only with `coordinates=true` (§18.3).
 
 Errors are structured results with codes such as `unknown_label`, `backend_error`, `backend_unreachable`,
 `io_error`, `path_not_allowed`, `not_replayable`, `view_unsupported`, `not_in_view`, `result_too_large`,

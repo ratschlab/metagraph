@@ -1610,7 +1610,9 @@ class GraphletTools:
     def graphlet_walks(self, handle, arm, rank='support', n=10, min_bp=0, label=None,
                        spell='none', tail_bp=60, route_consistent=True, cursor=None,
                        max_bytes=None, budget=None, coordinates=False):
-        """The arm's walks ranked, a page at a time. coordinates=true (a retrieval with
+        """The arm's walks ranked, a page at a time. spell='tail' spells each walk's
+        tail_bp outermost bases (the last on the right arm, the first on the left; 0: an
+        empty tail), spell='full' the whole walk. coordinates=true (a retrieval with
         record coordinates; no_coordinates otherwise): each row also gives, per label of
         labels_full shown, the occurrences of its run reaching the leaf (ref, the first 4
         [start, end], total, truncated, lower_bound when true)."""
@@ -1642,7 +1644,9 @@ class GraphletTools:
             if spell != 'none' and w.sequence is not None:
                 s = w.sequence
                 if spell == 'tail':
-                    s = s[-tail_bp:] if a.side == 'right' else s[:tail_bp]
+                    # the tail_bp outermost bases: the last on the right arm, the first on
+                    # the left (never s[-0:], the whole flank: a tail of 0 is empty)
+                    s = s[max(0, len(s) - tail_bp):] if a.side == 'right' else s[:tail_bp]
                 row['sequence'] = s
             if coordinates and w.coordinates is not None:
                 row['coordinates'] = [
@@ -1751,7 +1755,8 @@ class GraphletTools:
     @staticmethod
     def _walk_rows(g, a, p, cut=_LABELS_IN_ROW, out=None, start=0, b=None, chain=None):
         """One row per segment of walk |p|: labels in and out with their TRUE totals (a
-        recorded list may be cut: entry_total, the last P total), merges, label ends.
+        recorded list may be cut: entry_total, the last P total), merges, label ends (by
+        at_bp, equal positions by label id; the first |cut| of them).
         |b| (local limits): each row charged before it is built, appended to |out| from chain
         position |start|."""
         rows = [] if out is None else out
@@ -1761,7 +1766,8 @@ class GraphletTools:
             if b is not None:
                 n = min(len(s.entry), cut or len(s.entry)) + min(len(s.end), cut or len(s.end))
                 ne = len(lee.get(sid, ()))
-                b.charge(_B.W_ROW + n + 2 * ne,
+                # the ends sorted by position (DESIGN §5.4: a sort is charged as one)
+                b.charge(_B.W_ROW + n + 2 * ne + (_B.sort_work(ne) if ne > 1 else 0),
                          _B.dict_bytes(12) + (n + min(ne, cut or ne)) * _B.dict_bytes(3))
             out_total = (s.presence[-1].total if s.presence else s.entry_total) \
                 if g.mode != 'constrain' else len(s.end)
@@ -1773,7 +1779,11 @@ class GraphletTools:
                    'out': _labels_json([g.labels[l] for l in s.end], cut)}
             if len(s.parents) > 1:
                 row['merge_of'] = list(s.parents)
-            ends = [a.runs[r] for r in derive.label_end_events(a).get(sid, ())]
+            # by position (SPEC §7.1, DESIGN §2.5), equal positions by label id (the order
+            # of end_labels): the order among equal positions is not information, so the
+            # ends a cut row shows must not follow the run numbering
+            ends = sorted((a.runs[r] for r in derive.label_end_events(a).get(sid, ())),
+                          key=lambda r: (r.to_bp, r.label, r.id))
             if ends:
                 row['ends'] = [dict(g.labels[r.label].as_dict(), at_bp=r.to_bp,
                                     why=r.event_reason)
@@ -2101,7 +2111,9 @@ class GraphletTools:
     def graphlet_sequence(self, handle, arm, walk=None, segment=None, start=0, end=None,
                           orientation='natural', with_seed=False, budget=None):
         """A slice [start, end) of a walk's (or a segment's) bases, at most 16 KB; the
-        result states the ceiling and where to continue."""
+        result states the ceiling and where to continue. A cut slice carries at least one
+        base: where not one fits beside the frame (a small ceiling), the answer is
+        result_too_large."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         if (walk is None) == (segment is None):
@@ -2156,7 +2168,12 @@ class GraphletTools:
         if _size(out) > room:
             # the ceiling holds for the whole result, the continuation keys included
             frame = _size(dict(out, sequence='', truncated=True, to=end, next_from=end))
-            part = part[:max(0, room - frame)]
+            if room - frame < 1:
+                # not one base fits beside the frame: a slice cannot be made to fit, so
+                # the whole one is answered and the wrapper refuses it (result_too_large)
+                # where it does not fit -- never an empty slice whose next_from is its from
+                return out
+            part = part[:room - frame]
             out.update(sequence=part, truncated=True, to=start + len(part),
                        next_from=start + len(part))
         return out

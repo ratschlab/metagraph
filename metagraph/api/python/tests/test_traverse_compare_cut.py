@@ -140,14 +140,14 @@ class TestCompareStopCut(unittest.TestCase):
         self.assertIn('local', full)
         self.assertNotIn('fields_cut', full)
         # where the answer fits (its local block compacted), it is answered unchanged
-        for mb in (None, 1500, 1264):
+        for mb in (None, 1500, 1258):
             with _Uncut():
                 before = self.tools.graphlet_compare(self.a, self.b, max_bytes=mb)
             self.assertNotIn('error', before)
             self.assertEqual(json.dumps(before),
                              json.dumps(self.tools.graphlet_compare(self.a, self.b, max_bytes=mb)))
         # where it was refused, the evidence (then the export hint) gives way
-        for mb, cuts in ((1263, ['evidence']), (1100, ['evidence']), (500, ['evidence', 'export'])):
+        for mb, cuts in ((1257, ['evidence']), (1100, ['evidence']), (500, ['evidence', 'export'])):
             with _Uncut():
                 self.assertEqual('result_too_large',
                                  self.tools.graphlet_compare(self.a, self.b, max_bytes=mb)['error'])

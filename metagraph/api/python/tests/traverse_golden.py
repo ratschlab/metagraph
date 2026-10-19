@@ -410,6 +410,86 @@ def all_digests(T, items, budget=None, tools=True):
     return out
 
 
+# ------------------------------------------------------------------ compare page shapes
+
+# the sizes the compare size gate pages at (None: the tool's default)
+SHAPE_SIZES = (None, 950, 1024, 2048, 1 << 22)
+
+
+def compare_page_shapes(T):
+    """graphlet_compare's first page over the compare size gate's pairs (VERIFY-F R2-1, the
+    verifier's probe_tool_all2.py): per seed, every retrieval of the committed real,
+    review3 and coords sets and of the CLI documents (as made, and with an index_fp) with
+    itself, with each other and with itself without its bases, and each without bases with
+    itself; plus merge and annotate at level 5 vs 6 -- 4 modes x SHAPE_SIZES ->
+    {'a|b:mode:max_bytes': [error, rows, next_cursor, fields_cut, row_truncated, the bytes
+    of the answer without rows, next_cursor and total]}."""
+    import importlib
+    import itertools
+    import traverse_testlib as TL
+    from test_traverse_regressions import without_bases
+    tools_mod = importlib.import_module(T.__name__ + '.mcp_tools')
+    graphs = []
+    for pat in ('real/*/*.graphlet.json.gz', 'review3/*.graphlet.json',
+                'coords/*.graphlet.json.gz'):
+        for path in sorted(glob.glob(os.path.join(DATA, pat))):
+            d = read_json(path)
+            resp = d['response'] if isinstance(d.get('response'), dict) else d
+            for i, r in enumerate(resp.get('results') or []):
+                if isinstance(r, dict) and isinstance(r.get('graphlet'), str):
+                    key = '%s#%d' % (os.path.relpath(path, DATA), i)
+                    graphs.append((key, T.from_response(r, resp)))
+    for path in sorted(glob.glob(os.path.join(DATA, 'documents', '*.mgt'))):
+        name = os.path.basename(path)[:-4]
+        text = TL.read(path)
+        graphs.append(('doc:' + name, T.parse(text)))
+        graphs.append(('docfp:' + name, T.parse(text.replace(
+            ' walk fixtures * ', ' walk fixtures %s ' % ('cd' * 32), 1))))
+    bare = []
+    for key, g in graphs:
+        try:
+            bare.append(('bare:' + key, without_bases(g)))
+        except Exception:
+            pass
+    out = {}
+    with tempfile.TemporaryDirectory() as d:
+        store = T.GraphletStore(d)
+        tools = tools_mod.GraphletTools(store)
+        hs = {key: (store.put_graphlet(g), g.seed.sequence) for key, g in graphs + bare}
+        for name in ('merge', 'annotate'):
+            new = TL.graphlet(name)
+            with open(os.path.join(DATA, 'r21', name + '_level5.graphlet.json'),
+                      encoding='utf-8') as f:
+                j = json.load(f)
+            old = T.from_response(j['results'][0], j)
+            for g in (new, old):
+                g.index_fp = 'f' * 64
+            hs['dp6:' + name] = (store.put_graphlet(new), None)
+            hs['dp5:' + name] = (store.put_graphlet(old), None)
+        by = {}
+        for key, (h, seq) in hs.items():
+            if seq is not None and not key.startswith('bare:'):
+                by.setdefault(seq, []).append(key)
+        pairs = []
+        for ks in by.values():
+            pairs += [(k, k) for k in ks] + list(itertools.combinations(ks, 2))
+            pairs += [(k, 'bare:' + k) for k in ks if 'bare:' + k in hs]
+            pairs += [('bare:' + k, 'bare:' + k) for k in ks if 'bare:' + k in hs]
+        pairs += [('dp5:merge', 'dp6:merge'), ('dp5:annotate', 'dp6:annotate')]
+        for ka, kb in pairs:
+            for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
+                for mb in SHAPE_SIZES:
+                    o = tools.graphlet_compare(hs[ka][0], hs[kb][0], mode=mode, max_bytes=mb)
+                    base = {k: v for k, v in o.items()
+                            if k not in ('rows', 'next_cursor', 'total')}
+                    out['%s|%s:%s:%s' % (ka, kb, mode, mb)] = [
+                        o.get('error'), len(o.get('rows') or []), 'next_cursor' in o,
+                        o.get('fields_cut'), bool(o.get('row_truncated')),
+                        len(json.dumps(base, separators=(',', ':'),
+                                       ensure_ascii=False).encode('utf-8'))]
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('inputs', nargs='*')
@@ -417,6 +497,8 @@ def main(argv=None):
     ap.add_argument('--out')
     ap.add_argument('--no-tools', action='store_true')
     ap.add_argument('--diff', nargs=2)
+    ap.add_argument('--compare-shapes', action='store_true',
+                    help='record compare_page_shapes() instead of the digests')
     args = ap.parse_args(argv)
     if args.diff:
         a, b = (read_json(p) for p in args.diff)
@@ -428,8 +510,12 @@ def main(argv=None):
     sys.dont_write_bytecode = True
     sys.path.insert(0, os.path.abspath(args.lib))
     import metagraph.traverse as T
-    items = items_of(args.inputs or golden_files(), base=None if args.inputs else DATA)
-    out = all_digests(T, items, tools=not args.no_tools)
+    if args.compare_shapes:
+        items = []
+        out = compare_page_shapes(T)
+    else:
+        items = items_of(args.inputs or golden_files(), base=None if args.inputs else DATA)
+        out = all_digests(T, items, tools=not args.no_tools)
     text = json.dumps(out, indent=0, sort_keys=True)
     if args.out and args.out.endswith('.gz'):
         # mtime 0: the same digests make the same file

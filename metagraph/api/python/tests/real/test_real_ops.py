@@ -1651,9 +1651,11 @@ class TestCompare(unittest.TestCase):
                     if not has_bases(g) and mode != 'labels':
                         # claims and walks are keyed by their displayed bases: without
                         # them they cannot be matched (unknown, the reason naming
-                        # output.sequences) -- stated, never guessed
+                        # output.sequences, or the notes when no common depth decided
+                        # it) -- stated, never guessed
                         want = max(want, 'unknown', key=_rank)
-                        self.assertIn('output.sequences', cmp.reason)
+                        self.assertIn('output.sequences', cmp.reason if cmp.depth_used
+                                      else ' '.join(cmp.notes))
                     self.assertEqual(want, cmp.comparable, cmp.notes)
                     self.assertEqual(True if want is True else None, cmp.equal)
             n += 1
@@ -1716,7 +1718,8 @@ class TestCompare(unittest.TestCase):
                         self.assertEqual(('unknown', None), (cmp.comparable, cmp.equal))
                         self.assertEqual(([], [], []),
                                          (cmp.only_in_a, cmp.only_in_b, cmp.differ))
-                        self.assertIn('output.sequences', cmp.reason)
+                        self.assertIn('output.sequences', cmp.reason if cmp.depth_used
+                                      else ' '.join(cmp.notes))
             n += 1
         self.assertGreater(n, 0)
 
@@ -1752,8 +1755,8 @@ class TestCompareAtDepthZero(unittest.TestCase):
                         cmp = x.compare(y, arm='right', mode=mode)
                         self.assertEqual(('unknown', None, 0),
                                          (cmp.comparable, cmp.equal, cmp.depth_used))
-                        self.assertIn('no common certified depth (complete_to_bp 0 on a or b)',
-                                      cmp.notes)
+                        self.assertEqual('no common certified depth (complete_to_bp 0 on a or b)',
+                                         cmp.reason)
             n += 1
         if n == 0:
             self.skipTest('no server up')

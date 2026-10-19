@@ -565,7 +565,10 @@ class TestCompareCli(unittest.TestCase):
         for mode in ('claims', 'walks', 'labels', 'prefix_subset'):
             c = g.compare(g, mode=mode)
             self.assertEqual(('unknown', None, 0), (c.comparable, c.equal, c.depth_used))
-            self.assertIn('no common certified depth (complete_to_bp 0 on a or b)', c.notes)
+            # the rule that decided is the reason, and not repeated in the notes
+            self.assertEqual('no common certified depth (complete_to_bp 0 on a or b)',
+                             c.reason)
+            self.assertNotIn(c.reason, c.notes)
 
 
 class TestExports(unittest.TestCase):
