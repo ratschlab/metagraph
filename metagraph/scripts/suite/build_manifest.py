@@ -158,7 +158,7 @@ def snapshot_digests(directory: str) -> dict:
 def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES,
           exposure_file: Optional[str] = DEFAULT_EXPOSURE, manifest_version: int = MANIFEST_VERSION,
           corpus_file: Optional[str] = None, library_commit: Optional[str] = None,
-          include_direct_only: bool = True) -> dict:
+          include_direct_only: bool = True, stop_scenarios: bool = False) -> dict:
     if manifest_version not in BUILDABLE_VERSIONS:
         raise SystemExit("manifest version %r: this builder makes %s" % (
             manifest_version, " and ".join("v%d" % v for v in BUILDABLE_VERSIONS)))
@@ -223,6 +223,10 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         g_problems, pending = area_g.validate_g(g, _table_cases())
         graphlets = {"corpus": _corpus_identity(corpus_file, corpus), "library_commit": library_commit,
                      "include_direct_only": include_direct_only, "pending": pending, "summary": area_g.summary(g)}
+        if stop_scenarios:
+            # the owner's decision: only once async's MCP runner has the stop flow (--stop-scenarios)
+            scenarios += areas.gen_stop(ctx, seeds_from)
+            graphlets["stop_scenarios"] = list(areas.STOP_IDS)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios) + \
@@ -906,6 +910,9 @@ def main(argv=None) -> int:
                          "default (the owner, 2026-10-19)")
     ap.add_argument("--no-direct-only", dest="include_direct_only", action="store_false",
                     help="v8: leave the direct-only area G slots out")
+    ap.add_argument("--stop-scenarios", action="store_true",
+                    help="v8: append the two stop scenarios (traverse_stop via MCP on a running /traverse and "
+                         "/resolve; mcp.flow), only once async's MCP runner has the stop flow (the owner, 2026-10-19)")
     ap.add_argument("--freeze", action="store_true",
                     help="v8: allow the default outputs manifest/suite_v8.json / suite_smoke_v8.json (the owner's "
                          "freeze)")
@@ -979,7 +986,8 @@ def main(argv=None) -> int:
             raise SystemExit(why)
     m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities,
               exposure_file=args.exposure or None, manifest_version=args.manifest_version, corpus_file=args.corpus,
-              library_commit=args.library_commit, include_direct_only=args.include_direct_only)
+              library_commit=args.library_commit, include_direct_only=args.include_direct_only,
+              stop_scenarios=args.stop_scenarios)
     if only:
         m["partial_build"] = True
     write(args.out, m)

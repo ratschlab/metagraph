@@ -441,6 +441,29 @@ class PlansOnRealGraphlets(unittest.TestCase):
 
 
 @unittest.skipUnless(have_cache(), "no record cache")
+class StopScenarios(unittest.TestCase):
+    """The owner's decision of 2026-10-19: the stop scenarios enter only with --stop-scenarios (async's flow)."""
+
+    def test_two_flow_scenarios(self):
+        import build_manifest as bm
+        recs = truth.load_with_sequences(fetch=False)
+        ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
+        out = areas_mod().gen_stop(ctx, v7_scenarios())
+        self.assertEqual([s["id"] for s in out], list(areas_mod().STOP_IDS))
+        walk, res = out
+        self.assertEqual(walk["route"], "POST /traverse")
+        self.assertEqual(walk["mcp"]["tool"], "traverse_fetch")
+        self.assertEqual(walk["mcp"]["flow"]["kind"], "stop")
+        self.assertTrue(walk["mcp"]["flow"]["expect"]["stop_answer"]["cancel_supported"])
+        self.assertEqual(len(walk["request"]["seeds"][0]["sequence"]), 6600)
+        self.assertEqual(res["route"], "POST /resolve")
+        self.assertEqual(res["mcp"]["tool"], "traverse_resolve")
+        self.assertFalse(res["mcp"]["flow"]["expect"]["stop_answer"]["cancel_supported"])
+        self.assertEqual(len(res["request"]["sequence"]), 500)
+        self.assertEqual(bm.validate(out), [])
+
+
+@unittest.skipUnless(have_cache(), "no record cache")
 class BuiltV8(unittest.TestCase):
     def test_v8_is_v7_with_t_walk_0024s_warm_ups_then_area_g(self):
         # the owner's decisions of 2026-10-19: v8 differs from v7 only by T-walk-0024's warm-ups and area G
