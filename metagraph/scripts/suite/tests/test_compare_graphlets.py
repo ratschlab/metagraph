@@ -902,6 +902,9 @@ class FiveWay(unittest.TestCase):
                 self.assertEqual(e["outcome"], "inconclusive", e)
             else:
                 self.assertEqual(e["outcome"], "agree", e)
+                # R2-7: the entry states W4's reason, W3 running
+                self.assertEqual(e["not_exposed"], {"W4": "the service keeps no document for a failed seed"})
+                self.assertEqual((e["ways"]["W4"], e["ways"]["W3"]), ("not_exposed", "error"))
                 self.assertEqual(res["scenarios"][SID]["outcome"], "pass", res["scenarios"][SID])
             self.run_.cleanup()
             self.run_ = None
