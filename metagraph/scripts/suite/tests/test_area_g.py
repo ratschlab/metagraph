@@ -693,6 +693,22 @@ class StopScenarios(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class Defaults(unittest.TestCase):
+    """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
+    service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2)."""
+
+    def test_the_defaults_agree(self):
+        import inspect
+        import build_manifest as bm
+        import compare as cmp
+        for fn in (areas_mod().gen_G, area_g.gen_G, area_g.choose, bm.build):
+            self.assertIs(inspect.signature(fn).parameters["include_direct_only"].default, True, fn.__name__)
+        self.assertTrue(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[1]["service_commit"].startswith("22d034ba"))
+        gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
+        self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
+        self.assertEqual(set(c.get("source_commit") for c in gcases.values()) - {None}, {ginfo["service_commit"]})
+
+
 class Freeze(unittest.TestCase):
     """VERIFY-D VD12: --freeze refuses a provisional corpus and anything still pending."""
 

@@ -2651,7 +2651,7 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
 
 # ================================================================================================= G: graphlet tools (v8)
 def gen_G(ctx: Ctx, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,
-          include_direct_only: bool = False) -> List[dict]:
+          include_direct_only: bool = True) -> List[dict]:
     """Area G of manifest v8 (DESIGN-v8 §3-§5, FORMAT-v8 §1-§2): the graphlet processing tools five ways on the
     corpus of graphlets the rehearsal chose (|corpus|, rehearse_g.py; provisional without one), each scenario a
     `detail: graphlet` request with the exact merged strategy the service sends, its MCP mapping (traverse_fetch with
