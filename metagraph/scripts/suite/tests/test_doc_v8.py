@@ -289,6 +289,16 @@ class ChapterGReadingV8Test(unittest.TestCase):
         self.assertIn("graphlet tools answer alike", cm["G"])
         self.assertIn("traverse_stop", cm["S"])
 
+    def test_mcp_only_pairs_counted(self):
+        import sections
+        entries = {"S-stop-0001": {"mcp_agreement": {"class": "no_direct_reference", "mcp_outcome": "pass"}},
+                   "S-base-0001": {"mcp_agreement": {"class": "not_implemented_mcp"}}}
+        run = _Stub(comp_entry=lambda sid: entries[sid], depth={})
+        _, mtext = sections._agreement_counts(_Stub(run=run), ["S-stop-0001", "S-base-0001"])
+        self.assertIn("1 run via MCP only (no direct answer to compare with)", mtext)
+        _, mtext = sections._agreement_counts(_Stub(run=run), ["S-base-0001"])
+        self.assertNotIn("via MCP only", mtext)
+
     def test_r_warm_v8(self):
         import facts
         r = prose("R")

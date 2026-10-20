@@ -3004,6 +3004,9 @@ def _agreement_counts(ctx, sids):
                 mcp.get("disagree", 0), (", %d missing" % mcp["missing"]) if mcp.get("missing") else "")
     if mcp.get("not_planned"):
         mtext += ", %d with no MCP execution planned" % mcp["not_planned"]
+    if mcp.get("no_direct_reference"):
+        # manifest v8's stop scenarios run on MCP alone (direct_not_run): judged by their own checks, no pair
+        mtext += ", %d run via MCP only (no direct answer to compare with)" % mcp["no_direct_reference"]
     return esc(dtext), esc(mtext)
 
 
