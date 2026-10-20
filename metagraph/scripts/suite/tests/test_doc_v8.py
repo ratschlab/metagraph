@@ -279,6 +279,26 @@ class AppendixBAndSinceV8Test(unittest.TestCase):
                          "S-base-0001, -0002 (chapter S)")
 
 
+class ChapterGReadingV8Test(unittest.TestCase):
+    """Chapter G read as a whole: the store-management smoke is shown but kept out of the per-tool total (it is
+    outside the five-way comparison, as the summary's op counts are), quoted messages read with typographic quotes,
+    and I.1's map asks chapters G's and S's questions."""
+
+    def test_r_warm_v8(self):
+        import facts
+        r = prose("R")
+        fam, unit = r["families"]["R-warm"]["prose"], r["units"]["R-warm"]["property"]
+        v7 = facts.fill(fam, {"manifest_version": 7}, unresolved=[])
+        v8 = facts.fill(fam, {"manifest_version": 8}, unresolved=[])
+        self.assertTrue(v7.startswith("Eight resolves"))
+        self.assertTrue(v8.startswith("Eighteen resolves"))
+        self.assertNotIn("R-warm-0009", v7)
+        self.assertIn("R-warm-0009 to -0018, ten windows of 682 to 688 bp", v8)
+        self.assertIn("a taxid column for the thirteen others", v8)
+        self.assertIn("T-labels-0003 and N-hard-0022)", facts.fill(unit, {"manifest_version": 7}, unresolved=[]))
+        self.assertIn("N-hard-0022 and T-walk-0024)", facts.fill(unit, {"manifest_version": 8}, unresolved=[]))
+
+
 class SharedProseV8Test(unittest.TestCase):
     """The v8 branches of the shared prose: I.2's access paths name the graphlet tools and traverse_stop, its "Not
     covered" paragraph is v7's for v7 only and v8's says where the graphlet tools and the stops are tested; T-walk's
