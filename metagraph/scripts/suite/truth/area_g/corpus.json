@@ -1,0 +1,7559 @@
+{
+ "candidates": {
+  "annotate.1": {
+   "facts": {
+    "annotate": true,
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 6901,
+    "complete_to_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1",
+     "NC_017256.1",
+     "NW_019681576.1",
+     "NZ_CP009253.1",
+     "NC_004061.1",
+     "NZ_MJNC01000001.1",
+     "NZ_CP002703.1",
+     "NZ_CP002701.1",
+     "NZ_CP002699.1",
+     "NZ_CP002697.1",
+     "NW_019646586.1",
+     "NC_017259.1",
+     "NZ_AYSE01000005.1",
+     "NZ_NUOT01000016.1",
+     "NZ_NTRO01000051.1",
+     "NZ_PKOZ01000002.1"
+    ],
+    "labels": 23,
+    "max_labels_per_node": 9,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 31,
+     "right": 25
+    },
+    "stop": null,
+    "summary_cut_bytes": 1585,
+    "walk_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "walks": {
+     "left": 19,
+     "right": 13
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "segments_min": {
+     "left": 31,
+     "right": 25
+    },
+    "walk_bp_min": {
+     "left": 200,
+     "right": 200
+    },
+    "walks_min": {
+     "left": 19,
+     "right": 13
+    }
+   },
+   "reference": {
+    "body_digest": "c63422ec31e0f79cc650b4d7c695688185f42d1b2061b523919b4b881637d3f9",
+    "engine_ms": {
+     "dl0": 1096.983337,
+     "dl1": 22.934146,
+     "dl2": 23.976125
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 9
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 1096.983337,
+    "dl1": 22.934146,
+    "dl2": 23.976125
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "annotate.2": {
+   "facts": {
+    "annotate": true,
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2503,
+    "complete_to_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_018498.1",
+     "NC_000908.2",
+     "NC_018497.1",
+     "NC_018496.1",
+     "NC_018495.1"
+    ],
+    "labels": 5,
+    "max_labels_per_node": 5,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 3
+    },
+    "stop": null,
+    "summary_cut_bytes": 1582,
+    "walk_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "walks": {
+     "left": 1,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_018498.1",
+     "NC_000908.2",
+     "NC_018497.1"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 3
+    },
+    "walk_bp_min": {
+     "left": 200,
+     "right": 200
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "253954ba824c233f0087fd67b724eb867b0f22ed39d7d91a75bc8d92c6faab80",
+    "engine_ms": {
+     "dl0": 505.807746,
+     "dl1": 9.754452,
+     "dl2": 9.783441999999999
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 5
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 505.807746,
+    "dl1": 9.754452,
+    "dl2": 9.783441999999999
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "coordinates.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 1957,
+    "complete_to_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "coordinates": true,
+    "cut_lists": false,
+    "label_names": [
+     "NC_000964.3"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1276,
+    "walk_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000964.3"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 100,
+     "right": 100
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "65256dc4b4dc80fe8558749690e782dcd72a9b144dd98fbdffde2f47c5404c0e",
+    "engine_ms": {
+     "dl0": 21.26312,
+     "dl1": 18.893718,
+     "dl2": 28.407557
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 21.26312,
+    "dl1": 18.893718,
+    "dl2": 28.407557
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "cut_lists.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 7884,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1"
+    ],
+    "labels": 8,
+    "max_labels_per_node": 8,
+    "merges": {
+     "left": 8,
+     "right": 7
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 27,
+     "right": 24
+    },
+    "stop": null,
+    "summary_cut_bytes": 2377,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "merges_min": {
+     "left": 8,
+     "right": 7
+    },
+    "segments_min": {
+     "left": 27,
+     "right": 24
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "8d15bb213dea22a68bbe8fff9ca63ab0ed8cfde3bb068ca036e64353bf4350c5",
+    "engine_ms": {
+     "dl0": 32.815909999999995,
+     "dl1": 54.908805,
+     "dl2": 51.658106000000004,
+     "mcp": 51.987119
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 8
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "max_labels_per_node": 2,
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 32.815909999999995,
+    "dl1": 54.908805,
+    "dl2": 51.658106000000004,
+    "mcp": 51.987119
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "cut_lists.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 73325,
+    "complete_to_bp": {
+     "left": 50,
+     "right": 50
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "244319",
+     "562",
+     "28901",
+     "42897",
+     "1446746",
+     "216592",
+     "1086030",
+     "1444044",
+     "1444266",
+     "1165946",
+     "1446730",
+     "1165943",
+     "1240759",
+     "1446536",
+     "1116001",
+     "1116177",
+     "1240773",
+     "1042804",
+     "868183",
+     "2163603",
+     "1444151",
+     "1090928",
+     "1446594",
+     "1446718",
+     "913089",
+     "1446519",
+     "1116183",
+     "1444063",
+     "1446724",
+     "1446572",
+     "868187",
+     "1116053",
+     "1169333",
+     "1240762",
+     "1444040",
+     "1116153",
+     "1116191",
+     "1116007",
+     "1125643",
+     "1182715",
+     "1116041",
+     "1411693",
+     "1281254",
+     "1444050",
+     "1116046",
+     "1446700",
+     "1116126",
+     "1280998",
+     "1412821",
+     "752786",
+     "1116074",
+     "1268996",
+     "1446765",
+     "1269003",
+     "1412827",
+     "1281242",
+     "1331064",
+     "1281080",
+     "1444203",
+     "869677",
+     "1116005",
+     "1125645",
+     "1212583",
+     "1444281",
+     "1444049",
+     "1281243",
+     "1116103",
+     "1434144",
+     "1444270",
+     "679895",
+     "1173690",
+     "1890305",
+     "1434148",
+     "1434156",
+     "1286344",
+     "622",
+     "331111",
+     "316407",
+     "1248902",
+     "868185",
+     "1078032",
+     "1232151",
+     "1444223",
+     "1050617",
+     "1116139",
+     "1446599",
+     "1200752",
+     "869675",
+     "1446744",
+     "1116002",
+     "1068619",
+     "1240775",
+     "1446731",
+     "1240770",
+     "1446592",
+     "1068615",
+     "1281058",
+     "1116055",
+     "1446741",
+     "1196033",
+     "1444148",
+     "1281127",
+     "868171",
+     "1116048",
+     "868191",
+     "1446507",
+     "1116179",
+     "1116026",
+     "1405295",
+     "1281052",
+     "1101440",
+     "1444246",
+     "1116073",
+     "1281247",
+     "1116185",
+     "868208",
+     "1412837",
+     "1444045",
+     "1280984",
+     "2048775",
+     "868204",
+     "1116134",
+     "1446514",
+     "1116100",
+     "1446527",
+     "1116091",
+     "1125649",
+     "1116147",
+     "1281017",
+     "1125650",
+     "1444239",
+     "1116032",
+     "1453472",
+     "1446532",
+     "1116095",
+     "1281072",
+     "656443",
+     "1169367",
+     "869671",
+     "1454383",
+     "1444119",
+     "626531",
+     "1444211",
+     "1169863",
+     "1126916",
+     "1182668",
+     "1269007",
+     "1212581",
+     "1181758",
+     "1444169",
+     "1212580",
+     "1212562",
+     "1444227",
+     "1444196",
+     "1412839",
+     "1005462",
+     "1434131",
+     "1434129",
+     "1337384",
+     "1434139",
+     "1434136",
+     "1434159",
+     "1434178",
+     "749547",
+     "168927",
+     "424717",
+     "573235",
+     "404399",
+     "1055537",
+     "566546",
+     "1446701",
+     "758831",
+     "637912",
+     "1055534",
+     "1444212",
+     "1248915",
+     "1444132",
+     "869679",
+     "754088",
+     "1240772",
+     "1240774",
+     "1240764",
+     "1444185",
+     "1444163",
+     "1446541",
+     "1444091",
+     "1444038",
+     "1116137",
+     "1444153",
+     "868206",
+     "1240758",
+     "1116070",
+     "1116186",
+     "1444200",
+     "1116154",
+     "868207",
+     "754080",
+     "656397",
+     "868167",
+     "1116033",
+     "1116141",
+     "1444174",
+     "1126892",
+     "1116012",
+     "1444121",
+     "1281051",
+     "1116067",
+     "1450431",
+     "1444135",
+     "754090",
+     "1116019",
+     "1444231",
+     "1116155",
+     "1125639",
+     "1116096",
+     "1268978",
+     "1281083",
+     "358709",
+     "1116108",
+     "1444149",
+     "1005565",
+     "868199",
+     "1182694",
+     "1411698",
+     "550672",
+     "1126912",
+     "1438691",
+     "1268977",
+     "1446763",
+     "1444177",
+     "1281260",
+     "1182701",
+     "1001988",
+     "1281212",
+     "1281238",
+     "1169332",
+     "1268997",
+     "1444226",
+     "1181749",
+     "1182663",
+     "1281122",
+     "1444213",
+     "1434146",
+     "1403831",
+     "1434163",
+     "1434130",
+     "1434154",
+     "1248823",
+     "868170",
+     "585396",
+     "1115997",
+     "1040638",
+     "1240776",
+     "1446500",
+     "1446728",
+     "1126889",
+     "1444180",
+     "1446589",
+     "1165941",
+     "868179",
+     "656419",
+     "868180",
+     "1280986",
+     "1404262",
+     "1446711",
+     "1446523",
+     "1078031",
+     "1444142",
+     "1446591",
+     "1446713",
+     "868195",
+     "1446734",
+     "1444083",
+     "1444248",
+     "1444113",
+     "1446595",
+     "1116125",
+     "1444282",
+     "1116089",
+     "1116015",
+     "1444068",
+     "1444096",
+     "679204",
+     "1444217",
+     "1116076",
+     "1446555",
+     "1446554",
+     "1446525",
+     "1446575",
+     "1116098",
+     "1411697",
+     "1446568",
+     "1116043",
+     "1182678",
+     "1444082",
+     "1444090",
+     "656427",
+     "1281270",
+     "1116031",
+     "1444210",
+     "1317131",
+     "1444077",
+     "1126919",
+     "1335303",
+     "1116114",
+     "1182720",
+     "1330529",
+     "1169396",
+     "1116049",
+     "1181768",
+     "1126918",
+     "1116101",
+     "475609",
+     "1444263",
+     "1116192",
+     "1212566",
+     "1281206",
+     "1182722",
+     "1169365",
+     "1444075",
+     "754092",
+     "1435461",
+     "868197",
+     "1182719",
+     "585034",
+     "1212569",
+     "1434152",
+     "869690",
+     "1434172",
+     "373384",
+     "550689",
+     "1068608",
+     "1078034",
+     "2605619",
+     "1110693",
+     "1412834",
+     "1444275",
+     "1055533",
+     "1042803",
+     "869670",
+     "868178",
+     "1444170",
+     "1116131",
+     "1446593",
+     "1446574",
+     "1068614",
+     "1116120",
+     "656447",
+     "1068618",
+     "1412825",
+     "1078033",
+     "1327978",
+     "1444036",
+     "1048266",
+     "1240763",
+     "1446740",
+     "1281204",
+     "1446511",
+     "2048779",
+     "754079",
+     "670896",
+     "1806490",
+     "1116189",
+     "1116069",
+     "1412833",
+     "868209",
+     "1446742",
+     "1444199",
+     "868165",
+     "766166",
+     "1116180",
+     "1446516",
+     "1116159",
+     "1281253",
+     "941323",
+     "1281233",
+     "1116129",
+     "1446569",
+     "409438",
+     "1444134",
+     "1331061",
+     "868162",
+     "1181767",
+     "1281034",
+     "1116038",
+     "1400023",
+     "1444253",
+     "1116035",
+     "656423",
+     "1125647",
+     "1116128",
+     "1331062",
+     "1126927",
+     "1116009",
+     "1444041",
+     "1169358",
+     "1444154",
+     "1444095",
+     "1444192",
+     "1444104",
+     "457401",
+     "1182728",
+     "2049486",
+     "656402",
+     "591020",
+     "1444201",
+     "1444257",
+     "1182688",
+     "766164",
+     "1444122",
+     "1182729",
+     "550688",
+     "1169388",
+     "413997",
+     "634469",
+     "879462",
+     "1212571",
+     "1434138",
+     "668369",
+     "1434169",
+     "550686",
+     "1434153",
+     "621",
+     "511145",
+     "1048254",
+     "198215",
+     "37762",
+     "536056",
+     "1444219",
+     "1446580",
+     "344601",
+     "1005550",
+     "1444165",
+     "1446546",
+     "1446750",
+     "1163738",
+     "1232150",
+     "1240779",
+     "1240768",
+     "1048256",
+     "1240767",
+     "1165953",
+     "1444267",
+     "1446723",
+     "1116050",
+     "1444237",
+     "1069643",
+     "1073985",
+     "1116017",
+     "1446768",
+     "1116066",
+     "1446733",
+     "1444276",
+     "656430",
+     "1281218",
+     "868174",
+     "868189",
+     "1055542",
+     "670894",
+     "1446529",
+     "1181744",
+     "1281214",
+     "1444146",
+     "1281172",
+     "1116157",
+     "1116071",
+     "1182716",
+     "1136217",
+     "1116010",
+     "1227814",
+     "1126928",
+     "1116115",
+     "913091",
+     "1444254",
+     "1116045",
+     "550676",
+     "1125648",
+     "1116027",
+     "1116104",
+     "656383",
+     "1446708",
+     "1169330",
+     "1116037",
+     "1438687",
+     "1116138",
+     "754084",
+     "754083",
+     "1182700",
+     "1444260",
+     "1358422",
+     "1182730",
+     "1105330",
+     "1116193",
+     "1116081",
+     "1444206",
+     "1116080",
+     "1116087",
+     "656408",
+     "1446497",
+     "749538",
+     "1435046",
+     "749540",
+     "656404",
+     "1281147",
+     "752790",
+     "1127126",
+     "1286348",
+     "550690",
+     "316385",
+     "766145",
+     "656414",
+     "766159",
+     "1281153",
+     "623",
+     "624",
+     "1045010",
+     "564",
+     "1446726",
+     "868193",
+     "1165945",
+     "868194",
+     "1126900",
+     "1446721",
+     "1240765",
+     "1268976",
+     "1240760",
+     "1116136",
+     "868176",
+     "1116113",
+     "1446538",
+     "1281235",
+     "1125634",
+     "1311757",
+     "1444092",
+     "1116184",
+     "1444178",
+     "1116025",
+     "754086",
+     "585055",
+     "1281158",
+     "1444243",
+     "868177",
+     "1182702",
+     "1182710",
+     "1444176",
+     "1116078",
+     "1444272",
+     "1446518",
+     "1116102",
+     "1116156",
+     "1281189",
+     "1446520",
+     "868190",
+     "1125640",
+     "868169",
+     "1116006",
+     "1116109",
+     "868200",
+     "1451264",
+     "1444225",
+     "1400022",
+     "1167694",
+     "1330528",
+     "1116142",
+     "754078",
+     "1444261",
+     "1182738",
+     "1335916",
+     "550675",
+     "1116146",
+     "1116194",
+     "1005464",
+     "1444255",
+     "457400",
+     "1813821",
+     "1434150",
+     "1617964",
+     "868172",
+     "868181",
+     "1165950",
+     "1444137",
+     "868192",
+     "1068616",
+     "1115998",
+     "868168",
+     "1090927",
+     "656396",
+     "340186",
+     "1446517",
+     "1444130",
+     "1116072",
+     "1444207",
+     "868198",
+     "1444065",
+     "1116160",
+     "869689",
+     "670890",
+     "745156",
+     "1176728",
+     "1444245",
+     "1116004",
+     "1412817",
+     "1116018",
+     "1116149",
+     "1125635",
+     "1444106",
+     "300269",
+     "1125637",
+     "1444120",
+     "1444233",
+     "1125636",
+     "656374",
+     "1438678",
+     "1181756",
+     "1182655",
+     "1181742",
+     "550683",
+     "1444241",
+     "1116086",
+     "1173689",
+     "1212584",
+     "749532",
+     "1935181",
+     "656438",
+     "1438669",
+     "1282357",
+     "1245474",
+     "1434162",
+     "1892899",
+     "424720",
+     "469008",
+     "1446547",
+     "1038927",
+     "216599",
+     "1078035",
+     "2056315",
+     "1392854",
+     "198214",
+     "869688",
+     "1134453",
+     "585395",
+     "1444181",
+     "868182",
+     "1446588",
+     "868173",
+     "1446510",
+     "1048334",
+     "1048265",
+     "1240771",
+     "1446717",
+     "1069645",
+     "1116140",
+     "1055541",
+     "1068617",
+     "1444279",
+     "1116158",
+     "1169376",
+     "1116119",
+     "1116188",
+     "754081",
+     "550691",
+     "1438696",
+     "1446567",
+     "1444094",
+     "1182680",
+     "1444097",
+     "1182703",
+     "1444118",
+     "1281227",
+     "749539",
+     "1055545",
+     "550679",
+     "1126917",
+     "868201",
+     "1411645",
+     "766162",
+     "1412820",
+     "1125644",
+     "1446748",
+     "1274814",
+     "1212564",
+     "869674",
+     "1281273",
+     "868196",
+     "1434132",
+     "1434141",
+     "1434151",
+     "1446751",
+     "1116133",
+     "1165944",
+     "1444190",
+     "1444160",
+     "1055544",
+     "1446714",
+     "679205",
+     "1068620",
+     "1446549",
+     "1181739",
+     "1052677",
+     "1125638",
+     "1444209",
+     "1240777",
+     "1116056",
+     "1068621",
+     "1444115",
+     "1232154",
+     "1405294",
+     "316401",
+     "1444133",
+     "656411",
+     "1240761",
+     "1444224",
+     "1116052",
+     "656393",
+     "1116187",
+     "1240778",
+     "1444125",
+     "1240766",
+     "1446521",
+     "1314847",
+     "1182671",
+     "2048777",
+     "1116039",
+     "868210",
+     "1182658",
+     "1169379",
+     "945434",
+     "1444191",
+     "1446556",
+     "1281154",
+     "1090929",
+     "1169357",
+     "1116094",
+     "1126897",
+     "1116003",
+     "868164",
+     "766163",
+     "1416672",
+     "1089445",
+     "869683",
+     "796392",
+     "1212582",
+     "1281177",
+     "910348",
+     "1116097",
+     "1212568",
+     "1281194",
+     "766158",
+     "1268238",
+     "1434133",
+     "1282358",
+     "1452720",
+     "83333",
+     "869681",
+     "913090",
+     "1165949",
+     "696406",
+     "1124984",
+     "340185",
+     "1446735",
+     "1116047",
+     "1240769",
+     "1116051",
+     "868160",
+     "1412828",
+     "2605620",
+     "868161",
+     "670903",
+     "656433",
+     "868166",
+     "1444064",
+     "868186",
+     "1116122",
+     "1126933",
+     "754087",
+     "1116000",
+     "1444078",
+     "1116127",
+     "2082629",
+     "1116022",
+     "1116042",
+     "1116117",
+     "1455597",
+     "1116028",
+     "1116020",
+     "1116092",
+     "1412832",
+     "1116099",
+     "869694",
+     "1182733",
+     "1116024",
+     "868163",
+     "1005567",
+     "1444188",
+     "1169318",
+     "1116152",
+     "1116083",
+     "1328450",
+     "1281261",
+     "1169359",
+     "1182684",
+     "1210044",
+     "1210043",
+     "1181743",
+     "1281028",
+     "331112",
+     "1227813",
+     "595496",
+     "1434142",
+     "1434135",
+     "1434179",
+     "766160",
+     "1169664",
+     "868188",
+     "1165952",
+     "1444155",
+     "670893",
+     "868175",
+     "1248903",
+     "1450428",
+     "1432548",
+     "1125651",
+     "1444230",
+     "550682",
+     "1446542",
+     "1446548",
+     "1116181",
+     "1444158",
+     "1446571",
+     "1416676",
+     "670892",
+     "1116190",
+     "1446558",
+     "1444099",
+     "656400",
+     "1281240",
+     "1446508",
+     "754077",
+     "1444058",
+     "1165942",
+     "1281179",
+     "1116014",
+     "1281192",
+     "1116150",
+     "1116148",
+     "1446760",
+     "1412836",
+     "1005564",
+     "1438686",
+     "1181759",
+     "1078030",
+     "1280969",
+     "1181730",
+     "1090930",
+     "1169369",
+     "1116123",
+     "1005442",
+     "1181778",
+     "2082618",
+     "1169397",
+     "1446702",
+     "1281085",
+     "1116085",
+     "1169378",
+     "1444048",
+     "1444259",
+     "1444059",
+     "1328448",
+     "1444162",
+     "1886513",
+     "766148",
+     "1446501",
+     "1434160"
+    ],
+    "labels": 873,
+    "max_labels_per_node": 873,
+    "merges": {
+     "left": 2,
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 19,
+     "right": 37
+    },
+    "stop": null,
+    "summary_cut_bytes": 2281,
+    "walk_bp": {
+     "left": 50,
+     "right": 50
+    },
+    "walks": {
+     "left": 7,
+     "right": 18
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "244319",
+     "562",
+     "28901"
+    ],
+    "merges_min": {
+     "left": 2,
+     "right": 1
+    },
+    "segments_min": {
+     "left": 19,
+     "right": 37
+    },
+    "walk_bp_min": {
+     "left": 50,
+     "right": 50
+    },
+    "walks_min": {
+     "left": 7,
+     "right": 18
+    }
+   },
+   "reference": {
+    "body_digest": "a82e632879ef00bf50e17c70955df4f5e13f804c26c0b2a5f4597dcb90209e8d",
+    "engine_ms": {
+     "dl0": 224.589482,
+     "dl1": 202.440123,
+     "dl2": 198.483135,
+     "mcp": 1392.563062
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 873
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 50,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "max_labels_per_node": 8,
+     "mode": "constrain",
+     "seed_label_kind": "column"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 224.589482,
+    "dl1": 202.440123,
+    "dl2": 198.483135,
+    "mcp": 1392.563062
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "cut_lists.3": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 14641,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1",
+     "NZ_CP010538.1",
+     "NC_000912.1",
+     "NZ_CP010551.1",
+     "NZ_MJIW01000006.1",
+     "NZ_MJIX01000003.1",
+     "NZ_MJIT01000001.1",
+     "NZ_MJIY01000002.1",
+     "NZ_MJJA01000002.1",
+     "NZ_MJIU01000003.1",
+     "NZ_MJIV01000001.1",
+     "NZ_JTGU01000029.1",
+     "NZ_JTGY01000021.1",
+     "NZ_JTGZ01000021.1",
+     "NZ_JTHB01000021.1",
+     "NZ_JTHD01000015.1",
+     "NZ_LHPO01000008.1",
+     "NZ_LHPS01000003.1",
+     "NZ_LHPP01000008.1",
+     "NZ_LHPV01000010.1",
+     "NZ_LHPQ01000014.1",
+     "NZ_LHPX01000009.1",
+     "NZ_LHQB01000004.1",
+     "NZ_LHQF01000005.1",
+     "NZ_LHQK01000010.1",
+     "NZ_LHPY01000011.1",
+     "NZ_CP017327.1",
+     "NZ_CP020689.1",
+     "NZ_CP020693.1",
+     "NZ_CP020692.1",
+     "NZ_CP020691.1",
+     "NZ_CP020690.1",
+     "NZ_CP020711.1",
+     "NZ_CP020710.1",
+     "NZ_CP020712.1",
+     "NZ_CP010548.1",
+     "NZ_CP013829.1",
+     "NZ_CP014267.1",
+     "NZ_AP017319.1",
+     "NZ_AP017318.1",
+     "NZ_CP017328.1",
+     "NZ_CP017330.1",
+     "NZ_CP017331.1",
+     "NZ_CP017332.1",
+     "NZ_CP017340.1",
+     "NZ_CP017341.1",
+     "NZ_CP017337.1",
+     "NZ_CP017333.1",
+     "NZ_CP017342.1",
+     "NZ_CP017336.1",
+     "NZ_CP017334.1",
+     "NZ_CP017338.1",
+     "NZ_CP017343.1",
+     "NZ_CP017339.1",
+     "NZ_CP017329.1",
+     "NZ_CP017335.1",
+     "NZ_CP010544.1",
+     "NZ_CP010540.1",
+     "NZ_CP010545.1",
+     "NC_020076.2",
+     "NZ_CP010541.1",
+     "NZ_CP010547.1",
+     "NZ_CP010539.1",
+     "NC_017504.1",
+     "NZ_CP010546.1",
+     "NZ_CP010543.1",
+     "NC_016807.1",
+     "NZ_CP010550.1"
+    ],
+    "labels": 70,
+    "max_labels_per_node": 70,
+    "merges": {
+     "left": 0,
+     "right": 5
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 5,
+     "right": 22
+    },
+    "stop": null,
+    "summary_cut_bytes": 2397,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 5
+    },
+    "segments_min": {
+     "left": 5,
+     "right": 22
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "reference": {
+    "body_digest": "c4bd487e412b9ad352ab39623713daee45aabc3e3a4aa6c5474980baf25cc1fe",
+    "engine_ms": {
+     "dl0": 50.070921,
+     "dl1": 63.746869999999994,
+     "dl2": 45.7208,
+     "mcp": 63.515617999999996
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 70
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "max_labels_per_node": 4,
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 50.070921,
+    "dl1": 63.746869999999994,
+    "dl2": 45.7208,
+    "mcp": 63.515617999999996
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "depth_zero.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2389,
+    "complete_to_bp": {
+     "left": 1,
+     "right": 0
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "labels": 2,
+    "max_labels_per_node": 2,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1959,
+    "walk_bp": {
+     "left": 1,
+     "right": 0
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 1,
+     "right": 0
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "f910b183b1064b16481a4a4bba86a77e899b0cda48dc8c397ad8dba69ba71827",
+    "engine_ms": {
+     "dl0": 5.805935,
+     "dl1": 6.894955,
+     "dl2": 7.727253,
+     "mcp": 7.32796
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 2
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 200,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_steps": 1,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 5.805935,
+    "dl1": 6.894955,
+    "dl2": 7.727253,
+    "mcp": 7.32796
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "depth_zero.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2353,
+    "complete_to_bp": {
+     "left": 1,
+     "right": 0
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "237561"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1866,
+    "walk_bp": {
+     "left": 1,
+     "right": 0
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "237561"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 1,
+     "right": 0
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "a975e29a5fbb09242439f21afb4e26a74e649522e4a20d04dd772a89769b9127",
+    "engine_ms": {
+     "dl0": 5.792775,
+     "dl1": 5.124889,
+     "dl2": 5.379721,
+     "mcp": 7.805913
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_steps": 1,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 5.792775,
+    "dl1": 5.124889,
+    "dl2": 5.379721,
+    "mcp": 7.805913
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "failed_seed.1": {
+   "facts": {
+    "error": "the work budget (bounds.max_work_units = 10000) ran out while the seed was validated against its labels, after 116763 work units: no traversal was made",
+    "failed": true
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "no_graphlet": true
+   },
+   "reference": {
+    "body_digest": null,
+    "engine_ms": {
+     "dl0": 9.61904,
+     "dl1": 14.433576,
+     "dl2": 16.462004999999998,
+     "mcp": null
+    }
+   },
+   "service_facts": {},
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 10000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 9.61904,
+    "dl1": 14.433576,
+    "dl2": 16.462004999999998,
+    "mcp": null
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass (failed seed: error and outcome equal)",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "failed_seed.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3528,
+    "complete_to_bp": {
+     "left": 0,
+     "right": 0
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000962.3"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": "work",
+    "summary_cut_bytes": 2742,
+    "walk_bp": {
+     "left": 0,
+     "right": 0
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 11.528528,
+    "dl1": 8.243388000000001,
+    "dl2": 13.407646,
+    "mcp": 8.763251
+   },
+   "verdicts": {
+    "bodies": "fail: a graphlet {'dl0': '4b0f367dde6cc216be03bb379e1a21e0400d06c63615e4245f443647243931ba', 'dl1': '4b0f367dde6cc216be03bb379e1a21e0400d06c63615e4245f443647243931ba', 'dl2': '4b0f367dde6cc216be03bb379e1a21e0400d06c63615e4245f443647243931ba', 'mcp': '4b0f367dde6cc216be03bb379e1a21e0400d06c63615e4245f443647243931ba'}",
+    "echo": "pass",
+    "envelope": "pass (failed seed: error and outcome equal)",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "fail: the seed has a graphlet",
+    "twin": "pass"
+   }
+  },
+  "linear.1": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2798,
+    "complete_to_bp": {
+     "right": 1000
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_032095.1"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1189,
+    "walk_bp": {
+     "right": 1000
+    },
+    "walks": {
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_032095.1"
+    ],
+    "segments_min": {
+     "right": 1
+    },
+    "walk_bp_min": {
+     "right": 1000
+    },
+    "walks_min": {
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "ca4c0df1774f33c4ab4c62acc78b65eaea90c56893efb4f6fa7b22688a42e5de",
+    "engine_ms": {
+     "dl0": 25.402549999999998,
+     "dl1": 15.013071,
+     "dl2": 16.532645,
+     "mcp": 746.724159
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "right",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 25.402549999999998,
+    "dl1": 15.013071,
+    "dl2": 16.532645,
+    "mcp": 746.724159
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "linear.2": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2953,
+    "complete_to_bp": {
+     "right": 1000
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_001136.10"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1192,
+    "walk_bp": {
+     "right": 1000
+    },
+    "walks": {
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_001136.10"
+    ],
+    "segments_min": {
+     "right": 1
+    },
+    "walk_bp_min": {
+     "right": 1000
+    },
+    "walks_min": {
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "e9a60b75715401465062bc91e5334340d4f408593b25ad0d5d021694343da664",
+    "engine_ms": {
+     "dl0": 33.219781,
+     "dl1": 18.404543999999998,
+     "dl2": 17.218552000000003,
+     "mcp": 937.761507
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "right",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 33.219781,
+    "dl1": 18.404543999999998,
+    "dl2": 17.218552000000003,
+    "mcp": 937.761507
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "linear.3": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 1565,
+    "complete_to_bp": {
+     "right": 100
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000962.3"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1186,
+    "walk_bp": {
+     "right": 100
+    },
+    "walks": {
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000962.3"
+    ],
+    "segments_min": {
+     "right": 1
+    },
+    "walk_bp_min": {
+     "right": 100
+    },
+    "walks_min": {
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "84eb0300a37922f3d0e9a8d67afc2e354a8327d6e7888c72520bc636f5def024",
+    "engine_ms": {
+     "dl0": 48.703438,
+     "dl1": 59.286948,
+     "dl2": 33.236281999999996,
+     "mcp": 54.630256
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "right",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 48.703438,
+    "dl1": 59.286948,
+    "dl2": 33.236281999999996,
+    "mcp": 54.630256
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "long_walk.1": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 21509,
+    "complete_to_bp": {
+     "right": 10000
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "315358"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1191,
+    "walk_bp": {
+     "right": 10000
+    },
+    "walks": {
+     "right": 1
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 302.548135,
+    "dl1": 186.726136,
+    "dl2": 175.975885,
+    "mcp": 14676.134284
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "fail: engine 14676.134284 ms against 3750 ms (25 % of 15000 ms)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "long_walk.2": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 22349,
+    "complete_to_bp": {
+     "right": 10000
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "272634"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 6
+    },
+    "stop": null,
+    "summary_cut_bytes": 1188,
+    "walk_bp": {
+     "right": 10000
+    },
+    "walks": {
+     "right": 2
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 370.007679,
+    "dl1": 182.43079500000002,
+    "dl2": 180.39571700000002,
+    "mcp": 13113.435642
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "fail: engine 13113.435642 ms against 3750 ms (25 % of 15000 ms)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "long_walk.3": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 21359,
+    "complete_to_bp": {
+     "right": 10000
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "315358"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1100,
+    "walk_bp": {
+     "right": 10000
+    },
+    "walks": {
+     "right": 1
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 177.423249,
+    "dl1": 170.921118,
+    "dl2": 169.984139,
+    "mcp": 430.662209
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "fail: the seed's cold engine time 14676 ms (G-long-c1 ran it first; this candidate met warm rows) against 7500 ms (25 % of 30000 ms)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "long_walk.4": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 21509,
+    "complete_to_bp": {
+     "right": 10000
+    },
+    "continuation": {
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "315358"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1191,
+    "walk_bp": {
+     "right": 10000
+    },
+    "walks": {
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "315358"
+    ],
+    "segments_min": {
+     "right": 1
+    },
+    "walk_bp_min": {
+     "right": 10000
+    },
+    "walks_min": {
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "4bd9a5e038c5572eee83dd4ef83341d1dd136e677914cd2f740f48d5a6a867ee",
+    "engine_ms": {
+     "dl0": 246.047602,
+     "dl1": 220.947689,
+     "dl2": 231.023271,
+     "mcp": 528.489561
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 10000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "right",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 246.047602,
+    "dl1": 220.947689,
+    "dl2": 231.023271,
+    "mcp": 528.489561
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "long_walk.5": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 8698,
+    "complete_to_bp": {
+     "right": 10000
+    },
+    "continuation": {
+     "right": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "272634"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 8
+    },
+    "stop": null,
+    "summary_cut_bytes": 1182,
+    "walk_bp": {
+     "right": 169
+    },
+    "walks": {
+     "right": 3
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 104.789802,
+    "dl1": 93.75933,
+    "dl2": 94.716689,
+    "mcp": 462.78837
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "fail: not the slot's shape: a walk whose length with the seed exceeds the 16,384-byte sequence ceiling",
+    "twin": "pass"
+   }
+  },
+  "merges.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 7327,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1"
+    ],
+    "labels": 8,
+    "max_labels_per_node": 8,
+    "merges": {
+     "left": 8,
+     "right": 7
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 27,
+     "right": 24
+    },
+    "stop": null,
+    "summary_cut_bytes": 1914,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "merges_min": {
+     "left": 8,
+     "right": 7
+    },
+    "segments_min": {
+     "left": 27,
+     "right": 24
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "c1fb6198e185a8d7762cb15cf78aa4dc3596403f3932a03a390aa1f2cc1e28c3",
+    "engine_ms": {
+     "dl0": 100.239792,
+     "dl1": 52.078149999999994,
+     "dl2": 50.513645000000004,
+     "mcp": 2722.4462009999997
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 8
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 100.239792,
+    "dl1": 52.078149999999994,
+    "dl2": 50.513645000000004,
+    "mcp": 2722.4462009999997
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "merges.1+cap2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 7884,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1"
+    ],
+    "labels": 8,
+    "max_labels_per_node": 8,
+    "merges": {
+     "left": 8,
+     "right": 7
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 27,
+     "right": 24
+    },
+    "stop": null,
+    "summary_cut_bytes": 2377,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "merges_min": {
+     "left": 8,
+     "right": 7
+    },
+    "segments_min": {
+     "left": 27,
+     "right": 24
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "8d15bb213dea22a68bbe8fff9ca63ab0ed8cfde3bb068ca036e64353bf4350c5",
+    "engine_ms": {
+     "dl0": 54.111269,
+     "dl1": 50.397425000000005,
+     "dl2": 52.936707999999996,
+     "mcp": 50.032889999999995
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 8
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "max_labels_per_node": 2,
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 54.111269,
+    "dl1": 50.397425000000005,
+    "dl2": 52.936707999999996,
+    "mcp": 50.032889999999995
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "merges.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 9592,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2",
+     "NC_018497.1",
+     "NC_018496.1",
+     "NC_018495.1"
+    ],
+    "labels": 6,
+    "max_labels_per_node": 6,
+    "merges": {
+     "left": 1,
+     "right": 9
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 4,
+     "right": 58
+    },
+    "stop": null,
+    "summary_cut_bytes": 1913,
+    "walk_bp": {
+     "left": 1000,
+     "right": 877
+    },
+    "walks": {
+     "left": 1,
+     "right": 16
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2"
+    ],
+    "merges_min": {
+     "left": 1,
+     "right": 9
+    },
+    "segments_min": {
+     "left": 4,
+     "right": 58
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 877
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 16
+    }
+   },
+   "reference": {
+    "body_digest": "6dd9fa827f88de1d87d619fea926a87dba636dba2108a955fce73e2822e25c8b",
+    "engine_ms": {
+     "dl0": 95.844581,
+     "dl1": 53.466702999999995,
+     "dl2": 55.980407,
+     "mcp": 2725.89381
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 6
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 95.844581,
+    "dl1": 53.466702999999995,
+    "dl2": 55.980407,
+    "mcp": 2725.89381
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "merges.2+cap2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 10147,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": false
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2",
+     "NC_018497.1",
+     "NC_018496.1",
+     "NC_018495.1"
+    ],
+    "labels": 6,
+    "max_labels_per_node": 6,
+    "merges": {
+     "left": 1,
+     "right": 9
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 4,
+     "right": 58
+    },
+    "stop": null,
+    "summary_cut_bytes": 2376,
+    "walk_bp": {
+     "left": 1000,
+     "right": 877
+    },
+    "walks": {
+     "left": 1,
+     "right": 16
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2"
+    ],
+    "merges_min": {
+     "left": 1,
+     "right": 9
+    },
+    "segments_min": {
+     "left": 4,
+     "right": 58
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 877
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 16
+    }
+   },
+   "reference": {
+    "body_digest": "9e6599a4c910ea1e7dd13137168f62fefd66aa94cad09577ee64bf5a6f1a55b2",
+    "engine_ms": {
+     "dl0": 35.674683,
+     "dl1": 53.774995,
+     "dl2": 54.735604,
+     "mcp": 61.317915
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 6
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "max_labels_per_node": 2,
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 35.674683,
+    "dl1": 53.774995,
+    "dl2": 54.735604,
+    "mcp": 61.317915
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "no_bases.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": false,
+    "body_bytes": 5791,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1"
+    ],
+    "labels": 8,
+    "max_labels_per_node": 8,
+    "merges": {
+     "left": 8,
+     "right": 7
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 27,
+     "right": 24
+    },
+    "stop": null,
+    "summary_cut_bytes": 1914,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": false,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "merges_min": {
+     "left": 8,
+     "right": 7
+    },
+    "segments_min": {
+     "left": 27,
+     "right": 24
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "e6da6a010722dda29b51bf53a53471633c7e52e42145971eb44211869b61bcdf",
+    "engine_ms": {
+     "dl0": 55.717804,
+     "dl1": 44.208006000000005,
+     "dl2": 49.177552999999996
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 8
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 55.717804,
+    "dl1": 44.208006000000005,
+    "dl2": 49.177552999999996
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "no_bases.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": false,
+    "body_bytes": 15557,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1",
+     "NZ_CP010538.1",
+     "NC_000912.1",
+     "NZ_CP010551.1",
+     "NZ_MJIW01000006.1",
+     "NZ_MJIX01000003.1",
+     "NZ_MJIT01000001.1",
+     "NZ_MJIY01000002.1",
+     "NZ_MJJA01000002.1",
+     "NZ_MJIU01000003.1",
+     "NZ_MJIV01000001.1",
+     "NZ_JTGU01000029.1",
+     "NZ_JTGY01000021.1",
+     "NZ_JTGZ01000021.1",
+     "NZ_JTHB01000021.1",
+     "NZ_JTHD01000015.1",
+     "NZ_LHPO01000008.1",
+     "NZ_LHPS01000003.1",
+     "NZ_LHPP01000008.1",
+     "NZ_LHPV01000010.1",
+     "NZ_LHPQ01000014.1",
+     "NZ_LHPX01000009.1",
+     "NZ_LHQB01000004.1",
+     "NZ_LHQF01000005.1",
+     "NZ_LHQK01000010.1",
+     "NZ_LHPY01000011.1",
+     "NZ_CP017327.1",
+     "NZ_CP020689.1",
+     "NZ_CP020693.1",
+     "NZ_CP020692.1",
+     "NZ_CP020691.1",
+     "NZ_CP020690.1",
+     "NZ_CP020711.1",
+     "NZ_CP020710.1",
+     "NZ_CP020712.1",
+     "NZ_CP010548.1",
+     "NZ_CP013829.1",
+     "NZ_CP014267.1",
+     "NZ_AP017319.1",
+     "NZ_AP017318.1",
+     "NZ_CP017328.1",
+     "NZ_CP017330.1",
+     "NZ_CP017331.1",
+     "NZ_CP017332.1",
+     "NZ_CP017340.1",
+     "NZ_CP017341.1",
+     "NZ_CP017337.1",
+     "NZ_CP017333.1",
+     "NZ_CP017342.1",
+     "NZ_CP017336.1",
+     "NZ_CP017334.1",
+     "NZ_CP017338.1",
+     "NZ_CP017343.1",
+     "NZ_CP017339.1",
+     "NZ_CP017329.1",
+     "NZ_CP017335.1",
+     "NZ_CP010544.1",
+     "NZ_CP010540.1",
+     "NZ_CP010545.1",
+     "NC_020076.2",
+     "NZ_CP010541.1",
+     "NZ_CP010547.1",
+     "NZ_CP010539.1",
+     "NC_017504.1",
+     "NZ_CP010546.1",
+     "NZ_CP010543.1",
+     "NC_016807.1",
+     "NZ_CP010550.1"
+    ],
+    "labels": 70,
+    "max_labels_per_node": 70,
+    "merges": {
+     "left": 0,
+     "right": 5
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 5,
+     "right": 22
+    },
+    "stop": null,
+    "summary_cut_bytes": 2398,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": false,
+    "labels_present": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 5
+    },
+    "segments_min": {
+     "left": 5,
+     "right": 22
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "reference": {
+    "body_digest": "199a34a00b81aaf60fd3f9594f289d7f3bee92a4ed783a69c8407e57c511df37",
+    "engine_ms": {
+     "dl0": 95.877462,
+     "dl1": 70.495073,
+     "dl2": 47.598128
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 70
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 95.877462,
+    "dl1": 70.495073,
+    "dl2": 47.598128
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "one_arm.1": {
+   "facts": {
+    "arms": [
+     "left"
+    ],
+    "bases": true,
+    "body_bytes": 3037,
+    "complete_to_bp": {
+     "left": 1000
+    },
+    "continuation": {
+     "left": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000909.1"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 13
+    },
+    "stop": null,
+    "summary_cut_bytes": 1186,
+    "walk_bp": {
+     "left": 254
+    },
+    "walks": {
+     "left": 9
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000909.1"
+    ],
+    "segments_min": {
+     "left": 13
+    },
+    "walk_bp_min": {
+     "left": 254
+    },
+    "walks_min": {
+     "left": 9
+    }
+   },
+   "reference": {
+    "body_digest": "fffe62a03637179e7fd4ec09b862bf828e9d75f38637ecf22e67541d164d53e6",
+    "engine_ms": {
+     "dl0": 21.552443,
+     "dl1": 11.491328000000001,
+     "dl2": 11.475068,
+     "mcp": 766.7892469999999
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "left",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 21.552443,
+    "dl1": 11.491328000000001,
+    "dl2": 11.475068,
+    "mcp": 766.7892469999999
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "one_arm.2": {
+   "facts": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 7480,
+    "complete_to_bp": {
+     "right": 1000
+    },
+    "continuation": {
+     "right": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2",
+     "NC_018497.1",
+     "NC_018496.1",
+     "NC_018495.1"
+    ],
+    "labels": 6,
+    "max_labels_per_node": 6,
+    "merges": {
+     "right": 9
+    },
+    "seed_bp": null,
+    "segments": {
+     "right": 58
+    },
+    "stop": null,
+    "summary_cut_bytes": 1380,
+    "walk_bp": {
+     "right": 877
+    },
+    "walks": {
+     "right": 16
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2"
+    ],
+    "merges_min": {
+     "right": 9
+    },
+    "segments_min": {
+     "right": 58
+    },
+    "walk_bp_min": {
+     "right": 877
+    },
+    "walks_min": {
+     "right": 16
+    }
+   },
+   "reference": {
+    "body_digest": "b9a6a12c397876d9dd127a898e7de7ca82552dcc5d61d12933096eda68c3b5ea",
+    "engine_ms": {
+     "dl0": 37.996757,
+     "dl1": 34.13588,
+     "dl2": 41.695691,
+     "mcp": 42.688168
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 6
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "right",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 37.996757,
+    "dl1": 34.13588,
+    "dl2": 41.695691,
+    "mcp": 42.688168
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "one_arm.3": {
+   "facts": {
+    "arms": [
+     "left"
+    ],
+    "bases": true,
+    "body_bytes": 1913,
+    "complete_to_bp": {
+     "left": 100
+    },
+    "continuation": {
+     "left": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000017.11"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 7
+    },
+    "stop": null,
+    "summary_cut_bytes": 1184,
+    "walk_bp": {
+     "left": 18
+    },
+    "walks": {
+     "left": 4
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000017.11"
+    ],
+    "segments_min": {
+     "left": 7
+    },
+    "walk_bp_min": {
+     "left": 18
+    },
+    "walks_min": {
+     "left": 4
+    }
+   },
+   "reference": {
+    "body_digest": "ed4277ef958534b70643ab492469c51fe3a0f7f37b12e2877317ba9386ee3447",
+    "engine_ms": {
+     "dl0": 70.774585,
+     "dl1": 59.480999,
+     "dl2": 60.864643,
+     "mcp": 921.4404870000001
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "left",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 70.774585,
+    "dl1": 59.480999,
+    "dl2": 60.864643,
+    "mcp": 921.4404870000001
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "over_8mib.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 305290,
+    "complete_to_bp": {
+     "left": 88,
+     "right": 77
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "244319",
+     "562",
+     "28901",
+     "42897",
+     "1446746",
+     "216592",
+     "1086030",
+     "1444044",
+     "1444266",
+     "1165946",
+     "1446730",
+     "1165943",
+     "1240759",
+     "1446536",
+     "1116001",
+     "1116177",
+     "1240773",
+     "1042804",
+     "868183",
+     "2163603",
+     "1444151",
+     "1090928",
+     "1446594",
+     "1446718",
+     "913089",
+     "1446519",
+     "1116183",
+     "1444063",
+     "1446724",
+     "1446572",
+     "868187",
+     "1116053",
+     "1169333",
+     "1240762",
+     "1444040",
+     "1116153",
+     "1116191",
+     "1116007",
+     "1125643",
+     "1182715",
+     "1116041",
+     "1411693",
+     "1281254",
+     "1444050",
+     "1116046",
+     "1446700",
+     "1116126",
+     "1280998",
+     "1412821",
+     "752786",
+     "1116074",
+     "1268996",
+     "1446765",
+     "1269003",
+     "1412827",
+     "1281242",
+     "1331064",
+     "1281080",
+     "1444203",
+     "869677",
+     "1116005",
+     "1125645",
+     "1212583",
+     "1444281",
+     "1444049",
+     "1281243",
+     "1116103",
+     "1434144",
+     "1444270",
+     "679895",
+     "1173690",
+     "1890305",
+     "1434148",
+     "1434156",
+     "1286344",
+     "622",
+     "331111",
+     "316407",
+     "1248902",
+     "868185",
+     "1078032",
+     "1232151",
+     "1444223",
+     "1050617",
+     "1116139",
+     "1446599",
+     "1200752",
+     "869675",
+     "1446744",
+     "1116002",
+     "1068619",
+     "1240775",
+     "1446731",
+     "1240770",
+     "1446592",
+     "1068615",
+     "1281058",
+     "1116055",
+     "1446741",
+     "1196033",
+     "1444148",
+     "1281127",
+     "868171",
+     "1116048",
+     "868191",
+     "1446507",
+     "1116179",
+     "1116026",
+     "1405295",
+     "1281052",
+     "1101440",
+     "1444246",
+     "1116073",
+     "1281247",
+     "1116185",
+     "868208",
+     "1412837",
+     "1444045",
+     "1280984",
+     "2048775",
+     "868204",
+     "1116134",
+     "1446514",
+     "1116100",
+     "1446527",
+     "1116091",
+     "1125649",
+     "1116147",
+     "1281017",
+     "1125650",
+     "1444239",
+     "1116032",
+     "1453472",
+     "1446532",
+     "1116095",
+     "1281072",
+     "656443",
+     "1169367",
+     "869671",
+     "1454383",
+     "1444119",
+     "626531",
+     "1444211",
+     "1169863",
+     "1126916",
+     "1182668",
+     "1269007",
+     "1212581",
+     "1181758",
+     "1444169",
+     "1212580",
+     "1212562",
+     "1444227",
+     "1444196",
+     "1412839",
+     "1005462",
+     "1434131",
+     "1434129",
+     "1337384",
+     "1434139",
+     "1434136",
+     "1434159",
+     "1434178",
+     "749547",
+     "168927",
+     "424717",
+     "573235",
+     "404399",
+     "1055537",
+     "566546",
+     "1446701",
+     "758831",
+     "637912",
+     "1055534",
+     "1444212",
+     "1248915",
+     "1444132",
+     "869679",
+     "754088",
+     "1240772",
+     "1240774",
+     "1240764",
+     "1444185",
+     "1444163",
+     "1446541",
+     "1444091",
+     "1444038",
+     "1116137",
+     "1444153",
+     "868206",
+     "1240758",
+     "1116070",
+     "1116186",
+     "1444200",
+     "1116154",
+     "868207",
+     "754080",
+     "656397",
+     "868167",
+     "1116033",
+     "1116141",
+     "1444174",
+     "1126892",
+     "1116012",
+     "1444121",
+     "1281051",
+     "1116067",
+     "1450431",
+     "1444135",
+     "754090",
+     "1116019",
+     "1444231",
+     "1116155",
+     "1125639",
+     "1116096",
+     "1268978",
+     "1281083",
+     "358709",
+     "1116108",
+     "1444149",
+     "1005565",
+     "868199",
+     "1182694",
+     "1411698",
+     "550672",
+     "1126912",
+     "1438691",
+     "1268977",
+     "1446763",
+     "1444177",
+     "1281260",
+     "1182701",
+     "1001988",
+     "1281212",
+     "1281238",
+     "1169332",
+     "1268997",
+     "1444226",
+     "1181749",
+     "1182663",
+     "1281122",
+     "1444213",
+     "1434146",
+     "1403831",
+     "1434163",
+     "1434130",
+     "1434154",
+     "1248823",
+     "868170",
+     "585396",
+     "1115997",
+     "1040638",
+     "1240776",
+     "1446500",
+     "1446728",
+     "1126889",
+     "1444180",
+     "1446589",
+     "1165941",
+     "868179",
+     "656419",
+     "868180",
+     "1280986",
+     "1404262",
+     "1446711",
+     "1446523",
+     "1078031",
+     "1444142",
+     "1446591",
+     "1446713",
+     "868195",
+     "1446734",
+     "1444083",
+     "1444248",
+     "1444113",
+     "1446595",
+     "1116125",
+     "1444282",
+     "1116089",
+     "1116015",
+     "1444068",
+     "1444096",
+     "679204",
+     "1444217",
+     "1116076",
+     "1446555",
+     "1446554",
+     "1446525",
+     "1446575",
+     "1116098",
+     "1411697",
+     "1446568",
+     "1116043",
+     "1182678",
+     "1444082",
+     "1444090",
+     "656427",
+     "1281270",
+     "1116031",
+     "1444210",
+     "1317131",
+     "1444077",
+     "1126919",
+     "1335303",
+     "1116114",
+     "1182720",
+     "1330529",
+     "1169396",
+     "1116049",
+     "1181768",
+     "1126918",
+     "1116101",
+     "475609",
+     "1444263",
+     "1116192",
+     "1212566",
+     "1281206",
+     "1182722",
+     "1169365",
+     "1444075",
+     "754092",
+     "1435461",
+     "868197",
+     "1182719",
+     "585034",
+     "1212569",
+     "1434152",
+     "869690",
+     "1434172",
+     "373384",
+     "550689",
+     "1068608",
+     "1078034",
+     "2605619",
+     "1110693",
+     "1412834",
+     "1444275",
+     "1055533",
+     "1042803",
+     "869670",
+     "868178",
+     "1444170",
+     "1116131",
+     "1446593",
+     "1446574",
+     "1068614",
+     "1116120",
+     "656447",
+     "1068618",
+     "1412825",
+     "1078033",
+     "1327978",
+     "1444036",
+     "1048266",
+     "1240763",
+     "1446740",
+     "1281204",
+     "1446511",
+     "2048779",
+     "754079",
+     "670896",
+     "1806490",
+     "1116189",
+     "1116069",
+     "1412833",
+     "868209",
+     "1446742",
+     "1444199",
+     "868165",
+     "766166",
+     "1116180",
+     "1446516",
+     "1116159",
+     "1281253",
+     "941323",
+     "1281233",
+     "1116129",
+     "1446569",
+     "409438",
+     "1444134",
+     "1331061",
+     "868162",
+     "1181767",
+     "1281034",
+     "1116038",
+     "1400023",
+     "1444253",
+     "1116035",
+     "656423",
+     "1125647",
+     "1116128",
+     "1331062",
+     "1126927",
+     "1116009",
+     "1444041",
+     "1169358",
+     "1444154",
+     "1444095",
+     "1444192",
+     "1444104",
+     "457401",
+     "1182728",
+     "2049486",
+     "656402",
+     "591020",
+     "1444201",
+     "1444257",
+     "1182688",
+     "766164",
+     "1444122",
+     "1182729",
+     "550688",
+     "1169388",
+     "413997",
+     "634469",
+     "879462",
+     "1212571",
+     "1434138",
+     "668369",
+     "1434169",
+     "550686",
+     "1434153",
+     "621",
+     "511145",
+     "1048254",
+     "198215",
+     "37762",
+     "536056",
+     "1444219",
+     "1446580",
+     "344601",
+     "1005550",
+     "1444165",
+     "1446546",
+     "1446750",
+     "1163738",
+     "1232150",
+     "1240779",
+     "1240768",
+     "1048256",
+     "1240767",
+     "1165953",
+     "1444267",
+     "1446723",
+     "1116050",
+     "1444237",
+     "1069643",
+     "1073985",
+     "1116017",
+     "1446768",
+     "1116066",
+     "1446733",
+     "1444276",
+     "656430",
+     "1281218",
+     "868174",
+     "868189",
+     "1055542",
+     "670894",
+     "1446529",
+     "1181744",
+     "1281214",
+     "1444146",
+     "1281172",
+     "1116157",
+     "1116071",
+     "1182716",
+     "1136217",
+     "1116010",
+     "1227814",
+     "1126928",
+     "1116115",
+     "913091",
+     "1444254",
+     "1116045",
+     "550676",
+     "1125648",
+     "1116027",
+     "1116104",
+     "656383",
+     "1446708",
+     "1169330",
+     "1116037",
+     "1438687",
+     "1116138",
+     "754084",
+     "754083",
+     "1182700",
+     "1444260",
+     "1358422",
+     "1182730",
+     "1105330",
+     "1116193",
+     "1116081",
+     "1444206",
+     "1116080",
+     "1116087",
+     "656408",
+     "1446497",
+     "749538",
+     "1435046",
+     "749540",
+     "656404",
+     "1281147",
+     "752790",
+     "1127126",
+     "1286348",
+     "550690",
+     "316385",
+     "766145",
+     "656414",
+     "766159",
+     "1281153",
+     "623",
+     "624",
+     "1045010",
+     "564",
+     "1446726",
+     "868193",
+     "1165945",
+     "868194",
+     "1126900",
+     "1446721",
+     "1240765",
+     "1268976",
+     "1240760",
+     "1116136",
+     "868176",
+     "1116113",
+     "1446538",
+     "1281235",
+     "1125634",
+     "1311757",
+     "1444092",
+     "1116184",
+     "1444178",
+     "1116025",
+     "754086",
+     "585055",
+     "1281158",
+     "1444243",
+     "868177",
+     "1182702",
+     "1182710",
+     "1444176",
+     "1116078",
+     "1444272",
+     "1446518",
+     "1116102",
+     "1116156",
+     "1281189",
+     "1446520",
+     "868190",
+     "1125640",
+     "868169",
+     "1116006",
+     "1116109",
+     "868200",
+     "1451264",
+     "1444225",
+     "1400022",
+     "1167694",
+     "1330528",
+     "1116142",
+     "754078",
+     "1444261",
+     "1182738",
+     "1335916",
+     "550675",
+     "1116146",
+     "1116194",
+     "1005464",
+     "1444255",
+     "457400",
+     "1813821",
+     "1434150",
+     "1617964",
+     "868172",
+     "868181",
+     "1165950",
+     "1444137",
+     "868192",
+     "1068616",
+     "1115998",
+     "868168",
+     "1090927",
+     "656396",
+     "340186",
+     "1446517",
+     "1444130",
+     "1116072",
+     "1444207",
+     "868198",
+     "1444065",
+     "1116160",
+     "869689",
+     "670890",
+     "745156",
+     "1176728",
+     "1444245",
+     "1116004",
+     "1412817",
+     "1116018",
+     "1116149",
+     "1125635",
+     "1444106",
+     "300269",
+     "1125637",
+     "1444120",
+     "1444233",
+     "1125636",
+     "656374",
+     "1438678",
+     "1181756",
+     "1182655",
+     "1181742",
+     "550683",
+     "1444241",
+     "1116086",
+     "1173689",
+     "1212584",
+     "749532",
+     "1935181",
+     "656438",
+     "1438669",
+     "1282357",
+     "1245474",
+     "1434162",
+     "1892899",
+     "424720",
+     "469008",
+     "1446547",
+     "1038927",
+     "216599",
+     "1078035",
+     "2056315",
+     "1392854",
+     "198214",
+     "869688",
+     "1134453",
+     "585395",
+     "1444181",
+     "868182",
+     "1446588",
+     "868173",
+     "1446510",
+     "1048334",
+     "1048265",
+     "1240771",
+     "1446717",
+     "1069645",
+     "1116140",
+     "1055541",
+     "1068617",
+     "1444279",
+     "1116158",
+     "1169376",
+     "1116119",
+     "1116188",
+     "754081",
+     "550691",
+     "1438696",
+     "1446567",
+     "1444094",
+     "1182680",
+     "1444097",
+     "1182703",
+     "1444118",
+     "1281227",
+     "749539",
+     "1055545",
+     "550679",
+     "1126917",
+     "868201",
+     "1411645",
+     "766162",
+     "1412820",
+     "1125644",
+     "1446748",
+     "1274814",
+     "1212564",
+     "869674",
+     "1281273",
+     "868196",
+     "1434132",
+     "1434141",
+     "1434151",
+     "1446751",
+     "1116133",
+     "1165944",
+     "1444190",
+     "1444160",
+     "1055544",
+     "1446714",
+     "679205",
+     "1068620",
+     "1446549",
+     "1181739",
+     "1052677",
+     "1125638",
+     "1444209",
+     "1240777",
+     "1116056",
+     "1068621",
+     "1444115",
+     "1232154",
+     "1405294",
+     "316401",
+     "1444133",
+     "656411",
+     "1240761",
+     "1444224",
+     "1116052",
+     "656393",
+     "1116187",
+     "1240778",
+     "1444125",
+     "1240766",
+     "1446521",
+     "1314847",
+     "1182671",
+     "2048777",
+     "1116039",
+     "868210",
+     "1182658",
+     "1169379",
+     "945434",
+     "1444191",
+     "1446556",
+     "1281154",
+     "1090929",
+     "1169357",
+     "1116094",
+     "1126897",
+     "1116003",
+     "868164",
+     "766163",
+     "1416672",
+     "1089445",
+     "869683",
+     "796392",
+     "1212582",
+     "1281177",
+     "910348",
+     "1116097",
+     "1212568",
+     "1281194",
+     "766158",
+     "1268238",
+     "1434133",
+     "1282358",
+     "1452720",
+     "83333",
+     "869681",
+     "913090",
+     "1165949",
+     "696406",
+     "1124984",
+     "340185",
+     "1446735",
+     "1116047",
+     "1240769",
+     "1116051",
+     "868160",
+     "1412828",
+     "2605620",
+     "868161",
+     "670903",
+     "656433",
+     "868166",
+     "1444064",
+     "868186",
+     "1116122",
+     "1126933",
+     "754087",
+     "1116000",
+     "1444078",
+     "1116127",
+     "2082629",
+     "1116022",
+     "1116042",
+     "1116117",
+     "1455597",
+     "1116028",
+     "1116020",
+     "1116092",
+     "1412832",
+     "1116099",
+     "869694",
+     "1182733",
+     "1116024",
+     "868163",
+     "1005567",
+     "1444188",
+     "1169318",
+     "1116152",
+     "1116083",
+     "1328450",
+     "1281261",
+     "1169359",
+     "1182684",
+     "1210044",
+     "1210043",
+     "1181743",
+     "1281028",
+     "331112",
+     "1227813",
+     "595496",
+     "1434142",
+     "1434135",
+     "1434179",
+     "766160",
+     "1169664",
+     "868188",
+     "1165952",
+     "1444155",
+     "670893",
+     "868175",
+     "1248903",
+     "1450428",
+     "1432548",
+     "1125651",
+     "1444230",
+     "550682",
+     "1446542",
+     "1446548",
+     "1116181",
+     "1444158",
+     "1446571",
+     "1416676",
+     "670892",
+     "1116190",
+     "1446558",
+     "1444099",
+     "656400",
+     "1281240",
+     "1446508",
+     "754077",
+     "1444058",
+     "1165942",
+     "1281179",
+     "1116014",
+     "1281192",
+     "1116150",
+     "1116148",
+     "1446760",
+     "1412836",
+     "1005564",
+     "1438686",
+     "1181759",
+     "1078030",
+     "1280969",
+     "1181730",
+     "1090930",
+     "1169369",
+     "1116123",
+     "1005442",
+     "1181778",
+     "2082618",
+     "1169397",
+     "1446702",
+     "1281085",
+     "1116085",
+     "1169378",
+     "1444048",
+     "1444259",
+     "1444059",
+     "1328448",
+     "1444162",
+     "1886513",
+     "766148",
+     "1446501",
+     "1434160"
+    ],
+    "labels": 873,
+    "max_labels_per_node": 873,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1152,
+     "right": 1923
+    },
+    "stop": "work",
+    "summary_cut_bytes": 3094,
+    "walk_bp": {
+     "left": 88,
+     "right": 78
+    },
+    "walks": {
+     "left": 620,
+     "right": 1036
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 739.567125,
+    "dl1": 680.3580179999999,
+    "dl2": 669.7516489999999,
+    "mcp": 5015.9677010000005
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "fail: not the slot's shape: a body over 8 MiB",
+    "twin": "pass"
+   }
+  },
+  "over_8mib.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 305290,
+    "complete_to_bp": {
+     "left": 88,
+     "right": 77
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "244319",
+     "562",
+     "28901",
+     "42897",
+     "1446746",
+     "216592",
+     "1086030",
+     "1444044",
+     "1444266",
+     "1165946",
+     "1446730",
+     "1165943",
+     "1240759",
+     "1446536",
+     "1116001",
+     "1116177",
+     "1240773",
+     "1042804",
+     "868183",
+     "2163603",
+     "1444151",
+     "1090928",
+     "1446594",
+     "1446718",
+     "913089",
+     "1446519",
+     "1116183",
+     "1444063",
+     "1446724",
+     "1446572",
+     "868187",
+     "1116053",
+     "1169333",
+     "1240762",
+     "1444040",
+     "1116153",
+     "1116191",
+     "1116007",
+     "1125643",
+     "1182715",
+     "1116041",
+     "1411693",
+     "1281254",
+     "1444050",
+     "1116046",
+     "1446700",
+     "1116126",
+     "1280998",
+     "1412821",
+     "752786",
+     "1116074",
+     "1268996",
+     "1446765",
+     "1269003",
+     "1412827",
+     "1281242",
+     "1331064",
+     "1281080",
+     "1444203",
+     "869677",
+     "1116005",
+     "1125645",
+     "1212583",
+     "1444281",
+     "1444049",
+     "1281243",
+     "1116103",
+     "1434144",
+     "1444270",
+     "679895",
+     "1173690",
+     "1890305",
+     "1434148",
+     "1434156",
+     "1286344",
+     "622",
+     "331111",
+     "316407",
+     "1248902",
+     "868185",
+     "1078032",
+     "1232151",
+     "1444223",
+     "1050617",
+     "1116139",
+     "1446599",
+     "1200752",
+     "869675",
+     "1446744",
+     "1116002",
+     "1068619",
+     "1240775",
+     "1446731",
+     "1240770",
+     "1446592",
+     "1068615",
+     "1281058",
+     "1116055",
+     "1446741",
+     "1196033",
+     "1444148",
+     "1281127",
+     "868171",
+     "1116048",
+     "868191",
+     "1446507",
+     "1116179",
+     "1116026",
+     "1405295",
+     "1281052",
+     "1101440",
+     "1444246",
+     "1116073",
+     "1281247",
+     "1116185",
+     "868208",
+     "1412837",
+     "1444045",
+     "1280984",
+     "2048775",
+     "868204",
+     "1116134",
+     "1446514",
+     "1116100",
+     "1446527",
+     "1116091",
+     "1125649",
+     "1116147",
+     "1281017",
+     "1125650",
+     "1444239",
+     "1116032",
+     "1453472",
+     "1446532",
+     "1116095",
+     "1281072",
+     "656443",
+     "1169367",
+     "869671",
+     "1454383",
+     "1444119",
+     "626531",
+     "1444211",
+     "1169863",
+     "1126916",
+     "1182668",
+     "1269007",
+     "1212581",
+     "1181758",
+     "1444169",
+     "1212580",
+     "1212562",
+     "1444227",
+     "1444196",
+     "1412839",
+     "1005462",
+     "1434131",
+     "1434129",
+     "1337384",
+     "1434139",
+     "1434136",
+     "1434159",
+     "1434178",
+     "749547",
+     "168927",
+     "424717",
+     "573235",
+     "404399",
+     "1055537",
+     "566546",
+     "1446701",
+     "758831",
+     "637912",
+     "1055534",
+     "1444212",
+     "1248915",
+     "1444132",
+     "869679",
+     "754088",
+     "1240772",
+     "1240774",
+     "1240764",
+     "1444185",
+     "1444163",
+     "1446541",
+     "1444091",
+     "1444038",
+     "1116137",
+     "1444153",
+     "868206",
+     "1240758",
+     "1116070",
+     "1116186",
+     "1444200",
+     "1116154",
+     "868207",
+     "754080",
+     "656397",
+     "868167",
+     "1116033",
+     "1116141",
+     "1444174",
+     "1126892",
+     "1116012",
+     "1444121",
+     "1281051",
+     "1116067",
+     "1450431",
+     "1444135",
+     "754090",
+     "1116019",
+     "1444231",
+     "1116155",
+     "1125639",
+     "1116096",
+     "1268978",
+     "1281083",
+     "358709",
+     "1116108",
+     "1444149",
+     "1005565",
+     "868199",
+     "1182694",
+     "1411698",
+     "550672",
+     "1126912",
+     "1438691",
+     "1268977",
+     "1446763",
+     "1444177",
+     "1281260",
+     "1182701",
+     "1001988",
+     "1281212",
+     "1281238",
+     "1169332",
+     "1268997",
+     "1444226",
+     "1181749",
+     "1182663",
+     "1281122",
+     "1444213",
+     "1434146",
+     "1403831",
+     "1434163",
+     "1434130",
+     "1434154",
+     "1248823",
+     "868170",
+     "585396",
+     "1115997",
+     "1040638",
+     "1240776",
+     "1446500",
+     "1446728",
+     "1126889",
+     "1444180",
+     "1446589",
+     "1165941",
+     "868179",
+     "656419",
+     "868180",
+     "1280986",
+     "1404262",
+     "1446711",
+     "1446523",
+     "1078031",
+     "1444142",
+     "1446591",
+     "1446713",
+     "868195",
+     "1446734",
+     "1444083",
+     "1444248",
+     "1444113",
+     "1446595",
+     "1116125",
+     "1444282",
+     "1116089",
+     "1116015",
+     "1444068",
+     "1444096",
+     "679204",
+     "1444217",
+     "1116076",
+     "1446555",
+     "1446554",
+     "1446525",
+     "1446575",
+     "1116098",
+     "1411697",
+     "1446568",
+     "1116043",
+     "1182678",
+     "1444082",
+     "1444090",
+     "656427",
+     "1281270",
+     "1116031",
+     "1444210",
+     "1317131",
+     "1444077",
+     "1126919",
+     "1335303",
+     "1116114",
+     "1182720",
+     "1330529",
+     "1169396",
+     "1116049",
+     "1181768",
+     "1126918",
+     "1116101",
+     "475609",
+     "1444263",
+     "1116192",
+     "1212566",
+     "1281206",
+     "1182722",
+     "1169365",
+     "1444075",
+     "754092",
+     "1435461",
+     "868197",
+     "1182719",
+     "585034",
+     "1212569",
+     "1434152",
+     "869690",
+     "1434172",
+     "373384",
+     "550689",
+     "1068608",
+     "1078034",
+     "2605619",
+     "1110693",
+     "1412834",
+     "1444275",
+     "1055533",
+     "1042803",
+     "869670",
+     "868178",
+     "1444170",
+     "1116131",
+     "1446593",
+     "1446574",
+     "1068614",
+     "1116120",
+     "656447",
+     "1068618",
+     "1412825",
+     "1078033",
+     "1327978",
+     "1444036",
+     "1048266",
+     "1240763",
+     "1446740",
+     "1281204",
+     "1446511",
+     "2048779",
+     "754079",
+     "670896",
+     "1806490",
+     "1116189",
+     "1116069",
+     "1412833",
+     "868209",
+     "1446742",
+     "1444199",
+     "868165",
+     "766166",
+     "1116180",
+     "1446516",
+     "1116159",
+     "1281253",
+     "941323",
+     "1281233",
+     "1116129",
+     "1446569",
+     "409438",
+     "1444134",
+     "1331061",
+     "868162",
+     "1181767",
+     "1281034",
+     "1116038",
+     "1400023",
+     "1444253",
+     "1116035",
+     "656423",
+     "1125647",
+     "1116128",
+     "1331062",
+     "1126927",
+     "1116009",
+     "1444041",
+     "1169358",
+     "1444154",
+     "1444095",
+     "1444192",
+     "1444104",
+     "457401",
+     "1182728",
+     "2049486",
+     "656402",
+     "591020",
+     "1444201",
+     "1444257",
+     "1182688",
+     "766164",
+     "1444122",
+     "1182729",
+     "550688",
+     "1169388",
+     "413997",
+     "634469",
+     "879462",
+     "1212571",
+     "1434138",
+     "668369",
+     "1434169",
+     "550686",
+     "1434153",
+     "621",
+     "511145",
+     "1048254",
+     "198215",
+     "37762",
+     "536056",
+     "1444219",
+     "1446580",
+     "344601",
+     "1005550",
+     "1444165",
+     "1446546",
+     "1446750",
+     "1163738",
+     "1232150",
+     "1240779",
+     "1240768",
+     "1048256",
+     "1240767",
+     "1165953",
+     "1444267",
+     "1446723",
+     "1116050",
+     "1444237",
+     "1069643",
+     "1073985",
+     "1116017",
+     "1446768",
+     "1116066",
+     "1446733",
+     "1444276",
+     "656430",
+     "1281218",
+     "868174",
+     "868189",
+     "1055542",
+     "670894",
+     "1446529",
+     "1181744",
+     "1281214",
+     "1444146",
+     "1281172",
+     "1116157",
+     "1116071",
+     "1182716",
+     "1136217",
+     "1116010",
+     "1227814",
+     "1126928",
+     "1116115",
+     "913091",
+     "1444254",
+     "1116045",
+     "550676",
+     "1125648",
+     "1116027",
+     "1116104",
+     "656383",
+     "1446708",
+     "1169330",
+     "1116037",
+     "1438687",
+     "1116138",
+     "754084",
+     "754083",
+     "1182700",
+     "1444260",
+     "1358422",
+     "1182730",
+     "1105330",
+     "1116193",
+     "1116081",
+     "1444206",
+     "1116080",
+     "1116087",
+     "656408",
+     "1446497",
+     "749538",
+     "1435046",
+     "749540",
+     "656404",
+     "1281147",
+     "752790",
+     "1127126",
+     "1286348",
+     "550690",
+     "316385",
+     "766145",
+     "656414",
+     "766159",
+     "1281153",
+     "623",
+     "624",
+     "1045010",
+     "564",
+     "1446726",
+     "868193",
+     "1165945",
+     "868194",
+     "1126900",
+     "1446721",
+     "1240765",
+     "1268976",
+     "1240760",
+     "1116136",
+     "868176",
+     "1116113",
+     "1446538",
+     "1281235",
+     "1125634",
+     "1311757",
+     "1444092",
+     "1116184",
+     "1444178",
+     "1116025",
+     "754086",
+     "585055",
+     "1281158",
+     "1444243",
+     "868177",
+     "1182702",
+     "1182710",
+     "1444176",
+     "1116078",
+     "1444272",
+     "1446518",
+     "1116102",
+     "1116156",
+     "1281189",
+     "1446520",
+     "868190",
+     "1125640",
+     "868169",
+     "1116006",
+     "1116109",
+     "868200",
+     "1451264",
+     "1444225",
+     "1400022",
+     "1167694",
+     "1330528",
+     "1116142",
+     "754078",
+     "1444261",
+     "1182738",
+     "1335916",
+     "550675",
+     "1116146",
+     "1116194",
+     "1005464",
+     "1444255",
+     "457400",
+     "1813821",
+     "1434150",
+     "1617964",
+     "868172",
+     "868181",
+     "1165950",
+     "1444137",
+     "868192",
+     "1068616",
+     "1115998",
+     "868168",
+     "1090927",
+     "656396",
+     "340186",
+     "1446517",
+     "1444130",
+     "1116072",
+     "1444207",
+     "868198",
+     "1444065",
+     "1116160",
+     "869689",
+     "670890",
+     "745156",
+     "1176728",
+     "1444245",
+     "1116004",
+     "1412817",
+     "1116018",
+     "1116149",
+     "1125635",
+     "1444106",
+     "300269",
+     "1125637",
+     "1444120",
+     "1444233",
+     "1125636",
+     "656374",
+     "1438678",
+     "1181756",
+     "1182655",
+     "1181742",
+     "550683",
+     "1444241",
+     "1116086",
+     "1173689",
+     "1212584",
+     "749532",
+     "1935181",
+     "656438",
+     "1438669",
+     "1282357",
+     "1245474",
+     "1434162",
+     "1892899",
+     "424720",
+     "469008",
+     "1446547",
+     "1038927",
+     "216599",
+     "1078035",
+     "2056315",
+     "1392854",
+     "198214",
+     "869688",
+     "1134453",
+     "585395",
+     "1444181",
+     "868182",
+     "1446588",
+     "868173",
+     "1446510",
+     "1048334",
+     "1048265",
+     "1240771",
+     "1446717",
+     "1069645",
+     "1116140",
+     "1055541",
+     "1068617",
+     "1444279",
+     "1116158",
+     "1169376",
+     "1116119",
+     "1116188",
+     "754081",
+     "550691",
+     "1438696",
+     "1446567",
+     "1444094",
+     "1182680",
+     "1444097",
+     "1182703",
+     "1444118",
+     "1281227",
+     "749539",
+     "1055545",
+     "550679",
+     "1126917",
+     "868201",
+     "1411645",
+     "766162",
+     "1412820",
+     "1125644",
+     "1446748",
+     "1274814",
+     "1212564",
+     "869674",
+     "1281273",
+     "868196",
+     "1434132",
+     "1434141",
+     "1434151",
+     "1446751",
+     "1116133",
+     "1165944",
+     "1444190",
+     "1444160",
+     "1055544",
+     "1446714",
+     "679205",
+     "1068620",
+     "1446549",
+     "1181739",
+     "1052677",
+     "1125638",
+     "1444209",
+     "1240777",
+     "1116056",
+     "1068621",
+     "1444115",
+     "1232154",
+     "1405294",
+     "316401",
+     "1444133",
+     "656411",
+     "1240761",
+     "1444224",
+     "1116052",
+     "656393",
+     "1116187",
+     "1240778",
+     "1444125",
+     "1240766",
+     "1446521",
+     "1314847",
+     "1182671",
+     "2048777",
+     "1116039",
+     "868210",
+     "1182658",
+     "1169379",
+     "945434",
+     "1444191",
+     "1446556",
+     "1281154",
+     "1090929",
+     "1169357",
+     "1116094",
+     "1126897",
+     "1116003",
+     "868164",
+     "766163",
+     "1416672",
+     "1089445",
+     "869683",
+     "796392",
+     "1212582",
+     "1281177",
+     "910348",
+     "1116097",
+     "1212568",
+     "1281194",
+     "766158",
+     "1268238",
+     "1434133",
+     "1282358",
+     "1452720",
+     "83333",
+     "869681",
+     "913090",
+     "1165949",
+     "696406",
+     "1124984",
+     "340185",
+     "1446735",
+     "1116047",
+     "1240769",
+     "1116051",
+     "868160",
+     "1412828",
+     "2605620",
+     "868161",
+     "670903",
+     "656433",
+     "868166",
+     "1444064",
+     "868186",
+     "1116122",
+     "1126933",
+     "754087",
+     "1116000",
+     "1444078",
+     "1116127",
+     "2082629",
+     "1116022",
+     "1116042",
+     "1116117",
+     "1455597",
+     "1116028",
+     "1116020",
+     "1116092",
+     "1412832",
+     "1116099",
+     "869694",
+     "1182733",
+     "1116024",
+     "868163",
+     "1005567",
+     "1444188",
+     "1169318",
+     "1116152",
+     "1116083",
+     "1328450",
+     "1281261",
+     "1169359",
+     "1182684",
+     "1210044",
+     "1210043",
+     "1181743",
+     "1281028",
+     "331112",
+     "1227813",
+     "595496",
+     "1434142",
+     "1434135",
+     "1434179",
+     "766160",
+     "1169664",
+     "868188",
+     "1165952",
+     "1444155",
+     "670893",
+     "868175",
+     "1248903",
+     "1450428",
+     "1432548",
+     "1125651",
+     "1444230",
+     "550682",
+     "1446542",
+     "1446548",
+     "1116181",
+     "1444158",
+     "1446571",
+     "1416676",
+     "670892",
+     "1116190",
+     "1446558",
+     "1444099",
+     "656400",
+     "1281240",
+     "1446508",
+     "754077",
+     "1444058",
+     "1165942",
+     "1281179",
+     "1116014",
+     "1281192",
+     "1116150",
+     "1116148",
+     "1446760",
+     "1412836",
+     "1005564",
+     "1438686",
+     "1181759",
+     "1078030",
+     "1280969",
+     "1181730",
+     "1090930",
+     "1169369",
+     "1116123",
+     "1005442",
+     "1181778",
+     "2082618",
+     "1169397",
+     "1446702",
+     "1281085",
+     "1116085",
+     "1169378",
+     "1444048",
+     "1444259",
+     "1444059",
+     "1328448",
+     "1444162",
+     "1886513",
+     "766148",
+     "1446501",
+     "1434160"
+    ],
+    "labels": 873,
+    "max_labels_per_node": 873,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1152,
+     "right": 1923
+    },
+    "stop": "work",
+    "summary_cut_bytes": 3094,
+    "walk_bp": {
+     "left": 88,
+     "right": 78
+    },
+    "walks": {
+     "left": 620,
+     "right": 1036
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 687.9882,
+    "dl1": 669.2250429999999,
+    "dl2": 685.479066,
+    "mcp": 742.825125
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "fail: not the slot's shape: a body over 8 MiB",
+    "twin": "pass"
+   }
+  },
+  "resource_stop.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3717,
+    "complete_to_bp": {
+     "left": 35,
+     "right": 35
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000913.3"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": "work",
+    "summary_cut_bytes": 2760,
+    "walk_bp": {
+     "left": 35,
+     "right": 35
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000913.3"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 35,
+     "right": 35
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "58d803f47ddba4d36c2a706c4a7233c5ac3954c08b3de38cd5e29831ccff7ecf",
+    "engine_ms": {
+     "dl0": 30.605458,
+     "dl1": 32.742506999999996,
+     "dl2": 34.566725999999996,
+     "mcp": 431.703962
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 300000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 30.605458,
+    "dl1": 32.742506999999996,
+    "dl2": 34.566725999999996,
+    "mcp": 431.703962
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "resource_stop.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 9592,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_018498.1",
+     "NZ_AAGX01000014.1",
+     "NC_000908.2",
+     "NC_018497.1",
+     "NC_018496.1",
+     "NC_018495.1"
+    ],
+    "labels": 6,
+    "max_labels_per_node": 6,
+    "merges": {
+     "left": 1,
+     "right": 9
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 4,
+     "right": 58
+    },
+    "stop": null,
+    "summary_cut_bytes": 1913,
+    "walk_bp": {
+     "left": 1000,
+     "right": 877
+    },
+    "walks": {
+     "left": 1,
+     "right": 16
+    }
+   },
+   "passed": false,
+   "plan_problems": [],
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 56.394400999999995,
+    "dl1": 56.768874,
+    "dl2": 35.599575,
+    "mcp": 48.029101999999995
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "fail: not the slot's shape: a resource stop by work units",
+    "twin": "pass"
+   }
+  },
+  "trace.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 1957,
+    "complete_to_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000964.3"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1198,
+    "walk_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000964.3"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 100,
+     "right": 100
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "65256dc4b4dc80fe8558749690e782dcd72a9b144dd98fbdffde2f47c5404c0e",
+    "engine_ms": {
+     "dl0": 41.622872,
+     "dl1": 26.257427,
+     "dl2": 29.112774,
+     "mcp": 915.327695
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2,
+     "on_reconverge": "keep"
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    },
+    "support": "trace"
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 41.622872,
+    "dl1": 26.257427,
+    "dl2": 29.112774,
+    "mcp": 915.327695
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "trace.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 1960,
+    "complete_to_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_001416.1"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1198,
+    "walk_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_001416.1"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 100,
+     "right": 100
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "9178319f62a63c8aee07d47a79dcbda027af8f7ea1155147573aeaea514bf3f0",
+    "engine_ms": {
+     "dl0": 431.050853,
+     "dl1": 392.892265,
+     "dl2": 389.55798400000003,
+     "mcp": 2093.1161930000003
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2,
+     "on_reconverge": "keep"
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    },
+    "support": "trace"
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 431.050853,
+    "dl1": 392.892265,
+    "dl2": 389.55798400000003,
+    "mcp": 2093.1161930000003
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.1": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 14644,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "entered": {
+     "right": false
+    },
+    "label_names": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1",
+     "NZ_CP010538.1",
+     "NC_000912.1",
+     "NZ_CP010551.1",
+     "NZ_MJIW01000006.1",
+     "NZ_MJIX01000003.1",
+     "NZ_MJIT01000001.1",
+     "NZ_MJIY01000002.1",
+     "NZ_MJJA01000002.1",
+     "NZ_MJIU01000003.1",
+     "NZ_MJIV01000001.1",
+     "NZ_JTGU01000029.1",
+     "NZ_JTGY01000021.1",
+     "NZ_JTGZ01000021.1",
+     "NZ_JTHB01000021.1",
+     "NZ_JTHD01000015.1",
+     "NZ_LHPO01000008.1",
+     "NZ_LHPS01000003.1",
+     "NZ_LHPP01000008.1",
+     "NZ_LHPV01000010.1",
+     "NZ_LHPQ01000014.1",
+     "NZ_LHPX01000009.1",
+     "NZ_LHQB01000004.1",
+     "NZ_LHQF01000005.1",
+     "NZ_LHQK01000010.1",
+     "NZ_LHPY01000011.1",
+     "NZ_CP017327.1",
+     "NZ_CP020689.1",
+     "NZ_CP020693.1",
+     "NZ_CP020692.1",
+     "NZ_CP020691.1",
+     "NZ_CP020690.1",
+     "NZ_CP020711.1",
+     "NZ_CP020710.1",
+     "NZ_CP020712.1",
+     "NZ_CP010548.1",
+     "NZ_CP013829.1",
+     "NZ_CP014267.1",
+     "NZ_AP017319.1",
+     "NZ_AP017318.1",
+     "NZ_CP017328.1",
+     "NZ_CP017330.1",
+     "NZ_CP017331.1",
+     "NZ_CP017332.1",
+     "NZ_CP017340.1",
+     "NZ_CP017341.1",
+     "NZ_CP017337.1",
+     "NZ_CP017333.1",
+     "NZ_CP017342.1",
+     "NZ_CP017336.1",
+     "NZ_CP017334.1",
+     "NZ_CP017338.1",
+     "NZ_CP017343.1",
+     "NZ_CP017339.1",
+     "NZ_CP017329.1",
+     "NZ_CP017335.1",
+     "NZ_CP010544.1",
+     "NZ_CP010540.1",
+     "NZ_CP010545.1",
+     "NC_020076.2",
+     "NZ_CP010541.1",
+     "NZ_CP010547.1",
+     "NZ_CP010539.1",
+     "NC_017504.1",
+     "NZ_CP010546.1",
+     "NZ_CP010543.1",
+     "NC_016807.1",
+     "NZ_CP010550.1"
+    ],
+    "labels": 70,
+    "max_labels_per_node": 70,
+    "merges": {
+     "left": 0,
+     "right": 5
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 5,
+     "right": 22
+    },
+    "stop": null,
+    "summary_cut_bytes": 2398,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 5
+    },
+    "segments_min": {
+     "left": 5,
+     "right": 22
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "reference": {
+    "body_digest": "7ce7e55e86ba373b3b2c7ab51692dd2950b2e316c0fbd0da629d14756fe736b2",
+    "engine_ms": {
+     "dl0": 117.767246,
+     "dl1": 69.78504600000001,
+     "dl2": 49.198734,
+     "mcp": 2367.798338
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 70
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 117.767246,
+    "dl1": 69.78504600000001,
+    "dl2": 49.198734,
+    "mcp": 2367.798338
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.1+radius": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 9816,
+    "complete_to_bp": {
+     "left": 500,
+     "right": 500
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1",
+     "NZ_CP010538.1",
+     "NC_000912.1",
+     "NZ_CP010551.1",
+     "NZ_MJIW01000006.1",
+     "NZ_MJIX01000003.1",
+     "NZ_MJIT01000001.1",
+     "NZ_MJIY01000002.1",
+     "NZ_MJJA01000002.1",
+     "NZ_MJIU01000003.1",
+     "NZ_MJIV01000001.1",
+     "NZ_JTGU01000029.1",
+     "NZ_JTGY01000021.1",
+     "NZ_JTGZ01000021.1",
+     "NZ_JTHB01000021.1",
+     "NZ_JTHD01000015.1",
+     "NZ_LHPO01000008.1",
+     "NZ_LHPS01000003.1",
+     "NZ_LHPP01000008.1",
+     "NZ_LHPV01000010.1",
+     "NZ_LHPQ01000014.1",
+     "NZ_LHPX01000009.1",
+     "NZ_LHQB01000004.1",
+     "NZ_LHQF01000005.1",
+     "NZ_LHQK01000010.1",
+     "NZ_LHPY01000011.1",
+     "NZ_CP017327.1",
+     "NZ_CP020689.1",
+     "NZ_CP020693.1",
+     "NZ_CP020692.1",
+     "NZ_CP020691.1",
+     "NZ_CP020690.1",
+     "NZ_CP020711.1",
+     "NZ_CP020710.1",
+     "NZ_CP020712.1",
+     "NZ_CP010548.1",
+     "NZ_CP013829.1",
+     "NZ_CP014267.1",
+     "NZ_AP017319.1",
+     "NZ_AP017318.1",
+     "NZ_CP017328.1",
+     "NZ_CP017330.1",
+     "NZ_CP017331.1",
+     "NZ_CP017332.1",
+     "NZ_CP017340.1",
+     "NZ_CP017341.1",
+     "NZ_CP017337.1",
+     "NZ_CP017333.1",
+     "NZ_CP017342.1",
+     "NZ_CP017336.1",
+     "NZ_CP017334.1",
+     "NZ_CP017338.1",
+     "NZ_CP017343.1",
+     "NZ_CP017339.1",
+     "NZ_CP017329.1",
+     "NZ_CP017335.1",
+     "NZ_CP010544.1",
+     "NZ_CP010540.1",
+     "NZ_CP010545.1",
+     "NC_020076.2",
+     "NZ_CP010541.1",
+     "NZ_CP010547.1",
+     "NZ_CP010539.1",
+     "NC_017504.1",
+     "NZ_CP010546.1",
+     "NZ_CP010543.1",
+     "NC_016807.1",
+     "NZ_CP010550.1"
+    ],
+    "labels": 70,
+    "max_labels_per_node": 70,
+    "merges": {
+     "left": 0,
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 3,
+     "right": 6
+    },
+    "stop": null,
+    "summary_cut_bytes": 2379,
+    "walk_bp": {
+     "left": 500,
+     "right": 500
+    },
+    "walks": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 1
+    },
+    "segments_min": {
+     "left": 3,
+     "right": 6
+    },
+    "walk_bp_min": {
+     "left": 500,
+     "right": 500
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "7f970f9603330e120142962f24697d9221153aeef5a64d99675c03fbc97d7408",
+    "engine_ms": {
+     "dl0": 22.943747000000002,
+     "dl1": 41.537262,
+     "dl2": 36.642134999999996,
+     "mcp": 43.459297
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 70
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 500,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 22.943747000000002,
+    "dl1": 41.537262,
+    "dl2": 36.642134999999996,
+    "mcp": 43.459297
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.1+shift10": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 14653,
+    "complete_to_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": true,
+    "label_names": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1",
+     "NZ_CP010538.1",
+     "NC_000912.1",
+     "NZ_CP010551.1",
+     "NZ_MJIW01000006.1",
+     "NZ_MJIX01000003.1",
+     "NZ_MJIT01000001.1",
+     "NZ_MJIY01000002.1",
+     "NZ_MJJA01000002.1",
+     "NZ_MJIU01000003.1",
+     "NZ_MJIV01000001.1",
+     "NZ_JTGU01000029.1",
+     "NZ_JTGY01000021.1",
+     "NZ_JTGZ01000021.1",
+     "NZ_JTHB01000021.1",
+     "NZ_JTHD01000015.1",
+     "NZ_LHPO01000008.1",
+     "NZ_LHPS01000003.1",
+     "NZ_LHPP01000008.1",
+     "NZ_LHPV01000010.1",
+     "NZ_LHPQ01000014.1",
+     "NZ_LHPX01000009.1",
+     "NZ_LHQB01000004.1",
+     "NZ_LHQF01000005.1",
+     "NZ_LHQK01000010.1",
+     "NZ_LHPY01000011.1",
+     "NZ_CP017327.1",
+     "NZ_CP020689.1",
+     "NZ_CP020693.1",
+     "NZ_CP020692.1",
+     "NZ_CP020691.1",
+     "NZ_CP020690.1",
+     "NZ_CP020711.1",
+     "NZ_CP020710.1",
+     "NZ_CP020712.1",
+     "NZ_CP010548.1",
+     "NZ_CP013829.1",
+     "NZ_CP014267.1",
+     "NZ_AP017319.1",
+     "NZ_AP017318.1",
+     "NZ_CP017328.1",
+     "NZ_CP017330.1",
+     "NZ_CP017331.1",
+     "NZ_CP017332.1",
+     "NZ_CP017340.1",
+     "NZ_CP017341.1",
+     "NZ_CP017337.1",
+     "NZ_CP017333.1",
+     "NZ_CP017342.1",
+     "NZ_CP017336.1",
+     "NZ_CP017334.1",
+     "NZ_CP017338.1",
+     "NZ_CP017343.1",
+     "NZ_CP017339.1",
+     "NZ_CP017329.1",
+     "NZ_CP017335.1",
+     "NZ_CP010544.1",
+     "NZ_CP010540.1",
+     "NZ_CP010545.1",
+     "NC_020076.2",
+     "NZ_CP010541.1",
+     "NZ_CP010547.1",
+     "NZ_CP010539.1",
+     "NC_017504.1",
+     "NZ_CP010546.1",
+     "NZ_CP010543.1",
+     "NC_016807.1",
+     "NZ_CP010550.1"
+    ],
+    "labels": 70,
+    "max_labels_per_node": 70,
+    "merges": {
+     "left": 0,
+     "right": 5
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 5,
+     "right": 22
+    },
+    "stop": null,
+    "summary_cut_bytes": 2398,
+    "walk_bp": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NZ_CP010542.1",
+     "NZ_CP010549.1",
+     "NZ_CP008895.1"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 5
+    },
+    "segments_min": {
+     "left": 5,
+     "right": 22
+    },
+    "walk_bp_min": {
+     "left": 1000,
+     "right": 1000
+    },
+    "walks_min": {
+     "left": 3,
+     "right": 4
+    }
+   },
+   "reference": {
+    "body_digest": "6ea0934a6d379c3a1038a044f554a83ef775beca2733cf4e769e217c14b016da",
+    "engine_ms": {
+     "dl0": 76.212658,
+     "dl1": 69.150851,
+     "dl2": 47.89956,
+     "mcp": 59.601586
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": true,
+    "max_labels_per_node": 70
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 1000,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 76.212658,
+    "dl1": 69.150851,
+    "dl2": 47.89956,
+    "mcp": 59.601586
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.2": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3735,
+    "complete_to_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "continuation": {
+     "left": true,
+     "right": false
+    },
+    "cut_lists": false,
+    "entered": {
+     "right": false
+    },
+    "label_names": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "labels": 2,
+    "max_labels_per_node": 2,
+    "merges": {
+     "left": 0,
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 7,
+     "right": 8
+    },
+    "stop": null,
+    "summary_cut_bytes": 1595,
+    "walk_bp": {
+     "left": 200,
+     "right": 93
+    },
+    "walks": {
+     "left": 4,
+     "right": 3
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 1
+    },
+    "segments_min": {
+     "left": 7,
+     "right": 8
+    },
+    "walk_bp_min": {
+     "left": 200,
+     "right": 93
+    },
+    "walks_min": {
+     "left": 4,
+     "right": 3
+    }
+   },
+   "reference": {
+    "body_digest": "6845b8b6b76ff2bb461b2ff16bc2e8e64aa9d220764fa86c26714a736dc983d6",
+    "engine_ms": {
+     "dl0": 41.249300000000005,
+     "dl1": 20.183941,
+     "dl2": 21.601254,
+     "mcp": 892.594058
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 2
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 200,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 41.249300000000005,
+    "dl1": 20.183941,
+    "dl2": 21.601254,
+    "mcp": 892.594058
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.2+radius": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3541,
+    "complete_to_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "continuation": {
+     "left": true,
+     "right": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "labels": 2,
+    "max_labels_per_node": 2,
+    "merges": {
+     "left": 0,
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 7,
+     "right": 8
+    },
+    "stop": null,
+    "summary_cut_bytes": 1595,
+    "walk_bp": {
+     "left": 100,
+     "right": 93
+    },
+    "walks": {
+     "left": 4,
+     "right": 3
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 1
+    },
+    "segments_min": {
+     "left": 7,
+     "right": 8
+    },
+    "walk_bp_min": {
+     "left": 100,
+     "right": 93
+    },
+    "walks_min": {
+     "left": 4,
+     "right": 3
+    }
+   },
+   "reference": {
+    "body_digest": "d5a99deb65d6d7dbda62c86321639bf4c65772e5de6abd3fa8e38609ecc17837",
+    "engine_ms": {
+     "dl0": 18.261461999999998,
+     "dl1": 18.833508,
+     "dl2": 17.318883,
+     "mcp": 21.241209
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 2
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 18.261461999999998,
+    "dl1": 18.833508,
+    "dl2": 17.318883,
+    "mcp": 21.241209
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.2+shift10": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3728,
+    "complete_to_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "continuation": {
+     "left": true,
+     "right": false
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "labels": 2,
+    "max_labels_per_node": 2,
+    "merges": {
+     "left": 0,
+     "right": 1
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 7,
+     "right": 8
+    },
+    "stop": null,
+    "summary_cut_bytes": 1595,
+    "walk_bp": {
+     "left": 200,
+     "right": 83
+    },
+    "walks": {
+     "left": 4,
+     "right": 3
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_000912.1",
+     "272634"
+    ],
+    "merges_min": {
+     "left": 0,
+     "right": 1
+    },
+    "segments_min": {
+     "left": 7,
+     "right": 8
+    },
+    "walk_bp_min": {
+     "left": 200,
+     "right": 83
+    },
+    "walks_min": {
+     "left": 4,
+     "right": 3
+    }
+   },
+   "reference": {
+    "body_digest": "dbce8fc4e444ac09e7ab3e33b0cc0fd719f87164e17af7015166802a7856da4e",
+    "engine_ms": {
+     "dl0": 15.566577,
+     "dl1": 22.203599,
+     "dl2": 22.628453,
+     "mcp": 23.041037
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 2
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 200,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 15.566577,
+    "dl1": 22.203599,
+    "dl2": 22.628453,
+    "mcp": 23.041037
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.3": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2398,
+    "complete_to_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "237561"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 3,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1504,
+    "walk_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "walks": {
+     "left": 2,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "237561"
+    ],
+    "segments_min": {
+     "left": 3,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 100,
+     "right": 100
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "55b25757608db40a81aa34264cade169ee2380872dc5fe30864b601da53a8abc",
+    "engine_ms": {
+     "dl0": 21.09319,
+     "dl1": 7.867754,
+     "dl2": 8.051245999999999,
+     "mcp": 412.654171
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 21.09319,
+    "dl1": 7.867754,
+    "dl2": 8.051245999999999,
+    "mcp": 412.654171
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.3+radius": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2067,
+    "complete_to_bp": {
+     "left": 50,
+     "right": 50
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "237561"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 1
+    },
+    "stop": null,
+    "summary_cut_bytes": 1496,
+    "walk_bp": {
+     "left": 50,
+     "right": 50
+    },
+    "walks": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "237561"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 1
+    },
+    "walk_bp_min": {
+     "left": 50,
+     "right": 50
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 1
+    }
+   },
+   "reference": {
+    "body_digest": "da4dd6519fc744a10ebb68105ad13ce65ec2b8085c98cd420861194ff6307ce2",
+    "engine_ms": {
+     "dl0": 4.1742289999999995,
+     "dl1": 3.7359250000000004,
+     "dl2": 4.23391,
+     "mcp": 3.708865
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 50,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 4.1742289999999995,
+    "dl1": 3.7359250000000004,
+    "dl2": 4.23391,
+    "mcp": 3.708865
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "two_arms.3+shift10": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 2514,
+    "complete_to_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "237561"
+    ],
+    "labels": 1,
+    "max_labels_per_node": 1,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 3,
+     "right": 3
+    },
+    "stop": null,
+    "summary_cut_bytes": 1504,
+    "walk_bp": {
+     "left": 100,
+     "right": 100
+    },
+    "walks": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "237561"
+    ],
+    "segments_min": {
+     "left": 3,
+     "right": 3
+    },
+    "walk_bp_min": {
+     "left": 100,
+     "right": 100
+    },
+    "walks_min": {
+     "left": 2,
+     "right": 2
+    }
+   },
+   "reference": {
+    "body_digest": "d7d37b8feab04681b05530169da6aa00301af5709d955be32d0ef489e3acd16e",
+    "engine_ms": {
+     "dl0": 10.032855,
+     "dl1": 7.730453,
+     "dl2": 8.123996,
+     "mcp": 55.767323
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 1
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 100,
+     "max_memory_mb": 512,
+     "max_output_bp": 500000,
+     "max_work_units": 100000000,
+     "time_budget_ms": 15000
+    },
+    "branching": {
+     "max_label_branches": 2
+    },
+    "direction": "both",
+    "exhaustive": false,
+    "labels": {
+     "mode": "constrain"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 10.032855,
+    "dl1": 7.730453,
+    "dl2": 8.123996,
+    "mcp": 55.767323
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "echo": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  }
+ },
+ "library_commit": "44583b51307ed3242e19c051aaf133c671107956",
+ "provisional": false,
+ "rehearsal": {
+  "utc": "2026-10-19T22:08:45Z"
+ },
+ "rich": [
+  "merges",
+  "cut_lists",
+  "two_arms"
+ ],
+ "slots": {
+  "annotate": {
+   "candidate": "annotate.1",
+   "tried": [
+    "annotate.1",
+    "annotate.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "coordinates": {
+   "candidate": "coordinates.1",
+   "tried": [
+    "coordinates.1"
+   ],
+   "why": "passed every verdict"
+  },
+  "cut_lists": {
+   "candidate": "cut_lists.1",
+   "tried": [
+    "cut_lists.1",
+    "cut_lists.2",
+    "cut_lists.3"
+   ],
+   "why": "passed every verdict"
+  },
+  "depth_zero": {
+   "candidate": "depth_zero.1",
+   "tried": [
+    "depth_zero.1",
+    "depth_zero.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "failed_seed": {
+   "candidate": "failed_seed.1",
+   "tried": [
+    "failed_seed.1",
+    "failed_seed.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "linear": {
+   "candidate": "linear.1",
+   "tried": [
+    "linear.1",
+    "linear.2",
+    "linear.3"
+   ],
+   "why": "passed every verdict"
+  },
+  "long_walk": {
+   "candidate": "long_walk.4",
+   "tried": [
+    "long_walk.1",
+    "long_walk.2",
+    "long_walk.3",
+    "long_walk.4",
+    "long_walk.5"
+   ],
+   "why": "passed every verdict; before it long_walk.1: headroom fail: engine 14676.134284 ms against 3750 ms (25 % of 15000 ms); long_walk.2: headroom fail: engine 13113.435642 ms against 3750 ms (25 % of 15000 ms); long_walk.3: headroom fail: the seed's cold engine time 14676 ms (G-long-c1 ran it first; this candidate met warm rows) against 7500 ms (25 % of 30000 ms)"
+  },
+  "merges": {
+   "candidate": "merges.1",
+   "tried": [
+    "merges.1",
+    "merges.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "no_bases": {
+   "candidate": "no_bases.1",
+   "tried": [
+    "no_bases.1",
+    "no_bases.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "one_arm": {
+   "candidate": "one_arm.1",
+   "tried": [
+    "one_arm.1",
+    "one_arm.2",
+    "one_arm.3"
+   ],
+   "why": "passed every verdict"
+  },
+  "over_8mib": {
+   "candidate": null,
+   "tried": [
+    "over_8mib.1",
+    "over_8mib.2"
+   ],
+   "why": "over_8mib.1: slot fail: not the slot's shape: a body over 8 MiB; over_8mib.2: slot fail: not the slot's shape: a body over 8 MiB"
+  },
+  "resource_stop": {
+   "candidate": "resource_stop.1",
+   "tried": [
+    "resource_stop.1",
+    "resource_stop.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "trace": {
+   "candidate": "trace.1",
+   "tried": [
+    "trace.1",
+    "trace.2"
+   ],
+   "why": "passed every verdict"
+  },
+  "two_arms": {
+   "candidate": "two_arms.1",
+   "tried": [
+    "two_arms.1",
+    "two_arms.2",
+    "two_arms.3"
+   ],
+   "why": "passed every verdict"
+  },
+  "two_databases": {
+   "candidate": null,
+   "tried": [],
+   "why": "no candidate rehearsed"
+  }
+ },
+ "version": 1
+}

@@ -66,7 +66,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Optional
+from typing import List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -218,7 +218,11 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     g_problems: list = []
     if manifest_version >= GRAPHLET_VERSION and (not only_areas or "G" in only_areas):
         # v8: area G after every v7 layout step (no v7 scenario moves; the gate's warm repeats are v7's)
+        if corpus_file is None and os.path.exists(DEFAULT_CORPUS):
+            corpus_file = DEFAULT_CORPUS   # the committed rehearsal corpus ('' builds the provisional one)
         corpus = area_g.load_corpus(corpus_file)
+        if library_commit is None and isinstance(corpus.get("library_commit"), str) and corpus["library_commit"]:
+            library_commit = corpus["library_commit"]   # the pin the corpus was rehearsed against (else --library-commit)
         seeds_from = scenarios if any(s["area"] == "T" for s in scenarios) else areas.gen_T(Ctx(recs, seed))
         g = areas.gen_G(ctx, seeds_from, corpus, library_commit, include_direct_only)
         scenarios += g
@@ -273,6 +277,21 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         manifest["relations"] = relations
         manifest["scenarios"] = scenarios
     return manifest
+
+
+def freeze_problems(m: dict) -> List[str]:
+    """Why a built v8 must not be frozen into manifest/ (VERIFY-D VD12): a provisional corpus (no rehearsal's corpus
+    file), or anything the freeze still needs (graphlets.pending: the library pin, frozen preconditions, a by-design
+    case the tables lack)."""
+    g = m.get("graphlets")
+    if m.get("manifest_version", 0) < GRAPHLET_VERSION or not isinstance(g, dict):
+        return []
+    out = []
+    if (g.get("corpus") or {}).get("provisional"):
+        out.append("the area G corpus is provisional (commit the rehearsal's corpus as %s, or pass --corpus)"
+                   % os.path.relpath(DEFAULT_CORPUS, HERE))
+    out += ["pending: %s" % p for p in g.get("pending") or []]
+    return out
 
 
 def _corpus_identity(path: Optional[str], corpus: dict) -> dict:
@@ -998,6 +1017,10 @@ def main(argv=None) -> int:
               stop_scenarios=args.stop_scenarios)
     if only:
         m["partial_build"] = True
+    if args.freeze and (manifest_path(args.out) or manifest_path(args.smoke_out)):
+        probs = freeze_problems(m)
+        if probs:
+            raise SystemExit("v%d is not ready to freeze:\n  %s" % (args.manifest_version, "\n  ".join(probs[:20])))
     write(args.out, m)
     s = smoke_of(m)
     write(args.smoke_out, s)

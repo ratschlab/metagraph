@@ -693,6 +693,24 @@ class StopScenarios(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class Freeze(unittest.TestCase):
+    """VERIFY-D VD12: --freeze refuses a provisional corpus and anything still pending."""
+
+    def test_freeze_problems(self):
+        import build_manifest as bm
+        m = {"manifest_version": 8, "graphlets": {"corpus": {"file": None, "provisional": True},
+                                                  "pending": ["G-x-0001: preconditions (the rehearsal freezes them)"]}}
+        probs = bm.freeze_problems(m)
+        self.assertTrue(any("corpus is provisional" in p for p in probs), probs)
+        self.assertIn("pending: G-x-0001: preconditions (the rehearsal freezes them)", probs)
+        m["graphlets"] = {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}
+        self.assertEqual(bm.freeze_problems(m), [])
+        self.assertEqual(bm.freeze_problems({"manifest_version": 7}), [])
+        self.assertTrue(os.path.exists(bm.DEFAULT_CORPUS))
+        corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        self.assertFalse(corpus.get("provisional"))
+
+
 @unittest.skipUnless(have_cache(), "no record cache")
 class BuiltV8(unittest.TestCase):
     def test_v8_is_v7_with_t_walk_0024s_warm_ups_then_area_g(self):
@@ -724,7 +742,12 @@ class BuiltV8(unittest.TestCase):
             self.assertIn("not_implemented", s["mcp"])
             self.assertLessEqual(len(s["request"]["sequence"]), 10000)
         self.assertEqual(bm.smoke_of(m)["content_sha256"], bm.smoke_of(v7)["content_sha256"])
-        self.assertTrue(m["graphlets"]["corpus"]["provisional"])
+        # the rehearsal's corpus is committed (VERIFY-D VD12): the default build reads it, the pin from it
+        self.assertEqual(m["graphlets"]["corpus"]["file"], "truth/area_g/corpus.json")
+        self.assertFalse(m["graphlets"]["corpus"]["provisional"])
+        self.assertEqual(m["graphlets"]["library_commit"], "44583b51307ed3242e19c051aaf133c671107956")
+        self.assertEqual(m["graphlets"]["pending"], [])
+        self.assertEqual(bm.freeze_problems(m), [])
         # the paired plan's warm repeats of every v7 scenario unchanged
         w7 = dict((s["id"], k % 10 == 0) for k, s in enumerate(v7["scenarios"]))
         w8 = dict((s["id"], k % 10 == 0) for k, s in enumerate(m["scenarios"]))
