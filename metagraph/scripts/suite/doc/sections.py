@@ -1441,7 +1441,10 @@ def front_matter(ctx):
     if ctx.sample or set(ctx.chapters) != set(ctx.units.chapters):
         rows.append(("chapters built", "%s of %s (Part II holds %s; the whole-run summary is shown for context)" % (
             esc(", ".join(ctx.chapters)), esc(", ".join(ctx.units.chapters)), esc(", ".join(ctx.chapters)))))
-    return _kv_table(rows)
+    # manifest v8: area G's verdict in a box of its own under the run verdict and the deploy gate's
+    area = graphlets.area_line(ctx)
+    box = ("\\coverbox{Area G (graphlet tools)}{%s}\n\\vspace{1em}\n" % area) if area else ""
+    return box + _kv_table(rows)
 
 
 FINDING_KIND_WORDS = {
@@ -2043,8 +2046,9 @@ def decision_summary(ctx):
     `closing`); the per-arm outcome table is I.4's."""
     out = ctx.prose_paragraphs("decision")
     out += chapter_map_table(ctx)
-    out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n\\par\\endgroup\\medskip\n\n" % (
-        verdict_line(ctx), gate_line(ctx))
+    area = graphlets.area_line(ctx, cover=False)
+    out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n%s\\par\\endgroup\\medskip\n\n" % (
+        verdict_line(ctx), gate_line(ctx), ("\\bline{area G}{%s}\n" % area) if area else "")
     out += ctx.prose_paragraphs("decision", "verdict", optional=True)
     out += gate_population_table(ctx)
     out += attention_table(ctx)

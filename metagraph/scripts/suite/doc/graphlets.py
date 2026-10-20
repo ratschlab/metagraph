@@ -465,6 +465,32 @@ def chapter_s_sections(ctx):
     return out
 
 
+def area_line(ctx, cover=True):
+    """Area G's verdict line beside the run verdict and the deploy gate (the cover and I.1; manifest v8): the word
+    large, the scenarios and op calls by outcome, the service checks, and on the cover a small line on what the
+    area is; None without a comparison."""
+    g = data(ctx.run)
+    if g is None:
+        return None
+    if g.get("error"):
+        return "\\textbf{\\large ERROR}\\ the graphlet comparison could not be computed: %s" % esc(g["error"], 300)
+    word, _ = verdict(g)
+    s = g.get("summary") or {}
+    sc_, ops = s.get("scenarios") or {}, s.get("ops") or {}
+    by_outcome = {}
+    for c in g.get("service_checks") or []:
+        by_outcome[c.get("outcome")] = by_outcome.get(c.get("outcome"), 0) + 1
+    return ("\\textbf{\\large %s}\\ (%d graphlet scenarios: %s; %d op calls: %s; service checks: %s; chapter G)"
+            "%s" % (
+                esc(word), sum(sc_.values()), esc(_count_text(sc_, ("pass", "fail", "precondition_failed",
+                                                                       "inconclusive"))),
+                sum(ops.values()), esc(_count_text(ops, ("agree", "disagree", "service_by_design", "inconclusive",
+                                                          "precondition_failed"))),
+                esc(_count_text(by_outcome, ("pass", "fail", "inconclusive", "n/a"))),
+                "\\\\{\\small the graphlet tools compared five ways; the deploy gate requires them (I.1)}"
+                if cover else ""))
+
+
 # -- the chapters' prose values ------------------------------------------------------------------------------
 
 def _count_text(counts, order):

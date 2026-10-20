@@ -207,6 +207,26 @@ class GateV8Test(unittest.TestCase):
         self.assertEqual(sections.library_note_text(_Stub(run=_Stub(gate={}, identity=None))), ("", []))
 
 
+class AreaLineAndGlossaryTest(unittest.TestCase):
+    """Area G's verdict line on the cover and in I.1 (none without a comparison)."""
+
+    def test_area_line(self):
+        import graphlets
+        g = {"summary": {"scenarios": {"pass": 2, "fail": 1}, "ops": {"agree": 40, "disagree": 2}},
+             "service_checks": [{"check": "a", "outcome": "pass"}, {"check": "b", "outcome": "n/a"}],
+             "scenarios": {}}
+        run = _Stub(manifest={"manifest_version": 8}, _graphlets=g)
+        word, _ = graphlets.verdict(g)
+        cover = graphlets.area_line(_Stub(run=run))
+        self.assertIn("\\textbf{\\large %s}" % word, cover)
+        self.assertIn("(3 graphlet scenarios: 2 pass, 1 fail; 42 op calls: 40 agree, 2 disagree; service checks: "
+                      "1 pass, 1 n/a; chapter G)", cover)
+        self.assertIn("the deploy gate requires them (I.1)", cover)
+        self.assertNotIn("(I.1)", graphlets.area_line(_Stub(run=run), cover=False))
+        self.assertIn("ERROR", graphlets.area_line(_Stub(run=_Stub(manifest={}, _graphlets={"error": "x"}))))
+        self.assertIsNone(graphlets.area_line(_Stub(run=_Stub(manifest={}, _graphlets=None))))
+
+
 class SharedProseV8Test(unittest.TestCase):
     """The v8 branches of the shared prose: I.2's access paths name the graphlet tools and traverse_stop, its "Not
     covered" paragraph is v7's for v7 only and v8's says where the graphlet tools and the stops are tested; T-walk's
