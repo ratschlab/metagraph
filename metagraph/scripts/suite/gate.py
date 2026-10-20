@@ -703,6 +703,12 @@ def graphlet_problems(run_dir, policy, manifest, notes, reuse=False):
     if (comp.get("manifest") or {}).get("content_sha256") != want.get("content_sha256"):
         out.append(_problem("identity", "graphlet_compare.json compared the manifest content %s, the policy's is %s" % (
             str((comp.get("manifest") or {}).get("content_sha256"))[:16], str(want.get("content_sha256"))[:16])))
+    gpin = (block.get("by_design_g_table") or {}).get("sha256")
+    gused = (comp.get("by_design_g_table") or {}).get("sha256")
+    if gpin and gused is not None and gused != gpin:
+        out.append(_problem("identity", "the graphlet comparison read area G's by-design table sha256 %s, the policy "
+                                        "was derived from %s (regenerate the policy, or compare with that table)" % (
+                                            str(gused)[:16], gpin[:16])))
     if block.get("whitelist_sha256") and comp.get("whitelist_sha256") != block["whitelist_sha256"]:
         notes.append("the library's answer keys (compare_graphlets.ANSWER_KEYS) differ from the table the policy was "
                      "generated with (%s vs %s)" % (str(comp.get("whitelist_sha256"))[:12],

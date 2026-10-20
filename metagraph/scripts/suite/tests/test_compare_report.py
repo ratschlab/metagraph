@@ -486,14 +486,20 @@ class CompareTest(unittest.TestCase):
     def test_load_real_table(self):
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         # async's vendored table at 31a2e41f (e427d503's edit, case 131), and lane S8g's discovery cap (two renamed
-        # cases, their old ids kept as aliases: 133); v8 (lane D, 2026-10-20): async's three area G cases appended
-        # (BY-DESIGN-G-CASES.json), every earlier byte unchanged: 136; then its fourth (the mgt export): 137
-        self.assertEqual(info["cases"], 137)
+        # cases, their old ids kept as aliases: 133)
+        self.assertEqual(info["cases"], 133)
         # lane S7v: the vocabulary's wall_rule entry states budget_minus_reserve's threshold (B - 1 s, the name kept);
         # lane S8g: the discovery cap 1000 of async's fb66f1dd; integration stage 2: traverse.duplicate_seeds also
-        # explains the merged seed's missing result; v8: the G cases (the v4-v7 policies pin d4b8636c..., the table
-        # before them, and stay as committed)
-        self.assertEqual(info["sha256"], "ee92298cc47bb5142286b39e3ee98014ed992b4e083b6e467f793a8f934454d6")
+        # explains the merged seed's missing result
+        self.assertEqual(info["sha256"], "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44")
+        # v8 (VERIFY-D VD1): area G's four cases are a table of their own, the v1-v7 table above byte-identical
+        self.assertFalse([cid for cid, c in cases.items() if "graphlet" in c])
+        gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
+        self.assertEqual(sorted(gcases), ["graphlet.body_over_in_service_ceiling",
+                                          "graphlet.body_over_in_service_ceiling.summary",
+                                          "graphlet.export_mgt_is_the_stored_body",
+                                          "graphlet.max_bytes_above_service_cap"])
+        self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07),
         # and the field the merge removes from the MCP answer, results.1.duplicate (T-edge-0008, by design)

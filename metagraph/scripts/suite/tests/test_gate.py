@@ -248,10 +248,25 @@ class PinnedTable(unittest.TestCase):
             now = json.load(fh)["cases"]
         with open(pinned_table(), encoding="utf-8") as fh:
             before = json.load(fh)["cases"]
-        self.assertEqual(now[:len(before)], before)     # the G cases appended, nothing else changed
-        self.assertEqual([c["id"] for c in now[len(before):]],
+        self.assertEqual(now, before)     # VERIFY-D VD1: the G cases are in service_by_design_g.json
+        with open(cmp.DEFAULT_BY_DESIGN_G, encoding="utf-8") as fh:
+            g = json.load(fh)["cases"]
+        self.assertEqual([c["id"] for c in g],
                          ["graphlet.max_bytes_above_service_cap", "graphlet.body_over_in_service_ceiling",
                           "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body"])
+
+    def test_every_shipped_policy_pins_the_tables_sha(self):
+        # VERIFY-D VD1: a new v4-v7 gate run snapshots the tree's table; its sha is the one every shipped policy pins
+        import glob
+        import hashlib as hl
+        with open(cmp.DEFAULT_BY_DESIGN, "rb") as fh:
+            sha = hl.sha256(fh.read()).hexdigest()
+        self.assertEqual(sha, V7_TABLE_SHA256)
+        policies = sorted(glob.glob(os.path.join(SUITE, "gate", "policy_v*.json")))
+        self.assertTrue(policies)
+        for p in policies:
+            with open(p, encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["by_design_table"]["sha256"], sha, p)
 
 
 class PolicyTest(GateCase):

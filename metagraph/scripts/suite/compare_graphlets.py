@@ -1125,6 +1125,8 @@ def input_digests(run_dir, recs=None):
     out["files"] = h.hexdigest()
     table, _ = cmp.table_for(run_dir, None)
     out["by_design_table"] = sc.file_sha256(table) if table else None
+    gtable = cmp.g_table_for(run_dir)
+    out["by_design_g_table"] = sc.file_sha256(gtable) if os.path.exists(gtable) else None
     out["code"] = hashlib.sha256("".join("%s\0%s\n" % (f, sc.file_sha256(os.path.join(HERE, f)))
                                          for f in CODE_FILES).encode("utf-8")).hexdigest()
     return out

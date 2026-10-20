@@ -303,7 +303,7 @@ class ByDesignTable(unittest.TestCase):
 
     def test_the_g_cases_load_and_the_plans_name_them(self):
         import compare as cmp
-        cases, info = cmp.load_by_design(os.path.join(SUITE, "service_by_design.json"))
+        cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)   # area G's own table (VERIFY-D VD1)
         for cid in (area_g.SERVICE_CAP_CASE, area_g.BIG_BODY_CASE, area_g.BIG_BODY_CASE + ".summary",
                     area_g.MGT_EXPORT_CASE):
             self.assertIn(cid, cases)

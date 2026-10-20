@@ -710,9 +710,15 @@ def gate_warm_problems(scenarios: list, reference: dict, warm_every: int = WARM_
 
 
 def _table_cases() -> set:
-    """The case ids of the service-by-design table beside this script."""
-    with open(os.path.join(HERE, "service_by_design.json")) as f:
-        return set(c.get("id") for c in json.load(f).get("cases") or [])
+    """The case ids of the service-by-design tables beside this script: service_by_design.json and area G's
+    service_by_design_g.json (VERIFY-D VD1: the G cases apart, the v1-v7 table byte-identical)."""
+    out = set()
+    for name in ("service_by_design.json", "service_by_design_g.json"):
+        path = os.path.join(HERE, name)
+        if os.path.exists(path):
+            with open(path) as f:
+                out |= set(c.get("id") for c in json.load(f).get("cases") or [])
+    return out
 
 
 def validate(scenarios, cases=None) -> list:

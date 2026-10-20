@@ -316,7 +316,11 @@ def graphlet_block(manifest, selected, declared=None):
         if pin and pin not in pins:
             pins.append(pin)
     sub = dict(manifest, scenarios=chosen)
+    _gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
     return {"scenarios": [s["id"] for s in chosen], "required": required, "smoke_report_only": smoke,
+            # area G's own by-design table (VERIFY-D VD1), pinned beside the policy's by_design_table
+            "by_design_g_table": dict((k, (ginfo or {}).get(k)) for k in ("sha256", "version", "service_commit",
+                                                                         "cases")) if ginfo else None,
             "prechecks": list(gp.CHECKS), "service_checks": gs.required_service_checks(sub),
             "library_commit": pins[0] if len(pins) == 1 else (pins or None),
             "not_required": [dict(e, rules=["declared"]) for e in (declared or {}).get("graphlet_not_required") or []],

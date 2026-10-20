@@ -2537,7 +2537,7 @@ SNAPSHOT_FILE = "SNAPSHOT.json"
 # What the arms run and judge with: the direct runner and its sampler, the checks (or the stub) and suite_common they
 # import, and the by-design table the MCP runner reads beside its --checks-dir.
 SNAPSHOT_FILES = ("run_direct.py", "sampler.py", "suite_common.py", "checks.py", "checks_stub.py",
-                  "service_by_design.json")
+                  "service_by_design.json", "service_by_design_g.json")
 
 
 class SnapshotChanged(Exception):

@@ -549,20 +549,28 @@ def judge_by_design(entry, scen, op, recs, cases):
 
 
 def by_design_stage(result, run_dir, manifest, recs, prechecks):
-    """Stage of compare_graphlets: judges every op that names by-design cases, with the run's table."""
+    """Stage of compare_graphlets: judges every op that names by-design cases, with the run's tables: the
+    service-by-design table and area G's own (service_by_design_g.json, VERIFY-D VD1), each the run's snapshot's,
+    else the tree's; both identities recorded (by_design_table, by_design_g_table: a v8 policy pins both)."""
     ops = [(scen, op) for scen in gp.graphlet_scenarios(manifest) for op in gp.scenario_ops(scen)
            if op.get("by_design")]
     if not ops:
         return
     path, warnings = cmp.table_for(run_dir, None)
     result.setdefault("warnings", []).extend(w for w in warnings if w not in result.get("warnings", []))
-    try:
-        cases, info = cmp.load_by_design(path) if path else ({}, None)
-    except cmp.TableError as e:
-        cases, info = {}, None
-        result["warnings"].append("by-design table refused: %s" % e)
-    result["by_design_table"] = None if info is None else {
-        "sha256": info.get("sha256"), "path": cmp.run_relative(info.get("path"), run_dir), "cases": info.get("cases")}
+    cases = {}
+    for key, p_ in (("by_design_table", path), ("by_design_g_table", cmp.g_table_for(run_dir))):
+        try:
+            got, info = cmp.load_by_design(p_) if p_ else ({}, None)
+        except cmp.TableError as e:
+            got, info = {}, None
+            result["warnings"].append("by-design table refused: %s" % e)
+        for cid in sorted(set(got) & set(cases)):
+            result["warnings"].append("by-design case %s is in both tables: %s's is read" % (cid, key))
+        cases.update(got)
+        result[key] = None if info is None else {
+            "sha256": info.get("sha256"), "path": cmp.run_relative(info.get("path"), run_dir),
+            "cases": info.get("cases")}
     for scen, op in ops:
         entry = result["scenarios"].get(scen.get("id"), {}).get("ops", {}).get(op["id"])
         if entry is not None:

@@ -68,6 +68,9 @@ SAMPLE_NEAREST_S = 5.0
 # service-side by design
 
 DEFAULT_BY_DESIGN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_by_design.json")
+# area G's by-design cases (manifest v8), the same schema in a file of their own so that the v1-v7 table stays
+# byte-identical (VERIFY-D VD1): only the area G comparison reads it (graphlet_service_checks), beside the table
+DEFAULT_BY_DESIGN_G = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_by_design_g.json")
 
 
 class TableError(ValueError):
@@ -757,6 +760,17 @@ def snapshot_table(run_dir):
     None when the run has none."""
     path = os.path.join(sc.snapshot_dir(run_dir), "service_by_design.json")
     return path if os.path.isfile(path) else None
+
+
+def snapshot_table_g(run_dir):
+    """Area G's by-design table of a run's snapshot (RUN_DIR/scripts/service_by_design_g.json), None without one."""
+    path = os.path.join(sc.snapshot_dir(run_dir), "service_by_design_g.json")
+    return path if os.path.isfile(path) else None
+
+
+def g_table_for(run_dir):
+    """Area G's by-design table a run is compared with: its snapshot's (snapshot_table_g), else DEFAULT_BY_DESIGN_G."""
+    return snapshot_table_g(run_dir) or DEFAULT_BY_DESIGN_G
 
 
 def run_relative(path, run_dir):

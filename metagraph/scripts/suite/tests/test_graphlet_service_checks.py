@@ -68,6 +68,9 @@ class ServiceBase(unittest.TestCase):
             data = {"version": 1, "service_commit": gf.SERVICE, "cases": table}
             with open(self.run_.path("scripts", "service_by_design.json"), "w") as fh:
                 json.dump(data, fh)
+            # the run's area G table (VERIFY-D VD1) empty: the test's table alone states the cases
+            with open(self.run_.path("scripts", "service_by_design_g.json"), "w") as fh:
+                json.dump({"version": 1, "service_commit": gf.SERVICE, "cases": []}, fh)
         return self.run_
 
     def put(self, sid, op, answers, errors=None, sf=None, ways=FOUR):
@@ -394,7 +397,7 @@ class ByDesign(ServiceBase):
         self.assertEqual(res["by_design_table"]["path"], "scripts/service_by_design.json")
 
     def mgt_case(self):
-        cases, _ = cmp.load_by_design(os.path.join(os.path.dirname(HERE), "service_by_design.json"))
+        cases, _ = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         return cases["graphlet.export_mgt_is_the_stored_body"]
 
     def put_mgt(self, op, w3_text):
@@ -513,8 +516,11 @@ class ByDesign(ServiceBase):
         lib_sf = copy.deepcopy(CAP_CASE)
         lib_sf["graphlet"]["library"]["service_fields"] = {"x": 1}
         self.assertIn("on the service side only", "; ".join(cmp.table_problems([lib_sf])))
-        # the real table loads, with async's four area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20), each valid
+        # the real tables load: async's four area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20) in area G's own
+        # table (VERIFY-D VD1), each valid; the service-by-design table holds none
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
+        self.assertFalse([cid for cid, c in cases.items() if "graphlet" in c])
+        cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         g = sorted(cid for cid, c in cases.items() if "graphlet" in c)
         self.assertEqual(g, ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
                              "graphlet.export_mgt_is_the_stored_body", "graphlet.max_bytes_above_service_cap"])
