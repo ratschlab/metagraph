@@ -218,6 +218,57 @@ class GateCase(unittest.TestCase):
         return [p for p in verdict["problems"] if kind is None or p["kind"] == kind]
 
 
+_PINNED_TABLE = {}
+# the by-design table every shipped v4-v7 policy pins (d4b8636c...): the bundled table without the area G cases v8
+# appended (lane D, 2026-10-20: async's BY-DESIGN-G-CASES.json), every earlier byte unchanged
+V7_TABLE_SHA256 = "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44"
+
+
+def pinned_table():
+    """The path of the bundled table without its area G cases (the cases with a `graphlet` block), serialized as the
+    table is (indent 1, non-ASCII kept): byte for byte the table the shipped v4-v7 policies were derived from."""
+    if "path" not in _PINNED_TABLE:
+        import tempfile as tf
+        with open(cmp.DEFAULT_BY_DESIGN, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["cases"] = [c for c in data["cases"] if "graphlet" not in c]
+        fd, path = tf.mkstemp(prefix="by_design_v7_", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+        _PINNED_TABLE["path"] = path
+    return _PINNED_TABLE["path"]
+
+
+class PinnedTable(unittest.TestCase):
+    def test_the_v7_table_is_the_bundled_one_without_the_g_cases(self):
+        import hashlib as hl
+        with open(pinned_table(), "rb") as fh:
+            self.assertEqual(hl.sha256(fh.read()).hexdigest(), V7_TABLE_SHA256)
+        with open(cmp.DEFAULT_BY_DESIGN, encoding="utf-8") as fh:
+            now = json.load(fh)["cases"]
+        with open(pinned_table(), encoding="utf-8") as fh:
+            before = json.load(fh)["cases"]
+        self.assertEqual(now, before)     # VERIFY-D VD1: the G cases are in service_by_design_g.json
+        with open(cmp.DEFAULT_BY_DESIGN_G, encoding="utf-8") as fh:
+            g = json.load(fh)["cases"]
+        self.assertEqual([c["id"] for c in g],
+                         ["graphlet.max_bytes_above_service_cap", "graphlet.body_over_in_service_ceiling",
+                          "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body"])
+
+    def test_every_shipped_policy_pins_the_tables_sha(self):
+        # VERIFY-D VD1: a new v4-v7 gate run snapshots the tree's table; its sha is the one every shipped policy pins
+        import glob
+        import hashlib as hl
+        with open(cmp.DEFAULT_BY_DESIGN, "rb") as fh:
+            sha = hl.sha256(fh.read()).hexdigest()
+        self.assertEqual(sha, V7_TABLE_SHA256)
+        policies = sorted(glob.glob(os.path.join(SUITE, "gate", "policy_v*.json")))
+        self.assertTrue(policies)
+        for p in policies:
+            with open(p, encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["by_design_table"]["sha256"], sha, p)
+
+
 class PolicyTest(GateCase):
     def test_selection_by_route_and_exclusions(self):
         pol = policy_of(self.m)
@@ -365,7 +416,8 @@ class PolicyTest(GateCase):
     def test_shipped_v4_policy_is_regenerated_exactly(self):
         shipped = sc.read_json(os.path.join(SUITE, "gate", "policy_v4_rt_mcp.json"))
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v4.json"))
-        fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v4.json",
+        fresh = gate_policy.build_policy(m, table_path=pinned_table(), arms=("mcp", "direct-local"),
+                                         manifest_file="manifest/suite_v4.json",
                                          name="v4-rt-mcp", declared_file="gate/declared_v4_rt.json",
                                          declared=sc.read_json(os.path.join(SUITE, "gate", "declared_v4_rt.json")))
         for p in (shipped, fresh):
@@ -384,7 +436,8 @@ class PolicyTest(GateCase):
         self.assertEqual(smoke["content_sha256"], "abc0596fef7977dc0fa7d51bf7b8d0194e6427ed726f0a9acf12605116546e8d")
         declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v5_rt.json"))
         self.assertEqual(declared["manifest"]["content_sha256"], m["content_sha256"])
-        fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v5.json",
+        fresh = gate_policy.build_policy(m, table_path=pinned_table(), arms=("mcp", "direct-local"),
+                                         manifest_file="manifest/suite_v5.json",
                                          name="v5-rt-mcp", declared_file="gate/declared_v5_rt.json",
                                          declared=declared)
         for p in (shipped, fresh):
@@ -419,7 +472,8 @@ class PolicyTest(GateCase):
         # one declared entry, for the rtp policy (test_shipped_v6_rtp_policy): outside this gate's selection
         self.assertEqual([(e["relation"], e["arms"]) for e in declared["relations_excluded"]],
                          [("REL-subset-0007", ["mcp"])])
-        fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v6.json",
+        fresh = gate_policy.build_policy(m, table_path=pinned_table(), arms=("mcp", "direct-local"),
+                                         manifest_file="manifest/suite_v6.json",
                                          name="v6-rt-mcp", declared_file="gate/declared_v6_rt.json",
                                          declared=declared)
         for p in (shipped, fresh):
@@ -479,7 +533,8 @@ class PolicyTest(GateCase):
         for kind, routes in (("rt", None), ("rtp", list(gate_policy.DEFAULT_ROUTES) + ["POST /pattern"])):
             shipped[kind] = sc.read_json(os.path.join(SUITE, "gate", "policy_v7_%s_mcp.json" % kind))
             kw = {"routes": routes} if routes else {}
-            fresh = gate_policy.build_policy(m, arms=("mcp", "direct-local"), manifest_file="manifest/suite_v7.json",
+            fresh = gate_policy.build_policy(m, table_path=pinned_table(), arms=("mcp", "direct-local"),
+                                             manifest_file="manifest/suite_v7.json",
                                              name="v7-%s-mcp" % kind, declared_file="gate/declared_v7_rt.json",
                                              declared=declared, **kw)
             a, b = dict(shipped[kind]), dict(fresh)
@@ -528,7 +583,7 @@ class PolicyTest(GateCase):
         m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v6.json"))
         declared = sc.read_json(os.path.join(SUITE, "gate", "declared_v6_rt.json"))
         routes = list(gate_policy.DEFAULT_ROUTES) + ["POST /pattern"]
-        fresh = gate_policy.build_policy(m, routes=routes, arms=("mcp", "direct-local"),
+        fresh = gate_policy.build_policy(m, table_path=pinned_table(), routes=routes, arms=("mcp", "direct-local"),
                                          manifest_file="manifest/suite_v6.json", name="v6-rtp-mcp",
                                          declared_file="gate/declared_v6_rt.json", declared=declared)
         for p in (shipped, fresh):

@@ -681,6 +681,9 @@ class EveryToolTests(unittest.TestCase):
         self.assertFalse([k for k in runs[0]["child"]["env_keys"] if k.startswith("PYTHON") and k != "PYTHONHASHSEED"])
         self.assertEqual(runs[0]["state"], "done")
         self.assertEqual(runs[0]["limits_not_applied"]["max_graphlet_mb"]["value"], 8)
+        # no recorded capabilities, the table states no graphlet block: --limits / the defaults, recorded
+        self.assertEqual(runs[0]["limits_source"]["missing"],
+                         ["service_settings.graphlet.library (absent: --limits or the defaults used)"])
         for d in ("dl-lib", "dr-lib"):   # VL15: the library's scratch goes with the run (--keep-work keeps it)
             self.assertFalse(os.path.exists(os.path.join(self.out, "arms", d, "work")))
         for way in ("W1", "W2"):
@@ -719,9 +722,14 @@ class DocumentErrorTests(unittest.TestCase):
             docs.update((sid, os.path.join(tmp, sid + ".json.gz")) for sid in raws)
             ops = [op("s", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048}),
                    op("c", "graphlet_compare", {"a": {"graphlet": "G-annot"}, "b": "<handle>", "arm": None,
-                                                "mode": "labels", "max_bytes": 2048})]
+                                                "mode": "labels", "max_bytes": 2048}),
+                   # ops whose arguments select from an earlier op's answer (async's review X4)
+                   op("w", "graphlet_walks", walks("left", n=1)),
+                   op("w0", "graphlet_walk", {"arm": "left", "walk": {"ref": "w", "path": "/rows/0/walk"},
+                                              "max_bytes": 2048}),
+                   op("cur", "graphlet_walks", walks("left", n=1, cursor={"cursor_of": "w"}))]
             plan = {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid in (
-                "G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws))]}
+                "G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws)) + ("G-annot",)]}
             recs = run_offline(os.path.join(tmp, "run"), plan, docs=docs, ways="W4")["W4"]
             got = dict(((r["scenario"], r["op"]), r) for r in recs)
             self.assertEqual(got[("G-nofile", "s")]["error"]["code"], "no_document")
@@ -738,6 +746,15 @@ class DocumentErrorTests(unittest.TestCase):
             self.assertEqual(got[("G-failed", "s")]["error"], {"code": "no_graphlet", "fields": {}})
             self.assertEqual(got[("G-broken", "s")]["error"]["code"], "document_refused")
             self.assertEqual(got[("G-broken", "s")]["error"]["fields"], {"stage": "load", "code": "format_error"})
+            # X4: without a document a dependent op carries the document's error (no selector error), so a missing
+            # MCP document reads as the document's failure on W4, never as a W1-W4 disagreement
+            for sid in ("G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws)):
+                for oid in ("w", "w0", "cur"):
+                    self.assertIsNone(got[(sid, oid)]["selector_error"], (sid, oid))
+                    self.assertEqual(got[(sid, oid)]["error"], got[(sid, "s")]["error"], (sid, oid))
+            # with a document the selectors resolve (a real selector error stays one)
+            self.assertIsNone(got[("G-annot", "w0")]["selector_error"])
+            self.assertIsNone(got[("G-annot", "w0")]["error"])
             # a call on another graphlet still runs; <handle> of a scenario without one is left to the library
             self.assertEqual(got[("G-failed", "c")]["args_resolved"]["a"], "<handle:G-annot>")
             self.assertEqual(got[("G-failed", "c")]["error"]["code"], "unknown_handle")
@@ -1259,6 +1276,71 @@ class ExportAndDriftTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+
+
+class LibraryLimitsFromTheCapabilities(unittest.TestCase):
+    """The ways' GraphletTools from the capabilities' service_settings.graphlet.library block where it states a key
+    (DESIGN-v8 §3), else --limits, else the defaults; a part absent or served null is not stated (the fallback, the
+    missing limit recorded); which was used is recorded per key (run.json limits_source)."""
+
+    BLOCK = {"max_bytes": 4096, "sequence_max_bytes": 32768, "local_limits": None, "max_graphlet_mb": None}
+
+    def refs(self, library):
+        doc = None if library is ... else {"service_settings": {"graphlet": {"library": library}}}
+        return sc.References(None, {"service": doc}, {"service": "arms/mcp/run.json service_capabilities"})
+
+    def limits_file(self, obj):
+        d = tempfile.mkdtemp(prefix="rgl-limits-")
+        self.addCleanup(shutil.rmtree, d, True)
+        path = os.path.join(d, "limits.json")
+        with open(path, "w") as fh:
+            json.dump(obj, fh)
+        return path
+
+    def test_from_the_block(self):
+        limits, ignored, rec = rgl.library_limits(refs=self.refs(dict(self.BLOCK)))
+        self.assertEqual(limits, {"max_bytes": 4096, "sequence_max_bytes": 32768, "local_limits": None})
+        self.assertEqual(set(rec["source"].values()), {"capabilities (live)"})
+        self.assertEqual(rec["missing"], [])
+        self.assertEqual(rec["document"], "arms/mcp/run.json service_capabilities")
+        self.assertEqual(ignored, {})
+        _l, ignored, _r = rgl.library_limits(refs=self.refs(dict(self.BLOCK, max_graphlet_mb=8)))
+        self.assertEqual(ignored["max_graphlet_mb"]["value"], 8)
+        self.assertEqual(ignored["max_graphlet_mb"]["from"], "capabilities (live)")
+
+    def test_null_or_absent_parts_fall_back(self):
+        path = self.limits_file({"max_bytes": 1024})
+        limits, _i, rec = rgl.library_limits(path, refs=self.refs(dict(self.BLOCK, max_bytes=None)))
+        self.assertEqual((limits["max_bytes"], limits["sequence_max_bytes"]), (1024, 32768))
+        self.assertEqual(rec["source"]["max_bytes"], "--limits")
+        self.assertEqual(rec["missing"], ["service_settings.graphlet.library.max_bytes (null; --limits used)"])
+        block = dict(self.BLOCK)
+        del block["sequence_max_bytes"]
+        limits, _i, rec = rgl.library_limits(refs=self.refs(dict(block, max_bytes=10)))
+        self.assertEqual(limits, rgl.DEFAULT_LIMITS)
+        self.assertEqual(rec["source"], {"max_bytes": "default", "sequence_max_bytes": "default",
+                                         "local_limits": "capabilities (live)"})
+        self.assertEqual(rec["missing"], ["service_settings.graphlet.library.max_bytes (not a valid value 10; default "
+                                          "used)", "service_settings.graphlet.library.sequence_max_bytes (absent)"])
+        # the whole block null (a part the service failed to compute) or absent: --limits / the defaults
+        for library in (None, ...):
+            limits, _i, rec = rgl.library_limits(path, refs=self.refs(library))
+            self.assertEqual(limits["max_bytes"], 1024)
+            self.assertEqual(rec["missing"], ["service_settings.graphlet.library (absent: --limits or the defaults "
+                                              "used)"])
+
+    def test_a_run_directory_records_its_document(self):
+        d = tempfile.mkdtemp(prefix="rgl-run-")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, "arms", "mcp"))
+        with open(os.path.join(d, "arms", "mcp", "run.json"), "w") as fh:
+            json.dump({"service_capabilities": {"document": {"service_settings": {"graphlet": {
+                "library": dict(self.BLOCK)}}}}}, fh)
+        limits, _i, rec = rgl.library_limits(None, d)
+        self.assertEqual(limits["max_bytes"], 4096)
+        self.assertIn("service_capabilities", rec["document"])
+        limits, _i, rec = rgl.library_limits(None, os.path.join(d, "nothing"))
+        self.assertEqual(limits, rgl.DEFAULT_LIMITS)
 
 if __name__ == "__main__":
     unittest.main()

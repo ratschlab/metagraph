@@ -45,6 +45,53 @@ def library_tools(local_limits=False):
     return tools, handles, tmp, mcp_tools
 
 
+@unittest.skipIf(sys.version_info < (3, 10), "the traversal library needs Python 3.10 or later")
+class RealExportRecords(unittest.TestCase):
+    """F-D1 (lane D, 2026-10-19): file.raw is relative to the WAY directory (FORMAT v2.1 B3), as run_graphlet_local
+    writes it; read at arms/<way dir>/raw/<file.raw> every export and save file of a real run was "not kept"."""
+
+    def test_the_files_of_real_records_are_found_and_agree(self):
+        import shutil
+        import run_graphlet_local as rgl
+        tmp = tempfile.mkdtemp(prefix="lane_d_files_")
+        try:
+            ops = [{"id": "exp-fasta", "tool": "graphlet_export",
+                    "args": {"format": "fasta", "arm": None, "walks": None, "what": None}, "paging": "none"},
+                   {"id": "exp-json", "tool": "graphlet_export",
+                    "args": {"format": "json", "arm": None, "walks": None, "what": None}, "paging": "none"},
+                   {"id": "exp-mgt", "tool": "graphlet_export",
+                    "args": {"format": "mgt", "arm": None, "walks": None, "what": None}, "paging": "none"},
+                   {"id": "save", "tool": "graphlet_save", "args": {"path": "G.saved.mgt"}, "paging": "none"}]
+            plan = os.path.join(tmp, "plan.json")
+            with open(plan, "w") as fh:
+                json.dump({"scenarios": [{"id": "G", "graphlet": {"ops": ops}}]}, fh)
+            doc = os.path.join(gf.MINI, "mini_ndm1_rc__switch1.graphlet.json.gz")
+            self.assertEqual(rgl.main(["--plan", plan, "--doc", "G=" + doc, "--library-root", gf.LIB, "--out", tmp,
+                                       "--ways", "W1,W4", "--run-id", "f-d1", "--quiet"]), 0)
+            recs = {}
+            for way in ("W1", "W4"):
+                with open(os.path.join(tmp, "arms", gp.WAY_DIRS[way], gp.OPS_FILE)) as fh:
+                    recs[way] = dict(((r["scenario"], r["op"]), r) for r in map(json.loads, fh))
+            for way, by in recs.items():
+                for key, rec in by.items():
+                    self.assertTrue(rec["file"]["raw"].startswith("raw/"), rec["file"])   # the writer's convention
+                    path = cg.file_path(tmp, way, rec)
+                    self.assertTrue(os.path.exists(path), path)
+                    self.assertEqual(os.path.dirname(os.path.relpath(path, tmp)),
+                                     os.path.join("arms", gp.WAY_DIRS[way], "raw"))
+            cg.attach_files(tmp, recs)
+            for key in recs["W1"]:
+                v1, v4 = recs["W1"][key]["_file_view"], recs["W4"][key]["_file_view"]
+                self.assertNotIn("not_kept", v1, key)
+                self.assertIsNotNone(recs["W1"][key]["_file_text"], key)
+                self.assertEqual(v1, v4, key)   # one document, one library: the same file content on both ways
+            # and a file.raw that leaves the way directory is refused
+            bad = dict(recs["W1"][("G", "exp-fasta")], file={"raw": "../escape.fa"})
+            self.assertIsNone(cg.file_path(tmp, "W1", bad))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class Whitelist(unittest.TestCase):
     """ANSWER_KEYS against the library's answers: every key a tool answers is in its row of the table."""
 
@@ -816,6 +863,49 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(res["scenarios"][SID]["precheck"]["outcome"], "pass", res["scenarios"][SID]["precheck"])
         self.assertEqual(res["scenarios"][SID]["outcome"], "pass")
 
+    def test_vd2_a_failed_seeds_plan_leaves_w4_out(self):
+        """VERIFY-D VD2: the service keeps no document for a failed seed, so W4's runner records no_document (a runner
+        code: the op inconclusive). area_g.plan_failed's ops run W1, W2, W3, W5 with W4 not exposed: the op agrees and
+        the scenario passes; W4 recording its real no_document on an op that names W4 is inconclusive."""
+        import area_g
+        import graphlet_oracle as go
+        cg.graphlet_oracle = go
+        p = area_g.Plan(SID, {"failed": True, "arms": ["left"]}, False)
+        area_g.plan_failed(p, "G-other-0001")
+        planned = next(o for o in p.ops if o["id"] == "walks")
+        self.assertEqual(planned["ways"], ["W1", "W2", "W3", "W5"])
+        self.assertEqual(planned["not_exposed"], {"W4": "the service keeps no document for a failed seed"})
+        self.assertEqual([o.get("by_design") for o in p.ops if o.get("by_design")], [])   # VD3: no case
+        for w4_runs in (False, True):
+            op = {"id": "walks", "tool": "graphlet_walks", "args": planned["args"], "paging": "none"}
+            op.update({"ways": ["W1", "W2", "W3", "W4", "W5"]} if w4_runs else
+                      {"ways": planned["ways"], "not_exposed": planned["not_exposed"]})
+            scen = gf.scenario(pre={"no_graphlet": True}, ops=[op])
+            self.run_ = gf.GRun(scenarios=[scen])
+            self.run_.write_twin(SID, {"results": [{"seed": {"length_bp": 31}, "error": "seed_failed"}]})
+            self.run_.write_echo(SID, scen["request"]["strategy"])
+            self.run_.write_mcp_runs()
+            for way in ("W1", "W2"):
+                self.run_.record(way, SID, "walks", "graphlet_walks", op["args"],
+                                 error={"code": "no_graphlet", "fields": {"outcome": "failed"}})
+            if w4_runs:   # what W4's runner records without the MCP's document
+                self.run_.record("W4", SID, "walks", "graphlet_walks", op["args"],
+                                 error={"code": "no_document", "fields": {"source": None}})
+            self.run_.record("W3", SID, "walks", "graphlet_walks", op["args"],
+                             error={"code": "no_graphlet", "fields": {"reason": "the seed's retrieval failed"}})
+            self.run_.record("W5", SID, "walks", "graphlet_walks", op["args"], answer=None,
+                             oracle={"checked": {}, "consistency_only": ["/*"], "declared": "expected_error",
+                                     "expected_error": "no_graphlet", "note": "the full twin's seed failed"})
+            res = self.result()
+            e = res["scenarios"][SID]["ops"]["walks"]
+            if w4_runs:
+                self.assertEqual(e["outcome"], "inconclusive", e)
+            else:
+                self.assertEqual(e["outcome"], "agree", e)
+                self.assertEqual(res["scenarios"][SID]["outcome"], "pass", res["scenarios"][SID])
+            self.run_.cleanup()
+            self.run_ = None
+
     def test_vr4_a_failed_seed_with_lane_os_run_step(self):
         """The same failed seed with W5 written by lane O's own run step (graphlet_oracle.write_run, 846eeb97d: W5
         expects no_graphlet from the full twin's seed error): the op agrees and the scenario passes."""
@@ -1094,7 +1184,7 @@ class FiveWay(unittest.TestCase):
     def put_files(self, op, text, answer, w3=None, texts=None, ways=("W1", "W2", "W3", "W4"), raw_gz=False):
         """Records an export op on |ways| with its file kept (FORMAT v2 B3): |text| on every way unless |texts|."""
         for way in ways:
-            raw = "%s.%s.file%s" % (SID, op["id"], ".gz" if raw_gz else "")
+            raw = "raw/%s.%s.file%s" % (SID, op["id"], ".gz" if raw_gz else "")
             f = self.run_.write_file(way, raw, (texts or {}).get(way, text))
             ans = copy.deepcopy(w3 if way == "W3" and w3 is not None else answer)
             self.run_.record(way, SID, op["id"], op["tool"], op["args"], answer=ans, file=f)
@@ -1205,10 +1295,10 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(cg.stale(self.run_.dir, changed), ["by_design_table", "code"])
         # an export file the records name
         exp = {"id": "fasta", "tool": "graphlet_export", "args": {"format": "fasta"}}
-        f = self.run_.write_file("W1", "x.fa", ">a\nAC\n")
+        f = self.run_.write_file("W1", "raw/x.fa", ">a\nAC\n")
         self.run_.record("W1", SID, "fasta", "graphlet_export", exp["args"], answer={"records": 1}, file=f)
         before = cg.input_digests(self.run_.dir)
-        self.run_.write_file("W1", "x.fa", ">a\nAG\n")
+        self.run_.write_file("W1", "raw/x.fa", ">a\nAG\n")
         after = cg.input_digests(self.run_.dir)
         self.assertNotEqual(before["files"], after["files"])
         self.assertEqual(before["code"], after["code"])

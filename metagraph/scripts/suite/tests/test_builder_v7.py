@@ -99,7 +99,7 @@ class PatternTextByDesign(unittest.TestCase):
 
     def test_the_versions_the_builder_makes(self):
         self.assertEqual(bm.MANIFEST_VERSION, 7)
-        self.assertEqual(bm.BUILDABLE_VERSIONS, (6, 7))
+        self.assertEqual(bm.BUILDABLE_VERSIONS, (6, 7, 8))   # v8 (area G) is buildable, not frozen, not the default
         self.assertEqual(bm.SMOKE_TAG, "smoke-v5")   # v7 keeps v5's smoke selection (the gate's scenarios)
         with self.assertRaises(SystemExit):
             bm.build(bm.DEFAULT_SEED, fetch=False, manifest_version=5)

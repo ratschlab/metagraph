@@ -29,6 +29,17 @@ capabilities documents only when the arm has none yet, no closing GET); `--finis
 closing GET /capabilities. Either way run.json's `planned` / `state` cover the whole selection: `done` when every
 planned execution is recorded, else `partial`.
 
+Area G (manifest v8, FORMAT-v8 v2 C2): a scenario with a `graphlet` block is a `detail: graphlet` request like any
+other on both direct arms (its raw answer keeps the engine's whole response, the body text the local ways convert);
+on direct-local the runner also sends its `detail: full` twin (graphlet.twin.strategy, the same seeds) once, right
+after the scenario's first execution in the session (repeat 0, or the first one left on a resume), and keeps the
+twin's engine body as it is at docs/<id>.full.json.gz (the bare body: what graphlet_precheck and graphlet_oracle
+read) and its raw record at raw/<id>.direct-local.twin.json.gz (the request, the response's metadata, the normalised
+answer, also when it is no 200: then no docs file, a run.json warning, and the pre-checks name the missing twin).
+A twin kept is never sent again; a scenario whose executions were all recorded before its twin (an interruption)
+gets the twin alone. run.json `twins` lists each twin's http, wall time and files; the twin is a request of
+--max-requests, never an execution line.
+
 Resumable: a second invocation with the same --out skips the executions already recorded (same manifest
 required). A warm-up whose executions in the invocation's scope are all recorded while its target there has one left
 (an interruption between the two) runs again, its repeat 0, right before the target's first execution left
@@ -438,6 +449,7 @@ class Runner(object):
         # when the arm has none yet and no closing GET; --finish takes only the closing GET.
         self.closing_get = not args.only
         self.start_gets = not args.finish
+        self.twins_tried = set()
 
     # -- bookkeeping ------------------------------------------------------------------------------------------
     def default_run_id(self):
@@ -636,6 +648,65 @@ class Runner(object):
         self.executed += 1
         return line
 
+    # -- area G: the detail full twin (FORMAT-v8 v2 C2) -----------------------------------------------------------
+    def twin_files(self, scenario):
+        """(the docs file, the raw file) of a scenario's twin, relative to the arm's directory."""
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(scenario.get("id")))
+        return "docs/%s.full.json.gz" % safe, "raw/%s.%s.twin.json.gz" % (safe, self.args.arm)
+
+    def needs_twin(self, scenario):
+        """Whether this arm sends |scenario|'s twin: direct-local, an area G scenario stating its twin strategy, no
+        twin kept yet."""
+        g = scenario.get("graphlet")
+        twin = (g or {}).get("twin") if isinstance(g, dict) else None
+        if self.args.arm != "direct-local" or not isinstance(twin, dict) or not isinstance(twin.get("strategy"), dict):
+            return False
+        if not isinstance(scenario.get("request"), dict):
+            return False
+        if scenario.get("id") in self.twins_tried:
+            return False   # one attempt per scenario and session (a refused twin is not sent at every repeat)
+        return not os.path.exists(os.path.join(self.out, self.twin_files(scenario)[0]))
+
+    def send_twin(self, scenario):
+        """One `detail: full` request of |scenario| (its seeds, graphlet.twin.strategy); the engine body kept at
+        docs/<id>.full.json.gz when the host answered 200 with a JSON object, the raw record always."""
+        sid = scenario.get("id")
+        self.twins_tried.add(sid)
+        request = dict(scenario["request"])
+        request["strategy"] = scenario["graphlet"]["twin"]["strategy"]
+        method, path = sc.parse_route(scenario.get("route", "POST /traverse"))
+        body = json.dumps(request, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        headers = dict(DEFAULT_HEADERS)
+        timeout = timeout_for(scenario, self.args.arm, self.timeouts)
+        started = time.time()
+        res = self.client.call(method, path, body, headers, timeout)
+        self.requests += res["attempts"]
+        if res["http"]:
+            answer = sc.normalise_direct(res["http"], res["raw"], res["headers"])
+        else:
+            answer = sc.transport_failure(res["error"][0], res["error"][1])
+        doc_rel, raw_rel = self.twin_files(scenario)
+        sc.write_gz_json(os.path.join(self.out, raw_rel), {
+            "scenario": sid, "arm": self.args.arm, "twin": True, "started_utc": sc.iso_utc(started),
+            "request": {"body": request, "method": method, "path": path, "headers": headers},
+            "response": {"http": res["http"], "headers": res["headers"], "bytes_wire": res["bytes_wire"],
+                         "bytes_body": len(res["raw"])}, "answer": answer})
+        kept = None
+        if answer["http"] == 200 and isinstance(answer["body"], dict) and isinstance(answer["body"].get("results"),
+                                                                                       list):
+            os.makedirs(os.path.join(self.out, os.path.dirname(doc_rel)), exist_ok=True)
+            sc.write_gz_json(os.path.join(self.out, doc_rel), answer["body"])
+            kept = doc_rel
+        else:
+            self.run.setdefault("warnings", []).append(
+                "twin of %s: http %s%s; no docs file (the pre-checks name the missing twin)" % (
+                    sid, answer["http"], (" (%s)" % (answer.get("error") or {}).get("text")) if answer.get("error")
+                    else ""))
+        self.run.setdefault("twins", {})[sid] = {"http": answer["http"], "wall_ms": res["wall_ms"], "file": kept,
+                                                 "raw": raw_rel, "started_utc": sc.iso_utc(started)}
+        self.session["twins_sent"] = self.session.get("twins_sent", 0) + 1
+        return kept
+
     def previous_entry(self, line):
         """{digest, time_limited} of a recorded execution, for checks.evaluate's `previous`."""
         tl = line.get("time_limited")
@@ -736,6 +807,14 @@ class Runner(object):
                 for index, warm_up in rewarms.pop(p[1].get("id"), []):
                     steps.append((index, warm_up, 0, "cold", p[1].get("id")))
                 steps.append(p + (None,))
+            # area G: a twin missing for a scenario whose executions in scope are all recorded (an interruption
+            # between them and the twin) is sent alone (repeat None)
+            left = set(p[1].get("id") for p in todo)
+            twin_only = []
+            for p in scope:
+                if p[1].get("id") not in left and p[1].get("id") not in twin_only and self.needs_twin(p[1]):
+                    twin_only.append(p[1].get("id"))
+                    steps.append((p[0], p[1], None, "twin", None))
         again = [{"scenario": s_[1].get("id"), "target": s_[4]} for s_ in steps if s_[4]]
         if again:
             self.session["reruns_for_resume"] = again
@@ -762,6 +841,13 @@ class Runner(object):
                     break
                 sid = scenario.get("id")
                 self.write_state("running", len(planned), ndone, sid)
+                if repeat is None:
+                    kept = self.send_twin(scenario)
+                    if not self.args.quiet:
+                        say("[%s] %s twin (detail full) %s\n" % (self.args.arm, sid, kept or "not kept"))
+                    self.save_run()
+                    self.pause()
+                    continue
                 if rerun_target:
                     # timing evidence for the target, never an execution of its key: no `previous`, no digest
                     line = self.execute(index, scenario, repeat, cache, False, [], rerun_target=rerun_target)
@@ -782,6 +868,13 @@ class Runner(object):
                         self.args.arm, ndone, len(planned), sid, repeat, line["outcome"], line["http"],
                         line["wall_ms"] or 0.0))
                 self.pause()
+                if self.needs_twin(scenario) and self.may_request():
+                    # area G: the full twin right after the scenario's first execution of the session
+                    kept = self.send_twin(scenario)
+                    if not self.args.quiet:
+                        say("[%s] %s twin (detail full) %s\n" % (self.args.arm, sid, kept or "not kept"))
+                    self.save_run()
+                    self.pause()
             if STOP.flag:
                 state = "interrupted"
         except KeyboardInterrupt:

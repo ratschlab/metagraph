@@ -5,13 +5,18 @@ differences verified as by-design pairs (D-R12). Two stages of compare_graphlets
 Positive service checks, functions over W3's records and the scenario's facts (scenario_facts: from W1's document
 by the suite's own reader, a scenario's graphlet.facts stating them where the corpus says so):
   walk_display       every graphlet_walks / graphlet_walk answer of W3 carries walk_display "first_parent";
-  label_evidence     a W3 graphlet_compare answer carries label_evidence "lower_bound" exactly when one of its two
-                     graphlets has cut label lists (a segment whose recorded labels are fewer than its labels_total);
+  label_evidence     a W3 graphlet_compare answer carries label_evidence "lower_bound" exactly when the service adds
+                     its label fields (as hint below: the verdict qualified, the notes naming label_lists, a side's
+                     label lists cut), never on another compare (lane D's finding, 2026-10-20);
   qualified_cause    present exactly with label_evidence, and consistent with the library's answer to the same call
-                     (W4's, else W1's): it states each side's cap (labels.max_labels_per_node of the side's request)
+                     (W4's, else W1's): it states the cap of each side whose lists were cut (labels.max_labels_per_
+                     node of the side's request; ops_runtime._label_cap names those sides only)
                      and "no difference within the recorded evidence" exactly when the library counts no difference;
-  hint               a W3 compare answer carries hint exactly when one of its graphlets has more than 64 labels on a
-                     node (labels_total);
+  hint               a W3 compare answer carries hint exactly when its verdict is qualified (comparable), its notes
+                     name label_lists and a side's label lists were cut: the side's cut_lists, or a node with more
+                     labels (labels_total) than the side's cap, labels.max_labels_per_node of its scenario's strategy
+                     (64, the engine's default, when it states none), not a fixed 64 (the service's rule,
+                     ops_runtime._label_cap / _finish; service_settings.graphlet.compare_hint, async's limits block);
   in_service         a W3 graphlet_summary of a body over 8 MiB carries in_service false and a download; no other
                      summary carries in_service false;
   max_bytes_refused  a W3 call with max_bytes above the service's 262,144 is refused bad_argument, and the library
@@ -46,14 +51,15 @@ import suite_common as sc  # noqa: E402
 SERVICE_CHECKS = ("walk_display", "label_evidence", "qualified_cause", "hint", "in_service", "max_bytes_refused",
                   "forbidden", "bad_handle", "library_commit")
 SERVICE_MAX_BYTES = 262144
-HINT_LABELS_PER_NODE = 64
+DEFAULT_LABELS_PER_NODE = 64   # the engine's labels.max_labels_per_node when a strategy states none (async's U2)
 IN_SERVICE_BYTES = 8 * 1024 * 1024
 NO_DIFFERENCE = "no difference within the recorded evidence"
 # FORMAT v2 D2: an op's probe "wrong_token" | "bad_handle" -> (the service check, the code W3 must answer)
 PROBES = {"wrong_token": ("forbidden", "forbidden"), "bad_handle": ("bad_handle", "bad_handle")}
 # the pairs a by-design case lets differ (the service side against the library and the oracle)
 BY_DESIGN_PAIRS = ("W3-W4", "W3-W5")
-# the kinds of disagreement a verified case excuses on those pairs (an answer or an error that differs)
+# the kinds of disagreement a verified case excuses on those pairs (an answer or an error that differs; a receipt is
+# an answer): never a file (kind file: compare_graphlets compares a file by its content first, whatever the receipts)
 BY_DESIGN_KINDS = ("error", "answer")
 
 
@@ -77,9 +83,23 @@ def document_facts(text, checks_mod):
         return out
     segs = [s for a in arms.values() for s in a.get("segments") or []]
     if segs and all("labels_total" in s for s in segs):
-        out["cut_lists"] = any(s.get("labels_truncated") for s in segs)
+        out["cut_lists"] = any(s.get("labels_truncated") for s in segs) or engine_states_cut_lists(text)
         out["max_labels_per_node"] = max(s.get("labels_total") or 0 for s in segs)
     return out
+
+
+def engine_states_cut_lists(text):
+    """Whether the document states cut label lists as the engine writes them (F-D3, the rehearsal of 2026-10-19):
+    a K record of kind label_lists ("N recorded label list(s) are cut at the cap", SPEC-core §7.5.2 K) or the O
+    record's label_evidence `l` (lower_bound). A segment's entry list can be whole (labels_truncated false) while other
+    recorded lists (end sets, events) are cut: on every cut-list graphlet of that rehearsal no segment showed one."""
+    for line in text.split("\n"):
+        f = line.split(" ")
+        if f[0] == "K" and len(f) > 2 and f[2] == "label_lists":
+            return True
+        if f[0] == "O" and len(f) > 3 and f[3] == "l":
+            return True
+    return False
 
 
 def scenario_facts(run_dir, manifest, checks_mod=None):
@@ -174,18 +194,39 @@ def check_label_evidence(recs, manifest, facts):
     calls, bad, unknown = 0, [], []
     for sid, op, r in _compare_calls(recs, manifest):
         calls += 1
-        sides = [facts.get(x, {}).get("cut_lists") for x in (sid, _b_scenario(sid, op))]
-        if any(v is None for v in sides):
-            unknown.append("%s %s: cut lists unknown" % (sid, op["id"]))
-            continue
         sf = service_fields(r)
-        want = any(sides)
+        want, why = _label_fields_expected(recs, facts, sid, op, r)
+        if want is None:
+            unknown.append("%s %s: %s" % (sid, op["id"], "no compare verdict" if why == "verdict" else
+                                          "cut label lists unknown"))
+            continue
         if want and sf.get("label_evidence") != "lower_bound":
-            bad.append(_fail(sid, op, "a cut-list graphlet, label_evidence %s" % gp.compact(
-                sf.get("label_evidence", gp.MISSING))))
+            bad.append(_fail(sid, op, "%s, label_evidence %s" % (why, gp.compact(sf.get("label_evidence",
+                                                                                         gp.MISSING)))))
         elif not want and "label_evidence" in sf:
-            bad.append(_fail(sid, op, "no cut list, yet label_evidence %s" % gp.compact(sf["label_evidence"])))
+            bad.append(_fail(sid, op, "%s, yet label_evidence %s" % (why, gp.compact(sf["label_evidence"]))))
     return _result("label_evidence", calls, bad, unknown, "of graphlet_compare answered")
+
+
+def _label_fields_expected(recs, facts, sid, op, r):
+    """(whether the service adds its label fields -- label_evidence, qualified_cause, hint -- to this compare answer,
+    why) as it does (ops_runtime._label_cap / _finish): the verdict qualified (comparable, W3's answer, else the
+    library's), the library's notes naming label_lists and a side's label lists cut (side_cut_lists: its cut_lists,
+    or more labels on a node than its own cap). (None, "verdict" | "facts") when what decides it is unknown."""
+    verdict, notes = _compare_verdict(recs, sid, op["id"], r)
+    if verdict is None:
+        return None, "verdict"
+    if verdict != "qualified":
+        return False, "verdict %s" % gp.compact(verdict)
+    if not any(isinstance(n, str) and "label_lists" in n for n in notes):
+        return False, "verdict qualified, no label_lists note"
+    sides = [(x, side_cut_lists(facts.get(x, {}))) for x in (sid, _b_scenario(sid, op))]
+    cut = [x for x, v in sides if v]
+    if cut:
+        return True, "verdict qualified, label lists cut on %s" % " and ".join(cut)
+    if any(v is None for _x, v in sides):
+        return None, "facts"
+    return False, "verdict qualified, no cut label list"
 
 
 def _library_answer(recs, sid, oid):
@@ -223,6 +264,8 @@ def check_qualified_cause(recs, manifest, facts):
                 "no difference" if none_differ else gp.compact(counts), gp.compact(cause))))
             continue
         for side in (sid, _b_scenario(sid, op)):
+            if not side_cut_lists(facts.get(side, {})):
+                continue   # the service names the caps of the sides whose lists were cut only (VERIFY-D VD11)
             cap = facts.get(side, {}).get("cap")
             # the cap as a number of its own (VERIFY-C VC12): 64 is not stated by "640" or "1964"
             if isinstance(cap, int) and not re.search(r"(?<![0-9])%d(?![0-9])" % cap, cause):
@@ -232,19 +275,56 @@ def check_qualified_cause(recs, manifest, facts):
     return _result("qualified_cause", calls, bad, unknown, "of graphlet_compare answered")
 
 
+def side_cut_lists(f):
+    """Whether a graphlet's label lists were cut (True / False / None unknown): its cut_lists (the document's
+    segments, its K label_lists or O lower_bound record), or a node with more labels than its cap (labels_total
+    above the scenario's labels.max_labels_per_node, DEFAULT_LABELS_PER_NODE when the strategy states none)."""
+    cut = f.get("cut_lists")
+    n = f.get("max_labels_per_node")
+    cap = f.get("cap") if isinstance(f.get("cap"), int) and not isinstance(f.get("cap"), bool) else \
+        DEFAULT_LABELS_PER_NODE
+    over = n > cap if isinstance(n, int) and not isinstance(n, bool) else None
+    if cut or over:
+        return True
+    if cut is None and over is None:
+        return None
+    return False
+
+
+def _compare_verdict(recs, sid, oid, r):
+    """(comparable, notes) of a compare call: W3's own answer, else the library's to the same call."""
+    for ans in (r.get("answer"), _library_answer(recs, sid, oid)):
+        if isinstance(ans, dict) and "comparable" in ans:
+            notes = ans.get("notes")
+            return ans["comparable"], notes if isinstance(notes, list) else []
+    return None, []
+
+
 def check_hint(recs, manifest, facts):
     calls, bad, unknown = 0, [], []
     for sid, op, r in _compare_calls(recs, manifest):
         calls += 1
-        sides = [facts.get(x, {}).get("max_labels_per_node") for x in (sid, _b_scenario(sid, op))]
-        if any(v is None for v in sides):
-            unknown.append("%s %s: labels per node unknown" % (sid, op["id"]))
-            continue
-        want = max(sides) > HINT_LABELS_PER_NODE
         has = "hint" in service_fields(r)
-        if want != has:
-            bad.append(_fail(sid, op, "%d labels per node at most, hint %s" % (max(sides),
-                                                                              "present" if has else "absent")))
+        verdict, notes = _compare_verdict(recs, sid, op["id"], r)
+        if verdict is None:
+            unknown.append("%s %s: no compare verdict" % (sid, op["id"]))
+            continue
+        named = any(isinstance(n, str) and "label_lists" in n for n in notes)
+        if verdict != "qualified" or not named:
+            if has:
+                bad.append(_fail(sid, op, "verdict %s%s, hint present" % (
+                    gp.compact(verdict), "" if named else ", no label_lists note")))
+            continue
+        sides = [(x, side_cut_lists(facts.get(x, {}))) for x in (sid, _b_scenario(sid, op))]
+        cut = [x for x, v in sides if v]
+        if not cut and any(v is None for _x, v in sides):
+            unknown.append("%s %s: cut label lists unknown" % (sid, op["id"]))
+            continue
+        if bool(cut) != has:
+            caps = ", ".join("%s cap %s" % (x, facts.get(x, {}).get("cap") or DEFAULT_LABELS_PER_NODE)
+                             for x, _v in sides)
+            bad.append(_fail(sid, op, "verdict qualified, label lists %s (%s), hint %s" % (
+                "cut on " + " and ".join(cut) if cut else "not cut", caps, "present" if has else "absent")))
     return _result("hint", calls, bad, unknown, "of graphlet_compare answered")
 
 
@@ -455,7 +535,7 @@ def judge_by_design(entry, scen, op, recs, cases):
     if entry["outcome"] in ("precondition_failed",) or entry.get("smoke"):
         return entry
     # a verified case excuses only the declared difference: a W3-W4 or W3-W5 disagreement of kind error / answer,
-    # never differing args_resolved or a selector (VERIFY-C VC11)
+    # never differing args_resolved, a selector (VERIFY-C VC11) or a file's content (kind file)
     kinds = dict((p.get("pair"), p.get("kind")) for p in entry.get("pairs") or [] if p.get("outcome") == "disagree")
     rest = [p for p in entry.get("disagreeing") or []
             if not (p in BY_DESIGN_PAIRS and kinds.get(p) in BY_DESIGN_KINDS)]
@@ -472,20 +552,28 @@ def judge_by_design(entry, scen, op, recs, cases):
 
 
 def by_design_stage(result, run_dir, manifest, recs, prechecks):
-    """Stage of compare_graphlets: judges every op that names by-design cases, with the run's table."""
+    """Stage of compare_graphlets: judges every op that names by-design cases, with the run's tables: the
+    service-by-design table and area G's own (service_by_design_g.json, VERIFY-D VD1), each the run's snapshot's,
+    else the tree's; both identities recorded (by_design_table, by_design_g_table: a v8 policy pins both)."""
     ops = [(scen, op) for scen in gp.graphlet_scenarios(manifest) for op in gp.scenario_ops(scen)
            if op.get("by_design")]
     if not ops:
         return
     path, warnings = cmp.table_for(run_dir, None)
     result.setdefault("warnings", []).extend(w for w in warnings if w not in result.get("warnings", []))
-    try:
-        cases, info = cmp.load_by_design(path) if path else ({}, None)
-    except cmp.TableError as e:
-        cases, info = {}, None
-        result["warnings"].append("by-design table refused: %s" % e)
-    result["by_design_table"] = None if info is None else {
-        "sha256": info.get("sha256"), "path": cmp.run_relative(info.get("path"), run_dir), "cases": info.get("cases")}
+    cases = {}
+    for key, p_ in (("by_design_table", path), ("by_design_g_table", cmp.g_table_for(run_dir))):
+        try:
+            got, info = cmp.load_by_design(p_) if p_ else ({}, None)
+        except cmp.TableError as e:
+            got, info = {}, None
+            result["warnings"].append("by-design table refused: %s" % e)
+        for cid in sorted(set(got) & set(cases)):
+            result["warnings"].append("by-design case %s is in both tables: %s's is read" % (cid, key))
+        cases.update(got)
+        result[key] = None if info is None else {
+            "sha256": info.get("sha256"), "path": cmp.run_relative(info.get("path"), run_dir),
+            "cases": info.get("cases")}
     for scen, op in ops:
         entry = result["scenarios"].get(scen.get("id"), {}).get("ops", {}).get(op["id"])
         if entry is not None:

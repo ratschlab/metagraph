@@ -34,6 +34,17 @@ entry's absence_scope or strands are no longer marked not implemented via MCP (a
 the MCP's answer states them per database, checks.MCP_PATTERN_DATABASE_FIELDS), so P-scope-0004 / -0006 run on the
 MCP arm again.
 
+v8 (the owner's design of 2026-10-19, DESIGN-v8 / FORMAT-v8; not frozen) is v7's scenarios, unchanged and in v7's
+order, followed by area G (areas.gen_G, area_g.py): the graphlet processing tools run five ways on a corpus of
+graphlets, built from the corpus file the rehearsal writes (--corpus; provisional without one: the first candidate of
+every slot, preconditions pending) with the library pin --library-commit; the slots the MCP cannot express on staging
+(annotate, output.sequences false, trace with coordinates) are direct-only scenarios (W1, W2, W5; the owner's decision
+of 2026-10-19; --no-direct-only leaves them out). The G block is appended
+after every v7 layout step, so no v7 scenario moves and the deploy gate's warm repeats stay v7's; the relations are
+v7's. A v8 build is refused into manifest/ without --freeze (the owner freezes v8); `graphlets` (outside the content
+digest) states the corpus file, the pin and what the freeze still needs (pending). --rehearse G (rehearse_g.py) runs
+the candidates on staging and writes the corpus file and the rehearsal report.
+
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
 documents and the scenarios a host capability decides (the protein substitution cap: manifest_lib.HOST_MISMATCH_MAX)
@@ -55,11 +66,12 @@ import os
 import re
 import subprocess
 import sys
-from typing import Optional
+from typing import List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import area_g  # noqa: E402
 import areas  # noqa: E402
 import checks  # noqa: E402
 import manifest_lib  # noqa: E402
@@ -68,8 +80,10 @@ from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
 MANIFEST_VERSION = 7
-# the versions this builder makes: v6 (frozen; rebuilt byte for byte) and v7
-BUILDABLE_VERSIONS = (6, 7)
+# the versions this builder makes: v6 and v7 (frozen; rebuilt byte for byte) and v8 (area G; not frozen)
+BUILDABLE_VERSIONS = (6, 7, 8)
+GRAPHLET_VERSION = 8
+DEFAULT_CORPUS = os.path.join(truth.TRUTH_DIR, "area_g", "corpus.json")
 # The smoke selection's version (SMOKE_TAG): v5's selection, kept by v6 (the tag is part of every scenario's tags, and
 # the gate's scenarios must stay byte-identical to v5's)
 SMOKE_SELECTION_VERSION = 5
@@ -108,6 +122,13 @@ CONVENTIONS = {
 }
 
 
+# v8's own conventions: only a v8 manifest states them, so a v1-v7 rebuild stays byte-identical
+V8_CONVENTIONS = {
+    "direct_not_run": "a scenario only the MCP arm runs (v8's stop scenarios), the reason: the direct arms skip it "
+                      "(suite_common.plan_executions)",
+}
+
+
 CAPABILITY_DOCUMENTS = ("capabilities", "pattern_capabilities", "traverse_capabilities")
 # The checks a baseline run shows the MCP surface exposes, per scenario (mcp.exposes; compare.exposure_drops reads a
 # listed check that reads not_exposed as a disagreement): written by --exposure-from from a recorded run
@@ -142,7 +163,9 @@ def snapshot_digests(directory: str) -> dict:
 
 
 def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAULT_CAPABILITIES,
-          exposure_file: Optional[str] = DEFAULT_EXPOSURE, manifest_version: int = MANIFEST_VERSION) -> dict:
+          exposure_file: Optional[str] = DEFAULT_EXPOSURE, manifest_version: int = MANIFEST_VERSION,
+          corpus_file: Optional[str] = None, library_commit: Optional[str] = None,
+          include_direct_only: bool = True, stop_scenarios: bool = False) -> dict:
     if manifest_version not in BUILDABLE_VERSIONS:
         raise SystemExit("manifest version %r: this builder makes %s" % (
             manifest_version, " and ".join("v%d" % v for v in BUILDABLE_VERSIONS)))
@@ -164,6 +187,9 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         if only_areas and area not in only_areas:
             continue
         scenarios += gen(ctx)
+        if area == "T" and manifest_version >= GRAPHLET_VERSION:
+            # v8 (the owner, 2026-10-19): T-walk-0024's ten warm-ups (areas.T_WALK_0024_REGION), right before it
+            scenarios += areas.t_walk_0024_warm_ups(ctx, scenarios)
     if not only_areas or "C" in only_areas:
         scenarios += areas.gen_C(ctx, caps)
     if not only_areas:
@@ -193,10 +219,29 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         with open(exposure_file) as f:
             exposure = json.load(f)
         apply_exposure(scenarios, exposure)
+    graphlets = None
+    g_problems: list = []
+    if manifest_version >= GRAPHLET_VERSION and (not only_areas or "G" in only_areas):
+        # v8: area G after every v7 layout step (no v7 scenario moves; the gate's warm repeats are v7's)
+        if corpus_file is None and os.path.exists(DEFAULT_CORPUS):
+            corpus_file = DEFAULT_CORPUS   # the committed rehearsal corpus ('' builds the provisional one)
+        corpus = area_g.load_corpus(corpus_file)
+        if library_commit is None and isinstance(corpus.get("library_commit"), str) and corpus["library_commit"]:
+            library_commit = corpus["library_commit"]   # the pin the corpus was rehearsed against (else --library-commit)
+        seeds_from = scenarios if any(s["area"] == "T" for s in scenarios) else areas.gen_T(Ctx(recs, seed))
+        g = areas.gen_G(ctx, seeds_from, corpus, library_commit, include_direct_only)
+        scenarios += g
+        g_problems, pending = area_g.validate_g(g, _table_cases())
+        graphlets = {"corpus": _corpus_identity(corpus_file, corpus), "library_commit": library_commit,
+                     "include_direct_only": include_direct_only, "pending": pending, "summary": area_g.summary(g)}
+        if stop_scenarios:
+            # the owner's decision: only once async's MCP runner has the stop flow (--stop-scenarios)
+            scenarios += areas.gen_stop(ctx, seeds_from)
+            graphlets["stop_scenarios"] = list(areas.STOP_IDS)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios) + \
-        gate_warm_problems(scenarios, reference)
+        gate_warm_problems(scenarios, reference) + g_problems
     if problems:
         raise SystemExit("manifest invalid:\n  " + "\n  ".join(problems[:30]))
     tc = caps["traverse_capabilities"]
@@ -219,7 +264,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
             "records": [r.describe() for r in recs],
             "records_not_fetched": missing,
         },
-        "conventions": CONVENTIONS,
+        "conventions": dict(CONVENTIONS, **V8_CONVENTIONS) if manifest_version >= GRAPHLET_VERSION else CONVENTIONS,
         "mcp_exposure_baseline": None if exposure is None else {
             "file": os.path.relpath(os.path.abspath(exposure_file), HERE), "source": exposure.get("source"),
             "rule": exposure.get("rule"), "sha256": sha256_json(exposure),
@@ -231,7 +276,41 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
         "relations": relations,
         "scenarios": scenarios,
     }
+    if graphlets is not None:
+        manifest = dict((k, v) for k, v in manifest.items() if k not in ("relations", "scenarios"))
+        manifest["graphlets"] = graphlets
+        manifest["relations"] = relations
+        manifest["scenarios"] = scenarios
     return manifest
+
+
+def freeze_problems(m: dict) -> List[str]:
+    """Why a built v8 must not be frozen into manifest/ (VERIFY-D VD12): a provisional corpus (no rehearsal's corpus
+    file), or anything the freeze still needs (graphlets.pending: the library pin, frozen preconditions, a by-design
+    case the tables lack)."""
+    g = m.get("graphlets")
+    if m.get("manifest_version", 0) < GRAPHLET_VERSION or not isinstance(g, dict):
+        return []
+    out = []
+    if (g.get("corpus") or {}).get("provisional"):
+        out.append("the area G corpus is provisional (commit the rehearsal's corpus as %s, or pass --corpus)"
+                   % os.path.relpath(DEFAULT_CORPUS, HERE))
+    out += ["pending: %s" % p for p in g.get("pending") or []]
+    return out
+
+
+def _corpus_identity(path: Optional[str], corpus: dict) -> dict:
+    """The corpus file a v8 build read (relative to this directory when inside it, its sha256), or the provisional
+    corpus."""
+    if not path:
+        return {"file": None, "provisional": True,
+                "rule": "no rehearsal yet: the first candidate of every slot (direct-only ones by default), "
+                        "preconditions pending"}
+    with open(path, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    rel = os.path.relpath(os.path.abspath(path), HERE)
+    return {"file": rel if not rel.startswith("..") else os.path.abspath(path), "sha256": digest,
+            "provisional": bool(corpus.get("provisional")), "rehearsal": corpus.get("rehearsal")}
 
 
 # the tools whose time_budget_ms the request digest leaves out (EXPOSURE_RULE): traverse_resolve's since v5,
@@ -657,9 +736,15 @@ def gate_warm_problems(scenarios: list, reference: dict, warm_every: int = WARM_
 
 
 def _table_cases() -> set:
-    """The case ids of the service-by-design table beside this script."""
-    with open(os.path.join(HERE, "service_by_design.json")) as f:
-        return set(c.get("id") for c in json.load(f).get("cases") or [])
+    """The case ids of the service-by-design tables beside this script: service_by_design.json and area G's
+    service_by_design_g.json (VERIFY-D VD1: the G cases apart, the v1-v7 table byte-identical)."""
+    out = set()
+    for name in ("service_by_design.json", "service_by_design_g.json"):
+        path = os.path.join(HERE, name)
+        if os.path.exists(path):
+            with open(path) as f:
+                out |= set(c.get("id") for c in json.load(f).get("cases") or [])
+    return out
 
 
 def validate(scenarios, cases=None) -> list:
@@ -755,6 +840,7 @@ def smoke_of(manifest: dict) -> dict:
     if missing and not manifest.get("partial_build"):
         raise SystemExit("smoke scenarios not in the manifest: %s" % ", ".join(missing))
     m = dict(manifest)
+    m.pop("graphlets", None)   # v8: area G is not in the smoke selection
     m["scenarios"] = sel
     m["content_sha256"] = sha256_json(sel)
     ids = {s["id"] for s in sel}
@@ -846,7 +932,32 @@ def main(argv=None) -> int:
                          "was recorded against (--exposure-source-manifest) to --exposure-out, then exit")
     ap.add_argument("--exposure-source-manifest", metavar="MANIFEST",
                     help="the manifest --exposure-rebase's baseline was recorded against (manifest/suite_v4.json)")
-    args = ap.parse_args(argv)
+    ap.add_argument("--corpus", default=None,
+                    help="v8: the area G corpus file the rehearsal wrote (default truth/area_g/corpus.json when it "
+                         "exists, else the provisional corpus)")
+    ap.add_argument("--library-commit", default=None,
+                    help="v8: the library commit the manifest is frozen against (graphlet.library_commit)")
+    ap.add_argument("--include-direct-only", action="store_true", default=True,
+                    help="v8: the area G slots the MCP cannot express as direct-only scenarios (W1, W2, W5): the "
+                         "default (the owner, 2026-10-19)")
+    ap.add_argument("--no-direct-only", dest="include_direct_only", action="store_false",
+                    help="v8: leave the direct-only area G slots out")
+    ap.add_argument("--stop-scenarios", action="store_true",
+                    help="v8: append the two stop scenarios (traverse_stop via MCP on a running /traverse and "
+                         "/resolve; mcp.flow), only once async's MCP runner has the stop flow (the owner, 2026-10-19)")
+    ap.add_argument("--freeze", action="store_true",
+                    help="v8: allow the default outputs manifest/suite_v8.json / suite_smoke_v8.json (the owner's "
+                         "freeze)")
+    ap.add_argument("--rehearse", metavar="AREA", default=None,
+                    help="G: the area G rehearsal (rehearse_g.py; its own arguments follow --)")
+    args, rest = ap.parse_known_args(argv)
+    if args.rehearse:
+        if args.rehearse != "G":
+            raise SystemExit("--rehearse: only area G has a rehearsal")
+        import rehearse_g
+        return rehearse_g.main([x for x in rest if x != "--"])
+    if rest:
+        ap.error("unrecognized arguments: %s" % " ".join(rest))
     args.out = args.out or os.path.join(HERE, "manifest", "suite_v%d.json" % args.manifest_version)
     args.smoke_out = args.smoke_out or os.path.join(HERE, "manifest", "suite_smoke_v%d.json" % args.manifest_version)
     if args.exposure_rebase:
@@ -892,6 +1003,12 @@ def main(argv=None) -> int:
                                                        sum(1 for v in doc["scenarios"].values() if v["exposes"])))
         return 0
     only = area_list(args.areas)
+    if args.manifest_version >= GRAPHLET_VERSION and not args.freeze and (
+            manifest_path(args.out) or manifest_path(args.smoke_out)):
+        raise SystemExit("v%d is not frozen: build into files outside manifest/ (--out, --smoke-out), or pass --freeze "
+                         "(the owner's freeze)" % args.manifest_version)
+    if args.corpus is None and args.manifest_version >= GRAPHLET_VERSION and os.path.exists(DEFAULT_CORPUS):
+        args.corpus = DEFAULT_CORPUS
     if only and (manifest_path(args.out) or manifest_path(args.smoke_out)):
         raise SystemExit("--areas builds a partial manifest: give --out and --smoke-out outside manifest/ (not a "
                          "suite_v*.json / suite_smoke_v*.json there, by any spelling)")
@@ -900,14 +1017,22 @@ def main(argv=None) -> int:
         if why:
             raise SystemExit(why)
     m = build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities,
-              exposure_file=args.exposure or None, manifest_version=args.manifest_version)
+              exposure_file=args.exposure or None, manifest_version=args.manifest_version, corpus_file=args.corpus,
+              library_commit=args.library_commit, include_direct_only=args.include_direct_only,
+              stop_scenarios=args.stop_scenarios)
     if only:
         m["partial_build"] = True
+    if args.freeze and (manifest_path(args.out) or manifest_path(args.smoke_out)):
+        probs = freeze_problems(m)
+        if probs:
+            raise SystemExit("v%d is not ready to freeze:\n  %s" % (args.manifest_version, "\n  ".join(probs[:20])))
     write(args.out, m)
     s = smoke_of(m)
     write(args.smoke_out, s)
     for sk in m["skipped"]:
         print("skipped: %(area)s %(scenario)s: %(reason)s" % sk, file=sys.stderr)
+    for p in (m.get("graphlets") or {}).get("pending") or []:
+        print("pending (area G, before the freeze): %s" % p, file=sys.stderr)
     print(json.dumps({"full": {"path": args.out, "content_sha256": m["content_sha256"], **m["counts"]},
                       "smoke": {"path": args.smoke_out, "content_sha256": s["content_sha256"], **s["counts"]}}, indent=1))
     return 0

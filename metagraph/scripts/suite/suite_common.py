@@ -209,6 +209,11 @@ def plan_executions(selected, arm, warm_every=10):
     [{scenario, reason}] for scenarios this arm does not run (the long class behind the front proxy)."""
     planned, skipped = [], []
     for index, scenario in selected:
+        if arm in DIRECT_ARMS and scenario.get("direct_not_run"):
+            # a scenario only the MCP arm runs (manifest v8's stop scenarios: their MCP stop is the first and only
+            # request, VERIFY-D VD6)
+            skipped.append({"scenario": scenario.get("id"), "reason": "direct_not_run: %s" % scenario["direct_not_run"]})
+            continue
         if arm == "direct-remote" and scenario.get("timing_class") == "long":
             skipped.append({"scenario": scenario.get("id"),
                             "reason": "timing_class long: over the front proxy's ~120 s cut, direct-local only"})
@@ -294,14 +299,26 @@ def beyond_status(scenarios):
     return sorted(names)
 
 
+def single_mcp_execution(scenario):
+    """Whether a scenario runs once on MCP (manifest v8, async's runner questions, 2026-10-20): an area G scenario
+    (a graphlet block: the service's 300 s result cache answers a repeat from the first, so MCP repeats prove nothing,
+    DESIGN-v8 §3) and a stop scenario (mcp.flow kind "stop": each repeat would stop another job). No scenario of
+    v1-v7 has either."""
+    if isinstance(scenario.get("graphlet"), dict):
+        return True
+    flow = (scenario.get("mcp") or {}).get("flow")
+    return isinstance(flow, dict) and flow.get("kind") == "stop"
+
+
 def mcp_repeats(index, scenario, warm_every=10):
     """The MCP executions of a scenario in paired mode, as repeat indices: repeat 0 before the direct arms
     (cold), the others after them (warm); one more than the direct arms' repeats when those run once, so
     every scenario has an MCP warm execution. A scenario the manifest marks not implemented via MCP gets
-    repeat 0 only (the MCP runner records the mark); the long class none (the front cuts every arm behind it)."""
+    repeat 0 only (the MCP runner records the mark), so do area G and the stop scenarios (single_mcp_execution);
+    the long class none (the front cuts every arm behind it)."""
     if scenario.get("timing_class") == "long":
         return []
-    if ((scenario.get("mcp") or {}).get("not_implemented")):
+    if ((scenario.get("mcp") or {}).get("not_implemented")) or single_mcp_execution(scenario):
         return [0]
     return list(range(max(2, repeat_count(index, scenario, warm_every))))
 
@@ -2525,7 +2542,7 @@ SNAPSHOT_FILE = "SNAPSHOT.json"
 # What the arms run and judge with: the direct runner and its sampler, the checks (or the stub) and suite_common they
 # import, and the by-design table the MCP runner reads beside its --checks-dir.
 SNAPSHOT_FILES = ("run_direct.py", "sampler.py", "suite_common.py", "checks.py", "checks_stub.py",
-                  "service_by_design.json")
+                  "service_by_design.json", "service_by_design_g.json")
 
 
 class SnapshotChanged(Exception):

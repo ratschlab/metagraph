@@ -267,12 +267,14 @@ def canonical_args(args):
 
 
 def file_path(run_dir, way, rec):
-    """Where a record's file text is kept (FORMAT v2 B3: arms/<way dir>/raw/<file.raw>), or None."""
+    """Where a record's file text is kept, or None: arms/<way dir>/<file.raw>, file.raw being relative to the way's
+    directory (FORMAT v2.1 B3: "raw/G-x.exp-json.file.json.gz", as run_graphlet_local writes it and as executions'
+    `raw` is relative to the arm's directory)."""
     f = rec.get("file") if isinstance(rec.get("file"), dict) else None
     raw = f.get("raw") if f else None
     if not isinstance(raw, str) or not raw or os.path.isabs(raw) or ".." in raw.split("/"):
         return None
-    return os.path.join(run_dir, "arms", gp.WAY_DIRS[way], "raw", raw)
+    return os.path.join(run_dir, "arms", gp.WAY_DIRS[way], raw)
 
 
 def file_view(rec, text):
@@ -320,7 +322,7 @@ def attach_files(run_dir, recs):
             text = gp._read_text(path) if path and os.path.exists(path) else None
             rec["_file_text"] = text
             rec["_file_view"] = file_view(rec, text) if text is not None else {
-                "not_kept": "arms/%s/raw/%s" % (gp.WAY_DIRS[way], (rec["file"] or {}).get("raw"))}
+                "not_kept": "arms/%s/%s" % (gp.WAY_DIRS[way], (rec["file"] or {}).get("raw"))}
 
 
 def same_library_env(ra, rb):
@@ -683,12 +685,18 @@ def compare_records(a, ra, b, rb, what):
         code = (va.get("error") or vb.get("error") or {}).get("code")
         return _pair(a, b, what, "disagree", "%s answered the error %s, %s an answer" % (err, code, ok),
                      ("/", va, vb), kind="error", views=(va, vb))
+    if "answer" in va and ("file" in va or "file" in vb):
+        # the file by its content first, whatever the receipts say (FORMAT v2 B3): a difference there is of kind
+        # file, which no by-design case excuses (a case excuses a receipt / answer difference only: W3's mgt
+        # receipt is the stored body's link, its file still the document; async's 4th case, 2026-10-20)
+        df = gp.first_difference(dict((k, v) for k, v in va.items() if k != "answer"),
+                                 dict((k, v) for k, v in vb.items() if k != "answer"))
+        if df:
+            return _pair(a, b, what, "disagree", (df[3] or None) if len(df) > 3 else None, df[:3], kind="file",
+                         views=(va, vb))
     if "answer" in va and "W3" in (a, b) and isinstance(va["answer"], dict) and isinstance(vb["answer"], dict):
         d = cut_aware_difference(va["answer"], vb["answer"])   # FORMAT v2 A3: the service's cut rows
         d = d and ("/answer" + (d[0] or ""),) + tuple(d[1:])
-        if not d:   # the rest of the view (a file's content) equal as usual
-            d = gp.first_difference(dict((k, v) for k, v in va.items() if k != "answer"),
-                                    dict((k, v) for k, v in vb.items() if k != "answer"))
     else:
         d = gp.first_difference(va, vb)
     if d and len(d) > 3 and str(d[3]).startswith("uncomparable"):
@@ -885,6 +893,11 @@ def compare_op(scenario, op, recs, precheck, manifest):
         entry["ways"]["W3"] = "not_exposed"
         if why is None:
             entry["problems"].append("W3 is left out without the owner's reason (not_exposed)")
+        w4 = (op.get("not_exposed") or {}).get("W4") if isinstance(op.get("not_exposed"), dict) else None
+        if "W4" not in ways and isinstance(w4, str) and w4.strip():
+            # a direct-only scenario (no MCP job, so no W4 document): stated, never missing
+            entry["not_exposed"]["W4"] = w4.strip()
+            entry["ways"]["W4"] = "not_exposed"
     if ((precheck or {}).get("preconditions") or {}).get("outcome") == "precondition_failed":
         for w in ways:
             entry["ways"][w] = "not_compared"
@@ -1093,7 +1106,7 @@ def _tree_digest(run_dir, rel_dirs):
 def input_digests(run_dir, recs=None):
     """{name: sha256 or None} of everything a graphlet comparison reads (VERIFY-C VC3): the manifest; every way's
     records; the job record and the MCP runner's identity records (graphlet_jobs.jsonl, mcp_runs.jsonl, run.json);
-    every kept document and twin (arms/*/docs); every export or save file the records name (arms/*/raw/<file.raw>);
+    every kept document and twin (arms/*/docs); every export or save file the records name (arms/<way dir>/<file.raw>);
     the by-design table the run reads; and the code (CODE_FILES, as this tree holds them)."""
     import compare as cmp
     names = ["manifest.json"] + ["arms/%s/%s" % (gp.WAY_DIRS[w], gp.OPS_FILE) for w in WAYS + ("drift",)] + \
@@ -1112,6 +1125,8 @@ def input_digests(run_dir, recs=None):
     out["files"] = h.hexdigest()
     table, _ = cmp.table_for(run_dir, None)
     out["by_design_table"] = sc.file_sha256(table) if table else None
+    gtable = cmp.g_table_for(run_dir)
+    out["by_design_g_table"] = sc.file_sha256(gtable) if os.path.exists(gtable) else None
     out["code"] = hashlib.sha256("".join("%s\0%s\n" % (f, sc.file_sha256(os.path.join(HERE, f)))
                                          for f in CODE_FILES).encode("utf-8")).hexdigest()
     return out

@@ -2505,6 +2505,163 @@ def gen_D(ctx: Ctx, pool: List[dict]) -> List[dict]:
     return out
 
 
+# ================================================================================================= v8: T-walk-0024's warm-ups
+# The owner's decision of 2026-10-19 (lane D's proposal (b)): T-walk-0024, a 200 bp seed of mge under its column
+# 243273, both arms, 10,000 bp, walk preset (15 s), took 4.2, 4.2, 0.14, 6.5, 18.6 (time-stopped at 3,098 bp) and
+# 6.8 s cold via MCP in the runs of 2026-10-17..19 and ~0.1 s warm. Its paths end at stated branches 2,398 bp left
+# and 3,916 bp right of the seed in every v5-v7 run (complete_to_bp 10,000 on both arms), so its cost is the cold reads
+# of that region: warm-up resolves of it, against the column (a column walk reads rows), right before it. TEN pieces,
+# not the four the proposal named: the paired plan gives every tenth scenario of the manifest a warm repeat, by index
+# (suite_common.repeat_count), so inserting a multiple of ten keeps every later v7 scenario's index residue, hence
+# its warm repeat, and the builder's single-execution and gate-warm-repeat placements move nothing (with four, 120 of
+# v7's warm repeats moved, 27 on the gate's routes, and T-attempts-0002 / -0003 and N-negative-0007.. were re-placed).
+T_WALK_0024_REGION = {"target": "T-walk-0024", "left_bp": 2398, "right_bp": 3916, "label": "243273",
+                      "ids": tuple("R-warm-%04d" % n for n in range(9, 19))}
+
+
+def t_walk_0024_warm_ups(ctx: Ctx, scenarios: List[dict]) -> List[dict]:
+    """The ten warm-ups of T_WALK_0024_REGION (v8 only; build_manifest adds them, place_warm_ups puts them right
+    before the walk): the seed with WARM_MARGIN_BP beyond each arm's paths' ends, cut at a base outside ACGT, in ten
+    contiguous pieces of at most RESOLVE_MAX_QUERY_BP (the MCP's traverse_resolve sends them too) overlapping by k - 1
+    so that every k-mer of the region is read, each resolved against the column, every k-mer supported."""
+    spec = T_WALK_0024_REGION
+    target = _by_id(scenarios, spec["target"])
+    t = target["truth"]
+    rec = ctx.rec(t["genome"])
+    assert spec["label"] == rec.column, "T-walk-0024's column"
+    s0 = t["start"] - rec.offset
+    a, _, _ = acgt_flank(rec, s0, t["length"], spec["left_bp"] + WARM_MARGIN_BP)
+    _, b, _ = acgt_flank(rec, s0, t["length"], spec["right_bp"] + WARM_MARGIN_BP)
+    n = len(spec["ids"])
+    piece = -(-(b - a + (n - 1) * (K - 1)) // n)   # ceil: n pieces overlapping by k - 1 cover [a, b)
+    assert piece <= RESOLVE_MAX_QUERY_BP, "a T-walk-0024 warm-up the MCP can send"
+    out = []
+    for i, sid in enumerate(spec["ids"]):
+        start = a + i * (piece - (K - 1))
+        end = min(b, start + piece) if i + 1 < n else b
+        region = ctx.truth_at(rec, start, end - start, flank=0)
+        region["flank"] = ""
+        why = ("the rows of T-walk-0024's column walk (piece %d of %d of the seed and %s bp left / %s bp right, its "
+               "paths' ends + %d): its cold MCP call took 4.2-18.6 s against the walk preset's 15,000 ms" % (
+                   i + 1, n, format(spec["left_bp"], ","), format(spec["right_bp"], ","), WARM_MARGIN_BP))
+        out.append(warm_up(ctx, sid, region["window"], spec["label"], region, spec["target"], why,
+                           tags=("column-label",)))
+    return out
+
+
+# ================================================================================================= v8: stop scenarios (flag)
+# The owner's decision of 2026-10-19: traverse_stop via MCP on a running /traverse and a running /resolve enters v8
+# if async's MCP runner adds the stop flow in time; until then the builder makes them only with --stop-scenarios
+# (lane D's proposal (a), lanes/D-proposals.md). The direct arms run the request as a plain scenario; the MCP arm
+# runs mcp.flow: submit, wait for `running`, stop after delay_s, read the job to its end, and observe what the flow
+# names; mcp.flow.expect states what the stop-grace bundle promises (the token-release rule of 2026-10-15,
+# confirmed to async 2026-10-19: /traverse released on the host's evidence, a covers_admission tombstone or a
+# finished attempt of the pinned instance; /resolve after a bounded grace of ~20 s, never past the lease).
+STOP_FLOW_DELAY_S = 2.0
+STOP_IDS = ("S-stop-0001", "S-stop-0002")
+
+
+# The stop checks (checks.py, stop flows) over the MCP arm's stop_flow record; the direct arms (the base request) do
+# not expose them. A /traverse stop: one running attempt cancelled (cancel_supported), the job done or stopped within
+# the stop's bound, the token released on evidence (finished / tombstone / would_release) or a hold that fits it. A
+# /resolve stop: the worker closes the connection (cancel "disconnect", cancel_supported true on staging since the
+# release lane), the token held 20 s after the close (grace_20s) or until the lease when that ends first.
+STOP_CHECKS_TRAVERSE = [
+    ex("stop_answer", running=1, cancel_supported=True, bound_seconds_gt=0),
+    ex("job_terminal", status_in=["done", "stopped"], within_bound_seconds=True),
+    ex("attempt_state", settled=True, same_instance=True),
+    ex("token_release", route="traverse"),
+]
+STOP_CHECKS_RESOLVE = [
+    ex("stop_answer", running=1, cancel_supported=True, cancel="disconnect"),
+    ex("job_terminal", status_in=["done", "stopped"]),
+    ex("attempt_state", settled=True),
+    ex("token_release", route="resolve", grace_s=20),
+]
+
+
+# The stop scenarios run on the MCP arm only (VERIFY-D VD5 / VD6, lane D's proposal (a)): the MCP stop is the
+# scenario's first and only request in every mode, so no direct arm of the scenario warms the walk the stop must catch
+# running, and no check judges the stop_flow body as a traversal or resolve answer (the expect list is the flow's:
+# status and the four stop checks)
+STOP_DIRECT_NOT_RUN = ("the stop flow runs on the MCP arm only: a direct run of the base request would warm the walk "
+                       "the stop must catch running and judges nothing of the stop")
+# S-stop-0001's walk (VD6): T-walk-0028's 200 bp sau seed, right arm, constrained to its header label, is CPU-bound:
+# 1,000 bp took 1,100 ms cold and 1,100 ms warm in the v7 baseline (13.0 M work units, one linear path); at 10,000 bp
+# it runs ~8 s (or until the walk preset's work budget, ~7.7 kbp) on a warm host too, well past delay_s + the stop's
+# latency. The stop rehearsal (3 of 3 taken stops) confirms it.
+STOP_WALK_SOURCE = "T-walk-0028"
+STOP_WALK_EXTENSION_BP = 10000
+
+
+def stop_scenario(sid: str, title: str, route: str, req: dict, truth: dict, checks: List[dict], tags: List[str],
+                  mcp: dict) -> dict:
+    """A stop scenario: the flow's expect list only (no budget_respected, invariants or seed checks on the stop_flow
+    body), the direct arms not run (direct_not_run)."""
+    sc_ = scenario(sid, "S", title, route, req, truth, [OK] + copy.deepcopy(checks), timing_class="slow",
+                   tags=tags, mcp=mcp, direct_not_run=STOP_DIRECT_NOT_RUN)
+    sc_["expect"] = [e for e in sc_["expect"] if e["check"] != "budget_respected"]
+    return sc_
+
+
+def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
+    """The two stop scenarios (STOP_IDS), appended after every other area (no index moves), MCP only: S-stop-0001
+    stops a running walk (STOP_WALK_SOURCE's seed at STOP_WALK_EXTENSION_BP: CPU-bound, running ~8 s warm too),
+    S-stop-0002 a running discovery (500 bp around T-labels-0003's eco window, header kind, 1,000 labels: its v4
+    cold calls took 21-37 s)."""
+    from manifest_lib import mcp_resolve, mcp_traverse
+    out = []
+    flow = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
+            "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
+    src = next((x for x in built if x.get("id") == STOP_WALK_SOURCE), None)
+    if src is None:
+        ctx.skip("S", STOP_IDS[0], "no %s to take the walk from" % STOP_WALK_SOURCE)
+    else:
+        req = copy.deepcopy(src["request"])
+        req["strategy"]["bounds"]["max_extension_bp"] = STOP_WALK_EXTENSION_BP
+        mcp = mcp_traverse(req)
+        # the flow records (async's suite_stop_flow.py: FLOW_KEYS only); the suite judges its record (checks.py)
+        mcp["flow"] = copy.deepcopy(flow)
+        t = dict(src["truth"], stop_flow="lane D's proposal (a): traverse_stop on a running /traverse",
+                 walk_from=STOP_WALK_SOURCE)
+        out.append(stop_scenario(STOP_IDS[0], "traverse_stop via MCP on a running walk (%s's 200 bp sau seed, right "
+                                 "arm, %d bp, header label: CPU-bound, ~8 s warm too): the stop's answer, the job's "
+                                 "end, the host attempt, the token's release" % (STOP_WALK_SOURCE,
+                                                                                STOP_WALK_EXTENSION_BP),
+                                 "POST /traverse", req, t, STOP_CHECKS_TRAVERSE, ["stop", "mcp-flow", "walk"], mcp))
+    src = next((x for x in built if x.get("id") == "T-labels-0003"), None)
+    t = (src or {}).get("truth") or {}
+    flank, fs, st0 = t.get("flank"), t.get("flank_start"), t.get("start")
+    if not (isinstance(flank, str) and isinstance(fs, int) and isinstance(st0, int)):
+        ctx.skip("S", STOP_IDS[1], "no T-labels-0003 truth")
+        return out
+    a = max(0, st0 - fs - 200)
+    query = flank[a:a + 500]
+    req = resolve_request(query, discover={"kind": "header", "max_labels": 1000})
+    mcp = mcp_resolve(req)
+    if "tool" in mcp:
+        mcp["flow"] = copy.deepcopy(flow)
+    tr = {"record": t.get("record"), "genome": t.get("genome"), "start": fs + a, "length": len(query),
+          "window": query, "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve"}
+    out.append(stop_scenario(STOP_IDS[1], "traverse_stop via MCP on a running discovery (500 bp of eco, header kind, "
+                             "1,000 labels): the stop's answer, the job's end, the token's release after its grace",
+                             "POST /resolve", req, tr, STOP_CHECKS_RESOLVE, ["stop", "mcp-flow", "resolve"], mcp))
+    return out
+
+
+# ================================================================================================= G: graphlet tools (v8)
+def gen_G(ctx: Ctx, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,
+          include_direct_only: bool = True) -> List[dict]:
+    """Area G of manifest v8 (DESIGN-v8 §3-§5, FORMAT-v8 §1-§2): the graphlet processing tools five ways on the
+    corpus of graphlets the rehearsal chose (|corpus|, rehearse_g.py; provisional without one), each scenario a
+    `detail: graphlet` request with the exact merged strategy the service sends, its MCP mapping (traverse_fetch with
+    a preset and overrides that merge to it), the `full` twin, the structural preconditions, the library pin
+    |library_commit| and the op plan with run-time selectors. |built|: the scenarios of the other areas (v7's),
+    whose T seeds the candidates reuse. The code is area_g.py."""
+    import area_g
+    return area_g.gen_G(ctx, built, corpus, library_commit, include_direct_only)
+
+
 # ================================================================================================= N: negatives, near misses, hard regions, use cases
 PRIMERS = {   # universal 16S primers (IUPAC), the classic agent use case
     "27F": "AGAGTTTGATCMTGGCTCAG", "1492R": "GGTTACCTTGTTACGACTT",
