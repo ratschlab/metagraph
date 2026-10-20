@@ -2557,7 +2557,7 @@ def t_walk_0024_warm_ups(ctx: Ctx, scenarios: List[dict]) -> List[dict]:
 # names; mcp.flow.expect states what the stop-grace bundle promises (the token-release rule of 2026-10-15,
 # confirmed to async 2026-10-19: /traverse released on the host's evidence, a covers_admission tombstone or a
 # finished attempt of the pinned instance; /resolve after a bounded grace of ~20 s, never past the lease).
-STOP_FLOW_DELAY_S = 2.0
+STOP_FLOW_DELAY_S = 0.0   # the stop right after "running" (VERIFY-D-R2 R2-1: async's flow accepts 0)
 STOP_IDS = ("S-stop-0001", "S-stop-0002")
 
 
@@ -2586,12 +2586,31 @@ STOP_CHECKS_RESOLVE = [
 # status and the four stop checks)
 STOP_DIRECT_NOT_RUN = ("the stop flow runs on the MCP arm only: a direct run of the base request would warm the walk "
                        "the stop must catch running and judges nothing of the stop")
-# S-stop-0001's walk (VD6): T-walk-0028's 200 bp sau seed, right arm, constrained to its header label, is CPU-bound:
-# 1,000 bp took 1,100 ms cold and 1,100 ms warm in the v7 baseline (13.0 M work units, one linear path); at 10,000 bp
-# it runs ~8 s (or until the walk preset's work budget, ~7.7 kbp) on a warm host too, well past delay_s + the stop's
-# latency. The stop rehearsal (3 of 3 taken stops) confirms it.
+# S-stop-0001's walk (VERIFY-D-R2 R2-1): a 200 bp seed of sau (NC_007795.1) under its header label, right arm, 10 kbp,
+# in a stretch whose 30-mers each occur once in the genome on either strand from the seed to 10,260 bp past it (the
+# repeat scan D-scratch/r2/scan_sau.py: 79 such stretches of >= 10,260 bp; this one, 1,511,368-1,597,534, is the
+# longest, the seed 1,000 bp into it): a header-constrained walk branches only where a 30-mer recurs, so it walks
+# the whole 10 kbp (or to the walk preset's work budget), never ending early at a repeat. sau's header walks are
+# CPU-heavy (T-walk-0028: 1.0-1.3 s per kbp warm on direct-local, 13 M work units per kbp), so the walk runs for
+# seconds on a warm host too; the stop rehearsal measures its warm time (its base request run to completion first).
+# The strategy is T-walk-0028's (the walk preset's, direction right, constrained to the seed's header label).
 STOP_WALK_SOURCE = "T-walk-0028"
 STOP_WALK_EXTENSION_BP = 10000
+STOP_WALK = {"genome": "sau", "record": "NC_007795.1", "start": 1512368, "label": "NC_007795.1", "no_repeat_bp": 10260,
+             "seed": ("TACGTAATTCATGTGATACATTAGCAATGAAATCTTTCTTCATTTGATCTAGATTGTGCTCATTAGTCATATCACGAACTGTCACAACAACACC"
+                      "ACTTTTACCTCCCTGTTCAATCTTGTCGATATAGCTTGTGGTCACAACAAAGAATCGTGCATTCATTTCTAAATCGCGCATTTCAGTTTGTTTTG"
+                      "ATTTAAAAGTA")}
+# S-stop-0002's resolve (R2-2): a header discovery (1,000 labels) over 500 bp of eco's 16S rRNA gene (rrnH, from its
+# 515F primer site at 224,284 through V4-V6): k-mers most bacterial genomes of the index share, so every k-mer's row
+# holds many labels to decode, warm or cold. Its time is measured in the stop rehearsal (its base request run to
+# completion first); no earlier measurement exists.
+STOP_RESOLVE = {"genome": "eco", "record": "NC_000913.3", "start": 224284, "kind": "header", "max_labels": 1000,
+                "query": ("GTGCCAGCAGCCGCGGTAATACGGAGGGTGCAAGCGTTAATCGGAATTACTGGGCGTAAAGCGCACGCAGGCGGTTTGTTAAGTCAGATG"
+                          "TGAAATCCCCGGGCTCAACCTGGGAACTGCATCTGATACTGGCAAGCTTGAGTCTCGTAGAGGGGGGTAGAATTCCAGGTGTAGCGGTGA"
+                          "AATGCGTAGAGATCTGGAGGAATACCGGTGGCGAAGGCGGCCCCCTGGACGAAGACTGACGCTCAGGTGCGAAAGCGTGGGGAGCAAACA"
+                          "GGATTAGATACCCTGGTAGTCCACGCCGTAAACGATGTCGACTTGGAGGTTGTGCCCTTGAGGCGTGGCTTCCGGAGCTAACGCGTTAAG"
+                          "TCGACCGCCTGGGGAGTACGGCCGCAAGGTTAAAACTCAAATGAATTGACGGGGGCCCGCACAAGCGGTGGAGCATGTGGTTTAATTCGA"
+                          "TGCAACGCGAAGAACCTTACCTGGTCTTGACATCCACAGAACTTTCCAGA")}
 
 
 def stop_scenario(sid: str, title: str, route: str, req: dict, truth: dict, checks: List[dict], tags: List[str],
@@ -2604,48 +2623,57 @@ def stop_scenario(sid: str, title: str, route: str, req: dict, truth: dict, chec
     return sc_
 
 
+def stop_base_requests(built: List[dict]) -> List[Tuple[str, dict]]:
+    """[(route, request)] of the two stop scenarios' base requests (STOP_WALK under STOP_WALK_SOURCE's strategy,
+    STOP_RESOLVE), None-free: the stop rehearsal runs them to completion first (R2-3)."""
+    src = next((x for x in built if x.get("id") == STOP_WALK_SOURCE), None)
+    out = []
+    if src is not None:
+        strategy = copy.deepcopy(src["request"]["strategy"])
+        strategy["bounds"]["max_extension_bp"] = STOP_WALK_EXTENSION_BP
+        strategy["direction"] = "right"
+        out.append(("POST /traverse", {"seeds": [{"labels": [STOP_WALK["label"]], "sequence": STOP_WALK["seed"]}],
+                                       "strategy": strategy}))
+    discover = {"kind": STOP_RESOLVE["kind"], "max_labels": STOP_RESOLVE["max_labels"]}
+    out.append(("POST /resolve", resolve_request(STOP_RESOLVE["query"], discover=discover)))
+    return out
+
+
 def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
     """The two stop scenarios (STOP_IDS), appended after every other area (no index moves), MCP only: S-stop-0001
-    stops a running walk (STOP_WALK_SOURCE's seed at STOP_WALK_EXTENSION_BP: CPU-bound, running ~8 s warm too),
-    S-stop-0002 a running discovery (500 bp around T-labels-0003's eco window, header kind, 1,000 labels: its v4
-    cold calls took 21-37 s)."""
+    stops a running header walk through a repeat-free 10 kbp stretch of sau (STOP_WALK), S-stop-0002 a running
+    16S header discovery (STOP_RESOLVE); both stopped right after the flow sees them running (delay_s 0)."""
     from manifest_lib import mcp_resolve, mcp_traverse
     out = []
     flow = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
             "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
-    src = next((x for x in built if x.get("id") == STOP_WALK_SOURCE), None)
-    if src is None:
-        ctx.skip("S", STOP_IDS[0], "no %s to take the walk from" % STOP_WALK_SOURCE)
+    bases = dict(stop_base_requests(built))
+    req = bases.get("POST /traverse")
+    if req is None:
+        ctx.skip("S", STOP_IDS[0], "no %s to take the walk's strategy from" % STOP_WALK_SOURCE)
     else:
-        req = copy.deepcopy(src["request"])
-        req["strategy"]["bounds"]["max_extension_bp"] = STOP_WALK_EXTENSION_BP
         mcp = mcp_traverse(req)
         # the flow records (async's suite_stop_flow.py: FLOW_KEYS only); the suite judges its record (checks.py)
         mcp["flow"] = copy.deepcopy(flow)
-        t = dict(src["truth"], stop_flow="lane D's proposal (a): traverse_stop on a running /traverse",
-                 walk_from=STOP_WALK_SOURCE)
-        out.append(stop_scenario(STOP_IDS[0], "traverse_stop via MCP on a running walk (%s's 200 bp sau seed, right "
-                                 "arm, %d bp, header label: CPU-bound, ~8 s warm too): the stop's answer, the job's "
-                                 "end, the host attempt, the token's release" % (STOP_WALK_SOURCE,
-                                                                                STOP_WALK_EXTENSION_BP),
+        t = {"genome": STOP_WALK["genome"], "record": STOP_WALK["record"], "start": STOP_WALK["start"],
+             "length": len(STOP_WALK["seed"]), "window": STOP_WALK["seed"], "no_repeat_bp": STOP_WALK["no_repeat_bp"],
+             "strategy_from": STOP_WALK_SOURCE,
+             "stop_flow": "lane D's proposal (a): traverse_stop on a running /traverse"}
+        out.append(stop_scenario(STOP_IDS[0], "traverse_stop via MCP on a running walk (200 bp of sau, header label, "
+                                 "right arm, %d bp through a stretch without a repeated 30-mer): the stop's answer, "
+                                 "the job's end, the host attempt, the token's release" % STOP_WALK_EXTENSION_BP,
                                  "POST /traverse", req, t, STOP_CHECKS_TRAVERSE, ["stop", "mcp-flow", "walk"], mcp))
-    src = next((x for x in built if x.get("id") == "T-labels-0003"), None)
-    t = (src or {}).get("truth") or {}
-    flank, fs, st0 = t.get("flank"), t.get("flank_start"), t.get("start")
-    if not (isinstance(flank, str) and isinstance(fs, int) and isinstance(st0, int)):
-        ctx.skip("S", STOP_IDS[1], "no T-labels-0003 truth")
-        return out
-    a = max(0, st0 - fs - 200)
-    query = flank[a:a + 500]
-    req = resolve_request(query, discover={"kind": "header", "max_labels": 1000})
+    req = bases["POST /resolve"]
     mcp = mcp_resolve(req)
     if "tool" in mcp:
         mcp["flow"] = copy.deepcopy(flow)
-    tr = {"record": t.get("record"), "genome": t.get("genome"), "start": fs + a, "length": len(query),
-          "window": query, "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve"}
-    out.append(stop_scenario(STOP_IDS[1], "traverse_stop via MCP on a running discovery (500 bp of eco, header kind, "
-                             "1,000 labels): the stop's answer, the job's end, the token's release after its grace",
-                             "POST /resolve", req, tr, STOP_CHECKS_RESOLVE, ["stop", "mcp-flow", "resolve"], mcp))
+    tr = {"genome": STOP_RESOLVE["genome"], "record": STOP_RESOLVE["record"], "start": STOP_RESOLVE["start"],
+          "length": len(STOP_RESOLVE["query"]), "window": STOP_RESOLVE["query"],
+          "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve"}
+    out.append(stop_scenario(STOP_IDS[1], "traverse_stop via MCP on a running discovery (500 bp of eco's 16S rRNA, "
+                             "header kind, 1,000 labels): the stop's answer, the job's end, the token's release after "
+                             "its grace", "POST /resolve", req, tr, STOP_CHECKS_RESOLVE,
+                             ["stop", "mcp-flow", "resolve"], mcp))
     return out
 
 

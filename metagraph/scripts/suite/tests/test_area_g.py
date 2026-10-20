@@ -662,9 +662,12 @@ class StopScenarios(unittest.TestCase):
             self.assertEqual(s["direct_not_run"], areas_mod().STOP_DIRECT_NOT_RUN)                    # VD6
         self.assertEqual(walk["route"], "POST /traverse")
         self.assertEqual(walk["mcp"]["tool"], "traverse_fetch")
-        src = next(x for x in v7_scenarios() if x["id"] == areas_mod().STOP_WALK_SOURCE)
-        self.assertEqual(walk["request"]["seeds"], src["request"]["seeds"])
+        sw = areas_mod().STOP_WALK
+        self.assertEqual(walk["request"]["seeds"], [{"labels": ["NC_007795.1"], "sequence": sw["seed"]}])
+        self.assertEqual((walk["request"]["strategy"]["direction"], walk["truth"]["start"]), ("right", 1512368))
         self.assertEqual(walk["request"]["strategy"]["bounds"]["max_extension_bp"], 10000)
+        for s in out:
+            self.assertEqual(s["mcp"]["flow"]["delay_s"], 0.0)   # R2-1: the stop right after running
         self.assertEqual(walk["mcp"]["arguments"]["overrides"]["bounds"]["max_extension_bp"], 10000)
         sa = dict((e["check"], e["args"]) for e in walk["expect"])["stop_answer"]
         self.assertTrue(sa["cancel_supported"])
@@ -672,7 +675,35 @@ class StopScenarios(unittest.TestCase):
         self.assertEqual(res["mcp"]["tool"], "traverse_resolve")
         sa = dict((e["check"], e["args"]) for e in res["expect"])["stop_answer"]
         self.assertEqual((sa["cancel_supported"], sa["cancel"]), (True, "disconnect"))
+        self.assertEqual(res["request"]["sequence"], areas_mod().STOP_RESOLVE["query"])
+        self.assertEqual(res["request"]["discover"], {"kind": "header", "max_labels": 1000})
+        self.assertEqual(res["mcp"]["arguments"]["sequence"], areas_mod().STOP_RESOLVE["query"])
+        self.assertNotIn("21", res["title"] + json.dumps(res["truth"]))   # R2-2: no unsourced timing claim
         self.assertEqual(bm.validate(out), [])
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_the_walk_meets_no_repeat_and_the_sequences_are_the_records(self):
+        # R2-1: every 30-mer from the seed to 10,260 bp past it occurs once in sau (either strand), so the header
+        # walk branches nowhere within its 10 kbp; the constants are the records' bases
+        recs = dict((r.key, r) for r in truth.load_with_sequences(fetch=False))
+        sw, sr = areas_mod().STOP_WALK, areas_mod().STOP_RESOLVE
+        sau = recs["sau"].seq
+        self.assertEqual(sau[sw["start"]:sw["start"] + len(sw["seed"])], sw["seed"])
+        self.assertEqual(recs["eco"].seq[sr["start"]:sr["start"] + 500], sr["query"])
+        k = 30
+        comp = str.maketrans("ACGT", "TGCA")
+
+        def canon(w):
+            r = w.translate(comp)[::-1]
+            return min(w, r)
+        window = sau[sw["start"]:sw["start"] + sw["no_repeat_bp"] + k]
+        want = set(canon(window[i:i + k]) for i in range(len(window) - k + 1))
+        self.assertEqual(len(want), len(window) - k + 1)   # no repeat inside the window
+        hits = 0
+        for i in range(len(sau) - k + 1):
+            if canon(sau[i:i + k]) in want:
+                hits += 1
+        self.assertEqual(hits, len(want))                 # and none elsewhere in the genome
 
     def test_only_the_mcp_arm_runs_them(self):
         out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
