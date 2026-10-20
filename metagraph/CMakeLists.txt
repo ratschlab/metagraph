@@ -344,7 +344,16 @@ if(APPLE)
   get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
 endif()
 
-set(Boost_USE_STATIC_LIBS ON)
+# Static Boost libs from most distro packages (e.g. Ubuntu's libboost_iostreams.a)
+# aren't built with -fPIC, so linking them into the _pymetagraph_core shared
+# object fails with "relocation ... can not be used when making a shared
+# object; recompile with -fPIC". Only the python-bindings build needs a
+# shared object, so only it needs Boost as shared libs too.
+if(BUILD_PYTHON_BINDINGS)
+  set(Boost_USE_STATIC_LIBS OFF)
+else()
+  set(Boost_USE_STATIC_LIBS ON)
+endif()
 find_package(Boost REQUIRED COMPONENTS iostreams)
 find_library(LIBDEFLATE_LIBRARY NAMES deflate HINTS ENV LIBRARY_PATH
              PATHS ${HOMEBREW_DIR}/lib REQUIRED)
