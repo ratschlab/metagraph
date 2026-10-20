@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-"""Readfish-compatible Aligner backed by a metagraph index."""
+"""In-process queries against an annotated metagraph index."""
 
-from .aligner import Aligner
+from .annotated_graph import AnnotatedGraph
 
-__all__ = ["Aligner"]
+__all__ = ["AnnotatedGraph"]
