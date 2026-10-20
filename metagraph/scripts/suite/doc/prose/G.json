@@ -9,13 +9,14 @@
   "5": "W5, the fifth way; five ways (DESIGN-v8 §2)",
   "262,144": "the service's answer cap in bytes (DESIGN-v8 §5)",
   "16": "a walk over 16 kbp: the sequence paging slot (DESIGN-v8 §4)",
+  "7.5": "SPEC-labeled-traversal-core section 7.5, the MGT document form (DESIGN-v8 section 2)",
   "8": "a body over 8 MiB (DESIGN-v8 §4, left to v9)",
   "9": "manifest v9 (DESIGN-v8 §1)"
  },
  "chapter": "G",
  "title": "Graphlet tools",
  "purpose": [
-  "Once a traversal is fetched as a graphlet, the graphlet tools answer what a user asks of it: which walks it holds and how long they are, which labels support them, the sequence along a walk, a summary, an export in FASTA, GFA, JSON or the suite's MGT form, and how two graphlets compare. This chapter tests every tool and every distinct behaviour of each on the corpus graphlets of DESIGN-v8 §4 by running each call five ways and requiring the ways to agree. Agreement of the first four ways shows consistency: the transport, the fetch path, the service's wrapper and the library's determinism; only the fifth way, the suite's own reading of the engine's values, shows correctness, on the fields it checks. The sections after the background give the comparison per tool, every disagreement with both answers, the pre-checks, the service's own behaviour, the correctness coverage and what is not covered."
+  "Once a traversal is fetched as a graphlet, the graphlet tools answer what a user asks of it: which walks it holds and how long they are, which labels support them, the sequence along a walk, a summary, an export in FASTA, GFA, JSON or MGT (the graphlet's own document form, SPEC-labeled-traversal-core section 7.5), and how two graphlets compare. This chapter tests every tool and every distinct behaviour of each on the corpus graphlets of DESIGN-v8 §4 by running each call five ways and requiring the ways to agree. Agreement of the first four ways shows consistency: the transport, the fetch path, the service's wrapper and the library's determinism; only the fifth way, the suite's own reading of the engine's values, shows correctness, on the fields it checks. The sections after the background give the comparison per tool, every disagreement with both answers, the pre-checks, the service's own behaviour, the correctness coverage and what is not covered."
  ],
  "summary": [
   "*What held.* [[g_error ? The five-way comparison could not be computed: {g_error}. | Area G: {g_verdict}; {g_scenarios_text} of {n_g_scenarios} graphlet scenarios; of {n_g_ops} op calls {g_ops_text}. [[n_g_disagree ? The disagreements are in the tools {g_disagree_tools}, each listed below with both answers. | No op call disagreed between any two ways.]] [[g_prechecks_failed ? The pre-checks that did not pass: {g_prechecks_failed}. | Every pre-check passed: the three library ways read one document, the full twin's paths equal the graphlet's and the MCP sent the direct requests' strategy.]] The service's own behaviour: {g_service_text}.]]",

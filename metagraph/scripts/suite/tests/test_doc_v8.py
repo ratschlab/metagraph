@@ -284,6 +284,22 @@ class ChapterGReadingV8Test(unittest.TestCase):
     outside the five-way comparison, as the summary's op counts are), quoted messages read with typographic quotes,
     and I.1's map asks chapters G's and S's questions."""
 
+    def test_smoke_outside_the_total(self):
+        import graphlets
+        g = {"scenarios": {}, "summary": {"per_tool": {
+            "graphlet_walks": {"calls": 10, "agree": 9, "disagree": 1, "smoke": 0, "not_exposed": 0},
+            "graphlet_list": {"calls": 1, "agree": 1, "smoke": 1, "not_exposed": 1}}}}
+        text = graphlets.per_tool_section(g)
+        self.assertIn("graphlet\\_\\allowbreak{}list} {\\scriptsize (smoke)}", text)
+        self.assertIn("\\textbf{all tools} {\\scriptsize (without the smoke)}", text)
+        self.assertIn("\\textbf{10}", text)
+        self.assertIn("graphlet\\_list: a smoke outside the five-way comparison", text)
+
+    def test_quoted(self):
+        import graphlets
+        self.assertEqual(graphlets._quoted('failed: "args.walk: no answer"'), "failed: \u201cargs.walk: no answer\u201d")
+        self.assertIsNone(graphlets._quoted(None))
+
     def test_chapter_map(self):
         cm = dict((e["chapter"], e["question"]) for e in prose("overview")["sections"]["decision"]["chapter_map"])
         self.assertIn("graphlet tools answer alike", cm["G"])

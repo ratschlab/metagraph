@@ -8,6 +8,7 @@ chapter G and nothing here is printed."""
 
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +43,12 @@ PROVES = (("pre-checks", "the three library ways read one document: the bodies e
                         "reading of the engine's values (a field W5 re-derives from a DESIGN formula catches a slip "
                         "of the implementation, not a wrong rule)"))
 MAX_ITEMS = 40
+
+
+def _quoted(text):
+    """|text| with its paired ASCII double quotes as typographic ones (a reason or detail quoting a selector's or
+    service's message reads “...”, not ”...”)."""
+    return None if text is None else re.sub(r'"([^"\n]*)"', "\u201c\\1\u201d", str(text))
 
 
 def data(run):
@@ -106,19 +113,25 @@ def per_tool_section(g):
     pt = (g.get("summary") or {}).get("per_tool") or {}
     rows = []
     tot = {}
+    smoke = []
     for tool in sorted(pt):
         c = pt[tool]
-        for k in ("calls", "agree", "disagree", "service_by_design", "not_exposed", "inconclusive",
-                  "precondition_failed"):
-            tot[k] = tot.get(k, 0) + (c.get(k) or 0)
+        is_smoke = bool(c.get("calls")) and c.get("smoke") == c.get("calls")
+        if is_smoke:   # the store-management smoke (D-R15): each way answered, nothing compared; not in the total
+            smoke.append(tool)
+        else:
+            for k in ("calls", "agree", "disagree", "service_by_design", "not_exposed", "inconclusive",
+                      "precondition_failed"):
+                tot[k] = tot.get(k, 0) + (c.get(k) or 0)
         pw = per_way.get(tool) or {}
-        rows.append([tt(tool), str(c.get("calls", 0)),
+        rows.append([tt(tool) + (" {\\scriptsize (smoke)}" if is_smoke else ""), str(c.get("calls", 0)),
                      "{\\scriptsize %s}" % esc(", ".join("%s %d" % (w, pw[w]) for w in WAY_ORDER if pw.get(w)) or "–"),
                      _n(c.get("agree")), cells.attn(_n(c.get("disagree"))) if c.get("disagree") else "–",
                      _n(c.get("service_by_design")), _n(c.get("not_exposed")),
                      cells.attn(_n(c.get("inconclusive"))) if c.get("inconclusive") else "–",
                      cells.attn(_n(c.get("precondition_failed"))) if c.get("precondition_failed") else "–"])
-    rows.append(["\\textbf{all tools}", "\\textbf{%d}" % tot.get("calls", 0), ""] + [
+    rows.append(["\\textbf{all tools}%s" % (" {\\scriptsize (without the smoke)}" if smoke else ""),
+                 "\\textbf{%d}" % tot.get("calls", 0), ""] + [
         "\\textbf{%s}" % _n(tot.get(k)) for k in ("agree", "disagree", "service_by_design", "not_exposed",
                                                    "inconclusive", "precondition_failed")])
     out = latex.section("The comparison per tool", "g:tools", level="subsection")
@@ -128,7 +141,9 @@ def per_tool_section(g):
                               "W3 not exposed", "incon\\-clusive", "pre\\-condition failed"], rows,
                              "per tool its op calls and their outcomes; an op call agrees when every pair of the ways "
                              "it runs on agrees; W3 not exposed counts the calls the service does not offer (the "
-                             "owner's reasons, below), which are no gap of the comparison")
+                             "owner's reasons, below), which are no gap of the comparison"
+                             + ("; %s: a smoke outside the five-way comparison (each way answered, nothing "
+                                "compared), not in the total" % " and ".join(esc(t) for t in smoke) if smoke else ""))
     return out
 
 
@@ -173,12 +188,12 @@ def disagreements_section(g, max_items=MAX_ITEMS):
             for c in e.get("cuts") or []:
                 if c.get("outcome") == "disagree":
                     sub.append("%s against its uncut answer: %s%s" % (esc(c.get("way")), latex.esc_wrap(
-                        c.get("detail"), 200), (" at %s" % tt(c["pointer"])) if c.get("pointer") else ""))
+                        _quoted(c.get("detail")), 200), (" at %s" % tt(c["pointer"])) if c.get("pointer") else ""))
                     key_parts.append(("cut", c.get("way"), c.get("pointer")))
             for r in e.get("by_design") or []:
                 if not r.get("verified"):
                     sub.append("by-design %s, %s side: %s" % (tt(r.get("case")), esc(r.get("side")),
-                                                             latex.esc_wrap(r.get("detail"), 200)))
+                                                             latex.esc_wrap(_quoted(r.get("detail")), 200)))
                     key_parts.append(("bd", r.get("case"), r.get("side")))
             key = json.dumps(key_parts, default=str)
             if key not in index:
@@ -212,7 +227,7 @@ def disagreements_section(g, max_items=MAX_ITEMS):
         for sid, oid, e in other[:max_items]:
             out += "\\item %s %s (%s): %s: %s\n" % (latex.breakable_id(sid), tt(oid), tt(e.get("tool")),
                                                   esc((e.get("outcome") or "").replace("_", " ")),
-                                                  latex.esc_wrap(e.get("reason"), 200))
+                                                  latex.esc_wrap(_quoted(e.get("reason")), 200))
         if len(other) > max_items:
             out += "\\item … %d more (the report's chapter G lists them all)\n" % (len(other) - max_items)
         out += "\\end{itemize}}\n\n"
@@ -247,15 +262,16 @@ def prechecks_section(g, max_items=MAX_ITEMS):
                               "scenario"], rows,
                              "the pre-checks per scenario, before any op call is compared (DESIGN-v8 §2): the bodies "
                              "of W1, W2 and W4 equal, their envelopes equal but for per-request values, the full "
-                             "twin's paths equal the graphlet's, the MCP's strategy echo the direct requests' "
-                             "strategy, the structural preconditions frozen in the manifest, the library commit of "
-                             "every MCP call the deployed and pinned one; the last column the scenario's outcome")
+                             "twin's paths equal the graphlet's, the strategy the MCP echoes equal to the one the direct "
+                             "requests sent, the structural preconditions frozen in the manifest met, the library "
+                             "commit of every MCP call the deployed and pinned one (not exposed: a direct-only "
+                             "scenario, no MCP call); the last column the scenario's outcome")
     if bad:
         out += "{\\small\\begin{itemize}\\setlength\\itemsep{0pt}\n"
         for sid, k, c in bad[:max_items]:
             out += "\\item %s %s: %s: %s\n" % (latex.breakable_id(sid), esc(k.replace("_", " ")),
                                              esc(((c or {}).get("outcome") or "–").replace("_", " ")),
-                                             latex.esc_wrap((c or {}).get("detail"), 240))
+                                             latex.esc_wrap(_quoted((c or {}).get("detail")), 240))
         if len(bad) > max_items:
             out += "\\item … %d more\n" % (len(bad) - max_items)
         out += "\\end{itemize}}\n\n"
@@ -265,7 +281,7 @@ def prechecks_section(g, max_items=MAX_ITEMS):
 def service_checks_section(g):
     req = set(g.get("required_service_checks") or [])
     rows = [[tt(c.get("check")), _outcome_tex(c.get("outcome")) if c.get("outcome") != "n/a" else "n/a",
-             str(c.get("calls", 0)), "yes" if c.get("check") in req else "no", latex.esc_wrap(c.get("detail"), 260)]
+             str(c.get("calls", 0)), "yes" if c.get("check") in req else "no", latex.esc_wrap(_quoted(c.get("detail")), 260)]
             for c in g.get("service_checks") or []]
     out = latex.section("The service's own behaviour", "g:service", level="subsection")
     out += latex.plain_table(latex.spec_p([30, 20, 12, 15, 87], aligns=["raggedright", "raggedright", "raggedleft",
