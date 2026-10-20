@@ -5098,10 +5098,11 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   --prior merges it into the first rehearsal's corpus.
 
 ### After the second rehearsal (the coordinator's follow-ups of 2026-10-20)
-- service_by_design.json carries async's four area G cases (max_bytes above the service's cap, a body over the
-  in-service ceiling and its .summary, the mgt export as the stored body); every earlier byte unchanged. The v1-v7
-  policies pin the table without them (d4b8636c): a new v4-v7 gate run that snapshots this table needs its policy
-  regenerated, or the pinned table.
+- Async's four area G cases (max_bytes above the service's cap, a body over the in-service ceiling and its
+  .summary, the mgt export as the stored body) are in service_by_design_g.json, the same schema, loaded alongside
+  service_by_design.json by the area G comparison and pinned by a v8 policy's graphlets block (by_design_g_table);
+  service_by_design.json stays byte-identical to v7's (d4b8636c), so the v4-v7 policies and gate runs are untouched
+  (VERIFY-D VD1).
 - area_g.by_design_case links every op to the case that applies (validate_g refuses a missing or a wrong link, a probe
   above 262,144 and an op named after an arm). The hint, label_evidence and qualified_cause checks expect the
   service's label fields only on a qualified compare whose notes name label_lists and one of whose sides is cut (by
@@ -5114,7 +5115,17 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
 - suite_common.mcp_repeats runs area G and the stop scenarios once on MCP (v1-v7 unchanged); without a document a
   dependent op carries the document's error in run_graphlet_local.
 - The stop scenarios are judged by four checks over async's stop_flow record (stop_answer, job_terminal,
-  attempt_state, token_release; RELEASE-RECORD.md): a null release on a terminal job and a race are inconclusive.
+  attempt_state, token_release; RELEASE-RECORD.md): a null release on a terminal job and a race are inconclusive;
+  already_stopping counts as taken; the token's hold past its lease is 30 s on a contract host, 25 s legacy, 0 for
+  /resolve. They run on the MCP arm only (direct_not_run: plan_executions skips them on the direct arms), expect
+  the flow's checks only, and S-stop-0001 walks a CPU-bound 10 kbp sau walk that outlasts the stop on a warm host.
+  `rehearse_g.py --rehearsal 3` rehearses them (3 tries each) with the constrain partner of the annotate pair.
+- After the verifier (VERIFY-D): a failed seed's plan leaves W4 out (no document) and links no case; the W3
+  headroom counts only a stated escalation; qualified_cause checks only the cut sides' caps; area G adds
+  self-compares answering true and unknown, owner D1's constrain / annotate pair (direct-only, compare rows) and
+  paging passes that page; the rehearsal's analysis shadow-runs the plans the build makes from its corpus; the
+  chosen corpus is committed (truth/area_g/corpus.json) and `--freeze` refuses a provisional corpus or anything
+  pending.
 
 ## Glossary
 
