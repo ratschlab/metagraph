@@ -5125,6 +5125,11 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   MCP cannot provoke, so async's unit and parity tests cover it. A /traverse stop passes on completed (decision
   null), finished or tombstone; a hold or the sweep is inconclusive; a /resolve stop passes on grace or grace_capped,
   its completed (the resolve ended first) is inconclusive.
+- `shadow_run.py` runs a full v8 run end to end (the shadow run): build (v8 with the stop scenarios, outside
+  manifest/), the v7 declared entries re-pinned, the v8 policy (gate_policy.py, v7's rtp parameters), the deployed
+  library's tree, run_suite.sh --paired with all three arms (async's runner for MCP and W3), run_graphlet_local
+  (W1, W2, W4, drift), graphlet_oracle (W5), compare_graphlets (pre-checks, comparison, service checks), report.py
+  (chapter G) and gate.py with the v8 policy; --dry-run prints the steps and the expected load, --from resumes.
 - After the verifier (VERIFY-D): a failed seed's plan leaves W4 out (no document) and links no case; the W3
   headroom counts only a stated escalation; qualified_cause checks only the cut sides' caps; area G adds
   self-compares answering true and unknown, owner D1's constrain / annotate pair (direct-only, compare rows) and
