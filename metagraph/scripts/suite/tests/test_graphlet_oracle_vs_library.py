@@ -26,7 +26,7 @@ sys.path.insert(0, SUITE)
 sys.path.insert(0, HERE)
 
 import graphlet_oracle as O  # noqa: E402
-from test_graphlet_oracle import DATA, NOT_TWINS, engine_pairs  # noqa: E402
+from test_graphlet_oracle import DATA, NOT_TWINS, REHEARSAL2, engine_pairs, rehearsal2  # noqa: E402
 
 LIB = os.path.normpath(os.path.join(SUITE, "..", "..", "api", "python"))
 WIDE = 262144            # the service's largest page (DESIGN-v8 §5: whole-list calls fit uncut there)
@@ -394,6 +394,42 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertEqual(declared["twin_mismatch"] > 0, True)
         self.assertGreater(outcomes["not_comparable"], 40)      # result_too_large at 512 and 300 bytes (F3)
         self.assertGreater(outcomes["agree"], 3000)
+
+    def test_real_twin_without_memory_budget(self):
+        """VERIFY-D VD4: the whole op plan on two real rehearsal-2 pairs, whose twin v8 sent without
+        bounds.max_memory_mb (SPEC §7.1 R21 (4)) while the graphlet request had it: given the request's strategy, W5
+        and the library agree on every call (the seed-level limitations, memory_bound_soft included, read from the
+        graphlet's K records); without it, W5's limitations shift by that entry (VD4 as measured)."""
+        from metagraph.traverse import parser
+        counts, report, shifted = collections.Counter(), [], set()
+        for sid in REHEARSAL2:
+            g, f, text = rehearsal2(sid)
+            h = self._load("rehearsal2_" + sid, parser.standalone_text(text, g["results"][0], g))
+            for tool, args in _calls(f["results"][0]):
+                kw = dict(args, handle=h)
+                if tool == "graphlet_save" and "path" not in args:
+                    kw["path"] = "saved_r2_%d.mgt" % sum(counts.values())
+                lib = self.assemble(tool, kw)
+                if tool in ("graphlet_export", "graphlet_save") and "error" not in lib:
+                    with open(lib["path"], encoding="utf-8") as fh:
+                        body = fh.read()
+                    lib = O.export_view("save" if tool == "graphlet_save" else args.get("format", "fasta"), lib, body,
+                                        args.get("what"))
+                op = {k: v for k, v in args.items() if k not in ("max_bytes",)}
+                ctx = {"max_bytes": args.get("max_bytes", 2048), "strategy": g["strategy"]}
+                v = O.compare(O.answer(tool, op, f, text, ctx), lib)
+                counts[v["outcome"]] += 1
+                for d in v["differences"]:
+                    report.append("%s %s %s %s: W5 %s lib %s" % (sid, tool, json.dumps(args)[:100], d["pointer"],
+                                                                json.dumps(d["oracle"])[:120],
+                                                                json.dumps(d.get("other", d.get("present")))[:120]))
+                if O.compare(O.answer(tool, op, f, text, dict(ctx, strategy=None)), lib)["outcome"] == "disagree":
+                    shifted.add((tool, args.get("detail"), args.get("format"), args.get("arm")))
+        self.assertEqual(report, [], "\n".join(report))
+        self.assertGreater(counts["agree"], 300)
+        # the limitations listings (whole, and each arm's, where the library lists the seed-level entry) and the json
+        self.assertEqual(shifted, {("graphlet_summary", "limitations", None, a) for a in (None, "left", "right")} |
+                         {("graphlet_export", None, "json", None)})
 
     def test_run_step_on_library_records(self):
         """FORMAT v2 F4 end to end: W1 records made from the library's answers (lane L's record shape: args_resolved
