@@ -1166,8 +1166,9 @@ class RunStep(unittest.TestCase):
 class MemoryBudgetTwin(unittest.TestCase):
     """VERIFY-D VD4 (decision F-D4): v8 sends the full twin without bounds.max_memory_mb (SPEC §7.1 R21 (4): `full`
     detail under a memory budget keeps a merge's arrival order), so the graphlet answer states a memory_bound_soft
-    (SPEC §7.0: stated exactly when the knob is set) the twin does not. W5 makes no claim on that entry, checks the
-    rest as before and names the difference in oracle.inputs. On the two real rehearsal-2 pairs."""
+    (SPEC §7.0: stated exactly when the knob is set) the twin does not. W5 then reads the seed-level entries from the
+    graphlet's own K records (SPEC §7.5.2 K; VERIFY-O-VD4 suggestion 1), checks the rest as before and names the
+    difference in oracle.inputs. On the two real rehearsal-2 pairs."""
 
     @staticmethod
     def stated(g, f):
@@ -1189,6 +1190,31 @@ class MemoryBudgetTwin(unittest.TestCase):
             self.assertEqual(f["results"][0]["limitations"], [])
             self.assertIsNone(O.twin_difference(f, mgt), sid)
 
+    def test_k_records(self):
+        """k_entries reads every K record as the JSON entry the graphlet's own summary states (SPEC §7.5.2 K), on
+        every engine pair and both rehearsal-2 pairs: seed level, and each arm where the summary lists it."""
+        pairs = engine_pairs() + [("r2/" + s, 0) + rehearsal2(s)[:2] for s in REHEARSAL2]
+        n_arm = 0
+        for cell, i, g, _ in pairs:
+            rg = g["results"][i]
+            ks = O.k_entries(rg["graphlet"])
+            self.assertTrue(O.same([e for a, e in ks if a == "*"], rg.get("limitations") or []), cell)
+            for a, side in (("l", "left"), ("r", "right")):
+                summ = (rg.get("arms") or {}).get(side) or {}
+                if "limitations" in summ:
+                    n_arm += 1
+                    self.assertTrue(O.same([e for x, e in ks if x == a], summ["limitations"]), (cell, side))
+        self.assertGreater(n_arm, 60)
+        # the typed values and the free text (SPEC §7.5.1)
+        self.assertEqual(O.k_entries("K * x k.n u f:0.25 * a=s:p%25%2Cq%C3%A9,b=i:7 e%25f%0Ag"),
+                         [("*", {"kind": "x", "knob": "k.n", "limit": "unlimited", "observed": 0.25, "a": "p%,qé",
+                                 "b": 7, "effect": "e%f\ng"})])
+        self.assertEqual(O.k_entries("K r y k.m i:3 * 12 . e"),
+                         [("r", {"kind": "y", "knob": "k.m", "limit": 3, "complete_to_bp": 12, "effect": "e"})])
+        for bad in ("K * x k i:01 * * . e", "K * x k q:1 * * . e", "K * x k i:1 * * a e", "K * x k i:1"):
+            with self.assertRaises(ValueError):
+                O.k_entries(bad)
+
     def test_limitations(self):
         for sid in REHEARSAL2:
             g, f, mgt = rehearsal2(sid)
@@ -1197,18 +1223,19 @@ class MemoryBudgetTwin(unittest.TestCase):
             r = O.answer("graphlet_summary", {"detail": "limitations"}, f, mgt, {"strategy": g["strategy"]})
             self.assertEqual(O.compare(r, want)["outcome"], "agree", sid)
             o = r["oracle"]
-            self.assertIn("/rows/0/*", o["consistency_only"])
-            self.assertEqual([p for p in o["checked"] if p.startswith("/rows/0/")], [])
+            # the seed-level block is the graphlet's K records, memory_bound_soft included, checked
+            self.assertEqual(r["answer"]["rows"][0], g["results"][0]["limitations"][0])
+            self.assertIn("SPEC §7.5.2 K (arm *)", o["checked"]["/rows/0/kind"])
+            self.assertIn("/rows/0/observed", o["checked"])
             self.assertIn("/rows/1/kind", o["checked"])
             self.assertEqual(o["inputs"][:2], ["full", "mgt"])
             self.assertTrue(o["inputs"][2].startswith("twin without the memory budget: the graphlet request has "
                                                       "bounds.max_memory_mb 512"))
             self.assertIn("R21 (4)", o["inputs"][2])
             self.assertIn("§6.8", o["inputs"][2])
-            # no claim on the memory entry's values
             other = copy.deepcopy(want)
-            other["rows"][0].update(observed=9, effect="another statement", limit=1)
-            self.assertEqual(O.compare(r, other)["outcome"], "agree", sid)
+            other["rows"][0]["observed"] = 9
+            self.assertEqual([d["pointer"] for d in O.compare(r, other)["differences"]], ["/rows/0/observed"])
             # the rest is checked as before: each arm row in place, and the total, which counts the entry (§7.0)
             other = copy.deepcopy(want)
             other["rows"][1]["observed"] += 1
@@ -1231,8 +1258,17 @@ class MemoryBudgetTwin(unittest.TestCase):
             # a twin given as one result, without its envelope: the knob is read off its stated limitations (§7.0)
             r1 = O.answer("graphlet_summary", {"detail": "limitations"}, f["results"][0], mgt,
                           {"strategy": g["strategy"]})
-            self.assertIn("its result states no memory_bound_soft", r1["oracle"]["inputs"][2])
+            self.assertIn("(its result states no memory_bound_soft)", r1["oracle"]["inputs"][2])
             self.assertEqual(O.compare(r1, want)["outcome"], "agree", sid)
+            self.assertIn("its strategy has no bounds.max_memory_mb and its result states no memory_bound_soft",
+                          o["inputs"][2])
+            # VERIFY-O-VD4 suggestion 2: a twin whose result states memory_bound_soft ran under the budget, whatever
+            # its strategy echo says: no gap, the twin's entries as they are
+            f2 = copy.deepcopy(f)
+            f2["results"][0]["limitations"] = copy.deepcopy(g["results"][0]["limitations"])
+            r2 = O.answer("graphlet_summary", {"detail": "limitations"}, f2, mgt, {"strategy": g["strategy"]})
+            self.assertEqual(r2["oracle"]["inputs"], ["full", "mgt"])
+            self.assertEqual(O.compare(r2, want)["outcome"], "agree", sid)
             # every record read from this twin names the difference
             w = O.answer("graphlet_walks", {"arm": "right"}, f, mgt, {"strategy": g["strategy"]})
             self.assertEqual(len(w["oracle"]["inputs"]), 3)
@@ -1245,15 +1281,12 @@ class MemoryBudgetTwin(unittest.TestCase):
             full["limitations"] = copy.deepcopy(g["results"][0]["limitations"])
             want = {"records": 1, "json": O.normalise_full_result(full)}
             self.assertEqual(O.compare(j, want)["outcome"], "agree", sid)
-            self.assertIn("/json/limitations/0/*", j["oracle"]["consistency_only"])
-            self.assertNotIn("/json/limitations", j["oracle"]["checked"])
+            self.assertIn("SPEC §7.5.2 K (arm *)", j["oracle"]["checked"]["/json/limitations"])
             self.assertIn("/json/arms/left/limitations", j["oracle"]["checked"])
-            self.assertIn("/json/limitations/1", j["oracle"]["absent"])
-            other = copy.deepcopy(want)
-            other["json"]["limitations"][0]["observed"] = 3
-            self.assertEqual(O.compare(j, other)["outcome"], "agree", sid)
-            other["json"]["limitations"].append({"kind": "scope"})
-            self.assertEqual([d["pointer"] for d in O.compare(j, other)["differences"]], ["/json/limitations/1"])
+            for change in (lambda x: x[0].update(observed=3), lambda x: x.append({"kind": "scope"}), list.clear):
+                other = copy.deepcopy(want)
+                change(other["json"]["limitations"])
+                self.assertEqual([d["pointer"] for d in O.compare(j, other)["differences"]], ["/json/limitations"])
             other = copy.deepcopy(want)
             other["json"]["arms"]["left"]["limitations"] = []
             self.assertEqual(O.compare(j, other)["outcome"], "disagree", sid)

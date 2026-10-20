@@ -398,8 +398,8 @@ class OracleVsLibrary(unittest.TestCase):
     def test_real_twin_without_memory_budget(self):
         """VERIFY-D VD4: the whole op plan on two real rehearsal-2 pairs, whose twin v8 sent without
         bounds.max_memory_mb (SPEC §7.1 R21 (4)) while the graphlet request had it: given the request's strategy, W5
-        and the library agree on every call (the graphlet's memory_bound_soft makes no claim); without it, W5's
-        limitations shift by that entry (VD4 as measured)."""
+        and the library agree on every call (the seed-level limitations, memory_bound_soft included, read from the
+        graphlet's K records); without it, W5's limitations shift by that entry (VD4 as measured)."""
         from metagraph.traverse import parser
         counts, report, shifted = collections.Counter(), [], set()
         for sid in REHEARSAL2:
