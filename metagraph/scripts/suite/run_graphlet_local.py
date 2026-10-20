@@ -25,10 +25,14 @@ enters as W1's does, any other (.mgt, .mgt.gz, a bare server body too) as W4's; 
 
 Every document enters its way the same way: written to the way's spool and loaded by the library's graphlet_load (the
 load path of a standalone file, the one the service names for its links). The way's GraphletTools is configured from
---limits (default max_bytes 2048, sequence_max_bytes 16384, local_limits null: DESIGN §3), with a fixed MAC key for
-its cursors, and the limits are recorded with every call (library.limits). A limits file may carry max_graphlet_mb
-(the capabilities' graphlet limits block does): it is accepted and noted in run.json as not applied, being a
-traverse_fetch argument with no meaning for a document graphlet_load reads (VERIFY-L VL10).
+the capabilities' graphlet limits block where it states them (service_settings.graphlet.library: max_bytes,
+sequence_max_bytes, local_limits; the run's recorded service document, else the by-design table's block; DESIGN-v8
+§3: "configured from the block, not hard-coded"), else from --limits, else the defaults (max_bytes 2048,
+sequence_max_bytes 16384, local_limits null: DESIGN §3); a part absent or served null (a part the service failed to
+compute) is not stated: the fallback is used and the missing limit recorded. run.json's limits_source says which
+was used per key (library_limits). The cursors take a fixed MAC key, and the limits are recorded with every call
+(library.limits). A limits file or the block may carry max_graphlet_mb: it is accepted and noted in run.json as not
+applied, being a traverse_fetch argument with no meaning for a document graphlet_load reads (VERIFY-L VL10).
 
 Process isolation: one child process per way, `python -s -B [-P] run_graphlet_local.py --child`, its environment
 scrubbed to PATH/HOME/TMPDIR/LANG/LC_* plus the way's PYTHONHASHSEED (distinct per way, recorded), its sys.path the
@@ -322,6 +326,60 @@ def read_limits(path):
     return limits, ignored
 
 
+LIBRARY_BLOCK = "service_settings.graphlet.library"
+
+
+def _valid_limit(key, value):
+    if key == "local_limits":
+        return value is None or isinstance(value, (dict, bool))   # null: unbudgeted (the block's own value)
+    if key == "max_bytes":
+        return isinstance(value, int) and not isinstance(value, bool) and 64 <= value <= 16 * 1024 * 1024
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def library_limits(limits_path=None, run_dir=None, refs=None):
+    """(limits, not applied, record) of the ways' GraphletTools: the capabilities' graphlet library block
+    (LIBRARY_BLOCK, through suite_common.References: the run's recorded live document, else the by-design table's
+    block) where it states a key validly, else --limits (read_limits), else DEFAULT_LIMITS. record {source: {key:
+    "capabilities (live|table)" | "--limits" | "default"}, missing: [what the block did not state], document}.
+    Never raises on the block: a document it cannot read is a missing block."""
+    limits, ignored = read_limits(limits_path)
+    given = set(sc.read_json(limits_path) or {}) if limits_path else set()
+    source = dict((k, "--limits" if k in given else "default") for k in DEFAULT_LIMITS)
+    missing, stated, document = [], 0, None
+    try:
+        refs = refs if refs is not None else (sc.run_references(run_dir) if run_dir else sc.default_references())
+        document = (refs.origins or {}).get("service") if refs.live.get("service") is not None else None
+    except Exception as e:   # the block is not stated
+        refs = None
+        missing.append("%s (the capabilities could not be read: %s)" % (LIBRARY_BLOCK, type(e).__name__))
+    for key in list(DEFAULT_LIMITS) + sorted(LIMITS_NOT_APPLIED):
+        if refs is None:
+            break
+        path = "%s.%s" % (LIBRARY_BLOCK, key)
+        try:
+            value, src, _mismatch = refs.resolve("service", path)
+        except Exception:
+            value, src = None, "unknown"
+        if src == "unknown":
+            missing.append("%s (absent)" % path)
+            continue
+        stated += 1
+        if key in LIMITS_NOT_APPLIED:
+            if value is not None:
+                ignored[key] = {"value": value, "why": LIMITS_NOT_APPLIED[key], "from": "capabilities (%s)" % src}
+            continue
+        if _valid_limit(key, value):
+            limits[key] = value
+            source[key] = "capabilities (%s)" % src
+        else:
+            missing.append("%s (%s; %s used)" % (path, "null" if value is None else "not a valid value %r" % (value,),
+                                                 source[key]))
+    if refs is not None and not stated:
+        missing = ["%s (absent: --limits or the defaults used)" % LIBRARY_BLOCK]
+    return limits, ignored, {"source": source, "missing": missing, "document": document}
+
+
 def read_text(path):
     """A document's text: gunzipped when the file is gzip, UTF-8 strictly."""
     with open(path, "rb") as fh:
@@ -442,6 +500,7 @@ class Way(object):
                 "failure": str(e), "source": runner.source_note(name),
                 "library": {"root": os.path.abspath(self.root), "commit": runner.commits[name]},
                 "limits": runner.limits, "limits_not_applied": runner.limits_not_applied,
+                "limits_source": runner.limits_source,
                 "started_utc": iso(self.started), "updated_utc": iso(time.time()),
                 "runner": os.path.basename(__file__)})
             if not runner.args.keep_work:
@@ -546,7 +605,8 @@ class Way(object):
                 "python", "implementation", "executable", "hashseed", "hash_randomization", "ignore_environment",
                 "hash_probe", "hash_probe_launch")),
             "child": {"argv": self.child.cmd, "env_keys": sorted(self.child.env), "restarts": self.restarts},
-            "limits": self.r.limits, "limits_not_applied": self.r.limits_not_applied, "counts": self.counts,
+            "limits": self.r.limits, "limits_not_applied": self.r.limits_not_applied,
+            "limits_source": self.r.limits_source, "counts": self.counts,
             "started_utc": iso(self.started),
             "updated_utc": iso(time.time()), "runner": os.path.basename(__file__)})
 
@@ -860,7 +920,8 @@ class Way(object):
 class Runner(object):
     def __init__(self, args):
         self.args = args
-        self.limits, self.limits_not_applied = read_limits(args.limits)
+        self.limits, self.limits_not_applied, self.limits_source = library_limits(
+            args.limits, None if getattr(args, "doc", None) else getattr(args, "run_dir", None))
         self.python = args.python or sys.executable
         self.op_timeout = args.op_timeout
         self.ways = args.ways
