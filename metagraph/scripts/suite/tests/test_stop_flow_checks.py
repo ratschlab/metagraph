@@ -43,7 +43,13 @@ def record(tool="traverse_fetch", attempts=None, stop_answer=None, status="stopp
     return rec
 
 
-def released(reason, site="stop", decision="released", detail=None, at="2026-10-20T10:00:04+00:00"):
+_NULL = object()
+
+
+def released(reason, site="stop", decision=_NULL, detail=None, at="2026-10-20T10:00:04+00:00"):
+    """A release record; its decision null for completed and grace (async's rule), else released, unless given."""
+    if decision is _NULL:
+        decision = None if reason in ("completed", "grace") else "released"
     return {"at": at, "reason": reason, "site": site, "decision": decision, "detail": detail,
             "decided_at": at}
 
@@ -74,37 +80,28 @@ class TraverseStop(unittest.TestCase):
         res = checks.evaluate(scenario(), {"http": 200, "body": {"stop_flow": record()}}, "mcp")
         self.assertEqual(checks.scenario_outcome(res), "pass")
         self.assertEqual(self.release_outcome(released("tombstone", site="worker"))[0], "pass")
-        # the switch off and a covering tombstone: would_release at the lease
-        rel = released("lease", decision="would_release", detail="tombstone_would_release_ok", at=LEASE)
-        self.assertEqual(self.release_outcome(rel)[0], "pass")
-        self.assertEqual(self.release_outcome(released("completed", site="worker", detail="answer"))[0], "pass")
-        self.assertEqual(self.release_outcome(released("swept", site="sweep", detail="clock_fallback"))[0], "pass")
-        rel = released("lease", decision="after_lease", detail="h4_finished", at="2026-10-20T10:01:01+00:00")
-        self.assertEqual(self.release_outcome(rel)[0], "pass")
+        # R3-2: on a healthy host the worker's completed on the host's answer, decision null (rehearsal S2's record)
+        completed = released("completed", site="worker", decision=None, detail="response")
+        self.assertEqual(self.release_outcome(completed)[0], "pass")
 
-    def test_a_hold_must_fit_the_stops_evidence(self):
-        rel = released("lease", decision="held", detail="stopping", at=LEASE)
-        out = self.release_outcome(rel, settled_at="2026-10-20T10:00:30+00:00")
-        self.assertEqual(out[0], "pass", out)
-        self.assertIn("the attempt was running when the stop came", out[1])
-        # settled before the stop was sent: "stopping" does not fit
-        out = self.release_outcome(rel, settled_at="2026-10-20T10:00:01+00:00")
-        self.assertEqual(out[0], "fail", out)
-        self.assertIn("does not fit the stop's evidence", out[1])
-        # no_answer while the host answered 200 without an error: does not fit
-        out = self.release_outcome(released("lease", decision="held", detail="no_answer", at=LEASE))
-        self.assertEqual(out[0], "fail", out)
-        out = self.release_outcome(released("lease", decision="held", detail="no_answer", at=LEASE),
-                                   http_status=None)
-        self.assertEqual(out[0], "pass", out)
-        out = self.release_outcome(released("lease", decision="held", detail="lease_passed", at=LEASE))
-        self.assertEqual(out[0], "pass", out)
-        out = self.release_outcome(released("lease", decision="held", detail="lease_passed",
-                                            at="2026-10-20T10:00:30+00:00"))
-        self.assertEqual(out[0], "fail", out)
-        out = self.release_outcome(released("lease", decision="held", detail="whatever", at=LEASE))
-        self.assertEqual(out[0], "fail", out)
-        self.assertEqual(self.release_outcome(released("grace", detail="grace_20s"))[0], "fail")
+    def test_holds_and_the_sweep_are_inconclusive(self):
+        # R3-2: a regression to "always held to the lease" blocks (inconclusive, never a pass)
+        for rel in (released("lease", decision="held", detail="stopping", at=LEASE),
+                    released("lease", decision="would_release", detail="tombstone_would_release_ok", at=LEASE),
+                    released("lease", decision="after_lease", detail="h4_finished", at="2026-10-20T10:01:01+00:00"),
+                    released("swept", site="sweep", detail="clock_fallback"),
+                    released("swept", site="sweep", decision=None, detail="finished")):
+            out = self.release_outcome(rel)
+            self.assertEqual(out[0], "inconclusive", (rel, out))
+        self.assertEqual(self.release_outcome(released("grace", decision=None, detail="grace_20s"))[0], "fail")
+        self.assertEqual(self.release_outcome(released("finished", decision="held"))[0], "fail")
+        self.assertEqual(self.release_outcome(released("whatever"))[0], "fail")
+
+    def test_asyncs_null_decision_rule(self):
+        # RELEASE-RECORD.md "Settled": decision null exactly for completed and grace; another value there fails
+        out = self.release_outcome(released("completed", site="worker", decision="released", detail="response"))
+        self.assertEqual(out[0], "fail")
+        self.assertIn("async's rule: null", out[1])
 
     def test_no_later_than_the_lease_with_asyncs_margin(self):
         late = released("finished", detail="finished", at="2026-10-20T10:01:20+00:00")   # lease + 20 s: within 30 s
@@ -180,17 +177,24 @@ class ResolveStop(unittest.TestCase):
                       attempts=[attempt(rel, settled_by="disconnect", **att)])
 
     def test_grace_20s_after_the_close(self):
-        out = run(self.rec(released("grace", detail="grace_20s", at="2026-10-20T10:00:22.6+00:00")), "resolve")
+        out = run(self.rec(released("grace", decision=None, detail="grace_20s", at="2026-10-20T10:00:22.6+00:00")),
+                  "resolve")
         self.assertEqual(dict((k, v[0]) for k, v in out.items() if k in checks.STOP_FLOW_CHECKS),
                          {"stop_answer": "pass", "job_terminal": "pass", "attempt_state": "pass",
                           "token_release": "pass"}, out)
-        out = run(self.rec(released("grace", detail="grace_20s", at="2026-10-20T10:00:45+00:00")), "resolve")
+        out = run(self.rec(released("grace", decision=None, detail="grace_20s", at="2026-10-20T10:00:45+00:00")),
+                  "resolve")
         self.assertEqual(out["token_release"][0], "fail")
         self.assertIn("expected the close + 20 s", out["token_release"][1])
-        out = run(self.rec(released("grace", detail="grace_20s", at="2026-10-20T10:00:05+00:00")), "resolve")
+        out = run(self.rec(released("grace", decision=None, detail="grace_20s", at="2026-10-20T10:00:05+00:00")),
+                  "resolve")
         self.assertEqual(out["token_release"][0], "fail")
-        out = run(self.rec(released("grace", detail="grace_0", at="2026-10-20T10:00:03+00:00")), "resolve")
+        out = run(self.rec(released("grace", decision=None, detail="grace_0", at="2026-10-20T10:00:03+00:00")),
+                  "resolve")
         self.assertIn("expected 'grace_20s'", out["token_release"][1])
+        out = run(self.rec(released("grace", decision="released", detail="grace_20s",
+                                    at="2026-10-20T10:00:22.6+00:00")), "resolve")
+        self.assertIn("async's rule: null", out["token_release"][1])   # a decision on grace fails
 
     def test_the_lease_first_and_a_completed_resolve(self):
         lease = "2026-10-20T10:00:15+00:00"   # before the close + 20 s: capped
@@ -199,8 +203,11 @@ class ResolveStop(unittest.TestCase):
         out = run(self.rec(dict(rel, at=LEASE), lease_until=LEASE), "resolve")   # the lease ends long after
         self.assertEqual(out["token_release"][0], "fail")
         self.assertIn("grace_capped although the lease", out["token_release"][1])
-        self.assertEqual(run(self.rec(released("completed", site="worker", detail="answer")),
-                             "resolve")["token_release"][0], "pass")
+        # R3-2: a completed /resolve ended before the stop (a race): inconclusive; the sweep likewise
+        self.assertEqual(run(self.rec(released("completed", site="worker", decision=None, detail="answer")),
+                             "resolve")["token_release"][0], "inconclusive")
+        self.assertEqual(run(self.rec(released("swept", site="sweep", detail="finished")),
+                             "resolve")["token_release"][0], "inconclusive")
         self.assertEqual(run(self.rec(released("finished", detail="finished")), "resolve")["token_release"][0],
                          "fail")
 
