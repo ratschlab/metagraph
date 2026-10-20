@@ -1,0 +1,49 @@
+{
+ "_about": "Chapter G (Graphlet tools) of the suite results document, manifest v8: the prose data in R.json's format for the area G scenarios (the corpus graphlets, their compare partners, the long walk's warm-ups; DESIGN-v8 §4). `summary` and `coverage_gap` lead the chapter page, `intro` follows the computed lines; the comparison sections (the five ways, per tool, disagreements, pre-checks, the service's own behaviour, correctness coverage, what is not covered) are the generator's (doc/graphlets.py) and follow the background. Every figure of the run is a placeholder (doc/graphlets.chapter_values, facts.py) and every run-dependent sentence a conditional. The literal numbers are listed under `_assumes`.",
+ "_assumes": {
+  "_note": "The literal numbers this file's prose may carry, each with its source: constants of DESIGN-v8, FORMAT-v8, the SPEC or the harness, never a figure of a run (those are placeholders the generator fills). tests/test_doc.py fails on a number the prose carries that is listed neither here nor as a placeholder.",
+  "1": "W1, the first way (DESIGN-v8 §2)",
+  "2": "W2 (DESIGN-v8 §2)",
+  "3": "W3 (DESIGN-v8 §2)",
+  "4": "W4 (DESIGN-v8 §2)",
+  "5": "W5, the fifth way; five ways (DESIGN-v8 §2)",
+  "262,144": "the service's answer cap in bytes (DESIGN-v8 §5)",
+  "16": "a walk over 16 kbp: the sequence paging slot (DESIGN-v8 §4)",
+  "8": "a body over 8 MiB (DESIGN-v8 §4, left to v9)",
+  "9": "manifest v9 (DESIGN-v8 §1)"
+ },
+ "chapter": "G",
+ "title": "Graphlet tools",
+ "purpose": [
+  "Once a traversal is fetched as a graphlet, the graphlet tools answer what a user asks of it: which walks it holds and how long they are, which labels support them, the sequence along a walk, a summary, an export in FASTA, GFA, JSON or the suite's MGT form, and how two graphlets compare. This chapter tests every tool and every distinct behaviour of each on the corpus graphlets of DESIGN-v8 §4 by running each call five ways and requiring the ways to agree. Agreement of the first four ways shows consistency: the transport, the fetch path, the service's wrapper and the library's determinism; only the fifth way, the suite's own reading of the engine's values, shows correctness, on the fields it checks. The sections after the background give the comparison per tool, every disagreement with both answers, the pre-checks, the service's own behaviour, the correctness coverage and what is not covered."
+ ],
+ "summary": [
+  "*What held.* [[g_error ? The five-way comparison could not be computed: {g_error}. | Area G: {g_verdict}; {g_scenarios_text} of {n_g_scenarios} graphlet scenarios; of {n_g_ops} op calls {g_ops_text}. [[n_g_disagree ? The disagreements are in the tools {g_disagree_tools}, each listed below with both answers. | No op call disagreed between any two ways.]] [[g_prechecks_failed ? The pre-checks that did not pass: {g_prechecks_failed}. | Every pre-check passed: the three library ways read one document, the full twin's paths equal the graphlet's and the MCP sent the direct requests' strategy.]] The service's own behaviour: {g_service_text}.]]",
+  "[[g_error ?| *What the agreement shows.* The first four ways agreeing is consistency: the two direct access paths, the service's stored body and the library at the deployed commit {g_library_commit} answer alike, and each library way runs in its own process with its own hash seed. Correctness rests on the fifth way alone: it checks {n_g_w5_checked} field paths against an engine value or a SPEC token and re-derives {n_g_w5_rederived} from a DESIGN formula; {n_g_w5_consistency} are left to consistency (correctness coverage, below).]]"
+ ],
+ "coverage_gap": [
+  "*What remains uncovered.* The tools the service does not expose (support, claims, splits, subtrie, save and load, traverse_continue, and arguments such as an export's path) run on the library ways and the fifth way only: they are covered as library behaviour, not as a service's answer. [[n_g_direct_only ? The direct-only graphlets ({g_direct_only_ids}) need a strategy the MCP cannot express on staging, so they run on the first, second and fifth ways only.]] [[g_v9_ids ? Left to manifest 9: {g_v9_ids} (a body over 8 MiB, one seed on two databases).]] A field the fifth way does not check is shown consistent, not correct; and a defect the engine and the library share in a value the fifth way reads from the engine stays unseen. The section 'What this chapter does not cover' lists each item with its reason."
+ ],
+ "intro": [
+  "A graphlet scenario is a /traverse request with one seed whose answer is a graphlet (`output.detail: graphlet`), made on the three access paths as every scenario is, plus a direct-local twin with `detail: full`, the input of the fifth way. Its op plan names the tool calls, each argument either literal or a selector resolved at run time from the same way's earlier answers (DESIGN-v8 §4), and the ways that run each call. Answers are compared whole, after all pages are assembled, with the service's own fields stripped (and checked positively), handles mapped to symbols and cursors removed; errors by code and structured fields. Every call the service answers is designed to fit within its 262,144-byte cap, and a deliberate cut is judged against the same call uncut."
+ ],
+ "families": {
+  "G-corpus": {
+   "title": "the corpus graphlets",
+   "prose": "One graphlet per behaviour of the corpus (DESIGN-v8 §4): two arms and one arm, merges, cut label lists, a deterministic resource stop, a walk of depth zero, a single linear walk, a failed seed, a walk over 16 kbp, a trace retrieval with and without coordinates, annotate mode and a graphlet without bases. The tables give each graphlet's fetch on the access paths; its tool calls are counted in the comparison sections above."
+  },
+  "G-pair": {
+   "title": "compare partners",
+   "prose": "The partners of the graphlet_compare pairs: one seed at two radii, two seeds of one locus, one seed under two label caps, and constrain against annotate; each is fetched and processed as a corpus graphlet, with its own short op plan."
+  },
+  "G-warm": {
+   "title": "warm-ups of the long walk",
+   "prose": "Two windows of the long walk's region resolved on direct-local right before it, so that the long walk meets rows the host has just read (its time is then the walk's, not the disk's)."
+  }
+ },
+ "units": {
+  "G-corpus": "A graphlet of the corpus: fetched on each access path (the direct requests with `detail: graphlet` and the `full` twin, `traverse_fetch` via MCP), then processed by the tools of its op plan on the ways that apply.",
+  "G-pair": "The partner of a graphlet_compare pair, fetched and processed as a corpus graphlet; the pair's compare calls are counted under the graphlet that names it.",
+  "G-warm": "A warm-up: a window of the long walk's region resolved on direct-local right before it; every k-mer supported, one run."
+ }
+}

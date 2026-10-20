@@ -77,5 +77,88 @@ class V8MappingTest(unittest.TestCase):
         self.assertEqual(len(units.chapter_scenarios("S")), 4)
 
 
+class ChapterGTest(unittest.TestCase):
+    """Chapter G's comparison sections (doc/graphlets.py) over a five-way comparison of lane C's fixture run: the ways
+    and what each agreement proves, the comparison per tool, the disagreements grouped by kind with both values, the
+    pre-checks, the service checks, the correctness coverage and what is not covered (computed from the manifest)."""
+
+    def comparison(self, change_w2=False):
+        import test_report_graphlets as trg
+        case = trg.Section("test_an_agreeing_run")
+        case.setUp()
+        self.addCleanup(case.tearDown)
+        g = case.comparison(change_w2=change_w2, by_design=True)
+        return g, case.run_
+
+    def test_sections(self):
+        import graphlets
+        g, run_ = self.comparison(change_w2=True)
+        ctx = _Stub(run=_Stub(manifest=run_.manifest, dir=run_.dir))
+        text = graphlets.ways_section(ctx)
+        self.assertIn("\\section*{The five ways}", text.replace("\\subsection*", "\\section*"))
+        self.assertIn("the suite's own reader, without the library", text)
+        self.assertIn("W5 is the one correctness check", text)
+        tools = graphlets.per_tool_section(g)
+        self.assertIn("\\texttt{graphlet\\_\\allowbreak{}walks}", tools)
+        self.assertIn("W1 2, W2 2, W3 2, W4 2, W5 1", tools)
+        dis = graphlets.disagreements_section(g)
+        self.assertIn("1 op call disagreed, in 1 kind of difference", dis)
+        self.assertIn("W1-W2 (transport) at \\texttt{/\\allowbreak{}answer/\\allowbreak{}total}", dis)
+        pre = graphlets.prechecks_section(g)
+        self.assertIn("G-\\allowbreak{}merge-\\allowbreak{}0001", pre)
+        service = graphlets.service_checks_section(g)
+        self.assertIn("walk\\_\\allowbreak{}display", service)
+        cov = graphlets.coverage_section(g)
+        self.assertIn("consistency only", cov)
+        nc = graphlets.not_covered(ctx.run)
+        self.assertIn("v9", nc)
+        word, _ = graphlets.verdict(g)
+        self.assertEqual(word, "FAIL")
+        g2, _ = self.comparison()
+        self.assertIn("No op call disagreed.", graphlets.disagreements_section(g2))
+
+    def test_no_graphlets_no_chapter(self):
+        import graphlets
+        run = _Stub(manifest={"manifest_version": 7, "scenarios": [{"id": "R-1", "area": "R"}]}, dir="/nowhere")
+        self.assertIsNone(graphlets.data(run))
+        self.assertEqual(graphlets.chapter_g_sections(_Stub(run=run)), "")
+
+
+class ChapterSTest(unittest.TestCase):
+    """Chapter S's records: per stop execution the stop's answer, the job's end and each host attempt's release
+    record; the base requests' times; nothing without a stop scenario."""
+
+    def run_stub(self, rec):
+        scen = {"S-stop-0001": {"id": "S-stop-0001", "area": "S", "mcp": {"tool": "traverse_fetch",
+                                                                           "flow": {"kind": "stop"}}},
+                "S-base-0001": {"id": "S-base-0001", "area": "S"}}
+        lines = {("S-stop-0001", "mcp"): [{"scenario": "S-stop-0001", "repeat": 0, "outcome": "pass",
+                                           "stop_flow": rec}],
+                 ("S-base-0001", "direct-local"): [{"scenario": "S-base-0001", "repeat": 0, "outcome": "pass",
+                                                    "wall_ms": 15002.0, "server": {"elapsed_ms": 15000.0}},
+                                                   {"scenario": "S-base-0001", "repeat": 1, "outcome": "pass",
+                                                    "wall_ms": 9000.0, "server": {"elapsed_ms": 8990.0}}]}
+        return _Stub(order=list(scen), scenario=lambda sid: scen.get(sid) or {},
+                     arm_lines=lambda sid, arm: lines.get((sid, arm), []))
+
+    def test_records(self):
+        import graphlets
+        rec = {"stop": {"took": True, "running": 1, "cancel_supported": True, "bound_seconds": 55},
+               "terminal_status": "stopped", "release_reads": 44,
+               "attempts": [{"attempt_id": "452019c1-e0c3-4460-932b-29afd4cf5a0f:1", "server_instance": "0c43fc04",
+                             "release": {"reason": "completed", "site": "worker", "decision": None,
+                                         "detail": "response"}}]}
+        text = graphlets.chapter_s_sections(_Stub(run=self.run_stub(rec)))
+        self.assertIn("taken; running 1, cancel supported, bound 55 s", text)
+        self.assertIn("completed, site worker, decision null, response", text)
+        self.assertIn("stopped", text)
+        self.assertIn("repeat 1 is the warm full-run time", text)
+        self.assertIn("& r1 & pass & 9.0 s & 9.0 s", text)
+        text = graphlets.chapter_s_sections(_Stub(run=self.run_stub(None)))
+        self.assertIn("no stop record", text)
+        empty = _Stub(order=[], scenario=lambda sid: {}, arm_lines=lambda sid, arm: [])
+        self.assertEqual(graphlets.chapter_s_sections(_Stub(run=empty)), "")
+
+
 if __name__ == "__main__":
     unittest.main()

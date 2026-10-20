@@ -19,6 +19,7 @@ import blocks  # noqa: E402
 import cells  # noqa: E402
 import compare as cmp  # noqa: E402
 import facts  # noqa: E402
+import graphlets  # noqa: E402
 import gate as gate_mod  # noqa: E402
 import latex  # noqa: E402
 import merge_run  # noqa: E402
@@ -4226,6 +4227,11 @@ def chapter(ctx, ch):
         out += "Every property check of this chapter was passed by at least one execution of each test.\n\n"
     out += "\\parhead{Background}\n"
     out += background(ctx, prose, values)
+    # manifest v8: chapter G's five-way comparison and chapter S's stop records, before the families' tables
+    if any(isinstance(ctx.run.scenario(s).get("graphlet"), dict) for s in sids):
+        out += graphlets.chapter_g_sections(ctx)
+    if any(isinstance((ctx.run.scenario(s).get("mcp") or {}).get("flow"), dict) for s in sids):
+        out += graphlets.chapter_s_sections(ctx)
     # the compact record key right before the first family's tables (re-verification N-1)
     out += record_key_paragraph(ctx, ch)
     return out + body
