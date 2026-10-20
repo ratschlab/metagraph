@@ -194,6 +194,14 @@ class Rehearsal(unittest.TestCase):
         self.assertIn("summary_cut_bytes", e["facts"])
         for name in ("rehearsal.json", "corpus.json", "REPORT.md"):
             self.assertTrue(os.path.exists(os.path.join(self.tmp, name)), name)
+        # VERIFY-D VD9: the plans the build makes from the chosen corpus, shadow-run on the rehearsal's documents
+        built = res["built"]
+        self.assertGreaterEqual(built["checked"], 1, built)
+        self.assertNotIn("G-arms2-0001", built["not_rehearsed"])
+        self.assertEqual(built["problems"], {}, built["problems"])
+        self.assertIn("G-pair-radius-0001", built["not_rehearsed"])   # no partner was rehearsed here
+        with open(os.path.join(self.tmp, "REPORT.md")) as fh:
+            self.assertIn("## The built plans", fh.read())
         # the corpus builds: the chosen candidate with its preconditions and timeouts (seeds of v7 again)
         corp = sc.read_json(os.path.join(self.tmp, "corpus.json"))
         g = area_g.gen_G(FakeCtx(), v7_scenarios(), corp, "a" * 40)

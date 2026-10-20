@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime
+import glob
 import gzip
 import json
 import os
@@ -1008,8 +1009,78 @@ def analyse(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, mcp_di
     if prior:
         results, meta, scen = merge_prior(prior, results, meta, scen)
     corpus = choose_corpus(results, meta, scen, library_commit)
-    write_outputs(out, results, meta, scen, corpus, warm_ups, lanes)
-    return {"results": results, "corpus": corpus, "warm_ups": warm_ups, "lanes": lanes}
+    dl_runs = [dl_run] + (sorted(glob.glob(os.path.join(prior, "runs", "*"))) if prior else [])
+    built = built_plan_check(out, corpus, meta, results, dl_runs, library_root, library_commit)
+    write_outputs(out, results, meta, scen, corpus, warm_ups, lanes, built)
+    return {"results": results, "corpus": corpus, "warm_ups": warm_ups, "lanes": lanes, "built": built}
+
+
+def _paged_once(o: dict, r: Optional[dict]) -> bool:
+    """An op meant to page (its id names a paging pass, paging all) whose record took one page: it does not page."""
+    return bool(r) and "-paged" in o["id"] and o.get("paging") == "all" and not r.get("error") and \
+        (r.get("pages") or 0) <= 1
+
+
+def built_plan_check(out: str, corpus: dict, meta: Dict[str, dict], results: Dict, dl_runs: List[str],
+                     library_root: str, library_commit: Optional[str]) -> dict:
+    """VERIFY-D VD9: the plans the build makes from the chosen corpus (area_g.gen_G: the chosen rich set, every
+    corpus-wide extra, the pairs), shadow-run by the local library (W1) on the rehearsals' own documents: each built
+    scenario reads the document of the rehearsal scenario of its candidate (the ids renamed in its plan). -> {checked,
+    problems {built id: [...]}, unpaged {built id: [op]}, not_rehearsed [built id], skipped_ops {built id: [op]}}.
+    A built scenario whose candidate no rehearsal ran (not_rehearsed) is left out, and so are the ops that name it."""
+    ctx, v7 = build_context()
+    try:
+        built = [x for x in area_g.gen_G(ctx, v7, corpus, library_commit) if isinstance(x.get("graphlet"), dict)]
+    except SystemExit as e:
+        return {"error": str(e)}
+    by_cid = {}
+    for sid_, m in meta.items():
+        if m.get("cid") and sid_ in results:
+            by_cid.setdefault(m["cid"], sid_)
+    rename = dict((b["id"], by_cid.get(b["graphlet"]["candidate"])) for b in built)
+    absent = sorted(b for b, r in rename.items() if r is None)
+    text = json.dumps(built)
+    for b, r in rename.items():
+        if r:
+            text = text.replace('"%s"' % b, '"%s"' % r)
+    scen = [x for x in json.loads(text) if x["id"] in set(r for r in rename.values() if r)]
+    skipped = {}
+    for x in scen:
+        keep = []
+        for o in x["graphlet"]["ops"]:
+            named = [b for b in absent if '"%s"' % b in json.dumps(o["args"])]
+            if named:
+                skipped.setdefault(x["id"], []).append(o["id"])
+            else:
+                keep.append(o)
+        x["graphlet"]["ops"] = keep
+    # one direct-local arm holding every rehearsal document the built plans read (the rehearsals' runs)
+    combo = os.path.join(out, "shadow", "built-docs")
+    raw = os.path.join(combo, "arms", "direct-local", "raw")
+    os.makedirs(raw, exist_ok=True)
+    for x in scen:
+        name = sc.raw_name(x["id"], "direct-local", 0).split("/", 1)[1]
+        for d in dl_runs:
+            src = os.path.join(d, "arms", "direct-local", "raw", name)
+            if os.path.exists(src):
+                dst = os.path.join(raw, name)
+                if not os.path.exists(dst):
+                    os.symlink(os.path.abspath(src), dst)
+                break
+    recs = shadow_run({"scenarios": scen}, [x["id"] for x in scen], combo, library_root,
+                      os.path.join(out, "shadow", "built"))
+    back = dict((r, b) for b, r in rename.items() if r)
+    problems, unpaged = {}, {}
+    for x in scen:
+        probs = plan_problems(x, (results.get(x["id"]) or {}).get("facts") or {}, recs)
+        if probs:
+            problems[back[x["id"]]] = probs
+        once = [o["id"] for o in x["graphlet"]["ops"] if _paged_once(o, recs.get((x["id"], o["id"])))]
+        if once:
+            unpaged[back[x["id"]]] = once
+    return {"checked": len(scen), "ops": sum(len(x["graphlet"]["ops"]) for x in scen), "problems": problems,
+            "unpaged": unpaged, "not_rehearsed": absent,
+            "skipped_ops": dict((back[k], v) for k, v in skipped.items())}
 
 
 def lanes_of_runs(run_dirs: List[str]) -> dict:
@@ -1172,11 +1243,11 @@ def lanes_record(lanes: Optional[dict]) -> Optional[dict]:
 
 
 def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict,
-                  warm_ups: Optional[Dict] = None, lanes: Optional[dict] = None) -> None:
+                  warm_ups: Optional[Dict] = None, lanes: Optional[dict] = None, built: Optional[dict] = None) -> None:
     with open(os.path.join(out, "rehearsal.json"), "w") as fh:
         json.dump({"results": results, "meta": dict((k, dict((kk, vv) for kk, vv in v.items() if kk != "candidate"))
                                                     for k, v in meta.items()), "warm_ups": warm_ups or {},
-                   "w3_lanes": lanes_record(lanes)},
+                   "w3_lanes": lanes_record(lanes), "built_plans": built},
                   fh, indent=1, sort_keys=True, default=str)
     with open(os.path.join(out, "corpus.json"), "w") as fh:
         json.dump(corpus, fh, indent=1, sort_keys=True)
@@ -1206,6 +1277,20 @@ def write_outputs(out: str, results: Dict, meta: Dict, scen: Dict, corpus: dict,
         top = sorted(med.items(), key=lambda kv: -kv[1])[:3]
         lines.append("| %s | %d | %.2f | %s |" % (sid, len(med), statistics.median(med.values()),
                                                   ", ".join("%s %.1f" % kv for kv in top)))
+    if built:
+        lines += ["", "## The built plans (VERIFY-D VD9: the corpus's own plans, shadow-run on the rehearsals' documents)",
+                  ""]
+        if built.get("error"):
+            lines.append("not built: %s" % built["error"])
+        else:
+            lines.append("%d scenario(s), %d op(s) run by the local library (W1); %d with an op off its expected "
+                         "outcome; not rehearsed: %s." % (built["checked"], built["ops"], len(built["problems"]),
+                                                         ", ".join(built["not_rehearsed"]) or "none"))
+            for bid, probs in sorted(built["problems"].items()):
+                lines.append("- %s: %s" % (bid, "; ".join("%s %s (want %s)" % (p_["op"], p_["got"], p_["want"])
+                                                          for p_ in probs[:8])))
+            for bid, ops in sorted(built["unpaged"].items()):
+                lines.append("- %s: one page only: %s" % (bid, ", ".join(ops)))
     lr = lanes_record(lanes)
     if lr:
         lines += ["", "## W3 headroom (DESIGN-v8 §3, refined 2026-10-20)", "",
