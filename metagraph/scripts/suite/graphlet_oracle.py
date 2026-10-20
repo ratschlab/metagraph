@@ -7,8 +7,9 @@
     python3 graphlet_oracle.py --run-dir RUN      # writes arms/oracle/graphlet_ops.jsonl (FORMAT v2 F4)
 
 answer() gives the answer a library tool should give on the graphlet whose MGT text is |mgt_text| (the engine's
-body, or W1's standalone document: W5 reads no J line) and whose `detail: full` twin is |full_answer| (the
-direct-local response, or one result of it), for the arguments W1 sent (FORMAT-v8 §2: W5 takes W1's args_resolved).
+body, or W1's standalone document: answer() reads no J line, the run step only its strategy when it has no engine
+body) and whose `detail: full` twin is |full_answer| (the direct-local response, or one result of it), for the
+arguments W1 sent (FORMAT-v8 §2: W5 takes W1's args_resolved).
 compare() is THE comparison of another way's answer with a W5 record (FORMAT v2 F2): the compare stage calls it.
 
 The record (FORMAT-v8 §4 and FORMAT v2 F1):
@@ -51,7 +52,7 @@ The record (FORMAT-v8 §4 and FORMAT v2 F1):
 concatenated; otherwise rows are checked up to `rows`, the reference way's row count, and are consistency-only
 without it); max_bytes (2048) and sequence_max_bytes (16384), the configured ceilings (DESIGN-v8 §3: from the
 capabilities' limits block); view (the op runs on a subtrie handle); strategy (the graphlet envelope's normalized
-strategy, for traverse_continue; default the full twin's).
+strategy, for traverse_continue and the twin's memory budget below; default the full twin's).
 
 Independence (DESIGN-v8 §2, REVIEW-DESIGN-v8 D-R5): this module imports the standard library and the suite's own
 `checks` (its MGT reader, stdlib only) and nothing of `metagraph`; it cites SPEC-core
@@ -64,6 +65,13 @@ with no definition outside the library, or only DESIGN pseudocode the twin does 
 Values a clock measured (a time limitation's observed, a time resource stop's amounts) differ between the twin's
 execution and the graphlet's (SPEC §6.8) and are never checked.
 
+A twin without the graphlet request's memory budget (VERIFY-D VD4: v8 sends the full twin without
+bounds.max_memory_mb, since `full` detail under a memory budget keeps a merge's arrival order, SPEC §7.1 R21 (4); the
+budget is per seed, §6.8): the graphlet answer states one seed-level memory_bound_soft the twin does not (SPEC §7.0:
+stated exactly when the knob is set). W5 then makes no claim on that entry (an empty, consistency-only row in
+graphlet_summary's limitations and the json export's seed-level limitations, whose lengths count it), checks
+everything else as before, and names the difference in every record's oracle.inputs (_memory_gap).
+
 Coverage (phases A and B; [S] SPEC, [D] DESIGN, [P] presentation per INVENTORY §2, [L] library-defined (an expected
 error's code); [R] re-derived from DESIGN (oracle.rederived); c/o = consistency-only). Every whole list's length is
 checked (VO7); refusals are expected errors with their code [L].
@@ -75,7 +83,8 @@ checked (VO7); refusals are expected errors with their code [L].
       segments, splits, merges, bases, max_bp [S §7.5.5 counts, §7.5.2 A] | c/o: seed.seed_id, seed.labels,
       top_labels, caveats, cut flags
   graphlet_summary limitations: outcome, resource_stop [S §7.0], rows (each entry, arm) and total [S §7.0, §7.5.2 K
-      order] | c/o: rows.*.informational; a clock's values (SPEC §6.8); rows with arm= beside seed-level entries
+      order] | c/o: rows.*.informational; a clock's values (SPEC §6.8); rows with arm= beside seed-level entries;
+      the memory_bound_soft a twin without the memory budget does not state (VD4), and the seed-level rows beside it
   graphlet_walks: arm, total, rows.*.walk (in the rank's order: support [D §5][R], length, id [P ties]), length_bp,
       end [S §7.5.6, §7.1; string P], n_alive [S §7.5.6], n_full, labels_full (+_truncated) [D §5.1 via
       end_labels.route_bp and runs.from_bp][R], sequence (spell tail/full) [S §7.5.4], label filter (alive at the
@@ -95,7 +104,8 @@ checked (VO7); refusals are expected errors with their code [L].
   graphlet_sequence: arm, orientation, with_seed, from, length, sequence [S §7.5.4], to (an uncut slice) | c/o:
       ceiling_bytes, truncated/next_from/to of a cut slice, left-arm walk orientation with the seed
   graphlet_export: fasta records, ids and sequences [D §5 to_fasta, S §7.5.4]; gfa P count and the walks the paths
-      spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37]; json what=walk chains (arm and
+      spell [D §9]; json = the normalised full result per key [S §7.5.6, D §9 T37] (seed-level limitations: their
+      length only under a twin without the memory budget, VD4); json what=walk chains (arm and
       walks required [L §2.13]); mgt body digest [S §7.5.2, FORMAT §3]; fasta without bases: an expected error [L] | c/o:
       header tags, gfa S/L lines, gfa with arm or without bases, records of gfa/json/mgt, what=compare, fasta walks
       without arm
@@ -182,6 +192,9 @@ C_NO_BASES_EXPORT = "library-defined: the tool refuses a FASTA of a retrieval wh
                     "(sequences: false), with a code of its own"
 C_WHOLE_LIST = "the whole list W5 derives (every page assembled, FORMAT-v8 §3): no element beyond it"
 C_BAD_ARG = "library-defined: an argument outside the tool's domain is bad_argument (INVENTORY §1.1)"
+C_MEMORY_TWIN = "SPEC §7.1 (R21 (4): `full` detail under a memory budget keeps a merge's arrival order, so the full " \
+                "twin runs without bounds.max_memory_mb) and §6.8 (max_memory_mb is a per-seed budget); SPEC §7.0: " \
+                "memory_bound_soft is one seed-level entry, stated exactly when bounds.max_memory_mb is set"
 
 
 class _Refused(Exception):
@@ -919,6 +932,32 @@ def _time_measured(result: dict) -> List[str]:
     return out
 
 
+_MEMORY_KNOB = "bounds.max_memory_mb"
+
+
+def _memory_gap(d: _Doc, ctx: dict) -> Optional[str]:
+    """The twin ran without the graphlet request's memory budget (VERIFY-D VD4: v8 sends the full twin without
+    bounds.max_memory_mb, SPEC §7.1 R21 (4)): the difference, for oracle.inputs, else None. The request's side is
+    the graphlet envelope's normalised strategy (context strategy: an omitted budget a server maximum set is in it,
+    SPEC §10.3 clamped); the twin's is its envelope's strategy, or, without an envelope, its result's limitations
+    (SPEC §7.0: memory_bound_soft is stated exactly when the knob is set). The graphlet answer then states the
+    seed-level memory_bound_soft the twin does not: W5 makes no claim on that entry."""
+    budget = ((ctx.get("strategy") or {}).get("bounds") or {}).get("max_memory_mb")
+    if budget is None:
+        return None
+    st = d.envelope.get("strategy")
+    if isinstance(st, dict):
+        if (st.get("bounds") or {}).get("max_memory_mb") is not None:
+            return None
+        how = "its strategy has no bounds.max_memory_mb"
+    elif any(isinstance(e, dict) and e.get("knob") == _MEMORY_KNOB for e in d.result.get("limitations") or []):
+        return None
+    else:
+        how = "its result states no memory_bound_soft"
+    return "twin without the memory budget: the graphlet request has bounds.max_memory_mb %s, the full twin none " \
+           "(%s); the memory limitation entries are consistency-only (%s)" % (budget, how, C_MEMORY_TWIN)
+
+
 def _evidence(d: _Doc, sides: Sequence[str]) -> Tuple[dict, Dict[str, str], List[str]]:
     """The evidence block of every local answer (DESIGN §6: complete_to_bp, exact, support, reconverge, scope,
     outcome, limitations), for the arms the answer covers."""
@@ -1012,19 +1051,27 @@ def _graphlet_summary(d: _Doc, args: dict, ctx: dict) -> dict:
 
 def _limitations(d: _Doc, side: Optional[str], ctx: dict) -> dict:
     """detail='limitations': every stated limitation in full, the seed's first, then the left arm's and the right
-    arm's, each in its JSON order (SPEC §7.5.2 K), and the resource stop (SPEC §7.0)."""
+    arm's, each in its JSON order (SPEC §7.5.2 K), and the resource stop (SPEC §7.0).
+    A twin run without the graphlet request's memory budget (_memory_gap) states no memory_bound_soft: the answer
+    holds one seed-level entry more (SPEC §7.0), on which W5 makes no claim (an empty row, consistency-only); since
+    no clause orders seed-level entries, beside other seed-level entries of the twin every seed-level row is one."""
     seed_level = list(d.result.get("limitations") or [])
+    gap = _memory_gap(d, ctx)
     # (the entry's pointer in the result, the row): seed-level entries carry no arm
     src = [("/limitations/%d" % j, dict(e)) for j, e in enumerate(seed_level)] if side is None else []
+    cons_m = []
+    if gap and side is None:
+        src = [(None, {}) for _ in range(len(seed_level) + 1)]
+        cons_m = ["/rows/%d/*" % i for i in range(len(src))]
     for s in d.sides:
         if side is None or s == side:
             src += [("/arms/%s/limitations/%d" % (s, j), dict(e, arm=s))
                     for j, e in enumerate(d.arms[s].get("limitations") or [])]
     rows = [r for _, r in src]
     timed = set(_time_measured(d.result))
-    cons_t = []
+    cons_t = list(cons_m)
     for i, (base, row) in enumerate(src):
-        if base + "/observed" in timed:
+        if base is not None and base + "/observed" in timed:
             row.pop("observed", None)
             cons_t.append("/rows/%d/observed" % i)
     rs = d.result.get("resource_stop")
@@ -1035,11 +1082,13 @@ def _limitations(d: _Doc, side: Optional[str], ctx: dict) -> dict:
         cons_t += [t for t in timed if t.startswith("/resource_stop/")]
         clauses = {"/outcome": C_OUTCOME, "/resource_stop/*": c_rs + "; a clock's amounts left out (SPEC §6.8)"}
     ans = {"outcome": d.result["outcome"], "resource_stop": rs, "total": len(rows), "rows": rows}
-    clauses.update({"/total": "SPEC §7.0: every stated limitation (seed level and the arms asked)",
+    clauses.update({"/total": "SPEC §7.0: every stated limitation (seed level and the arms asked)" +
+                              ("; with the memory_bound_soft the twin does not state (%s)" % C_MEMORY_TWIN
+                               if cons_m else ""),
                     "/rows/*/arm": "SPEC §7.5.2 K arm (an arm's entry names its arm)",
                     "/rows/*/*": "SPEC §7.0 limitations: the stated entry (§7.5.2 K: the JSON entry itself)"})
     cons = ["/rows/*/informational", "/next_cursor"] + cons_t
-    if side is not None and seed_level:
+    if side is not None and (seed_level or gap):
         # whether a seed-level entry belongs to an arm's listing is the tool's choice
         ans.pop("total")
         ans["rows"] = []
@@ -1550,11 +1599,20 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
         c_json = "SPEC §7.5.6: the full result is reproduced exactly from the text and its summary (the twin's " \
                  "result, normalised: DESIGN §9 T37, §2.5, SPEC §8.3)"
         timed = ["/json" + t for t in _time_measured(res)]
+        cons_m = []
+        if _memory_gap(d, ctx):
+            # the twin states no memory_bound_soft (it ran without the budget): the seed-level list holds one entry
+            # more, in no order a clause fixes; W5 claims its length only (C_MEMORY_TWIN)
+            res["limitations"] = [{} for _ in range(len(res.get("limitations") or []) + 1)]
+            timed = [t for t in timed if not t.startswith("/json/limitations/")]
+            cons_m = ["/json/limitations/%d/*" % i for i in range(len(res["limitations"]))]
         for t in timed:   # a clock's value: left out of W5's answer, consistency-only (SPEC §6.8)
             parent, key = t.rsplit("/", 1)
             resolve_pointer({"json": res}, parent).pop(key.replace("~1", "/").replace("~0", "~"), None)
         clauses = {}
         for k in res:
+            if k == "limitations" and cons_m:
+                continue
             if k == "arms":
                 for s, arm in res["arms"].items():
                     for ak in arm:
@@ -1568,7 +1626,7 @@ def _graphlet_export(d: _Doc, args: dict, ctx: dict) -> dict:
             if clauses.pop(container, None) is not None:
                 clauses[container + ("/*/*" if container != entry else "/*")] = c_json
         return _record({"json": res}, clauses, cons + ["/records", "/json/timing", "/json/annotation/direct_reads",
-                                                       "/json/annotation/keys_mapped"] + timed)
+                                                       "/json/annotation/keys_mapped"] + timed + cons_m)
     sides = [d.arm(args.get("arm"), required=False)] if args.get("arm") is not None else d.sides
     if args.get("walks") is not None and args.get("arm") is None and len(d.sides) > 1:
         # which walks a list of ids names on two arms is defined by no clause (the library writes records for it)
@@ -2273,12 +2331,17 @@ def answer(tool: str, args_resolved: dict, full_answer: dict, mgt_text: Optional
         return _declared("twin_mismatch", twin)
     d = _Doc(full_answer, mgt_text, ctx.get("seed_index", 0))
     if (args_resolved or {}).get("cursor") is not None:
-        return _cursor_record(d, tool, args_resolved, ctx)
-    try:
-        return _TOOLS[tool](d, args, ctx)
-    except _Refused as e:
-        return _record(None, {}, ["/*"], declared="expected_error", expected_error=e.code,
-                       note="%s (%s)" % (e, e.clause))
+        rec = _cursor_record(d, tool, args_resolved, ctx)
+    else:
+        try:
+            rec = _TOOLS[tool](d, args, ctx)
+        except _Refused as e:
+            rec = _record(None, {}, ["/*"], declared="expected_error", expected_error=e.code,
+                          note="%s (%s)" % (e, e.clause))
+    gap = _memory_gap(d, ctx)
+    if gap:   # every record read from this twin says so (VERIFY-D VD4)
+        rec["oracle"]["inputs"] = list(rec["oracle"].get("inputs") or []) + [gap]
+    return rec
 
 
 # ---------------------------------------------------------------------------------------------- compare properties
@@ -2491,6 +2554,15 @@ def _inputs(run: str, sid: str, repeat: int) -> Tuple[Optional[dict], Optional[s
             with gzip.open(os.path.join(run, rel), "rt", encoding="utf-8") as fh:
                 text = fh.read()
             src["mgt"] = rel + " (W1's document)"
+            # the graphlet request's normalised strategy, for _memory_gap and traverse_continue: the document's J
+            # record is the response envelope (SPEC §7.5.2); W5 reads nothing else of it
+            j = next((x[2:] for x in text.split("\n") if x.startswith("J ")), None)
+            try:
+                st = json.loads(j).get("strategy") if j else None
+            except (ValueError, AttributeError):
+                st = None
+            if isinstance(st, dict):
+                envelope, src["strategy"] = {"strategy": st}, rel + " J (the response envelope's strategy)"
     return full, text, envelope, src
 
 

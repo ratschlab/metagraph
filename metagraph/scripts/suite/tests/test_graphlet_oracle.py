@@ -23,6 +23,10 @@ DATA = os.path.normpath(os.path.join(SUITE, "..", "..", "api", "python", "tests"
 HAND_MADE = {"clipped_merge", "limits"}
 SUBDIRS = ("real/mini_refseq", "real/sra", "real/uhgg", "documents", "documents/budgets", "coords")
 NOT_TWINS = {"real/sra/sra_16s_OK510341__time_tight", "coords/d3_memory_stop"}
+# real pairs of the area G rehearsal 2 (refseq97, 2026-10-19, run 20261019T220627Z): the engine's `detail: graphlet`
+# response body (the direct-local raw answer) and its full twin as v8 sends it, without bounds.max_memory_mb (VD4)
+AREA_G = os.path.join(HERE, "data", "area_g")
+REHEARSAL2 = ("G-cut-c1", "G-merge-c1")
 
 
 def _load(path):
@@ -54,6 +58,13 @@ def doc(name):
     """A documents/ pair: (graphlet response, full response, MGT body)."""
     g = _load(os.path.join(DATA, "documents", name + ".graphlet.json"))
     f = _load(os.path.join(DATA, "documents", name + ".full.json"))
+    return g, f, g["results"][0]["graphlet"]
+
+
+def rehearsal2(sid):
+    """A rehearsal-2 pair (AREA_G): (graphlet response, full twin, MGT body)."""
+    g = _load(os.path.join(AREA_G, "rehearsal2-20261019-%s.graphlet.json.gz" % sid))
+    f = _load(os.path.join(AREA_G, "rehearsal2-20261019-%s.full.json.gz" % sid))
     return g, f, g["results"][0]["graphlet"]
 
 
@@ -1150,6 +1161,152 @@ class RunStep(unittest.TestCase):
             with open(os.path.join(root, "arms", "oracle", "run.json"), encoding="utf-8") as fh:
                 self.assertEqual(json.load(fh)["unreadable_w1_lines"], 2)
             self.assertEqual(O.main(["--run-dir", root, "--force", "--quiet"]), 0)
+
+
+class MemoryBudgetTwin(unittest.TestCase):
+    """VERIFY-D VD4 (decision F-D4): v8 sends the full twin without bounds.max_memory_mb (SPEC §7.1 R21 (4): `full`
+    detail under a memory budget keeps a merge's arrival order), so the graphlet answer states a memory_bound_soft
+    (SPEC §7.0: stated exactly when the knob is set) the twin does not. W5 makes no claim on that entry, checks the
+    rest as before and names the difference in oracle.inputs. On the two real rehearsal-2 pairs."""
+
+    @staticmethod
+    def stated(g, f):
+        """graphlet_summary(detail='limitations') as the graphlet states it: its seed-level entries (the response's
+        summary), then each arm's (left first; the twin walked the same arms: twin pre-check), outcome and stop."""
+        rg = g["results"][0]
+        rows = [dict(e) for e in rg["limitations"]]
+        for s in ("left", "right"):
+            rows += [dict(e, arm=s) for e in (f["results"][0]["arms"].get(s) or {}).get("limitations") or []]
+        return {"outcome": rg["outcome"], "resource_stop": rg.get("resource_stop"), "total": len(rows), "rows": rows}
+
+    def test_the_pairs(self):
+        for sid in REHEARSAL2:
+            g, f, mgt = rehearsal2(sid)
+            self.assertEqual(g["strategy"]["bounds"]["max_memory_mb"], 512)
+            self.assertNotIn("max_memory_mb", f["strategy"]["bounds"])
+            self.assertEqual([(e["kind"], e["knob"]) for e in g["results"][0]["limitations"]],
+                             [("memory_bound_soft", "bounds.max_memory_mb")])
+            self.assertEqual(f["results"][0]["limitations"], [])
+            self.assertIsNone(O.twin_difference(f, mgt), sid)
+
+    def test_limitations(self):
+        for sid in REHEARSAL2:
+            g, f, mgt = rehearsal2(sid)
+            want = self.stated(g, f)
+            self.assertGreater(len(want["rows"]), 2)
+            r = O.answer("graphlet_summary", {"detail": "limitations"}, f, mgt, {"strategy": g["strategy"]})
+            self.assertEqual(O.compare(r, want)["outcome"], "agree", sid)
+            o = r["oracle"]
+            self.assertIn("/rows/0/*", o["consistency_only"])
+            self.assertEqual([p for p in o["checked"] if p.startswith("/rows/0/")], [])
+            self.assertIn("/rows/1/kind", o["checked"])
+            self.assertEqual(o["inputs"][:2], ["full", "mgt"])
+            self.assertTrue(o["inputs"][2].startswith("twin without the memory budget: the graphlet request has "
+                                                      "bounds.max_memory_mb 512"))
+            self.assertIn("R21 (4)", o["inputs"][2])
+            self.assertIn("§6.8", o["inputs"][2])
+            # no claim on the memory entry's values
+            other = copy.deepcopy(want)
+            other["rows"][0].update(observed=9, effect="another statement", limit=1)
+            self.assertEqual(O.compare(r, other)["outcome"], "agree", sid)
+            # the rest is checked as before: each arm row in place, and the total, which counts the entry (§7.0)
+            other = copy.deepcopy(want)
+            other["rows"][1]["observed"] += 1
+            self.assertEqual([d["pointer"] for d in O.compare(r, other)["differences"]], ["/rows/1/observed"])
+            other = copy.deepcopy(want)
+            del other["rows"][0]
+            other["total"] -= 1
+            self.assertEqual(O.compare(r, other)["outcome"], "disagree", sid)
+            other = dict(want, outcome=dict(want["outcome"], walks="complete"))
+            self.assertEqual(O.compare(r, other)["outcome"], "disagree", sid)
+            # without the request's strategy W5 cannot tell (VD4 as measured: the rows shift by the entry)
+            r0 = O.answer("graphlet_summary", {"detail": "limitations"}, f, mgt)
+            self.assertEqual(r0["oracle"]["inputs"], ["full", "mgt"])
+            self.assertEqual(O.compare(r0, want)["outcome"], "disagree", sid)
+            # one arm's listing beside a seed-level entry is the tool's choice, as for a twin stating one
+            ra = O.answer("graphlet_summary", {"detail": "limitations", "arm": "left"}, f, mgt,
+                          {"strategy": g["strategy"]})
+            self.assertIn("/rows/*", ra["oracle"]["consistency_only"])
+            self.assertNotIn("total", ra["answer"])
+            # a twin given as one result, without its envelope: the knob is read off its stated limitations (§7.0)
+            r1 = O.answer("graphlet_summary", {"detail": "limitations"}, f["results"][0], mgt,
+                          {"strategy": g["strategy"]})
+            self.assertIn("its result states no memory_bound_soft", r1["oracle"]["inputs"][2])
+            self.assertEqual(O.compare(r1, want)["outcome"], "agree", sid)
+            # every record read from this twin names the difference
+            w = O.answer("graphlet_walks", {"arm": "right"}, f, mgt, {"strategy": g["strategy"]})
+            self.assertEqual(len(w["oracle"]["inputs"]), 3)
+
+    def test_json_export(self):
+        for sid in REHEARSAL2:
+            g, f, mgt = rehearsal2(sid)
+            j = O.answer("graphlet_export", {"format": "json"}, f, mgt, {"strategy": g["strategy"]})
+            full = copy.deepcopy(f["results"][0])
+            full["limitations"] = copy.deepcopy(g["results"][0]["limitations"])
+            want = {"records": 1, "json": O.normalise_full_result(full)}
+            self.assertEqual(O.compare(j, want)["outcome"], "agree", sid)
+            self.assertIn("/json/limitations/0/*", j["oracle"]["consistency_only"])
+            self.assertNotIn("/json/limitations", j["oracle"]["checked"])
+            self.assertIn("/json/arms/left/limitations", j["oracle"]["checked"])
+            self.assertIn("/json/limitations/1", j["oracle"]["absent"])
+            other = copy.deepcopy(want)
+            other["json"]["limitations"][0]["observed"] = 3
+            self.assertEqual(O.compare(j, other)["outcome"], "agree", sid)
+            other["json"]["limitations"].append({"kind": "scope"})
+            self.assertEqual([d["pointer"] for d in O.compare(j, other)["differences"]], ["/json/limitations/1"])
+            other = copy.deepcopy(want)
+            other["json"]["arms"]["left"]["limitations"] = []
+            self.assertEqual(O.compare(j, other)["outcome"], "disagree", sid)
+            j0 = O.answer("graphlet_export", {"format": "json"}, f, mgt)
+            self.assertEqual(O.compare(j0, want)["outcome"], "disagree", sid)
+
+    def test_twin_with_the_budget(self):
+        """documents/budgets/memory_soft: both executions under max_memory_mb 1 state memory_bound_soft; nothing
+        changes: the entry is checked as the twin states it."""
+        g = _load(os.path.join(DATA, "documents", "budgets", "memory_soft.graphlet.json"))
+        f = _load(os.path.join(DATA, "documents", "budgets", "memory_soft.full.json"))
+        mgt = g["results"][0]["graphlet"]
+        for tool, args in (("graphlet_summary", {"detail": "limitations"}), ("graphlet_export", {"format": "json"})):
+            r = O.answer(tool, args, f, mgt, {"strategy": g["strategy"]})
+            self.assertEqual(r["oracle"]["inputs"], ["full", "mgt"])
+            self.assertEqual(r, O.answer(tool, args, f, mgt))
+        self.assertEqual(r["answer"]["json"]["limitations"][0]["kind"], "memory_bound_soft")
+        self.assertIn("/json/limitations", r["oracle"]["checked"])
+
+    def test_run_step(self):
+        """The run step takes the request's strategy from the engine's response (the raw answer), else from W1's
+        document's J record (SPEC §7.5.2: the response envelope)."""
+        import tempfile
+        g, f, mgt = rehearsal2("G-cut-c1")
+        want = self.stated(g, f)
+        rg = {k: v for k, v in g["results"][0].items() if k != "graphlet"}
+        h, rest = mgt.split("\n", 1)
+        with_j = h + "\nJ " + json.dumps(dict(g, results=[rg]), separators=(",", ":")) + "\n" + rest
+        with tempfile.TemporaryDirectory() as root:
+            for sub in ("raw", "docs"):
+                os.makedirs(os.path.join(root, "arms", "direct-local", sub))
+            os.makedirs(os.path.join(root, "arms", "dl-lib", "docs"))
+            for sid in ("G-raw", "G-doc"):
+                with gzip.open(os.path.join(root, "arms", "direct-local", "docs", "%s.full.json.gz" % sid), "wt",
+                               encoding="utf-8") as fh:
+                    json.dump(f, fh)
+            with gzip.open(os.path.join(root, "arms", "direct-local", "raw", "G-raw.direct-local.0.json.gz"), "wt",
+                           encoding="utf-8") as fh:
+                json.dump({"answer": {"body": g}}, fh)
+            with gzip.open(os.path.join(root, "arms", "dl-lib", "docs", "G-doc.mgt.gz"), "wt", encoding="utf-8") as fh:
+                fh.write(with_j)
+            w1 = [{"scenario": sid, "op": "lims", "tool": "graphlet_summary", "paging_complete": True,
+                   "args_resolved": {"handle": "<handle>", "detail": "limitations", "max_bytes": 2048},
+                   "answer": want, "error": None, "run_id": "R", "way": "W1"} for sid in ("G-raw", "G-doc")]
+            with open(os.path.join(root, "arms", "dl-lib", "graphlet_ops.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write("".join(json.dumps(r) + "\n" for r in w1))
+            with open(O.write_run(root, quiet=True), encoding="utf-8") as fh:
+                lines = {r["scenario"]: r for r in map(json.loads, fh)}
+        for sid, r in zip(("G-raw", "G-doc"), w1):
+            self.assertEqual(O.compare(lines[sid], r)["outcome"], "agree", sid)
+            self.assertTrue(lines[sid]["oracle"]["inputs"][2].startswith("twin without the memory budget"), sid)
+        self.assertNotIn("strategy", lines["G-raw"]["sources"])
+        self.assertIn(" J ", lines["G-doc"]["sources"]["strategy"])
 
 
 class Independence(unittest.TestCase):
