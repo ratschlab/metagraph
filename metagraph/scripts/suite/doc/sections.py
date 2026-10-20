@@ -2789,6 +2789,24 @@ def _argument_changes(prev, cur):
     return out
 
 
+def added_scenarios_text(run, added):
+    """The scenarios a manifest added, by area in the manifest's order (since manifest v8, whose 33 are area G's,
+    the stops' and T-walk-0024's warm-ups): the ids of an area when they read short (at most 60 characters as
+    ranges), its count otherwise, and the chapter that reports it."""
+    by_area, order = {}, []
+    for sid in run.order:
+        if sid in added:
+            area = (run.scenario(sid) or {}).get("area") or sid.split("-")[0]
+            if area not in by_area:
+                order.append(area)
+            by_area.setdefault(area, []).append(sid)
+    out = []
+    for a in order:
+        ids = facts.ids_ranges(by_area[a])
+        out.append("%s (chapter %s)" % (ids if len(ids) <= 60 else "%d scenarios" % len(by_area[a]), a))
+    return "; ".join(out)
+
+
 def since_previous(ctx):
     """I.4's 'Since the previous edition' (the reader review of the v7 document, RV7): computed from the previous
     edition's run given as an input (make_doc --previous, reader.PreviousRun): the scenarios, the manifest's MCP marks
@@ -2808,6 +2826,8 @@ def since_previous(ctx):
     else:
         items.append("%d scenarios against %d (%d added, %d removed); %d executions against %d" % (
             len(c_ids), len(p_ids), len(c_ids - p_ids), len(p_ids - c_ids), len(clines), len(plines)))
+        if (cells._num(cm.get("manifest_version")) or 0) >= 8 and c_ids - p_ids:
+            items[-1] += "; added: %s" % added_scenarios_text(run, c_ids - p_ids)
     # the manifest's MCP marks, scenario by scenario
     removed_level, removed_prop, moved, added = [], {}, [], []
     for sid in run.order:

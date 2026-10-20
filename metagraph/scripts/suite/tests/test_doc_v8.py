@@ -247,7 +247,7 @@ class AreaLineAndGlossaryTest(unittest.TestCase):
 
 class AppendixBAndSinceV8Test(unittest.TestCase):
     """Appendix B's area G part: area G's own by-design table, case by case, with the op calls that name a case and
-    the comparison's evidence (none without a comparison)."""
+    the comparison's evidence (none without a comparison); I.4's added scenarios by area (manifest v8 on)."""
 
     def test_by_design_g_section(self):
         import graphlets
@@ -268,6 +268,15 @@ class AppendixBAndSinceV8Test(unittest.TestCase):
         self.assertIn("not exercised in this run", text)       # the table's other cases
         self.assertEqual(text.count("\\texttt{graphlet."), 4)
         self.assertEqual(graphlets.by_design_g_section(_Stub(run=_Stub(manifest={}, _graphlets=None))), "")
+
+    def test_added_scenarios(self):
+        import sections
+        ids = (["R-warm-%04d" % i for i in range(9, 19)] + ["G-f%d-0001" % i for i in range(19)]
+               + ["S-stop-0001", "S-stop-0002", "S-base-0001", "S-base-0002"])
+        run = _Stub(order=["T-walk-0001"] + ids, scenario=lambda sid: {"area": sid.split("-")[0]})
+        self.assertEqual(sections.added_scenarios_text(run, set(ids)),
+                         "R-warm-0009 to -0018 (chapter R); 19 scenarios (chapter G); S-stop-0001, -0002, "
+                         "S-base-0001, -0002 (chapter S)")
 
 
 class SharedProseV8Test(unittest.TestCase):
