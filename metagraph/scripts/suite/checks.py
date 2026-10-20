@@ -22,6 +22,7 @@ inclusive; resolve runs and traverse intervals 0-based half-open (the SPECs' con
 from __future__ import annotations
 
 import gzip
+import datetime
 import hashlib
 import json
 import math
@@ -4960,6 +4961,333 @@ def check_invariants(sc, ans, a, arm, client=None):
 # scenario was built to test; an execution whose property checks all could not test anything (not exposed on the
 # MCP arm) is inconclusive even when its generic checks pass (scenario_outcome). A scenario with no property check
 # (a refusal: its status, code and text are the claim) is judged by its generic checks.
+
+# ---------------------------------------------------------------------------------------------- stop flows
+# The stop scenarios' property checks (manifest v8, behind --stop-scenarios; lane D's proposal (a)) over the record
+# async's MCP runner writes for an mcp.flow of kind "stop" (scripts/bench/suite_stop_flow.py: the answer's body
+# {"stop_flow": ...}; the flow records, the suite judges) and the token release record of the admin job read
+# (GET /admin/traversal/jobs/{id}: each attempt's `release`, async's feat/stop-release-record, RELEASE-RECORD.md of
+# 2026-10-20). Registered in CHECKS:
+#
+#   stop_answer    traverse_stop's answer states what args expect (running, cancel_supported, cancel, bound_seconds_gt);
+#   job_terminal   the job ends with a status in args.status_in, within the stop's bound_seconds (+ margin_s);
+#   attempt_state  every attempt row settled, on the server instance it was reserved for;
+#   token_release  each attempt's release record as the stop's route allows:
+#                  /traverse: reason finished (site stop, released), tombstone (released: the switch on), or with the
+#                    switch off and a covering tombstone reason lease / decision would_release / detail
+#                    tombstone_would_release_ok; a normal end (completed), the sweep (swept) or evidence after the lease
+#                    (decision after_lease); any other hold only with a detail that fits the stop's evidence (STOP_HOLD_FITS);
+#                  /resolve: reason grace, detail grace_<N>s (grace_0), at = the connection's close + N s (the close: the
+#                    stop's answer, within the worker's poll; +- grace_margin_s), or reason lease / decision held / detail
+#                    grace_capped when the lease ends first (at = lease_until); completed (the resolve ended first);
+#                  every release no later than the token's lease: lease_until + lease_margin_s (async's caveat 1: on a
+#                    contract host the Redis token may outlive the row's lease by max(TRAVERSAL_STOP_CONFIRM_S, the HTTP
+#                    phase margin)), or dispatched_at + token_lease_ms where the row states it; decision error fails.
+# Outcomes: a job that ended before the stop (the flow's race, or a terminal time before the stop) is inconclusive on
+# every check (recorded; the flow's delay_s keeps it rare); a null release on a terminal job is inconclusive (async's
+# caveats 2-4: no attempt row before a claim, an RQ job-timeout path, a later sweep), never a fail; a deploy whose rows
+# state no release (older than the release lane) is inconclusive; the direct arms (which send the base request) are
+# not exposed.
+STOP_FLOW_CHECKS = ("stop_answer", "job_terminal", "attempt_state", "token_release")
+
+# async's settings (app/settings.py): TRAVERSAL_STOP_CONFIRM_S 30; the HTTP phase margin connect 10 + write 10 + pool 5
+STOP_CONFIRM_S = 30.0
+STOP_HTTP_PHASE_MARGIN_S = 25.0
+STOP_LEASE_MARGIN_S = max(STOP_CONFIRM_S, STOP_HTTP_PHASE_MARGIN_S)
+RESOLVE_STOP_GRACE_S = 20.0        # TRAVERSAL_RESOLVE_STOP_GRACE_S
+STOP_GRACE_MARGIN_S = 5.0               # the worker closes the connection within its stop poll; the clocks
+STOP_TERMINAL_MARGIN_S = 5.0            # job_terminal: the stop's bound plus this
+STOP_TRAVERSE_TOOLS = ("traverse_fetch",)
+STOP_RESOLVE_TOOLS = ("traverse_resolve",)
+
+
+
+def _sf_utc(value):
+    """A datetime (UTC) of an ISO 8601 text ("Z" or an offset), None when it is not one."""
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt
+
+
+def _sf_num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _sf_record(body):
+    rec = body.get("stop_flow") if isinstance(body, dict) else None
+    if not isinstance(rec, dict):
+        raise Missing("stop_flow")
+    return rec
+
+
+def stop_flow_race(rec):
+    """Why the execution cannot test the stop (the job ended before it), else None."""
+    if rec.get("race"):
+        return "race %s: the job ended before the stop (recorded; the flow's delay_s keeps it rare)" % rec["race"]
+    stop = rec.get("stop") or {}
+    answer = stop.get("answer") if isinstance(stop.get("answer"), dict) else {}
+    sent = _sf_utc(stop.get("sent_utc"))
+    fin = _sf_utc((rec.get("terminal") or {}).get("finished_at"))
+    if sent and fin and fin < sent:
+        return "the job finished at %s, before the stop was sent at %s (a race)" % (
+            (rec.get("terminal") or {}).get("finished_at"), stop.get("sent_utc"))
+    if answer.get("error") in ("already_terminal",) or stop.get("error") == "already_terminal":
+        return "the stop found the job terminal (a race)"
+    return None
+
+
+def _sf_route(rec, scenario):
+    tool = rec.get("tool") or ((scenario or {}).get("mcp") or {}).get("tool")
+    return "resolve" if tool in STOP_RESOLVE_TOOLS else "traverse"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+def _sf_stop_answer(rec, args, scenario):
+    stop = rec.get("stop")
+    if not isinstance(stop, dict):
+        return INCONCLUSIVE, "no stop was sent: %s" % (rec.get("error") or "the flow ended before it")
+    if stop.get("error"):
+        return FAIL, "traverse_stop answered error %s" % stop["error"]
+    ans = stop.get("answer")
+    if not isinstance(ans, dict):
+        return FAIL, "traverse_stop's answer is not an object"
+    bad = []
+    for key, want in sorted(args.items()):
+        if key.endswith("_gt"):
+            got = _sf_num(ans.get(key[:-3]))
+            if got is None or not got > want:
+                bad.append("%s %r, expected > %r" % (key[:-3], ans.get(key[:-3]), want))
+        elif ans.get(key) != want:
+            bad.append("%s %r, expected %r" % (key, ans.get(key), want))
+    if bad:
+        return FAIL, "; ".join(bad)
+    return PASS, "traverse_stop: %s" % ", ".join("%s %r" % (k, ans.get(k[:-3] if k.endswith("_gt") else k))
+                                                for k in sorted(args))
+
+
+def _sf_job_terminal(rec, args, scenario):
+    term = rec.get("terminal")
+    if not isinstance(term, dict):
+        return (INCONCLUSIVE if rec.get("error") else FAIL), "no terminal read%s" % (
+            ": %s" % rec["error"] if rec.get("error") else " after the stop")
+    status = term.get("status")
+    want = args.get("status_in")
+    if want and status not in want:
+        return FAIL, "status %r, expected one of %s" % (status, want)
+    detail = "status %s" % status
+    if args.get("within_bound_seconds"):
+        stop = rec.get("stop") or {}
+        bound = _sf_num((stop.get("answer") or {}).get("bound_seconds"))
+        answered = _sf_utc(stop.get("answered_utc"))
+        end = _sf_utc(term.get("finished_at")) or _sf_utc(term.get("utc"))
+        if bound is None or answered is None or end is None:
+            return INCONCLUSIVE, "%s; the stop's bound or the end time not stated" % detail
+        late = (end - answered).total_seconds() - bound
+        margin = float(args.get("margin_s", STOP_TERMINAL_MARGIN_S))
+        if late > margin:
+            return FAIL, "%s %.1f s after the stop answered, its bound %d s (+%g s)" % (
+                detail, (end - answered).total_seconds(), bound, margin)
+        detail += ", %.1f s after the stop answered (bound %d s)" % ((end - answered).total_seconds(), bound)
+    return PASS, detail
+
+
+def _sf_attempts(rec):
+    if rec.get("admin") != "read":
+        return None, "the admin job record was not read (%s)" % (rec.get("admin") or "no admin key")
+    atts = rec.get("attempts")
+    if not isinstance(atts, list) or not atts:
+        return None, "no attempt row (nothing is recorded before a claim)"
+    return atts, None
+
+
+def _sf_attempt_state(rec, args, scenario):
+    atts, why = _sf_attempts(rec)
+    if atts is None:
+        return INCONCLUSIVE, why
+    bad, seen = [], []
+    for a in atts:
+        aid = a.get("attempt_id")
+        if args.get("settled", True) and not a.get("settled_at"):
+            bad.append("attempt %s not settled" % aid)
+        exp, got = a.get("expect_server_instance"), a.get("server_instance")
+        if args.get("same_instance") and exp and got and exp != got:
+            bad.append("attempt %s ran on %s, reserved for %s" % (aid, got, exp))
+        seen.append("%s %s" % (aid, a.get("settled_by")))
+    running = (rec.get("running_seen") or {}).get("attempt_id")
+    if running and running not in [a.get("attempt_id") for a in atts]:
+        bad.append("the attempt seen running (%s) is not among the rows" % running)
+    if bad:
+        return FAIL, "; ".join(bad)
+    return PASS, "settled: %s" % ", ".join(seen)
+
+
+# a hold (reason lease, decision held) is acceptable on a /traverse stop only when its detail fits the evidence
+def _sf_running_at_stop(rec, a):
+    ans = ((rec.get("stop") or {}).get("answer")) or {}
+    settled = _sf_utc(a.get("settled_at"))
+    sent = _sf_utc((rec.get("stop") or {}).get("sent_utc"))
+    return (_sf_num(ans.get("running")) or 0) >= 1 and not (settled and sent and settled < sent)
+
+
+STOP_HOLD_FITS = {
+    "stopping": ("the attempt was running when the stop came", _sf_running_at_stop),
+    "switch_off": ("the attempt was running when the stop came (no release on a tombstone with the switch off)",
+                   _sf_running_at_stop),
+    "lease_passed": ("the release is at or after the lease",
+                     lambda rec, a: _sf_after(a.get("release", {}).get("at"), a.get("lease_until"), -1.0)),
+    "no_answer": ("the attempt states no answer of its host",
+                  lambda rec, a: a.get("http_status") is None or bool(a.get("error_class"))),
+    "no_attempt_contract": ("the attempt states no contract bound",
+                            lambda rec, a: a.get("bound_ms") is None and a.get("not_after_ms") is None),
+}
+
+
+def _sf_after(x, y, slack_s=0.0):
+    tx, ty = _sf_utc(x), _sf_utc(y)
+    return bool(tx and ty and (tx - ty).total_seconds() >= slack_s)
+
+
+def _sf_lease_bound(a, args):
+    """(the latest release time the token's lease allows, how it was read) of an attempt row."""
+    tl = _sf_num(a.get("token_lease_ms"))
+    disp = _sf_utc(a.get("dispatched_at"))
+    if tl is not None and disp is not None:
+        return disp + datetime.timedelta(milliseconds=tl), "dispatched_at + token_lease_ms %d" % tl
+    lease = _sf_utc(a.get("lease_until"))
+    if lease is None:
+        return None, "no lease stated"
+    margin = float(args.get("lease_margin_s", STOP_LEASE_MARGIN_S))
+    return lease + datetime.timedelta(seconds=margin), "lease_until + %g s" % margin
+
+
+def _sf_judge_traverse(rec, a, rel):
+    reason, decision, detail = rel.get("reason"), rel.get("decision"), rel.get("detail")
+    if reason == "finished" and decision == "released":
+        return PASS, "finished (site %s)" % rel.get("site")
+    if reason == "tombstone" and decision == "released":
+        return PASS, "tombstone (site %s, the switch on)" % rel.get("site")
+    if reason == "lease" and decision == "would_release" and detail == "tombstone_would_release_ok":
+        return PASS, "lease: would_release on a covering tombstone (the switch off)"
+    if reason == "lease" and decision == "after_lease":
+        return PASS, "lease: evidence after the lease (%s)" % detail
+    if reason == "completed":
+        return PASS, "completed (site %s, %s): the attempt ended" % (rel.get("site"), detail)
+    if reason == "swept" and decision == "released":
+        return PASS, "swept (%s)" % detail
+    if reason == "lease" and decision == "held":
+        fit = STOP_HOLD_FITS.get(str(detail))
+        if fit and fit[1](rec, dict(a, release=rel)):
+            return PASS, "held (%s): %s" % (detail, fit[0])
+        return FAIL, "held with detail %r, which does not fit the stop's evidence%s" % (
+            detail, " (%s)" % fit[0] if fit else "")
+    return FAIL, "reason %r decision %r detail %r on a /traverse stop" % (reason, decision, detail)
+
+
+def _sf_judge_resolve(rec, a, rel, args):
+    reason, decision, detail = rel.get("reason"), rel.get("decision"), rel.get("detail")
+    grace = float(args.get("grace_s", RESOLVE_STOP_GRACE_S))
+    margin = float(args.get("grace_margin_s", STOP_GRACE_MARGIN_S))
+    stop = rec.get("stop") or {}
+    lo, hi = _sf_utc(stop.get("sent_utc")), _sf_utc(stop.get("answered_utc")) or _sf_utc(stop.get("sent_utc"))
+    at = _sf_utc(rel.get("at"))
+    if reason == "grace":
+        want = "grace_%gs" % grace if grace > 0 else "grace_0"
+        if detail != want:
+            return FAIL, "grace detail %r, expected %r" % (detail, want)
+        if at is None or lo is None:
+            return INCONCLUSIVE, "grace: its time or the stop's not stated"
+        early = (lo + datetime.timedelta(seconds=grace - margin) - at).total_seconds()
+        late = (at - (hi + datetime.timedelta(seconds=grace + margin))).total_seconds()
+        if early > 0 or late > 0:
+            return FAIL, "grace released at %s, expected the close + %g s (+- %g s; the stop %s .. %s)" % (
+                rel.get("at"), grace, margin, stop.get("sent_utc"), stop.get("answered_utc"))
+        return PASS, "grace %s, %.1f s after the stop answered" % (detail, (at - hi).total_seconds())
+    if reason == "lease" and decision == "held" and detail == "grace_capped":
+        lease = _sf_utc(a.get("lease_until"))
+        if lease is None or at is None or hi is None:
+            return INCONCLUSIVE, "grace_capped: the lease or the release time not stated"
+        if abs((at - lease).total_seconds()) > margin:
+            return FAIL, "grace_capped at %s, the lease ends %s" % (rel.get("at"), a.get("lease_until"))
+        if lease > hi + datetime.timedelta(seconds=grace + margin):
+            return FAIL, "grace_capped although the lease (%s) ends after the close + %g s" % (a.get("lease_until"),
+                                                                                              grace)
+        return PASS, "grace_capped: the lease ended first (%s)" % a.get("lease_until")
+    if reason == "completed":
+        return PASS, "completed (%s): the resolve ended first" % detail
+    if reason == "swept" and decision == "released":
+        return PASS, "swept (%s)" % detail
+    return FAIL, "reason %r decision %r detail %r on a /resolve stop (expected grace)" % (reason, decision, detail)
+
+
+def _sf_token_release(rec, args, scenario):
+    atts, why = _sf_attempts(rec)
+    if atts is None:
+        return INCONCLUSIVE, why
+    route = args.get("route") or _sf_route(rec, scenario)
+    terminal = isinstance(rec.get("terminal"), dict)
+    fails, unknown, ok = [], [], []
+    for a in atts:
+        aid = a.get("attempt_id")
+        if a.get("release_stated") is False:
+            unknown.append("attempt %s: no release key (a deploy older than the release record)" % aid)
+            continue
+        rel = a.get("release")
+        if rel is None:
+            unknown.append("attempt %s: release null%s" % (aid, " on a terminal job (no claim, an RQ job-timeout "
+                                                                  "path or a later sweep)" if terminal else ""))
+            continue
+        if not isinstance(rel, dict):
+            fails.append("attempt %s: release %r is not an object" % (aid, rel))
+            continue
+        if rel.get("decision") == "error":
+            fails.append("attempt %s: the release failed (%s)" % (aid, rel.get("detail")))
+            continue
+        bound, how = _sf_lease_bound(a, args)
+        at = _sf_utc(rel.get("at"))
+        if bound is not None and at is not None and at > bound:
+            fails.append("attempt %s: released at %s, after the token's lease (%s: %s)" % (
+                aid, rel.get("at"), how, bound.isoformat()))
+            continue
+        outcome, detail = (_sf_judge_resolve(rec, a, rel, args) if route == "resolve" else
+                           _sf_judge_traverse(rec, a, rel))
+        {"pass": ok, "fail": fails, "inconclusive": unknown}[outcome].append("attempt %s: %s" % (aid, detail))
+    if fails:
+        return FAIL, "; ".join(fails + unknown)
+    if unknown:
+        return INCONCLUSIVE, "; ".join(unknown + ok)
+    return PASS, "; ".join(ok)
+
+
+_SF_JUDGES = {"stop_answer": _sf_stop_answer, "job_terminal": _sf_job_terminal, "attempt_state": _sf_attempt_state,
+          "token_release": _sf_token_release}
+
+
+def stop_flow_judge(name, scenario, body, args, arm):
+    """(outcome, detail) of check |name| on an execution's answer body; Missing when the MCP answer has none."""
+    if arm != "mcp":
+        return NOT_EXPOSED, "the stop flow runs on the MCP arm only (the direct arms send the base request)"
+    rec = _sf_record(body)
+    race = stop_flow_race(rec)
+    if race:
+        return INCONCLUSIVE, race
+    return _SF_JUDGES[name](rec, args or {}, scenario)
+
+
+def _stop_flow_check(name: str) -> Callable:
+    def check(sc, ans, a, arm):
+        return stop_flow_judge(name, sc, _body(ans) if arm == "mcp" else ans.get("body"), a, arm)
+    check.__name__ = "check_" + name
+    return check
+
 GENERIC_CHECKS = frozenset({"status", "invariants", "counts_consistent", "budget_respected"})
 
 
@@ -5014,7 +5342,13 @@ CHECKS: Dict[str, Callable] = {
     "paths_end": check_paths_end,
     "label_dict_contains": check_label_dict_contains,
     "trace_coordinates": check_trace_coordinates,
+    # the stop scenarios (manifest v8, --stop-scenarios): the MCP arm's stop_flow record
+    "stop_answer": _stop_flow_check("stop_answer"),
+    "job_terminal": _stop_flow_check("job_terminal"),
+    "attempt_state": _stop_flow_check("attempt_state"),
+    "token_release": _stop_flow_check("token_release"),
 }
+
 
 
 # ---------------------------------------------------------------------------------------------- relations
@@ -5280,6 +5614,11 @@ CHECK_ARGS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
     "paths_end": (("reasons_in",), ("seed", "max_bp")),
     "label_dict_contains": (("name",), ("seed", "kind", "only_kind")),
     "trace_coordinates": ((), ("seed",)),
+    # the stop scenarios (stop flows): over the MCP arm's stop_flow record
+    "stop_answer": ((), ("running", "cancel_supported", "cancel", "bound_seconds_gt")),
+    "job_terminal": (("status_in",), ("within_bound_seconds", "margin_s")),
+    "attempt_state": ((), ("settled", "same_instance")),
+    "token_release": (("route",), ("grace_s", "grace_margin_s", "lease_margin_s")),
 }
 
 

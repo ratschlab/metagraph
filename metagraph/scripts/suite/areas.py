@@ -2561,6 +2561,25 @@ STOP_FLOW_DELAY_S = 2.0
 STOP_IDS = ("S-stop-0001", "S-stop-0002")
 
 
+# The stop checks (checks.py, stop flows) over the MCP arm's stop_flow record; the direct arms (the base request) do
+# not expose them. A /traverse stop: one running attempt cancelled (cancel_supported), the job done or stopped within
+# the stop's bound, the token released on evidence (finished / tombstone / would_release) or a hold that fits it. A
+# /resolve stop: the worker closes the connection (cancel "disconnect", cancel_supported true on staging since the
+# release lane), the token held 20 s after the close (grace_20s) or until the lease when that ends first.
+STOP_CHECKS_TRAVERSE = [
+    ex("stop_answer", running=1, cancel_supported=True, bound_seconds_gt=0),
+    ex("job_terminal", status_in=["done", "stopped"], within_bound_seconds=True),
+    ex("attempt_state", settled=True, same_instance=True),
+    ex("token_release", route="traverse"),
+]
+STOP_CHECKS_RESOLVE = [
+    ex("stop_answer", running=1, cancel_supported=True, cancel="disconnect"),
+    ex("job_terminal", status_in=["done", "stopped"]),
+    ex("attempt_state", settled=True),
+    ex("token_release", route="resolve", grace_s=20),
+]
+
+
 def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
     """The two stop scenarios (STOP_IDS), appended after every other area (no index moves): S-stop-0001 stops a
     running walk (area G's long_walk.2 seed, a 6.6 kbp mpn seed with a 10 kbp arm, whose cold engine time was 13.1 s
@@ -2577,20 +2596,15 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
         req = {"seeds": [copy.deepcopy(walk["seed"])], "strategy": area_g.candidate_strategy(walk)}
         req["strategy"]["output"]["detail"] = "full"
         mcp = mcp_traverse(req)
+        # the flow records (async's suite_stop_flow.py: FLOW_KEYS only, no expectations); the suite judges the record
+        # with the stop checks below (checks.py, stop flows: RELEASE-RECORD.md of 2026-10-20)
         mcp["flow"] = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
-                       "observe": ["stop_answer", "job_state", "attempt_state", "token_release"],
-                       "expect": {"stop_answer": {"running": 1, "cancel_supported": True, "bound_seconds_gt": 0},
-                                  "job_state": {"status_in": ["done", "stopped"], "terminal": True,
-                                                "within_bound_seconds": True},
-                                  "attempt_state": {"state_in": ["cancelled", "finished"], "same_instance": True},
-                                  "token_release": {"not_before": "the host's evidence (tombstone or finished)",
-                                                    "not_after": "the lease"},
-                                  "race": "the job ended before the stop (already_terminal): inconclusive"}}
+                       "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
         t = dict(walk["truth"], stop_flow="lane D's proposal (a): traverse_stop on a running /traverse")
         out.append(scenario(STOP_IDS[0], "S", "traverse_stop via MCP on a running walk (a 6.6 kbp mpn seed, 10 kbp "
                             "right arm): the stop's answer, the job's end, the host attempt, the token's release",
                             "POST /traverse", req, t,
-                            [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"])],
+                            [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"])] + STOP_CHECKS_TRAVERSE,
                             timing_class="slow", tags=["stop", "mcp-flow", "walk"], mcp=mcp))
     src = next((x for x in built if x.get("id") == "T-labels-0003"), None)
     t = (src or {}).get("truth") or {}
@@ -2604,17 +2618,13 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
     mcp = mcp_resolve(req)
     if "tool" in mcp:
         mcp["flow"] = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
-                       "observe": ["stop_answer", "job_state", "token_release"],
-                       "expect": {"stop_answer": {"cancel_supported": False},
-                                  "job_state": {"status_in": ["done", "stopped"], "terminal": True},
-                                  "token_release": {"grace_s_max": 25, "not_after": "the lease"},
-                                  "race": "the resolve answered inline or ended before the stop: inconclusive"}}
+                       "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
     tr = {"record": t.get("record"), "genome": t.get("genome"), "start": fs + a, "length": len(query),
           "window": query, "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve"}
     out.append(scenario(STOP_IDS[1], "S", "traverse_stop via MCP on a running discovery (500 bp of eco, header "
                         "kind, 1,000 labels): the stop's answer, the job's end, the token's release after its grace",
-                        "POST /resolve", req, tr, [OK, INV], timing_class="slow",
-                        tags=["stop", "mcp-flow", "resolve"], mcp=mcp))
+                        "POST /resolve", req, tr, [OK, INV, ex("answer_fields", present=["labels"])] +
+                        STOP_CHECKS_RESOLVE, timing_class="slow", tags=["stop", "mcp-flow", "resolve"], mcp=mcp))
     return out
 
 

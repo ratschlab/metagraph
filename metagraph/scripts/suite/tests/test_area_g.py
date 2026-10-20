@@ -614,11 +614,19 @@ class StopScenarios(unittest.TestCase):
         self.assertEqual(walk["route"], "POST /traverse")
         self.assertEqual(walk["mcp"]["tool"], "traverse_fetch")
         self.assertEqual(walk["mcp"]["flow"]["kind"], "stop")
-        self.assertTrue(walk["mcp"]["flow"]["expect"]["stop_answer"]["cancel_supported"])
+        flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # async's FLOW_KEYS
+        for s in out:
+            self.assertLessEqual(set(s["mcp"]["flow"]), flow_keys, s["id"])
+            names = [e["check"] for e in s["expect"]]
+            stop_checks = ["stop_answer", "job_terminal", "attempt_state", "token_release"]
+            self.assertEqual([n for n in names if n in stop_checks], stop_checks)
+        sa = dict((e["check"], e["args"]) for e in walk["expect"])["stop_answer"]
+        self.assertTrue(sa["cancel_supported"])
         self.assertEqual(len(walk["request"]["seeds"][0]["sequence"]), 6600)
         self.assertEqual(res["route"], "POST /resolve")
         self.assertEqual(res["mcp"]["tool"], "traverse_resolve")
-        self.assertFalse(res["mcp"]["flow"]["expect"]["stop_answer"]["cancel_supported"])
+        sa = dict((e["check"], e["args"]) for e in res["expect"])["stop_answer"]
+        self.assertEqual((sa["cancel_supported"], sa["cancel"]), (True, "disconnect"))
         self.assertEqual(len(res["request"]["sequence"]), 500)
         self.assertEqual(bm.validate(out), [])
 
