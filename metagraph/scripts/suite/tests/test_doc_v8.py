@@ -284,6 +284,11 @@ class ChapterGReadingV8Test(unittest.TestCase):
     outside the five-way comparison, as the summary's op counts are), quoted messages read with typographic quotes,
     and I.1's map asks chapters G's and S's questions."""
 
+    def test_chapter_map(self):
+        cm = dict((e["chapter"], e["question"]) for e in prose("overview")["sections"]["decision"]["chapter_map"])
+        self.assertIn("graphlet tools answer alike", cm["G"])
+        self.assertIn("traverse_stop", cm["S"])
+
     def test_r_warm_v8(self):
         import facts
         r = prose("R")

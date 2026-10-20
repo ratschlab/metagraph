@@ -4744,7 +4744,9 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("*The result units.*", decision["paragraphs"][1])
         self.assertIn("*Two ways in.*", decision["paragraphs"][2])
         self.assertTrue(decision["paragraphs"][3].startswith("*Scope.*"))
-        self.assertEqual([e["chapter"] for e in decision["chapter_map"]], ["R", "T", "P", "L", "X", "M", "Q", "C", "N", "D"])
+        # G and S since manifest v8 (a v5 to v7 build's units have neither chapter, so its map is as it was)
+        self.assertEqual([e["chapter"] for e in decision["chapter_map"]],
+                         ["R", "T", "P", "L", "X", "M", "Q", "C", "N", "D", "G", "S"])
         ctx = self.ctx(overview=self.overview)
         table = sections.chapter_map_table(ctx)
         self.assertIn("where to look: the chapters by the question they answer", table)

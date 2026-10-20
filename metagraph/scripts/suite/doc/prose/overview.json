@@ -155,7 +155,9 @@
     {"chapter": "Q", "question": "Can a search be restricted by a predicate over the labels (a taxon, a motif), and does the filtered answer claim only what it may?"},
     {"chapter": "C", "question": "Do the capabilities documents and the HTTP protocol (encodings, methods, bodies) behave as the contract states?"},
     {"chapter": "N", "question": "Is an absent sequence reported absent (random, shuffled, reverse-complemented and near-miss variants), and do hard cases (repeats, low complexity, long queries, tight budgets) end as the SPEC says?"},
-    {"chapter": "D", "question": "Does the same request answer the same bytes on repeat, on every access path?"}
+    {"chapter": "D", "question": "Does the same request answer the same bytes on repeat, on every access path?"},
+    {"chapter": "G", "question": "Do the graphlet tools answer alike on every way that runs them (the service's tools on its stored body, the library on each access path's document), and does the suite's own reading of the walks agree where it can check?"},
+    {"chapter": "S", "question": "Does traverse_stop end a running walk or discovery, the job stopped and every host attempt's token released, as the service's own record states?"}
    ],
    "verdict": [
     "{gate_decision} The two lines answer different questions. The run verdict says whether the host and the service answered as the SPECs and the by-design table say, over every scenario of the run, counting what could not be tested apart; beside a gate it is exploratory. The deploy gate asks whether every required property was shown on the gated access paths and reads not shown as not passed (the rules in appendix F), so a finding or an inconclusive execution the policy requires on that access path and repeat fails it[[gate_judged ?; appendix F states, per group, the evidence that would clear its problems]]."
