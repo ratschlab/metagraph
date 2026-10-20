@@ -117,6 +117,32 @@ class W3Headroom(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class RichSet(unittest.TestCase):
+    """VERIFY-D-R2 R2-5 (the coordinator, round 5): one rich graphlet per seed; the committed corpus's rich set."""
+
+    def test_one_rich_graphlet_per_seed(self):
+        import rehearse_g
+        cands = dict((c["cid"], c) for c in area_g.candidates(FakeCtx(), v7_scenarios()))
+        meta, results, scen = {}, {}, {}
+        for cid, segs in (("merges.1", 51), ("cut_lists.1", 51), ("two_arms.1", 27), ("one_arm.1", 9),
+                          ("linear.1", 1)):
+            sid = "x-" + cid
+            meta[sid] = {"cid": cid, "slot": cands[cid]["slot"], "candidate": cands[cid]}
+            results[sid] = {"verdicts": {"bodies": "pass"}, "passed": True, "times_ms": {}, "bodies": {},
+                            "facts": {"arms": ["left"], "segments": {"left": segs}, "walks": {"left": 1},
+                                      "merges": {"left": 0}, "bases": True, "cut_lists": False, "label_names": [],
+                                      "max_labels_per_node": 1, "walk_bp": {"left": [100]}, "body_bytes": 1000}}
+            scen[sid] = {}
+        corpus = rehearse_g.choose_corpus(results, meta, scen, None)
+        self.assertEqual(corpus["rich"], ["merges", "two_arms", "one_arm"])   # cut_lists.1: merges.1's seed
+
+    def test_the_committed_corpus(self):
+        import build_manifest as bm
+        c = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        self.assertEqual(c["rich"], ["merges", "two_arms", "long_walk"])
+        self.assertIn("one rich graphlet per seed", c["rich_note"])
+
+
 class StopRehearsal(unittest.TestCase):
     """The stop rehearsal (rehearsal 3, VERIFY-D VD6): each stop scenario three times, interleaved, MCP only; the
     constrain / annotate partner (VD8) direct-local; the entry verdict over recorded stop_flow records."""

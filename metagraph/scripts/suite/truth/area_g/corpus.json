@@ -7427,9 +7427,10 @@
  },
  "rich": [
   "merges",
-  "cut_lists",
-  "two_arms"
+  "two_arms",
+  "long_walk"
  ],
+ "rich_note": "the coordinator, 2026-10-20 (VERIFY-D-R2 R2-5): one rich graphlet per seed; merges.1 and cut_lists.1 are one seed and graph, so cut_lists.1 leaves the rich set; two_arms.1 (7 walks, 27 segments, 5 merges, cut lists) stays; the third is long_walk.4 (its 16.6 kbp walk: the long walk's paging)",
  "slots": {
   "annotate": {
    "candidate": "annotate.1",

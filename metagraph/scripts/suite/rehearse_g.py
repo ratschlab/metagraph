@@ -1316,7 +1316,7 @@ def built_plan_check(out: str, corpus: dict, meta: Dict[str, dict], results: Dic
     recs = shadow_run({"scenarios": scen}, [x["id"] for x in scen], combo, library_root,
                       os.path.join(out, "shadow", "built"))
     back = dict((r, b) for b, r in rename.items() if r)
-    problems, unpaged, compares = {}, {}, {}
+    problems, unpaged, compares, unfit = {}, {}, {}, {}
     for x in scen:
         for o in x["graphlet"]["ops"]:
             r = recs.get((x["id"], o["id"]))
@@ -1331,8 +1331,11 @@ def built_plan_check(out: str, corpus: dict, meta: Dict[str, dict], results: Dic
         once = [o["id"] for o in x["graphlet"]["ops"] if _paged_once(o, recs.get((x["id"], o["id"])))]
         if once:
             unpaged[back[x["id"]]] = once
+        fit = fit_problems(x, recs)   # W3's whole-list calls at 262,144 must stay uncut
+        if fit:
+            unfit[back[x["id"]]] = fit
     return {"checked": len(scen), "ops": sum(len(x["graphlet"]["ops"]) for x in scen), "problems": problems,
-            "unpaged": unpaged, "not_rehearsed": absent, "compares": compares,
+            "unpaged": unpaged, "unfit": unfit, "not_rehearsed": absent, "compares": compares,
             "skipped_ops": dict((back[k], v) for k, v in skipped.items())}
 
 
@@ -1477,9 +1480,16 @@ def choose_corpus(results: Dict, meta: Dict, scen: Dict, library_commit: Optiona
     chosen = [(slot, slots[slot]["candidate"]) for slot in slots if slots[slot]["candidate"]]
     direct_only = set(m["cid"] for m in meta.values() if not area_g.expressible(m["candidate"]))
     # the richest: most segments, the graphlets the MCP can express first (a direct-only one enters the corpus only
-    # with the owner's decision)
-    rich = sorted(chosen, key=lambda x: (x[1] in direct_only,
-                                         -sum((cands[x[1]]["facts"].get("segments") or {}).values())))
+    # with the owner's decision), one per seed (VERIFY-D-R2 R2-5: merges.1 and cut_lists.1 are one seed and graph)
+    ranked = sorted(chosen, key=lambda x: (x[1] in direct_only,
+                                           -sum((cands[x[1]]["facts"].get("segments") or {}).values())))
+    rich, seeds = [], set()
+    for slot, cid in ranked:
+        seed = (meta[by_cid[cid]]["candidate"].get("seed") or {}).get("sequence")
+        if seed in seeds:
+            continue
+        seeds.add(seed)
+        rich.append((slot, cid))
     rich = rich[:area_g.RICHEST]
     return {"version": 1, "provisional": False,
             "rehearsal": {"utc": utc_now()},
