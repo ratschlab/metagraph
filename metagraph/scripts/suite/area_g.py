@@ -34,8 +34,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
+import suite_common as sc
 from manifest_lib import (TRACE_PRESET, TRIE_PRESET, WALK_PRESET, deep_merge, mcp_traverse, scenario,
                           traverse_request)
 
@@ -1422,6 +1424,22 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
     return problems, sorted(set(pending))
 
 
+# An op's raw pages are raw/<scenario>.<op>.<page>.json.gz in its way's directory, and W3's way directory is the MCP
+# arm's (arms/mcp), whose execution record is raw/<scenario>.mcp.<repeat>.json.gz (suite_common.raw_name): an op
+# named after an arm would overwrite it (async's runner exits 4 on such a plan, 2026-10-20). Op ids keep to the
+# characters a raw name keeps (suite_common.raw_name / run_graphlet_local.safe), so no two ops share a page name.
+OP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def op_id_problems(oid: Any) -> List[str]:
+    if not isinstance(oid, str) or not OP_ID.match(oid):
+        return ["op id %r: letters, digits, '.', '_' and '-' only (its raw page names)" % (oid,)]
+    if oid in sc.ARMS:
+        return ["op id %r is an arm's name: its raw pages would collide with the execution's raw record "
+                "(raw/<scenario>.%s.<repeat>.json.gz)" % (oid, oid)]
+    return []
+
+
 def op_problems(o: dict, g: dict, ids: set, before: set) -> List[str]:
     """What is wrong with one op: its tool and arguments for the ways it runs (the service's arguments all named on
     an op W3 runs, no library-only argument there; a library-only tool or argument without W3 and with the owner's
@@ -1429,8 +1447,9 @@ def op_problems(o: dict, g: dict, ids: set, before: set) -> List[str]:
     out = []
     tool, args = o.get("tool"), o.get("args")
     ways = o.get("ways") or (g.get("ways") or {}).get("default") or ALL_WAYS
+    out += op_id_problems(o.get("id"))
     if not isinstance(args, dict):
-        return ["args is not an object"]
+        return out + ["args is not an object"]
     if o.get("paging") not in ("none", "all") and not (isinstance(o.get("paging"), dict)
                                                       and set(o["paging"]) == {"pages"}):
         out.append("paging %r" % (o.get("paging"),))

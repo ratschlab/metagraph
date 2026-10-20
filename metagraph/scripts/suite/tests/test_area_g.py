@@ -314,6 +314,29 @@ class ByDesignTable(unittest.TestCase):
                          sorted(p for p in area_g.validate_g(g, set(cases))[1] if "by-design case" not in p))
 
 
+class OpIds(unittest.TestCase):
+    """The builder refuses an op named after an arm (2026-10-20, async's runner review): its raw pages
+    raw/<scenario>.mcp.<page>.json.gz would overwrite the MCP execution's raw record raw/<scenario>.mcp.0.json.gz
+    in arms/mcp (async's runner exits 4 on such a plan); op ids keep to a raw name's characters."""
+
+    def test_an_op_named_mcp_is_refused(self):
+        g, _ = provisional()
+        self.assertEqual(area_g.validate_g(g, None)[0], [])
+        for bad in ("mcp", "direct-local", "direct-remote", "a/b", "", "-x", None):
+            g2 = copy.deepcopy(g)
+            g2[0]["graphlet"]["ops"][0]["id"] = bad
+            problems = area_g.validate_g(g2, None)[0]
+            self.assertTrue(any(("op id %r" % (bad,)) in p for p in problems), (bad, problems))
+        self.assertIn("collide with the execution's raw record", area_g.op_id_problems("mcp")[0])
+        for ok in ("mcp-walks", "sum", "walks-id-left", "seq-0-left", "exp.mgt", "x_1"):
+            self.assertEqual(area_g.op_id_problems(ok), [], ok)
+
+    def test_every_planned_op_id_is_valid(self):
+        g, _ = provisional(include_direct_only=True)
+        bad = [(s["id"], o["id"]) for s in g for o in s["graphlet"]["ops"] if area_g.op_id_problems(o["id"])]
+        self.assertEqual(bad, [])
+
+
 class ByDesignLinks(unittest.TestCase):
     """Every op links the by-design case that applies to it (async's three, 2026-10-20) and no other; the probes stay
     within the service's 262,144 (its cap refusal comes before the token check); the summary of a body over the
