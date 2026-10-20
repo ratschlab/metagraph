@@ -87,12 +87,15 @@ class W3Headroom(unittest.TestCase):
               "untimed": {"error": {"code": "op_busy"}}}
         hr = rehearse_g.w3_headroom(ops, w3, lanes)
         self.assertEqual(hr["timed"], 8)
-        self.assertEqual([x.split(":")[0] for x in hr["slow"]], ["slow", "esc-slow", "heavy-slow", "said-no"])
+        # VERIFY-D VD10: no escalation inferred from the time: an unstated op over a third of the alarm fails, at
+        # 1.5 s as at 4 s (monotonic); only the stated one is judged as heavy
+        self.assertEqual([x.split(":")[0] for x in hr["slow"]], ["slow", "esc", "esc-slow", "heavy-slow", "said-no"])
         self.assertIn("slow: W3 1.50 s, interactive lane's third 1 s", hr["slow"])
+        self.assertIn("esc: W3 4.00 s, interactive lane's third 1 s", hr["slow"])
+        self.assertEqual(hr["escalations"], ["said-yes: 2.00 s, escalated to heavy (stated)"])
+        stated = dict(w3, **{"esc-slow": {"elapsed_ms": 45000.0, "op_meta": {"escalated": True}}})
+        hr = rehearse_g.w3_headroom(ops, stated, lanes)
         self.assertIn("esc-slow: W3 45.00 s, heavy (escalated) lane's third 40 s", hr["slow"])
-        self.assertEqual(hr["escalations"], ["esc: 4.00 s, escalated to heavy (inferred: past the 3 s alarm)",
-                                             "esc-slow: 45.00 s, escalated to heavy (inferred: past the 3 s alarm)",
-                                             "said-yes: 2.00 s, escalated to heavy (stated)"])
 
     def test_lanes_of_runs(self):
         import rehearse_g
@@ -198,8 +201,8 @@ class Rehearsal(unittest.TestCase):
         self.assertEqual(s["graphlet"]["candidate"], "two_arms.2")
         self.assertEqual(s["graphlet"]["preconditions"], e["preconditions"])
         # W3's times (the shadow run's): the lanes from the run's recorded capabilities (alarm 6 s: interactive
-        # third 2 s); sum at 2.5 s misses it; walks-id-left at 7 s is past the alarm: an escalation, recorded,
-        # within the heavy lane's third
+        # third 2 s); sum at 2.5 s misses it; walks-id-left at 7 s states its escalation: recorded, within the heavy
+        # lane's third (VD10: only a stated escalation counts)
         w3dir = os.path.join(self.tmp, "w3")
         os.makedirs(os.path.join(w3dir, "arms", "mcp"))
         doc = {"service_settings": {"graphlet": {"lanes": {
@@ -209,7 +212,10 @@ class Rehearsal(unittest.TestCase):
             json.dump({"service_capabilities": {"document": doc, "read_at": "2026-10-20T00:00:00Z"}}, fh)
         with open(os.path.join(w3dir, "arms", "mcp", "graphlet_ops.jsonl"), "w") as fh:
             for op, ms in (("sum", 2500.0), ("walks-id-left", 7000.0)):
-                fh.write(json.dumps({"scenario": "G-arms2-c2", "op": op, "elapsed_ms": ms}) + "\n")
+                row = {"scenario": "G-arms2-c2", "op": op, "elapsed_ms": ms}
+                if op == "walks-id-left":
+                    row["headers"] = {"X-Graphlet-Op-Escalated": "true", "X-Graphlet-Op-Lane": "heavy"}
+                fh.write(json.dumps(row) + "\n")
         out2 = os.path.join(self.tmp, "with-w3")
         os.makedirs(out2)
         res2 = rehearse_g.analyse(out2, manifest, meta, dl, mdir, LIB, "a" * 40, mcp_graphlet_run=w3dir)
@@ -218,8 +224,7 @@ class Rehearsal(unittest.TestCase):
         self.assertEqual(res2["lanes"]["missing"], [])
         self.assertIn("sum: W3 2.50 s, interactive lane's third 2 s", r2["verdicts"]["op_headroom"])
         self.assertNotIn("walks-id-left: W3", r2["verdicts"]["op_headroom"])
-        self.assertEqual(r2["escalations"], ["walks-id-left: 7.00 s, escalated to heavy (inferred: past the 6 s "
-                                             "alarm)"])
+        self.assertEqual(r2["escalations"], ["walks-id-left: 7.00 s, escalated to heavy (stated)"])
         self.assertFalse(r2["passed"])
         rec = read_json(os.path.join(out2, "rehearsal.json"))
         self.assertEqual(rec["w3_lanes"]["headroom_s"], {"interactive": 2.0, "heavy": 40.0})

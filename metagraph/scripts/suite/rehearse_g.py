@@ -33,9 +33,9 @@ Per candidate (DESIGN-v8 §3 and the lane D brief):
                 median exceeds a third of its lane is named (DESIGN-v8 §3);
   W3 headroom   (DESIGN-v8 §3, refined 2026-10-20) every op W3 runs within a third of its service lane: interactive
                 ops a third of lanes.interactive.alarm_s (3 s -> 1 s), heavy ops (lanes.heavy_ops) a third of
-                lanes.heavy.timeout_s (120 s -> 40 s); an interactive op past the alarm escalated (stated, else
-                inferred from its time): allowed, recorded (escalations), judged as heavy. The values from the run's
-                recorded capabilities, service_settings.graphlet.lanes (graphlet_lanes: a part absent or null is the
+                lanes.heavy.timeout_s (120 s -> 40 s); an interactive op whose record states it escalated (never
+                inferred from its time: VERIFY-D VD10): allowed, recorded (escalations), judged as heavy. The values
+                from the run's recorded capabilities, service_settings.graphlet.lanes (graphlet_lanes: a part absent or null is the
                 fallback, recorded missing); a miss fails op_headroom.
 A candidate that fails a verdict leaves the corpus (DESIGN-v8 §3: no op_timeout, no time stop is an expected outcome).
 Per slot the first candidate (area_g order) that passes every verdict is chosen; the pairs follow their slot's chosen
@@ -788,8 +788,10 @@ def flags_from(problems: List[dict], facts: dict) -> bool:
 # limit: an interactive op a third of the service's alarm (lanes.interactive.alarm_s: 3 s -> 1 s; past the alarm the
 # service escalates the op ONCE to the heavy lane, same digest, same answer), a heavy op a third of the heavy lane's
 # timeout (lanes.heavy.timeout_s: 120 s -> 40 s). An escalation is allowed and recorded: the escalated op is judged
-# as a heavy one. The values come from the capabilities' service_settings.graphlet.lanes (async's limits block: the
-# run's recorded live document, else the by-design table's service_settings block); a part absent or served null
+# as a heavy one. Only a stated escalation counts (the record's op meta or the X-Graphlet-Op-Escalated header), never
+# one inferred from the time (VERIFY-D VD10: monotonic, an unstated interactive op over the third fails however long).
+# The values come from the capabilities' service_settings.graphlet.lanes (async's limits block: the run's recorded
+# live document, else the by-design table's service_settings block); a part absent or served null
 # (a part the service failed to compute) is "not stated": its fallback below is used and the missing limit recorded.
 W3_HEADROOM_DIVISOR = 3.0
 GRAPHLET_LANES = "service_settings.graphlet.lanes"
@@ -881,9 +883,9 @@ def stated_escalation(rec: dict) -> Optional[bool]:
 
 def w3_headroom(ops: List[dict], w3: Dict[str, dict], lanes: dict) -> dict:
     """W3's headroom over one scenario's ops (|w3|: {op: W3 record}, one execution each): {slow: [...], escalations:
-    [...], timed: n}. An interactive op past the alarm (stated, else inferred from its time: the service escalates
-    exactly when the library call outlives alarm_s, and the record's time includes it) escalated: recorded, judged
-    against the heavy lane's third."""
+    [...], timed: n}. An interactive op whose record states it escalated: recorded, judged against the heavy lane's
+    third; an op stating none is interactive, judged against a third of the alarm (no inference from its time: the
+    rule stays monotonic, VERIFY-D VD10)."""
     slow, escalations, timed = [], [], 0
     interactive = lanes["alarm_s"] / W3_HEADROOM_DIVISOR
     heavy = lanes["heavy_timeout_s"] / W3_HEADROOM_DIVISOR
@@ -896,14 +898,9 @@ def w3_headroom(ops: List[dict], w3: Dict[str, dict], lanes: dict) -> dict:
         t = ms / 1000.0
         lane = w3_lane(o, lanes)
         limit = heavy if lane == "heavy" else interactive
-        if lane == "interactive":
-            esc = stated_escalation(r)
-            how = "stated"
-            if esc is None:
-                esc, how = t > lanes["alarm_s"], "inferred: past the %.3g s alarm" % lanes["alarm_s"]
-            if esc:
-                escalations.append("%s: %.2f s, escalated to heavy (%s)" % (o["id"], t, how))
-                lane, limit = "heavy (escalated)", heavy
+        if lane == "interactive" and stated_escalation(r):
+            escalations.append("%s: %.2f s, escalated to heavy (stated)" % (o["id"], t))
+            lane, limit = "heavy (escalated)", heavy
         if t > limit:
             slow.append("%s: W3 %.2f s, %s lane's third %.3g s" % (o["id"], t, lane, limit))
     return {"slow": slow, "escalations": escalations, "timed": timed}
