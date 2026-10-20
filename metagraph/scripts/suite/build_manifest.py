@@ -112,8 +112,6 @@ CONVENTIONS = {
     "mcp.by_design": "case ids of the async session's service-by-design table (service_by_design.json)",
     "mcp.requires_service": "the service increment the MCP mapping needs (I12: max_mismatches)",
     "timing_class": "fast (< ~5 s), slow, long (> 100 s: direct-local only)",
-    "direct_not_run": "a scenario only the MCP arm runs (v8's stop scenarios), the reason: the direct arms skip it "
-                      "(suite_common.plan_executions)",
     "warms": "a warm-up's target (lane V5): the id of the scenario whose annotation rows it reads right before it; "
              "the builder keeps the pair adjacent (the warm-up first) and every selection that takes the target takes "
              "its warm-up (suite_common.select_scenarios)",
@@ -121,6 +119,13 @@ CONVENTIONS = {
                   "S5c, A2-06): it appends '-', the run id (the run directory's name, which the arms of a run share), "
                   "'-' and the arm to each, cut to the id pattern's 128 characters, and records the request it sent; "
                   "the manifest keeps the base value",
+}
+
+
+# v8's own conventions: only a v8 manifest states them, so a v1-v7 rebuild stays byte-identical
+V8_CONVENTIONS = {
+    "direct_not_run": "a scenario only the MCP arm runs (v8's stop scenarios), the reason: the direct arms skip it "
+                      "(suite_common.plan_executions)",
 }
 
 
@@ -259,7 +264,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
             "records": [r.describe() for r in recs],
             "records_not_fetched": missing,
         },
-        "conventions": CONVENTIONS,
+        "conventions": dict(CONVENTIONS, **V8_CONVENTIONS) if manifest_version >= GRAPHLET_VERSION else CONVENTIONS,
         "mcp_exposure_baseline": None if exposure is None else {
             "file": os.path.relpath(os.path.abspath(exposure_file), HERE), "source": exposure.get("source"),
             "rule": exposure.get("rule"), "sha256": sha256_json(exposure),
