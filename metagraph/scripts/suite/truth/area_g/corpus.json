@@ -2522,6 +2522,14 @@
     "merges": {
      "right": 0
     },
+    "page_bytes": {
+     "claims-paged": null,
+     "labels-paged": null,
+     "lims-paged": 1120,
+     "splits-paged": null,
+     "walk-paged-right": null,
+     "walks-paged-right": null
+    },
     "seed_bp": null,
     "segments": {
      "right": 1
@@ -2695,6 +2703,16 @@
     "merges": {
      "left": 8,
      "right": 7
+    },
+    "page_bytes": {
+     "claims-paged": 2048,
+     "labels-paged": 2048,
+     "lims-paged": 1312,
+     "splits-paged": 1472,
+     "walk-paged-left": 12288,
+     "walk-paged-right": 12288,
+     "walks-paged-left": 800,
+     "walks-paged-right": 928
     },
     "seed_bp": null,
     "segments": {
@@ -6197,6 +6215,16 @@
      "left": 0,
      "right": 5
     },
+    "page_bytes": {
+     "claims-paged": 16384,
+     "labels-paged": 16384,
+     "lims-paged": 1536,
+     "splits-paged": null,
+     "walk-paged-left": 1536,
+     "walk-paged-right": 3072,
+     "walks-paged-left": 1536,
+     "walks-paged-right": 1536
+    },
     "seed_bp": null,
     "segments": {
      "left": 5,
@@ -7421,6 +7449,7 @@
   }
  },
  "library_commit": "44583b51307ed3242e19c051aaf133c671107956",
+ "page_bytes_note": "facts.page_bytes (round 5): per paging pass of a rich graphlet the largest max_bytes at which the local library took at least two pages of the listing on the rehearsal's document, keeping 64 bytes above the smallest page a row fits in (W3's reserve and longer handle); null: one row, the pass is left out (lane D's D-scratch/r5/measure_pages.py)",
  "provisional": false,
  "rehearsal": {
   "utc": "2026-10-19T22:08:45Z"

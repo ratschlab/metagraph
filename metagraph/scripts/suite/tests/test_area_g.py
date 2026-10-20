@@ -763,6 +763,48 @@ class Coverage(unittest.TestCase):
         self.assertIn("cmp-paged", [o["id"] for o in radius["graphlet"]["ops"]])
 
 
+class PagingPasses(unittest.TestCase):
+    """The coordinator (round 5): every paging pass really pages on its graphlet: its max_bytes is the graphlet's
+    measured facts.page_bytes (at least two pages on the rehearsal's document, W1), a null leaves the pass out."""
+
+    def test_page_of_and_the_plan(self):
+        self.assertEqual(area_g.page_of({}, "walks-paged-left", 1200), 1200)
+        self.assertEqual(area_g.page_of({"page_bytes": {"walks-paged-left": 800}}, "walks-paged-left", 1200), 800)
+        self.assertIsNone(area_g.page_of({"page_bytes": {"walks-paged-left": None}}, "walks-paged-left", 1200))
+        facts = {"arms": ["left", "right"], "walks": {"left": 3, "right": 4},
+                 "page_bytes": {"walks-paged-left": 800, "walk-paged-left": None, "splits-paged": None,
+                                "lims-paged": 1312, "claims-paged": 2048, "labels-paged": 2048}}
+        ops = dict((o["id"], o) for o in area_g.op_plan("G-arms2-0001", "two_arms", facts, True,
+                                                        extras={"page_cut": True}))
+        self.assertEqual(ops["walks-paged-left"]["args"]["max_bytes"], 800)
+        self.assertEqual(ops["walks-p1"]["args"]["max_bytes"], 800)           # the page cut of the same listing
+        self.assertEqual(ops["walks-reuse"]["args"]["max_bytes"], 800)
+        self.assertNotIn("walk-paged-left", ops)
+        self.assertNotIn("splits-paged", ops)
+        self.assertEqual((ops["lims-paged"]["args"]["max_bytes"], ops["claims-paged"]["args"]["max_bytes"],
+                          ops["labels-paged"]["args"]["max_bytes"]), (1312, 2048, 2048))
+        self.assertEqual(ops["walk-paged-right"]["args"]["max_bytes"], area_g.ROW_PAGE)   # not measured: default
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_the_committed_corpus_pages_every_pass(self):
+        import build_manifest as bm
+        recs = truth.load_with_sequences(fetch=False)
+        ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
+        corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        g = dict((x["id"], x) for x in area_g.gen_G(ctx, v7_scenarios(), corpus, "a" * 40) if "graphlet" in x)
+        for sid in ("G-merge-0001", "G-arms2-0001", "G-long-0001"):
+            pb = corpus["candidates"][g[sid]["graphlet"]["candidate"]]["facts"]["page_bytes"]
+            ops = dict((o["id"], o) for o in g[sid]["graphlet"]["ops"])
+            for oid, size in pb.items():
+                if size is None:
+                    self.assertNotIn(oid, ops, (sid, oid))
+                else:
+                    self.assertEqual(ops[oid]["args"]["max_bytes"], size, (sid, oid))
+            for oid in ops:
+                if "-paged" in oid and oid != "cmp-paged":
+                    self.assertIn(oid, pb, (sid, oid))   # every paging pass of a rich graphlet is measured
+
+
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
     service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2)."""

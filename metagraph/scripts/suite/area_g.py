@@ -566,6 +566,18 @@ def lib(o: dict, reason: str) -> dict:
     return o
 
 
+# A paging pass (an op id holding "-paged") must really page on its graphlet (the coordinator, round 5): its
+# max_bytes is the graphlet's measured one, facts page_bytes {op id: bytes}, the largest page at which the local
+# library (W1) took at least two pages of the listing on the rehearsal's document (D-scratch/r5/measure_pages.py);
+# null: the listing has one row and cannot page there, so the pass is left out; without a measurement the default.
+def page_of(facts: dict, oid: str, default: int) -> Optional[int]:
+    pb = facts.get("page_bytes")
+    if isinstance(pb, dict) and oid in pb:
+        v = pb[oid]
+        return v if isinstance(v, int) and not isinstance(v, bool) and v >= 64 else None
+    return default
+
+
 class Plan(object):
     """An op plan under construction: unique op ids, the facts of the graphlet."""
 
@@ -606,8 +618,9 @@ def plan_summary(p: Plan) -> None:
     for a in arms:
         p.add(_op("sum-%s" % a, "graphlet_summary", {"arm": a, "detail": "summary", "max_bytes": MAXB}))
     p.add(_op("lims", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": MAXB}, paging="all"))
-    if p.rich:
-        p.add(_op("lims-paged", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": LIMS_PAGE},
+    lims = page_of(p.facts, "lims-paged", LIMS_PAGE)
+    if p.rich and lims:
+        p.add(_op("lims-paged", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": lims},
                   paging="all"))
     p.add(_op("sum-bad-detail", "graphlet_summary", {"arm": None, "detail": "full", "max_bytes": 2048}))
     p.add(_op("sum-bad-arm", "graphlet_summary", {"arm": "up", "detail": "summary", "max_bytes": 2048}))
@@ -648,11 +661,15 @@ def plan_walks_and_walk(p: Plan) -> None:
         for i in idx:
             p.add(_op("walk-%d-%s" % (i, a), "graphlet_walk",
                       {"arm": a, "walk": ref("walks-id-%s" % a, "/rows/%d/walk" % i), "max_bytes": MAXB}))
-        if p.rich:
+        wpage = page_of(p.facts, "walk-paged-%s" % a, ROW_PAGE)
+        if p.rich and wpage:
             p.add(_op("walk-paged-%s" % a, "graphlet_walk",
-                      {"arm": a, "walk": ref("walks-length-%s" % a, "/rows/0/walk"), "max_bytes": ROW_PAGE},
+                      {"arm": a, "walk": ref("walks-length-%s" % a, "/rows/0/walk"), "max_bytes": wpage},
                       paging="all"))
-            p.add(_op("walks-paged-%s" % a, "graphlet_walks", W(a, **PAGED_WALKS), paging="all"))
+        wspage = page_of(p.facts, "walks-paged-%s" % a, PAGED_WALKS["max_bytes"])
+        if p.rich and wspage:
+            p.add(_op("walks-paged-%s" % a, "graphlet_walks", W(a, **dict(PAGED_WALKS, max_bytes=wspage)),
+                      paging="all"))
         # the rehearsal's shadow run: merge_walk False when no sampled walk passes a merge
         mw = (p.facts.get("merge_walk") or {}).get(a)
         if p.merges(a) and (mw if mw is not None else p.rich):
@@ -695,8 +712,9 @@ def plan_labels(p: Plan) -> None:
         p.add(_op("labels-atpast-%s" % a, "graphlet_labels",
                   L(arm=a, at_bp=sel("slice_past_end", length_of="walks-length-%s" % a, part="end",
                                      walk=ref("walks-length-%s" % a, "/rows/0/walk"), past=1)), paging="all"))
-    if p.rich:
-        p.add(_op("labels-paged", "graphlet_labels", L(max_bytes=1024), paging="all"))
+    lpage = page_of(p.facts, "labels-paged", 1024)
+    if p.rich and lpage:
+        p.add(_op("labels-paged", "graphlet_labels", L(max_bytes=lpage), paging="all"))
     # name=: up to 3 labels, by {ref}, by {name}, by a bare string; per arm and both
     n = min(3, max(1, p.labels()))
     forms = [("ref", lambda i: sel("top_label", labels="labels-all-direct", index=i)),
@@ -803,11 +821,13 @@ def plan_library_only(p: Plan, partner: Optional[str]) -> None:
                            "allow_unverified_index": False, "max_bytes": 16384, "reset_branches": False}),
                       OWNER_NOT_SERVED))
     a = arms[0]
-    if p.rich:
+    spage, cpage = page_of(p.facts, "splits-paged", 1024), page_of(p.facts, "claims-paged", ROW_PAGE)
+    if p.rich and spage:
         p.add(lib(_op("splits-paged", "graphlet_splits", {"arm": a, "n": 10000, "min_labels_before": 0,
-                                                          "max_bytes": 1024}, paging="all"), OWNER_LIBRARY_ONLY))
+                                                          "max_bytes": spage}, paging="all"), OWNER_LIBRARY_ONLY))
+    if p.rich and cpage:
         p.add(lib(_op("claims-paged", "graphlet_claims", {"arm": a, "min_bp": 0, "route_consistent": False,
-                                                          "labels": None, "max_bytes": ROW_PAGE}, paging="all"),
+                                                          "labels": None, "max_bytes": cpage}, paging="all"),
                   OWNER_LIBRARY_ONLY))
     p.add(lib(_op("splits-n0", "graphlet_splits", {"arm": a, "n": 0, "min_labels_before": 0, "max_bytes": 2048}),
               OWNER_LIBRARY_ONLY))
@@ -1066,11 +1086,13 @@ def add_extras(p: Plan, extras: dict) -> None:
     if extras.get("summary_cut"):
         cut = int(p.facts.get("summary_cut_bytes") or SUMMARY_CUT_BYTES)
         p.add(_op("sum-cut", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": cut}, cut_of="sum"))
-    if extras.get("page_cut") and any(o["id"] == "walks-paged-%s" % a for o in p.ops):
+    paged = next((o for o in p.ops if o["id"] == "walks-paged-%s" % a), None)
+    if extras.get("page_cut") and paged is not None:
         # the first page of a listing is the page cut (cut_of); its cursor reused with other arguments: bad_cursor
-        p.add(_op("walks-p1", "graphlet_walks", W(a, **PAGED_WALKS), paging={"pages": 1},
+        page = dict(PAGED_WALKS, max_bytes=paged["args"]["max_bytes"])
+        p.add(_op("walks-p1", "graphlet_walks", W(a, **page), paging={"pages": 1},
                   cut_of="walks-paged-%s" % a))
-        p.add(_op("walks-reuse", "graphlet_walks", W(a, **dict(PAGED_WALKS, rank="length",
+        p.add(_op("walks-reuse", "graphlet_walks", W(a, **dict(page, rank="length",
                                                                cursor={"cursor_of": "walks-p1"}))))
     if extras.get("ceiling_cut"):
         p.add(_op("walks-too-large", "graphlet_walks", W(a, max_bytes=64), cut_of="walks-id-%s" % a))
