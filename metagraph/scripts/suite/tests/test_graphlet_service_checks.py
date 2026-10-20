@@ -149,7 +149,36 @@ class CompareFields(ServiceBase):
         self.run_.cleanup()
         res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" %
                              gs.NO_DIFFERENCE}, cut_b=False, labels_b=10)
-        self.assertIn("no cut list, yet label_evidence", self.check(res, "label_evidence")["detail"])
+        self.assertIn("verdict qualified, no cut label list, yet label_evidence",
+                      self.check(res, "label_evidence")["detail"])
+
+    def test_label_fields_only_on_a_qualified_compare_with_a_label_lists_note(self):
+        # lane D's finding (2026-10-20): the service adds label_evidence, qualified_cause and hint together, only when
+        # the verdict is qualified, the notes name label_lists and a side's lists are cut
+        for verdict in (True, False, "unknown"):
+            res = self.run_with({}, comparable=verdict)        # a cut-list b, no label fields: as the service does
+            for name in ("label_evidence", "qualified_cause", "hint"):
+                self.assertEqual(self.check(res, name)["outcome"], "pass", (verdict, self.check(res, name)))
+            self.run_.cleanup()
+            res = self.run_with(dict(self.FIELDS, hint="h"), comparable=verdict)
+            c = self.check(res, "label_evidence")
+            self.assertEqual(c["outcome"], "fail", verdict)
+            self.assertIn("yet label_evidence", c["detail"])
+            self.run_.cleanup()
+        notes = ("inexact_counts (labels.counts): the oracle is a lower bound",)
+        res = self.run_with({}, notes=notes)
+        self.assertEqual(self.check(res, "label_evidence")["outcome"], "pass")
+        self.run_.cleanup()
+        res = self.run_with(dict(self.FIELDS, hint="h"), notes=notes)
+        self.assertIn("no label_lists note, yet label_evidence", self.check(res, "label_evidence")["detail"])
+        self.run_.cleanup()
+        # b's 40 labels on a node above its own cap 32 (its cut_lists unstated): the fields are due
+        res = self.run_with({}, cut_b=None, labels_b=40)
+        self.assertIn("label lists cut on %s, label_evidence (absent)" % SID_B,
+                      self.check(res, "label_evidence")["detail"])
+        self.run_.cleanup()
+        res = self.run_with({}, cut_b=None, labels_b=None)
+        self.assertEqual(self.check(res, "label_evidence")["outcome"], "inconclusive")
 
     def test_qualified_cause_against_the_library(self):
         res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" %

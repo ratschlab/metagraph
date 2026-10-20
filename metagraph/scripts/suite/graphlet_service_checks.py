@@ -5,8 +5,9 @@ differences verified as by-design pairs (D-R12). Two stages of compare_graphlets
 Positive service checks, functions over W3's records and the scenario's facts (scenario_facts: from W1's document
 by the suite's own reader, a scenario's graphlet.facts stating them where the corpus says so):
   walk_display       every graphlet_walks / graphlet_walk answer of W3 carries walk_display "first_parent";
-  label_evidence     a W3 graphlet_compare answer carries label_evidence "lower_bound" exactly when one of its two
-                     graphlets has cut label lists (a segment whose recorded labels are fewer than its labels_total);
+  label_evidence     a W3 graphlet_compare answer carries label_evidence "lower_bound" exactly when the service adds
+                     its label fields (as hint below: the verdict qualified, the notes naming label_lists, a side's
+                     label lists cut), never on another compare (lane D's finding, 2026-10-20);
   qualified_cause    present exactly with label_evidence, and consistent with the library's answer to the same call
                      (W4's, else W1's): it states each side's cap (labels.max_labels_per_node of the side's request)
                      and "no difference within the recorded evidence" exactly when the library counts no difference;
@@ -191,18 +192,39 @@ def check_label_evidence(recs, manifest, facts):
     calls, bad, unknown = 0, [], []
     for sid, op, r in _compare_calls(recs, manifest):
         calls += 1
-        sides = [facts.get(x, {}).get("cut_lists") for x in (sid, _b_scenario(sid, op))]
-        if any(v is None for v in sides):
-            unknown.append("%s %s: cut lists unknown" % (sid, op["id"]))
-            continue
         sf = service_fields(r)
-        want = any(sides)
+        want, why = _label_fields_expected(recs, facts, sid, op, r)
+        if want is None:
+            unknown.append("%s %s: %s" % (sid, op["id"], "no compare verdict" if why == "verdict" else
+                                          "cut label lists unknown"))
+            continue
         if want and sf.get("label_evidence") != "lower_bound":
-            bad.append(_fail(sid, op, "a cut-list graphlet, label_evidence %s" % gp.compact(
-                sf.get("label_evidence", gp.MISSING))))
+            bad.append(_fail(sid, op, "%s, label_evidence %s" % (why, gp.compact(sf.get("label_evidence",
+                                                                                         gp.MISSING)))))
         elif not want and "label_evidence" in sf:
-            bad.append(_fail(sid, op, "no cut list, yet label_evidence %s" % gp.compact(sf["label_evidence"])))
+            bad.append(_fail(sid, op, "%s, yet label_evidence %s" % (why, gp.compact(sf["label_evidence"]))))
     return _result("label_evidence", calls, bad, unknown, "of graphlet_compare answered")
+
+
+def _label_fields_expected(recs, facts, sid, op, r):
+    """(whether the service adds its label fields -- label_evidence, qualified_cause, hint -- to this compare answer,
+    why) as it does (ops_runtime._label_cap / _finish): the verdict qualified (comparable, W3's answer, else the
+    library's), the library's notes naming label_lists and a side's label lists cut (side_cut_lists: its cut_lists,
+    or more labels on a node than its own cap). (None, "verdict" | "facts") when what decides it is unknown."""
+    verdict, notes = _compare_verdict(recs, sid, op["id"], r)
+    if verdict is None:
+        return None, "verdict"
+    if verdict != "qualified":
+        return False, "verdict %s" % gp.compact(verdict)
+    if not any(isinstance(n, str) and "label_lists" in n for n in notes):
+        return False, "verdict qualified, no label_lists note"
+    sides = [(x, side_cut_lists(facts.get(x, {}))) for x in (sid, _b_scenario(sid, op))]
+    cut = [x for x, v in sides if v]
+    if cut:
+        return True, "verdict qualified, label lists cut on %s" % " and ".join(cut)
+    if any(v is None for _x, v in sides):
+        return None, "facts"
+    return False, "verdict qualified, no cut label list"
 
 
 def _library_answer(recs, sid, oid):
