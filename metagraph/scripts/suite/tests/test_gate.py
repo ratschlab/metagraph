@@ -251,7 +251,7 @@ class PinnedTable(unittest.TestCase):
         self.assertEqual(now[:len(before)], before)     # the G cases appended, nothing else changed
         self.assertEqual([c["id"] for c in now[len(before):]],
                          ["graphlet.max_bytes_above_service_cap", "graphlet.body_over_in_service_ceiling",
-                          "graphlet.body_over_in_service_ceiling.summary"])
+                          "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body"])
 
 
 class PolicyTest(GateCase):

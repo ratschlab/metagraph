@@ -304,7 +304,8 @@ class ByDesignTable(unittest.TestCase):
     def test_the_g_cases_load_and_the_plans_name_them(self):
         import compare as cmp
         cases, info = cmp.load_by_design(os.path.join(SUITE, "service_by_design.json"))
-        for cid in (area_g.SERVICE_CAP_CASE, area_g.BIG_BODY_CASE, area_g.BIG_BODY_CASE + ".summary"):
+        for cid in (area_g.SERVICE_CAP_CASE, area_g.BIG_BODY_CASE, area_g.BIG_BODY_CASE + ".summary",
+                    area_g.MGT_EXPORT_CASE):
             self.assertIn(cid, cases)
             self.assertEqual(cmp.graphlet_case_problems(cases[cid]), [], cid)
         g, _ = provisional()
@@ -352,7 +353,7 @@ class ByDesignLinks(unittest.TestCase):
         self.assertEqual(summary["by_design"], area_g.BIG_BODY_CASE + ".summary")
         for o in ops:
             if o["tool"] == "graphlet_export" and o["args"].get("format") == "mgt":
-                self.assertIsNone(by[o["id"]], o["id"])      # answered on every way
+                self.assertEqual(by[o["id"]], area_g.MGT_EXPORT_CASE, o["id"])   # the stored body's link
             elif o["tool"] != "graphlet_summary":
                 self.assertEqual(by[o["id"]], area_g.BIG_BODY_CASE, o["id"])
         g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {"over_8mib": True}}
@@ -370,7 +371,7 @@ class ByDesignLinks(unittest.TestCase):
         seq = area_g._op("s", "graphlet_sequence", area_g.S("left", walk=0, max_bytes=area_g.MAXB + 1))
         self.assertIsNone(case(seq, {}))              # the cap case does not name graphlet_sequence
         for fmt, want in (("fasta", area_g.BIG_BODY_CASE), ("gfa", area_g.BIG_BODY_CASE),
-                          ("json", area_g.BIG_BODY_CASE), ("mgt", None)):
+                          ("json", area_g.BIG_BODY_CASE), ("mgt", area_g.MGT_EXPORT_CASE)):
             self.assertEqual(case(area_g._op("e", "graphlet_export", area_g.E(format=fmt)), {"over_8mib": True}),
                              want, fmt)
         cmp_ = area_g._op("c", "graphlet_compare", area_g.C("G-x-0001", mode="labels", max_bytes=2048))
@@ -398,6 +399,27 @@ class ByDesignLinks(unittest.TestCase):
         g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {}}
         over = dict(probes[0], args=dict(probes[0]["args"], max_bytes=area_g.MAXB + 1), timeout_s=20.0)
         self.assertTrue(any("cap's refusal" in m for m in area_g.op_problems(over, g, set(), set())))
+
+    def test_every_mgt_export_links_the_stored_body_case(self):
+        g, _ = provisional(include_direct_only=True)
+        seen = 0
+        for s in g:
+            default = s["graphlet"]["ways"]["default"]
+            for o in s["graphlet"]["ops"]:
+                if o["tool"] != "graphlet_export" or o["args"].get("format") != "mgt":
+                    continue
+                w3 = "W3" in (o.get("ways") or default)
+                self.assertEqual(o.get("by_design"), area_g.MGT_EXPORT_CASE if w3 else None, (s["id"], o["id"]))
+                seen += w3
+        self.assertGreater(seen, 0)
+        self.assertIsNone(area_g.by_design_case(area_g._op("e", "graphlet_export", area_g.E(format="mgt", arm="left")),
+                                                {}))
+        # a direct-only scenario keeps its mgt export (W1, W2, W5), without the case
+        direct = [s for s in g if "direct-only" in s["tags"]]
+        self.assertTrue(direct)
+        for s in direct:
+            ids = [o["id"] for o in s["graphlet"]["ops"]]
+            self.assertIn("exp-mgt", ids, s["id"])
 
     def test_the_built_plans_link_every_case(self):
         g, _ = provisional()

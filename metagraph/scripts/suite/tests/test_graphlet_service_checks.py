@@ -474,11 +474,11 @@ class ByDesign(ServiceBase):
         lib_sf = copy.deepcopy(CAP_CASE)
         lib_sf["graphlet"]["library"]["service_fields"] = {"x": 1}
         self.assertIn("on the service side only", "; ".join(cmp.table_problems([lib_sf])))
-        # the real table loads, with async's three area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20), each valid
+        # the real table loads, with async's four area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20), each valid
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         g = sorted(cid for cid, c in cases.items() if "graphlet" in c)
         self.assertEqual(g, ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
-                             "graphlet.max_bytes_above_service_cap"])
+                             "graphlet.export_mgt_is_the_stored_body", "graphlet.max_bytes_above_service_cap"])
         for cid in g:
             self.assertEqual(cmp.graphlet_case_problems(cases[cid]), [], cid)
 

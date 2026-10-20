@@ -5095,6 +5095,92 @@
      }
     }
    }
+  },
+  {
+   "id": "graphlet.export_mgt_is_the_stored_body",
+   "areas": [
+    "G"
+   ],
+   "scenario_match": "graphlet_export with format mgt (no arm, walks, what or export_id) on any area G scenario, in service or above the in-service ceiling: W3 answers the stored body's presigned link with the service's own receipt, the library ways write dump(g, envelope=True) and answer the library's receipt {path, bytes, records}",
+   "direct_expectation": {
+    "http": null,
+    "code": null,
+    "text": null,
+    "text_source": "vendor/metagraph_traverse/mcp_tools.py:2166, :2262-2267, :2280-2281 (vendored 44583b51); metagraph fdff625e metagraph/api/python/metagraph/traverse/mcp_tools.py:2184, :2284-2285, :2298-2299 (the same receipt; only the atomic writer is parser._write_user_file, parser.py:1422-1430, returning len(data))",
+    "behaviour": "the library ways answer {path, bytes, records}: path = the realpath of <export_dir>/<handle>.mgt (or the given file name; _confined, mcp_tools.py:1140-1157 at fdff625e), bytes = the length of the UTF-8 file written, the standalone document dump(g, envelope=True) with its J line, records = its line count (text.count('\\n')); records, then bytes, are cut first when the receipt would not fit (fields_cut). The file is the document itself. With local_limits null (graphlet.library) the mgt branch dumps the parsed graphlet; under local limits it would copy the stored text (_export_body, :2284-2298 vendored). arm is still checked (bad_arm) and walks validated, then ignored"
+   },
+   "service_answer": {
+    "tool": "graphlet_export",
+    "outcome": "answered",
+    "http": null,
+    "code": null,
+    "text_contains": null,
+    "field": null,
+    "keys": {
+     "export_id": null,
+     "format": "mgt",
+     "status": "done",
+     "handle": "<handle>",
+     "link": "the stored object's presigned link {url, expires_at, ttl_seconds, encoding: gzip, content_type, filename <job>-<task>-<seed>.mgt.gz, bytes (= gz_bytes), body_sha256, how_to_read}",
+     "bytes": "<n>: ref.body_bytes, the SERVER body's UTF-8 length (no J line): not the downloaded document's size, not the library's bytes",
+     "gz_bytes": "<n>: the stored gzip object's size",
+     "in_service": "true | false (the row's; false above the ceiling, the link given all the same)"
+    },
+    "stage": "route",
+    "detail": "POST /traverse/graphlets/{handle}/export with format mgt (also the default when format is absent: app/api/routes_graphlets.py:1031-1032) is answered by the API itself: normalize_export_args (app/traversal/ops_exports.py:301-341; arm / walks with mgt -> bad_argument :320-322, what -> bad_argument :318-319), then, after authorisation, _mgt_answer (app/api/routes_graphlets.py:933-948, :1038-1041) -> ops_exports.mgt_answer (app/traversal/ops_exports.py:424-450): export_refusal for mgt checks only unknown_handle / no_graphlet / body_deleted (:381-390: no in-service check, no export gate), and results.body_link (app/traversal/results.py:728-756) presigns the stored object (unknown_handle {reason: job_expired} when the job has no life left for a link). No op, no traversal_exports row, no parse, no worker, any body size. 200 {export_id: null, format: mgt, status: done, handle, link, bytes, gz_bytes, in_service} exactly: no records, no path, no fields_cut. The MCP tool relays it unchanged (status done: no collect_note / retry_note; app/mcp_server.py:8453-8525). The stored object is gzip(mgt.standalone_text(body, result, response)) (app/traversal/execute.py:1890, :1905): H + J + the server body + Z, byte for byte the library's dump(from_response(...), envelope=True) for a canonical body (app/traversal/mgt.py:10-15); bytes = mgt.body_digest's count of the server body (app/traversal/execute.py:1896, app/traversal/mgt.py:275-279), gz_bytes the stored gzip size (app/traversal/execute.py:1905-1910). Excused on W3-W4 and W3-W5: the receipt's records (absent on W3), path (absent on W3; also an ENV_KEY the suite drops), export_id null, format, status, handle, link, gz_bytes, in_service (W3's receipt-only keys: service fields) and bytes' other meaning (an ENV_KEY). NOT excused: the file. FORMAT v2 B3 compares it by content (file_view: mgt by its body digest, H seed_index masked, J and Z out): W3's file is the stored body, so its body digest equals W4's document (the MCP's exported .mgt.gz, arms/mcp/docs/<scenario>.mgt.gz) and W1's after standalone_text, which the pre-check's body digest (W1 = W2 = W4) covers. Caution, suite at 1556ec439: compare_records reads a W3 pair's file view only when the receipts agree (compare_graphlets.py:688-693) and a verified case excuses the whole W3-W4 / W3-W5 pair of kind answer (graphlet_service_checks.py:58-60, :460): with this case W3's own downloaded mgt file is not compared on those pairs, only through the pre-check (W4's document is the same stored object)."
+   },
+   "explains_checks": [],
+   "agreement": "by_design",
+   "source": [
+    "app/traversal/ops_exports.py:424",
+    "app/traversal/ops_exports.py:441",
+    "app/traversal/ops_exports.py:389",
+    "app/api/routes_graphlets.py:1038",
+    "app/traversal/execute.py:1890",
+    "app/traversal/execute.py:1896",
+    "app/mcp_server.py:8453",
+    "vendor/metagraph_traverse/mcp_tools.py:2266",
+    "vendor/metagraph_traverse/mcp_tools.py:2281"
+   ],
+   "source_commit": "f994e3e2880e3f21c51577d75926cfb35c3d4355",
+   "graphlet": {
+    "tools": [
+     "graphlet_export"
+    ],
+    "args": [
+     {
+      "path": "format",
+      "equals": "mgt"
+     },
+     {
+      "path": "arm",
+      "absent": true
+     },
+     {
+      "path": "walks",
+      "absent": true
+     },
+     {
+      "path": "what",
+      "absent": true
+     },
+     {
+      "path": "export_id",
+      "absent": true
+     }
+    ],
+    "library": {
+     "answered": true
+    },
+    "service": {
+     "answered": true,
+     "service_fields": {
+      "export_id": null,
+      "format": "mgt",
+      "status": "done"
+     }
+    }
+   }
   }
  ]
 }
