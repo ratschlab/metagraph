@@ -9,7 +9,8 @@ by the suite's own reader, a scenario's graphlet.facts stating them where the co
                      its label fields (as hint below: the verdict qualified, the notes naming label_lists, a side's
                      label lists cut), never on another compare (lane D's finding, 2026-10-20);
   qualified_cause    present exactly with label_evidence, and consistent with the library's answer to the same call
-                     (W4's, else W1's): it states each side's cap (labels.max_labels_per_node of the side's request)
+                     (W4's, else W1's): it states the cap of each side whose lists were cut (labels.max_labels_per_
+                     node of the side's request; ops_runtime._label_cap names those sides only)
                      and "no difference within the recorded evidence" exactly when the library counts no difference;
   hint               a W3 compare answer carries hint exactly when its verdict is qualified (comparable), its notes
                      name label_lists and a side's label lists were cut: the side's cut_lists, or a node with more
@@ -263,6 +264,8 @@ def check_qualified_cause(recs, manifest, facts):
                 "no difference" if none_differ else gp.compact(counts), gp.compact(cause))))
             continue
         for side in (sid, _b_scenario(sid, op)):
+            if not side_cut_lists(facts.get(side, {})):
+                continue   # the service names the caps of the sides whose lists were cut only (VERIFY-D VD11)
             cap = facts.get(side, {}).get("cap")
             # the cap as a number of its own (VERIFY-C VC12): 64 is not stated by "640" or "1964"
             if isinstance(cap, int) and not re.search(r"(?<![0-9])%d(?![0-9])" % cap, cause):

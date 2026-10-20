@@ -199,7 +199,22 @@ class CompareFields(ServiceBase):
                              gs.NO_DIFFERENCE, "hint": "h"})
         c = self.check(res, "qualified_cause")
         self.assertEqual(c["outcome"], "fail")
-        self.assertIn("does not state the cap 64", c["detail"])
+        self.assertIn("does not state the cap 32", c["detail"])   # b's (a's lists are whole: VD11)
+        self.run_.cleanup()
+        res = self.run_with({"label_evidence": "lower_bound", "qualified_cause": "caps 640 and 1932: %s" %
+                             gs.NO_DIFFERENCE, "hint": "h"}, cut_a=True)
+        self.assertIn("does not state the cap 64", self.check(res, "qualified_cause")["detail"])
+
+    def test_vd11_only_the_cut_sides_caps(self):
+        # the service names the caps of the sides whose label lists were cut (ops_runtime._label_cap): a's lists are
+        # whole, so its cap 64 is not demanded
+        cause = {"label_evidence": "lower_bound", "hint": "h",
+                 "qualified_cause": "at most 32 labels per node were kept: %s" % gs.NO_DIFFERENCE}
+        res = self.run_with(cause)
+        self.assertEqual(self.check(res, "qualified_cause")["outcome"], "pass", self.check(res, "qualified_cause"))
+        self.run_.cleanup()
+        res = self.run_with(cause, cut_a=True)   # both cut: both caps
+        self.assertIn("does not state the cap 64 of %s" % SID, self.check(res, "qualified_cause")["detail"])
 
     FIELDS = {"label_evidence": "lower_bound", "qualified_cause": "caps 64 and 32: %s" % gs.NO_DIFFERENCE}
 
