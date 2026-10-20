@@ -400,6 +400,28 @@ class ByDesignLinks(unittest.TestCase):
         over = dict(probes[0], args=dict(probes[0]["args"], max_bytes=area_g.MAXB + 1), timeout_s=20.0)
         self.assertTrue(any("cap's refusal" in m for m in area_g.op_problems(over, g, set(), set())))
 
+    def test_a_failed_seed_links_no_case_and_leaves_w4_out(self):
+        # VERIFY-D VD2 / VD3: no way has a graphlet; W4 not exposed (no document), and no case whose sides could hold
+        ops = area_g.op_plan("G-fail-0001", "failed_seed", {"failed": True, "arms": ["left"]}, False,
+                             extras={"other": "G-arms2-0001"})
+        self.assertTrue(ops)
+        for o in ops:
+            self.assertNotIn("by_design", o, o["id"])
+            self.assertEqual((o["ways"], o["not_exposed"]), (area_g.FAILED_SEED_WAYS,
+                                                              {"W4": area_g.REASON_FAILED_NO_DOC}), o["id"])
+        mgt = next(o for o in ops if o["id"] == "exp-mgt")
+        self.assertIsNone(area_g.by_design_case(mgt, {"failed": True}))
+        self.assertEqual(area_g.by_design_case(dict(mgt, ways=None), {}), area_g.MGT_EXPORT_CASE)
+        g, _ = provisional()
+        fail = next(s for s in g if s["id"] == "G-fail-0001")
+        self.assertFalse([o["id"] for o in fail["graphlet"]["ops"] if o.get("by_design")])
+        self.assertEqual(area_g.validate_g(g, None)[0], [])
+        # validate_g refuses the mgt case on a failed seed
+        bad = copy.deepcopy(g)
+        b = next(s for s in bad if s["id"] == "G-fail-0001")
+        next(o for o in b["graphlet"]["ops"] if o["id"] == "exp-mgt")["by_design"] = area_g.MGT_EXPORT_CASE
+        self.assertTrue([p_ for p_ in area_g.validate_g(bad, None)[0] if "G-fail-0001/exp-mgt" in p_])
+
     def test_every_mgt_export_links_the_stored_body_case(self):
         g, _ = provisional(include_direct_only=True)
         seen = 0
@@ -408,7 +430,7 @@ class ByDesignLinks(unittest.TestCase):
             for o in s["graphlet"]["ops"]:
                 if o["tool"] != "graphlet_export" or o["args"].get("format") != "mgt":
                     continue
-                w3 = "W3" in (o.get("ways") or default)
+                w3 = "W3" in (o.get("ways") or default) and not s["graphlet"]["preconditions"].get("no_graphlet")
                 self.assertEqual(o.get("by_design"), area_g.MGT_EXPORT_CASE if w3 else None, (s["id"], o["id"]))
                 seen += w3
         self.assertGreater(seen, 0)

@@ -863,6 +863,49 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(res["scenarios"][SID]["precheck"]["outcome"], "pass", res["scenarios"][SID]["precheck"])
         self.assertEqual(res["scenarios"][SID]["outcome"], "pass")
 
+    def test_vd2_a_failed_seeds_plan_leaves_w4_out(self):
+        """VERIFY-D VD2: the service keeps no document for a failed seed, so W4's runner records no_document (a runner
+        code: the op inconclusive). area_g.plan_failed's ops run W1, W2, W3, W5 with W4 not exposed: the op agrees and
+        the scenario passes; W4 recording its real no_document on an op that names W4 is inconclusive."""
+        import area_g
+        import graphlet_oracle as go
+        cg.graphlet_oracle = go
+        p = area_g.Plan(SID, {"failed": True, "arms": ["left"]}, False)
+        area_g.plan_failed(p, "G-other-0001")
+        planned = next(o for o in p.ops if o["id"] == "walks")
+        self.assertEqual(planned["ways"], ["W1", "W2", "W3", "W5"])
+        self.assertEqual(planned["not_exposed"], {"W4": "the service keeps no document for a failed seed"})
+        self.assertEqual([o.get("by_design") for o in p.ops if o.get("by_design")], [])   # VD3: no case
+        for w4_runs in (False, True):
+            op = {"id": "walks", "tool": "graphlet_walks", "args": planned["args"], "paging": "none"}
+            op.update({"ways": ["W1", "W2", "W3", "W4", "W5"]} if w4_runs else
+                      {"ways": planned["ways"], "not_exposed": planned["not_exposed"]})
+            scen = gf.scenario(pre={"no_graphlet": True}, ops=[op])
+            self.run_ = gf.GRun(scenarios=[scen])
+            self.run_.write_twin(SID, {"results": [{"seed": {"length_bp": 31}, "error": "seed_failed"}]})
+            self.run_.write_echo(SID, scen["request"]["strategy"])
+            self.run_.write_mcp_runs()
+            for way in ("W1", "W2"):
+                self.run_.record(way, SID, "walks", "graphlet_walks", op["args"],
+                                 error={"code": "no_graphlet", "fields": {"outcome": "failed"}})
+            if w4_runs:   # what W4's runner records without the MCP's document
+                self.run_.record("W4", SID, "walks", "graphlet_walks", op["args"],
+                                 error={"code": "no_document", "fields": {"source": None}})
+            self.run_.record("W3", SID, "walks", "graphlet_walks", op["args"],
+                             error={"code": "no_graphlet", "fields": {"reason": "the seed's retrieval failed"}})
+            self.run_.record("W5", SID, "walks", "graphlet_walks", op["args"], answer=None,
+                             oracle={"checked": {}, "consistency_only": ["/*"], "declared": "expected_error",
+                                     "expected_error": "no_graphlet", "note": "the full twin's seed failed"})
+            res = self.result()
+            e = res["scenarios"][SID]["ops"]["walks"]
+            if w4_runs:
+                self.assertEqual(e["outcome"], "inconclusive", e)
+            else:
+                self.assertEqual(e["outcome"], "agree", e)
+                self.assertEqual(res["scenarios"][SID]["outcome"], "pass", res["scenarios"][SID])
+            self.run_.cleanup()
+            self.run_ = None
+
     def test_vr4_a_failed_seed_with_lane_os_run_step(self):
         """The same failed seed with W5 written by lane O's own run step (graphlet_oracle.write_run, 846eeb97d: W5
         expects no_graphlet from the full twin's seed error): the op agrees and the scenario passes."""

@@ -45,7 +45,7 @@ AREA = "G"
 MAXB = 262144                      # the service's max_bytes ceiling: every W3 whole-list call is designed to fit it
 CUT_PAGE = 2048                    # a paging pass's page (the tools' default ceiling; byte-bound pages)
 ROW_PAGE = 4096                    # a paging pass over rows with label lists (walk segments, claims, compare)
-SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async's case (service_by_design.json, 2026-10-20)
+SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async's case (service_by_design_g.json, 2026-10-20)
 ALL_WAYS = ["W1", "W2", "W3", "W4", "W5"]
 DIRECT_ONLY_WAYS = ["W1", "W2", "W5"]
 LIBRARY_WAYS = ["W1", "W2", "W4", "W5"]
@@ -895,19 +895,27 @@ def plan_compare(p: Plan, partner: str, full: bool, oid_prefix: str = "cmp") -> 
     p.add(_op("%s-bad-mode" % oid_prefix, "graphlet_compare", C(partner, mode="all")))
 
 
+REASON_FAILED_NO_DOC = "the service keeps no document for a failed seed"
+FAILED_SEED_WAYS = ["W1", "W2", "W3", "W5"]
+
+
 def plan_failed(p: Plan, other: str) -> None:
-    """A failed seed: every tool the service exposes answers no_graphlet (the library ways: the runner's
-    no_graphlet), one call each."""
-    p.add(_op("sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": MAXB}))
-    p.add(_op("walks", "graphlet_walks", W("left")))
-    p.add(_op("walk", "graphlet_walk", {"arm": "left", "walk": 0, "max_bytes": MAXB}))
-    p.add(_op("labels", "graphlet_labels", L()))
-    p.add(_op("seq", "graphlet_sequence", S("left", walk=0)))
-    p.add(_op("exp-mgt", "graphlet_export", E(format="mgt")))
-    p.add(_op("cmp", "graphlet_compare", C(other)))
+    """A failed seed: every tool the service exposes answers no_graphlet (W3, and W1 / W2 / W5: the runner's
+    no_graphlet), one call each. W4 is not exposed (VERIFY-D VD2): the service keeps no document for a failed seed,
+    so W4's runner would record no_document (a runner code: the op inconclusive by construction)."""
+    for o in (_op("sum", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": MAXB}),
+              _op("walks", "graphlet_walks", W("left")),
+              _op("walk", "graphlet_walk", {"arm": "left", "walk": 0, "max_bytes": MAXB}),
+              _op("labels", "graphlet_labels", L()),
+              _op("seq", "graphlet_sequence", S("left", walk=0)),
+              _op("exp-mgt", "graphlet_export", E(format="mgt")),
+              _op("cmp", "graphlet_compare", C(other))):
+        o["ways"] = list(FAILED_SEED_WAYS)
+        o["not_exposed"] = {"W4": REASON_FAILED_NO_DOC}
+        p.add(o)
 
 
-BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async's case (service_by_design.json, 2026-10-20)
+BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async's case (service_by_design_g.json, 2026-10-20)
 BIG_BODY_SUMMARY_CASE = BIG_BODY_CASE + ".summary"         # graphlet_summary answered from the stored row
 MGT_EXPORT_CASE = "graphlet.export_mgt_is_the_stored_body"  # async's 4th case: W3's mgt receipt is the stored body's link
 IN_SERVICE_MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -926,8 +934,8 @@ def by_design_case(o: dict, facts: dict) -> Optional[str]:
     at); else, on a body over the in-service ceiling (facts over_8mib), graphlet_summary the .summary case (answered
     from the row) and the refusing tools the body case (graphlet_export only for fasta / gfa / json)."""
     ways = o.get("ways") or ALL_WAYS
-    if "W3" not in ways:
-        return None
+    if "W3" not in ways or facts.get("failed"):
+        return None   # a failed seed: every way answers no_graphlet, no case's sides can hold (VERIFY-D VD3)
     args = o["args"]
     if o["tool"] == "graphlet_export" and args.get("format") == "mgt":
         return MGT_EXPORT_CASE if all(args.get(k) is None for k in ("arm", "walks", "what", "export_id")) else None
@@ -1416,7 +1424,8 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
         seen = set()
         # over the in-service ceiling: the rehearsal's service facts, else the slot's expectation (facts_of)
         big = (g.get("facts") or {}).get("body_over_8mib")
-        gf = dict(g, _facts={"over_8mib": bool(big if big is not None else g.get("slot") == "over_8mib")})
+        gf = dict(g, _facts={"over_8mib": bool(big if big is not None else g.get("slot") == "over_8mib"),
+                             "failed": bool((g.get("preconditions") or {}).get("no_graphlet"))})
         for o in g.get("ops") or []:
             oid = o.get("id")
             if oid in seen:
@@ -1425,7 +1434,7 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
             problems += ["%s/%s: %s" % (sid, oid, m) for m in op_problems(o, gf, ids, seen)]
             bd = o.get("by_design")
             if bd and cases is not None and bd not in cases:
-                pending.append("%s/%s: by-design case %s not in service_by_design.json yet (async adds it)" % (
+                pending.append("%s/%s: by-design case %s not in the by-design tables yet (async adds it)" % (
                     sid, oid, bd))
     return problems, sorted(set(pending))
 
