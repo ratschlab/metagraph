@@ -722,9 +722,14 @@ class DocumentErrorTests(unittest.TestCase):
             docs.update((sid, os.path.join(tmp, sid + ".json.gz")) for sid in raws)
             ops = [op("s", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": 2048}),
                    op("c", "graphlet_compare", {"a": {"graphlet": "G-annot"}, "b": "<handle>", "arm": None,
-                                                "mode": "labels", "max_bytes": 2048})]
+                                                "mode": "labels", "max_bytes": 2048}),
+                   # ops whose arguments select from an earlier op's answer (async's review X4)
+                   op("w", "graphlet_walks", walks("left", n=1)),
+                   op("w0", "graphlet_walk", {"arm": "left", "walk": {"ref": "w", "path": "/rows/0/walk"},
+                                              "max_bytes": 2048}),
+                   op("cur", "graphlet_walks", walks("left", n=1, cursor={"cursor_of": "w"}))]
             plan = {"scenarios": [{"id": sid, "graphlet": {"ops": ops}} for sid in (
-                "G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws))]}
+                "G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws)) + ("G-annot",)]}
             recs = run_offline(os.path.join(tmp, "run"), plan, docs=docs, ways="W4")["W4"]
             got = dict(((r["scenario"], r["op"]), r) for r in recs)
             self.assertEqual(got[("G-nofile", "s")]["error"]["code"], "no_document")
@@ -741,6 +746,15 @@ class DocumentErrorTests(unittest.TestCase):
             self.assertEqual(got[("G-failed", "s")]["error"], {"code": "no_graphlet", "fields": {}})
             self.assertEqual(got[("G-broken", "s")]["error"]["code"], "document_refused")
             self.assertEqual(got[("G-broken", "s")]["error"]["fields"], {"stage": "load", "code": "format_error"})
+            # X4: without a document a dependent op carries the document's error (no selector error), so a missing
+            # MCP document reads as the document's failure on W4, never as a W1-W4 disagreement
+            for sid in ("G-nofile", "G-failed", "G-broken", "G-nodoc") + tuple(sorted(raws)):
+                for oid in ("w", "w0", "cur"):
+                    self.assertIsNone(got[(sid, oid)]["selector_error"], (sid, oid))
+                    self.assertEqual(got[(sid, oid)]["error"], got[(sid, "s")]["error"], (sid, oid))
+            # with a document the selectors resolve (a real selector error stays one)
+            self.assertIsNone(got[("G-annot", "w0")]["selector_error"])
+            self.assertIsNone(got[("G-annot", "w0")]["error"])
             # a call on another graphlet still runs; <handle> of a scenario without one is left to the library
             self.assertEqual(got[("G-failed", "c")]["args_resolved"]["a"], "<handle:G-annot>")
             self.assertEqual(got[("G-failed", "c")]["error"]["code"], "unknown_handle")

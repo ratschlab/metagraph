@@ -822,6 +822,12 @@ class Way(object):
         try:
             args = self.graphlets(graphlet_select.resolve(op.get("args") or {}, answers), sid)
         except graphlet_select.SelectorError as e:
+            if sid not in self.handles and doc["error"] is not None:
+                # no document, so no earlier answer to select from: the document's failure is the op's error, as it
+                # is every op's of its scenario (README; async's review X4: a selector error here would read as a
+                # W1-W4 disagreement whenever the MCP document is missing)
+                rec["error"] = doc["error"]
+                return rec, None
             rec["selector_error"] = str(e)
             return rec, None
         key = HANDLE_ARG.get(tool)
