@@ -5120,6 +5120,11 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   /resolve. They run on the MCP arm only (direct_not_run: plan_executions skips them on the direct arms), expect
   the flow's checks only, and S-stop-0001 walks a CPU-bound 10 kbp sau walk that outlasts the stop on a warm host.
   `rehearse_g.py --rehearsal 3` rehearses them (3 tries each) with the constrain partner of the annotate pair.
+  On a healthy host the /traverse release is the worker's `completed` on the host's answer; the stop site's own
+  judgement (re-cancel; pinned finished / covering tombstone / lease) runs only when the host doesn't answer, which
+  MCP cannot provoke, so async's unit and parity tests cover it. A /traverse stop passes on completed (decision
+  null), finished or tombstone; a hold or the sweep is inconclusive; a /resolve stop passes on grace or grace_capped,
+  its completed (the resolve ended first) is inconclusive.
 - After the verifier (VERIFY-D): a failed seed's plan leaves W4 out (no document) and links no case; the W3
   headroom counts only a stated escalation; qualified_cause checks only the cut sides' caps; area G adds
   self-compares answering true and unknown, owner D1's constrain / annotate pair (direct-only, compare rows) and

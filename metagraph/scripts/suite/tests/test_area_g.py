@@ -660,6 +660,9 @@ class StopScenarios(unittest.TestCase):
             self.assertEqual(b["request"], stop["request"])
             self.assertIn("not_implemented", b["mcp"])
             self.assertEqual([e["check"] for e in b["expect"]], ["status"])
+        for x in (walk, res):   # the coordinator's sentence on the release judgement's scope
+            self.assertEqual(x["truth"]["release_note"], areas_mod().STOP_RELEASE_NOTE)
+        self.assertIn("MCP cannot provoke", areas_mod().STOP_RELEASE_NOTE)
         out = [walk, res]
         flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # async's FLOW_KEYS
         stop_checks = ["stop_answer", "job_terminal", "attempt_state", "token_release"]
