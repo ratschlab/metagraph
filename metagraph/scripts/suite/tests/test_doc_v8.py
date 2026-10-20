@@ -208,7 +208,8 @@ class GateV8Test(unittest.TestCase):
 
 
 class AreaLineAndGlossaryTest(unittest.TestCase):
-    """Area G's verdict line on the cover and in I.1 (none without a comparison)."""
+    """Area G's verdict line on the cover and in I.1 (none without a comparison), and the glossary's v8 terms, printed
+    from manifest v8 on only (a v5 to v7 glossary is as it was)."""
 
     def test_area_line(self):
         import graphlets
@@ -225,6 +226,23 @@ class AreaLineAndGlossaryTest(unittest.TestCase):
         self.assertNotIn("(I.1)", graphlets.area_line(_Stub(run=run), cover=False))
         self.assertIn("ERROR", graphlets.area_line(_Stub(run=_Stub(manifest={}, _graphlets={"error": "x"}))))
         self.assertIsNone(graphlets.area_line(_Stub(run=_Stub(manifest={}, _graphlets=None))))
+
+    def test_glossary_since(self):
+        import sections
+        entries = prose("glossary")["entries"]
+        new = [e["term"] for e in entries if e.get("since")]
+        self.assertEqual(set(e.get("since") for e in entries if e.get("since")), {8})
+        self.assertIn("way (W1 to W5)", new)
+        self.assertIn("stop, release record", new)
+        for v in (5, 6, 7, None):
+            self.assertEqual([e["term"] for e in sections.glossary_for(entries, v)],
+                             [e["term"] for e in entries if not e.get("since")])
+        self.assertEqual(len(sections.glossary_for(entries, 8)), len(entries))
+        terms = set(e["term"] for e in entries)
+        for e in entries:
+            if e.get("since"):
+                for s in e.get("see") or []:
+                    self.assertIn(s, terms)
 
 
 class SharedProseV8Test(unittest.TestCase):

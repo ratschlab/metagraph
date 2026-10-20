@@ -5301,6 +5301,13 @@ def _sort_key(term):
     return t
 
 
+def glossary_for(entries, manifest_version):
+    """The glossary entries a document of |manifest_version| prints: an entry with `since` (a term of a later
+    manifest, area G's and the stops' since v8) only from that version on."""
+    version = cells._num(manifest_version) or 0
+    return [e for e in entries if not (cells._num(e.get("since")) and version < cells._num(e.get("since")))]
+
+
 def glossary(ctx):
     """Appendix D: the full record key first (labelled rk:D, linked from every matrix's legend and from the
     compact key of I.3: re-verification N-1), then the short glossary of glossary.json ({term, definition | text,
@@ -5332,7 +5339,8 @@ def glossary(ctx):
         # two columns at footnote size (READ-020: readable at ordinary page size, two pages if need be)
         out += ("\\begin{multicols}{2}\\footnotesize\\raggedright\\setlength{\\columnsep}{5mm}"
                 "\\setlength{\\parskip}{0pt}\n")
-        for e in sorted(entries, key=lambda e: _sort_key(e["term"])):
+        for e in sorted(glossary_for(entries, (ctx.run.manifest or {}).get("manifest_version")),
+                        key=lambda e: _sort_key(e["term"])):
             text = inline(ctx.fill(e.get("definition") or e.get("text") or ""))
             see = e.get("see")
             see_text = inline(", ".join(str(x) for x in see)) if isinstance(see, list) and see else None
