@@ -310,6 +310,189 @@ def execute2(out: str, manifest_path: str, mcp_cmd: str) -> int:
                            env=env, stdin=subprocess.DEVNULL)
 
 
+# ===================================================================================================== rehearsal 3 (S)
+# The stop rehearsal (VERIFY-D VD6, the coordinator 2026-10-20: after async's bundle with the release record is
+# deployed): each stop scenario STOP_TRIES times, interleaved (a try's walk meets the host the earlier tries warmed),
+# MCP only (the scenarios' direct_not_run); the entry condition is every try a taken stop (stop.took, no race) with
+# every stop check passing. With it, the direct-local rehearsal of VD8's constrain / annotate partner (direct-only:
+# three graphlet requests and the twin) whose preconditions the freeze needs.
+STOP_TRIES = 3
+REHEARSAL3_PAIR = "annotate.1+constrain"
+
+
+def rehearsal3_scenarios(ctx: Any, v7: List[dict]) -> Tuple[List[dict], Dict[str, dict]]:
+    """(the stop rehearsal's scenarios, meta): try t of S-stop-000n as S-stop-cn-tt (a copy of the built scenario),
+    the tries of the two scenarios interleaved, the constrain / annotate partner after the first round."""
+    import areas
+    stops = areas.gen_stop(ctx, v7)
+    if len(stops) != len(areas.STOP_IDS):
+        raise SystemExit("rehearsal S: the stop scenarios do not build (%s)" % [x["id"] for x in stops])
+    cands = area_g.candidates(ctx, v7)
+    partners = dict((pc["cid"], (pc, of, pair)) for pc, of, pair in partner_candidates(cands))
+    if REHEARSAL3_PAIR not in partners:
+        raise SystemExit("rehearsal S: no partner %s" % REHEARSAL3_PAIR)
+    pc, of, pair = partners[REHEARSAL3_PAIR]
+    corpus = area_g.default_corpus()
+    of_sid = candidate_ids([of])[of["cid"]]
+    pid = "G-pair-annot-c1"
+    pops = area_g.op_plan(pid, pc["slot"], area_g.facts_of(pc, corpus), False, [(of_sid, False)],
+                          direct_only=True, extras={"no_compare": True}, partner_of=of_sid,
+                          reason=area_g.direct_reason(pc))
+    partner = area_g.g_scenario(pid, "rehearsal S: the constrain partner of %s (VD8)" % of["cid"], pc, corpus, None,
+                                pops, ["rehearsal", "rehearsal-s", "pair"])
+    partner["repeat"] = DL_REPEATS
+    out, meta = [], {}
+    for t in range(1, STOP_TRIES + 1):
+        for n, base in enumerate(stops, 1):
+            x = copy.deepcopy(base)
+            x["id"] = "S-stop-c%d-t%d" % (n, t)
+            x["tags"] = sorted(set(x["tags"] + ["rehearsal", "rehearsal-s"]))
+            out.append(x)
+            meta[x["id"]] = {"stop_of": base["id"], "try": t}
+        if t == 1:
+            out.append(partner)
+            meta[pid] = {"cid": pc["cid"], "slot": pc["slot"], "pair": pair, "of": of["cid"], "candidate": pc}
+    return out, meta
+
+
+def plan3(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
+    """What the stop rehearsal sends, and its expected duration: a stop try is one MCP job (submit, running, delay,
+    traverse_stop, terminal, then the admin reads until the release record, at most the lease + 35 s and 90 s after
+    the end); the partner three direct-local requests and its twin."""
+    rows, mcp_jobs, dl, seconds = [], 0, 0, 0.0
+    for x in scenarios:
+        m = meta[x["id"]]
+        if m.get("stop_of"):
+            jobs, n_dl, t = 1, 0, 2.0 + STOP_FLOW_DELAY_S_DEFAULT + 10.0 + 60.0
+        else:
+            jobs, n_dl = 0, DL_REPEATS + 1
+            t = n_dl * (0.5 + DL_PAUSE_S)
+        mcp_jobs += jobs
+        dl += n_dl
+        seconds += t
+        rows.append({"scenario": x["id"], "what": m.get("stop_of") and "%s try %d" % (m["stop_of"], m["try"])
+                     or "the partner %s" % m.get("cid"), "mcp_jobs": jobs, "direct_local_requests": n_dl,
+                     "expected_s": round(t, 1)})
+    dl += 4
+    return {"stop_tries": sum(1 for x in scenarios if meta[x["id"]].get("stop_of")), "mcp_jobs": mcp_jobs,
+            "direct_local_requests": dl, "direct_remote_requests": 0, "expected_minutes": round(seconds / 60.0, 1),
+            "rows": rows,
+            "load": "one request in flight at a time, in manifest order (run_suite.sh --paired --skip-remote): per "
+                    "stop try one MCP job (traverse_fetch of the CPU-bound 10 kbp sau walk, or traverse_resolve of "
+                    "the 500 bp eco discovery), stopped %g s after it runs; the direct arms send nothing for them "
+                    "(direct_not_run); the partner three direct-local graphlet requests and its twin" % (
+                        STOP_FLOW_DELAY_S_DEFAULT)}
+
+
+STOP_FLOW_DELAY_S_DEFAULT = 2.0
+
+
+def plan3_markdown(p: dict, out: str, mpath: str, mcp_cmd: str) -> str:
+    lines = ["# Stop rehearsal (rehearsal S) plan", "",
+             "Stop tries %d (MCP jobs %d), direct-local requests %d, direct-remote 0; expected about %.0f minutes "
+             "of staging time (most of it the runner waiting for each attempt's release record)." % (
+                 p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"], p["expected_minutes"]), "",
+             "Load: %s." % p["load"], "",
+             "Precondition: async's bundle with the release record (feat/stop-release-record) deployed on staging, "
+             "and the MCP runner at a52bd3d6 or later (the stop flow, the release wait).", "",
+             "Command (the coordinator's GO first): `METAGRAPH_ADMIN_KEY_FILE=<key file> rehearse_g.py --rehearsal 3 "
+             "--out %s --execute` = `run_suite.sh --manifest %s --paired --skip-remote --mcp-cmd '<%s>' --warm-every 0 "
+             "--no-gate --no-pdf` (SUITE_RUNS=%s/runs)" % (out, mpath, mcp_cmd.split(" ")[1] if " " in mcp_cmd
+                                                         else mcp_cmd, out), "",
+             "Then offline: `rehearse_g.py --rehearsal 3 --out %s --analyse --dl-run <the run> --prior <rehearsal 2's "
+             "directory>`: per stop try taken / race and the four stop checks, the entry verdict (3 of 3 taken stops, "
+             "every check passing), and the partner's corpus entry merged into a copy of truth/area_g/corpus.json "
+             "(OUT/corpus.json) with the built plans re-checked." % out, "",
+             "| scenario | what | MCP jobs | direct-local | expected s |", "|---|---|---|---|---|"]
+    for r in p["rows"]:
+        lines.append("| %s | %s | %d | %d | %.1f |" % (r["scenario"], r["what"], r["mcp_jobs"],
+                                                        r["direct_local_requests"], r["expected_s"]))
+    return "\n".join(lines) + "\n"
+
+
+def stop_try_verdicts(manifest: dict, meta: Dict[str, dict], run_dir: str) -> dict:
+    """Per stop try of a recorded stop rehearsal: {taken, race, checks {name: (outcome, detail)}, outcome}; per stop
+    scenario the entry verdict: every try taken (stop.took, no race) and every check passing."""
+    import checks
+    tries, by_stop = {}, {}
+    for x in manifest["scenarios"]:
+        m = meta.get(x["id"]) or {}
+        if not m.get("stop_of"):
+            continue
+        raw = _read(os.path.join(run_dir, "arms", "mcp", sc.raw_name(x["id"], "mcp", 0))) or {}
+        ans = raw.get("answer") if isinstance(raw.get("answer"), dict) else None
+        body = (ans or {}).get("body") if isinstance((ans or {}).get("body"), dict) else {}
+        flow = raw.get("stop_flow") if isinstance(raw.get("stop_flow"), dict) else body.get("stop_flow")
+        if ans is None:   # the execution ended without an answer: the raw record's stop_flow alone
+            ans = {"http": None, "body": {"stop_flow": flow} if flow else None}
+        res = checks.evaluate(x, ans, "mcp")
+        stop = (flow or {}).get("stop") or {}
+        t = {"taken": bool(stop.get("took")) and not (flow or {}).get("race"), "race": (flow or {}).get("race"),
+             "flow_error": (flow or {}).get("error"), "recorded": flow is not None,
+             "checks": dict((r["check"], (r["outcome"], r["detail"])) for r in res),
+             "outcome": checks.scenario_outcome(res)}
+        tries[x["id"]] = t
+        by_stop.setdefault(m["stop_of"], []).append(x["id"])
+    entry = {}
+    for stop_id, ids in sorted(by_stop.items()):
+        taken = sum(1 for i in ids if tries[i]["taken"])
+        passed = sum(1 for i in ids if tries[i]["outcome"] == "pass")
+        entry[stop_id] = {"tries": len(ids), "taken": taken, "passed": passed,
+                          "verdict": "pass" if taken == passed == len(ids) == STOP_TRIES else
+                          "fail: %d of %d taken, %d passed" % (taken, len(ids), passed)}
+    return {"tries": tries, "entry": entry}
+
+
+def analyse3(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, library_root: str,
+             library_commit: Optional[str], prior: Optional[str]) -> dict:
+    """The stop rehearsal's judgement: stop_try_verdicts, the partner analysed as any candidate (analyse), its corpus
+    entry merged into a copy of the committed corpus (OUT/corpus.json; the committed file is not touched), the built
+    plans of that corpus re-checked on both rehearsals' and this one's documents. Writes OUT/REPORT-S.md and
+    OUT/rehearsal_s.json."""
+    stops = stop_try_verdicts(manifest, meta, dl_run)
+    gmeta = dict((k, v) for k, v in meta.items() if v.get("cid"))
+    res = analyse(os.path.join(out, "partner"), {"scenarios": [x for x in manifest["scenarios"] if x["id"] in gmeta]},
+                  gmeta, dl_run, os.path.join(dl_run, "arms", "mcp"), library_root, library_commit) \
+        if gmeta else {"results": {}, "corpus": {"candidates": {}}}
+    committed = sc.read_json(os.path.join(HERE, "truth", "area_g", "corpus.json"))
+    merged = copy.deepcopy(committed)
+    merged.setdefault("candidates", {}).update(res["corpus"].get("candidates") or {})
+    merged["rehearsal"] = dict(merged.get("rehearsal") or {}, stop_rehearsal=utc_now())
+    with open(os.path.join(out, "corpus.json"), "w") as fh:
+        json.dump(merged, fh, indent=1, sort_keys=True)
+    built = None
+    if prior:
+        prev = sc.read_json(os.path.join(prior, "rehearsal.json")) or {}
+        pmeta = dict((prev.get("meta") or {}), **dict((k, dict((kk, vv) for kk, vv in v.items() if kk != "candidate"))
+                                                     for k, v in gmeta.items()))
+        presults = dict((prev.get("results") or {}), **res["results"])
+        dl_runs = [dl_run] + sorted(glob.glob(os.path.join(prior, "runs", "*")))
+        built = built_plan_check(out, merged, pmeta, presults, dl_runs, library_root,
+                                 merged.get("library_commit") or library_commit)
+    record = {"stops": stops, "partner": res["results"], "built_plans": built}
+    with open(os.path.join(out, "rehearsal_s.json"), "w") as fh:
+        json.dump(record, fh, indent=1, sort_keys=True, default=str)
+    lines = ["# Stop rehearsal (rehearsal S) report", "", "## Entry verdict (%d of %d taken stops, every check passing)"
+             % (STOP_TRIES, STOP_TRIES), "", "| stop scenario | tries | taken | passed | verdict |", "|---|---|---|---|---|"]
+    for sid_, e in stops["entry"].items():
+        lines.append("| %s | %d | %d | %d | %s |" % (sid_, e["tries"], e["taken"], e["passed"], e["verdict"]))
+    lines += ["", "## Tries", "", "| try | taken | race | outcome | checks not passing |", "|---|---|---|---|---|"]
+    for tid, t in stops["tries"].items():
+        bad = "; ".join("%s %s: %s" % (k, v[0], str(v[1])[:120]) for k, v in t["checks"].items() if v[0] != "pass")
+        lines.append("| %s | %s | %s | %s | %s |" % (tid, t["taken"], t["race"] or "-", t["outcome"],
+                                                     bad.replace("|", "/") or "-"))
+    for sid_, r in res["results"].items():
+        lines += ["", "## The partner %s: %s" % (sid_, "passed" if r.get("passed") else "not passed: %s" % "; ".join(
+            "%s %s" % kv for kv in r.get("verdicts", {}).items() if not str(kv[1]).startswith("pass")))]
+    if built:
+        lines += ["", "## The built plans of OUT/corpus.json: %d scenario(s), %d op(s), problems in %d, not rehearsed "
+                  "%s" % (built.get("checked", 0), built.get("ops", 0), len(built.get("problems") or {}),
+                          ", ".join(built.get("not_rehearsed") or []) or "none")]
+    with open(os.path.join(out, "REPORT-S.md"), "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return record
+
+
 def rehearsal_manifest(scenarios: List[dict], skipped: List[dict]) -> dict:
     return {"manifest_version": 8, "rehearsal": "area G (rehearse_g.py)", "partial_build": True,
             "content_sha256": ml.sha256_json(scenarios), "created_utc": utc_now(), "index": {"database": ml.DB},
@@ -1326,15 +1509,18 @@ def main(argv=None) -> int:
     ap.add_argument("--library-commit", default=None, help="the pin written into the corpus file")
     ap.add_argument("--skip-conditional", action="store_true", help="leave out the conditional (over 8 MiB) slot")
     ap.add_argument("--slots", default=None, help="comma-separated slots (default all)")
-    ap.add_argument("--rehearsal", type=int, choices=(1, 2), default=1,
-                    help="2: the second rehearsal (the twin re-checks, the long walk with its warm-ups)")
+    ap.add_argument("--rehearsal", type=int, choices=(1, 2, 3), default=1,
+                    help="2: the second rehearsal (the twin re-checks, the long walk with its warm-ups); 3: the stop "
+                         "rehearsal (S: each stop scenario 3 times, the constrain / annotate partner)")
     ap.add_argument("--prior", default=None, help="--analyse: the first rehearsal's directory, merged into the corpus")
     a = ap.parse_args(argv)
     out = os.path.abspath(a.out or default_out())
     os.makedirs(out, exist_ok=True)
     ctx, v7 = build_context()
     slots = [x.strip() for x in a.slots.split(",")] if a.slots else None
-    if a.rehearsal == 2:
+    if a.rehearsal == 3:
+        scenarios, meta = rehearsal3_scenarios(ctx, v7)
+    elif a.rehearsal == 2:
         scenarios, meta = rehearsal2_scenarios(ctx, v7)
     else:
         scenarios, meta = rehearsal_scenarios(ctx, v7, a.skip_conditional, slots)
@@ -1347,23 +1533,34 @@ def main(argv=None) -> int:
     else:
         manifest = sc.read_json(mpath)
     mcp_cmd = a.mcp_cmd or async_mcp_template()
-    p = plan2(manifest["scenarios"], meta) if a.rehearsal == 2 else plan(manifest["scenarios"], meta)
+    p = plan3(manifest["scenarios"], meta) if a.rehearsal == 3 else plan2(manifest["scenarios"], meta) \
+        if a.rehearsal == 2 else plan(manifest["scenarios"], meta)
     with open(os.path.join(out, "plan.json"), "w") as fh:
         json.dump(p, fh, indent=1, sort_keys=True)
     with open(os.path.join(out, "PLAN.md"), "w") as fh:
-        fh.write(plan2_markdown(p, out, mpath, mcp_cmd) if a.rehearsal == 2 else plan_markdown(p, out, mcp_cmd))
+        fh.write(plan3_markdown(p, out, mpath, mcp_cmd) if a.rehearsal == 3 else plan2_markdown(p, out, mpath, mcp_cmd)
+                 if a.rehearsal == 2 else plan_markdown(p, out, mcp_cmd))
     if a.execute:
-        if a.rehearsal == 2:
+        if a.rehearsal in (2, 3):
             return execute2(out, mpath, mcp_cmd)
         return execute(out, mpath, manifest["scenarios"], mcp_cmd)
     if a.analyse:
         if not a.dl_run:
             ap.error("--analyse needs --dl-run")
+        if a.rehearsal == 3:
+            rec = analyse3(out, manifest, meta, a.dl_run, a.library_root, a.library_commit, a.prior)
+            print(json.dumps(rec["stops"]["entry"], indent=1))
+            return 0
         default_mcp = os.path.join(a.dl_run, "arms", "mcp") if a.rehearsal == 2 else os.path.join(out, "mcp")
         res = analyse(out, manifest, meta, a.dl_run, a.mcp_dir or default_mcp, a.library_root,
                       a.library_commit, a.mcp_graphlet_run, a.prior)
         n = sum(1 for e in res["corpus"]["slots"].values() if e["candidate"])
         print("rehearsal: %d of %d slots chosen; %s" % (n, len(res["corpus"]["slots"]), os.path.join(out, "REPORT.md")))
+        return 0
+    if a.rehearsal == 3:
+        print(json.dumps({"out": out, "stop_tries": p["stop_tries"], "mcp_jobs": p["mcp_jobs"],
+                          "direct_local_requests": p["direct_local_requests"],
+                          "expected_minutes": p["expected_minutes"]}, indent=1))
         return 0
     print(json.dumps({"out": out, "candidates": p["candidates"], "mcp_jobs": p["mcp_jobs"],
                       "direct_local_requests": p["direct_local_requests"], "expected_minutes": p["expected_minutes"],

@@ -117,6 +117,62 @@ class W3Headroom(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class StopRehearsal(unittest.TestCase):
+    """The stop rehearsal (rehearsal 3, VERIFY-D VD6): each stop scenario three times, interleaved, MCP only; the
+    constrain / annotate partner (VD8) direct-local; the entry verdict over recorded stop_flow records."""
+
+    def test_its_manifest_and_plan(self):
+        import rehearse_g
+        scen, meta = rehearse_g.rehearsal3_scenarios(FakeCtx(), v7_scenarios())
+        ids = [x["id"] for x in scen]
+        self.assertEqual(ids, ["S-stop-c1-t1", "S-stop-c2-t1", "G-pair-annot-c1", "S-stop-c1-t2", "S-stop-c2-t2",
+                               "S-stop-c1-t3", "S-stop-c2-t3"])
+        for x in scen:
+            if x["id"].startswith("S-stop"):
+                self.assertTrue(x["direct_not_run"])
+                self.assertEqual(sc.mcp_repeats(0, x, 0), [0])
+                self.assertEqual(meta[x["id"]]["stop_of"], "S-stop-000%s" % x["id"][8])
+        partner = scen[2]
+        self.assertEqual(partner["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
+        self.assertEqual(partner["repeat"], 3)
+        self.assertFalse([o["id"] for o in partner["graphlet"]["ops"] if o["id"].startswith("cmp")])
+        self.assertEqual(meta["G-pair-annot-c1"]["cid"], "annotate.1+constrain")
+        p = rehearse_g.plan3(scen, meta)
+        self.assertEqual((p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"]), (6, 6, 8))
+
+    def test_the_entry_verdict(self):
+        import rehearse_g
+        sys.path.insert(0, HERE)
+        from test_stop_flow_checks import record
+        scen, meta = rehearse_g.rehearsal3_scenarios(FakeCtx(), v7_scenarios())
+        tmp = tempfile.mkdtemp(prefix="reh-s-")
+        os.makedirs(os.path.join(tmp, "arms", "mcp", "raw"))
+        try:
+            for x in scen:
+                if not x["id"].startswith("S-stop"):
+                    continue
+                if x["id"].startswith("S-stop-c2"):
+                    from test_stop_flow_checks import ResolveStop, attempt, released
+                    rec = record(tool="traverse_resolve", stop_answer=dict(ResolveStop.ANSWER),
+                                 attempts=[attempt(released("grace", detail="grace_20s",
+                                                            at="2026-10-20T10:00:22.6+00:00"))])
+                    if x["id"].endswith("t3"):
+                        rec["race"] = "terminal_before_running"
+                else:
+                    rec = record()
+                rec["stop"]["took"] = True
+                sc.write_gz_json(os.path.join(tmp, "arms", "mcp", sc.raw_name(x["id"], "mcp", 0)),
+                                 {"scenario": x["id"], "answer": {"http": 200, "body": {"stop_flow": rec}}})
+            got = rehearse_g.stop_try_verdicts({"scenarios": scen}, meta, tmp)
+            self.assertEqual(got["entry"]["S-stop-0001"]["verdict"], "pass", got["entry"])
+            self.assertEqual(got["entry"]["S-stop-0002"]["verdict"], "fail: 2 of 3 taken, 2 passed")
+            self.assertEqual(got["tries"]["S-stop-c2-t3"]["race"], "terminal_before_running")
+            self.assertEqual(got["tries"]["S-stop-c2-t3"]["outcome"], "inconclusive")
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 @needs_library
 class Rehearsal(unittest.TestCase):
     """rehearse_g.analyse on a recorded rehearsal made of the library's fixture graphlets: verdicts, facts, the
