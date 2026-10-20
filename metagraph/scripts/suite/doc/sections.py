@@ -6076,6 +6076,7 @@ def appendices(ctx):
     out += check_catalogue(ctx)
     out += latex.section("B\\qd %s" % titles["B"], "app:B")
     out += by_design_table(ctx)
+    out += graphlets.by_design_g_section(ctx)   # manifest v8: area G's own table ('' before)
     out += latex.section("C\\qd %s" % titles["C"], "app:C", needspace=12)
     out += relations_appendix(ctx)
     out += latex.section("D\\qd %s" % titles["D"], "app:D")

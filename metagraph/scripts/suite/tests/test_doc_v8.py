@@ -245,6 +245,31 @@ class AreaLineAndGlossaryTest(unittest.TestCase):
                     self.assertIn(s, terms)
 
 
+class AppendixBAndSinceV8Test(unittest.TestCase):
+    """Appendix B's area G part: area G's own by-design table, case by case, with the op calls that name a case and
+    the comparison's evidence (none without a comparison)."""
+
+    def test_by_design_g_section(self):
+        import graphlets
+        g = {"summary": {}, "scenarios": {"G-x-0001": {"ops": {"exp-mgt": {"by_design": [
+            {"case": "graphlet.export_mgt_is_the_stored_body", "verified": True}]}}},
+            "G-y-0001": {"ops": {"exp-mgt": {"by_design": [
+                {"case": "graphlet.export_mgt_is_the_stored_body", "verified": False, "side": "W3"}]}}}}}
+        manifest = {"manifest_version": 8, "scenarios": [
+            {"id": "G-x-0001", "graphlet": {"ops": [{"id": "exp-mgt", "by_design":
+                                                    "graphlet.export_mgt_is_the_stored_body"}]}}]}
+        run = _Stub(manifest=manifest, dir="/nowhere", _graphlets=g, policy={"graphlets": {"by_design_g_table": {
+            "sha256": "0" * 64}}})
+        text = graphlets.by_design_g_section(_Stub(run=run))
+        self.assertIn("Area G's by-design table", text)
+        self.assertIn("2 op calls: 1 verified on both sides", text)
+        self.assertIn("1 not verified", text)
+        self.assertIn("the deploy gate's policy pins", text)
+        self.assertIn("not exercised in this run", text)       # the table's other cases
+        self.assertEqual(text.count("\\texttt{graphlet."), 4)
+        self.assertEqual(graphlets.by_design_g_section(_Stub(run=_Stub(manifest={}, _graphlets=None))), "")
+
+
 class SharedProseV8Test(unittest.TestCase):
     """The v8 branches of the shared prose: I.2's access paths name the graphlet tools and traverse_stop, its "Not
     covered" paragraph is v7's for v7 only and v8's says where the graphlet tools and the stops are tested; T-walk's

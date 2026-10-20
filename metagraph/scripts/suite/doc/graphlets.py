@@ -332,6 +332,85 @@ def by_design_and_drift_section(g, max_items=MAX_ITEMS):
     return out
 
 
+def by_design_g_table(run):
+    """(cases, info) of area G's by-design table the comparison read (compare.g_table_for: the run's snapshot's, else
+    the tree's); ({}, None) when it cannot be read."""
+    try:
+        import compare as cmp
+        return cmp.load_by_design(cmp.g_table_for(run.dir))
+    except Exception:   # the appendix says so
+        return {}, None
+
+
+def by_design_g_section(ctx):
+    """Appendix B's area G part (manifest v8): one row per case of area G's own by-design table (kept apart from the
+    v1-v7 table): the case and its class, what it matches, the service's documented answer, the library ways'
+    documented answer (both the table's statements), and this run's op calls that name it with their evidence (the
+    comparison's by-design pairs, verified on both sides or not); '' without a comparison."""
+    run = ctx.run
+    g = data(run)
+    if g is None or g.get("error"):
+        return ""
+    cases, info = by_design_g_table(run)
+    out = latex.section("Area G's by-design table", "app:B:g", level="subsection")
+    if info is None:
+        return out + "No area G by-design table could be read for this run.\\par\\medskip\n"
+    pinned = ((run.policy.get("graphlets") or {}).get("by_design_g_table") or {}) if isinstance(
+        getattr(run, "policy", None), dict) else {}
+    pin = pinned.get("sha256") if isinstance(pinned, dict) else None
+    named, evidence = {}, {}
+    for scen in (run.manifest or {}).get("scenarios") or []:
+        for op in ((scen.get("graphlet") or {}).get("ops") or []) if isinstance(scen, dict) else []:
+            bd = op.get("by_design") if isinstance(op, dict) else None
+            for cid in ([bd] if isinstance(bd, str) else (bd or [])):
+                named.setdefault(cid, []).append((scen.get("id"), op.get("id")))
+    for sid, sv in sorted((g.get("scenarios") or {}).items()):
+        for oid, e in sorted((sv.get("ops") or {}).items()):
+            for r in e.get("by_design") or []:
+                evidence.setdefault(r.get("case"), []).append((sid, oid, bool(r.get("verified"))))
+    rows = []
+    for cid in sorted(set(cases) | set(named) | set(evidence)):
+        c = cases.get(cid) or {}
+        sa, de = c.get("service_answer") or {}, c.get("direct_expectation") or {}
+        service = [esc(sa[k]) if k == "outcome" else "%s %s" % (k, esc(sa[k])) for k in ("outcome", "http")
+                   if sa.get(k) is not None]
+        if sa.get("code"):
+            service.append(tt(sa["code"]))
+        if sa.get("text_contains"):
+            service.append("“%s”" % latex.join_units(latex.esc_wrap(sa["text_contains"], 200)))
+        ev = evidence.get(cid) or []
+        n_ver = sum(1 for _, _, v in ev if v)
+        if ev:
+            run_text = "%d op call%s: %d verified on both sides%s" % (
+                len(ev), "" if len(ev) == 1 else "s", n_ver,
+                (", " + cells.attn("%d not verified" % (len(ev) - n_ver))) if len(ev) > n_ver else "")
+            run_text += " (%s%s)" % (", ".join("%s %s" % (latex.breakable_id(s), tt(o)) for s, o, _ in ev[:4]),
+                                     ", …" if len(ev) > 4 else "")
+        elif named.get(cid):
+            run_text = "named by %d op call%s, no pair judged" % (len(named[cid]), "" if len(named[cid]) == 1 else "s")
+        else:
+            run_text = "not exercised in this run"
+        if not c:
+            run_text = cells.attn("not in the table") + "; " + run_text
+        rows.append([tt(cid) + "\\newline{\\scriptsize %s}" % esc(c.get("agreement") or "–"),
+                     latex.join_units(latex.esc_wrap(c.get("scenario_match"), 420)),
+                     "; ".join(service) or "– (none stated)",
+                     latex.join_units(latex.esc_wrap(de.get("behaviour"), 300)) or "– (none stated)", run_text])
+    out += ("Area G's own by-design table (version %s, %d case%s, service commit %s, sha256 %s%s), kept apart from the "
+            "table above so that it stays as v1 to v7 pinned it: a difference of the service's tools (W3) from the "
+            "library ways (W1, W2, W4) that the service documents. An op call that names a case is judged by it "
+            "(\\emph{by design}) only when both sides match the table: W3's answer the service's, the library ways' "
+            "theirs; otherwise it is a disagreement (chapter G).\n\n" % (
+                esc(info.get("version")), info.get("cases") or 0, "" if info.get("cases") == 1 else "s",
+                tt((info.get("service_commit") or "–")[:12]), tt((info.get("sha256") or "–")[:12]),
+                "" if not pin else ("; the deploy gate's policy pins it" if pin == info.get("sha256") else
+                                    "; " + cells.attn("the deploy gate's policy pins %s" % tt(pin[:12])))))
+    out += latex.plain_table(latex.spec_p([30, 40, 30, 40, 34]),
+                             ["case", "matches", "service (the table's answer)", "library ways (the table's answer)",
+                              "this run's op calls and their evidence"], rows)
+    return out
+
+
 def not_covered(run):
     """{library_only: [(reason, [tools])], direct_only: [(scenario, reason)], v9: [(scenario, reason)]} of the
     manifest: the tools and arguments the service does not expose (the owner's reasons of graphlet.not_exposed, the
