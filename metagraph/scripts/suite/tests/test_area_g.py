@@ -873,7 +873,7 @@ class BuiltV8(unittest.TestCase):
         # the rehearsal's corpus is committed (VERIFY-D VD12): the default build reads it, the pin from it
         self.assertEqual(m["graphlets"]["corpus"]["file"], "truth/area_g/corpus.json")
         self.assertFalse(m["graphlets"]["corpus"]["provisional"])
-        self.assertEqual(m["graphlets"]["library_commit"], "44583b51307ed3242e19c051aaf133c671107956")
+        self.assertEqual(m["graphlets"]["library_commit"], "fdff625ef7322e919b28da4b81763acec65591af")   # R3-1: staging's library
         # the constrain / annotate pair's partner (VERIFY-D VD8) was rehearsed in REHEARSAL S2: nothing pending
         self.assertEqual(m["graphlets"]["pending"], [])
         self.assertEqual(bm.freeze_problems(m), [])

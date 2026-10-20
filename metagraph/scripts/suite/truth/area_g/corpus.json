@@ -7556,7 +7556,8 @@
    }
   }
  },
- "library_commit": "44583b51307ed3242e19c051aaf133c671107956",
+ "library_commit": "fdff625ef7322e919b28da4b81763acec65591af",
+ "library_commit_note": "the library staging serves since a5767cfc (2026-10-20, the coordinator R3-1; the follow-up deploy c60b753e does not re-vendor); the rehearsals ran 44583b51",
  "page_bytes_note": "facts.page_bytes (round 5): per paging pass of a rich graphlet the largest max_bytes at which the local library took at least two pages of the listing on the rehearsal's document, keeping 64 bytes above the smallest page a row fits in (W3's reserve and longer handle); null: one row, the pass is left out (lane D's D-scratch/r5/measure_pages.py)",
  "provisional": false,
  "rehearsal": {
