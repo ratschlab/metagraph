@@ -238,6 +238,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
             # the owner's decision: only once async's MCP runner has the stop flow (--stop-scenarios)
             scenarios += areas.gen_stop(ctx, seeds_from)
             graphlets["stop_scenarios"] = list(areas.STOP_IDS)
+            graphlets["stop_base_scenarios"] = list(areas.STOP_BASE_IDS)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios) + \

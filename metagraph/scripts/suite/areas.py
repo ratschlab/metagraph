@@ -2559,6 +2559,12 @@ def t_walk_0024_warm_ups(ctx: Ctx, scenarios: List[dict]) -> List[dict]:
 # finished attempt of the pinned instance; /resolve after a bounded grace of ~20 s, never past the lease).
 STOP_FLOW_DELAY_S = 0.0   # the stop right after "running" (VERIFY-D-R2 R2-1: async's flow accepts 0)
 STOP_IDS = ("S-stop-0001", "S-stop-0002")
+# each stop scenario's base request run to completion (VERIFY-D-R3 R3-3): repeat 1 is the warm full-run time the stop
+# must beat (repeat 0 meets its own rows cold); direct-local only (the long class), MCP not implemented
+STOP_BASE_IDS = ("S-base-0001", "S-base-0002")
+STOP_BASE_NOT_MCP = ("the stop scenario's base request run to completion on direct-local: its warm full-run time "
+                     "(repeat 1), what the stop must beat (VERIFY-D-R3 R3-3)")
+STOP_POLL_S = 0.2   # the flow's reads while waiting for "running" (R3-3: halves the worst-case stop arrival)
 
 
 # The stop checks (checks.py, stop flows) over the MCP arm's stop_flow record; the direct arms (the base request) do
@@ -2645,7 +2651,7 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
     16S header discovery (STOP_RESOLVE); both stopped right after the flow sees them running (delay_s 0)."""
     from manifest_lib import mcp_resolve, mcp_traverse
     out = []
-    flow = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
+    flow = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S, "poll_s": STOP_POLL_S,
             "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
     bases = dict(stop_base_requests(built))
     req = bases.get("POST /traverse")
@@ -2674,6 +2680,18 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
                              "header kind, 1,000 labels): the stop's answer, the job's end, the token's release after "
                              "its grace", "POST /resolve", req, tr, STOP_CHECKS_RESOLVE,
                              ["stop", "mcp-flow", "resolve"], mcp))
+    # the base requests, after the stops (so they warm nothing the stops meet in this run): two repeats each
+    for route, bid, stop_id in (("POST /traverse", STOP_BASE_IDS[0], STOP_IDS[0]),
+                                ("POST /resolve", STOP_BASE_IDS[1], STOP_IDS[1])):
+        if route not in bases:
+            continue
+        b = scenario(bid, "S", "%s's base request run to completion twice on direct-local: the warm full-run time "
+                     "(repeat 1) the stop must beat" % stop_id, route, copy.deepcopy(bases[route]),
+                     {"base_of": stop_id}, [OK], timing_class="long",
+                     tags=["stop-base", "walk" if route == "POST /traverse" else "resolve"],
+                     mcp={"not_implemented": STOP_BASE_NOT_MCP}, repeat=2)
+        b["expect"] = [e for e in b["expect"] if e["check"] != "budget_respected"]
+        out.append(b)
     return out
 
 

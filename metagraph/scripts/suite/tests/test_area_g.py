@@ -652,8 +652,15 @@ class StopScenarios(unittest.TestCase):
     def test_two_flow_scenarios(self):
         import build_manifest as bm
         out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
-        self.assertEqual([s["id"] for s in out], list(areas_mod().STOP_IDS))
-        walk, res = out
+        self.assertEqual([s["id"] for s in out], list(areas_mod().STOP_IDS) + list(areas_mod().STOP_BASE_IDS))
+        walk, res, base_walk, base_res = out
+        # R3-3: the base requests' warm full runs (repeat 1), direct-local only (the long class), MCP not implemented
+        for b, stop in ((base_walk, walk), (base_res, res)):
+            self.assertEqual((b["repeat"], b["timing_class"], b["route"]), (2, "long", stop["route"]))
+            self.assertEqual(b["request"], stop["request"])
+            self.assertIn("not_implemented", b["mcp"])
+            self.assertEqual([e["check"] for e in b["expect"]], ["status"])
+        out = [walk, res]
         flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # async's FLOW_KEYS
         stop_checks = ["stop_answer", "job_terminal", "attempt_state", "token_release"]
         for s in out:
@@ -668,6 +675,7 @@ class StopScenarios(unittest.TestCase):
         self.assertEqual(walk["request"]["strategy"]["bounds"]["max_extension_bp"], 10000)
         for s in out:
             self.assertEqual(s["mcp"]["flow"]["delay_s"], 0.0)   # R2-1: the stop right after running
+            self.assertEqual(s["mcp"]["flow"]["poll_s"], 0.2)    # R3-3
         self.assertEqual(walk["mcp"]["arguments"]["overrides"]["bounds"]["max_extension_bp"], 10000)
         sa = dict((e["check"], e["args"]) for e in walk["expect"])["stop_answer"]
         self.assertTrue(sa["cancel_supported"])
@@ -706,7 +714,7 @@ class StopScenarios(unittest.TestCase):
         self.assertEqual(hits, len(want))                 # and none elsewhere in the genome
 
     def test_only_the_mcp_arm_runs_them(self):
-        out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
+        out = [x for x in areas_mod().gen_stop(FakeCtx(), v7_scenarios()) if x["id"] in areas_mod().STOP_IDS]
         selected = list(enumerate(out))
         for arm in sc.DIRECT_ARMS:
             planned, skipped = sc.plan_executions(selected, arm, 10)

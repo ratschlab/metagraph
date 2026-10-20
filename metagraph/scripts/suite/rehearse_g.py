@@ -331,7 +331,7 @@ def rehearsal3_scenarios(ctx: Any, v7: List[dict]) -> Tuple[List[dict], Dict[str
     S-stop-000n as S-stop-c<n>-t<t> (a copy of the built scenario, the tries of the two interleaved), then G-annot-c1
     and G-pair-annot-c1 (direct-local)."""
     import areas
-    stops = areas.gen_stop(ctx, v7)
+    stops = [x for x in areas.gen_stop(ctx, v7) if x["id"] in areas.STOP_IDS]
     if len(stops) != len(areas.STOP_IDS):
         raise SystemExit("rehearsal S: the stop scenarios do not build (%s)" % [x["id"] for x in stops])
     by = dict((x["id"], x) for x in v7)
@@ -544,8 +544,8 @@ def analyse3(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, libra
         bad = "; ".join("%s %s: %s" % (k, v[0], str(v[1])[:120]) for k, v in t["checks"].items() if v[0] != "pass")
         lines.append("| %s | %s | %s | %s | %s |" % (tid, t["taken"], t["race"] or "-", t["outcome"],
                                                      bad.replace("|", "/") or "-"))
-    lines += ["", "## The base requests, once to completion on direct-local (the warm engine time the stop must beat)",
-              ""]
+    lines += ["", "## The base requests, once to completion on direct-local (their first full run: their own rows "
+                  "cold; the warm full run is S-base-000n's repeat 1 in a v8 run)", ""]
     for stop_id, b_ in sorted(bases.items()):
         lines.append("- %s (%s): http %s, engine %s ms, wall %s ms" % (stop_id, b_["scenario"], b_["http"],
                                                                       b_["engine_ms"], b_["wall_ms"]))
