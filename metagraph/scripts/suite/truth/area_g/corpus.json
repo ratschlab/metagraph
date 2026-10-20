@@ -2633,7 +2633,7 @@
     "page_bytes": {
      "claims-paged": null,
      "labels-paged": null,
-     "lims-paged": 1120,
+     "lims-paged": null,
      "splits-paged": null,
      "walk-paged-right": null,
      "walks-paged-right": null
@@ -2813,13 +2813,13 @@
      "right": 7
     },
     "page_bytes": {
-     "claims-paged": 2048,
+     "claims-paged": 2560,
      "labels-paged": 2048,
      "lims-paged": 1312,
      "splits-paged": 1472,
      "walk-paged-left": 12288,
      "walk-paged-right": 12288,
-     "walks-paged-left": 800,
+     "walks-paged-left": null,
      "walks-paged-right": 928
     },
     "seed_bp": null,
@@ -6326,12 +6326,12 @@
     "page_bytes": {
      "claims-paged": 16384,
      "labels-paged": 16384,
-     "lims-paged": 1536,
+     "lims-paged": 1984,
      "splits-paged": null,
-     "walk-paged-left": 1536,
+     "walk-paged-left": 1792,
      "walk-paged-right": 3072,
-     "walks-paged-left": 1536,
-     "walks-paged-right": 1536
+     "walks-paged-left": 1856,
+     "walks-paged-right": 1664
     },
     "seed_bp": null,
     "segments": {
@@ -7558,7 +7558,7 @@
  },
  "library_commit": "fdff625ef7322e919b28da4b81763acec65591af",
  "library_commit_note": "the library staging serves since a5767cfc (2026-10-20, the coordinator R3-1; the follow-up deploy c60b753e does not re-vendor); the rehearsals ran 44583b51",
- "page_bytes_note": "facts.page_bytes (round 5): per paging pass of a rich graphlet the largest max_bytes at which the local library took at least two pages of the listing on the rehearsal's document, keeping 64 bytes above the smallest page a row fits in (W3's reserve and longer handle); null: one row, the pass is left out (lane D's D-scratch/r5/measure_pages.py)",
+ "page_bytes_note": "facts.page_bytes (round 5, R3-4): per paging pass of a rich graphlet the largest max_bytes at which the local library takes at least two pages of the listing on the rehearsal's document and still at least two whole pages (no error, no cut row) at W3's real budget, max_bytes - max(96, W3's overhead: walks / walk 82 = reserve 30 + handle 22 + the handle in next_cursor 30; others 52); null: no size does, the pass is left out (D-scratch/r5/measure_pages2.py)",
  "provisional": false,
  "rehearsal": {
   "stop_rehearsal": "s2-prepared-20261020T074516Z (2026-10-20T20:06-20:17Z): the constrain partner annotate.1+constrain; annotate.1's cmp-paged page (walks mode, 28 rows)",
