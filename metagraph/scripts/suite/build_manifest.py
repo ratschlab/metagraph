@@ -112,6 +112,8 @@ CONVENTIONS = {
     "mcp.by_design": "case ids of the async session's service-by-design table (service_by_design.json)",
     "mcp.requires_service": "the service increment the MCP mapping needs (I12: max_mismatches)",
     "timing_class": "fast (< ~5 s), slow, long (> 100 s: direct-local only)",
+    "direct_not_run": "a scenario only the MCP arm runs (v8's stop scenarios), the reason: the direct arms skip it "
+                      "(suite_common.plan_executions)",
     "warms": "a warm-up's target (lane V5): the id of the scenario whose annotation rows it reads right before it; "
              "the builder keeps the pair adjacent (the warm-up first) and every selection that takes the target takes "
              "its warm-up (suite_common.select_scenarios)",

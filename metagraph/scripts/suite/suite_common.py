@@ -209,6 +209,11 @@ def plan_executions(selected, arm, warm_every=10):
     [{scenario, reason}] for scenarios this arm does not run (the long class behind the front proxy)."""
     planned, skipped = [], []
     for index, scenario in selected:
+        if arm in DIRECT_ARMS and scenario.get("direct_not_run"):
+            # a scenario only the MCP arm runs (manifest v8's stop scenarios: their MCP stop is the first and only
+            # request, VERIFY-D VD6)
+            skipped.append({"scenario": scenario.get("id"), "reason": "direct_not_run: %s" % scenario["direct_not_run"]})
+            continue
         if arm == "direct-remote" and scenario.get("timing_class") == "long":
             skipped.append({"scenario": scenario.get("id"),
                             "reason": "timing_class long: over the front proxy's ~120 s cut, direct-local only"})

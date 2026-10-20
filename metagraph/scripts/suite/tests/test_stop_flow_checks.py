@@ -209,6 +209,43 @@ class ResolveStop(unittest.TestCase):
         self.assertEqual(out["stop_answer"][0], "fail")
 
 
+class BuiltScenarios(unittest.TestCase):
+    """VERIFY-D VD5: the BUILT stop scenarios' expect lists (areas.gen_stop on v7's scenarios) evaluated on a stop_flow
+    body in the runner's recorded shape (suite_stop_flow.py a52bd3d6: {"http": 200, "body": {"stop_flow": ...}}): no
+    check judges the stop body as a traversal or a resolve answer; a correct stop passes, a race is inconclusive."""
+
+    @classmethod
+    def setUpClass(cls):
+        import suite_common as sc
+        v7 = sc.read_json(os.path.join(os.path.dirname(HERE), "manifest", "suite_v7.json"))["scenarios"]
+
+        class Ctx(object):
+            def skip(self, *a):
+                raise AssertionError("skipped %s" % (a,))
+        cls.built = dict((s["id"], s) for s in areas.gen_stop(Ctx(), v7))
+
+    def evaluate(self, sid, rec):
+        res = checks.evaluate(self.built[sid], {"http": 200, "body": {"stop_flow": rec}}, "mcp")
+        return res, checks.scenario_outcome(res)
+
+    def test_a_correct_stop_passes_on_every_built_check(self):
+        res, outcome = self.evaluate("S-stop-0001", record())
+        self.assertEqual(outcome, "pass", res)
+        self.assertEqual([r["check"] for r in res], ["status", "stop_answer", "job_terminal", "attempt_state",
+                                                     "token_release"])
+        rel = released("grace", detail="grace_20s", at="2026-10-20T10:00:22.6+00:00")
+        rec = record(tool="traverse_resolve", stop_answer=dict(ResolveStop.ANSWER),
+                     attempts=[attempt(rel, settled_by="disconnect")])
+        res, outcome = self.evaluate("S-stop-0002", rec)
+        self.assertEqual(outcome, "pass", res)
+        self.assertFalse([r for r in res if r["check"] in ("invariants", "answer_fields", "budget_respected")])
+
+    def test_a_race_or_a_null_release_is_inconclusive_never_a_fail(self):
+        for sid in ("S-stop-0001", "S-stop-0002"):
+            self.assertEqual(self.evaluate(sid, record(race="terminal_before_running"))[1], "inconclusive", sid)
+        self.assertEqual(self.evaluate("S-stop-0001", record(attempts=[attempt(None)]))[1], "inconclusive")
+
+
 class StopScenarioShape(unittest.TestCase):
     def test_the_flow_states_only_asyncs_keys(self):
         flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # suite_stop_flow.FLOW_KEYS

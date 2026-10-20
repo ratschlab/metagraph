@@ -644,35 +644,53 @@ class McpRepeats(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-@unittest.skipUnless(have_cache(), "no record cache")
 class StopScenarios(unittest.TestCase):
-    """The owner's decision of 2026-10-19: the stop scenarios enter only with --stop-scenarios (async's flow)."""
+    """The owner's decision of 2026-10-19: the stop scenarios enter only with --stop-scenarios (async's flow). VERIFY-D
+    VD5 / VD6: MCP only (the direct arms skip them), the flow's expect list only, a walk CPU-bound enough to be
+    running past delay_s + margin on a warm host too."""
 
     def test_two_flow_scenarios(self):
         import build_manifest as bm
-        recs = truth.load_with_sequences(fetch=False)
-        ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
-        out = areas_mod().gen_stop(ctx, v7_scenarios())
+        out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
         self.assertEqual([s["id"] for s in out], list(areas_mod().STOP_IDS))
         walk, res = out
-        self.assertEqual(walk["route"], "POST /traverse")
-        self.assertEqual(walk["mcp"]["tool"], "traverse_fetch")
-        self.assertEqual(walk["mcp"]["flow"]["kind"], "stop")
         flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # async's FLOW_KEYS
+        stop_checks = ["stop_answer", "job_terminal", "attempt_state", "token_release"]
         for s in out:
             self.assertLessEqual(set(s["mcp"]["flow"]), flow_keys, s["id"])
-            names = [e["check"] for e in s["expect"]]
-            stop_checks = ["stop_answer", "job_terminal", "attempt_state", "token_release"]
-            self.assertEqual([n for n in names if n in stop_checks], stop_checks)
+            self.assertEqual([e["check"] for e in s["expect"]], ["status"] + stop_checks, s["id"])   # VD5
+            self.assertEqual(s["direct_not_run"], areas_mod().STOP_DIRECT_NOT_RUN)                    # VD6
+        self.assertEqual(walk["route"], "POST /traverse")
+        self.assertEqual(walk["mcp"]["tool"], "traverse_fetch")
+        src = next(x for x in v7_scenarios() if x["id"] == areas_mod().STOP_WALK_SOURCE)
+        self.assertEqual(walk["request"]["seeds"], src["request"]["seeds"])
+        self.assertEqual(walk["request"]["strategy"]["bounds"]["max_extension_bp"], 10000)
+        self.assertEqual(walk["mcp"]["arguments"]["overrides"]["bounds"]["max_extension_bp"], 10000)
         sa = dict((e["check"], e["args"]) for e in walk["expect"])["stop_answer"]
         self.assertTrue(sa["cancel_supported"])
-        self.assertEqual(len(walk["request"]["seeds"][0]["sequence"]), 6600)
         self.assertEqual(res["route"], "POST /resolve")
         self.assertEqual(res["mcp"]["tool"], "traverse_resolve")
         sa = dict((e["check"], e["args"]) for e in res["expect"])["stop_answer"]
         self.assertEqual((sa["cancel_supported"], sa["cancel"]), (True, "disconnect"))
-        self.assertEqual(len(res["request"]["sequence"]), 500)
         self.assertEqual(bm.validate(out), [])
+
+    def test_only_the_mcp_arm_runs_them(self):
+        out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
+        selected = list(enumerate(out))
+        for arm in sc.DIRECT_ARMS:
+            planned, skipped = sc.plan_executions(selected, arm, 10)
+            self.assertEqual(planned, [], arm)
+            self.assertEqual([x["scenario"] for x in skipped], list(areas_mod().STOP_IDS))
+            self.assertTrue(all(x["reason"].startswith("direct_not_run: ") for x in skipped))
+        tmp = tempfile.mkdtemp(prefix="stop-plan-")
+        try:
+            for item in sc.paired_plan({"scenarios": out}, tmp, warm_every=10,
+                                       arms=("direct-local", "direct-remote", "mcp")):
+                self.assertEqual((item["direct-local"], item["direct-remote"], item["mcp_cold"], item["mcp_warm"]),
+                                 (None, None, True, []), item["scenario"])
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 @unittest.skipUnless(have_cache(), "no record cache")

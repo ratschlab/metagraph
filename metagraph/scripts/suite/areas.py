@@ -2580,32 +2580,55 @@ STOP_CHECKS_RESOLVE = [
 ]
 
 
+# The stop scenarios run on the MCP arm only (VERIFY-D VD5 / VD6, lane D's proposal (a)): the MCP stop is the
+# scenario's first and only request in every mode, so no direct arm of the scenario warms the walk the stop must catch
+# running, and no check judges the stop_flow body as a traversal or resolve answer (the expect list is the flow's:
+# status and the four stop checks)
+STOP_DIRECT_NOT_RUN = ("the stop flow runs on the MCP arm only: a direct run of the base request would warm the walk "
+                       "the stop must catch running and judges nothing of the stop")
+# S-stop-0001's walk (VD6): T-walk-0028's 200 bp sau seed, right arm, constrained to its header label, is CPU-bound:
+# 1,000 bp took 1,100 ms cold and 1,100 ms warm in the v7 baseline (13.0 M work units, one linear path); at 10,000 bp
+# it runs ~8 s (or until the walk preset's work budget, ~7.7 kbp) on a warm host too, well past delay_s + the stop's
+# latency. The stop rehearsal (3 of 3 taken stops) confirms it.
+STOP_WALK_SOURCE = "T-walk-0028"
+STOP_WALK_EXTENSION_BP = 10000
+
+
+def stop_scenario(sid: str, title: str, route: str, req: dict, truth: dict, checks: List[dict], tags: List[str],
+                  mcp: dict) -> dict:
+    """A stop scenario: the flow's expect list only (no budget_respected, invariants or seed checks on the stop_flow
+    body), the direct arms not run (direct_not_run)."""
+    sc_ = scenario(sid, "S", title, route, req, truth, [OK] + copy.deepcopy(checks), timing_class="slow",
+                   tags=tags, mcp=mcp, direct_not_run=STOP_DIRECT_NOT_RUN)
+    sc_["expect"] = [e for e in sc_["expect"] if e["check"] != "budget_respected"]
+    return sc_
+
+
 def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
-    """The two stop scenarios (STOP_IDS), appended after every other area (no index moves): S-stop-0001 stops a
-    running walk (area G's long_walk.2 seed, a 6.6 kbp mpn seed with a 10 kbp arm, whose cold engine time was 13.1 s
-    in the rehearsal of 2026-10-19; no warm-up reads its region), S-stop-0002 a running discovery (500 bp around
-    T-labels-0003's eco window, header kind, 1,000 labels: its v4 cold calls took 21-37 s)."""
-    import area_g
+    """The two stop scenarios (STOP_IDS), appended after every other area (no index moves), MCP only: S-stop-0001
+    stops a running walk (STOP_WALK_SOURCE's seed at STOP_WALK_EXTENSION_BP: CPU-bound, running ~8 s warm too),
+    S-stop-0002 a running discovery (500 bp around T-labels-0003's eco window, header kind, 1,000 labels: its v4
+    cold calls took 21-37 s)."""
     from manifest_lib import mcp_resolve, mcp_traverse
     out = []
-    cands = dict((c["cid"], c) for c in area_g.candidates(ctx, built))
-    walk = cands.get("long_walk.2")
-    if walk is None:
-        ctx.skip("S", STOP_IDS[0], "no long_walk.2 candidate (the record cache)")
+    flow = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
+            "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
+    src = next((x for x in built if x.get("id") == STOP_WALK_SOURCE), None)
+    if src is None:
+        ctx.skip("S", STOP_IDS[0], "no %s to take the walk from" % STOP_WALK_SOURCE)
     else:
-        req = {"seeds": [copy.deepcopy(walk["seed"])], "strategy": area_g.candidate_strategy(walk)}
-        req["strategy"]["output"]["detail"] = "full"
+        req = copy.deepcopy(src["request"])
+        req["strategy"]["bounds"]["max_extension_bp"] = STOP_WALK_EXTENSION_BP
         mcp = mcp_traverse(req)
-        # the flow records (async's suite_stop_flow.py: FLOW_KEYS only, no expectations); the suite judges the record
-        # with the stop checks below (checks.py, stop flows: RELEASE-RECORD.md of 2026-10-20)
-        mcp["flow"] = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
-                       "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
-        t = dict(walk["truth"], stop_flow="lane D's proposal (a): traverse_stop on a running /traverse")
-        out.append(scenario(STOP_IDS[0], "S", "traverse_stop via MCP on a running walk (a 6.6 kbp mpn seed, 10 kbp "
-                            "right arm): the stop's answer, the job's end, the host attempt, the token's release",
-                            "POST /traverse", req, t,
-                            [OK, INV, ex("traverse_seed_outcome", walks=["complete", "partial"])] + STOP_CHECKS_TRAVERSE,
-                            timing_class="slow", tags=["stop", "mcp-flow", "walk"], mcp=mcp))
+        # the flow records (async's suite_stop_flow.py: FLOW_KEYS only); the suite judges its record (checks.py)
+        mcp["flow"] = copy.deepcopy(flow)
+        t = dict(src["truth"], stop_flow="lane D's proposal (a): traverse_stop on a running /traverse",
+                 walk_from=STOP_WALK_SOURCE)
+        out.append(stop_scenario(STOP_IDS[0], "traverse_stop via MCP on a running walk (%s's 200 bp sau seed, right "
+                                 "arm, %d bp, header label: CPU-bound, ~8 s warm too): the stop's answer, the job's "
+                                 "end, the host attempt, the token's release" % (STOP_WALK_SOURCE,
+                                                                                STOP_WALK_EXTENSION_BP),
+                                 "POST /traverse", req, t, STOP_CHECKS_TRAVERSE, ["stop", "mcp-flow", "walk"], mcp))
     src = next((x for x in built if x.get("id") == "T-labels-0003"), None)
     t = (src or {}).get("truth") or {}
     flank, fs, st0 = t.get("flank"), t.get("flank_start"), t.get("start")
@@ -2617,14 +2640,12 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
     req = resolve_request(query, discover={"kind": "header", "max_labels": 1000})
     mcp = mcp_resolve(req)
     if "tool" in mcp:
-        mcp["flow"] = {"kind": "stop", "after": "running", "delay_s": STOP_FLOW_DELAY_S,
-                       "observe": ["stop_answer", "job_state", "attempt_state", "token_release"]}
+        mcp["flow"] = copy.deepcopy(flow)
     tr = {"record": t.get("record"), "genome": t.get("genome"), "start": fs + a, "length": len(query),
           "window": query, "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve"}
-    out.append(scenario(STOP_IDS[1], "S", "traverse_stop via MCP on a running discovery (500 bp of eco, header "
-                        "kind, 1,000 labels): the stop's answer, the job's end, the token's release after its grace",
-                        "POST /resolve", req, tr, [OK, INV, ex("answer_fields", present=["labels"])] +
-                        STOP_CHECKS_RESOLVE, timing_class="slow", tags=["stop", "mcp-flow", "resolve"], mcp=mcp))
+    out.append(stop_scenario(STOP_IDS[1], "traverse_stop via MCP on a running discovery (500 bp of eco, header kind, "
+                             "1,000 labels): the stop's answer, the job's end, the token's release after its grace",
+                             "POST /resolve", req, tr, STOP_CHECKS_RESOLVE, ["stop", "mcp-flow", "resolve"], mcp))
     return out
 
 
