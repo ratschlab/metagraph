@@ -184,6 +184,16 @@ class StopRehearsal(unittest.TestCase):
         p = rehearse_g.plan3(scen, meta)
         self.assertEqual((p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"]), (6, 12, 17))
 
+    def test_the_pair_replans_without_compares(self):
+        # the analysis rebuilds the constrain partner's plan: no compares of its own, direct-only
+        import rehearse_g
+        scen, meta = rehearse_g.rehearsal3_scenarios(FakeCtx(), v7_scenarios())
+        partner = next(x for x in scen if x["id"] == "G-pair-annot-c1")
+        s2 = rehearse_g.replan(partner, meta["G-pair-annot-c1"], {"arms": ["left", "right"]})
+        self.assertFalse([o["id"] for o in s2["graphlet"]["ops"] if o["tool"] == "graphlet_compare"])
+        for o in s2["graphlet"]["ops"]:
+            self.assertNotIn("W3", o["ways"], o["id"])
+
     def test_the_entry_verdict(self):
         import rehearse_g
         sys.path.insert(0, HERE)

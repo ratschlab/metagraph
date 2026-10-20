@@ -495,17 +495,25 @@ def analyse3(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, libra
         if gmeta else {"results": {}, "corpus": {"candidates": {}}}
     committed = sc.read_json(os.path.join(HERE, "truth", "area_g", "corpus.json"))
     merged = copy.deepcopy(committed)
-    merged.setdefault("candidates", {}).update(res["corpus"].get("candidates") or {})
+    for cid, entry in (res["corpus"].get("candidates") or {}).items():
+        old = (merged.get("candidates") or {}).get(cid) or {}
+        entry = copy.deepcopy(entry)
+        if "page_bytes" in (old.get("facts") or {}) and "page_bytes" not in (entry.get("facts") or {}):
+            entry.setdefault("facts", {})["page_bytes"] = old["facts"]["page_bytes"]   # measured, kept
+        merged.setdefault("candidates", {})[cid] = entry
     merged["rehearsal"] = dict(merged.get("rehearsal") or {}, stop_rehearsal=utc_now())
     with open(os.path.join(out, "corpus.json"), "w") as fh:
         json.dump(merged, fh, indent=1, sort_keys=True)
     built = None
-    if prior:
-        prev = sc.read_json(os.path.join(prior, "rehearsal.json")) or {}
+    priors = [x for x in (prior or "").split(",") if x]
+    if priors:
+        # the first prior's rehearsal.json (rehearsal 2's holds rehearsal 1's results merged); the documents of
+        # every prior's runs (rehearsal 1's graphlets live in its own run)
+        prev = sc.read_json(os.path.join(priors[0], "rehearsal.json")) or {}
         pmeta = dict((prev.get("meta") or {}), **dict((k, dict((kk, vv) for kk, vv in v.items() if kk != "candidate"))
                                                      for k, v in gmeta.items()))
         presults = dict((prev.get("results") or {}), **res["results"])
-        dl_runs = [dl_run] + sorted(glob.glob(os.path.join(prior, "runs", "*")))
+        dl_runs = [dl_run] + [d for p_ in priors for d in sorted(glob.glob(os.path.join(p_, "runs", "*")))]
         built = built_plan_check(out, merged, pmeta, presults, dl_runs, library_root,
                                  merged.get("library_commit") or library_commit)
     bases = {}
@@ -1425,9 +1433,13 @@ def replan(s: dict, meta: dict, facts: dict, other: Optional[str] = None) -> dic
     f = dict(area_g.facts_of(c, area_g.default_corpus()))
     f.update(dict((k, v) for k, v in facts.items() if v is not None))
     if meta.get("pair"):
-        b = _partner_b(s)
+        try:
+            b, extras = _partner_b(s), {}
+        except ValueError:   # a partner whose compares run on the other graphlet (the constrain / annotate pair)
+            b, extras = s["id"], {"no_compare": True}
         ops = area_g.op_plan(s["id"], c["slot"], f, False, [(b, meta["pair"] in ("radius", "two_seeds"))],
-                             partner_of=b)
+                             partner_of=b, extras=extras, direct_only=not area_g.expressible(c),
+                             reason=area_g.direct_reason(c))
     else:
         ops = area_g.op_plan(s["id"], c["slot"], f, c["slot"] in area_g.DEFAULT_RICH,
                              [(s["id"], False)] if c["slot"] == "two_arms" else [],
@@ -1592,7 +1604,9 @@ def main(argv=None) -> int:
     ap.add_argument("--rehearsal", type=int, choices=(1, 2, 3), default=1,
                     help="2: the second rehearsal (the twin re-checks, the long walk with its warm-ups); 3: the stop "
                          "rehearsal (S: each stop scenario 3 times, the constrain / annotate partner)")
-    ap.add_argument("--prior", default=None, help="--analyse: the first rehearsal's directory, merged into the corpus")
+    ap.add_argument("--prior", default=None, help="--analyse: the first rehearsal's directory, merged into the corpus "
+                                              "(--rehearsal 3: comma-separated, the latest first; every one's runs "
+                                              "lend their documents)")
     a = ap.parse_args(argv)
     out = os.path.abspath(a.out or default_out())
     os.makedirs(out, exist_ok=True)
