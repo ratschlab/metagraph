@@ -5,6 +5,7 @@ binary (taken from $METAGRAPH, else from PATH); the tests are skipped if
 neither is available. Query results are compared to `metagraph query`.
 """
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,7 +49,7 @@ def graph(index):
 
 
 def cli_query(index, fasta, discovery_fraction):
-    """{sequence index: [labels]} as reported by `metagraph query`."""
+    """{sequence index: [(label, kmer_count)]} as reported by `metagraph query`."""
     result = subprocess.run(
         [METAGRAPH, "query", "-i", str(index[0]), "-a", str(index[1]),
          "--min-kmers-fraction-label", str(discovery_fraction), str(fasta)],
@@ -56,7 +57,9 @@ def cli_query(index, fasta, discovery_fraction):
     hits = {}
     for line in result.stdout.splitlines():
         fields = line.split("\t")
-        hits[int(fields[0])] = [label for label in fields[2:] if label]
+        # each hit is printed as <label>:<kmer_count>
+        hits[int(fields[0])] = [(m.group(1), int(m.group(2)))
+                                for m in (re.fullmatch(r"<(.*)>:(\d+)", f) for f in fields[2:] if f)]
     return hits
 
 
@@ -76,7 +79,7 @@ def test_matches_cli(graph, index, tmp_path):
         result = graph.query(queries, num_top_labels=len(graph.labels),
                              discovery_fraction=discovery_fraction)
         for i, hits in enumerate(result):
-            assert sorted(label for label, _ in hits) == sorted(expected.get(i, []))
+            assert sorted(hits) == sorted(expected.get(i, []))
 
 
 def test_counts_and_order(graph):
