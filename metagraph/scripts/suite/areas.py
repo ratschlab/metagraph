@@ -2565,9 +2565,10 @@ STOP_BASE_IDS = ("S-base-0001", "S-base-0002")
 STOP_BASE_NOT_MCP = ("the stop scenario's base request run to completion on direct-local: its warm full-run time "
                      "(repeat 1), what the stop must beat (VERIFY-D-R3 R3-3)")
 # both stop scenarios' notes (the coordinator, 2026-10-20; async's RELEASE-RECORD.md "Settled")
-STOP_RELEASE_NOTE = ("On a healthy host the /traverse release is the worker's `completed` on the host's answer; the stop "
-                     "site's own judgement (re-cancel; pinned finished / covering tombstone / lease) runs only when the "
-                     "host doesn't answer, which MCP cannot provoke, so async's unit and parity tests cover it.")
+STOP_RELEASE_NOTE = ("On a healthy host the /traverse release is the worker's `completed` on the host's answer; the "
+                     "stop site's own judgement (re-cancel; pinned finished / covering tombstone / lease) runs only "
+                     "when the host doesn't answer, which MCP cannot provoke, so async's unit and parity tests cover "
+                     "it.")
 STOP_POLL_S = 0.2   # the flow's reads while waiting for "running" (R3-3: halves the worst-case stop arrival)
 
 
@@ -2668,7 +2669,8 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
         t = {"genome": STOP_WALK["genome"], "record": STOP_WALK["record"], "start": STOP_WALK["start"],
              "length": len(STOP_WALK["seed"]), "window": STOP_WALK["seed"], "no_repeat_bp": STOP_WALK["no_repeat_bp"],
              "strategy_from": STOP_WALK_SOURCE,
-             "stop_flow": "lane D's proposal (a): traverse_stop on a running /traverse", "release_note": STOP_RELEASE_NOTE}
+             "stop_flow": "lane D's proposal (a): traverse_stop on a running /traverse",
+             "release_note": STOP_RELEASE_NOTE}
         out.append(stop_scenario(STOP_IDS[0], "traverse_stop via MCP on a running walk (200 bp of sau, header label, "
                                  "right arm, %d bp through a stretch without a repeated 30-mer): the stop's answer, "
                                  "the job's end, the host attempt, the token's release" % STOP_WALK_EXTENSION_BP,
@@ -2679,7 +2681,8 @@ def gen_stop(ctx: Ctx, built: List[dict]) -> List[dict]:
         mcp["flow"] = copy.deepcopy(flow)
     tr = {"genome": STOP_RESOLVE["genome"], "record": STOP_RESOLVE["record"], "start": STOP_RESOLVE["start"],
           "length": len(STOP_RESOLVE["query"]), "window": STOP_RESOLVE["query"],
-          "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve", "release_note": STOP_RELEASE_NOTE}
+          "stop_flow": "lane D's proposal (a): traverse_stop on a running /resolve",
+          "release_note": STOP_RELEASE_NOTE}
     out.append(stop_scenario(STOP_IDS[1], "traverse_stop via MCP on a running discovery (500 bp of eco's 16S rRNA, "
                              "header kind, 1,000 labels): the stop's answer, the job's end, the token's release after "
                              "its grace", "POST /resolve", req, tr, STOP_CHECKS_RESOLVE,
