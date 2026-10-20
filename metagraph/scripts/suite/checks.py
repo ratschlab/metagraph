@@ -4990,10 +4990,20 @@ def check_invariants(sc, ans, a, arm, client=None):
 # not exposed.
 STOP_FLOW_CHECKS = ("stop_answer", "job_terminal", "attempt_state", "token_release")
 
-# async's settings (app/settings.py): TRAVERSAL_STOP_CONFIRM_S 30; the HTTP phase margin connect 10 + write 10 + pool 5
+# async's settings (app/settings.py): TRAVERSAL_STOP_CONFIRM_S 30; the HTTP phase margin connect 10 + write 10 + pool 5.
+# The token's hold past the row's lease_until (async's bundle review L1, 2026-10-20): at most 30 s on a contract host
+# (an attempt row stating its contract bound), 25 s on a legacy host, 0 for /resolve (it records before publishing)
 STOP_CONFIRM_S = 30.0
 STOP_HTTP_PHASE_MARGIN_S = 25.0
 STOP_LEASE_MARGIN_S = max(STOP_CONFIRM_S, STOP_HTTP_PHASE_MARGIN_S)
+STOP_LEASE_HOLD_S = {"contract": STOP_CONFIRM_S, "legacy": STOP_HTTP_PHASE_MARGIN_S, "resolve": 0.0}
+# A /traverse job can read stopped up to ~40 s before the stop site writes its release record (M1): a release written
+# up to this long after the job's end is on time; async's runner waits until lease_until + 35 s, at most 90 s after
+STOP_RELEASE_WRITE_WINDOW_S = 45.0
+# traverse_stop's codes: one that says an earlier call of the same stop took (async's STOP_TOOK, VERIFY-D VD7), and
+# those that say the stop was never answered (no answer, busy past the runner's retries): not tested, never a refusal
+STOP_TOOK_CODES = ("already_stopping",)
+STOP_UNANSWERED_CODES = ("temporarily_unavailable", "timeout", "transport", "no_answer", "connection_error")
 RESOLVE_STOP_GRACE_S = 20.0        # TRAVERSAL_RESOLVE_STOP_GRACE_S
 STOP_GRACE_MARGIN_S = 5.0               # the worker closes the connection within its stop poll; the clocks
 STOP_TERMINAL_MARGIN_S = 5.0            # job_terminal: the stop's bound plus this
@@ -5056,7 +5066,15 @@ def _sf_stop_answer(rec, args, scenario):
     if not isinstance(stop, dict):
         return INCONCLUSIVE, "no stop was sent: %s" % (rec.get("error") or "the flow ended before it")
     if stop.get("error"):
-        return FAIL, "traverse_stop answered error %s" % stop["error"]
+        err = str(stop["error"])
+        if err in STOP_TOOK_CODES and stop.get("took") is not False:
+            # the runner resent an unanswered stop (idempotent) and records the last answer: an earlier call took
+            return PASS, "traverse_stop: %s, an earlier call of this stop took (%d call(s))" % (
+                err, stop.get("calls") or 1)
+        if err in STOP_UNANSWERED_CODES or (stop.get("answer") is None and stop.get("took") is False and
+                                            ":" in err):
+            return INCONCLUSIVE, "the stop was never answered (%s): nothing of it to test" % err
+        return FAIL, "traverse_stop answered error %s" % err
     ans = stop.get("answer")
     if not isinstance(ans, dict):
         return FAIL, "traverse_stop's answer is not an object"
@@ -5089,6 +5107,12 @@ def _sf_job_terminal(rec, args, scenario):
         bound = _sf_num((stop.get("answer") or {}).get("bound_seconds"))
         answered = _sf_utc(stop.get("answered_utc"))
         end = _sf_utc(term.get("finished_at")) or _sf_utc(term.get("utc"))
+        if bound is None and answered is not None:
+            # the answer states no bound (already_stopping: an earlier call's answer was lost): the attempts' leases
+            leases = [_sf_utc(a.get("lease_until")) for a in rec.get("attempts") or [] if isinstance(a, dict)]
+            leases = [x for x in leases if x is not None]
+            if leases:
+                bound = max(0.0, (max(leases) - answered).total_seconds())
         if bound is None or answered is None or end is None:
             return INCONCLUSIVE, "%s; the stop's bound or the end time not stated" % detail
         late = (end - answered).total_seconds() - bound
@@ -5156,8 +5180,10 @@ def _sf_after(x, y, slack_s=0.0):
     return bool(tx and ty and (tx - ty).total_seconds() >= slack_s)
 
 
-def _sf_lease_bound(a, args):
-    """(the latest release time the token's lease allows, how it was read) of an attempt row."""
+def _sf_lease_bound(a, args, route="traverse"):
+    """(the latest release time the token's lease allows, how it was read) of an attempt row: dispatched_at +
+    token_lease_ms where the row states it, else lease_until plus the token's hold past it (STOP_LEASE_HOLD_S: 30 s
+    on a contract host, 25 s legacy, 0 for /resolve; args.lease_margin_s overrides)."""
     tl = _sf_num(a.get("token_lease_ms"))
     disp = _sf_utc(a.get("dispatched_at"))
     if tl is not None and disp is not None:
@@ -5165,8 +5191,10 @@ def _sf_lease_bound(a, args):
     lease = _sf_utc(a.get("lease_until"))
     if lease is None:
         return None, "no lease stated"
-    margin = float(args.get("lease_margin_s", STOP_LEASE_MARGIN_S))
-    return lease + datetime.timedelta(seconds=margin), "lease_until + %g s" % margin
+    host = "resolve" if route == "resolve" else (
+        "contract" if a.get("bound_ms") is not None or a.get("not_after_ms") is not None else "legacy")
+    margin = float(args["lease_margin_s"]) if "lease_margin_s" in args else STOP_LEASE_HOLD_S[host]
+    return lease + datetime.timedelta(seconds=margin), "lease_until + %g s (%s)" % (margin, host)
 
 
 def _sf_judge_traverse(rec, a, rel):
@@ -5242,8 +5270,11 @@ def _sf_token_release(rec, args, scenario):
             continue
         rel = a.get("release")
         if rel is None:
-            unknown.append("attempt %s: release null%s" % (aid, " on a terminal job (no claim, an RQ job-timeout "
-                                                                  "path or a later sweep)" if terminal else ""))
+            unknown.append("attempt %s: release null%s" % (aid, " on a terminal job after the runner's wait (no "
+                                                                  "claim, an RQ job-timeout path or a later sweep; a "
+                                                                  "/traverse release may follow its end by up to "
+                                                                  "%g s)" % STOP_RELEASE_WRITE_WINDOW_S
+                                                                  if terminal else ""))
             continue
         if not isinstance(rel, dict):
             fails.append("attempt %s: release %r is not an object" % (aid, rel))
@@ -5251,7 +5282,7 @@ def _sf_token_release(rec, args, scenario):
         if rel.get("decision") == "error":
             fails.append("attempt %s: the release failed (%s)" % (aid, rel.get("detail")))
             continue
-        bound, how = _sf_lease_bound(a, args)
+        bound, how = _sf_lease_bound(a, args, route)
         at = _sf_utc(rel.get("at"))
         if bound is not None and at is not None and at > bound:
             fails.append("attempt %s: released at %s, after the token's lease (%s: %s)" % (

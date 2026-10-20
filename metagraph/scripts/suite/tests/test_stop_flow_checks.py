@@ -246,6 +246,49 @@ class BuiltScenarios(unittest.TestCase):
         self.assertEqual(self.evaluate("S-stop-0001", record(attempts=[attempt(None)]))[1], "inconclusive")
 
 
+class TakenAndTimed(unittest.TestCase):
+    """VERIFY-D VD7: already_stopping (an earlier call of the same stop took: async's STOP_TOOK) counts as taken; a
+    stop never answered is inconclusive. Async's bundle review (2026-10-20): L1 the token's hold past lease_until is
+    at most 30 s on a contract host, 25 s legacy, 0 for /resolve; M1 a /traverse release may be written well after the
+    job read stopped (within the lease bound it is on time)."""
+
+    def test_already_stopping_counts_as_taken(self):
+        stop = {"sent_utc": STOP_SENT, "answered_utc": STOP_ANSWERED, "error": "already_stopping", "calls": 2,
+                "took": True, "answer": {"error": {"code": "already_stopping", "message": "a stop was requested"}}}
+        out = run(record(stop=stop))
+        self.assertEqual(out["stop_answer"][0], "pass", out)
+        self.assertIn("an earlier call of this stop took (2 call(s))", out["stop_answer"][1])
+        # its bound unseen: the job's end is judged against the attempts' lease (LEASE 10:01:00)
+        self.assertEqual(out["job_terminal"][0], "pass", out)
+        late = run(record(stop=stop, finished_at="2026-10-20T10:01:30+00:00"))
+        self.assertEqual(late["job_terminal"][0], "fail", late)
+        for err in ("temporarily_unavailable", "timeout"):
+            out = run(record(stop=dict(stop, error=err, took=False, answer=None)))
+            self.assertEqual(out["stop_answer"][0], "inconclusive", (err, out))
+        out = run(record(stop=dict(stop, error="forbidden", took=False)))
+        self.assertEqual(out["stop_answer"][0], "fail")
+
+    def test_the_tokens_hold_past_the_lease(self):
+        at = "2026-10-20T10:01:27+00:00"     # lease_until + 27 s
+        rel = released("finished", detail="finished", at=at)
+        self.assertEqual(run(record(attempts=[attempt(rel)]))["token_release"][0], "pass")   # contract: 30 s
+        out = run(record(attempts=[attempt(rel, bound_ms=None, not_after_ms=None)]))        # legacy: 25 s
+        self.assertEqual(out["token_release"][0], "fail", out)
+        self.assertIn("lease_until + 25 s (legacy)", out["token_release"][1])
+        # /resolve records before publishing: no hold past its lease
+        lease = "2026-10-20T10:00:21+00:00"
+        rel = released("grace", detail="grace_20s", at="2026-10-20T10:00:22.4+00:00")
+        out = run(record(tool="traverse_resolve", stop_answer=dict(ResolveStop.ANSWER),
+                         attempts=[attempt(rel, lease_until=lease)]), "resolve")
+        self.assertEqual(out["token_release"][0], "fail", out)
+        self.assertIn("lease_until + 0 s (resolve)", out["token_release"][1])
+
+    def test_a_release_written_long_after_the_end_is_on_time_within_the_lease(self):
+        # M1: the job read stopped at 10:00:04; the stop site wrote the release 40 s later, before lease + 30 s
+        rel = released("finished", detail="finished", at="2026-10-20T10:00:44+00:00")
+        self.assertEqual(run(record(attempts=[attempt(rel)]))["token_release"][0], "pass")
+
+
 class StopScenarioShape(unittest.TestCase):
     def test_the_flow_states_only_asyncs_keys(self):
         flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # suite_stop_flow.FLOW_KEYS
