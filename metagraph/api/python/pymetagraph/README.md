@@ -1,9 +1,10 @@
 # pymetagraph
 
-A [Readfish](https://github.com/LooseLab/readfish) `Aligner` plugin backed by a prebuilt
-metagraph graph + annotation index. It reports label-presence hits (which reference sequence(s)
-a read's k-mers match, above a discovery/presence-fraction threshold) rather than real base-level
-alignments — `r_st`/`r_en`/`strand` on the returned alignment objects are placeholder values.
+Python bindings for querying an annotated metagraph index in-process, without a running
+`metagraph server`. They expose the label query behind `metagraph query` (and the server's
+`/search` endpoint) for batches of sequences and return plain `(label, k-mer count)` results, so
+callers decide how to turn them into classifications. For talking to a remote server, use the
+`metagraph` client package in `metagraph/api/python` instead.
 
 ## Building
 
@@ -69,29 +70,32 @@ pip install -e . --no-build-isolation   # requires scikit-build-core + pybind11 
 `_pymetagraph_core` is built without jemalloc even if it's installed on the system. This is
 deliberate: dlopen()-ing a library linked against jemalloc can fail at import time with `cannot
 allocate memory in static TLS block` (a glibc static-TLS-space limitation), which would otherwise
-require every user of this plugin to remember `LD_PRELOAD=libjemalloc.so.2` before launching
-Readfish. Since this plugin is aimed at non-power-users, it trades away folly's jemalloc-backed
-allocator optimizations for an extension that just imports cleanly with no extra steps. This only
+require every user to remember `LD_PRELOAD=libjemalloc.so.2` before starting Python. It trades
+away folly's jemalloc-backed allocator optimizations for an extension that just imports cleanly
+with no extra steps. This only
 affects `_pymetagraph_core` — the regular static `metagraph` CLI binary still picks up jemalloc
 normally when built without `BUILD_PYTHON_BINDINGS`.
 
 ## Usage
 
-```toml
-[mapper_settings.pymetagraph]
-input = "/path/to/graph.dbg"
-annotator = "/path/to/graph.column.annodbg"
-threads = 4
-num_top_labels = 1
-discovery_fraction = .4
-presence_fraction = .1
+```python
+import pymetagraph
+
+graph = pymetagraph.AnnotatedGraph("graph.dbg", "graph.column.annodbg", threads=8)
+graph.k        # 31
+graph.labels   # ['ref_A', 'ref_B']
+
+hits = graph.query(["ACGT...", "TTGA..."], num_top_labels=1, discovery_fraction=0.1)
+# [[('ref_A', 412)], []]   one list of (label, matching k-mers) per sequence
+graph.query("ACGT...")     # a single sequence gives a single list
 ```
+
+`query` releases the GIL and spreads the sequences over `threads` threads.
 
 ## Known limitations
 
-- `r_st`/`r_en`/`strand` are always dummy values (`0`, `len(seq)`, `+1`); only `ctg` (the matched
-  label) is meaningful.
-- Exactly one annotator file is supported.
-- Malformed configuration may, in rare cases, abort the process rather than raise a Python
-  exception, since metagraph's underlying CLI config parser calls `exit()` on some invalid inputs.
-  `Aligner.validate()` checks the common cases (missing files) up front.
+- Exactly one annotation file is supported.
+- Graphs and annotations must be readable by the metagraph version the bindings are built from.
+- The extension is built without jemalloc (see above).
+- `pip install` reuses `build/`; after a failed build, delete it before retrying, since its CMake
+  cache can point to pip's deleted build environment.
