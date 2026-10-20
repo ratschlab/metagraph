@@ -122,23 +122,41 @@ class StopRehearsal(unittest.TestCase):
     constrain / annotate partner (VD8) direct-local; the entry verdict over recorded stop_flow records."""
 
     def test_its_manifest_and_plan(self):
+        # R2-3: production's warm state first (the warmers as in a v8 run, each stop's base request once to
+        # completion), then the tries; the pair (R2-5) at the end
         import rehearse_g
         scen, meta = rehearse_g.rehearsal3_scenarios(FakeCtx(), v7_scenarios())
         ids = [x["id"] for x in scen]
-        self.assertEqual(ids, ["S-stop-c1-t1", "S-stop-c2-t1", "G-pair-annot-c1", "S-stop-c1-t2", "S-stop-c2-t2",
-                               "S-stop-c1-t3", "S-stop-c2-t3"])
+        self.assertEqual(ids, ["T-walk-0028", "R-warm-0005", "T-labels-0003", "S-base-c1", "S-base-c2",
+                               "S-stop-c1-t1", "S-stop-c2-t1", "S-stop-c1-t2", "S-stop-c2-t2", "S-stop-c1-t3",
+                               "S-stop-c2-t3", "G-pair-annot-c1", "G-annot-c1"])
+        by = dict((x["id"], x) for x in scen)
+        for wid in ("T-walk-0028", "R-warm-0005", "T-labels-0003"):
+            self.assertTrue(meta[wid]["warmer"])
+            self.assertNotIn("warms", by[wid])
+        import areas
+        bases = dict(areas.stop_base_requests(v7_scenarios()))
+        for n, stop_id in ((1, "S-stop-0001"), (2, "S-stop-0002")):
+            b_ = by["S-base-c%d" % n]
+            self.assertEqual(meta[b_["id"]], {"base_of": stop_id})
+            self.assertIn("not_implemented", b_["mcp"])
+            self.assertEqual(b_["request"], bases[b_["route"]])
+            self.assertFalse(b_.get("direct_not_run"))
         for x in scen:
             if x["id"].startswith("S-stop"):
                 self.assertTrue(x["direct_not_run"])
                 self.assertEqual(sc.mcp_repeats(0, x, 0), [0])
+                self.assertEqual(x["mcp"]["flow"]["delay_s"], 0.0)
                 self.assertEqual(meta[x["id"]]["stop_of"], "S-stop-000%s" % x["id"][8])
-        partner = scen[2]
-        self.assertEqual(partner["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
-        self.assertEqual(partner["repeat"], 3)
+        partner, annot = by["G-pair-annot-c1"], by["G-annot-c1"]
+        for g in (partner, annot):
+            self.assertEqual(g["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
+            self.assertEqual(g["repeat"], 3)
         self.assertFalse([o["id"] for o in partner["graphlet"]["ops"] if o["id"].startswith("cmp")])
         self.assertEqual(meta["G-pair-annot-c1"]["cid"], "annotate.1+constrain")
+        self.assertEqual(meta["G-annot-c1"]["cid"], "annotate.1")
         p = rehearse_g.plan3(scen, meta)
-        self.assertEqual((p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"]), (6, 6, 8))
+        self.assertEqual((p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"]), (6, 12, 17))
 
     def test_the_entry_verdict(self):
         import rehearse_g

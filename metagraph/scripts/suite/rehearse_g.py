@@ -311,22 +311,54 @@ def execute2(out: str, manifest_path: str, mcp_cmd: str) -> int:
 
 
 # ===================================================================================================== rehearsal 3 (S)
-# The stop rehearsal (VERIFY-D VD6, the coordinator 2026-10-20: after async's bundle with the release record is
-# deployed): each stop scenario STOP_TRIES times, interleaved (a try's walk meets the host the earlier tries warmed),
-# MCP only (the scenarios' direct_not_run); the entry condition is every try a taken stop (stop.took, no race) with
-# every stop check passing. With it, the direct-local rehearsal of VD8's constrain / annotate partner (direct-only:
-# three graphlet requests and the twin) whose preconditions the freeze needs.
+# The stop rehearsal (VERIFY-D VD6; VERIFY-D-R2 R2-3, the coordinator 2026-10-20: after async's bundle with the
+# release record is deployed), in production's warm state: first the scenarios that warm the host before the stops
+# in a real v8 run (STOP_WARMERS: as the manifest has them, MCP and direct-local), then each stop scenario's base
+# request once to completion on direct-local (S-base-c<n>: its warm engine time recorded), then each stop scenario
+# STOP_TRIES times, interleaved, MCP only (direct_not_run). The entry condition: every try a taken stop (stop.took,
+# no race) with every stop check passing. With it, the direct-local rehearsal of the constrain / annotate pair (VD8,
+# R2-5: G-annot-c1 and its constrain partner G-pair-annot-c1, three graphlet requests and the twin each), whose
+# compare rows and cmp-paged's pages the analysis reads from the built plans.
 STOP_TRIES = 3
 REHEARSAL3_PAIR = "annotate.1+constrain"
+STOP_WARMERS = ("T-walk-0028", "R-warm-0005", "T-labels-0003")
+REHEARSAL3_DIRECT = ("rehearsal S (VERIFY-D-R2 R2-3): the base request run once to completion on direct-local, to "
+                     "warm the host as a real run does before the stop")
 
 
 def rehearsal3_scenarios(ctx: Any, v7: List[dict]) -> Tuple[List[dict], Dict[str, dict]]:
-    """(the stop rehearsal's scenarios, meta): try t of S-stop-000n as S-stop-cn-tt (a copy of the built scenario),
-    the tries of the two scenarios interleaved, the constrain / annotate partner after the first round."""
+    """(the stop rehearsal's scenarios, meta): STOP_WARMERS (v7's scenarios), the base runs S-base-c<n>, try t of
+    S-stop-000n as S-stop-c<n>-t<t> (a copy of the built scenario, the tries of the two interleaved), then G-annot-c1
+    and G-pair-annot-c1 (direct-local)."""
     import areas
     stops = areas.gen_stop(ctx, v7)
     if len(stops) != len(areas.STOP_IDS):
         raise SystemExit("rehearsal S: the stop scenarios do not build (%s)" % [x["id"] for x in stops])
+    by = dict((x["id"], x) for x in v7)
+    out, meta = [], {}
+    for wid in STOP_WARMERS:
+        if wid not in by:
+            raise SystemExit("rehearsal S: no %s in v7" % wid)
+        x = copy.deepcopy(by[wid])
+        x.pop("warms", None)   # each runs on its own here, in this order
+        out.append(x)
+        meta[wid] = {"warmer": True}
+    for n, (route, req) in enumerate(areas.stop_base_requests(v7), 1):
+        sid = "S-base-c%d" % n
+        x = ml.scenario(sid, "S", "rehearsal S: %s's base request once to completion (warms the host)"
+                        % areas.STOP_IDS[n - 1], route, copy.deepcopy(req), {}, [{"check": "status",
+                                                                                  "args": {"http": 200}}],
+                        timing_class="slow", tags=["rehearsal", "rehearsal-s", "stop-base"],
+                        mcp={"not_implemented": REHEARSAL3_DIRECT})
+        out.append(x)
+        meta[sid] = {"base_of": areas.STOP_IDS[n - 1]}
+    for t in range(1, STOP_TRIES + 1):
+        for n, base in enumerate(stops, 1):
+            x = copy.deepcopy(base)
+            x["id"] = "S-stop-c%d-t%d" % (n, t)
+            x["tags"] = sorted(set(x["tags"] + ["rehearsal", "rehearsal-s"]))
+            out.append(x)
+            meta[x["id"]] = {"stop_of": base["id"], "try": t}
     cands = area_g.candidates(ctx, v7)
     partners = dict((pc["cid"], (pc, of, pair)) for pc, of, pair in partner_candidates(cands))
     if REHEARSAL3_PAIR not in partners:
@@ -335,23 +367,20 @@ def rehearsal3_scenarios(ctx: Any, v7: List[dict]) -> Tuple[List[dict], Dict[str
     corpus = area_g.default_corpus()
     of_sid = candidate_ids([of])[of["cid"]]
     pid = "G-pair-annot-c1"
+    aops = area_g.op_plan(of_sid, of["slot"], area_g.facts_of(of, corpus), False, [], direct_only=True,
+                          extras={"other": of_sid})
+    annot = area_g.g_scenario(of_sid, "rehearsal S: %s, the annotate side of the pair (R2-5)" % of["cid"], of, corpus,
+                              None, aops, ["rehearsal", "rehearsal-s"])
     pops = area_g.op_plan(pid, pc["slot"], area_g.facts_of(pc, corpus), False, [(of_sid, False)],
                           direct_only=True, extras={"no_compare": True}, partner_of=of_sid,
                           reason=area_g.direct_reason(pc))
     partner = area_g.g_scenario(pid, "rehearsal S: the constrain partner of %s (VD8)" % of["cid"], pc, corpus, None,
                                 pops, ["rehearsal", "rehearsal-s", "pair"])
-    partner["repeat"] = DL_REPEATS
-    out, meta = [], {}
-    for t in range(1, STOP_TRIES + 1):
-        for n, base in enumerate(stops, 1):
-            x = copy.deepcopy(base)
-            x["id"] = "S-stop-c%d-t%d" % (n, t)
-            x["tags"] = sorted(set(x["tags"] + ["rehearsal", "rehearsal-s"]))
-            out.append(x)
-            meta[x["id"]] = {"stop_of": base["id"], "try": t}
-        if t == 1:
-            out.append(partner)
-            meta[pid] = {"cid": pc["cid"], "slot": pc["slot"], "pair": pair, "of": of["cid"], "candidate": pc}
+    for x, m in ((partner, {"cid": pc["cid"], "slot": pc["slot"], "pair": pair, "of": of["cid"], "candidate": pc}),
+                 (annot, {"cid": of["cid"], "slot": of["slot"], "candidate": of})):
+        x["repeat"] = DL_REPEATS
+        out.append(x)
+        meta[x["id"]] = m
     return out, meta
 
 
@@ -364,27 +393,37 @@ def plan3(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
         m = meta[x["id"]]
         if m.get("stop_of"):
             jobs, n_dl, t = 1, 0, 2.0 + STOP_FLOW_DELAY_S_DEFAULT + 10.0 + 60.0
+        elif m.get("warmer"):
+            jobs = len(sc.mcp_repeats(0, x, 0))
+            n_dl = 0 if x.get("direct_not_run") else int(x.get("repeat") or 1)
+            t = jobs * (1.0 + MCP_OVERHEAD_S) + n_dl * (30.0 + DL_PAUSE_S)
+        elif m.get("base_of"):
+            jobs, n_dl, t = 0, 1, 20.0
         else:
             jobs, n_dl = 0, DL_REPEATS + 1
             t = n_dl * (0.5 + DL_PAUSE_S)
         mcp_jobs += jobs
         dl += n_dl
         seconds += t
-        rows.append({"scenario": x["id"], "what": m.get("stop_of") and "%s try %d" % (m["stop_of"], m["try"])
-                     or "the partner %s" % m.get("cid"), "mcp_jobs": jobs, "direct_local_requests": n_dl,
+        what = ("%s try %d" % (m["stop_of"], m["try"]) if m.get("stop_of") else
+                "warms the host as in a v8 run" if m.get("warmer") else
+                "%s's base request, once to completion" % m["base_of"] if m.get("base_of") else
+                "the pair: %s" % m.get("cid"))
+        rows.append({"scenario": x["id"], "what": what, "mcp_jobs": jobs, "direct_local_requests": n_dl,
                      "expected_s": round(t, 1)})
     dl += 4
     return {"stop_tries": sum(1 for x in scenarios if meta[x["id"]].get("stop_of")), "mcp_jobs": mcp_jobs,
             "direct_local_requests": dl, "direct_remote_requests": 0, "expected_minutes": round(seconds / 60.0, 1),
             "rows": rows,
-            "load": "one request in flight at a time, in manifest order (run_suite.sh --paired --skip-remote): per "
-                    "stop try one MCP job (traverse_fetch of the CPU-bound 10 kbp sau walk, or traverse_resolve of "
-                    "the 500 bp eco discovery), stopped %g s after it runs; the direct arms send nothing for them "
-                    "(direct_not_run); the partner three direct-local graphlet requests and its twin" % (
-                        STOP_FLOW_DELAY_S_DEFAULT)}
+            "load": "one request in flight at a time, in manifest order (run_suite.sh --paired --skip-remote): "
+                    "the warmers as in a v8 run (MCP cold, direct-local), each stop's base request once on "
+                    "direct-local, then per stop try one MCP job (traverse_fetch of the repeat-free 10 kbp sau "
+                    "walk, or traverse_resolve of the 500 bp 16S discovery), stopped %g s after it runs (the direct "
+                    "arms send nothing for them: direct_not_run); the pair's two graphlets three direct-local "
+                    "requests and a twin each" % STOP_FLOW_DELAY_S_DEFAULT}
 
 
-STOP_FLOW_DELAY_S_DEFAULT = 2.0
+STOP_FLOW_DELAY_S_DEFAULT = 0.0
 
 
 def plan3_markdown(p: dict, out: str, mpath: str, mcp_cmd: str) -> str:
@@ -469,7 +508,23 @@ def analyse3(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, libra
         dl_runs = [dl_run] + sorted(glob.glob(os.path.join(prior, "runs", "*")))
         built = built_plan_check(out, merged, pmeta, presults, dl_runs, library_root,
                                  merged.get("library_commit") or library_commit)
-    record = {"stops": stops, "partner": res["results"], "built_plans": built}
+    bases = {}
+    rows, _ = sc.read_jsonl(os.path.join(dl_run, "arms", "direct-local", "executions.jsonl"))
+    for r in rows:
+        m = meta.get(r.get("scenario")) or {}
+        if m.get("base_of"):
+            bases[m["base_of"]] = {"scenario": r.get("scenario"), "http": r.get("http"),
+                                   "engine_ms": (r.get("server") or {}).get("elapsed_ms"), "wall_ms": r.get("wall_ms")}
+    pair = {}
+    if built and not built.get("error"):
+        cmp_ = (built.get("compares") or {}).get("G-annot-0001") or {}
+        rows_total = sum(sum((v.get("counts") or {}).values()) for v in cmp_.values()
+                         if isinstance(v.get("counts"), dict))
+        paged = (cmp_.get("cmp-paged") or {}).get("pages")
+        pair = {"compares": cmp_, "rows": rows_total, "cmp_paged_pages": paged,
+                "verdict": "pass" if rows_total > 0 and (paged or 0) > 1 else
+                "fail: rows %d, cmp-paged %s page(s)" % (rows_total, paged)}
+    record = {"stops": stops, "partner": res["results"], "built_plans": built, "bases": bases, "pair": pair}
     with open(os.path.join(out, "rehearsal_s.json"), "w") as fh:
         json.dump(record, fh, indent=1, sort_keys=True, default=str)
     lines = ["# Stop rehearsal (rehearsal S) report", "", "## Entry verdict (%d of %d taken stops, every check passing)"
@@ -481,8 +536,16 @@ def analyse3(out: str, manifest: dict, meta: Dict[str, dict], dl_run: str, libra
         bad = "; ".join("%s %s: %s" % (k, v[0], str(v[1])[:120]) for k, v in t["checks"].items() if v[0] != "pass")
         lines.append("| %s | %s | %s | %s | %s |" % (tid, t["taken"], t["race"] or "-", t["outcome"],
                                                      bad.replace("|", "/") or "-"))
+    lines += ["", "## The base requests, once to completion on direct-local (the warm engine time the stop must beat)",
+              ""]
+    for stop_id, b_ in sorted(bases.items()):
+        lines.append("- %s (%s): http %s, engine %s ms, wall %s ms" % (stop_id, b_["scenario"], b_["http"],
+                                                                      b_["engine_ms"], b_["wall_ms"]))
+    if pair:
+        lines += ["", "## The constrain / annotate pair (R2-5): %s" % pair["verdict"], "",
+                  "compare rows (all modes) %d; cmp-paged %s page(s)" % (pair["rows"], pair["cmp_paged_pages"])]
     for sid_, r in res["results"].items():
-        lines += ["", "## The partner %s: %s" % (sid_, "passed" if r.get("passed") else "not passed: %s" % "; ".join(
+        lines += ["", "## The rehearsed graphlet %s: %s" % (sid_, "passed" if r.get("passed") else "not passed: %s" % "; ".join(
             "%s %s" % kv for kv in r.get("verdicts", {}).items() if not str(kv[1]).startswith("pass")))]
     if built:
         lines += ["", "## The built plans of OUT/corpus.json: %d scenario(s), %d op(s), problems in %d, not rehearsed "
@@ -1253,8 +1316,15 @@ def built_plan_check(out: str, corpus: dict, meta: Dict[str, dict], results: Dic
     recs = shadow_run({"scenarios": scen}, [x["id"] for x in scen], combo, library_root,
                       os.path.join(out, "shadow", "built"))
     back = dict((r, b) for b, r in rename.items() if r)
-    problems, unpaged = {}, {}
+    problems, unpaged, compares = {}, {}, {}
     for x in scen:
+        for o in x["graphlet"]["ops"]:
+            r = recs.get((x["id"], o["id"]))
+            if o["tool"] == "graphlet_compare" and r and isinstance(r.get("answer"), dict):
+                ans = r["answer"]
+                compares.setdefault(back[x["id"]], {})[o["id"]] = {
+                    "comparable": ans.get("comparable"), "counts": ans.get("counts"), "total": ans.get("total"),
+                    "pages": r.get("pages")}
         probs = plan_problems(x, (results.get(x["id"]) or {}).get("facts") or {}, recs)
         if probs:
             problems[back[x["id"]]] = probs
@@ -1262,7 +1332,7 @@ def built_plan_check(out: str, corpus: dict, meta: Dict[str, dict], results: Dic
         if once:
             unpaged[back[x["id"]]] = once
     return {"checked": len(scen), "ops": sum(len(x["graphlet"]["ops"]) for x in scen), "problems": problems,
-            "unpaged": unpaged, "not_rehearsed": absent,
+            "unpaged": unpaged, "not_rehearsed": absent, "compares": compares,
             "skipped_ops": dict((back[k], v) for k, v in skipped.items())}
 
 
