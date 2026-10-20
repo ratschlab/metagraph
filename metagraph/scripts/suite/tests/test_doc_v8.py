@@ -207,5 +207,34 @@ class GateV8Test(unittest.TestCase):
         self.assertEqual(sections.library_note_text(_Stub(run=_Stub(gate={}, identity=None))), ("", []))
 
 
+class SharedProseV8Test(unittest.TestCase):
+    """The v8 branches of the shared prose: I.2's access paths name the graphlet tools and traverse_stop, its "Not
+    covered" paragraph is v7's for v7 only and v8's says where the graphlet tools and the stops are tested; T-walk's
+    family names the warm-ups of T-walk-0024; v5 to v7 read as before."""
+
+    def test_branches(self):
+        import facts
+        pars = prose("overview")["sections"]["methods"]["paragraphs"]
+        vals = {"mcp_base": "u", "local_base": "l", "remote_base": "r", "mcp_tools_text": "four tools",
+                "mcp_tools_called": "TOOLS", "traversal_tools_not_called": "NOT"}
+        access8 = facts.fill(pars[0], dict(vals, manifest_version=8), unresolved=[])
+        self.assertIn("`catalog`, the graphlet tools (chapter G) and `traverse_stop` (chapter S))", access8)
+        self.assertIn("`catalog`) on", facts.fill(pars[0], dict(vals, manifest_version=7), unresolved=[]))
+        nc = [p for p in pars if "*Not covered.*" in p]
+        self.assertEqual(len(nc), 2)
+        for v in (6, 7):
+            self.assertEqual(facts.fill(nc[1], dict(vals, manifest_version=v), unresolved=[]).strip(), "")
+        self.assertIn("Not called, and so not covered: NOT;", facts.fill(nc[0], dict(vals, manifest_version=7),
+                                                                         unresolved=[]))
+        self.assertEqual(facts.fill(nc[0], dict(vals, manifest_version=8), unresolved=[]).strip(), "")
+        v8 = facts.fill(nc[1], dict(vals, manifest_version=8), unresolved=[])
+        self.assertIn("The graphlet tools are compared five ways in chapter G", v8)
+        self.assertIn("so not covered here: NOT.", v8)
+        walk = prose("T")["families"]["T-walk"]["prose"]
+        self.assertIn("T-walk-0024 follows ten warm-ups of its region (R-warm-0009 to -0018, chapter R)",
+                      facts.fill(walk, {"manifest_version": 8}, unresolved=[]))
+        self.assertNotIn("ten warm-ups", facts.fill(walk, {"manifest_version": 7}, unresolved=[]))
+
+
 if __name__ == "__main__":
     unittest.main()

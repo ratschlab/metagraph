@@ -641,7 +641,9 @@ class NotCoveredTest(unittest.TestCase):
         self.assertNotIn("codec vectors", text)
         self.assertIn("The MCP's other tools (sequence search, taxonomy, reference and sequence utilities) are outside "
                       "this suite's scope.", text)
-        access = prose("overview")["sections"]["methods"]["paragraphs"][0]
+        access = facts.fill(prose("overview")["sections"]["methods"]["paragraphs"][0],
+                            {"manifest_version": 7, "mcp_base": "u", "local_base": "l", "remote_base": "r"},
+                            unresolved=[])
         self.assertIn("`pattern_search`, `catalog`)", access)
         self.assertNotIn("the capabilities tools", access)
 
