@@ -49,6 +49,9 @@
      "left": 0,
      "right": 0
     },
+    "page_bytes": {
+     "cmp-paged": 6144
+    },
     "seed_bp": null,
     "segments": {
      "left": 31,
@@ -109,6 +112,111 @@
     "dl0": 1096.983337,
     "dl1": 22.934146,
     "dl2": 23.976125
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "annotate.1+constrain": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3206,
+    "complete_to_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1"
+    ],
+    "labels": 8,
+    "max_labels_per_node": 8,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 5
+    },
+    "stop": null,
+    "summary_cut_bytes": 1900,
+    "walk_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "walks": {
+     "left": 1,
+     "right": 3
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 5
+    },
+    "walk_bp_min": {
+     "left": 200,
+     "right": 200
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 3
+    }
+   },
+   "reference": {
+    "body_digest": "4bdfba5b3200eed62f725d0f213a95b0e904eded2699a811d620e374a3d8e485",
+    "engine_ms": {
+     "dl0": 610.122063,
+     "dl1": 13.876026,
+     "dl2": 14.194308
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 8
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 610.122063,
+    "dl1": 13.876026,
+    "dl2": 14.194308
    },
    "verdicts": {
     "bodies": "pass",
@@ -7452,6 +7560,7 @@
  "page_bytes_note": "facts.page_bytes (round 5): per paging pass of a rich graphlet the largest max_bytes at which the local library took at least two pages of the listing on the rehearsal's document, keeping 64 bytes above the smallest page a row fits in (W3's reserve and longer handle); null: one row, the pass is left out (lane D's D-scratch/r5/measure_pages.py)",
  "provisional": false,
  "rehearsal": {
+  "stop_rehearsal": "s2-prepared-20261020T074516Z (2026-10-20T20:06-20:17Z): the constrain partner annotate.1+constrain; annotate.1's cmp-paged page (walks mode, 28 rows)",
   "utc": "2026-10-19T22:08:45Z"
  },
  "rich": [

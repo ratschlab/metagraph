@@ -748,7 +748,7 @@ class Coverage(unittest.TestCase):
         self.assertEqual(annot["cmp-claims-all"]["not_exposed"]["W3"], area_g.REASON_DIRECT_ONLY)
         paged = annot["cmp-paged"]
         self.assertEqual((paged["args"]["mode"], paged["args"]["max_bytes"], paged["paging"]),
-                         ("claims", area_g.COMPARE_PAGE, "all"))
+                         ("walks", area_g.COMPARE_PAGE, "all"))   # rehearsal S2: the walks compare has the rows
         self.assertNotIn("cmp-paged", ops["G-pair-radius-0001"])
         self.assertIn("cmp-cut", ops["G-pair-radius-0001"])
         for sid, s in by.items():
@@ -874,10 +874,12 @@ class BuiltV8(unittest.TestCase):
         self.assertEqual(m["graphlets"]["corpus"]["file"], "truth/area_g/corpus.json")
         self.assertFalse(m["graphlets"]["corpus"]["provisional"])
         self.assertEqual(m["graphlets"]["library_commit"], "44583b51307ed3242e19c051aaf133c671107956")
-        # the constrain / annotate pair's partner (VERIFY-D VD8) waits for its rehearsal (REHEARSAL S)
-        self.assertEqual(m["graphlets"]["pending"], ["G-pair-annot-0001: preconditions (the rehearsal freezes them)"])
-        self.assertEqual(bm.freeze_problems(m), ["pending: G-pair-annot-0001: preconditions (the rehearsal freezes "
-                                                 "them)"])
+        # the constrain / annotate pair's partner (VERIFY-D VD8) was rehearsed in REHEARSAL S2: nothing pending
+        self.assertEqual(m["graphlets"]["pending"], [])
+        self.assertEqual(bm.freeze_problems(m), [])
+        annot = next(s for s in m["scenarios"] if s["id"] == "G-annot-0001")
+        paged = next(o for o in annot["graphlet"]["ops"] if o["id"] == "cmp-paged")
+        self.assertEqual((paged["args"]["mode"], paged["args"]["max_bytes"]), ("walks", 6144))
         # the paired plan's warm repeats of every v7 scenario unchanged
         w7 = dict((s["id"], k % 10 == 0) for k, s in enumerate(v7["scenarios"]))
         w8 = dict((s["id"], k % 10 == 0) for k, s in enumerate(m["scenarios"]))

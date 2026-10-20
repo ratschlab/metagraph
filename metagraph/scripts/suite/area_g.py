@@ -47,7 +47,7 @@ CUT_PAGE = 2048                    # a paging pass's page (the tools' default ce
 # pages small enough to page on the corpus (VERIFY-D VD8; measured on the rehearsals' documents, W1): a limitations
 # listing takes 2-3 pages at 1,024 bytes on every rich graphlet (one row needs up to ~500 bytes: 384 is too small)
 LIMS_PAGE = 1024
-COMPARE_PAGE = 1024                # cmp-paged: a claims compare with rows (the constrain / annotate pair)
+COMPARE_PAGE = 1024                # cmp-paged: a walks compare with rows (the constrain / annotate pair: 28 rows)
 ROW_PAGE = 4096                    # a paging pass over rows with label lists (walk segments, claims, compare)
 SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async's case (service_by_design_g.json, 2026-10-20)
 ALL_WAYS = ["W1", "W2", "W3", "W4", "W5"]
@@ -1108,8 +1108,10 @@ def add_extras(p: Plan, extras: dict) -> None:
         p.add(_op("cmp-cut", "graphlet_compare", C(partner, mode="claims", max_bytes=1024), paging="all",
                   cut_of="cmp-claims-all"))
     if extras.get("compare_paged"):
-        p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="claims", max_bytes=COMPARE_PAGE),
-                  paging="all"))
+        cmp_page = page_of(p.facts, "cmp-paged", COMPARE_PAGE)
+        if cmp_page:
+            p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="walks", max_bytes=cmp_page),
+                      paging="all"))
     if extras.get("probes"):
         for probe in ("wrong_token", "bad_handle"):
             p.add(_op("probe-%s" % probe.replace("_", "-"), "graphlet_summary",
