@@ -393,6 +393,45 @@ class ByDesign(ServiceBase):
         self.assertEqual(res["scenarios"][SID]["outcome"], "pass")
         self.assertEqual(res["by_design_table"]["path"], "scripts/service_by_design.json")
 
+    def mgt_case(self):
+        cases, _ = cmp.load_by_design(os.path.join(os.path.dirname(HERE), "service_by_design.json"))
+        return cases["graphlet.export_mgt_is_the_stored_body"]
+
+    def put_mgt(self, op, w3_text):
+        f = self.run_.fixture
+        lib = {"path": "/x/g_0123456789ab.mgt", "bytes": 100, "records": 9}
+        w3 = {"export_id": None, "format": "mgt", "status": "done", "handle": UUID, "link": {"url": "u"},
+              "bytes": 90, "gz_bytes": 40, "in_service": True}
+        for way in FOUR:
+            text = w3_text if way == "W3" else f.doc(0)
+            fl = self.run_.write_file(way, "raw/%s.%s.file" % (SID, op["id"]), text)
+            self.run_.record(way, SID, op["id"], op["tool"], op["args"], answer=copy.deepcopy(w3 if way == "W3"
+                                                                                               else lib),
+                             file=fl, service_fields={"export_id": None, "format": "mgt", "status": "done"})
+
+    def test_an_mgt_export_file_is_compared_whatever_the_case(self):
+        # async's 4th case: W3's mgt receipt is the stored body's link; the receipt may differ, the file never
+        case = self.mgt_case()
+        op = {"id": "exp-mgt", "tool": "graphlet_export", "ways": FOUR, "by_design": case["id"],
+              "args": {"format": "mgt", "arm": None, "walks": None, "what": None}}
+        self.make([gf.scenario(ops=[op])], table=[case])
+        stored = self.run_.fixture.doc(5, envelope=False)   # the stored body: no envelope, another batch position
+        self.put_mgt(op, stored)
+        e = self.result()["scenarios"][SID]["ops"]["exp-mgt"]
+        self.assertTrue(e["by_design"][0]["verified"], e["by_design"])
+        self.assertIn(e["outcome"], ("agree", "service_by_design"), e)
+        self.assertFalse([p for p in e["pairs"] if p.get("kind") == "file"], e["pairs"])
+        # the stored body differs (a label of the server body): a file difference, never excused
+        changed = stored.replace("L h 1 0 3 CP030345.1", "L h 1 0 3 CP030346.1", 1)
+        self.assertNotEqual(changed, stored)
+        self.put_mgt(op, changed)
+        e = self.result()["scenarios"][SID]["ops"]["exp-mgt"]
+        self.assertTrue(e["by_design"][0]["verified"], e["by_design"])
+        self.assertEqual(e["outcome"], "disagree", e)
+        self.assertIn("W3-W4", e["disagreeing"])
+        p = next(p for p in e["pairs"] if p["pair"] == "W3-W4")
+        self.assertEqual((p["kind"], p["pointer"][:5]), ("file", "/file"), p)
+
     def test_a_pair_that_does_not_hold_names_its_side(self):
         self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
         ans = gf.walks_answer()

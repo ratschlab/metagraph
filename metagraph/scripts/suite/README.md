@@ -5097,6 +5097,25 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   and the long walk with its warm-ups on fresh windows (long_walk.4 / .5), MCP cold after the warm-ups; --analyse
   --prior merges it into the first rehearsal's corpus.
 
+### After the second rehearsal (the coordinator's follow-ups of 2026-10-20)
+- service_by_design.json carries async's four area G cases (max_bytes above the service's cap, a body over the
+  in-service ceiling and its .summary, the mgt export as the stored body); every earlier byte unchanged. The v1-v7
+  policies pin the table without them (d4b8636c): a new v4-v7 gate run that snapshots this table needs its policy
+  regenerated, or the pinned table.
+- area_g.by_design_case links every op to the case that applies (validate_g refuses a missing or a wrong link, a probe
+  above 262,144 and an op named after an arm). The hint, label_evidence and qualified_cause checks expect the
+  service's label fields only on a qualified compare whose notes name label_lists and one of whose sides is cut (by
+  its own labels.max_labels_per_node). compare_graphlets compares an export's file by content before the receipts:
+  a file difference is of kind file, which no by-design case excuses.
+- rehearse_g judges W3's headroom: interactive ops a third of lanes.interactive.alarm_s, heavy ops a third of
+  lanes.heavy.timeout_s, an escalation recorded; run_graphlet_local configures the ways' library from
+  service_settings.graphlet.library (limits_source in run.json). Both read the capabilities' graphlet block, take a
+  part absent or null as not stated (the fallback, recorded) and compare its lists as sets.
+- suite_common.mcp_repeats runs area G and the stop scenarios once on MCP (v1-v7 unchanged); without a document a
+  dependent op carries the document's error in run_graphlet_local.
+- The stop scenarios are judged by four checks over async's stop_flow record (stop_answer, job_terminal,
+  attempt_state, token_release; RELEASE-RECORD.md): a null release on a terminal job and a race are inconclusive.
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

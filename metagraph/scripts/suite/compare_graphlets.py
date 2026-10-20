@@ -685,12 +685,18 @@ def compare_records(a, ra, b, rb, what):
         code = (va.get("error") or vb.get("error") or {}).get("code")
         return _pair(a, b, what, "disagree", "%s answered the error %s, %s an answer" % (err, code, ok),
                      ("/", va, vb), kind="error", views=(va, vb))
+    if "answer" in va and ("file" in va or "file" in vb):
+        # the file by its content first, whatever the receipts say (FORMAT v2 B3): a difference there is of kind
+        # file, which no by-design case excuses (a case excuses a receipt / answer difference only: W3's mgt
+        # receipt is the stored body's link, its file still the document; async's 4th case, 2026-10-20)
+        df = gp.first_difference(dict((k, v) for k, v in va.items() if k != "answer"),
+                                 dict((k, v) for k, v in vb.items() if k != "answer"))
+        if df:
+            return _pair(a, b, what, "disagree", (df[3] or None) if len(df) > 3 else None, df[:3], kind="file",
+                         views=(va, vb))
     if "answer" in va and "W3" in (a, b) and isinstance(va["answer"], dict) and isinstance(vb["answer"], dict):
         d = cut_aware_difference(va["answer"], vb["answer"])   # FORMAT v2 A3: the service's cut rows
         d = d and ("/answer" + (d[0] or ""),) + tuple(d[1:])
-        if not d:   # the rest of the view (a file's content) equal as usual
-            d = gp.first_difference(dict((k, v) for k, v in va.items() if k != "answer"),
-                                    dict((k, v) for k, v in vb.items() if k != "answer"))
     else:
         d = gp.first_difference(va, vb)
     if d and len(d) > 3 and str(d[3]).startswith("uncomparable"):

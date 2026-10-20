@@ -57,7 +57,8 @@ NO_DIFFERENCE = "no difference within the recorded evidence"
 PROBES = {"wrong_token": ("forbidden", "forbidden"), "bad_handle": ("bad_handle", "bad_handle")}
 # the pairs a by-design case lets differ (the service side against the library and the oracle)
 BY_DESIGN_PAIRS = ("W3-W4", "W3-W5")
-# the kinds of disagreement a verified case excuses on those pairs (an answer or an error that differs)
+# the kinds of disagreement a verified case excuses on those pairs (an answer or an error that differs; a receipt is
+# an answer): never a file (kind file: compare_graphlets compares a file by its content first, whatever the receipts)
 BY_DESIGN_KINDS = ("error", "answer")
 
 
@@ -531,7 +532,7 @@ def judge_by_design(entry, scen, op, recs, cases):
     if entry["outcome"] in ("precondition_failed",) or entry.get("smoke"):
         return entry
     # a verified case excuses only the declared difference: a W3-W4 or W3-W5 disagreement of kind error / answer,
-    # never differing args_resolved or a selector (VERIFY-C VC11)
+    # never differing args_resolved, a selector (VERIFY-C VC11) or a file's content (kind file)
     kinds = dict((p.get("pair"), p.get("kind")) for p in entry.get("pairs") or [] if p.get("outcome") == "disagree")
     rest = [p for p in entry.get("disagreeing") or []
             if not (p in BY_DESIGN_PAIRS and kinds.get(p) in BY_DESIGN_KINDS)]
