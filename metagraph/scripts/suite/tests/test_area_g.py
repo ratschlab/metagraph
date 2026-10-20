@@ -530,6 +530,53 @@ class PlansOnRealGraphlets(unittest.TestCase):
                 self.assertLess(len(json.dumps(r["answer"])), area_g.MAXB - 4096, (sid, oid))
 
 
+class McpRepeats(unittest.TestCase):
+    """Area G and the stop scenarios run once on MCP (suite_common.mcp_repeats, 2026-10-20: the service's result
+    cache answers a repeat from the first; a stop repeat would stop another job); v1-v7 unchanged (no scenario of
+    theirs has a graphlet block or a stop flow)."""
+
+    def test_the_rule(self):
+        g = {"id": "G-x-0001", "graphlet": {}, "mcp": {"tool": "traverse_fetch"}}
+        for k, we in ((0, 10), (10, 10), (3, 0)):
+            self.assertEqual(sc.mcp_repeats(k, g, we), [0])
+        self.assertEqual(sc.mcp_repeats(0, dict(g, repeat=3), 10), [0])
+        self.assertEqual(sc.mcp_repeats(0, dict(g, timing_class="long"), 10), [])
+        stop = {"id": "S-stop-0001", "mcp": {"tool": "traverse_fetch", "flow": {"kind": "stop"}}, "repeat": 3}
+        self.assertEqual(sc.mcp_repeats(0, stop, 10), [0])
+        other = {"id": "X", "mcp": {"tool": "traverse_fetch", "flow": {"kind": "resume"}}}
+        self.assertEqual(sc.mcp_repeats(0, other, 10), [0, 1])
+        self.assertEqual(sc.mcp_repeats(0, dict(other, repeat=3), 10), [0, 1, 2])
+        self.assertEqual(sc.mcp_repeats(1, {"id": "Y", "mcp": {"tool": "x"}}, 10), [0, 1])
+
+    def test_v1_to_v7_unchanged(self):
+        def before(index, scenario, warm_every):   # the rule before 2026-10-20
+            if scenario.get("timing_class") == "long":
+                return []
+            if (scenario.get("mcp") or {}).get("not_implemented"):
+                return [0]
+            return list(range(max(2, sc.repeat_count(index, scenario, warm_every))))
+        for v in range(1, 8):
+            m = sc.read_json(os.path.join(SUITE, "manifest", "suite_v%d.json" % v))
+            for k, s in enumerate(m["scenarios"]):
+                self.assertFalse(sc.single_mcp_execution(s), (v, s["id"]))
+                for we in (10, 0):
+                    self.assertEqual(sc.mcp_repeats(k, s, we), before(k, s, we), (v, s["id"], we))
+
+    def test_the_paired_plan_of_a_graphlet_scenario(self):
+        g, _ = provisional()
+        m = {"scenarios": g}
+        tmp = tempfile.mkdtemp(prefix="g-plan-")
+        try:
+            for item in sc.paired_plan(m, tmp, warm_every=10, arms=("direct-local", "mcp")):
+                if item["scenario"].startswith("G-warm-"):
+                    self.assertIsNone(item["mcp_cold"])
+                    continue
+                self.assertEqual((item["mcp_cold"], item["mcp_warm"]), (True, []), item["scenario"])
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 @unittest.skipUnless(have_cache(), "no record cache")
 class StopScenarios(unittest.TestCase):
     """The owner's decision of 2026-10-19: the stop scenarios enter only with --stop-scenarios (async's flow)."""
@@ -589,6 +636,17 @@ class BuiltV8(unittest.TestCase):
         w7 = dict((s["id"], k % 10 == 0) for k, s in enumerate(v7["scenarios"]))
         w8 = dict((s["id"], k % 10 == 0) for k, s in enumerate(m["scenarios"]))
         self.assertEqual([x for x in ids7 if w7[x] != w8[x]], [])
+        # the MCP plan: every v7 scenario's repeats as in v7; area G once (the warm-ups, long class, not at all)
+        for we in (10, 0):
+            r7 = dict((s["id"], sc.mcp_repeats(k, s, we)) for k, s in enumerate(v7["scenarios"]))
+            r8 = dict((s["id"], sc.mcp_repeats(k, s, we)) for k, s in enumerate(m["scenarios"]))
+            self.assertEqual([x for x in ids7 if r7[x] != r8[x]], [], we)
+            for s in rest:
+                self.assertEqual(r8[s["id"]], [] if s["timing_class"] == "long" else [0], s["id"])
+        stop = bm.build(bm.DEFAULT_SEED, fetch=False, manifest_version=8, stop_scenarios=True)
+        for k, s in enumerate(stop["scenarios"]):
+            if s["id"] in areas_mod().STOP_IDS:
+                self.assertEqual(sc.mcp_repeats(k, s, 10), [0], s["id"])
 
 
 if __name__ == "__main__":

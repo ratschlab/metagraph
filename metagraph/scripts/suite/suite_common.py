@@ -294,14 +294,26 @@ def beyond_status(scenarios):
     return sorted(names)
 
 
+def single_mcp_execution(scenario):
+    """Whether a scenario runs once on MCP (manifest v8, async's runner questions, 2026-10-20): an area G scenario
+    (a graphlet block: the service's 300 s result cache answers a repeat from the first, so MCP repeats prove nothing,
+    DESIGN-v8 §3) and a stop scenario (mcp.flow kind "stop": each repeat would stop another job). No scenario of
+    v1-v7 has either."""
+    if isinstance(scenario.get("graphlet"), dict):
+        return True
+    flow = (scenario.get("mcp") or {}).get("flow")
+    return isinstance(flow, dict) and flow.get("kind") == "stop"
+
+
 def mcp_repeats(index, scenario, warm_every=10):
     """The MCP executions of a scenario in paired mode, as repeat indices: repeat 0 before the direct arms
     (cold), the others after them (warm); one more than the direct arms' repeats when those run once, so
     every scenario has an MCP warm execution. A scenario the manifest marks not implemented via MCP gets
-    repeat 0 only (the MCP runner records the mark); the long class none (the front cuts every arm behind it)."""
+    repeat 0 only (the MCP runner records the mark), so do area G and the stop scenarios (single_mcp_execution);
+    the long class none (the front cuts every arm behind it)."""
     if scenario.get("timing_class") == "long":
         return []
-    if ((scenario.get("mcp") or {}).get("not_implemented")):
+    if ((scenario.get("mcp") or {}).get("not_implemented")) or single_mcp_execution(scenario):
         return [0]
     return list(range(max(2, repeat_count(index, scenario, warm_every))))
 

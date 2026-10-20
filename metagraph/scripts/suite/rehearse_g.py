@@ -277,7 +277,9 @@ def plan2(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
         if m.get("warm_up_of"):
             n_dl, jobs, t = 1, 0, 20.0   # a cold resolve of ~8.3 kbp under a single-record column (estimate)
         elif "tool" in s_["mcp"]:
-            n_dl, jobs = DL_REPEATS + 1, max(2, s_.get("repeat", 1))   # cold + warm repeats (suite_common.mcp_repeats)
+            # the paired plan's MCP executions (suite_common.mcp_repeats: an area G scenario runs once on MCP since
+            # 2026-10-20; rehearsal 2 of 2026-10-19 still ran its long walks' two MCP warm repeats)
+            n_dl, jobs = DL_REPEATS + 1, len(sc.mcp_repeats(0, s_, 0))
             t = jobs * (1.0 + MCP_OVERHEAD_S) + n_dl * (0.5 + DL_PAUSE_S)
         else:
             n_dl, jobs = s_.get("repeat", 1) + 1, 0
@@ -295,8 +297,8 @@ def plan2(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
             "load": "one request in flight at a time, in manifest order (run_suite.sh --paired --skip-remote): the "
                     "twin re-checks on direct-local only (one graphlet request and its twin each; the MCP runner "
                     "only records their not-implemented mark), then per long walk its two warm-up resolves on "
-                    "direct-local, its MCP call cold, three direct-local repeats and the twin, and the MCP arm's two "
-                    "warm repeats"}
+                    "direct-local, its MCP call cold, three direct-local repeats and the twin (the MCP arm's warm "
+                    "repeats only where suite_common.mcp_repeats plans them: none for area G since 2026-10-20)"}
 
 
 def execute2(out: str, manifest_path: str, mcp_cmd: str) -> int:
