@@ -71,11 +71,11 @@ def _presence_sets(d, side, p):
 # library defects of a READING (FORMAT v2 G): on the calls where the defect's reading and W5's differ, the library must
 # equal the W5 record built under the defect's reading (every other value as W5 checks it) and differ from W5's own,
 # so that exactly the defect's differences are excused (VERIFY-O-B VO-B1); elsewhere the library must agree with W5
-KNOWN_READING_DEFECTS = {
-    "G4": ("graphlet_support's displayed profile counts a run where its route passes the walk (node presence); DESIGN "
-           "§5.1 derives each run's evidence at its anchor and keeps it where that chain is the walk",
-           "graphlet_support", "_support_sets", _presence_sets),
-}
+# G4 landed fixed with gr/v8-libfix2 (517f24df7): none is known now; its entry, kept for the tests below, is G4_ENTRY
+KNOWN_READING_DEFECTS = {}
+G4_ENTRY = ("graphlet_support's displayed profile counts a run where its route passes the walk (node presence); "
+            "DESIGN §5.1 derives each run's evidence at its anchor and keeps it where that chain is the walk",
+            "graphlet_support", "_support_sets", _presence_sets)
 
 
 def defect_alternative(tool, op, full, text, ctx):
@@ -483,10 +483,12 @@ class OracleVsLibrary(unittest.TestCase):
         self.assertEqual(excused("graphlet_walks", dict(args, tail_bp=1), diffs[:1]), (set(), diffs[:1]))
 
     def test_g4_on_every_walk(self):
-        """G4 on every walk of every twin (VERIFY-O-B VO-B1: 73 of the 399 non-empty constrain walks): where the
-        library's presence profile and DESIGN §5.1's displayed profile differ, the library equals W5's record under
-        the presence reading and differs from W5's own (it excuses exactly that difference); on every other walk the
-        library agrees with W5."""
+        """The fixed library (G4, gr/v8-libfix2) on every walk of every twin: it agrees with W5 (DESIGN §5.1) on
+        every walk, and on the 73 of the 399 non-empty constrain walks where the former presence reading differs
+        (VERIFY-O-B VO-B1) the W5 record under that reading disagrees with it, so the reading-defect mechanism
+        (G4_ENTRY injected here) would catch a return of the presence profile."""
+        KNOWN_READING_DEFECTS["G4"] = G4_ENTRY
+        self.addCleanup(KNOWN_READING_DEFECTS.pop, "G4", None)
         counts = collections.Counter()
         problems = []
         for name, (h, f, i, text) in self.docs.items():
@@ -505,8 +507,9 @@ class OracleVsLibrary(unittest.TestCase):
                         continue
                     alt = O.compare(galt, lib)["outcome"]
                     counts["affected"] += 1
-                    if (own, alt) != ("disagree", "agree"):
-                        problems.append("%s %s walk %d: W5 %s, under G4 %s" % (name, side, p["id"], own, alt))
+                    if (own, alt) != ("agree", "disagree"):
+                        problems.append("%s %s walk %d: W5 %s, under the presence reading %s" % (
+                            name, side, p["id"], own, alt))
         self.assertEqual(problems, [], "\n".join(problems[:10]))
         self.assertEqual(counts["affected"], 73, counts)
 
