@@ -44,6 +44,10 @@ from manifest_lib import (TRACE_PRESET, TRIE_PRESET, WALK_PRESET, deep_merge, mc
 AREA = "G"
 MAXB = 262144                      # the service's max_bytes ceiling: every W3 whole-list call is designed to fit it
 CUT_PAGE = 2048                    # a paging pass's page (the tools' default ceiling; byte-bound pages)
+# pages small enough to page on the corpus (VERIFY-D VD8; measured on the rehearsals' documents, W1): a limitations
+# listing takes 2-3 pages at 1,024 bytes on every rich graphlet (one row needs up to ~500 bytes: 384 is too small)
+LIMS_PAGE = 1024
+COMPARE_PAGE = 1024                # cmp-paged: a claims compare with rows (the constrain / annotate pair)
 ROW_PAGE = 4096                    # a paging pass over rows with label lists (walk segments, claims, compare)
 SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async's case (service_by_design_g.json, 2026-10-20)
 ALL_WAYS = ["W1", "W2", "W3", "W4", "W5"]
@@ -152,6 +156,10 @@ PAIRS = (
     ("label_cap", "G-pair-cap", "merges", "one seed under the default and a small label cap (qualified: lower bound)"),
     ("two_seeds", "G-pair-seeds", "two_arms", "two seeds of one locus (comparable false)"),
     ("self", None, "two_arms", "a graphlet with itself"),
+    # D1's constrain vs annotate, restored now that annotate is in v8 (direct-only, VERIFY-D VD8): the compare ops run
+    # on the annotate graphlet (W1, W2, W5) against the constrain partner, whose own plan runs every way
+    ("constrain_annotate", "G-pair-annot", "annotate", "one seed under constrain and under annotate (direct only: "
+                                                       "annotate is not expressible via MCP; compare rows)"),
     ("two_databases", None, "two_databases", "one seed on two databases (comparable false)"),
 )
 EVIDENCE_RUN = "20261019T111815Z_refseq97-1009f77c"
@@ -498,7 +506,17 @@ def mcp_merge(preset: str, overrides: Optional[dict]) -> dict:
 
 
 def expressible(c: dict) -> bool:
-    return not c["extra"]
+    """Whether the MCP runs the candidate: a strategy the service's presets and overrides express, and no reason of
+    the corpus to keep it direct-only (direct_only_reason: the constrain partner of the direct-only annotate pair)."""
+    return not c["extra"] and not c.get("direct_only_reason")
+
+
+def direct_reason(c: dict) -> str:
+    return c.get("direct_only_reason") or REASON_DIRECT_ONLY
+
+
+REASON_ANNOTATE_PAIR = ("the constrain / annotate pair runs on the direct ways (annotate is not expressible via MCP on "
+                        "staging: advanced strategy path off)")
 
 
 # ===================================================================================================== op plans
@@ -589,7 +607,7 @@ def plan_summary(p: Plan) -> None:
         p.add(_op("sum-%s" % a, "graphlet_summary", {"arm": a, "detail": "summary", "max_bytes": MAXB}))
     p.add(_op("lims", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": MAXB}, paging="all"))
     if p.rich:
-        p.add(_op("lims-paged", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": CUT_PAGE},
+        p.add(_op("lims-paged", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": LIMS_PAGE},
                   paging="all"))
     p.add(_op("sum-bad-detail", "graphlet_summary", {"arm": None, "detail": "full", "max_bytes": 2048}))
     p.add(_op("sum-bad-arm", "graphlet_summary", {"arm": "up", "detail": "summary", "max_bytes": 2048}))
@@ -917,7 +935,7 @@ def plan_failed(p: Plan, other: str) -> None:
 
 BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async's case (service_by_design_g.json, 2026-10-20)
 BIG_BODY_SUMMARY_CASE = BIG_BODY_CASE + ".summary"         # graphlet_summary answered from the stored row
-MGT_EXPORT_CASE = "graphlet.export_mgt_is_the_stored_body"  # async's 4th case: W3's mgt receipt is the stored body's link
+MGT_EXPORT_CASE = "graphlet.export_mgt_is_the_stored_body"  # async's 4th case: W3's mgt receipt is the body's link
 IN_SERVICE_MAX_BODY_BYTES = 8 * 1024 * 1024
 LIBRARY_MAX_BYTES = 16 * 1024 * 1024                       # the cap case's upper bound (the library's own limit)
 # the tools each case covers (async's BY-DESIGN-G-CASES.json graphlet.tools)
@@ -991,12 +1009,14 @@ def plan_partner(p: Plan, a_id: str, full: bool, extras: dict) -> None:
     for a in p.arms():
         p.add(_op("walks-id-%s" % a, "graphlet_walks", W(a), paging="all"))
     p.add(_op("labels-all-direct", "graphlet_labels", L(), paging="all"))
-    plan_compare(p, a_id, full, "cmp")
+    if not extras.get("no_compare"):   # the constrain / annotate partner: its compares run on the annotate graphlet
+        plan_compare(p, a_id, full, "cmp")
     add_extras(p, extras)
 
 
 def op_plan(sid: str, slot: str, facts: dict, rich: bool, pairs: Optional[List[Tuple[str, bool]]] = None,
-            direct_only: bool = False, extras: Optional[dict] = None, partner_of: Optional[str] = None) -> List[dict]:
+            direct_only: bool = False, extras: Optional[dict] = None, partner_of: Optional[str] = None,
+            reason: str = REASON_DIRECT_ONLY) -> List[dict]:
     """The op plan of one graphlet (DESIGN-v8 §4, INVENTORY §3.1): every distinct behaviour per tool and arm where it
     applies, per-walk sampling and paging passes only when |rich|; compares against |pairs| [(partner id, full)];
     |extras| the corpus-wide single ops this graphlet carries (cut kinds, probes, the by-design max_bytes call, the
@@ -1033,7 +1053,7 @@ def op_plan(sid: str, slot: str, facts: dict, rich: bool, pairs: Optional[List[T
                 continue   # W3's own behaviour: nothing to probe without an MCP job
             o.pop("by_design", None)   # the mgt export runs on the direct ways like any op; no W3, no case
             o["ways"] = [w for w in o.get("ways") or DIRECT_ONLY_WAYS if w in DIRECT_ONLY_WAYS]
-            o["not_exposed"] = {"W3": REASON_DIRECT_ONLY, "W4": REASON_DIRECT_ONLY}
+            o["not_exposed"] = {"W3": reason, "W4": reason}
             kept.append(o)
         return kept
     return p.ops
@@ -1066,7 +1086,7 @@ def add_extras(p: Plan, extras: dict) -> None:
         p.add(_op("cmp-cut", "graphlet_compare", C(partner, mode="claims", max_bytes=1024), paging="all",
                   cut_of="cmp-claims-all"))
     if extras.get("compare_paged"):
-        p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="labels", max_bytes=CUT_PAGE),
+        p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="claims", max_bytes=COMPARE_PAGE),
                   paging="all"))
     if extras.get("probes"):
         for probe in ("wrong_token", "bad_handle"):
@@ -1075,6 +1095,8 @@ def add_extras(p: Plan, extras: dict) -> None:
     if extras.get("service_cap"):
         p.add(_op("walks-cap", "graphlet_walks", W(a, max_bytes=MAXB + 1), paging="all", ways=["W1", "W2", "W3", "W4"],
                   by_design=SERVICE_CAP_CASE))
+    if extras.get("self_compare") and not any(o["id"].startswith("self-") for o in p.ops):
+        plan_compare(p, p.sid, False, "self")
     if extras.get("view_and_files"):
         plan_view_and_files(p)
 
@@ -1193,9 +1215,11 @@ def g_scenario(sid: str, title: str, c: dict, corpus: dict, library_commit: Opti
     if measured.get("reference"):
         g["reference"] = copy.deepcopy(measured["reference"])
     if not expressible(c):
-        g["not_exposed"]["*"] = REASON_DIRECT_ONLY
+        g["not_exposed"]["*"] = direct_reason(c)
     truth = dict(c["truth"], candidate={"cid": c["cid"], "source": c["source"], "evidence": c["evidence"]})
     mcp = mcp_traverse(request)
+    if c.get("direct_only_reason") and "tool" in mcp:
+        mcp = {"not_implemented": c["direct_only_reason"]}   # an expressible strategy the corpus keeps direct-only
     tags = sorted(set(tags + ["graphlet", "area-g", "slot-" + c["slot"]] +
                       ([] if expressible(c) else ["direct-only"]) + (["conditional"] if c["conditional"] else []) +
                       ([] if measured.get("preconditions") or failed else ["rehearsal-pending"])))
@@ -1235,7 +1259,7 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
         facts = facts_of(c, corpus)
         pairs_here = [(ps["partner_of_a"], ps["full"]) for ps in pair_specs if ps["a"] == sid and ps["partner_of_a"]]
         ops = op_plan(sid, slot, facts, slot in rich, pairs_here, direct_only=not expressible(c),
-                      extras=extras.get(sid))
+                      extras=extras.get(sid), reason=direct_reason(c))
         out.append(g_scenario(sid, "area G %s: %s (%s)" % (slot.replace("_", " "), titles[slot], c["cid"]), c, corpus,
                               library_commit, ops, ["slot"], timing_class="slow" if slot in ("long_walk",
                                                                                               "over_8mib") else "fast"))
@@ -1245,7 +1269,8 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
         pc = ps["partner_candidate"]
         facts = facts_of(pc, corpus)
         ops = op_plan(ps["partner_id"], pc["slot"], facts, False, [(ps["a"], ps["full"])],
-                      direct_only=not expressible(pc), extras=extras.get(ps["partner_id"]), partner_of=ps["a"])
+                      direct_only=not expressible(pc), extras=extras.get(ps["partner_id"]), partner_of=ps["a"],
+                      reason=direct_reason(pc))
         out.append(g_scenario(ps["partner_id"], "area G pair %s: %s (partner of %s)" % (ps["pair"], ps["title"],
                                                                                          ps["a"]),
                               pc, corpus, library_commit, ops, ["pair", "pair-" + ps["pair"]]))
@@ -1298,6 +1323,15 @@ def pair_plan(present: Dict[str, dict], ids: Dict[str, str], corpus: dict) -> Li
             ov.setdefault("labels", {})["max_labels_per_node"] = 2
             pc = _variant(c, c["cid"] + "+cap2", overrides=ov,
                           source=c["source"] + " under labels.max_labels_per_node 2")
+        elif pair == "constrain_annotate":
+            pc = _variant(c, c["cid"] + "+constrain", source=c["source"] + " under labels.mode constrain (the walk "
+                                                                          "preset's)")
+            pc["extra"] = {}   # the walk preset as it is: constrain
+            pc["direct_only_reason"] = REASON_ANNOTATE_PAIR   # a direct-only pair (VERIFY-D VD8, the coordinator)
+            out.append({"pair": pair, "title": title, "a": a, "partner_id": "%s-0001" % stem,
+                        "partner_candidate": pc, "partner_of_a": "%s-0001" % stem, "a_id_for_partner": a,
+                        "full": False, "ops_on_a": True})
+            continue
         elif pair == "two_seeds":
             t = _shift_seed(c["truth"], 10)
             if t is None:
@@ -1309,7 +1343,7 @@ def pair_plan(present: Dict[str, dict], ids: Dict[str, str], corpus: dict) -> Li
         out.append({"pair": pair, "title": title, "a": a, "partner_id": "%s-0001" % stem, "partner_candidate": pc,
                     "partner_of_a": None, "a_id_for_partner": a, "full": pair in ("radius", "two_seeds")})
     for ps in out:
-        if ps["partner_id"]:
+        if ps["partner_id"] and not ps.get("ops_on_a"):
             ps["partner_of_a"] = None
     return out
 
@@ -1327,24 +1361,40 @@ def corpus_extras(present: Dict[str, dict], ids: Dict[str, str], pair_specs: Lis
         put("long_walk", row_cut=True, sequence_cut=True)
     else:
         put("two_arms", row_cut=True)
+    # the compare verdicts true and unknown (VERIFY-D VD8): self-compares of an uncut graphlet (merges.1: true), of a
+    # depth-0 one and of one without bases (unknown)
+    for slot in ("merges", "depth_zero", "no_bases"):
+        put(slot, self_compare=True)
+    paged = False
+    for ps in pair_specs:
+        if ps["pair"] == "constrain_annotate":
+            # rows: constrain and annotate walk different paths (the claims compare pages at COMPARE_PAGE)
+            ex.setdefault(ps["a"], {}).update(compare_paged=ps["partner_id"])
+            ex.setdefault(ps["partner_id"], {}).update(no_compare=True)
+            paged = True
     for ps in pair_specs:
         if ps["pair"] == "radius" and ps["partner_id"]:
-            ex.setdefault(ps["partner_id"], {}).update(compare_cut=ps["a"], compare_paged=ps["a"])
+            ex.setdefault(ps["partner_id"], {}).update(compare_cut=ps["a"])
+            if not paged:
+                ex[ps["partner_id"]]["compare_paged"] = ps["a"]
     return ex
 
 
 def reorder_pairs(out: List[dict], pair_specs: List[dict]) -> List[dict]:
-    """Slot scenarios in SLOTS order, each pair partner right after the graphlet it compares with (b runs first)."""
+    """Slot scenarios in SLOTS order, each pair partner right after the graphlet it compares with (b runs first), or
+    right before it when the compares run on the graphlet (ops_on_a: the constrain / annotate pair)."""
     partners = dict((ps["a"], []) for ps in pair_specs)
+    before = dict((ps["a"], []) for ps in pair_specs)
     by_id = dict((s["id"], s) for s in out)
     for ps in pair_specs:
         if ps["partner_id"] and ps["partner_id"] in by_id:
-            partners.setdefault(ps["a"], []).append(by_id[ps["partner_id"]])
+            (before if ps.get("ops_on_a") else partners).setdefault(ps["a"], []).append(by_id[ps["partner_id"]])
     pids = set(ps["partner_id"] for ps in pair_specs if ps["partner_id"])
     res = []
     for s in out:
         if s["id"] in pids:
             continue
+        res.extend(before.get(s["id"], []))
         res.append(s)
         res.extend(partners.get(s["id"], []))
     return res

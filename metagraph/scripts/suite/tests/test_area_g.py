@@ -116,8 +116,8 @@ class Scenarios(unittest.TestCase):
         ids = [s["id"] for s in g]
         self.assertEqual(ids, ["G-arms2-0001", "G-pair-radius-0001", "G-pair-seeds-0001", "G-merge-0001",
                                "G-pair-cap-0001", "G-arm1-0001", "G-cut-0001", "G-stop-0001", "G-depth0-0001",
-                               "G-linear-0001", "G-fail-0001", "G-trace-0001", "G-coords-0001", "G-annot-0001",
-                               "G-nobases-0001"])
+                               "G-linear-0001", "G-fail-0001", "G-trace-0001", "G-coords-0001", "G-pair-annot-0001",
+                               "G-annot-0001", "G-nobases-0001"])
         skipped = dict((x["scenario"], x["reason"]) for x in ctx.skipped)
         for sid in ("G-big-0001", "G-twodb-0001", "G-long-0001"):
             self.assertIn(sid, skipped)
@@ -127,7 +127,7 @@ class Scenarios(unittest.TestCase):
         self.assertTrue(any("preconditions" in p for p in pending))
         self.assertTrue(any("library_commit" in p for p in pending))
         self.assertTrue(any(area_g.SERVICE_CAP_CASE in p for p in pending))
-        direct = ("G-coords-0001", "G-annot-0001", "G-nobases-0001")
+        direct = ("G-coords-0001", "G-annot-0001", "G-nobases-0001", "G-pair-annot-0001")
         for s in g:
             st = s["request"]["strategy"]
             if s["id"] not in direct:
@@ -437,7 +437,7 @@ class ByDesignLinks(unittest.TestCase):
         self.assertIsNone(area_g.by_design_case(area_g._op("e", "graphlet_export", area_g.E(format="mgt", arm="left")),
                                                 {}))
         # a direct-only scenario keeps its mgt export (W1, W2, W5), without the case
-        direct = [s for s in g if "direct-only" in s["tags"]]
+        direct = [s for s in g if "direct-only" in s["tags"] and "pair" not in s["tags"]]
         self.assertTrue(direct)
         for s in direct:
             ids = [o["id"] for o in s["graphlet"]["ops"]]
@@ -693,6 +693,45 @@ class StopScenarios(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class Coverage(unittest.TestCase):
+    """VERIFY-D VD8: compares that answer true (an uncut self-compare: merges.1) and unknown (depth 0, no bases),
+    compare rows (D1's constrain vs annotate pair, direct-only), a limitations listing and a compare that page."""
+
+    def test_the_gaps_are_closed(self):
+        g, _ = provisional(include_direct_only=True)
+        by = dict((s["id"], s) for s in g)
+        ops = dict((sid, dict((o["id"], o) for o in s["graphlet"]["ops"])) for sid, s in by.items())
+        for sid in ("G-merge-0001", "G-depth0-0001", "G-nobases-0001"):
+            for mode in ("claims", "walks", "labels", "prefix_subset"):
+                o = ops[sid]["self-%s-all" % mode]
+                self.assertEqual(o["args"]["b"], {"graphlet": sid}, (sid, mode))
+        # the pair: the compares on the annotate graphlet (W1, W2, W5) against its constrain partner
+        partner = by["G-pair-annot-0001"]
+        self.assertEqual(partner["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
+        self.assertEqual(partner["graphlet"]["not_exposed"]["*"], area_g.REASON_ANNOTATE_PAIR)
+        self.assertEqual(partner["mcp"], {"not_implemented": area_g.REASON_ANNOTATE_PAIR})
+        self.assertNotEqual(partner["request"]["strategy"]["labels"].get("mode"), "annotate")
+        self.assertFalse([oid for oid in ops["G-pair-annot-0001"] if oid.startswith("cmp")])
+        annot = ops["G-annot-0001"]
+        self.assertEqual(annot["cmp-claims-all"]["args"]["b"], {"graphlet": "G-pair-annot-0001"})
+        self.assertEqual(annot["cmp-claims-all"]["not_exposed"]["W3"], area_g.REASON_DIRECT_ONLY)
+        paged = annot["cmp-paged"]
+        self.assertEqual((paged["args"]["mode"], paged["args"]["max_bytes"], paged["paging"]),
+                         ("claims", area_g.COMPARE_PAGE, "all"))
+        self.assertNotIn("cmp-paged", ops["G-pair-radius-0001"])
+        self.assertIn("cmp-cut", ops["G-pair-radius-0001"])
+        for sid, s in by.items():
+            if "lims-paged" in ops[sid]:
+                self.assertEqual(ops[sid]["lims-paged"]["args"]["max_bytes"], area_g.LIMS_PAGE, sid)
+        self.assertEqual(area_g.validate_g(g, None)[0], [])
+        # without the direct-only slots the pair goes and the radius partner pages its compare as before
+        g2, _ = provisional(include_direct_only=False)
+        ids2 = [s["id"] for s in g2]
+        self.assertNotIn("G-pair-annot-0001", ids2)
+        radius = next(s for s in g2 if s["id"] == "G-pair-radius-0001")
+        self.assertIn("cmp-paged", [o["id"] for o in radius["graphlet"]["ops"]])
+
+
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
     service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2)."""
@@ -762,8 +801,10 @@ class BuiltV8(unittest.TestCase):
         self.assertEqual(m["graphlets"]["corpus"]["file"], "truth/area_g/corpus.json")
         self.assertFalse(m["graphlets"]["corpus"]["provisional"])
         self.assertEqual(m["graphlets"]["library_commit"], "44583b51307ed3242e19c051aaf133c671107956")
-        self.assertEqual(m["graphlets"]["pending"], [])
-        self.assertEqual(bm.freeze_problems(m), [])
+        # the constrain / annotate pair's partner (VERIFY-D VD8) waits for its rehearsal (REHEARSAL S)
+        self.assertEqual(m["graphlets"]["pending"], ["G-pair-annot-0001: preconditions (the rehearsal freezes them)"])
+        self.assertEqual(bm.freeze_problems(m), ["pending: G-pair-annot-0001: preconditions (the rehearsal freezes "
+                                                 "them)"])
         # the paired plan's warm repeats of every v7 scenario unchanged
         w7 = dict((s["id"], k % 10 == 0) for k, s in enumerate(v7["scenarios"]))
         w8 = dict((s["id"], k % 10 == 0) for k, s in enumerate(m["scenarios"]))
