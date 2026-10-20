@@ -258,14 +258,20 @@ class TakenAndTimed(unittest.TestCase):
         out = run(record(stop=stop))
         self.assertEqual(out["stop_answer"][0], "pass", out)
         self.assertIn("an earlier call of this stop took (2 call(s))", out["stop_answer"][1])
+        # R2-4: only what the answer states is checked; the rest is named unseen
+        self.assertIn("not seen: bound_seconds_gt, cancel_supported, running", out["stop_answer"][1])
+        stated = dict(stop, answer={"error": {"code": "already_stopping"}, "running": 0})
+        self.assertEqual(run(record(stop=stated))["stop_answer"][0], "fail")    # a stated running 0, expected 1
         # its bound unseen: the job's end is judged against the attempts' lease (LEASE 10:01:00)
         self.assertEqual(out["job_terminal"][0], "pass", out)
         late = run(record(stop=stop, finished_at="2026-10-20T10:01:30+00:00"))
         self.assertEqual(late["job_terminal"][0], "fail", late)
-        for err in ("temporarily_unavailable", "timeout"):
+        # R2-4: a stop not taken is an error, whatever the reason
+        for err in ("temporarily_unavailable", "timeout", "forbidden"):
             out = run(record(stop=dict(stop, error=err, took=False, answer=None)))
-            self.assertEqual(out["stop_answer"][0], "inconclusive", (err, out))
-        out = run(record(stop=dict(stop, error="forbidden", took=False)))
+            self.assertEqual(out["stop_answer"][0], "fail", (err, out))
+            self.assertIn("the stop was not taken: %s" % err, out["stop_answer"][1])
+        out = run(record(stop=dict(stop, error=None, took=False, answer={"running": 1})))
         self.assertEqual(out["stop_answer"][0], "fail")
 
     def test_the_tokens_hold_past_the_lease(self):

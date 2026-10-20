@@ -5000,10 +5000,10 @@ STOP_LEASE_HOLD_S = {"contract": STOP_CONFIRM_S, "legacy": STOP_HTTP_PHASE_MARGI
 # A /traverse job can read stopped up to ~40 s before the stop site writes its release record (M1): a release written
 # up to this long after the job's end is on time; async's runner waits until lease_until + 35 s, at most 90 s after
 STOP_RELEASE_WRITE_WINDOW_S = 45.0
-# traverse_stop's codes: one that says an earlier call of the same stop took (async's STOP_TOOK, VERIFY-D VD7), and
-# those that say the stop was never answered (no answer, busy past the runner's retries): not tested, never a refusal
+# traverse_stop's code that says an earlier call of the same stop took (async's STOP_TOOK, VERIFY-D VD7): taken, its
+# answer states only what it states; any stop not taken (no answer, busy past the runner's retries, another refusal)
+# is an error (the owner's rule, VERIFY-D-R2 R2-4)
 STOP_TOOK_CODES = ("already_stopping",)
-STOP_UNANSWERED_CODES = ("temporarily_unavailable", "timeout", "transport", "no_answer", "connection_error")
 RESOLVE_STOP_GRACE_S = 20.0        # TRAVERSAL_RESOLVE_STOP_GRACE_S
 STOP_GRACE_MARGIN_S = 5.0               # the worker closes the connection within its stop poll; the clocks
 STOP_TERMINAL_MARGIN_S = 5.0            # job_terminal: the stop's bound plus this
@@ -5065,19 +5065,37 @@ def _sf_stop_answer(rec, args, scenario):
     stop = rec.get("stop")
     if not isinstance(stop, dict):
         return INCONCLUSIVE, "no stop was sent: %s" % (rec.get("error") or "the flow ended before it")
+    taken_earlier = False
     if stop.get("error"):
         err = str(stop["error"])
         if err in STOP_TOOK_CODES and stop.get("took") is not False:
-            # the runner resent an unanswered stop (idempotent) and records the last answer: an earlier call took
-            return PASS, "traverse_stop: %s, an earlier call of this stop took (%d call(s))" % (
-                err, stop.get("calls") or 1)
-        if err in STOP_UNANSWERED_CODES or (stop.get("answer") is None and stop.get("took") is False and
-                                            ":" in err):
-            return INCONCLUSIVE, "the stop was never answered (%s): nothing of it to test" % err
-        return FAIL, "traverse_stop answered error %s" % err
+            # the runner resent an unanswered stop (idempotent) and records the last answer: an earlier call took;
+            # this answer states what it states, the rest of the expected answer was never seen
+            taken_earlier = True
+        else:
+            return FAIL, "the stop was not taken: %s (%d call(s))" % (err, stop.get("calls") or 1)
+    elif stop.get("took") is False:
+        return FAIL, "the stop was not taken (the runner's took false)"
     ans = stop.get("answer")
     if not isinstance(ans, dict):
-        return FAIL, "traverse_stop's answer is not an object"
+        if taken_earlier:
+            ans = {}
+        else:
+            return FAIL, "traverse_stop's answer is not an object"
+    if taken_earlier:
+        seen = dict((k, w) for k, w in args.items() if (k[:-3] if k.endswith("_gt") else k) in ans)
+        unseen = sorted(set(args) - set(seen))
+        bad = []
+        for key, want in sorted(seen.items()):
+            got = ans.get(key[:-3] if key.endswith("_gt") else key)
+            if key.endswith("_gt") and not (_sf_num(got) is not None and _sf_num(got) > want):
+                bad.append("%s %r, expected > %r" % (key[:-3], got, want))
+            elif not key.endswith("_gt") and got != want:
+                bad.append("%s %r, expected %r" % (key, got, want))
+        if bad:
+            return FAIL, "; ".join(bad)
+        return PASS, "traverse_stop: %s, an earlier call of this stop took (%d call(s)); not seen: %s" % (
+            stop["error"], stop.get("calls") or 1, ", ".join(unseen) or "nothing")
     bad = []
     for key, want in sorted(args.items()):
         if key.endswith("_gt"):
