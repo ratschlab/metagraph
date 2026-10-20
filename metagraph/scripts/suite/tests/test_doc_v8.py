@@ -160,5 +160,52 @@ class ChapterSTest(unittest.TestCase):
         self.assertEqual(graphlets.chapter_s_sections(_Stub(run=empty)), "")
 
 
+class GateV8Test(unittest.TestCase):
+    """The v8 gate on the overview pages: area G's population per policy, both policies side by side, area G's op calls
+    beside the executions, its problems grouped (a disagreement or a failed pre-check or service check a violation,
+    an inconclusive call not shown), the graphlet library's identity in plain words."""
+
+    def test_population_text(self):
+        import sections
+        pol = {"counts": {"graphlets": {"scenarios": 17, "op_calls": 1495, "w3_not_exposed": 650, "service_checks": 8,
+                                        "ways": {"W1": 1493, "W2": 1493, "W3": 845, "W4": 1118, "W5": 1492}}}}
+        verdict = {"counts": {"graphlet_ops": {"judged": 1495, "agree": 1490, "service_by_design": 5,
+                                               "not_required": 0}}}
+        self.assertEqual(sections.graphlet_population_text(pol, verdict),
+                         "17 scenarios, 1495 op calls required (W1 1493, W2 1493, W3 845, W4 1118, W5 1492 records), "
+                         "650 calls W3 does not expose, 8 service checks; judged 1495: 1490 agree, 5 by design")
+        self.assertEqual(sections.graphlet_population_text({"counts": {}}, verdict), "")
+
+    def test_problem_groups(self):
+        import sections
+        for detail, group in (("op x (graphlet_walks) disagrees (W1-W2): ...", "violation"),
+                              ("op x (graphlet_walks) inconclusive: the selector failed", "unproven"),
+                              ("pre-check body fail (a determinism finding): ...", "violation"),
+                              ("pre-check twin inconclusive: no twin kept", "unproven"),
+                              ("service check max_bytes_refused fail: 1 of 1", "violation"),
+                              ("service check in_service required, not passed (n/a)", "unproven"),
+                              ("the graphlet comparison could not be computed (X: y)", "evidence")):
+            self.assertEqual(sections.gate_group_of({"kind": "graphlet", "detail": detail}), group, detail)
+
+    def test_library_note(self):
+        import sections
+        rec = {"recorded": True, "library_commits": {"fdff625ef7322e919b28da4b81763acec65591af": 4}, "invocations": 4,
+               "library_commit": "fdff625ef7322e919b28da4b81763acec65591af", "source": "arms/mcp/mcp_runs.jsonl"}
+        pin = "fdff625ef7322e919b28da4b81763acec65591af"
+        gate = {"library_identity": {"expected": None, "recorded": rec, "pin": pin},
+                "policy": {"arms": ["mcp"], "graphlets": {}}}
+        text, _ = sections.library_note_text(_Stub(run=_Stub(gate=gate, identity=None)))
+        self.assertIn("on all 4 MCP invocations, the commit the manifest pins; the gate was given no record of the "
+                      "deployed library", text)
+        gate["library_identity"]["expected"] = pin
+        ident = {"deployed_library_commit": {"commit": pin, "source": "the deployment record"}}
+        text, _ = sections.library_note_text(_Stub(run=_Stub(gate=gate, identity=ident)))
+        self.assertIn("and equals the deployed one (the deployment record)", text)
+        self.assertTrue(sections.library_held(_Stub(gate=gate)))
+        gate["library_identity"]["expected"] = "0" * 40
+        self.assertFalse(sections.library_held(_Stub(gate=gate)))
+        self.assertEqual(sections.library_note_text(_Stub(run=_Stub(gate={}, identity=None))), ("", []))
+
+
 if __name__ == "__main__":
     unittest.main()

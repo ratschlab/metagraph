@@ -258,6 +258,10 @@ class Run(object):
         # identity input's deployment record, never from the run's own records (RV3, V3); None without one
         dep = (self.identity or {}).get("deployed_service_commit")
         self.expected_service_commit = dep.get("commit") if isinstance(dep, dict) else None
+        # manifest v8: the deployed graphlet library's commit (gate.py --expect-library-commit), likewise from the
+        # deployment record only
+        dlib = (self.identity or {}).get("deployed_library_commit")
+        self.expected_library_commit = dlib.get("commit") if isinstance(dlib, dict) else None
         self.orchestrator = sc.read_json(os.path.join(self.dir, "orchestrator.json")) or {}
         judged = cmp.judging_checks(self.dir, reevaluated) or {}
         self.judged = judged
@@ -283,7 +287,8 @@ class Run(object):
             # reads the merged lines, compare.json, the manifest and the plan; it writes nothing)
             try:
                 self.gate = gate_mod.judge(self.dir, self.policy, reevaluated,
-                                           expect_service_commit=self.expected_service_commit)
+                                           expect_service_commit=self.expected_service_commit,
+                                           expect_library_commit=self.expected_library_commit)
                 self.gate["policy"]["path"] = self.policy_path
                 self.gate_offline = True
             except Exception as e:  # a run the gate cannot judge: the document says why, never a crash
@@ -297,7 +302,8 @@ class Run(object):
             try:
                 entry["policy"] = gate_mod.load_policy(path)
                 entry["verdict"] = gate_mod.judge(self.dir, entry["policy"], reevaluated,
-                                                  expect_service_commit=self.expected_service_commit)
+                                                  expect_service_commit=self.expected_service_commit,
+                                                  expect_library_commit=self.expected_library_commit)
             except Exception as e:  # a policy the gate cannot read or judge: the document says why, never a crash
                 entry["error"] = "%s: %s" % (type(e).__name__, e)
             self.also_gates.append(entry)
@@ -423,11 +429,12 @@ class Run(object):
         # the deployed commit from the deployment record (the deploy's own record), with its source: the gate compares
         # the recorded identity with it (RV3, V3); a commit the run recorded otherwise is the gate's problem, not a
         # refusal here
-        dep = data.get("deployed_service_commit")
-        if dep is not None:
-            if not isinstance(dep, dict) or not gate_mod.COMMIT_RE.match(str(dep.get("commit") or "")) \
-                    or not str(dep.get("source") or "").strip():
-                problems.append("deployed_service_commit is not {commit (a git sha), source}")
+        for key in ("deployed_service_commit", "deployed_library_commit"):
+            dep = data.get(key)
+            if dep is not None:
+                if not isinstance(dep, dict) or not gate_mod.COMMIT_RE.match(str(dep.get("commit") or "")) \
+                        or not str(dep.get("source") or "").strip():
+                    problems.append("%s is not {commit (a git sha), source}" % key)
         content = re.search(r"\b[0-9a-f]{64}\b", str(data.get("manifest") or ""))
         if content and self.manifest.get("content_sha256") and content.group(0) != self.manifest["content_sha256"]:
             problems.append("manifest content %s, the run's is %s" % (content.group(0), self.manifest["content_sha256"]))
