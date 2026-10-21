@@ -36,15 +36,14 @@ namespace {
 // Loading an annotation goes through the CLI's Config (it carries the
 // annotation type and loading options), so build a minimal `server_query`
 // command line for it. "server_query" is the CLI identity that accepts -i/-a
-// without positional input files.
+// without positional input files. Do not pass -p here: Config would mutate the
+// process-global thread count. Each Python object owns its query/align pool.
 mtg::cli::Config make_config(const std::string &graph,
-                             const std::string &annotation,
-                             unsigned int threads) {
+                             const std::string &annotation) {
     std::vector<std::string> args = {
         "pymetagraph", "server_query",
         "-i", graph,
         "-a", annotation,
-        "-p", std::to_string(std::max(1u, threads)),
     };
     std::vector<char*> argv;
     argv.reserve(args.size());
@@ -92,7 +91,7 @@ class AnnotatedGraph {
             throw std::invalid_argument("threads must be at least 1");
         graph_ = mtg::cli::load_critical_dbg(graph);
         if (!annotation.empty()) {
-            auto config = make_config(graph, annotation, threads);
+            auto config = make_config(graph, annotation);
             anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config);
         }
         if (graph_->get_mode() == mtg::graph::DeBruijnGraph::PRIMARY)
