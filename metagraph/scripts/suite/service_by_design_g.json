@@ -1,7 +1,7 @@
 {
  "version": 1,
  "service_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
- "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20, and BY-DESIGN-G-CASES-2.json of the v8 shadow run, 2026-10-21), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table). service_commit is the latest commit a case cites; each case's source_commit names its own: f994e3e2 for the first four, c60b753e for the shadow run's three (graphlet.compare_export_line, graphlet.walks_arm_absent.two_arms / .one_arm)",
+ "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20, and the export case of BY-DESIGN-G-CASES-2.json of the v8 shadow run, 2026-10-21), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table). service_commit is the latest commit a case cites; each case's source_commit names its own: f994e3e2 for the first four, c60b753e for graphlet.compare_export_line. The shadow run's graphlet.walks_arm_absent.two_arms / .one_arm are gone since the service's arm fix 9abe8517 (an arm sent null reaches the library: W3 answers as the library, bad_arm on two arms, the only arm on one)",
  "cases": [
   {
    "id": "graphlet.max_bytes_above_service_cap",
@@ -378,123 +378,6 @@
      "answered": true,
      "service_fields": {
       "export": "complete lists: download both bodies (format=mgt) and compare locally"
-     }
-    }
-   }
-  },
-  {
-   "id": "graphlet.walks_arm_absent.two_arms",
-   "areas": [
-    "G"
-   ],
-   "scenario_match": "an area G op of graphlet_walks (also graphlet_walk, graphlet_sequence: the same path, not observed in the shadow run) on a graphlet with BOTH arms whose args send arm null: the library ways answer bad_arm, W3 answers bad_argument",
-   "direct_expectation": {
-    "http": null,
-    "code": "bad_arm",
-    "text": null,
-    "text_source": "vendor/metagraph_traverse/mcp_tools.py:911-923 (_arm: g.arm(None) raises on a two-arm graphlet -> bad_arm), :1610, :1795, :2113 (arm is a positional parameter without a default)",
-    "behaviour": "a library way that passes arm=None explicitly (the plan's arm: null) reaches _arm, and g.arm(None) cannot pick an arm of a two-arm graphlet: {error: bad_arm}. A library way that OMITS arm gets bad_argument 'missing a required argument: 'arm'' from the tool wrapper's sig.bind (vendor/metagraph_traverse/mcp_tools.py:555, :567), the same as W3: no difference, so name this case only on ops whose args state arm: null and whose library ways pass it"
-   },
-   "service_answer": {
-    "tool": "graphlet_walks | graphlet_walk | graphlet_sequence",
-    "outcome": "refused_by_library",
-    "http": 422,
-    "code": "bad_argument",
-    "text_contains": "missing a required argument: 'arm'",
-    "field": null,
-    "stage": "worker",
-    "detail": "The MCP tool's arm is `str | None = None` and _graphlet_body (app/mcp_server.py:8077-8079) sends only the arguments that are not None ('None = the library's default, so it is not sent'), so an arm of null (or absent: the tool cannot tell them apart) is not in the loopback body. The route keeps only the keys set (payload.model_dump(exclude_unset=True), app/api/routes_graphlets.py:707) and the worker calls getattr(tools, tool)(handle, **args) (app/traversal/ops_runtime.py:657-659) without arm; the library's tool wrapper cannot bind the call (arm has no default) and answers {error: bad_argument, message: \"missing a required argument: 'arm'\"} (vendor/metagraph_traverse/mcp_tools.py:555, :567; checked locally on the vendored library 2026-10-21: all three tools). The route answers 422 (a library code, app/traversal/ops_contract.py:537) and the MCP tool error is {error: {code: bad_argument, message}}. Through REST an explicit \"arm\": null IS set and reaches the library as arm=None, i.e. the library's answer (bad_arm here): only the MCP wrapper differs."
-   },
-   "agreement": "by_design",
-   "source": [
-    "app/mcp_server.py:8077",
-    "app/mcp_server.py:8245",
-    "app/api/routes_graphlets.py:707",
-    "app/traversal/ops_runtime.py:657",
-    "app/traversal/ops_contract.py:537",
-    "vendor/metagraph_traverse/mcp_tools.py:555",
-    "vendor/metagraph_traverse/mcp_tools.py:567",
-    "vendor/metagraph_traverse/mcp_tools.py:911",
-    "vendor/metagraph_traverse/mcp_tools.py:1610"
-   ],
-   "source_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
-   "graphlet": {
-    "tools": [
-     "graphlet_walks",
-     "graphlet_walk",
-     "graphlet_sequence"
-    ],
-    "args": [
-     {
-      "path": "arm",
-      "absent": true
-     }
-    ],
-    "library": {
-     "error": {
-      "code": "bad_arm"
-     }
-    },
-    "service": {
-     "error": {
-      "code": "bad_argument"
-     }
-    }
-   }
-  },
-  {
-   "id": "graphlet.walks_arm_absent.one_arm",
-   "areas": [
-    "G"
-   ],
-   "scenario_match": "an area G op of graphlet_walks (also graphlet_walk, graphlet_sequence: the same path, not observed in the shadow run) on a graphlet with ONE arm whose args send arm null: the library ways answer for the only arm, W3 answers bad_argument",
-   "direct_expectation": {
-    "http": null,
-    "code": null,
-    "text": null,
-    "text_source": "vendor/metagraph_traverse/mcp_tools.py:911-923 (_arm: g.arm(None) is the only arm of a one-arm graphlet)",
-    "behaviour": "a library way that passes arm=None explicitly answers as for the graphlet's only arm (walks of that arm, etc.). A library way that OMITS arm gets bad_argument from the wrapper, the same as W3 (see graphlet.walks_arm_absent.two_arms)"
-   },
-   "service_answer": {
-    "tool": "graphlet_walks | graphlet_walk | graphlet_sequence",
-    "outcome": "refused_by_library",
-    "http": 422,
-    "code": "bad_argument",
-    "text_contains": "missing a required argument: 'arm'",
-    "field": null,
-    "stage": "worker",
-    "detail": "The same path as graphlet.walks_arm_absent.two_arms. NOT PURE DESIGN: the MCP tools' docstrings say 'arm: left | right (l | r); required when the graphlet has both arms' (app/mcp_server.py:8245 walks, :8285 walk, :8318 sequence), i.e. optional on a one-arm graphlet, and the REST route already gives the library's answer for an explicit null; only the MCP wrapper's drop-None rule (app/mcp_server.py:8077-8079) loses it. A one-line service fix (send arm even when None for these three tools) would make W3 answer as the library on both shapes and retire both walks cases; the docstring alternative ('arm: required') would make this by design as written."
-   },
-   "agreement": "by_design",
-   "source": [
-    "app/mcp_server.py:8077",
-    "app/mcp_server.py:8245",
-    "app/mcp_server.py:8285",
-    "app/mcp_server.py:8318",
-    "app/api/routes_graphlets.py:707",
-    "app/traversal/ops_runtime.py:657",
-    "vendor/metagraph_traverse/mcp_tools.py:567",
-    "vendor/metagraph_traverse/mcp_tools.py:911"
-   ],
-   "source_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
-   "graphlet": {
-    "tools": [
-     "graphlet_walks",
-     "graphlet_walk",
-     "graphlet_sequence"
-    ],
-    "args": [
-     {
-      "path": "arm",
-      "absent": true
-     }
-    ],
-    "library": {
-     "answered": true
-    },
-    "service": {
-     "error": {
-      "code": "bad_argument"
      }
     }
    }

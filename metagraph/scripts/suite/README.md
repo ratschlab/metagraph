@@ -5150,6 +5150,10 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   pairs with (cut_lists) and no conditional tag, and its corpus entry is what rehearse_g.corpus_entry writes for a
   partner that passed every verdict but its slot's (partner_passed true, passed false; the slot stays without it).
   No judging step reads a scenario's slot or those tags: the v8 policies' required calls and checks are unchanged.
+  The arm-absent cases (graphlet.walks_arm_absent.two_arms / .one_arm) are gone with the service's arm fix 9abe8517
+  (an arm sent null reaches the library: W3 answers bad_arm on two arms, the only arm on one): their 9 ops
+  (walks-arm-none, walks-arm-only) link no case and expect the library's answer on every way; v8 is rebuilt and its
+  declared file and policies regenerated (VERIFY-D-R5 R5-1).
 - The v8 freeze package: gate/declared_v8_rt.json (v7's entries re-pinned, nothing of area G set aside) and
   gate/policy_v8_rt_mcp.json / policy_v8_rtp_mcp.json (v7's parameters: arms direct-local and mcp, warm_every 10,
   require_agreement false) pin manifest/suite_v8.json as `build_manifest.py --manifest-version 8 --stop-scenarios

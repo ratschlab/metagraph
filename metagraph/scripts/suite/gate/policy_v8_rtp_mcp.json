@@ -70,7 +70,7 @@
  "declared": {
   "declared_version": 1,
   "file": "gate/declared_v8_rt.json",
-  "sha256": "2b0d7bd18c012ea0dc69b5d557f6135aba6376569c067360dd7818c9a6ce28eb"
+  "sha256": "b6f2d24bd76b1d687f9304298c7a944351c3ae28b05150463b0f36e22de9be69"
  },
  "exclusions": [
   {
@@ -1177,12 +1177,12 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-21T05:40:11.542Z",
+ "generated_utc": "2026-10-21T06:14:12.967Z",
  "graphlets": {
   "by_design_g_table": {
-   "cases": 7,
+   "cases": 5,
    "service_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
-   "sha256": "692e82c6ad52d25eaffe3086db2c169cfe815ea803dc540c0e45948487fbc1f1",
+   "sha256": "98db11cf76095a1d7c5cb91f324b5fee9e21d5c30765d02748e57721f47cfa73",
    "version": 1
   },
   "drift": "report_only",
@@ -1690,7 +1690,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.two_arms",
     "op": "walks-arm-none",
     "scenario": "G-arms2-0001",
     "tool": "graphlet_walks",
@@ -4062,7 +4061,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.two_arms",
     "op": "walks-arm-none",
     "scenario": "G-merge-0001",
     "tool": "graphlet_walks",
@@ -6316,7 +6314,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.one_arm",
     "op": "walks-arm-only",
     "scenario": "G-arm1-0001",
     "tool": "graphlet_walks",
@@ -7560,7 +7557,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.two_arms",
     "op": "walks-arm-none",
     "scenario": "G-cut-0001",
     "tool": "graphlet_walks",
@@ -9116,7 +9112,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.two_arms",
     "op": "walks-arm-none",
     "scenario": "G-stop-0001",
     "tool": "graphlet_walks",
@@ -10620,7 +10615,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.two_arms",
     "op": "walks-arm-none",
     "scenario": "G-depth0-0001",
     "tool": "graphlet_walks",
@@ -12084,7 +12078,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.one_arm",
     "op": "walks-arm-only",
     "scenario": "G-linear-0001",
     "tool": "graphlet_walks",
@@ -13175,7 +13168,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.one_arm",
     "op": "walks-arm-only",
     "scenario": "G-long-0001",
     "tool": "graphlet_walks",
@@ -14369,7 +14361,6 @@
     ]
    },
    {
-    "by_design": "graphlet.walks_arm_absent.two_arms",
     "op": "walks-arm-none",
     "scenario": "G-trace-0001",
     "tool": "graphlet_walks",
@@ -20516,7 +20507,7 @@
   "whitelist_sha256": "9cb305bdfa6d6b075355e780c37b03860b611bb134f00d4e7bb0d80b48daaf42"
  },
  "manifest": {
-  "content_sha256": "a9c3ccb3c6836b32a8ac35cd94c5c0fda429507a427ad6bc6e78fa82bc041dc5",
+  "content_sha256": "1cffcea3d67feb82bdaa7fee88fc8dc2b2c7e8d52c6105d272a659f62152e570",
   "file": "manifest/suite_v8.json",
   "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
   "manifest_version": 8,
