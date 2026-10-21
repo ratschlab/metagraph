@@ -5144,6 +5144,15 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   no budget_respected; graphlet_list's accessed / created are not compared (drift); compare_graphlets.py as a script
   writes the by-design and service-check stages; the rows pair (G-pair-rows-0001 / -0002) gives W3 a compare with
   rows that pages (cmp-paged-w3).
+- The v8 freeze package: gate/declared_v8_rt.json (v7's entries re-pinned, nothing of area G set aside) and
+  gate/policy_v8_rt_mcp.json / policy_v8_rtp_mcp.json (v7's parameters: arms direct-local and mcp, warm_every 10,
+  require_agreement false) pin manifest/suite_v8.json as `build_manifest.py --manifest-version 8 --stop-scenarios
+  --freeze` writes it, and both by-design tables. Once the freeze has written it, `gate_policy.py manifest/suite_v8.json
+  --routes 'POST /resolve,POST /traverse,GET /traverse/capabilities,POST /pattern' --arms direct-local,mcp --declared
+  gate/declared_v8_rt.json --name v8-rtp-mcp --out gate/policy_v8_rtp_mcp.json` (without POST /pattern and named
+  v8-rt-mcp: the rt policy) regenerates them identically, generated_utc aside. The stop scenarios run on the MCP arm
+  only (direct_not_run): no direct execution is required of them, and a require_agreement policy reads their missing
+  direct reference as a note (R2-6).
 
 ## Glossary
 

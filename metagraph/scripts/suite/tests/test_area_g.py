@@ -991,6 +991,36 @@ class BuiltV8(unittest.TestCase):
         for k, s in enumerate(stop["scenarios"]):
             if s["id"] in areas_mod().STOP_IDS:
                 self.assertEqual(sc.mcp_repeats(k, s, 10), [0], s["id"])
+        # the freeze package (round 7 item 4): gate/declared_v8_rt.json and both v8 policies pin this build (with the
+        # stop scenarios) as manifest/suite_v8.json, v7's declared entries unchanged, nothing of area G set aside,
+        # both by-design tables pinned; the policies regenerate identical (generated_utc aside)
+        import compare as cmp
+        import gate_policy
+        suite = os.path.dirname(HERE)
+        declared = sc.read_json(os.path.join(suite, "gate", "declared_v8_rt.json"))
+        d7 = sc.read_json(os.path.join(suite, "gate", "declared_v7_rt.json"))
+        self.assertEqual(declared["manifest"], {"file": "manifest/suite_v8.json",
+                                                "content_sha256": stop["content_sha256"]})
+        for k in ("exclusions", "not_required", "relations_excluded"):
+            self.assertEqual(declared[k], d7[k], k)
+        self.assertEqual((declared["graphlet_not_required"], declared["graphlet_service_checks_not_required"]), ([], []))
+        g_sha = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)[1]["sha256"]
+        for name, routes in (("v8-rt-mcp", ["POST /resolve", "POST /traverse", "GET /traverse/capabilities"]),
+                             ("v8-rtp-mcp", ["POST /resolve", "POST /traverse", "GET /traverse/capabilities",
+                                             "POST /pattern"])):
+            pol = sc.read_json(os.path.join(suite, "gate", "policy_%s.json" % name.replace("-", "_")))
+            self.assertEqual((pol["manifest"]["file"], pol["manifest"]["content_sha256"]),
+                             ("manifest/suite_v8.json", stop["content_sha256"]))
+            self.assertEqual(pol["graphlets"]["by_design_g_table"]["sha256"], g_sha)
+            self.assertEqual(pol["by_design_table"]["sha256"][:8], "d4b8636c")
+            self.assertEqual((pol["arms"], pol["require_agreement"], pol["warm_every"], pol["advanced_path"]),
+                             (["direct-local", "mcp"], False, 10, False))
+            new = gate_policy.build_policy(stop, routes, ["direct-local", "mcp"], cmp.DEFAULT_BY_DESIGN, False, 10,
+                                           False, None, name, "manifest/suite_v8.json", declared=declared,
+                                           declared_file="gate/declared_v8_rt.json")
+            for x in (pol, new):
+                x.pop("generated_utc", None)
+            self.assertEqual(ml.canonical_json(new), ml.canonical_json(pol), name)
 
 
 if __name__ == "__main__":
