@@ -14,6 +14,9 @@
 #include "graph/alignment_redone/aln_match.hpp"
 #include "graph/alignment_redone/aligner_config.hpp"
 #include "graph/alignment_redone/aln_seeder.hpp"
+#if _DNA5_GRAPH
+#include "graph/alignment/dbg_aligner.hpp"
+#endif
 
 
 namespace {
@@ -88,6 +91,33 @@ TEST(AlignmentScoringRedone, DefaultsAndInvalidBytes) {
     EXPECT_EQ(-1, config.score_sequences("A", "a"));
 #endif
 }
+
+#if _DNA5_GRAPH
+TEST(LegacyQueryDNA5, AmbiguousMatches) {
+    const std::string reference = "AACNNNACGNNNTTA";
+    auto graph = build_graph_batch<DBGHashFast>(3, { reference });
+    for (bool edit_distance : { false, true }) {
+        mtg::graph::align::DBGAlignerConfig config{};
+        config.alignment_edit_distance = edit_distance;
+        config.alignment_match_score = 2;
+        config.alignment_mm_transition_score = config.alignment_mm_transversion_score = 3;
+        config.min_seed_length = 3;
+        config.max_seed_length = std::numeric_limits<size_t>::max();
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        config.set_scoring_matrix();
+        const auto match_score = edit_distance ? 1 : 2;
+        EXPECT_EQ(match_score, config.match_score("N"));
+        EXPECT_EQ(mtg::graph::align::Cigar::MATCH, mtg::graph::align::kCharToOp['N']['N']);
+        mtg::graph::align::DBGAligner<> aligner(*graph, config);
+        auto paths = aligner.align(reference);
+        ASSERT_EQ(1u, paths.size());
+        EXPECT_EQ("15=", paths[0].get_cigar().to_string());
+        EXPECT_EQ(15 * match_score, paths[0].get_score());
+        EXPECT_TRUE(paths[0].get_cigar().is_valid(reference, reference));
+    }
+}
+#endif
 
 TEST(BossRanges, EachLabelIsCalledOnce) {
     auto graph = build_graph_batch<DBGSuccinct>(3, { "AAACAAAGAAATAACACCAGCAT" });

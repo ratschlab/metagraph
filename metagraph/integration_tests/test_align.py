@@ -463,6 +463,30 @@ class TestDNA5Align(TestingBase):
     def setUp(self):
         super().setUpClass()
 
+    @parameterized.expand([(representation, edit_distance)
+                           for representation in ('succinct', 'hashfast')
+                           for edit_distance in (False, True)])
+    def test_query_alignment_ambiguous_matches(self, representation, edit_distance):
+        fasta = self.tempdir.name + '/reference.fa'
+        reference = 'AACNNNACGNNNTTA'
+        with open(fasta, 'w') as out:
+            out.write('>reference\n' + reference + '\n')
+        prefix = self.tempdir.name + '/graph'
+        self._build_graph(fasta, prefix, 3, representation)
+        graph = prefix + graph_file_extension[representation]
+        self._annotate_graph(fasta, graph, prefix, 'column')
+        options = ['--align-edit-distance'] if edit_distance else []
+        result = subprocess.run([METAGRAPH, 'query', '--json', '--align',
+                                 '--align-only-forwards', '--align-min-seed-length', '3',
+                                 '--align-no-seed-complexity-filter', *options,
+                                 '-i', graph, '-a', prefix + '.column.annodbg', fasta],
+                                stdout=PIPE, stderr=PIPE, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        aligned = json.loads(result.stdout)
+        self.assertEqual(aligned['cigar'], '15=')
+        self.assertEqual(aligned['score'], 15 if edit_distance else 40)
+        self.assertEqual(aligned['max_score'], aligned['score'])
+
     @parameterized.expand(['succinct', 'hashfast'])
     def test_ambiguous_reference_bases(self, representation):
         fasta = self.tempdir.name + '/reference.fa'
