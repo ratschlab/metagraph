@@ -5534,7 +5534,10 @@ EVIDENCE_FILE = "evidence.json"
 EVIDENCE_RUN_FILES = ("manifest.json", "run.json", "run.reevaluated.json", "executions.jsonl",
                       "executions.reevaluated.jsonl", "compare.json", "compare.reevaluated.json", "reevaluated.json",
                       "plan.json", "orchestrator.json", "samples.jsonl", "gate.json", "gate.reevaluated.json",
-                      "arms/direct-local/run.json", "arms/direct-remote/run.json", "arms/mcp/run.json")
+                      "arms/direct-local/run.json", "arms/direct-remote/run.json", "arms/mcp/run.json",
+                      # manifest v8: the engine container's memory snapshots Timing 8 reads (task_resources), when
+                      # the run directory holds them (written by hand at the run's start and end)
+                      "host_memory.json")
 
 
 def _file_sha256(path):

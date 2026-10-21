@@ -542,3 +542,8 @@ class RealRunV8Test(unittest.TestCase):
         _, mtext = sections._agreement_counts(_Stub(run=run), list(comp))
         self.assertIn("1 not implemented", mtext)
         self.assertIn("1 with no MCP execution planned", mtext)
+
+    def test_host_memory_in_evidence(self):
+        import sections
+        import task_resources
+        self.assertIn(task_resources.HOST_MEMORY_FILE, sections.EVIDENCE_RUN_FILES)
