@@ -813,7 +813,7 @@ class PagingPasses(unittest.TestCase):
         ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
         corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
         g = dict((x["id"], x) for x in area_g.gen_G(ctx, v7_scenarios(), corpus, "a" * 40) if "graphlet" in x)
-        for sid in ("G-merge-0001", "G-arms2-0001", "G-long-0001"):
+        for sid in ("G-merge-0001", "G-arms2-0001", "G-arm1-0001"):
             pb = corpus["candidates"][g[sid]["graphlet"]["candidate"]]["facts"]["page_bytes"]
             ops = dict((o["id"], o) for o in g[sid]["graphlet"]["ops"])
             for oid, size in pb.items():

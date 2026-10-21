@@ -3617,6 +3617,14 @@
     "merges": {
      "left": 0
     },
+    "page_bytes": {
+     "claims-paged": 2560,
+     "labels-paged": null,
+     "lims-paged": null,
+     "splits-paged": 928,
+     "walk-paged-left": 1088,
+     "walks-paged-left": 2048
+    },
     "seed_bp": null,
     "segments": {
      "left": 13
@@ -7567,9 +7575,9 @@
  "rich": [
   "merges",
   "two_arms",
-  "long_walk"
+  "one_arm"
  ],
- "rich_note": "the coordinator, 2026-10-20 (VERIFY-D-R2 R2-5): one rich graphlet per seed; merges.1 and cut_lists.1 are one seed and graph, so cut_lists.1 leaves the rich set; two_arms.1 (7 walks, 27 segments, 5 merges, cut lists) stays; the third is long_walk.4 (its 16.6 kbp walk: the long walk's paging)",
+ "rich_note": "the coordinator, 2026-10-20/21 (VERIFY-D-R2 R2-5, VERIFY-D-R4 R4-2): one rich graphlet per seed; merges.1 and cut_lists.1 are one seed and graph, so cut_lists.1 leaves the rich set; two_arms.1 (7 walks, 27 segments, 5 merges, cut lists) stays; the third is one_arm.1, whose walk, walks, splits and claims listings page whole at W3's budget (long_walk.4, one walk of one segment, pages none)",
  "slots": {
   "annotate": {
    "candidate": "annotate.1",

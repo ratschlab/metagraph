@@ -139,7 +139,7 @@ class RichSet(unittest.TestCase):
     def test_the_committed_corpus(self):
         import build_manifest as bm
         c = area_g.load_corpus(bm.DEFAULT_CORPUS)
-        self.assertEqual(c["rich"], ["merges", "two_arms", "long_walk"])
+        self.assertEqual(c["rich"], ["merges", "two_arms", "one_arm"])   # R4-2: one_arm.1 pages
         self.assertIn("one rich graphlet per seed", c["rich_note"])
 
 
