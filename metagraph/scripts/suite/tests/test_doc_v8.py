@@ -364,3 +364,20 @@ class SharedProseV8Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealRunV8Test(unittest.TestCase):
+    """What the shadow run's real records showed that the synthetic run did not (the dry build of 2026-10-21): an
+    added scenario's executions are 'added', not 'changed outcome'; one execution warm after an interrupted one reads
+    in the singular; a declared file given by path keeps its name and path for evidence.json; evidence.json and I.4
+    name area G's own by-design table and chapter G's inputs (none before v8); the units builder keys the mapping to
+    the manifest it is given."""
+
+    def test_one_execution_warm_after_interrupted(self):
+        import facts
+        tpl = [t for t in prose("closing")["observations"] if t["id"] == "load"][0]["template"]
+        base = {"load_sra_mean": "0", "load_load1_mean": "0.8", "load_samples": "6783", "load_caveat": "does not apply"}
+        one = facts.fill(tpl, dict(base, warm_after_interrupted_n="1", warm_after_interrupted_one=True))
+        self.assertIn("1 execution ran warm after an interrupted one and is in no bucket.", one)
+        four = facts.fill(tpl, dict(base, warm_after_interrupted_n="4", warm_after_interrupted_one=False))
+        self.assertIn("4 executions ran warm after an interrupted one and are in no bucket.", four)

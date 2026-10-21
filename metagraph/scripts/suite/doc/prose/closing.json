@@ -80,7 +80,7 @@
   },
   {
    "id": "load",
-   "template": "The host's `sra_all` CPU averaged {load_sra_mean} % and load1 {load_load1_mean} over {load_samples} samples, so the Logan caveat {load_caveat}; {warm_after_interrupted_n} executions ran warm after an interrupted one and are in no bucket."
+   "template": "The host's `sra_all` CPU averaged {load_sra_mean} % and load1 {load_load1_mean} over {load_samples} samples, so the Logan caveat {load_caveat}; {warm_after_interrupted_n} [[warm_after_interrupted_one ? execution ran warm after an interrupted one and is | executions ran warm after an interrupted one and are]] in no bucket."
   }
  ],
  "caveats": [

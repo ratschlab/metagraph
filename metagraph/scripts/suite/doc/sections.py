@@ -4717,6 +4717,7 @@ def closing_values(ctx):
             b = ((t.get(arm) or {}).get("by_host_cache") or {}).get(cells.WARM_AFTER_INTERRUPTED) or {}
             wai += (b.get("wall") or {}).get("n") or 0
     v["warm_after_interrupted_n"] = str(wai)
+    v["warm_after_interrupted_one"] = wai == 1   # the singular (the shadow run of 2026-10-20 had one)
     hc = run.comp.get("host_cache") or {}
     v["warm_window_s"] = fmt_n(hc.get("warm_window_s", 60), 0)
     totals = s.get("totals") or {}
