@@ -148,6 +148,7 @@ function (findFolly)
     ${FOLLY_SOURCE_DIR}/folly/ScopeGuard.cpp
     ${FOLLY_SOURCE_DIR}/folly/memory/detail/MallocImpl.cpp
     ${FOLLY_SOURCE_DIR}/folly/memory/Malloc.cpp
+    ${FOLLY_SOURCE_DIR}/folly/memory/SanitizeLeak.cpp
   )
   target_compile_features(folly PUBLIC cxx_std_20)
   if(Jemalloc_FOUND)
