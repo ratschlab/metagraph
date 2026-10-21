@@ -190,7 +190,7 @@ class wavelet_tree_sdsl : public wavelet_tree {
 
     template <class Vector>
     wavelet_tree_sdsl(uint8_t logsigma, const Vector &vector)
-      : wavelet_tree_sdsl(logsigma, t_wt_sdsl(vector)) {}
+      : wavelet_tree_sdsl(logsigma, t_wt_sdsl(vector.begin(), vector.end())) {}
 
     wavelet_tree_sdsl(uint8_t logsigma, const t_wt_sdsl &wwt)
       : wavelet_tree_sdsl(logsigma, t_wt_sdsl(wwt)) {}

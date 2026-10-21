@@ -2,6 +2,7 @@
 #define __SPARSE_MATRIX_HPP__
 
 #include <vector>
+#include <span>
 #include <functional>
 #include <istream>
 #include <ostream>
@@ -29,8 +30,10 @@ class BinaryMatrix {
     virtual uint64_t num_columns() const = 0;
     virtual uint64_t num_rows() const = 0;
 
-    // row is in [0, num_rows), column is in [0, num_columns)
-    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const = 0;
+    // Rows are in [0, num_rows); their input storage is borrowed only for the call.
+    virtual std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const = 0;
+    virtual std::vector<SetBitPositions> get_rows(std::span<const Row> rows,
+                                                  size_t num_threads) const;
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
     virtual std::vector<SetBitPositions> get_rows_dict(std::vector<Row> *rows,
@@ -53,6 +56,12 @@ class BinaryMatrix {
     virtual std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
              size_t min_count = 1) const;
+
+  protected:
+    // A helper function that calls `get_rows` in parallel for blocks of rows
+    template <typename T>
+    static std::vector<T> get_row_data_parallel(std::span<const Row> rows, size_t num_threads,
+                                                const std::function<std::vector<T>(std::span<const Row>)> &get_rows);
 };
 
 
@@ -61,7 +70,7 @@ class RainbowMatrix : public BinaryMatrix {
     virtual ~RainbowMatrix() {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const final;
+    virtual std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const final;
 
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
@@ -77,7 +86,7 @@ class RainbowMatrix : public BinaryMatrix {
 
   private:
     virtual uint64_t get_code(Row row) const = 0;
-    virtual std::vector<SetBitPositions> codes_to_rows(const std::vector<Row> &rows) const = 0;
+    virtual std::vector<SetBitPositions> codes_to_rows(std::span<const Row> rows) const = 0;
 };
 
 
@@ -88,7 +97,9 @@ class RowMajor : public BinaryMatrix {
     virtual SetBitPositions get_row(Row row) const = 0;
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const final;
+    virtual std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const final;
+    virtual std::vector<SetBitPositions> get_rows(std::span<const Row> rows,
+                                                  size_t num_threads) const final;
 };
 
 class GetEntrySupport {

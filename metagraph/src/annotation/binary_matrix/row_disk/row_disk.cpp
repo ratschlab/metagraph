@@ -11,6 +11,16 @@ namespace matrix {
 
 using mtg::common::logger;
 
+std::vector<BinaryMatrix::SetBitPositions>
+RowDisk::get_rows(std::span<const Row> row_ids) const {
+    View view = get_view();
+    std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = view.get_row(row_ids[i]);
+    }
+    return rows;
+}
+
 std::vector<BinaryMatrix::Row> RowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for RowDisk, consider"
                  " using a column-major format");
@@ -40,22 +50,20 @@ BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
 }
 
 bool RowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
-    assert(_f);
     try {
         num_columns_ = load_number(f);
 
         auto boundary_start = load_number(f);
 
-        buffer_params_.filename = _f->get_filename();
+        buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 
         assert(boundary_start >= buffer_params_.offset);
         iv_size_on_disk_ = boundary_start - buffer_params_.offset;
 
-        f.seekg(boundary_start, ios_base::beg);
-
-        boundary_.load(f);
+        // boundary_ is too large to load into RAM, always mmap it.
+        utils::load_mmap_random(buffer_params_.filename, boundary_start,
+                                [&](std::istream &in) { boundary_.load(in); });
 
         num_rows_ = boundary_.num_set_bits();
         num_relations_ = boundary_.size() - num_rows_;

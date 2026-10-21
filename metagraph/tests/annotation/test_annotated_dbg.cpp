@@ -9,10 +9,11 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/binary_matrix/row_disk/row_disk.hpp"
+#include "annotation/int_matrix/row_disk/coord_row_disk.hpp"
+#include "annotation/int_matrix/row_disk/int_row_disk.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
-#define protected public
-#define private public
 #include "annotation/annotation_converters.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
@@ -41,11 +42,13 @@ void check_labels(const AnnotatedDBG &anno_graph,
 
     for (const auto &label : labels_present) {
         std::set<SequenceGraph::node_index> cur_indices;
-        anno_graph.call_annotated_nodes(
+        assert(anno_graph.check_compatibility());
+        anno_graph.get_annotator().call_objects(
             label,
             [&](const auto &index) {
-                ASSERT_NE(SequenceGraph::npos, index);
-                cur_indices.insert(index);
+                auto node = anno_graph.anno_to_graph_index(index);
+                ASSERT_NE(SequenceGraph::npos, node);
+                cur_indices.insert(node);
             }
         );
         std::vector<SequenceGraph::node_index> diff;
@@ -69,7 +72,7 @@ std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
 
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
-        AnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
+        MutableAnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
                                 std::make_unique<annot::ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
@@ -117,7 +120,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -186,7 +189,7 @@ TEST(AnnotatedDBG, Transform) {
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
-        auto anno_graph = std::make_unique<AnnotatedDBG>(
+        auto anno_graph = std::make_unique<MutableAnnotatedDBG>(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -222,7 +225,7 @@ TEST(AnnotatedDBG, Transform) {
 
         anno_graph->annotate_sequence(std::string(seq_second), { "Second" });
 
-        anno_graph = std::make_unique<AnnotatedDBG>(
+        anno_graph = std::make_unique<MutableAnnotatedDBG>(
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 annot::convert<annot::RowFlatAnnotator>(
@@ -270,7 +273,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -353,7 +356,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -381,7 +384,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         uint64_t num_nodes = graph->num_nodes();
 
         ThreadPool thread_pool(10);
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -476,7 +479,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -503,7 +506,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         graph->mask_dummy_kmers(0, false);
 
         uint64_t num_nodes = graph->num_nodes();
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -595,7 +598,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -622,7 +625,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         graph->mask_dummy_kmers(10, false);
 
         ThreadPool thread_pool(10);
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -724,7 +727,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -750,7 +753,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(0, true);
 
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -840,7 +843,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -867,7 +870,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         graph->mask_dummy_kmers(10, true);
 
         ThreadPool thread_pool(10);
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -968,7 +971,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -1046,7 +1049,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, check_labels) {
         check_labels(*anno_graph, std::string(100, 'G'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         check_labels(*anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
@@ -1147,7 +1150,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
-    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
+    typedef std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>> VectorSignature;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1162,13 +1165,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
         );
 
         const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
-        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
-                        const std::pair<std::string, sdsl::bit_vector> &b) {
-            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
-            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+        auto comp = [&](const std::tuple<std::string, size_t, sdsl::bit_vector> &a,
+                        const std::tuple<std::string, size_t, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(std::get<2>(a));
+            size_t b_cnt = sdsl::util::cnt_one_bits(std::get<2>(b));
             return a_cnt > b_cnt
                 || (a_cnt == b_cnt
-                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+                        && label_encoder.encode(std::get<0>(a)) < label_encoder.encode(std::get<0>(b)));
         };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
@@ -1192,23 +1195,23 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
 
         std::vector<VectorSignature> results {
             {
-                std::make_pair("First", sdsl::bit_vector((100 + k) - (k + 1) + 1, true)),
-                std::make_pair("Third", to_sdsl(temps[0]))
+                { "First", 0, sdsl::bit_vector((100 + k) - (k + 1) + 1, true) },
+                { "Third", 0, to_sdsl(temps[0]) }
             },
             {
 #if _DNA_GRAPH
-                std::make_pair("Second", to_sdsl(temps[1]))
+                { "Second", 0, to_sdsl(temps[1]) }
 #else
-                std::make_pair("Second", sdsl::bit_vector(202 - (k + 1) + 1, true))
+                { "Second", 0, sdsl::bit_vector(202 - (k + 1) + 1, true) }
 #endif
             },
             {
 #if _DNA_GRAPH
-                std::make_pair("Third", to_sdsl(temps[2])),
-                std::make_pair("First", to_sdsl(temps[3]))
+                { "Third", 0, to_sdsl(temps[2]) },
+                { "First", 0, to_sdsl(temps[3]) }
 #else
-                std::make_pair("Third", sdsl::bit_vector(202 - (k + 1) + 1, true)),
-                std::make_pair("First", to_sdsl(temps[3]))
+                { "Third", 0, sdsl::bit_vector(202 - (k + 1) + 1, true) },
+                { "First", 0, to_sdsl(temps[3]) }
 #endif
             }
         };
@@ -1221,8 +1224,8 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             temps[5].assign(100 - (k + 1) + 1, true);
             temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
 
-            results[1].emplace_back("Third", to_sdsl(temps[4]));
-            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+            results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
 #else
             temps[4].assign(100 - (k + 1) + 1 + 1, false);
             temps[4].insert(temps[4].end(), 102 - (k + 1) + 1, true);
@@ -1231,13 +1234,13 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             temps[5].assign(102 - (k + 1) + 1, true);
             temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (102 - (k + 1) + 1), false);
 
-            results[1].emplace_back("Third", to_sdsl(temps[4]));
-            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+            results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
             std::swap(results[2][1], results[2][2]);
 #endif
         }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         switch (k) {
             case 2:
                 temps[4].assign(100 - (k + 1) + 1 + 2, false);
@@ -1248,8 +1251,8 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                 temps[5].insert(temps[5].end(), 2, true);
                 temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1) - 2, false);
 
-                results[1].emplace_back("Third", to_sdsl(temps[4]));
-                results[2].emplace_back("Second", to_sdsl(temps[5]));
+                results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+                results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
                 break;
             case 3:
                 temps[4].assign(100 - (k + 1) + 1 + 3, false);
@@ -1260,19 +1263,24 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                 temps[5].insert(temps[5].end(), 1, true);
                 temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 2) - 1, false);
 
-                results[1].emplace_back("Third", to_sdsl(temps[4]));
-                results[2].emplace_back("Second", to_sdsl(temps[5]));
+                results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+                results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
                 break;
         }
 #endif
-
+        // set all counts in expected results correctly
+        for (auto &v : results) {
+            for (auto &res : v) {
+                std::get<1>(res) = sdsl::util::cnt_one_bits(std::get<2>(res));
+            }
+        }
         std::vector<double> percentages;
         for (size_t i = 0; i < results.size(); ++i) {
             percentages.clear();
             std::transform(results[i].begin(), results[i].end(),
                            std::back_inserter(percentages),
-                           [&](const auto &pair) {
-                               return 1. * sdsl::util::cnt_one_bits(pair.second)
+                           [&](const auto &t) {
+                               return 1. * sdsl::util::cnt_one_bits(std::get<2>(t))
                                    / (sequences[i].size() - (k + 1) + 1);
                            });
             percentages.emplace_back(0.0);
@@ -1285,9 +1293,9 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
                 if (k == 1 && i == 2 && j == 2) {
                     ASSERT_EQ(2u, label_counts.size());
                     EXPECT_EQ(results[i][0], label_counts[0]);
-                    EXPECT_EQ(results[i][1].second, label_counts[1].second);
-                    EXPECT_TRUE(results[i][1].first == "First"
-                        || results[i][1].first == "Second");
+                    EXPECT_EQ(std::get<2>(results[i][1]), std::get<2>(label_counts[1]));
+                    EXPECT_TRUE(std::get<0>(results[i][1]) == "First"
+                        || std::get<0>(results[i][1]) == "Second");
                 } else {
                     EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
                               label_counts) << k << " " << i << " " << j;
@@ -1298,7 +1306,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                     // Special case to handle later
                     if (k == 1 && i == 2 && m == 2)
                         continue;
@@ -1317,7 +1325,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             }
 
             for (size_t m = 1; m <= results[i].size(); ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                 // Special case to handle later
                 if (k == 1 && i == 2 && m == 2)
                     continue;
@@ -1336,7 +1344,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             }
         }
 
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
         if (k == 1) {
             // special case for third sequence (First and Second are equally good matches)
             size_t i = 2;
@@ -1413,7 +1421,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_labels) {
 }
 
 TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
-    typedef std::vector<std::pair<std::string, sdsl::bit_vector>> VectorSignature;
+    typedef std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>> VectorSignature;
 
     for (size_t k = 1; k < 10; ++k) {
         const std::vector<std::string> sequences {
@@ -1428,13 +1436,13 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
         );
 
         const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
-        auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
-                        const std::pair<std::string, sdsl::bit_vector> &b) {
-            size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
-            size_t b_cnt = sdsl::util::cnt_one_bits(b.second);
+        auto comp = [&](const std::tuple<std::string, size_t, sdsl::bit_vector> &a,
+                        const std::tuple<std::string, size_t, sdsl::bit_vector> &b) {
+            size_t a_cnt = sdsl::util::cnt_one_bits(std::get<2>(a));
+            size_t b_cnt = sdsl::util::cnt_one_bits(std::get<2>(b));
             return a_cnt > b_cnt
                 || (a_cnt == b_cnt
-                        && label_encoder.encode(a.first) < label_encoder.encode(b.first));
+                        && label_encoder.encode(std::get<0>(a)) < label_encoder.encode(std::get<0>(b)));
         };
 
         EXPECT_TRUE(anno_graph->label_exists("First"));
@@ -1458,15 +1466,15 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
 
         std::vector<VectorSignature> results {
             {
-                std::make_pair("First", sdsl::bit_vector((100 + k) - (k + 1) + 1, true)),
-                std::make_pair("Third", to_sdsl(temps[0]))
+                { "First", 0, sdsl::bit_vector((100 + k) - (k + 1) + 1, true) },
+                { "Third", 0, to_sdsl(temps[0]) }
             },
             {
-                std::make_pair("Second", to_sdsl(temps[1]))
+                { "Second", 0, to_sdsl(temps[1]) }
             },
             {
-                std::make_pair("Third", to_sdsl(temps[2])),
-                std::make_pair("First", to_sdsl(temps[3]))
+                { "Third", 0, to_sdsl(temps[2]) },
+                { "First", 0, to_sdsl(temps[3]) }
             }
         };
 
@@ -1478,22 +1486,29 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
             temps[5].assign(100 - (k + 1) + 1, true);
             temps[5].insert(temps[5].end(), 202 - (k + 1) + 1 - (100 - (k + 1) + 1), false);
 
-            results[1].emplace_back("Third", to_sdsl(temps[4]));
-            results[2].emplace_back("Second", to_sdsl(temps[5]));
+            results[1].emplace_back("Third", 0, to_sdsl(temps[4]));
+            results[2].emplace_back("Second", 0, to_sdsl(temps[5]));
+        }
+
+        // set all counts in expected results correctly
+        for (auto &v : results) {
+            for (auto &res : v) {
+                std::get<1>(res) = sdsl::util::cnt_one_bits(std::get<2>(res));
+            }
         }
 
         std::vector<double> percentages;
         for (size_t i = 0; i < results.size(); ++i) {
             percentages.clear();
             for (size_t j = 0; j < results[i].size(); ++j) {
-                ASSERT_EQ(sequences[i].size() - (k + 1) + 1, results[i][j].second.size())
+                ASSERT_EQ(sequences[i].size() - (k + 1) + 1, std::get<2>(results[i][j]).size())
                     << k << " " << i << " " << j;
             }
 
             std::transform(results[i].begin(), results[i].end(),
                            std::back_inserter(percentages),
-                           [&](const auto &pair) {
-                               return 1. * sdsl::util::cnt_one_bits(pair.second)
+                           [&](const auto &t) {
+                               return 1. * sdsl::util::cnt_one_bits(std::get<2>(t))
                                    / (sequences[i].size() - (k + 1) + 1);
                            });
             percentages.emplace_back(0.0);
@@ -1505,10 +1520,10 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
                 if (k == 1 && i == 2 && j == 2) {
                     ASSERT_EQ(2u, label_counts.size());
                     EXPECT_EQ(results[i][0], label_counts[0]);
-                    EXPECT_EQ(results[i][1].second, label_counts[1].second)
-                        << results[i][1].second << " " << label_counts[1].second;
-                    EXPECT_TRUE(results[i][1].first == "First"
-                        || results[i][1].first == "Second");
+                    EXPECT_EQ(std::get<2>(results[i][1]), std::get<2>(label_counts[1]))
+                        << std::get<2>(results[i][1]) << " " << std::get<2>(label_counts[1]);
+                    EXPECT_TRUE(std::get<0>(results[i][1]) == "First"
+                        || std::get<0>(results[i][1]) == "Second");
                 } else {
                     EXPECT_EQ(VectorSignature(results[i].begin(), results[i].begin() + j),
                               label_counts) << k << " " << i << " " << j;
@@ -1640,7 +1655,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 #endif
         }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
         switch (k) {
             case 2:
                 results[1].emplace_back("Third", 2);
@@ -1685,7 +1700,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
 #endif
 
                 for (size_t m = 1; m <= j; ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                     // Special case to handle later
                     if (k == 1 && i == 2 && m == 2)
                         continue;
@@ -1702,7 +1717,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             }
 
             for (size_t m = 1; m <= results[i].size(); ++m) {
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
                 // Special case to handle later
                 if (k == 1 && i == 2 && m == 2)
                     continue;
@@ -1718,7 +1733,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             }
         }
 
-#ifdef _DNA_GRAPH
+#if _DNA_GRAPH
         if (k == 1) {
             // special case for third sequence (First and Second are equally good matches)
             size_t i = 2;
@@ -1877,158 +1892,132 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
 }
 #endif
 
-TEST(AnnotatedDBG, score_kmer_presence_mask) {
-    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(31, {}, {});
-    std::vector<std::pair<sdsl::bit_vector, int32_t>> results {
-       { sdsl::bit_vector(), 0},
-       { sdsl::bit_vector({
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }), 0 },
-       { sdsl::bit_vector({
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }), 97 },
-       { sdsl::bit_vector({
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1 }), 924 },
-       { sdsl::bit_vector({
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }), 0 },
-       { sdsl::bit_vector({
-          0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0,
-          1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-          1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1,
-          0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1,
-          0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1,
-          0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0,
-          1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0,
-          1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0,
-          0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0,
-          1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
-          0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0,
-          1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1,
-          1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0,
-          0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1,
-          1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1,
-          1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0,
-          0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0,
-          0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1,
-          0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1,
-          1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0,
-          0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0,
-          0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0,
-          0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
-          0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-          1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1,
-          0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1,
-          0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1,
-          1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0,
-          1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-          1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1,
-          0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1,
-          0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1,
-          0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0,
-          1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0,
-          0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1,
-          0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1 }), 869 },
-       { sdsl::bit_vector({
-          1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1,
-          0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0,
-          1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0,
-          0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1,
-          0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0,
-          0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0,
-          0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
-          0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0,
-          0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1,
-          0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0,
-          1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0,
-          1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1,
-          1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0,
-          1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0,
-          0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1,
-          1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1,
-          1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0,
-          1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1,
-          1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
-          1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1,
-          0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0,
-          1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-          1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0,
-          0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0,
-          0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0,
-          0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0,
-          0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1,
-          1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0,
-          1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0,
-          0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
-          1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1,
-          1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1,
-          0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
-          1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1,
-          0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0,
-          1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1 }), 822 }
+// `RowDiff<RowDisk>` can load via either `sdsl::mmap_ifstream` or
+// `utils::named_ifstream`. Verify both paths produce the same query results.
+TEST(RowDiffDiskAnnotatorTest, LoadConsistentAcrossMmapSettings) {
+    const std::vector<std::string> sequences {
+        std::string(80, 'A') + std::string(5, 'C'),
+        std::string(80, 'T') + std::string(5, 'G'),
+        std::string(80, 'G') + std::string(5, 'A'),
+    };
+    const std::vector<std::string> labels { "First", "Second", "Third" };
+    constexpr size_t k = 7;
+
+    const bool mmap_orig = utils::with_mmap();
+
+    utils::set_mmap(true);
+    auto anno_mmap = build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(
+            k, sequences, labels);
+
+    utils::set_mmap(false);
+    auto anno_plain = build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(
+            k, sequences, labels);
+
+    utils::set_mmap(mmap_orig);
+
+    ASSERT_NE(nullptr, anno_mmap);
+    ASSERT_NE(nullptr, anno_plain);
+
+    auto labels_per_node = [](const AnnotatedDBG &g, const std::string &seq) {
+        std::vector<std::set<std::string>> result;
+        g.get_graph().map_to_nodes(seq, [&](auto idx) {
+            EXPECT_NE(SequenceGraph::npos, idx);
+            result.push_back(convert_to_set(g.get_labels(idx)));
+        });
+        return result;
     };
 
-    size_t i = 0;
-    for (const auto &[vector, score] : results) {
-        EXPECT_EQ(score, anno_graph->score_kmer_presence_mask(vector)) << i;
-        ++i;
+    for (const auto &seq : sequences) {
+        EXPECT_EQ(labels_per_node(*anno_mmap, seq),
+                  labels_per_node(*anno_plain, seq));
     }
+}
+
+// `IntRowDisk::load` supports both mmap and non-mmap paths; verify they
+// produce the same row reads from a freshly serialized matrix.
+TEST(IntRowDiskTest, LoadConsistentAcrossMmapSettings) {
+    using mtg::annot::matrix::IntRowDisk;
+    using mtg::annot::matrix::IntMatrix;
+    using mtg::annot::matrix::BinaryMatrix;
+
+    const std::string fname = test_dump_dir() + "/test_int_row_disk.bin";
+    { std::ofstream tmp(fname, std::ios::binary | std::ios::trunc); }
+
+    std::vector<IntMatrix::RowValues> input_rows = {
+        { { 0, 5 }, { 2, 7 } },
+        { { 1, 3 } },
+        { { 0, 1 }, { 1, 2 }, { 2, 4 } },
+    };
+    constexpr uint64_t num_set_bits = 6;
+    constexpr uint8_t  max_val = 7;
+    constexpr uint64_t num_cols = 3;
+
+    IntRowDisk::serialize(fname,
+        [&](std::function<void(const IntMatrix::RowValues &)> write_row) {
+            for (const auto &row : input_rows) write_row(row);
+        },
+        num_cols, input_rows.size(), num_set_bits, max_val);
+
+    auto query = [&](bool mmap) {
+        const bool orig = utils::with_mmap();
+        utils::set_mmap(mmap);
+        auto in = utils::open_ifstream(fname);
+        IntRowDisk d;
+        EXPECT_TRUE(d.load(*in));
+        std::vector<BinaryMatrix::Row> all_rows(input_rows.size());
+        std::iota(all_rows.begin(), all_rows.end(), 0u);
+        auto got = d.get_row_values(all_rows);
+        utils::set_mmap(orig);
+        return got;
+    };
+
+    EXPECT_EQ(input_rows, query(true));
+    EXPECT_EQ(input_rows, query(false));
+}
+
+// `CoordRowDisk::load` reads `num_attributes_` from the boundary stream
+// after loading `boundary_`; verify mmap on/off paths are consistent.
+TEST(CoordRowDiskTest, LoadConsistentAcrossMmapSettings) {
+    using mtg::annot::matrix::CoordRowDisk;
+    using mtg::annot::matrix::MultiIntMatrix;
+    using mtg::annot::matrix::BinaryMatrix;
+    using Tuple = MultiIntMatrix::Tuple;
+
+    const std::string fname = test_dump_dir() + "/test_coord_row_disk.bin";
+    { std::ofstream tmp(fname, std::ios::binary | std::ios::trunc); }
+
+    std::vector<MultiIntMatrix::RowTuples> input_rows = {
+        { { 0, Tuple{ 5, 8 } }, { 2, Tuple{ 7 } } },
+        { { 1, Tuple{ 3 } } },
+        { { 0, Tuple{ 1 } }, { 1, Tuple{ 2, 4 } } },
+    };
+    constexpr uint64_t num_set_bits    = 5;  // total (col, Tuple) pairs
+    constexpr uint64_t num_values      = 7;  // total tuple elements
+    constexpr uint64_t max_val         = 8;
+    constexpr uint64_t max_tuple_size  = 2;
+    constexpr uint64_t num_cols        = 3;
+
+    CoordRowDisk::serialize(fname,
+        [&](std::function<void(const MultiIntMatrix::RowTuples &)> write_row) {
+            for (const auto &row : input_rows) write_row(row);
+        },
+        num_cols, input_rows.size(), num_set_bits, num_values, max_val, max_tuple_size);
+
+    auto query = [&](bool mmap) {
+        const bool orig = utils::with_mmap();
+        utils::set_mmap(mmap);
+        auto in = utils::open_ifstream(fname);
+        CoordRowDisk d;
+        EXPECT_TRUE(d.load(*in));
+        std::vector<BinaryMatrix::Row> all_rows(input_rows.size());
+        std::iota(all_rows.begin(), all_rows.end(), 0u);
+        auto got = d.get_row_tuples(all_rows);
+        utils::set_mmap(orig);
+        return got;
+    };
+
+    EXPECT_EQ(input_rows, query(true));
+    EXPECT_EQ(input_rows, query(false));
 }
 
 } // namespace

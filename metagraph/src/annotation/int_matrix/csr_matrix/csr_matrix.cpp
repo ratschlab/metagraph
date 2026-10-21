@@ -3,7 +3,8 @@
 #include <algorithm>
 #include <numeric>
 
-#include "common/logger.hpp"
+#include "common/algorithms.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -20,8 +21,9 @@ CSRMatrix::CSRMatrix(Vector<RowValues>&& rows, uint64_t num_columns)
 }
 
 std::vector<CSRMatrix::RowValues>
-CSRMatrix::get_row_values(const std::vector<Row> &rows) const {
+CSRMatrix::get_row_values(std::span<const Row> rows, size_t num_threads) const {
     std::vector<RowValues> row_values(rows.size());
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < rows.size(); ++i) {
         row_values[i] = vector_[rows[i]];
     }
@@ -38,12 +40,31 @@ uint64_t CSRMatrix::num_relations() const {
 
 CSRMatrix::SetBitPositions CSRMatrix::get_row(Row row) const {
     assert(row < vector_.size());
-    SetBitPositions result;
-    result.reserve(vector_[row].size());
-    for (const auto &[j, _] : vector_[row]) {
-        result.push_back(j);
+    return utils::get_firsts<SetBitPositions>(vector_[row]);
+}
+
+std::vector<std::pair<CSRMatrix::Column, size_t /* count */>>
+CSRMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts, size_t min_count) const {
+    if (index_counts.empty())
+        return {};
+
+    min_count = std::max<size_t>(min_count, 1);
+
+    size_t total_sum_count = 0;
+    for (const auto &[row, count] : index_counts) {
+        total_sum_count += count;
     }
-    return result;
+    if (total_sum_count < min_count)
+        return {};
+
+    auto call_bits = [&](const auto &callback) {
+        for (const auto &[row, count] : index_counts) {
+            for (const auto &[j, _] : vector_[row]) {
+                callback(j, count);
+            }
+        }
+    };
+    return utils::accumulate_counts(call_bits, num_columns(), min_count);
 }
 
 std::vector<CSRMatrix::Row> CSRMatrix::get_column(Column column) const {

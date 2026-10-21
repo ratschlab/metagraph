@@ -32,6 +32,9 @@ struct is_instance<U<Ts...>, U> : public std::true_type {};
 template <typename T, template <typename, typename...> class U>
 inline constexpr bool is_instance_v = is_instance<T, U>::value;
 
+template <typename T, typename... Ts>
+inline constexpr bool is_one_of_v = (std::is_same_v<T, Ts> || ...);
+
 // check if two classes have the same template parameters
 template <class, class>
 struct same_template : public std::false_type {};
@@ -135,6 +138,17 @@ struct LessSecond {
         return get_second(p1) < get_second(p2);
     }
 };
+
+// Example: get_firsts<vector<int>>(vector<pair<int, size_t>>{{1, 2}, {3, 4}}) returns {1, 3}
+template <class OutContainer, class InContainer>
+OutContainer get_firsts(const InContainer &v) {
+    OutContainer result;
+    result.reserve(v.size());
+    for (const auto &x : v) {
+        result.push_back(get_first(x));
+    }
+    return result;
+}
 
 } // namespace utils
 

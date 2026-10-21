@@ -856,4 +856,42 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
     }
 }
 
+TEST(MaskedDeBruijnGraph, CallNodesSmallGraphManyThreads) {
+    // Regression: call_nodes with only_valid_nodes_in_mask and
+    // kmers_in_graph_->size() < num_threads caused batch_size = 0,
+    // triggering SIGFPE in the OpenMP trip count computation.
+    for (size_t k = 2; k < 5; ++k) {
+        auto full_graph = build_graph_batch<DBGSuccinct>(k, { std::string(k, 'A') });
+
+        sdsl::bit_vector mask(full_graph->max_index() + 1, false);
+        full_graph->call_nodes([&](auto index) { mask[index] = true; });
+
+        MaskedDeBruijnGraph graph(full_graph,
+                                  std::make_unique<bit_vector_stat>(std::move(mask)),
+                                  true /* only_valid_nodes_in_mask */);
+
+        size_t num_nodes = 0;
+        graph.call_nodes([&](auto) { num_nodes++; },
+                         []() { return false; },
+                         full_graph->max_index() + 10);
+        EXPECT_EQ(num_nodes, graph.num_nodes());
+    }
+}
+
+TEST(MaskedDeBruijnGraph, CallNodesEmptyMaskManyThreads) {
+    auto full_graph = build_graph_batch<DBGSuccinct>(3, { "ACTAGC" });
+
+    sdsl::bit_vector mask(full_graph->max_index() + 1, false);
+
+    MaskedDeBruijnGraph graph(full_graph,
+                              std::make_unique<bit_vector_stat>(std::move(mask)),
+                              true /* only_valid_nodes_in_mask */);
+
+    size_t num_nodes = 0;
+    graph.call_nodes([&](auto) { num_nodes++; },
+                     []() { return false; },
+                     8);
+    EXPECT_EQ(0u, num_nodes);
+}
+
 } // namespace

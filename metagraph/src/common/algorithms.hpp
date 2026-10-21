@@ -7,8 +7,15 @@
 #include <functional>
 #include <utility>
 #include <cassert>
+#include <limits>
 #include <random>
 #include <set>
+#include <stdexcept>
+
+#include <tsl/hopscotch_map.h>
+
+#include "common/vector_map.hpp"
+#include "common/vector.hpp"
 
 
 namespace utils {
@@ -443,6 +450,121 @@ namespace utils {
             }
         }
     }
+
+    /**
+     * Integer exponentiation: returns base^exp.
+     * Uses binary exponentiation for O(log exp) multiplications.
+     * @throws std::overflow_error if the result would overflow uint64_t
+     */
+    inline uint64_t ipow(uint64_t base, unsigned int exp) {
+        if (base == 0)
+            return exp == 0;
+
+        uint64_t result = 1;
+        while (exp > 0) {
+            const uint64_t max_multiple = std::numeric_limits<uint64_t>::max() / base;
+            if (exp % 2) {
+                if (result > max_multiple)
+                    throw std::overflow_error("ipow: overflow");
+                result *= base;
+            }
+            if (exp > 1 && base > max_multiple)
+                throw std::overflow_error("ipow: overflow");
+            base *= base;
+            exp /= 2;
+        }
+        return result;
+    }
+
+
+    // Threshold for switching between dense vector and hash table for counting.
+    // Below this value, a dense vector is faster; above it, a hash table uses
+    // less memory and is competitive in speed. Determined empirically.
+    constexpr size_t kDenseCountThreshold = 300'000;
+
+    // Accumulate weighted counts of items produced by `enumerate_weighted_items` and return
+    // (item, count) pairs whose count is at least `min_count`.
+    //
+    // Assumes items are in the range [0, universe_size).
+    template <typename T = uint32_t, class Enumerator>
+    std::vector<std::pair<T /* item */, size_t /* count */>>
+    accumulate_counts(Enumerator&& enumerate_weighted_items,
+                      size_t universe_size, size_t min_count) {
+        constexpr size_t kMinReserve = 1024;
+        if (universe_size < kDenseCountThreshold) {
+            // For a small universe size, counting with a dense vector is faster than a hash table
+            Vector<size_t> counts(universe_size, 0);
+            enumerate_weighted_items([&](T item, size_t weight) {
+                const size_t i = static_cast<size_t>(item);
+                assert(i < universe_size);
+                counts[i] += weight;
+            });
+
+            std::vector<std::pair<T, size_t>> item_counts;
+            item_counts.reserve(std::min<size_t>(universe_size, kMinReserve));
+
+            for (size_t i = 0; i < counts.size(); ++i) {
+                // take only the items with counts >= min_count
+                if (counts[i] >= min_count)
+                    item_counts.emplace_back(static_cast<T>(i), counts[i]);
+            }
+            return item_counts;
+        }
+
+        VectorMap<T, size_t> counts;
+        counts.reserve(std::min<size_t>(universe_size, kMinReserve));
+        enumerate_weighted_items([&](T item, size_t weight) { counts[item] += weight; });
+
+        std::vector<std::pair<T, size_t>> item_counts = to_vector(std::move(counts));
+        // remove items with low counts
+        item_counts.erase(
+            std::remove_if(item_counts.begin(), item_counts.end(),
+                           [&](const auto &p) { return p.second < min_count; }),
+            item_counts.end()
+        );
+        return item_counts;
+    }
+
+    template <typename T, typename ValueType>
+    class ValueStore {
+      public:
+        ValueStore(size_t universe_size, size_t reserve_size = 0)
+              : use_dense_(universe_size < kMaxDenseSize) {
+            if (use_dense_) {
+                // For a small universe size, using a dense vector is faster than a hash table.
+                ids_.resize(universe_size);
+                dense_values_.reserve(reserve_size);
+            } else {
+                sparse_values_.reserve(reserve_size);
+            }
+        }
+
+        template <typename... Args>
+        void emplace(T j, Args&&... args) {
+            if (use_dense_) {
+                dense_values_.emplace_back(std::forward<Args>(args)...);
+                ids_[j] = dense_values_.size();
+            } else {
+                sparse_values_.emplace(j, std::forward<Args>(args)...);
+            }
+        }
+
+        ValueType* get(T j) {
+            if (use_dense_)
+                return ids_[j] ? &dense_values_[ids_[j] - 1] : nullptr;
+            auto it = sparse_values_.find(j);
+            return it != sparse_values_.end() ? &it.value() : nullptr;
+        }
+
+      private:
+        static constexpr size_t kMaxDenseSize = 1'000'000;
+        bool use_dense_;
+        // if dense, then dense_values_[ids_[j] - 1] is the value for j
+        Vector<ValueType> dense_values_;
+        std::vector<size_t> ids_;
+        // if sparse, then sparse_values_[j] is the value for j
+        tsl::hopscotch_map<T, ValueType> sparse_values_;
+    };
 
 } // namespace utils
 

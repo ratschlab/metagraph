@@ -367,7 +367,6 @@ void call_sequences(const DeBruijnGraph &graph,
                     bool kmers_in_single_form,
                     bool verbose = common::get_verbose()) {
     // TODO: port over the implementation from BOSS
-    std::ignore = num_threads;
 
     sdsl::bit_vector discovered(graph.max_index() + 1, true);
     graph.call_nodes([&](auto node) { discovered[node] = false; });
@@ -394,7 +393,7 @@ void call_sequences(const DeBruijnGraph &graph,
         //  .____  or  .____  or  ____.___
         //              \___      ___/
         //
-        #pragma omp parallel for num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(num_threads)
         for (uint64_t begin = 0; begin < discovered.size(); begin += kBlockSize) {
             call_zeros(discovered,
                 begin,
@@ -482,7 +481,7 @@ void DeBruijnGraph
                 assert(in_graph(node));
                 visited[node] = true;
                 callback(node, sequence);
-                sequence.assign(sequence.begin() + 1, sequence.end());
+                sequence.erase(0, 1);
 
                 auto next_node = npos;
                 char next_c = '\0';
@@ -598,10 +597,11 @@ void reverse_complement_seq_path(const SequenceGraph &graph,
         return;
     }
 
-    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
+    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph);
+            sshash && sshash->get_mode() == DeBruijnGraph::CANONICAL) {
         std::reverse(path.begin(), path.end());
         for (auto &node : path) {
-            sshash->reverse_complement(node);
+            node = sshash->reverse_complement(node);
         }
         reverse_complement(seq.begin(), seq.end());
         return;

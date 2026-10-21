@@ -192,7 +192,6 @@ sbatch -J "BIGSI_build" \
     --wrap="find ${DIR}/../data -name \"*.unitigs.fasta.gz\" \
         | /usr/bin/time -v $METAGRAPH build -v \
             -k 31 \
-            --inplace \
             --mode canonical \
             --mem-cap-gb 50 \
             --disk-swap ~/metagenome/scratch/nobackup \

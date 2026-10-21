@@ -6,9 +6,11 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 
+#include "../../test_helpers.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
+#include "common/serialization.hpp"
 
 
 namespace {
@@ -18,9 +20,9 @@ KSEQ_INIT(gzFile, gzread);
 using namespace mtg;
 using namespace mtg::graph::boss;
 
-const std::string test_data_dir = TEST_DATA_DIR;
+const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
-const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/graph_dump_test";
 
 
 uint64_t fwd(const BOSS &boss, uint64_t i) {
@@ -133,7 +135,7 @@ TEST(BOSS, AddSequenceFast) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    BOSSConstructor constructor(3);
+    auto constructor = make_test_boss_constructor(3);
 
     std::vector<std::string> names;
 
@@ -167,7 +169,7 @@ TEST(BOSS, SmallGraphTraversal) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    BOSSConstructor constructor(3 /* k-mer length */);
+    auto constructor = make_test_boss_constructor(3 /* k-mer length */);
 
     while (kseq_read(read_stream) >= 0) {
         constructor.add_sequences({ read_stream->seq.s });
@@ -224,7 +226,7 @@ TEST(BOSS, Serialization) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    BOSSConstructor constructor(3);
+    auto constructor = make_test_boss_constructor(3);
 
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
         constructor.add_sequences({ read_stream->seq.s });
@@ -245,6 +247,38 @@ TEST(BOSS, Serialization) {
     EXPECT_FALSE(BOSS() == loaded_graph);
 
     delete graph;
+}
+
+TEST(BOSS, FailedLoadCanBeRetried) {
+    BOSS reference(3);
+    reference.add_sequence("ACGTACGTT");
+    const auto valid_path = test_dump_basename + "_valid.boss";
+    {
+        std::ofstream out(valid_path, std::ios::binary);
+        reference.serialize(out);
+    }
+
+    // Unknown representations and valid headers with missing vector payloads.
+    for (uint64_t representation : { uint64_t{0}, uint64_t{5}, uint64_t{99}, UINT64_MAX,
+                                     uint64_t{BOSS::DYN}, uint64_t{BOSS::STAT},
+                                     uint64_t{BOSS::FAST}, uint64_t{BOSS::SMALL} }) {
+        SCOPED_TRACE(representation);
+        const auto invalid_path = test_dump_basename + "_invalid.boss";
+        {
+            std::ofstream out(invalid_path, std::ios::binary);
+            serialize_number_vector_raw(out, std::vector<BOSS::edge_index>(reference.alph_size, 0));
+            serialize_number(out, reference.get_k());
+            serialize_number(out, representation);
+        }
+        BOSS graph;
+        {
+            std::ifstream in(invalid_path, std::ios::binary);
+            EXPECT_FALSE(graph.load(in));
+        }
+        std::ifstream in(valid_path, std::ios::binary);
+        ASSERT_TRUE(graph.load(in));
+        EXPECT_TRUE(reference.equals_internally(graph));
+    }
 }
 
 TEST(BOSS, AddSequenceSimplePath) {
@@ -324,6 +358,50 @@ TEST(BOSS, MarkDummySinkEdgesTwoPaths) {
     }
 }
 
+TEST(BOSS, MarkDummySinkEdgesAllStates) {
+    const std::vector<std::vector<std::string>> records = {
+        {},
+        { "AAAAAAAAAA" },
+        { "ACGT" },
+        { "AAAACCCCGGGG", "AAAATTTTGGGG", "CCCCAAAATTTT" }
+    };
+    for (size_t k : { 1, 3, 7 }) {
+        for (const auto &sequences : records) {
+            BOSS graph(k);
+            for (const auto &sequence : sequences) {
+                graph.add_sequence(sequence);
+            }
+            for (auto state : { BOSS::DYN, BOSS::STAT, BOSS::SMALL, BOSS::FAST }) {
+                SCOPED_TRACE(testing::Message() << "k=" << k << ", state=" << state
+                                               << ", records=" << sequences.size());
+                graph.switch_state(state);
+                sdsl::bit_vector expected(graph.num_edges() + 1, false);
+                uint64_t count = 0;
+                for (BOSS::edge_index i = 2; i <= graph.num_edges(); ++i) {
+                    if (!graph.get_W(i)) {
+                        expected[i] = true;
+                        ++count;
+                    }
+                }
+                sdsl::bit_vector mask(expected.size(), false);
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges());
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+
+                // Preserve existing marks, including the two reserved positions.
+                for (size_t i = 0; i < mask.size(); ++i) {
+                    mask[i] = i < 2 || i % 2 == 0;
+                    expected[i] = expected[i] || mask[i];
+                }
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+            }
+        }
+    }
+}
+
 TEST(BOSS, MarkDummySourceEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
@@ -394,7 +472,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
         std::unique_ptr<BOSS> second_ptr;
 
         {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'C'),
                                         std::string(100, 'G'),
@@ -404,7 +482,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
         }
 
         {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'C'),
                                         std::string(100, 'G'),
@@ -432,7 +510,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraph) {
 
 TEST(BOSS, RemoveDummyEdgesLinear) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequence(std::string(20, 'A'));
         BOSS graph(&constructor);
 
@@ -459,7 +537,7 @@ TEST(BOSS, RemoveDummyEdgesLinear) {
 
 TEST(BOSS, RemoveDummyEdgesThreePaths) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'), });
@@ -490,7 +568,7 @@ TEST(BOSS, RemoveDummyEdgesThreePaths) {
 
 TEST(BOSS, RemoveDummyEdgesFourPaths) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'),
@@ -523,7 +601,7 @@ TEST(BOSS, RemoveDummyEdgesFourPaths) {
 
 TEST(BOSS, RemoveDummyEdgesFivePaths) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'),
@@ -558,7 +636,7 @@ TEST(BOSS, RemoveDummyEdgesFivePaths) {
 
 TEST(BOSS, RemoveDummyEdges) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'),
@@ -597,7 +675,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraphParallel) {
         std::unique_ptr<BOSS> second_ptr;
 
         {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'C'),
                                         std::string(100, 'G'),
@@ -607,7 +685,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraphParallel) {
         }
 
         {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'C'),
                                         std::string(100, 'G'),
@@ -635,7 +713,7 @@ TEST(BOSS, RemoveDummyEdgesForClearGraphParallel) {
 
 TEST(BOSS, RemoveDummyEdgesLinearParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequence(std::string(20, 'A'));
         BOSS graph(&constructor);
 
@@ -662,7 +740,7 @@ TEST(BOSS, RemoveDummyEdgesLinearParallel) {
 
 TEST(BOSS, RemoveDummyEdgesThreePathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'), });
@@ -693,7 +771,7 @@ TEST(BOSS, RemoveDummyEdgesThreePathsParallel) {
 
 TEST(BOSS, RemoveDummyEdgesFourPathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'),
@@ -726,7 +804,7 @@ TEST(BOSS, RemoveDummyEdgesFourPathsParallel) {
 
 TEST(BOSS, RemoveDummyEdgesFivePathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'),
@@ -761,7 +839,7 @@ TEST(BOSS, RemoveDummyEdgesFivePathsParallel) {
 
 TEST(BOSS, RemoveDummyEdgesParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
                                     std::string(20, 'C'),
                                     std::string(20, 'G'),
@@ -801,7 +879,7 @@ TEST(BOSS, AddSequenceBugRevealingTestcase) {
 
 // TODO: these are duplicates of tests in test_dbg
 TEST(BOSS, NonASCIIStrings) {
-    BOSSConstructor constructor_first(5);
+    auto constructor_first = make_test_boss_constructor(5);
     constructor_first.add_sequences({
         // cyrillic A and C
         "АСАСАСАСАСАСА",
@@ -839,7 +917,7 @@ TEST(BOSS, AddSequence) {
         EXPECT_EQ(6u, graph.num_nodes());
         EXPECT_EQ(8u, graph.num_edges());
     }
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
     {
         BOSS graph(4);
         graph.add_sequence("AGACN");
@@ -867,7 +945,7 @@ TEST(BOSS, AppendSequence) {
         EXPECT_EQ(7u, graph.num_nodes());
         EXPECT_EQ(8u, graph.num_edges());
     }
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
     {
         BOSS graph(4);
         graph.add_sequence("AGACN", true);
@@ -1013,7 +1091,7 @@ TEST(BOSS, CallUnitigsOneLoop) {
 TEST(BOSS, CallPathsTwoLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
             BOSS graph(&constructor);
 
@@ -1038,7 +1116,7 @@ TEST(BOSS, CallPathsTwoLoops) {
 TEST(BOSS, CallUnitigsTwoLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
             BOSS graph(&constructor);
 
@@ -1064,7 +1142,7 @@ TEST(BOSS, CallUnitigsTwoLoops) {
 TEST(BOSS, CallSequenceRowDiff_TwoLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A') });
             BOSS graph(&constructor);
 
@@ -1085,7 +1163,7 @@ TEST(BOSS, CallUnitigsTwoBigLoops) {
             "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
             "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
         };
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences(std::vector<std::string>(sequences));
         BOSS graph(&constructor);
 
@@ -1127,7 +1205,7 @@ TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
                 "ATCGGAAGAGCACACGTCTG" "AACTCCAGACA" "CTAAGGCATCTCGTATGCATCGGAAGAGC",
                 "GTGAGGCGTCATGCATGCAT" "TGTCTGGAGTT" "TCGTAGCGGCGGCTAGTGCGCGTAGTGAGGCGTCA"
         };
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences(std::vector<std::string>(sequences));
         BOSS graph(&constructor);
 
@@ -1145,7 +1223,7 @@ TEST(BOSS, CallSequenceRowDiff_TwoBigLoops) {
 TEST(BOSS, CallPathsFourLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'G'),
                                         std::string(100, 'C') });
@@ -1172,7 +1250,7 @@ TEST(BOSS, CallPathsFourLoops) {
 TEST(BOSS, CallUnitigsFourLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'G'),
                                         std::string(100, 'C') });
@@ -1200,7 +1278,7 @@ TEST(BOSS, CallUnitigsFourLoops) {
 TEST(BOSS, CallSequenceRowDiff_FourLoops) {
     for (size_t num_threads : { 1, 4 }) {
         for (size_t k = 1; k < 20; ++k) {
-            BOSSConstructor constructor(k);
+            auto constructor = make_test_boss_constructor(k);
             constructor.add_sequences({ std::string(100, 'A'),
                                         std::string(100, 'G'),
                                         std::string(100, 'C'),
@@ -1217,7 +1295,7 @@ TEST(BOSS, CallSequenceRowDiff_FourLoops) {
 
 TEST(BOSS, CallSequenceRowDiff_FourPaths) {
     constexpr size_t k = 5;
-    BOSSConstructor constructor(k);
+    auto constructor = make_test_boss_constructor(k);
     std::vector<std::string> sequences
             = { "ATCGGAAGA", "TTTAAACCCGGG", "ATACAGCTCGCT", "AAAAAA" };
     constructor.add_sequences(std::vector(sequences.begin(), sequences.end()));
@@ -1416,7 +1494,7 @@ TEST(BOSS, CallUnitigs) {
 
 TEST(BOSS, CallUnitigs1) {
     for (size_t num_threads : { 1, 4 }) {
-        BOSSConstructor constructor(3);
+        auto constructor = make_test_boss_constructor(3);
         constructor.add_sequences(std::vector<std::string> {
             "ACTAGCTAGCTAGCTAGCTAGC",
             "ACTCT"
@@ -1448,7 +1526,7 @@ TEST(BOSS, CallUnitigs1) {
 
 TEST(BOSS, CallUnitigsDisconnected1) {
     for (size_t num_threads : { 1, 4 }) {
-        BOSSConstructor constructor(3);
+        auto constructor = make_test_boss_constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
                                     "ATCATCATCATCATCATCAT" });
@@ -1479,10 +1557,10 @@ TEST(BOSS, CallUnitigsDisconnected1) {
     }
 }
 
-#ifndef _DNA_GRAPH
+#if ! _DNA_GRAPH
 TEST(BOSS, CallUnitigsDisconnected2) {
     for (size_t num_threads : { 1, 4 }) {
-        BOSSConstructor constructor(3);
+        auto constructor = make_test_boss_constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
                                     "ATCATCATCATCATCATCAT",
@@ -1517,7 +1595,7 @@ TEST(BOSS, CallUnitigsDisconnected2) {
 
 TEST(BOSS, CallUnitigsTwoComponents) {
     for (size_t num_threads : { 1, 4 }) {
-        BOSSConstructor constructor(3);
+        auto constructor = make_test_boss_constructor(3);
         constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                     "ACTCT",
                                     "ATCATCATCATCATCATCAT",
@@ -1556,7 +1634,7 @@ TEST(BOSS, CallUnitigsTwoComponents) {
 
 TEST(BOSS, CallUnitigsWithPruning) {
     for (size_t num_threads : { 1, 4 }) {
-        BOSSConstructor constructor(4);
+        auto constructor = make_test_boss_constructor(4);
         constructor.add_sequences({
             "ACTATAGCTAGTCTATGCGA",
             "ACTATAGCTAGTCTAA",
@@ -1665,7 +1743,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
 }
 
 TEST(BOSS, CallUnitigsCheckDegree) {
-    BOSSConstructor constructor(8);
+    auto constructor = make_test_boss_constructor(8);
     constructor.add_sequences({
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
@@ -1714,7 +1792,7 @@ TEST(BOSS, CallUnitigsCheckDegree) {
 }
 
 TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
-    BOSSConstructor constructor(8);
+    auto constructor = make_test_boss_constructor(8);
     constructor.add_sequences({
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
         "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
@@ -1763,7 +1841,7 @@ TEST(BOSS, CallUnitigsWithEdgesCheckDegree) {
 }
 
 TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
-    BOSSConstructor constructor(30);
+    auto constructor = make_test_boss_constructor(30);
     constructor.add_sequences({
         "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
         "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
@@ -1796,7 +1874,7 @@ TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
 }
 
 TEST(BOSS, CallUnitigsWithEdgesIndegreeFirstNodeIsZero) {
-    BOSSConstructor constructor(30);
+    auto constructor = make_test_boss_constructor(30);
     constructor.add_sequences({
         "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
         "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
@@ -1834,7 +1912,7 @@ TEST(BOSS, CallUnitigsMasked) {
     //      TGCA
     // ATGC      GCAGTGGTC
     std::vector<std::string> sequences { "TTGCACGGGTC", "ATGCAGTGGTC" };
-    BOSSConstructor constructor(k);
+    auto constructor = make_test_boss_constructor(k);
     constructor.add_sequences(std::vector<std::string>(sequences));
     BOSS graph(&constructor);
     std::mutex seq_mutex;
@@ -1874,7 +1952,7 @@ TEST(BOSS, CallUnitigsSingleKmer) {
         "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGCATCGGAA",
         "GGGGGGGTGCTCTTTTTTT"
     };
-    BOSSConstructor constructor(k);
+    auto constructor = make_test_boss_constructor(k);
     constructor.add_sequences(std::move(sequences));
     BOSS graph(&constructor);
     graph.prune_and_mark_all_dummy_edges(1);
@@ -1925,7 +2003,7 @@ TEST(BOSS, CallEdgesEmptyGraph) {
 
 TEST(BOSS, CallEdgesTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
         BOSS graph(&constructor);
 
@@ -1942,7 +2020,7 @@ TEST(BOSS, CallEdgesTwoLoops) {
 
 TEST(BOSS, CallEdgesFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(100, 'G'),
                                     std::string(100, 'C') });
@@ -2007,7 +2085,7 @@ TEST(BOSS, CallEdgesTestPathACA) {
 
 TEST(BOSS, CallEdgesTestPathDisconnected) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         BOSS graph(&constructor);
         graph.switch_state(BOSS::State::DYN);
@@ -2025,7 +2103,7 @@ TEST(BOSS, CallEdgesTestPathDisconnected) {
 
 TEST(BOSS, CallEdgesTestPathDisconnected2) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
         BOSS graph(&constructor);
         graph.switch_state(BOSS::State::DYN);
@@ -2060,7 +2138,7 @@ TEST(BOSS, CallKmersEmptyGraph) {
 
 TEST(BOSS, CallKmersTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
         BOSS graph(&constructor);
 
@@ -2077,7 +2155,7 @@ TEST(BOSS, CallKmersTwoLoops) {
 
 TEST(BOSS, CallKmersFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(100, 'G'),
                                     std::string(100, 'C') });
@@ -2140,7 +2218,7 @@ TEST(BOSS, CallKmersTestPathACA) {
 
 TEST(BOSS, CallKmersTestPathDisconnected) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         BOSS graph(&constructor);
         graph.switch_state(BOSS::State::DYN);
@@ -2155,7 +2233,7 @@ TEST(BOSS, CallKmersTestPathDisconnected) {
 
 TEST(BOSS, CallKmersTestPathDisconnected2) {
     for (size_t k = 1; k < 20; ++k) {
-        BOSSConstructor constructor(k);
+        auto constructor = make_test_boss_constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
         BOSS graph(&constructor);
         graph.switch_state(BOSS::State::DYN);

@@ -1,14 +1,11 @@
-#include "gtest/gtest.h"
-#include "test_helpers.hpp"
-
 #include <vector>
 #include <functional>
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-#define private public
-#define protected public
+#include "gtest/gtest.h"
 
+#include "test_helpers.hpp"
 #include "kmer/kmer_boss.hpp"
 #include "kmer/kmer_extractor.hpp"
 
@@ -161,12 +158,14 @@ TYPED_TEST(KmerBOSS, BitShiftBuild) {
         std::string(long_seq.rbegin() + 1,
                     long_seq.rbegin() + 3)
     ));
+    auto packed = kmer_builtup.data();
     for (int i = long_seq.length() - 4; i >= 0; --i) {
-        kmer_builtup.seq_ <<= static_cast<uint64_t>(kBitsPerChar);
-        kmer_builtup.seq_ |= KmerExtractorBOSS::encode(long_seq[i]);
+        packed <<= static_cast<uint64_t>(kBitsPerChar);
+        packed |= KmerExtractorBOSS::encode(long_seq[i]);
     }
-    kmer_builtup.seq_ <<= static_cast<uint64_t>(kBitsPerChar);
-    kmer_builtup.seq_ |= KmerExtractorBOSS::encode(long_seq[long_seq.length() - 1]);
+    packed <<= static_cast<uint64_t>(kBitsPerChar);
+    packed |= KmerExtractorBOSS::encode(long_seq[long_seq.length() - 1]);
+    kmer_builtup = KMER<typename TypeParam::type>(packed);
     std::string dec = kmer_builtup.to_string(long_seq.length(), KmerExtractorBOSS::alphabet);
     ASSERT_EQ(long_seq, dec);
 
@@ -336,9 +335,8 @@ TYPED_TEST(KmerBOSS, CompareSuffixTrueLong) {
     //shift, then compare
     long_seq_alt[kSizeOfKmer * 8 / kBitsPerChar - 2] = 'T';
 
-    kmer[0].seq_
-        = kmer[0].seq_ >> static_cast<int>((kSizeOfKmer * 8 / kBitsPerChar - 2)
-                                                * kBitsPerChar);
+    kmer[0] = KMER<typename TypeParam::type>(
+        kmer[0].data() >> static_cast<int>((kSizeOfKmer * 8 / kBitsPerChar - 2) * kBitsPerChar));
 
     kmer[1] = KMER<typename TypeParam::type>(KmerExtractorBOSS::encode(
         long_seq_alt.substr(kSizeOfKmer * 8 / kBitsPerChar - 2)

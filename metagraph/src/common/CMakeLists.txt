@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.19)
 project(metagraph_common)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
@@ -9,6 +9,10 @@ set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../..)
 
 include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
+find_package(Boost REQUIRED)
+find_package(ZLIB REQUIRED)
+buildLogging()
+buildCommonDependencies()
 findFolly()
 find_package(glog REQUIRED)
 checkFileSystem() # check for std::filesystem::temp_directory_path
@@ -17,28 +21,11 @@ file(GLOB src_files "*.cpp" "*/*.cpp")
 
 add_library(metagraph_common STATIC ${src_files})
 set(EXTERNAL_LIB_DIR "${PROJECT_PARENT_DIR}/external-libraries")
+buildProgressBar(${EXTERNAL_LIB_DIR} PROGRESS_BAR_LIBRARY)
+buildMersenneTwister(${EXTERNAL_LIB_DIR} MERSENNE_TWISTER_LIBRARY)
 
-# ASIO depends by default on boost/config.hpp, which is not recommended; this works around the issue
-target_compile_options(metagraph_common PRIVATE -DASIO_STANDALONE -Werror -Wall -Wextra)
-target_include_directories(metagraph_common
-  PRIVATE
-    ${PROJECT_PARENT_DIR}/src/
-    ${PROJECT_SOURCE_DIR}/external-libraries/folly/include
-  PUBLIC
-    ${EXTERNAL_LIB_DIR}/asio/asio/include
-    ${EXTERNAL_LIB_DIR}/DYNAMIC/include
-    ${EXTERNAL_LIB_DIR}/hopscotch-map/include
-    ${EXTERNAL_LIB_DIR}/ips4o
-    ${EXTERNAL_LIB_DIR}/ordered-map/include
-    ${EXTERNAL_LIB_DIR}/rollinghashcpp
-    ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-    ${EXTERNAL_LIB_DIR}/spdlog/include
-    ${EXTERNAL_LIB_DIR}/zlib
-    /usr/local/include  # On Mac the default include directories are not added any longer, so adding manually
-)
-target_include_directories(metagraph_common SYSTEM PUBLIC
-    ${EXTERNAL_LIB_DIR}/folly
-)
+target_compile_options(metagraph_common PRIVATE -Werror -Wall -Wextra)
+target_include_directories(metagraph_common PUBLIC ${PROJECT_PARENT_DIR}/src)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -48,21 +35,24 @@ IF(APPLE)
     set(CMAKE_USE_PTHREADS_INIT 1)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
-set(SPDLOG_BUILD_TESTING FALSE)
-add_subdirectory(${EXTERNAL_LIB_DIR}/spdlog spdlog)
 
-add_subdirectory(${EXTERNAL_LIB_DIR}/zlib zlib)
-
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(metagraph_common
   PUBLIC
-    ${FOLLY_LIBRARIES}
+    folly
+    metagraph-common-dependencies
+    ${PROGRESS_BAR_LIBRARY}
+    ${MERSENNE_TWISTER_LIBRARY}
     ${FILESYSTEM_LIBRARY}
-    ${SDSL_LIBRARY}
+    OpenMP::OpenMP_CXX
     glog::glog
     spdlog::spdlog
-    z
+    ZLIB::ZLIB
+  PRIVATE
+    Boost::headers
 )
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  target_link_libraries(metagraph_common PUBLIC atomic)
+endif()
 target_compile_definitions(metagraph_common PUBLIC _USE_FOLLY MODE_TI)
 message(STATUS "Compile flags used:"
   "${CMAKE_CXX_FLAGS}"

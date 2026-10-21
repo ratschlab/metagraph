@@ -31,6 +31,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
                                           uint8_t count_width,
+                                          bool index_coordinates,
                                           size_t max_chunks_open)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
@@ -44,6 +45,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                         }),
         count_width_(count_width),
         max_count_(sdsl::bits::lo_set[count_width]),
+        index_coordinates_(index_coordinates),
         max_chunks_open_(max_chunks_open) {}
 
 template <typename Label>
@@ -53,9 +55,11 @@ ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
                                           uint8_t count_width,
+                                          bool index_coordinates,
                                           size_t max_chunks_open)
       : ColumnCompressed(column.size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
+                         num_columns_cached, swap_dir, buffer_size_bytes,
+                         count_width, index_coordinates, max_chunks_open) {
     label_encoder_.insert_and_encode(column_label);
     bitmatrix_.resize(1);
     cached_columns_.Put(0, new bitmap_vector(std::move(column)));
@@ -69,9 +73,11 @@ ColumnCompressed<Label>::ColumnCompressed(std::vector<std::unique_ptr<bit_vector
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
                                           uint8_t count_width,
+                                          bool index_coordinates,
                                           size_t max_chunks_open)
       : ColumnCompressed(columns.at(0)->size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
+                         num_columns_cached, swap_dir, buffer_size_bytes,
+                         count_width, index_coordinates, max_chunks_open) {
     bitmatrix_ = std::move(columns);
     label_encoder_ = label_encoder;
     flushed_ = true;
@@ -197,10 +203,12 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     out.close();
 
-    if (coords_.size())
+    // Emit .coords when coordinate mode is on, even if empty (no coords added).
+    if (index_coordinates_)
         serialize_coordinates(filename);
 
-    if (relation_counts_.size())
+    // Emit .counts when count_width > 0, even if empty (no counts added).
+    if (count_width_)
         serialize_counts(filename);
 }
 
@@ -437,6 +445,9 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
+    coords_.clear();
+    max_coord_.clear();
+    relation_counts_.clear();
 
     label_encoder_.clear();
 
@@ -476,10 +487,12 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
         }
 
     } catch (const std::exception &e) {
-        logger->error("Caught exception when loading columns from {}: {}", f, e.what());
+        logger->error("Cannot load columns from '{}': {} (caught: {})", f,
+                      utils::file_read_failure_detail(f), e.what());
         return false;
     } catch (...) {
-        logger->error("Unknown exception when loading columns from {}", f);
+        logger->error("Cannot load columns from '{}': {} (caught unknown exception)", f,
+                      utils::file_read_failure_detail(f));
         return false;
     }
 
@@ -492,6 +505,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
+    coords_.clear();
+    max_coord_.clear();
+    relation_counts_.clear();
 
     label_encoder_.clear();
 
@@ -522,6 +538,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     decompress_bitmap(col) |= *column;
                 }
             } else {
+                logger->error("Cannot load column '{}': got {} rows, expected {}",
+                              label, column->size(), num_rows_);
                 no_errors = false;
             }
         },
@@ -531,9 +549,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     if (merge_successful && no_errors) {
         logger->trace("Annotation loading finished ({} columns)", bitmatrix_.size());
         return true;
-    } else {
-        return false;
     }
+    if (merge_successful && !no_errors) {
+        logger->error("Cannot load annotations from {}: columns from different inputs "
+                      "have inconsistent row counts (reference is {} rows)",
+                      fmt::join(filenames, ", "), num_rows_);
+    }
+    return false;
 }
 
 template <typename Label>
@@ -562,13 +584,14 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
             offsets[i] = read_num_labels(fname);
         } catch (...) {
-            logger->error("Can't load label encoder from {}", fname);
+            logger->error("Cannot load label encoder from '{}': {}", fname,
+                          utils::file_read_failure_detail(fname));
             error_occurred = true;
         }
     }
@@ -580,7 +603,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading annotations from file {}", filename);
@@ -614,10 +637,12 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                          std::move(new_column));
             }
         } catch (const std::exception &e) {
-            logger->error("Caught exception when loading columns from {}: {}", filename, e.what());
+            logger->error("Cannot load columns from '{}': {} (caught: {})", filename,
+                          utils::file_read_failure_detail(filename), e.what());
             error_occurred = true;
         } catch (...) {
-            logger->error("Unknown exception when loading columns from {}", filename);
+            logger->error("Cannot load columns from '{}': {} (caught unknown exception)",
+                          filename, utils::file_read_failure_detail(filename));
             error_occurred = true;
         }
     }
@@ -635,7 +660,7 @@ void ColumnCompressed<Label>
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -653,7 +678,7 @@ void ColumnCompressed<Label>
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading labels from {}", filename);
@@ -710,7 +735,7 @@ void ColumnCompressed<Label>
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -728,7 +753,7 @@ void ColumnCompressed<Label>
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading columns from {}", filename);
@@ -804,7 +829,7 @@ void ColumnCompressed<Label>::load_columns_delims_and_values(
     std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
         auto fname = make_suffix(filenames[i - 1], kExtension);
         try {
@@ -822,7 +847,7 @@ void ColumnCompressed<Label>::load_columns_delims_and_values(
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading columns from {}", filename);

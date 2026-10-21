@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.19)
 project(test_common)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -15,15 +15,6 @@ include(${PROJECT_PARENT_DIR}/CMakeListsHelpers.txt)
 findOpenMP()
 enable_testing()
 findGTest()
-
-# Check if 128 bit integers are supported
-try_compile(MODE_TI
-  "${PROJECT_BINARY_DIR}"
-  "${EXTERNAL_LIB_DIR}/sdsl-lite/CMakeModules/check_mode_ti.cpp"
-)
-if(MODE_TI)
-  string(APPEND CMAKE_CXX_FLAGS " -DMODE_TI")
-endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   file(STRINGS "/proc/cpuinfo" _cpuinfo)
@@ -52,35 +43,14 @@ message(STATUS "Compile flags used:"
   " ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}"
 )
 
-include_directories(
-  ${EXTERNAL_LIB_DIR}/benchmark/include
-  ${EXTERNAL_LIB_DIR}/DYNAMIC/include
-  ${EXTERNAL_LIB_DIR}/sdsl-lite/include
-  ${EXTERNAL_LIB_DIR}/hopscotch-map/include
-  ${EXTERNAL_LIB_DIR}/ordered-map/include
-  ${EXTERNAL_LIB_DIR}/ips4o
-  ${EXTERNAL_LIB_DIR}/spdlog/include
-  "../../src/"
-)
-link_directories(
-  ${EXTERNAL_LIB_DIR}/sdsl-lite/lib
-)
+file(GLOB benchmark_files "*.cpp")
 
-file(GLOB benchmark_files "*.cpp"
-  ../../src/common/data_generation.cpp
-  ../../src/common/vectors/bit_vector.cpp
-  ../../src/common/vectors/bitmap.cpp
-  ../../src/common/vectors/bitmap_mergers.cpp
-  ../../src/common/vectors/vector_algorithm.cpp
-  ../../src/common/serialization.cpp
-)
-
+add_subdirectory(${PROJECT_PARENT_DIR}/src/common metagraph_common)
 add_subdirectory(${PROJECT_PARENT_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL benchmark)
 
 add_executable(benchmark_bit_vectors ${benchmark_files})
 target_link_libraries(benchmark_bit_vectors
-  -lsdsl
-  ${OpenMP_CXX_LIBRARIES}
+  metagraph_common
   benchmark_main
   benchmark
 )

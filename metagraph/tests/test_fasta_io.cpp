@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
 #include <string>
 #include <filesystem>
@@ -14,7 +15,7 @@ using namespace mtg::seq_io;
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/transcripts_1000.fa";
-const std::string dump_filename_base = test_data_dir + "/dump.fasta";
+const std::string dump_filename_base = test_dump_dir() + "/dump.fasta";
 const std::vector<std::string> dump_filename_exts { ".gz", ".zst" };
 
 
@@ -236,10 +237,10 @@ TEST(FastaFile, twice_iterator_read_empty_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(0u, num_records);
         EXPECT_EQ(0u, total_size);
 
@@ -271,10 +272,10 @@ TEST(FastaFile, twice_full_iterator_read_1K_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(1'000u, num_records);
         EXPECT_EQ(499'500u, total_size);
 
@@ -629,10 +630,10 @@ TEST(FastaFileWithCanonical, twice_iterator_read_empty_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(0u, num_records);
         EXPECT_EQ(0u, total_size);
 
@@ -664,10 +665,10 @@ TEST(FastaFileWithCanonical, twice_full_iterator_read_1K_with_move) {
 
         num_records = 0;
         total_size = 0;
-        std::for_each(std::move(begin), parser.end(), [&](const auto &record) {
+        for (auto it = std::move(begin); it != parser.end(); ++it) {
             num_records++;
-            total_size += record.seq.l;
-        });
+            total_size += it->seq.l;
+        }
         EXPECT_EQ(1'000u * 2, num_records);
         EXPECT_EQ(499'500u * 2, total_size);
 

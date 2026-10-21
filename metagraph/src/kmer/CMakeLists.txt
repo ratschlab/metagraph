@@ -1,8 +1,8 @@
 include_guard(GLOBAL)
 #Library for extracting, sorting, de-duping and storing kmers for further processing
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.19)
 project(kmer)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(../common metagraph_common)
@@ -27,11 +27,9 @@ target_include_directories(kmer
     ..
 )
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_link_libraries(kmer
   PUBLIC
     ${FOLLY_LIBRARIES}
-    ${SDSL_LIBRARY}
     metagraph_common
 )
 

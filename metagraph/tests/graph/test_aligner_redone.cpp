@@ -26,16 +26,6 @@ using namespace mtg::kmer;
 const std::string test_data_dir = "../tests/data";
 //const bool PICK_REV_COMP = true;
 
-template <typename T>
-struct template_parameter;
-
-template <template <typename...> class C, typename T>
-struct template_parameter<C<T>> {
-    using type = T;
-};
-
-template <typename T>
-using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
 
 template <typename Graph>
 class DBGAlignerRedoneTest : public DeBruijnGraphTest<Graph> {};
@@ -929,7 +919,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
         if constexpr(std::is_same_v<DBGSSHash, TypeParam>) {
             const auto &sshash = static_cast<const DBGSSHash&>(*graph);
             std::visit([&](const auto &dict) {
-                using kmer_t = get_kmer_t<decltype(dict)>;
+                using kmer_t = typename std::decay_t<decltype(dict)>::kmer_type;
                 auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(reference.data(), k);
                 auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
                 // we can only find the first seed of it's also the minimizer

@@ -1,6 +1,7 @@
 #ifndef __CSC_MATRIX_HPP__
 #define __CSC_MATRIX_HPP__
 
+#include <utility>
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -26,10 +27,11 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
     CSCMatrix(BaseMatrix&& index_matrix,
               std::vector<ColumnValues>&& column_values)
       : binary_matrix_(std::move(index_matrix)),
-        column_values_(column_values) {}
+        column_values_(std::move(column_values)) {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
+                                          size_t num_threads = 1) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -37,7 +39,7 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const {
         return binary_matrix_.get_rows(rows);
     }
     std::vector<Row> get_column(Column column) const {
@@ -57,10 +59,12 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
 
 template <class BaseMatrix, class ColumnValues>
 inline std::vector<typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues>
-CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(const std::vector<Row> &rows) const {
-    const auto &column_ranks = binary_matrix_.get_column_ranks(rows);
+CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(std::span<const Row> rows,
+                                                    size_t num_threads) const {
+    const auto &column_ranks = binary_matrix_.get_column_ranks(rows, num_threads);
     std::vector<RowValues> row_values(rows.size());
-    // TODO: reshape?
+
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < rows.size(); ++i) {
         row_values[i].reserve(column_ranks[i].size());
         for (auto [j, r] : column_ranks[i]) {

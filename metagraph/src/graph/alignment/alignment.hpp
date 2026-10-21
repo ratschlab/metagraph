@@ -5,10 +5,11 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <span>
 #include <vector>
 
 #include <json/json.h>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
@@ -21,6 +22,7 @@
 
 
 namespace mtg {
+namespace annot { class CoordToHeader; }
 namespace graph {
 namespace align {
 
@@ -72,11 +74,7 @@ class Seed {
 
     // Add more nodes to the Seed. This assumes that the original query has |next|
     // extra characters and that the updated path still spells the query view.
-    void expand(const std::vector<node_index> &next) {
-        query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
-        end_clipping_ -= next.size();
-        nodes_.insert(nodes_.end(), next.begin(), next.end());
-    }
+    void expand(std::span<const node_index> next);
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
 
@@ -151,7 +149,7 @@ class Alignment {
             cigar_(Cigar::CLIPPED, clipping) { cigar_.append(std::move(cigar)); }
 
     Alignment(const Seed &seed, const DBGAlignerConfig &config)
-          : label_encoder(seed.label_encoder), label_columns(seed.label_columns),
+          : label_columns(seed.label_columns),
             label_coordinates(seed.label_coordinates), query_view_(seed.get_query_view()),
             nodes_(std::vector<node_index>(seed.get_nodes())),
             orientation_(seed.get_orientation()), offset_(seed.get_offset()),
@@ -269,10 +267,29 @@ class Alignment {
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
+    // `encoder` and `cth` are optional. When `encoder` is supplied, the
+    // returned object includes an `annotation.labels` array; the shape of
+    // each entry depends on what coord information is available:
+    //   - no `label_coordinates` (label-only annotator): `{sample}` only.
+    //   - `label_coordinates` + `cth` set: `{sample, nt_length, nt_coords}`
+    //     per target sequence (`.seqs` maps global column coords to
+    //     per-sequence local positions).
+    //   - `label_coordinates` set, `cth` null: `{sample, nt_coords}`
+    //     per annotation column; `nt_length` is omitted because the column
+    //     does not correspond to a single indexed sequence.
+    //
+    // `include_path_mapping` controls whether the bulky VG-style
+    // `path.mapping[]` object is emitted. Off by default: the path lists
+    // every visited node with redundant `edit` blocks (already in `cigar`)
+    // and dominates the JSON size for long alignments; no in-tree consumer
+    // currently reads it.
     Json::Value to_json(size_t node_size,
                         bool is_secondary = false,
                         const std::string &name = {},
-                        const std::string &label = {}) const;
+                        const std::string &label = {},
+                        const annot::LabelEncoder<> *encoder = nullptr,
+                        const annot::CoordToHeader *cth = nullptr,
+                        bool include_path_mapping = false) const;
 
     // writes to |query_str| the string which will be referenced in this object
     void load_from_json(const Json::Value &alignment,
@@ -280,8 +297,6 @@ class Alignment {
                         std::string *query_str);
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
-
-    const annot::LabelEncoder<> *label_encoder = nullptr;
 
     Columns label_columns;
 
@@ -294,7 +309,32 @@ class Alignment {
 
     score_t extra_score = 0;
 
-    std::string format_coords() const;
+    /**
+     * Emit the alignment's labels and their 1-based inclusive coordinate
+     * ranges as a single string:
+     *
+     *   "<label>:<start>-<end>[:<start>-<end>...][;<label>:...]"
+     *
+     * Separators: ';' separates labels; ':' separates the label from its
+     * first range and subsequent ranges within the same label. Multiple
+     * ranges for one label occur when the alignment matches that label
+     * at several positions (shared-k-mer case).
+     *
+     * Ordering: labels appear in the order of first occurrence when
+     * walking `label_coordinates` (by column, then by starting coord).
+     * Ranges within a single label appear in the order their starting
+     * coords were processed, which is the order of the source coords in
+     * the alignment's tuple.
+     *
+     * Two rendering modes (caller picks the overload that matches the
+     * available context — alignment itself is data-only):
+     *   - encoder: decode column indices to label names.
+     *   - cth + k: split ranges that cross a sequence boundary in the
+     *     CoordToHeader index across consecutive sequences (`k` must be > 0).
+     * Returns "" if the alignment has no coordinates.
+     */
+    std::string format_coords(const annot::LabelEncoder<> &encoder) const;
+    std::string format_coords(const annot::CoordToHeader &cth, size_t k) const;
 
   private:
     std::string_view query_view_;
@@ -305,10 +345,6 @@ class Alignment {
     score_t score_;
     Cigar cigar_;
 };
-
-inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
-    return out << fmt::format("{}", a);
-}
 
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
@@ -368,9 +404,12 @@ class AlignmentResults {
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
+    Alignment& operator[](size_t i) { return alignments_[i]; }
 
     auto begin() const { return alignments_.begin(); }
     auto end() const { return alignments_.end(); }
+    auto begin() { return alignments_.begin(); }
+    auto end() { return alignments_.end(); }
 
   private:
     std::string query_;
@@ -397,36 +436,21 @@ template <> struct formatter<mtg::graph::align::Alignment> {
 
     template <typename FormatContext>
     auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) const -> decltype(ctx.out()) {
-        format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
-                  a.get_orientation() ? "-" : "+",
-                  a.get_sequence(),
-                  a.get_score(),
-                  a.get_cigar().get_num_matches(),
-                  a.get_cigar().to_string(),
-                  a.get_offset());
-
-        const auto &label_columns = a.label_columns;
-        const auto &label_coordinates = a.label_coordinates;
-
-        if (label_coordinates.size()) {
-            format_to(ctx.out(), "\t{}", a.format_coords());
-        } else if (label_columns.size()) {
-            if (a.label_encoder) {
-                std::vector<std::string> decoded_labels;
-                decoded_labels.reserve(label_columns.size());
-                for (size_t i = 0; i < label_columns.size(); ++i) {
-                    decoded_labels.emplace_back(a.label_encoder->decode(label_columns[i]));
-                }
-
-                format_to(ctx.out(), "\t{}", fmt::join(decoded_labels, ";"));
-            } else {
-                format_to(ctx.out(), "\t{}", fmt::join(label_columns, ";"));
-            }
-        }
-
-        return ctx.out();
+        return fmt::format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
+                         a.get_orientation() ? "-" : "+",
+                         a.get_sequence(),
+                         a.get_score(),
+                         a.get_cigar().get_num_matches(),
+                         a.get_cigar().to_string(),
+                         a.get_offset());
     }
 };
 } // namespace fmt
+
+namespace mtg::graph::align {
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
+    return out << fmt::format("{}", a);
+}
+} // namespace mtg::graph::align
 
 #endif  // __ALIGNER_ALIGNMENT_HPP__

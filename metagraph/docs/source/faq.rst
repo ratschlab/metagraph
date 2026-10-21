@@ -129,8 +129,8 @@ How to handle large datasets?
 3. **Extremely large graphs:**
 
 Extremely large succinct graphs can be constructed by building their parts separately
-and writing them to disk on the fly with flag ``--inplace``.
-In such cases, don't forget to index suffix ranges afterwards with ``metagraph transform --index-ranges ...``.
+and writing them to disk on the fly. This is the default succinct build path;
+pass ``--in-ram`` to construct the graph in RAM instead (requires more RAM, normally not needed).
 
 Annotation
 ==========

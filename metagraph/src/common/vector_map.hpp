@@ -11,4 +11,11 @@ using VectorMap = tsl::ordered_map<Key, T, Hash, std::equal_to<Key>,
                                    std::vector<std::pair<Key, T>>,
                                    IndexType>;
 
+template <typename Key, typename T, typename IndexType = uint64_t, class Hash = std::hash<Key>>
+std::vector<std::pair<Key, T>> to_vector(VectorMap<Key, T, IndexType, Hash> &&map) {
+    std::vector<std::pair<Key, T>> vector;
+    vector.swap(const_cast<std::vector<std::pair<Key, T>>&>(map.values_container()));
+    return vector;
+}
+
 #endif // __VECTOR_MAP_HPP__

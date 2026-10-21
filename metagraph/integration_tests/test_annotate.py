@@ -30,7 +30,7 @@ class TestAnnotate(TestingBase):
     @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, graph_repr):
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --in-ram -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -75,7 +75,7 @@ class TestAnnotate(TestingBase):
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_simple_all_graphs_canonical(self, graph_repr):
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --in-ram -p {num_threads} \
                 --graph {repr} --mode canonical -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -120,7 +120,7 @@ class TestAnnotate(TestingBase):
         Annotate non-canonical graph constructed from non-canonical KMC database
         """
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                             --graph {graph_repr} -k 11 \
                             -o {self.tempdir.name}/graph \
                             {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
@@ -161,7 +161,7 @@ class TestAnnotate(TestingBase):
         Annotate non-canonical graph constructed from canonical KMC database
         """
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                             --graph {graph_repr} -k 11 \
                             -o {self.tempdir.name}/graph \
                             {TEST_DATA_DIR}/transcripts_1000_kmc_counters_both_strands.kmc_suf'
@@ -224,7 +224,7 @@ class TestAnnotate(TestingBase):
         Annotate canonical graph with k-mers from KMC
         """
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                             --graph {graph_repr} --mode canonical -k 11 \
                             -o {self.tempdir.name}/graph \
                             {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
@@ -283,7 +283,7 @@ class TestAnnotate(TestingBase):
         graph_repr = 'succinct'
         anno_repr = 'column'
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
+        construct_command = '{exe} build --mask-dummy --in-ram -p {num_threads} \
                 --graph {repr} -k 20 -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
@@ -325,7 +325,7 @@ class TestAnnotate(TestingBase):
     @parameterized.expand(GRAPH_TYPES)
     def test_annotate_coordinates(self, graph_repr):
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                               --graph {graph_repr} -k 11 \
                               -o {self.tempdir.name}/graph \
                               {TEST_DATA_DIR}/transcripts_100.fa'
@@ -345,7 +345,7 @@ class TestAnnotate(TestingBase):
     @parameterized.expand(GRAPH_TYPES)
     def test_annotate_coordinates_with_disk_swap(self, graph_repr):
 
-        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+        construct_command = f'{METAGRAPH} build --mask-dummy --in-ram -p {NUM_THREADS} \
                               --graph {graph_repr} -k 11 \
                               -o {self.tempdir.name}/graph \
                               {TEST_DATA_DIR}/transcripts_100.fa'
@@ -376,6 +376,49 @@ class TestAnnotate(TestingBase):
                                     f'{self.tempdir.name}/annotation_ram.column.annodbg'))
         self.assertTrue(filecmp.cmp(f'{self.tempdir.name}/annotation.column.annodbg.coords',
                                     f'{self.tempdir.name}/annotation_ram.column.annodbg.coords'))
+
+
+    def test_annotate_coordinates_hints_index_header_coords(self):
+        """`metagraph annotate --coordinates --anno-filename` (without
+        `--index-header-coords`) must point users at the second pass that
+        builds the CoordToHeader (.seqs) mapping. This is the brand-new
+        hint at the end of annotate_graph().
+
+        The hint is emitted via `logger->info()`; the split_sink in
+        common/logger.cpp routes info-level messages to stdout (warn+
+        goes to stderr), so we look in stdout.
+        """
+        construct_command = (f'{METAGRAPH} build --mask-dummy --in-ram '
+                             f'-p {NUM_THREADS} --graph succinct -k 11 '
+                             f'-o {self.tempdir.name}/graph '
+                             f'{TEST_DATA_DIR}/transcripts_100.fa')
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        annotate_cmd = (f'{METAGRAPH} annotate --anno-filename --coordinates '
+                        f'-p {NUM_THREADS} '
+                        f'-i {self.tempdir.name}/graph.dbg '
+                        f'-o {self.tempdir.name}/annotation '
+                        f'{TEST_DATA_DIR}/transcripts_100.fa')
+        res = subprocess.run([annotate_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        stdout = res.stdout.decode()
+        self.assertIn('To enable per-sequence coordinate reporting', stdout)
+        self.assertIn('--index-header-coords', stdout)
+        self.assertIn(f'-i {self.tempdir.name}/graph.dbg', stdout)
+        self.assertIn(f'-o {self.tempdir.name}/annotation', stdout)
+
+        # When --index-header-coords is passed, the hint must not appear
+        # (the user is already doing what the hint suggests).
+        index_cmd = (f'{METAGRAPH} annotate --anno-filename '
+                     f'--index-header-coords -p {NUM_THREADS} '
+                     f'-i {self.tempdir.name}/graph.dbg '
+                     f'-o {self.tempdir.name}/annotation '
+                     f'{TEST_DATA_DIR}/transcripts_100.fa')
+        res = subprocess.run([index_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertNotIn('To enable per-sequence coordinate reporting',
+                         res.stdout.decode())
 
 
 if __name__ == '__main__':

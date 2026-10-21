@@ -14,7 +14,7 @@ setup_requirements = ['pytest-runner']
 with open('requirements.txt') as f:
     requirements = list(f.readlines())
 
-test_requirements = ['pytest']
+test_requirements = ['pytest', 'pytest-xdist']
 
 with open('../../package.json') as f:
     version = json.load(f)['version']

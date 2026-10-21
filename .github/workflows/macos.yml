@@ -1,0 +1,220 @@
+name: MacOS
+
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        required: true
+        type: string
+      alphabet:
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+    
+  build:
+    runs-on: macos-latest
+
+    env: &macos-build-env
+      CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
+      DESCRIPTOR: >-
+        ${{ inputs.build_type }}-macos-arm64-${{ inputs.alphabet }}
+      CMAKE_ARGS: >-
+        -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
+        -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
+
+    name: Build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - &submodule-revision
+        name: Get dependency revision
+        id: submodules
+        run: echo "revision=$(git rev-parse HEAD:metagraph/external-libraries)" >> "$GITHUB_OUTPUT"
+
+      - &checkout-submodules-cache
+        name: Checkout submodules cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .git/modules
+            metagraph/external-libraries
+          key: submodules-${{ hashFiles('.gitmodules') }}-${{ steps.submodules.outputs.revision }}
+
+      - &checkout-submodules-update
+        name: Checkout submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - &install-macos-deps
+        name: Install dependencies
+        run: |
+          brew install bzip2 libomp boost jemalloc autoconf automake libtool \
+            libdeflate icu4c openssl@3 zstd cmake pkg-config ccache
+          printf 'OPENSSL_ROOT_DIR=%s\n' "$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DEFAULT_DIR }}
+          key: ccache-build-${{ env.DESCRIPTOR }}
+          restore-keys: |
+            ccache-build-
+
+      - &setup-ccache-config
+        name: Setup ccache config
+        run: |
+          ccache --set-config=max_size=1G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+
+      - name: Configure
+        run: |
+          mkdir -p metagraph/build
+          cd metagraph/build
+          cmake ${CMAKE_ARGS} ..
+
+      - name: Build metagraph
+        run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" metagraph
+
+      - name: Build unit tests
+        run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)" unit_tests
+
+      - name: Build other
+        run: cd metagraph/build && make -j"$(getconf _NPROCESSORS_ONLN)"
+
+      - &show-ccache-stats
+        name: Show ccache statistics
+        run: ccache --show-stats
+
+      - name: upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: &artifact artifact-${{ env.DESCRIPTOR }}
+          path: |
+            metagraph/build/metagraph_${{ inputs.alphabet }}
+            metagraph/build/unit_tests_parallel
+            metagraph/build/unit_tests
+          include-hidden-files: true
+          retention-days: 1
+
+
+  unit-tests:
+    needs: [build]
+
+    runs-on: macos-latest
+
+    name: Unit Tests
+
+    env: *macos-build-env
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *install-macos-deps
+
+      - &download-build-artifacts
+        name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: *artifact
+          path: metagraph/build
+
+      - name: run unit tests
+        run: cd metagraph/build && chmod +x unit_tests{,_parallel} && ./unit_tests_parallel
+
+
+  integration-tests:
+    needs: [build]
+
+    runs-on: macos-latest
+
+    env: *macos-build-env
+
+    name: Integration Tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *install-macos-deps
+
+      - name: install dependencies for integration tests
+        run: pip3 install parameterized --break-system-packages --user
+
+      - *download-build-artifacts
+
+      - name: Recreate metagraph symlink
+        run: |
+          cd metagraph/build
+          binary_name="metagraph_${{ inputs.alphabet }}"
+          chmod +x "${binary_name}"
+          ln -sf "${binary_name}" metagraph
+
+      - name: Run integration tests
+        run: |
+          ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
+          cd metagraph/build
+          ./test_venv/bin/python ../integration_tests/main.py
+
+      - name: check metagraph workflows
+        run: |
+          export PATH="$(pwd)/metagraph/build/:$PATH"
+          metagraph --help
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r metagraph/workflows/requirements.txt
+          cd metagraph/workflows
+          pytest
+
+
+  examples:
+    if: ${{ inputs.build_type == 'Debug' }}
+
+    runs-on: macos-latest
+
+    env: *macos-build-env
+
+    name: Examples
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - *submodule-revision
+
+      - *checkout-submodules-cache
+
+      - *checkout-submodules-update
+
+      - *install-macos-deps
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DEFAULT_DIR }}
+          key: ccache-examples-${{ env.DESCRIPTOR }}
+          restore-keys: |
+            ccache-examples-
+
+      - *setup-ccache-config
+
+      - name: Build and run subdirectory example
+        run: |
+          cd metagraph/examples/subdirectory
+          mkdir -p build && cd build
+          cmake ${CMAKE_ARGS} ..
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          make run_example
+
+      - name: Build and run ExternalProject example
+        run: |
+          cd metagraph/examples/ExternalProject
+          mkdir -p build && cd build
+          cmake -DMETAGRAPH_SOURCE_DIR="${GITHUB_WORKSPACE}" ${CMAKE_ARGS} ..
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          make run_example
+
+      - *show-ccache-stats

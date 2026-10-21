@@ -61,10 +61,10 @@ BOSS::BOSS(size_t k)
         alphabet(kmer_extractor_.alphabet),
         bits_per_char_W_(sdsl::bits::hi(alph_size - 1) + 2),
         k_(k),
-        last_(new bit_vector_dyn()),
+        last_(std::make_unique<bit_vector_dyn>()),
         F_(alph_size, 0),
         NF_(alph_size, 0),
-        W_(new wavelet_tree_dyn(bits_per_char_W_)) {
+        W_(std::make_unique<wavelet_tree_dyn>(bits_per_char_W_)) {
     assert(k_);
     assert(bits_per_char_W_ <= sizeof(TAlphabet) * 8
             && "Choose type for TAlphabet properly");
@@ -91,9 +91,27 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
     assert(is_valid());
 }
 
-BOSS::~BOSS() {
-    delete W_;
-    delete last_;
+BOSS::~BOSS() = default;
+
+sdsl::sd_vector<> BOSS::build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+                                               uint64_t num_edges) {
+    assert(ranges.size());
+    ranges[0] = std::max<uint64_t>(ranges[0], 1);
+    // align the values to be strictly increasing so that select queries
+    // can recover the originals via get_suffix_range(i) = select1(i+1) - i
+    for (size_t i = 1; i < ranges.size(); ++i) {
+        ranges[i] = std::max(ranges[i], ranges[i - 1] - (i - 1)) + i;
+    }
+    assert(std::is_sorted(ranges.begin(), ranges.end()));
+    sdsl::sd_vector_builder builder(num_edges + ranges.size(), ranges.size());
+    for (auto pos : ranges) {
+        builder.set(pos);
+    }
+    sdsl::sd_vector<> sd(builder);
+    logger->trace("Compressed node ranges to approx. {:.2f} MB",
+                  footprint_sd_vector(sd.size(), ranges.size()) / 8e6);
+    ranges = {};
+    return sd;
 }
 
 template <uint8_t t_width>
@@ -106,13 +124,13 @@ sdsl::int_vector<t_width> to_vector(sdsl::int_vector_buffer<t_width> &buf) {
 }
 
 void BOSS::initialize(Chunk *chunk) {
-    delete W_;
-    delete last_;
+    W_.reset();
+    last_.reset();
 
     // TODO: optimize
-    W_ = new wavelet_tree_stat(chunk->get_W_width(), chunk->W_);
+    W_ = std::make_unique<wavelet_tree_stat>(chunk->get_W_width(), chunk->W_);
 
-    last_ = new bit_vector_stat(to_vector(chunk->last_));
+    last_ = std::make_unique<bit_vector_stat>(to_vector(chunk->last_));
 
     F_ = chunk->F_;
     recompute_NF();
@@ -122,6 +140,14 @@ void BOSS::initialize(Chunk *chunk) {
     // alph_size = chunk->alph_size_;
 
     state = State::STAT;
+
+    if (chunk->indexed_suffix_length_) {
+        indexed_suffix_length_ = chunk->indexed_suffix_length_;
+        indexed_suffix_ranges_ = std::move(chunk->indexed_suffix_ranges_);
+        indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
+    }
 }
 
 /**
@@ -247,7 +273,8 @@ void BOSS::serialize(std::ofstream &outstream) const {
     outstream.flush();
 }
 
-void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
+void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state, int mode,
+                     bool serialize_suffix_ranges) {
     if (!out.good())
         throw std::ofstream::failure("Error: Can't write to file");
 
@@ -292,6 +319,16 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
             break;
     }
 
+    // serialize mode if provided (for DBGSuccinct)
+    if (mode >= 0)
+        serialize_number(out, mode);
+
+    if (serialize_suffix_ranges) {
+        assert(mode >= 0 && "suffix ranges require mode to be serialized");
+        serialize_number(out, chunk.indexed_suffix_length_);
+        chunk.indexed_suffix_ranges_.serialize(out);
+    }
+
     out.flush();
 }
 
@@ -303,7 +340,7 @@ bool BOSS::load(std::ifstream &instream) {
         // load F, k, and state
         F_ = load_number_vector_raw<edge_index>(instream);
         k_ = load_number(instream);
-        state = static_cast<State>(load_number(instream));
+        const auto loaded_state = load_number(instream);
 
         if (F_.size() != alph_size) {
             std::cerr << "ERROR: failed to load F vector, incompatible size" << std::endl;
@@ -311,26 +348,30 @@ bool BOSS::load(std::ifstream &instream) {
         }
 
         // load W and last arrays
-        delete W_;
-        delete last_;
-        switch (state) {
+        W_.reset();
+        last_.reset();
+        switch (loaded_state) {
             case State::DYN:
-                W_ = new wavelet_tree_dyn(bits_per_char_W_);
-                last_ = new bit_vector_dyn();
+                W_ = std::make_unique<wavelet_tree_dyn>(bits_per_char_W_);
+                last_ = std::make_unique<bit_vector_dyn>();
                 break;
             case State::STAT:
-                W_ = new wavelet_tree_stat(bits_per_char_W_);
-                last_ = new bit_vector_stat();
+                W_ = std::make_unique<wavelet_tree_stat>(bits_per_char_W_);
+                last_ = std::make_unique<bit_vector_stat>();
                 break;
             case State::FAST:
-                W_ = new wavelet_tree_fast(bits_per_char_W_);
-                last_ = new bit_vector_stat();
+                W_ = std::make_unique<wavelet_tree_fast>(bits_per_char_W_);
+                last_ = std::make_unique<bit_vector_stat>();
                 break;
             case State::SMALL:
-                W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_small();
+                W_ = std::make_unique<wavelet_tree_small>(bits_per_char_W_);
+                last_ = std::make_unique<bit_vector_small>();
                 break;
+            default:
+                std::cerr << "ERROR: unknown BOSS representation" << std::endl;
+                return false;
         }
+        state = static_cast<State>(loaded_state);
         if (!W_->load(instream)) {
             std::cerr << "ERROR: failed to load W vector" << std::endl;
             return false;
@@ -1087,16 +1128,12 @@ std::string BOSS::decode(const std::vector<TAlphabet> &seq_encoded) const {
 }
 
 template <class WaveletTree, class BitVector>
-void convert(wavelet_tree **W_, bit_vector **last_) {
+void convert(std::unique_ptr<wavelet_tree> &W, std::unique_ptr<bit_vector> &last) {
     common::logger->trace("Converting last");
-    bit_vector *last_new = new BitVector((*last_)->convert_to<BitVector>());
-    delete *last_;
-    *last_ = last_new;
+    last.reset(new BitVector(last->convert_to<BitVector>()));
 
     common::logger->trace("Converting W");
-    wavelet_tree *W_new = new WaveletTree((*W_)->convert_to<WaveletTree>());
-    delete *W_;
-    *W_ = W_new;
+    W.reset(new WaveletTree(W->convert_to<WaveletTree>()));
 }
 
 void BOSS::switch_state(State new_state) {
@@ -1107,19 +1144,19 @@ void BOSS::switch_state(State new_state) {
 
     switch (new_state) {
         case State::STAT: {
-            convert<wavelet_tree_stat, bit_vector_stat>(&W_, &last_);
+            convert<wavelet_tree_stat, bit_vector_stat>(W_, last_);
             break;
         }
         case State::SMALL: {
-            convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
+            convert<wavelet_tree_small, bit_vector_small>(W_, last_);
             break;
         }
         case State::FAST: {
-            convert<wavelet_tree_fast, bit_vector_stat>(&W_, &last_);
+            convert<wavelet_tree_fast, bit_vector_stat>(W_, last_);
             break;
         }
         case State::DYN: {
-            convert<wavelet_tree_dyn, bit_vector_dyn>(&W_, &last_);
+            convert<wavelet_tree_dyn, bit_vector_dyn>(W_, last_);
             break;
         }
     }
@@ -1181,6 +1218,12 @@ void BOSS::add_sequence(std::string_view seq,
 
     if (get_state() != State::DYN)
         throw std::runtime_error("representation must be dynamic");
+
+    if (indexed_suffix_length_) {
+        // the index of suffix ranges is invalid after dynamic updates
+        indexed_suffix_length_ = 0;
+        indexed_suffix_ranges_ = decltype(indexed_suffix_ranges_)();
+    }
 
     // prepend k buffer characters, in case we need to start with dummy node
     std::vector<TAlphabet> sequence(seq.size() + k_);
@@ -1384,7 +1427,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
 
     // update last
     sdsl::bit_vector old_last = last_->convert_to<sdsl::bit_vector>();
-    delete last_;
+    last_.reset();
     sdsl::bit_vector last(old_last.size() - num_edges_to_remove, false);
 
     for (edge_index i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
@@ -1395,11 +1438,11 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
                 last[new_i - 1] = 1;
         }
     }
-    last_ = new bit_vector_stat(std::move(last));
+    last_ = std::make_unique<bit_vector_stat>(std::move(last));
 
     // update W
     sdsl::int_vector<> old_W = W_->to_vector();
-    delete W_;
+    W_.reset();
     sdsl::int_vector<> W(old_W.size() - num_edges_to_remove, 0, bits_per_char_W_);
     std::vector<bool> first_removed(alph_size, false);
 
@@ -1418,7 +1461,7 @@ uint64_t BOSS::erase_edges(const sdsl::bit_vector &edges_to_remove_mask) {
             first_removed[c % alph_size] = false;
         }
     }
-    W_ = new wavelet_tree_stat(bits_per_char_W_, std::move(W));
+    W_ = std::make_unique<wavelet_tree_stat>(bits_per_char_W_, std::move(W));
 
     // update F
     TAlphabet c = 0;
@@ -1512,7 +1555,7 @@ void traverse_dummy_edges(const BOSS &graph,
 
             // TODO: remove this mask and use |call_edge| instead
             if (traversed_mask)
-                set_bit(traversed_mask->data(), edge, async, __ATOMIC_RELAXED);
+                set_bit(traversed_mask->data(), edge, async, std::memory_order_relaxed);
 
             if (redundant_path.back())
                 set_bit(redundant_mask->data(), edge, async);
@@ -1702,13 +1745,15 @@ uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
 
     uint64_t num_dummy_sink_edges = 0;
 
-    // skip the main dummy source
-    for (edge_index i = 2; i < W_->size(); ++i) {
-        assert(get_W(i) != alph_size);
-        if (!get_W(i)) {
-            (*mask)[i] = true;
-            num_dummy_sink_edges++;
-        }
+    // Enumerate W = $ instead of scanning every edge. Skip the reserved position 0
+    // and the main dummy source at position 1.
+    assert((*W_)[0] == 0 && (*W_)[1] == 0);
+    const uint64_t occurrences = W_->rank(0, num_edges());
+    for (uint64_t r = 3; r <= occurrences; ++r) {
+        const edge_index i = W_->select(0, r);
+        assert(i >= 2 && i < W_->size() && !get_W(i));
+        (*mask)[i] = true;
+        num_dummy_sink_edges++;
     }
 
     assert(num_dummy_sink_edges == rank_W(num_edges(), 0) - 1);
@@ -3137,8 +3182,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
     if (indexed_suffix_length_ == 0u)
         return;
 
-    if (indexed_suffix_length_ * log2(alph_size - 1) >= 64)
-        throw std::runtime_error("ERROR: Trying to index too long suffixes");
+    check_num_suffix_ranges(indexed_suffix_length_);
 
     // first, take empty suffix and the entire range of nodes in the BOSS table
     // will store pairs: begin[0], end[0], begin[1], end[1], ...
@@ -3167,19 +3211,7 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
         suffix_ranges.swap(narrowed);
     }
 
-    suffix_ranges[0] = std::max(suffix_ranges[0], (uint64_t)1);
-    // align the upper bounds to enable the binary search on them
-    for (size_t i = 1; i < suffix_ranges.size(); ++i) {
-        suffix_ranges[i] = std::max(suffix_ranges[i], suffix_ranges[i - 1] - (i - 1)) + i;
-    }
-
-    assert(std::is_sorted(suffix_ranges.begin(), suffix_ranges.end()));
-
-    sdsl::sd_vector_builder builder(W_->size() + suffix_ranges.size(), suffix_ranges.size());
-    for (auto pos : suffix_ranges) {
-        builder.set(pos);
-    }
-    indexed_suffix_ranges_ = sdsl::sd_vector<>(builder);
+    indexed_suffix_ranges_ = build_suffix_ranges_sd(std::move(suffix_ranges), W_->size());
     indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
     indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
     indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);

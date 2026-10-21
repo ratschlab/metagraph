@@ -156,7 +156,7 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
                           const std::string &filename, bool append_file);
 
     bit_vector_adaptive_stat(std::initializer_list<bool> init)
-      : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
+      : bit_vector_adaptive_stat(sdsl::bit_vector(init.begin(), init.end())) {}
 
     inline std::unique_ptr<bit_vector> copy() const override final;
 

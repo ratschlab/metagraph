@@ -2,17 +2,34 @@
 #define __THREADING_HPP__
 
 #include <vector>
-#include <queue>
+#include <deque>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <future>
 #include <functional>
 #include <atomic>
+#include <cassert>
+#include <chrono>
 
 
 void set_num_threads(unsigned int num_threads);
 unsigned int get_num_threads();
+
+// Compute chunk size for splitting |total_size| items across |num_threads|.
+// num_threads = 0 is treated as 1 (single-threaded).
+inline size_t get_chunk_size(size_t total_size,
+                             size_t max_chunk_size,
+                             size_t num_threads,
+                             bool one_chunk_if_single_thread = true,
+                             size_t chunks_per_thread = 2) {
+    num_threads = std::max<size_t>(1, num_threads);
+    size_t num_chunks = num_threads * chunks_per_thread;
+    return (one_chunk_if_single_thread && num_threads == 1)
+            ? std::max<size_t>(1, total_size)
+            : std::max<size_t>(1, std::min<size_t>(max_chunk_size,
+                                                    (total_size + num_chunks - 1) / num_chunks));
+}
 
 
 /**
@@ -29,12 +46,52 @@ class ThreadPool {
 
     template <class F, typename... Args>
     auto enqueue(F&& f, Args&&... args) {
-        return emplace(false, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false /*front*/, false /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     template <class F, typename... Args>
     auto force_enqueue(F&& f, Args&&... args) {
-        return emplace(true, std::forward<F>(f), std::forward<Args>(args)...);
+        return emplace(false /*front*/, true /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
+    }
+
+    template <class F, typename... Args>
+    auto force_enqueue_front(F&& f, Args&&... args) {
+        return emplace(true /*front*/, true /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
+    }
+
+    // Exception behavior differs between the two execution paths:
+    //   * Tasks run on a worker thread: if they throw, `future.get()` inside
+    //     `wrapped_task` rethrows on the worker, which escapes the worker
+    //     lambda and calls std::terminate (covered by MultiThreadException).
+    //   * Tasks stolen by `help_while_waiting` (below) run on the caller, so
+    //     an exception propagates out to the caller instead
+    //     (covered by HelpWhileWaitingStolenException).
+    template <class T>
+    std::shared_future<T>& help_while_waiting(std::shared_future<T> &future) {
+        auto ready = [&]() {
+            return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+        };
+        while (workers.size() && !ready()) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex);
+                helper_wakeup.wait_for(lock, std::chrono::microseconds(100), [this, &ready]() {
+                    return !tasks.empty() || ready();
+                });
+                if (ready())
+                    break;
+                if (tasks.empty())
+                    continue;
+
+                task = std::move(tasks.front());
+                tasks.pop_front();
+            }
+
+            not_full.notify_one();
+            task();
+        }
+
+        return future;
     }
 
     void join();
@@ -43,22 +100,28 @@ class ThreadPool {
 
     ~ThreadPool();
 
+    size_t num_threads() const { return num_threads_; }
+
   private:
     void initialize(size_t num_threads);
 
+    size_t num_threads_;
     std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
+    size_t num_waiting_;
+    std::deque<std::function<void()>> tasks;
     size_t max_num_tasks_;
 
     std::mutex queue_mutex;
-    std::condition_variable empty_condition;
-    std::condition_variable full_condition;
+    std::condition_variable has_work; // task available or joining
+    std::condition_variable not_full; // queue has space
+    std::condition_variable all_waiting; // all workers are idle
+    std::condition_variable helper_wakeup; // task available for the helper or future is ready
 
     bool joining_;
     bool stop_;
 
     template <class F, typename... Args>
-    auto emplace(bool force, F&& f, Args&&... args) {
+    auto emplace(bool front, bool force, F&& f, Args&&... args) {
         using return_type = decltype(f(args...));
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
@@ -68,7 +131,7 @@ class ThreadPool {
 
         auto wrapped_task = [task,future]() {
             (*task)();
-            future.get(); // re-thrown exceptions (if any) from packaged_task
+            (void)future.get(); // re-thrown exceptions (if any) from packaged_task
         };
 
         if (!workers.size()) {
@@ -76,13 +139,19 @@ class ThreadPool {
             return future;
         } else {
             std::unique_lock<std::mutex> lock(queue_mutex);
-            full_condition.wait(lock, [this,force]() {
+            assert(!joining_);
+            not_full.wait(lock, [this,force]() {
                 return this->tasks.size() < this->max_num_tasks_ || force;
             });
-            tasks.emplace(std::move(wrapped_task));
+            if (front) {
+                tasks.emplace_front(std::move(wrapped_task));
+            } else {
+                tasks.emplace_back(std::move(wrapped_task));
+            }
         }
 
-        empty_condition.notify_one();
+        has_work.notify_one();
+        helper_wakeup.notify_one();
 
         return future;
     }

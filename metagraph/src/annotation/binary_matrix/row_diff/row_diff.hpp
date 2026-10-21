@@ -1,17 +1,21 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
 #include "common/vector.hpp"
 #include "common/logger.hpp"
+#include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/hashers/hash.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -30,8 +34,6 @@ namespace matrix {
 
 const std::string kRowDiffAnchorExt = ".anchors";
 const std::string kRowDiffForkSuccExt = ".rd_succ";
-
-const size_t RD_PATH_RESERVE_SIZE = 2;
 
 
 class IRowDiff {
@@ -52,9 +54,24 @@ class IRowDiff {
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
   protected:
+    template <std::derived_from<BinaryMatrix> Matrix>
+    std::vector<BinaryMatrix::Row>
+    get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column) const;
+
     // get row-diff paths starting at |row_ids|
-    std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
-    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
+    // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
+    // groups[g] records indices of row_ids paths traced in group g.
+    // Rows from different groups access disjoint rd_rows entries, enabling
+    // parallel reconstruction grouped by thread.
+    std::tuple<std::vector<BinaryMatrix::Row>,
+               std::vector<std::vector<size_t>>,
+               std::vector<size_t>,
+               std::vector<std::vector<size_t>>>
+    get_rd_ids(std::span<const BinaryMatrix::Row> row_ids, size_t num_threads = 1) const;
+
+    template <class F, class G, class H, class Callback>
+    void call_rows(std::span<const BinaryMatrix::Row> row_ids, F call_rd_rows, G add_diff,
+                   H decode_diffs, Callback call_row, size_t num_threads) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
@@ -85,6 +102,8 @@ class IRowDiff {
 template <class BaseMatrix>
 class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
+    using base_matrix_type = BaseMatrix;
+
     template <typename... Args>
     RowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
@@ -99,10 +118,23 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     /**
      * Returns the given column.
      */
-    std::vector<Row> get_column(Column column) const override;
+    std::vector<Row> get_column(Column column) const override {
+        return get_column_from_rows(*this, column);
+    }
 
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> row_ids) const override;
 
+    /**
+     * Return rows (in arbitrary order) and update the row indexes in |rows|
+     * to point to their respective rows in the vector returned.
+     *
+     * In contrast to get_rows_dict in most other classes, the rows here
+     * are not deduplicated. Benchmarks on real queries showed that merging
+     * identical reconstructed rows rarely shrinks the batch size by much
+     * (only a few percent on dense annotation rows; occasionally on the order
+     * of ~40% when duplication was high), while hashing requires a critical
+     * section that dominates the query time. Hence, we skip deduplication.
+     */
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
 
@@ -119,112 +151,146 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 };
 
 
-/**
- * Returns the given column.
- */
-template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
+template <std::derived_from<BinaryMatrix> Matrix>
+std::vector<BinaryMatrix::Row>
+IRowDiff::get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column) const {
     assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-
+    assert(matrix.num_rows() == graph_->max_index());
+    assert(anchor_.size() == matrix.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    std::vector<Row> result;
-    // TODO: implement a more efficient algorithm
+    std::vector<BinaryMatrix::Row> result;
+    // Reuse reconstruction paths across a small batch of rows.
+    BatchAccumulator<BinaryMatrix::Row> batch([&](const auto &row_ids) {
+        auto rows = matrix.get_rows(row_ids);
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            if (std::ranges::binary_search(rows[i], column))
+                result.push_back(row_ids[i]);
+        }
+    }, 32 /* rows per batch */);
     graph_->call_nodes([&](auto node) {
-        auto row = graph::AnnotatedDBG::graph_to_anno_index(node);
-        SetBitPositions set_bits = get_rows({ row })[0];
-        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
-            result.push_back(row);
+        batch.push(graph::AnnotatedDBG::graph_to_anno_index(node));
     });
+    batch.process_all_buffered();
     return result;
+}
+
+template <class F, class G, class H, class Callback>
+void IRowDiff::call_rows(std::span<const BinaryMatrix::Row> row_ids, F call_rd_rows,
+                         G add_diff, H decode_diffs, Callback call_row, size_t num_threads) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
+
+    if (row_ids.empty())
+        return;
+
+    // No sorting in order not to break the topological order for row-diff annotation
+
+    // get row-diff paths
+    Timer timer;
+    // Unique row-diff row IDs to fetch and decode
+    std::vector<BinaryMatrix::Row> rd_ids;
+    // Truncated reconstruction paths (indices into rd_ids) per queried row
+    std::vector<std::vector<size_t>> rd_paths_trunc;
+    // Multiplicity for each queried row path returned by get_rd_ids()
+    std::vector<size_t> times_traversed;
+    // Independent groups of row paths that can be reconstructed in parallel
+    std::vector<std::vector<size_t>> groups;
+    std::tie(rd_ids, rd_paths_trunc, times_traversed, groups) = get_rd_ids(row_ids, num_threads);
+    double rd_traversal_time = timer.elapsed();
+    timer.reset();
+
+    auto rd_rows = call_rd_rows(rd_ids, num_threads);
+    double call_rd_rows_time = timer.elapsed();
+    timer.reset();
+    std::vector<BinaryMatrix::Row>().swap(rd_ids);
+
+    size_t num_rd_bits = 0;
+    size_t total_capacity = 0;
+    // 200 rows per task, to make the task dispatch time negligible
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 200) \
+        reduction(+:num_rd_bits,total_capacity)
+    for (size_t i = 0; i < rd_rows.size(); ++i) {
+        decode_diffs(&rd_rows[i]);
+        std::sort(rd_rows[i].begin(), rd_rows[i].end(), utils::LessFirst());
+        num_rd_bits += rd_rows[i].size();
+        total_capacity += rd_rows[i].capacity();
+    }
+
+    double decode_diffs_time = timer.elapsed();
+    timer.reset();
+
+    // Reconstruct annotation rows from row-diff.
+    // Since get_rd_ids skips cross-thread deduplication, rows from different
+    // groups access disjoint rd_rows entries. We use that to reconstruct
+    // each group in parallel, while preserving the sequential dependency
+    // order within each group.
+    using RowType = typename std::decay_t<decltype(rd_rows)>::value_type;
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t g = 0; g < groups.size(); ++g) {
+        RowType result;
+        for (size_t i : groups[g]) {
+            auto it = rd_paths_trunc[i].rbegin();
+            result = rd_rows[*it];
+            if (!(--times_traversed[*it]))
+                RowType().swap(rd_rows[*it]);
+            for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
+                add_diff(rd_rows[*it], &result);
+                if (--times_traversed[*it]) {
+                    rd_rows[*it] = result;
+                } else {
+                    RowType().swap(rd_rows[*it]);
+                }
+            }
+            call_row(i, result);
+        }
+    }
+
+    common::logger->trace("RD query [threads: {}, rows: {} -> {} ({:.1f}x)] -- "
+            "traversal: {:.2f} sec, call_rd_rows: {:.2f} sec (set bits: {}, capacity: {}), "
+            "decoding: {:.2f} sec, reconstruction: {:.2f} sec",
+            num_threads, row_ids.size(), rd_rows.size(), (double)rd_rows.size()/row_ids.size(),
+            rd_traversal_time, call_rd_rows_time, num_rd_bits, total_capacity,
+            decode_diffs_time, timer.elapsed());
+
+    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
+    assert(std::all_of(rd_rows.begin(), rd_rows.end(), [](const auto &v) { return v.empty(); }));
 }
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
-RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
-
-    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
-    DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
-    rd_ids = std::vector<Row>();
-
-    // reconstruct annotation rows from row-diff
+RowDiff<BaseMatrix>::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        SetBitPositions &result = rows[i];
-        // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            if (--times_traversed[*it]) {
-                rd_rows[*it] = result;
-            } else {
-                // free memory
-                rd_rows[*it] = {};
-            }
-        }
-    }
-    DEBUG_LOG("Reconstructed annotations for {} rows", rows.size());
-    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
-
+    call_rows(row_ids,
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
+            return diffs_.get_rows(rd_ids, num_threads);
+        },
+        add_diff, [](SetBitPositions *row) {},
+        [&](size_t i, const SetBitPositions &row) { rows[i] = row; },
+        1
+    );
     return rows;
 }
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    if (num_threads > 1)
-        return BinaryMatrix::get_rows_dict(rows, num_threads);
-
-    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
-    // No sorting in order not to break the topological order for row-diff annotation
-
-    // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(*rows);
-    common::logger->trace("RD: paths traversed, rows to query: {} -> {}", rows->size(), rd_ids.size());
-
-    std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
-    DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
-    rd_ids = std::vector<Row>();
-
-    // reconstruct annotation rows from row-diff
-    SetBitPositions result;
-
-    for (size_t i = 0; i < rows->size(); ++i) {
-        result.resize(0);
-        // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            if (--times_traversed[*it]) {
-                rd_rows[*it] = result;
-            } else {
-                // free memory
-                rd_rows[*it] = {};
-            }
-        }
-        auto it = unique_rows.emplace(result).first;
-        (*rows)[i] = it - unique_rows.begin();
-    }
-    DEBUG_LOG("Reconstructed annotations for {} rows", rows->size());
-    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
-
-    return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
+    std::vector<SetBitPositions> rows_dict(rows->size());
+    call_rows(*rows,
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
+            return diffs_.get_rows(rd_ids, num_threads);
+        },
+        add_diff, [](SetBitPositions *row) {},
+        [&](size_t i, const SetBitPositions &row) {
+            rows_dict[i] = row;
+            (*rows)[i] = i;
+        },
+        num_threads
+    );
+    return rows_dict;
 }
-
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(std::istream &f) {
@@ -232,13 +298,17 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
     std::string version(4, '\0');
     if (f.read(version.data(), 4) && version == "v2.0") {
         if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            auto anchor_start = f.tellg();
             if (!anchor_.load(f) || !fork_succ_.load(f))
                 return false;
+            // anchor_ / fork_succ_ are accessed randomly, hint the kernel.
+            utils::madvise_random_range(f, anchor_start, f.tellg() - anchor_start);
         }
     } else {
         // backward compatibility
         f.seekg(pos);
         if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            auto anchor_start = f.tellg();
             if (!anchor_.load(f))
                 return false;
 
@@ -246,6 +316,8 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
                 "Loading old version of RowDiff without a fork routing bitmap."
                 " The last outgoing edges will be used as successors.");
             fork_succ_ = fork_succ_bv_type();
+            // anchor_ is accessed randomly, hint the kernel.
+            utils::madvise_random_range(f, anchor_start, f.tellg() - anchor_start);
         }
     }
     return diffs_.load(f);

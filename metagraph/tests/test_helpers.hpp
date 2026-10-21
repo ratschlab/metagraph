@@ -1,11 +1,49 @@
 #ifndef __TEST_HELPERS_HPP__
 #define __TEST_HELPERS_HPP__
 
+#include <cstdlib>
+#include <filesystem>
 #include <set>
+#include <string>
 
 #include <gtest/gtest.h>
 
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
+#include "graph/representation/succinct/boss_construct.hpp"
+
+
+// Per-process unit-test dump directory.
+// If TEST_DUMP_DIR is set, use it; otherwise use utils::create_temp_dir().
+inline const std::string& test_dump_dir() {
+    static const std::string dir = [] {
+        namespace fs = std::filesystem;
+        if (const char* env = std::getenv("TEST_DUMP_DIR"); env && *env) {
+            fs::create_directories(env);
+            mtg::common::logger->trace("Using TEST_DUMP_DIR={}", env);
+            return std::string(env);
+        }
+        return utils::create_temp_dir(fs::temp_directory_path(),
+                                      "metagraph_tests").string();
+    }();
+    return dir;
+}
+
+// BOSSConstructor factory that uses the test dump dir for swap files.
+inline mtg::graph::boss::BOSSConstructor make_test_boss_constructor(
+        size_t k,
+        bool both_strands = false,
+        uint8_t bits_per_count = 0,
+        const std::string &filter_suffix = "",
+        size_t indexed_suffix_length = 0,
+        size_t num_threads = 1,
+        double memory_preallocated = 0,
+        mtg::kmer::ContainerType container = mtg::kmer::ContainerType::VECTOR) {
+    return mtg::graph::boss::BOSSConstructor(
+        k, both_strands, bits_per_count, filter_suffix,
+        indexed_suffix_length, num_threads, memory_preallocated,
+        container, test_dump_dir());
+}
 
 
 namespace {

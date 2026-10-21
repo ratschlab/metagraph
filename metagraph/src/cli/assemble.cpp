@@ -81,6 +81,17 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     Json::Value diff_json;
     fin >> diff_json;
 
+    // Validate the JSON shape early. Without this, missing 'groups' silently
+    // produces an empty output.
+    if (!diff_json.isMember("groups") || !diff_json["groups"].isArray()
+            || diff_json["groups"].empty()) {
+        logger->error("'{}' has no 'groups' array. Expected: "
+                      "{{\"groups\": [{{\"experiments\": [...]}}]}}. "
+                      "See metagraph/tests/data/example_simple.diff.json.",
+                      config->assembly_config_file);
+        exit(1);
+    }
+
     tsl::hopscotch_set<std::string> foreground_labels;
     tsl::hopscotch_set<std::string> background_labels;
     tsl::hopscotch_set<std::string> shared_foreground_labels;
@@ -151,15 +162,16 @@ int assemble(Config *config) {
     Timer timer;
     logger->trace("Graph loading...");
 
-    auto graph = load_critical_dbg(files.at(0));
-
-    logger->trace("Graph loaded in {} sec", timer.elapsed());
+    std::shared_ptr<DeBruijnGraph> graph;
 
     if (config->infbase_annotators.size()) {
         config->infbase = files.at(0);
 
         assert(config->assembly_config_file.size());
-        auto anno_graph = initialize_annotated_dbg(graph, *config);
+        auto loaded = load_graph_with_async_annotation(*config);
+        graph = loaded.first.get();
+        logger->trace("Graph loaded in {} sec", timer.elapsed());
+        auto anno_graph = loaded.second.get();
 
         logger->trace("Generating masked graphs...");
 
@@ -197,6 +209,9 @@ int assemble(Config *config) {
 
         return 0;
     }
+
+    graph = load_critical_dbg(files.at(0));
+    logger->trace("Graph loaded in {} sec", timer.elapsed());
 
     logger->trace("Extracting sequences from graph...");
 

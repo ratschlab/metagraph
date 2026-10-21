@@ -31,14 +31,22 @@ class RowFlat : public RowMajor, public GetEntrySupport {
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
 
+    // Iterate the rows in order, invoking `callback` once per row with its
+    // `SetBitPositions`. Mirrors `BRWT::call_rows` so RowDiff converters can
+    // walk both representations through the same interface.
+    void call_rows(const std::function<void(const SetBitPositions &)> &callback) const;
+
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
-    static void serialize(const std::function<void(const RowCallback&)> &call_rows,
+    // Append a freshly-serialized RowFlat body to `filename`. The file must
+    // already exist; callers write any preceding header (label encoder,
+    // version magic, RowDiff anchors, …) before calling this.
+    static void serialize(const std::string &filename,
+                          const std::function<void(const RowCallback&)> &call_rows,
                           uint64_t num_columns,
                           uint64_t num_rows,
-                          uint64_t num_set_bits,
-                          const std::string &filename, bool append_file);
+                          uint64_t num_set_bits);
 
     const BitVector& data() const { return *compressed_rows_; }
 

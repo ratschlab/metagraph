@@ -1,6 +1,7 @@
 #include "kmer/kmer_transform.hpp"
 
 #include <random>
+#include <utility>
 #include <vector>
 
 #include "kmer/kmer_extractor.hpp"
@@ -11,6 +12,34 @@
 
 namespace {
 using namespace mtg;
+
+template <typename WordTypes>
+class Transform : public ::testing::Test {};
+
+using TransformTypes = ::testing::Types<std::pair<uint64_t, sdsl::uint128_t>,
+                                       std::pair<sdsl::uint128_t, sdsl::uint256_t>>;
+TYPED_TEST_SUITE(Transform, TransformTypes);
+
+TYPED_TEST(Transform, ExpandTwoBitCharacters) {
+    using From = kmer::KMerBOSS<typename TypeParam::first_type, 2>;
+    using To = kmer::KMerBOSS<typename TypeParam::second_type, 3>;
+    // The distinct source type selects the generic implementation.
+    struct GenericFrom : From { using From::From; };
+
+    std::mt19937 gen(12345);
+    std::uniform_int_distribution<uint32_t> character(0, 3);
+    for (size_t k = 2; k <= sizeof(typename From::WordType) * 8 / 2; ++k) {
+        for (size_t trial = 0; trial < 100; ++trial) {
+            std::vector<uint8_t> sequence(k);
+            for (auto &value : sequence)
+                value = trial < 4 ? trial : character(gen);
+
+            const auto expected = To(sequence).data();
+            EXPECT_EQ(expected, kmer::transform<To>(From(sequence), k));
+            EXPECT_EQ(expected, kmer::transform<To>(GenericFrom(sequence), k));
+        }
+    }
+}
 
 #if ! _PROTEIN_GRAPH
 

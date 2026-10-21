@@ -41,7 +41,7 @@ int augment_graph(Config *config) {
     //       which are indexed by the rows of the BOSS table.
     //       This can be fixed by using the same indexes in all cases
     //       (non-contiguous indexing)
-    if (!node_weights->is_compatible(*graph)) {
+    if (node_weights && !node_weights->is_compatible(*graph)) {
         logger->error("Node weights are not compatible with graph '{}' "
                       "and will not be updated", config->infbase);
         node_weights.reset();
@@ -138,8 +138,6 @@ int augment_graph(Config *config) {
     auto annotation = initialize_annotation(config->infbase_annotators.at(0), *config);
 
     if (!annotation->load(config->infbase_annotators.at(0))) {
-        logger->error("Cannot load graph annotation from '{}'",
-                      config->infbase_annotators.at(0));
         exit(1);
     } else {
         logger->trace("Annotation was loaded in {} sec", timer.elapsed());

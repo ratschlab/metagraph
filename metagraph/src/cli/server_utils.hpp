@@ -14,12 +14,10 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      size_t request_id,
                      const std::function<Json::Value(const std::string &)> &process);
 
-// An exception that may be thrown inside the callback `process` to indicate that the response
-// is already sent by the caller and no additional action in `process_request` is required.
-class CustomResponse : public std::exception {
-    const char* what() const noexcept override {
-        return "Response already sent by callback";
-    }
+class CurrentlyInitializingError : public std::runtime_error {
+  public:
+    CurrentlyInitializingError()
+        : std::runtime_error("Server is currently initializing") {}
 };
 
 Json::Value parse_json_string(const std::string &msg);

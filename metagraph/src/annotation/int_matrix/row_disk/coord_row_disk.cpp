@@ -9,6 +9,28 @@ namespace matrix {
 
 using mtg::common::logger;
 
+std::vector<BinaryMatrix::SetBitPositions>
+CoordRowDisk::get_rows(std::span<const Row> row_ids) const {
+    View view = get_view();
+    std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = view.get_row(row_ids[i]);
+    }
+    return rows;
+}
+
+std::vector<CoordRowDisk::RowValues>
+CoordRowDisk::get_row_values(std::span<const Row> rows, size_t num_threads) const {
+    return get_row_data_parallel<RowValues>(rows, num_threads,
+                [&](const auto &rows) { return get_view().get_row_values(rows); });
+}
+
+std::vector<CoordRowDisk::RowTuples>
+CoordRowDisk::get_row_tuples(std::span<const Row> rows, size_t num_threads) const {
+    return get_row_data_parallel<RowTuples>(rows, num_threads,
+                [&](const auto &rows) { return get_view().get_row_tuples(rows); });
+}
+
 std::vector<BinaryMatrix::Row>
 CoordRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for CoordRowDisk, consider"
@@ -72,7 +94,7 @@ IntMatrix::RowValues CoordRowDisk::View::get_row_values(Row row) const {
 
 
 std::vector<IntMatrix::RowValues>
-CoordRowDisk::View::get_row_values(const std::vector<Row> &row_ids) const {
+CoordRowDisk::View::get_row_values(std::span<const Row> row_ids) const {
    std::vector<RowValues> rows_with_values(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -113,7 +135,7 @@ MultiIntMatrix::RowTuples CoordRowDisk::View::get_row_tuples(Row row) const {
 }
 
 std::vector<MultiIntMatrix::RowTuples>
-CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
+CoordRowDisk::View::get_row_tuples(std::span<const Row> rows) const {
     std::vector<RowTuples> rows_with_tuples(rows.size());
 
     for (size_t i = 0; i < rows.size(); ++i) {
@@ -125,8 +147,6 @@ CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
 
 
 bool CoordRowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
-    assert(_f);
     try {
         num_columns_ = load_number(f);
         auto boundary_start = load_number(f);
@@ -136,15 +156,17 @@ bool CoordRowDisk::load(std::istream &f) {
         bits_for_number_of_vals_ = load_number(f);
         bits_for_single_value_ = load_number(f);
 
-        buffer_params_.filename = _f->get_filename();
+        buffer_params_.filename = utils::get_filename(f);
         buffer_params_.offset = f.tellg();
 
         assert(boundary_start >= buffer_params_.offset);
 
-        f.seekg(boundary_start, std::ios_base::beg);
-
-        boundary_.load(f);
-        num_attributes_ = load_number(f);
+        // boundary_ is too large to load into RAM, always mmap it.
+        utils::load_mmap_random(buffer_params_.filename, boundary_start,
+                                [&](std::istream &in) {
+            boundary_.load(in);
+            num_attributes_ = load_number(in);
+        });
 
         num_rows_ = boundary_.num_set_bits();
 

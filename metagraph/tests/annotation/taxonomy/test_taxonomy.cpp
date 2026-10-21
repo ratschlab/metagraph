@@ -3,15 +3,24 @@
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
-#define private public
-#define protected public
-
 #include "annotation/taxonomy/tax_classifier.hpp"
+
+namespace mtg::annot {
+
+struct TaxonomyClsAnnoTestAccess : TaxonomyClsAnno {
+    using TaxonomyClsAnno::dfs_statistics;
+    using TaxonomyClsAnno::rmq_preprocessing;
+    using TaxonomyClsAnno::node_to_linearization_idx_;
+    using TaxonomyClsAnno::rmq_data_;
+    using TaxonomyBase::node_depth_;
+};
+
+} // namespace mtg::annot
 
 namespace {
 
 TEST(TaxonomyTest, ClsAnno_DfsStatistics) {
-    std::unique_ptr<mtg::annot::TaxonomyClsAnno> tax = std::make_unique<mtg::annot::TaxonomyClsAnno>();
+    auto tax = std::make_unique<mtg::annot::TaxonomyClsAnnoTestAccess>();
     tsl::hopscotch_map<uint32_t, std::vector<uint32_t>> tree {
         {0, {1, 2, 3}},      // node 0 -> root
         {1, {4, 5}},         // node 1
@@ -58,7 +67,7 @@ TEST(TaxonomyTest, ClsAnno_DfsStatistics) {
 }
 
 TEST(TaxonomyTest, ClsAnno_RmqPreprocessing) {
-    std::unique_ptr<mtg::annot::TaxonomyClsAnno> tax = std::make_unique<mtg::annot::TaxonomyClsAnno>();
+    auto tax = std::make_unique<mtg::annot::TaxonomyClsAnnoTestAccess>();
 
     tax->node_depth_ = {
         {0, 4},

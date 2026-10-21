@@ -10,7 +10,7 @@ namespace matrix {
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_.size()) {
-        return 0;
+        return explicit_num_rows_if_empty_;
     } else {
         assert(columns_[0]);
         return columns_[0]->size();
@@ -25,7 +25,7 @@ bool ColumnMajor::get(Row row, Column column) const {
 }
 
 std::vector<ColumnMajor::SetBitPositions>
-ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
+ColumnMajor::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t j = 0; j < columns_.size(); ++j) {
@@ -43,37 +43,27 @@ ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-Vector<std::pair<ColumnMajor::Column, uint64_t>>
-ColumnMajor::get_column_ranks(Row row) const {
-    assert(row < num_rows() || !columns_.size());
-
-    Vector<std::pair<Column, uint64_t>> result;
-    for (size_t i = 0; i < columns_.size(); ++i) {
-        assert(columns_[i]);
-
-        if (uint64_t r = columns_[i]->conditional_rank1(row))
-            result.emplace_back(i, r);
-    }
-    return result;
-}
-
 std::vector<Vector<std::pair<ColumnMajor::Column, uint64_t>>>
-ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
-    std::vector<Vector<std::pair<Column, uint64_t>>> result(row_ids.size());
+ColumnMajor::get_column_ranks(std::span<const Row> rows, size_t num_threads) const {
+    using T = Vector<std::pair<Column, uint64_t>>;
 
-    for (size_t j = 0; j < columns_.size(); ++j) {
-        assert(columns_[j]);
-        const bit_vector &col = *columns_[j];
+    return get_row_data_parallel<T>(rows, num_threads, [&](std::span<const Row> row_ids) {
+        std::vector<T> result(row_ids.size());
 
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            assert(row_ids[i] < num_rows());
+        for (size_t j = 0; j < columns_.size(); ++j) {
+            assert(columns_[j]);
+            const bit_vector &col = *columns_[j];
 
-            if (uint64_t r = col.conditional_rank1(row_ids[i]))
-                result[i].emplace_back(j, r);
+            for (size_t i = 0; i < row_ids.size(); ++i) {
+                assert(row_ids[i] < num_rows());
+
+                if (uint64_t r = col.conditional_rank1(row_ids[i]))
+                    result[i].emplace_back(j, r);
+            }
         }
-    }
 
-    return result;
+        return result;
+    });
 }
 
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
@@ -99,6 +89,7 @@ bool ColumnMajor::load(std::istream &in) {
         return false;
 
     columns_.clear();
+    explicit_num_rows_if_empty_ = 0;
 
     try {
         columns_.resize(load_number(in));
@@ -110,6 +101,10 @@ bool ColumnMajor::load(std::istream &in) {
             c = std::make_unique<bit_vector_sd>();
             if (!c->load(in))
                 return false;
+        }
+        // optional trailing row count for empty matrices
+        if (columns_.empty() && in.good() && in.peek() != std::istream::traits_type::eof()) {
+            explicit_num_rows_if_empty_ = load_number(in);
         }
         return true;
     } catch (...) {
@@ -129,6 +124,9 @@ void ColumnMajor::serialize(std::ostream &out) const {
         } else {
             c->copy_to<bit_vector_sd>().serialize(out);
         }
+    }
+    if (columns_.empty() && explicit_num_rows_if_empty_ > 0) {
+        serialize_number(out, explicit_num_rows_if_empty_);
     }
 }
 

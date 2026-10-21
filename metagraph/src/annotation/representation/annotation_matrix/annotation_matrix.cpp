@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include "common/logger.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
@@ -15,6 +16,7 @@ using namespace mtg::annot::matrix;
 
 using utils::remove_suffix;
 using utils::make_suffix;
+using mtg::common::logger;
 
 
 template <class BinaryMatrixType, typename Label>
@@ -32,18 +34,33 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
     const auto &fname = make_suffix(filename, kExtension);
-    using T = StaticBinRelAnnotator<BinaryMatrixType, Label>;
-    bool use_mmap = std::is_same_v<T, RowDiffDiskAnnotator>
-                        || std::is_same_v<T, IntRowDiffDiskAnnotator>
-                        || std::is_same_v<T, RowDiffDiskCoordAnnotator>;
-    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, use_mmap || utils::with_mmap());
-    if (!in->good())
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, utils::with_mmap());
+    if (!in->good()) {
+        logger->error("Cannot open annotation file '{}': {}", fname,
+                      utils::file_read_failure_detail(fname));
         return false;
+    }
 
     try {
         assert(matrix_.get());
-        return label_encoder_.load(*in) && matrix_->load(*in);
+        if (!label_encoder_.load(*in)) {
+            logger->error("Cannot load annotation label encoder from '{}': {}", fname,
+                          utils::file_read_failure_detail(fname));
+            return false;
+        }
+        if (!matrix_->load(*in)) {
+            logger->error("Cannot load annotation matrix from '{}': {}", fname,
+                          utils::file_read_failure_detail(fname));
+            return false;
+        }
+        return true;
+    } catch (const std::exception &e) {
+        logger->error("Cannot load annotation from '{}': {} (caught: {})", fname,
+                      utils::file_read_failure_detail(fname), e.what());
+        return false;
     } catch (...) {
+        logger->error("Cannot load annotation from '{}': {} (caught unknown exception)",
+                      fname, utils::file_read_failure_detail(fname));
         return false;
     }
 }

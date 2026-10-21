@@ -6,6 +6,8 @@
 #include <filesystem>
 
 #include <dictionary.hpp>
+#include <offsets.hpp>
+#include <kmer.hpp>
 #include <sdsl/uint256_t.hpp>
 
 #include "graph/representation/base/sequence_graph.hpp"
@@ -27,9 +29,9 @@ class DBGSSHash : public DeBruijnGraph {
     using kmer_t = sshash::dna_uint_kmer_t<KmerInt>;
 #endif
 
-    using dict_t = std::variant<sshash::dictionary<kmer_t<KmerInt64>>,
-                                sshash::dictionary<kmer_t<KmerInt128>>,
-                                sshash::dictionary<kmer_t<KmerInt256>>>;
+    using dict_t = std::variant<sshash::dictionary<kmer_t<KmerInt64>, sshash::decoded_offsets>,
+                                sshash::dictionary<kmer_t<KmerInt128>, sshash::decoded_offsets>,
+                                sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
     DBGSSHash(const std::string& input_filename,

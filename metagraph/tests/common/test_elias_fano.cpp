@@ -13,6 +13,8 @@
 #include "common/utils/file_utils.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
+#include "../test_helpers.hpp"
+
 
 namespace {
 
@@ -33,7 +35,7 @@ size_t encode(const std::vector<T> &values, const std::string &file_name) {
 }
 
 TYPED_TEST(EliasFanoTest, WriteEmpty) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     size_t file_size = encode<TypeParam>({}, out.name());
     // 17 = 2*8 + 1; no data is written to the file except number of high bytes (8
     // bytes each), number of low bits (1 byte) and number of elements (8 bytes)
@@ -42,7 +44,7 @@ TYPED_TEST(EliasFanoTest, WriteEmpty) {
 }
 
 TYPED_TEST(EliasFanoTest, ReadEmpty) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     encode<TypeParam>({}, out.name());
 
     EliasFanoDecoder<TypeParam> decoder(out.name());
@@ -50,7 +52,7 @@ TYPED_TEST(EliasFanoTest, ReadEmpty) {
 }
 
 TYPED_TEST(EliasFanoTest, WriteOne) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     size_t file_size = encode<TypeParam>({ (TypeParam)1234 }, out.name());
     // 16 + 1 + size(T); is the overhead, i.e. the number of high bytes (8
     // bytes), number of low bits (1 byte), the number of elements (8 bytes) and the
@@ -61,7 +63,7 @@ TYPED_TEST(EliasFanoTest, WriteOne) {
 }
 
 TYPED_TEST(EliasFanoTest, ReadOne) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     encode<TypeParam>({ 1234 }, file.name());
     EliasFanoDecoder<TypeParam> decoder(file.name());
     std::optional<TypeParam> decoded = decoder.next();
@@ -71,7 +73,7 @@ TYPED_TEST(EliasFanoTest, ReadOne) {
 }
 
 TYPED_TEST(EliasFanoTest, WriteTwo) {
-    utils::TempFile out;
+    utils::TempFile out(test_dump_dir());
     size_t file_size = encode<TypeParam>({ (TypeParam)1234, (TypeParam)4321 }, out.name());
     // 1234  and 4321 are encoded in 4 bytes plus the additional 17 byte header overhead
     EXPECT_EQ(17 + sizeof(TypeParam) + 4U, file_size);
@@ -80,7 +82,7 @@ TYPED_TEST(EliasFanoTest, WriteTwo) {
 }
 
 TYPED_TEST(EliasFanoTest, ReadTwo) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     encode<TypeParam>({ (TypeParam)1234, (TypeParam)4321 }, file.name());
 
     EliasFanoDecoder<TypeParam> decoder(file.name());
@@ -96,7 +98,7 @@ TYPED_TEST(EliasFanoTest, ReadTwo) {
 TYPED_TEST(EliasFanoTest, ReadWriteIncrementOne) {
     std::vector<TypeParam> values(100);
     std::iota(values.begin(), values.end(), 0);
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     // each value is represented in 2 bits, plus 17 bytes overhead for the header
     EXPECT_EQ(17 + sizeof(TypeParam) + (2 * 100) / 8U, file_size);
@@ -115,7 +117,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteIncrementTwo) {
     std::vector<TypeParam> values(100);
     uint32_t i = 0;
     std::for_each(values.begin(), values.end(), [&i](TypeParam &v) { v = 2 * i++; });
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -132,7 +134,7 @@ TYPED_TEST(EliasFanoTest, VariousSizes) {
     for (uint32_t size = 1012; size < 1036; ++size) {
         std::vector<TypeParam> values(size);
         std::iota(values.begin(), values.end(), 0);
-        utils::TempFile file;
+        utils::TempFile file(test_dump_dir());
         size_t file_size = encode(values, file.name());
         EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -155,7 +157,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly64LowBits) {
     std::vector<TypeParam> values = { 1,   5,   7,   12,  16,  17,  25,  31,  32,  37,  40,
                                  50,  53,  62,  71,  74,  82,  92,  97,  103, 104, 105,
                                  107, 114, 122, 123, 125, 129, 130, 139, 147, 150, 153 };
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -175,7 +177,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteExactly128LowBits) {
                 125, 129, 129, 139, 147, 150, 153, 161, 169, 174, 184, 194, 203,
                 210, 213, 220, 230, 234, 236, 243, 247, 253, 261, 268, 275, 279,
                 287, 289, 296, 298, 299, 300, 307, 311, 317, 321, 326, 333, 338 };
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -200,7 +202,7 @@ TYPED_TEST(EliasFanoTest, LastByteRead) {
                 1618, 1625, 1634, 1739, 1754, 1755, 1763, 1801, 1812, 1819, 1820,
                 2121, 2124, 2129, 2145, 2147, 2148, 2196, 2201, 2203, 2210, 2275,
                 2313, 2314, 2316, 2324, 2337, 2338, 2340 };
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     size_t file_size = encode(values, file.name());
     EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -224,7 +226,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteRandom) {
             i += dist10(rng);
             v = i;
         });
-        utils::TempFile file;
+        utils::TempFile file(test_dump_dir());
         size_t file_size = encode(values, file.name());
         EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -254,7 +256,7 @@ TYPED_TEST(EliasFanoTest, ReadWriteRandomLargerThanBuffer) {
             v = i;
         });
         values.back() = upper_bound;
-        utils::TempFile file;
+        utils::TempFile file(test_dump_dir());
         size_t file_size = encode(values, file.name());
         EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -273,14 +275,14 @@ class EliasFanoBufferedTest : public ::testing::Test {};
 TYPED_TEST_SUITE(EliasFanoBufferedTest, ValueTypes);
 
 TYPED_TEST(EliasFanoBufferedTest, Empty) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     encode<TypeParam>({}, file.name());
     EliasFanoDecoder<TypeParam> decoder(file.name());
     EXPECT_FALSE(decoder.next().has_value());
 }
 
 TYPED_TEST(EliasFanoBufferedTest, InsertOne) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     encode<TypeParam>({ (TypeParam)43 }, file.name());
     EliasFanoDecoder<TypeParam> decoder(file.name());
     std::optional<TypeParam> decoded = decoder.next();
@@ -290,7 +292,7 @@ TYPED_TEST(EliasFanoBufferedTest, InsertOne) {
 }
 
 TYPED_TEST(EliasFanoBufferedTest, InsertFullChunk) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
         under_test.add(2 * i);
@@ -306,7 +308,7 @@ TYPED_TEST(EliasFanoBufferedTest, InsertFullChunk) {
 }
 
 TYPED_TEST(EliasFanoBufferedTest, InsertTwoChunks) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 3);
     for (uint32_t i = 0; i < 4; ++i) {
         under_test.add(2 * i);
@@ -322,7 +324,7 @@ TYPED_TEST(EliasFanoBufferedTest, InsertTwoChunks) {
 }
 
 TYPED_TEST(EliasFanoBufferedTest, InsertManyChunks) {
-    utils::TempFile file;
+    utils::TempFile file(test_dump_dir());
     EliasFanoEncoderBuffered<TypeParam> under_test(file.name(), 10);
     for (uint32_t i = 0; i < 75; ++i) {
         under_test.add(2 * i);
@@ -353,7 +355,7 @@ TEST(EliasFanoTest128, ReadWriteRandomLarge) {
                 }
                 v = i;
             });
-            utils::TempFile file;
+            utils::TempFile file(test_dump_dir());
             size_t file_size = encode(values, file.name());
             EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 
@@ -385,7 +387,7 @@ TEST(EliasFanoTest256, ReadWriteRandomLarge) {
                 }
                 v = i;
             });
-            utils::TempFile file;
+            utils::TempFile file(test_dump_dir());
             size_t file_size = encode(values, file.name());
             EXPECT_EQ(file_size, std::filesystem::file_size(file.name()));
 

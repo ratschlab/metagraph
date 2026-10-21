@@ -255,44 +255,6 @@ void gfa_map_files(const Config *config,
     }
 }
 
-// std::string format_alignment(const std::string &header,
-//                              const AlignmentResults &paths,
-//                              const DeBruijnGraph &graph,
-//                              const Config &config) {
-//     std::string sout;
-//     if (!config.output_json) {
-//         sout += fmt::format("{}\t{}", header, paths.get_query());
-//         if (paths.empty()) {
-//             sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
-//         } else {
-//             for (const auto &path : paths) {
-//                 sout += fmt::format("\t{}", path);
-//             }
-//             sout += "\n";
-//         }
-
-//     } else {
-//         Json::StreamWriterBuilder builder;
-//         builder["indentation"] = "";
-
-//         bool secondary = false;
-//         for (size_t i = 0; i < paths.size(); ++i) {
-//             const auto &path = paths[i];
-
-//             Json::Value json_line = path.to_json(graph.get_k(), secondary, header);
-//             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
-//             secondary = true;
-//         }
-
-//         if (paths.empty()) {
-//             Json::Value json_line = graph::align::Alignment().to_json(graph.get_k(), secondary, header);
-//             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
-//         }
-//     }
-
-//     return sout;
-// }
-
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -300,10 +262,21 @@ int align_to_graph(Config *config) {
 
     assert(config->infbase.size());
 
-    // initialize graph
-    auto graph = load_critical_dbg(config->infbase);
+    // For graph-only outputs/queries, avoid starting annotation loading.
+    const bool graph_only_path = config->outfbase.ends_with(".gfa")
+                                 || config->map_sequences;
+    std::shared_ptr<DeBruijnGraph> graph;
+    std::future<std::unique_ptr<AnnotatedDBG>> anno_dbg_future;
+    if (graph_only_path) {
+        graph = load_critical_dbg(config->infbase);
+    } else {
+        // Load graph and annotation in parallel for alignment mode.
+        auto loaded = load_graph_with_async_annotation(*config);
+        graph = loaded.first.get();
+        anno_dbg_future = std::move(loaded.second);
+    }
 
-    if (utils::ends_with(config->outfbase, ".gfa")) {
+    if (config->outfbase.ends_with(".gfa")) {
         gfa_map_files(config, files, *graph);
         return 0;
     }
@@ -358,11 +331,10 @@ int align_to_graph(Config *config) {
         }, sshash->data());
     }
 
+    assert(config->infbase_annotators.size() <= 1);
     std::unique_ptr<AnnotatedDBG> anno_dbg;
-    if (config->infbase_annotators.size()) {
-        assert(config->infbase_annotators.size() == 1);
-        anno_dbg = initialize_annotated_dbg(graph, *config);
-    }
+    if (anno_dbg_future.valid())
+        anno_dbg = anno_dbg_future.get();
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
@@ -439,7 +411,7 @@ int align_to_graph(Config *config) {
                     anno_buffer.emplace(*aln_graph, anno_dbg->get_annotator());
 
                 for (const auto &[header, query] : batch) {
-                    align_redone::Query aln_query(*graph, query);
+                    align_redone::Query aln_query(*aln_graph, query);
 
                     std::unique_ptr<align_redone::ExactSeeder> seeder;
                     if (anno_dbg) {
@@ -469,6 +441,7 @@ int align_to_graph(Config *config) {
                                                   config->alignment_connect_anchors);
                     }
 
+                    std::lock_guard<std::mutex> lock(print_mutex);
                     *out << header << "\t" << query;
                     if (paths.size()) {
                         for (const auto &path : paths) {

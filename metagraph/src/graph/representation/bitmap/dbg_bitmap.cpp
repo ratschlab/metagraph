@@ -38,11 +38,11 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(std::string_view sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence, mode_ == CANONICAL)) {
         if (terminate())
             return;
 
-        callback(in_graph ? to_node(kmer) : npos);
+        callback(valid ? to_node(kmer) : npos);
     }
 }
 
@@ -53,11 +53,11 @@ void DBGBitmap::map_to_nodes(std::string_view sequence,
 void DBGBitmap::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)> &callback,
                                           const std::function<bool()> &terminate) const {
-    for (const auto &[kmer, in_graph] : sequence_to_kmers(sequence)) {
+    for (const auto &[kmer, valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
-        callback(in_graph ? to_node(kmer) : npos);
+        callback(valid ? to_node(kmer) : npos);
     }
 }
 

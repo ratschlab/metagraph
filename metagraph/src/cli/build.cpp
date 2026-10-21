@@ -127,6 +127,7 @@ int build_graph(Config *config) {
                 config->graph_mode == DeBruijnGraph::CANONICAL,
                 config->count_width,
                 suffix,
+                suffix.empty() ? config->node_suffix_length : 0,
                 get_num_threads(),
                 config->memory_available * kBytesInGigabyte,
                 config->tmp_dir.empty() ? kmer::ContainerType::VECTOR
@@ -163,14 +164,10 @@ int build_graph(Config *config) {
                     utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
         }
 
-        if (config->inplace) {
+        if (!config->in_ram) {
             if (config->mark_dummy_kmers) {
-                logger->warn("Graph is being constructed in-place, dummy k-mers will"
-                             " not be marked. Run `metagraph transform --clear-dummy` manually after construction.");
-            }
-            if (config->node_suffix_length) {
-                logger->warn("Graph is being constructed in-place, k-mer suffixes will"
-                             " not be indexed. Run `metagraph transform --index-ranges ...` manually after construction.");
+                logger->error("--mask-dummy requires --in-ram (dummy marking needs the graph in RAM)");
+                exit(1);
             }
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
                                    config->graph_mode, config->state);
@@ -346,26 +343,6 @@ int build_graph(Config *config) {
             logger->trace("Dummy k-mer detection done in {} sec", timer.elapsed());
         }
 
-        size_t suffix_length = std::min((size_t)config->node_suffix_length,
-                                        dbg_succ->get_boss().get_k());
-
-        if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
-            logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
-                         static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
-
-        } else {
-            logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
-                          suffix_length,
-                          std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
-                                * 2. * sizeof(uint64_t) * 1e-6);
-            timer.reset();
-            dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
-            logger->trace("Compressed node ranges to approx. {:.2f} MB",
-                          dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
-
-            logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
-        }
-
         if (config->state != dbg_succ->get_state()) {
             logger->trace("Converting graph to state {}", Config::state_to_string(config->state));
             timer.reset();
@@ -430,26 +407,6 @@ int concatenate_graph_chunks(Config *config) {
                               " remove redundant ones, and mark"
                               " those that cannot be removed");
                 dbg_succ->mask_dummy_kmers(get_num_threads(), true);
-            }
-
-            size_t suffix_length = std::min((size_t)config->node_suffix_length,
-                                            dbg_succ->get_boss().get_k());
-
-            if (suffix_length * log2(dbg_succ->get_boss().alph_size - 1) > 63) {
-                logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
-                             static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
-
-            } else {
-                logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
-                              suffix_length,
-                              std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
-                                    * 2. * sizeof(uint64_t) * 1e-6);
-                timer.reset();
-                dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
-                logger->trace("Compressed node ranges to approx. {:.2f} MB",
-                              dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
-
-                logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
             }
 
             graph = std::move(dbg_succ);

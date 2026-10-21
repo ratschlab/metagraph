@@ -33,8 +33,7 @@ template <typename Annotator>
 class AnnotatorTest : public ::testing::Test {
   public:
     std::unique_ptr<Annotator> annotation;
-    const std::string test_data_dir = "../tests/data";
-    const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
+    const std::string test_dump_basename = test_dump_dir() + "/bit_vector_dump_test";
 
     virtual void set(annot::ColumnCompressed<>&& column_annotator) {
         if constexpr(std::is_same_v<Annotator, annot::MultiBRWTAnnotator>) {

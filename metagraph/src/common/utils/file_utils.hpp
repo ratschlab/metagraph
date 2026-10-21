@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <filesystem>
 #include <iostream>
@@ -22,11 +23,53 @@ void remove_temp_dir(std::filesystem::path dir_name);
 
 bool check_if_writable(const std::string &filename);
 
-// Call with_mmap() to check and with_mmap(true) to set. Off by default.
-bool with_mmap(bool set_bit = false);
+// Rename a file, overwriting the target if exists. Also works for cross-device moves.
+void rename_or_move_file(const std::string &old_fname, const std::string &new_fname);
+
+// Returns true if mmap mode is enabled. Use set_mmap() to change.
+bool with_mmap();
+void set_mmap(bool set_bit);
+
+// Returns true if madvise hints are enabled. Use set_madvise() to change.
+bool with_madvise();
+void set_madvise(bool set_bit);
+
+// `std::ifstream` that remembers the path it was opened from.
+// Mirrors `sdsl::mmap_ifstream` so loaders can recover the filename via cast.
+class named_ifstream : public std::ifstream {
+  public:
+    explicit named_ifstream(const std::string &filename,
+                            std::ios_base::openmode mode = std::ios_base::binary)
+          : std::ifstream(filename, mode), filename_(filename) {}
+    const std::string& get_filename() const { return filename_; }
+
+  private:
+    std::string filename_;
+};
 
 std::unique_ptr<std::ifstream>
 open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
+
+// Returns the filename from a stream opened by `open_ifstream`
+// (i.e. `sdsl::mmap_ifstream` or `utils::named_ifstream`); throws otherwise.
+const std::string& get_filename(std::istream &f);
+
+// Hint MADV_RANDOM on `[start, start + length)` of the file mmapped by `f`.
+// `length < 0` (the default) means "to end of file". `start` is rounded
+// down to a page boundary (madvise requires page-aligned start).
+// No-op when `with_madvise()` is false or `f` is not an `sdsl::mmap_ifstream`.
+void madvise_random_range(std::istream &f,
+                          std::streamoff start = 0,
+                          std::streamoff length = -1);
+
+// Open `filename` as an `sdsl::mmap_ifstream` seeked to `offset`, invoke
+// `fn` so the caller can load from it, then (if `with_madvise()`) hint
+// MADV_RANDOM on the whole file mapping.
+void load_mmap_random(const std::string &filename, std::streamoff offset,
+                      const std::function<void(std::istream &)> &fn);
+
+// Explains likely reasons why a file could not be read (permissions, missing file, etc.).
+std::string file_read_failure_detail(const std::filesystem::path &path);
 
 // Always create a new physical file to avoid overwriting the existing one if
 // such exists, so that all readers (including mmap) can keep reading from it.

@@ -138,7 +138,7 @@ void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& anno
     annotator.get_label_encoder().serialize(out);
     out.close();
 
-    RowFlat<>::serialize(call_rows, num_columns, num_rows, num_set_bits, fname, true);
+    RowFlat<>::serialize(fname, call_rows, num_columns, num_rows, num_set_bits);
 }
 
 template <>
@@ -376,34 +376,60 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(
     uint64_t num_rows = columns.at(0)->size();
     uint64_t num_columns = columns.size();
 
-    RowFlat<>::serialize([&](auto callback) { utils::call_rows(columns, callback); },
-                         num_columns, num_rows, num_set_bits, fname, true);
+    RowFlat<>::serialize(fname, [&](auto callback) { utils::call_rows(columns, callback); },
+                         num_columns, num_rows, num_set_bits);
     logger->trace("Annotation converted");
 }
 
 
-template <>
-void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &anno,
-                                                  const std::string &outfbase) {
-    const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
+// Writes the standard RowDiff serialization header to |fname|:
+// label_encoder + "v2.0" + anchor + fork_succ. The file is created (or
+// truncated if it already exists), written, and closed so subsequent
+// target-specific writers can reopen and append the body.
+template <class Anno>
+static void write_row_diff_header(const std::string &fname, const Anno &anno) {
     std::ofstream out = utils::open_new_ofstream(fname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + fname);
-
     anno.get_label_encoder().serialize(out);
-
-    // serialize RowDiff<RowFlat<>>
     out.write("v2.0", 4);
     anno.get_matrix().anchor().serialize(out);
     anno.get_matrix().fork_succ().serialize(out);
-    out.close();
+}
 
-    RowFlat<>::serialize([&](auto callback) { anno.get_matrix().diffs().call_rows(callback); },
-                         anno.get_matrix().diffs().num_columns(),
-                         anno.get_matrix().diffs().num_rows(),
-                         anno.get_matrix().diffs().num_relations(),
-                         fname, true);
+// Reformat an already-built `RowDiff<...>` annotator into another `RowDiff<...>`
+// representation. The on-disk header (label encoder + version + anchor +
+// fork_succ) is identical across `Target` types, so the body — produced by
+// `Source::base_matrix_type::call_rows` and consumed by
+// `Target::base_matrix_type::serialize` — is the only piece that varies.
+template <class Target, class Source>
+static void convert_row_diff_repr(const Source &anno, const std::string &outfbase) {
+    const auto &fname = utils::make_suffix(outfbase, Target::kExtension);
+    write_row_diff_header(fname, anno);
+
+    const auto &diffs = anno.get_matrix().diffs();
+    Target::binary_matrix_type::base_matrix_type::serialize(fname,
+        [&](auto callback) { diffs.call_rows(callback); },
+        diffs.num_columns(), diffs.num_rows(), diffs.num_relations());
     logger->trace("Annotation converted");
+}
+
+template <>
+void convert_to_row_diff<RowDiffRowFlatAnnotator>(const RowDiffBRWTAnnotator &anno,
+                                                  const std::string &outfbase) {
+    convert_row_diff_repr<RowDiffRowFlatAnnotator>(anno, outfbase);
+}
+
+template <>
+void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffBRWTAnnotator &anno,
+                                               const std::string &outfbase) {
+    convert_row_diff_repr<RowDiffDiskAnnotator>(anno, outfbase);
+}
+
+template <>
+void convert_to_row_diff<RowDiffDiskAnnotator>(const RowDiffRowFlatAnnotator &anno,
+                                               const std::string &outfbase) {
+    convert_row_diff_repr<RowDiffDiskAnnotator>(anno, outfbase);
 }
 
 template <>
@@ -500,10 +526,8 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
             },
             num_threads
         );
-        if (!success) {
-            logger->error("Can't load annotation columns");
+        if (!success)
             exit(1);
-        }
     };
     return convert_to_BRWT(linkage, num_parallel_nodes, num_threads,
                            tmp_path, get_columns, std::move(column_names));
@@ -531,10 +555,8 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
             },
             num_threads
         );
-        if (!success) {
-            logger->error("Can't load annotation columns");
+        if (!success)
             exit(1);
-        }
     };
 
     std::unique_ptr<MultiBRWTAnnotator> annotator
@@ -551,10 +573,10 @@ void relax_BRWT(BRWT *annotation, size_t relax_max_arity, size_t num_threads) {
         BRWTOptimizer::relax(annotation, relax_max_arity, num_threads);
 }
 
-using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
+using CallColumn = BRWTBottomUpBuilder::CallColumn;
 
 std::vector<uint64_t>
-get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
+get_row_classes(const std::function<void(const CallColumn &, size_t)> &call_columns,
                 size_t num_columns) {
     std::vector<uint64_t> row_classes;
     uint64_t max_class = 0;
@@ -564,7 +586,7 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
 
     tsl::hopscotch_map<uint64_t, uint64_t> new_class;
 
-    call_columns([&](const auto &col_ptr) {
+    call_columns([&](uint64_t, const auto &col_ptr) {
         new_class.clear();
 
         if (row_classes.empty())
@@ -603,20 +625,20 @@ get_row_classes(const std::function<void(const CallColumn &)> &call_columns,
         }
 
         ++progress_bar;
-    });
+    }, 0);
 
     return row_classes;
 }
 
 std::unique_ptr<Rainbow<BRWT>>
-convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_columns,
+convert_to_RainbowBRWT(const std::function<void(const CallColumn &, size_t)> &call_columns,
                        size_t max_brwt_arity = 1) {
     uint64_t num_columns = 0;
     uint64_t num_ones = 0;
-    call_columns([&](const auto &col_ptr) {
+    call_columns([&](uint64_t, const auto &col_ptr) {
         num_columns++;
         num_ones += col_ptr->num_set_bits();
-    });
+    }, 0);
 
     if (!num_columns)
         return std::make_unique<Rainbow<BRWT>>();
@@ -687,19 +709,14 @@ convert_to_RainbowBRWT(const std::function<void(const CallColumn &)> &call_colum
                              std::cerr, !common::get_verbose());
 
     std::vector<std::unique_ptr<bit_vector>> columns(num_columns);
-    size_t j = 0;
-    ThreadPool thread_pool(get_num_threads());
-    call_columns([&](auto &&col_ptr) {
-        thread_pool.enqueue([&](size_t j, const auto &col_ptr) {
-            sdsl::bit_vector reduced_column(row_pointers.size(), false);
-            for (size_t r = 0; r < row_pointers.size(); ++r) {
-                reduced_column[r] = (*col_ptr)[row_pointers[r]];
-            }
-            columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
-            ++progress_bar;
-        }, j++, std::move(col_ptr));
-    });
-    thread_pool.join();
+    call_columns([&](uint64_t j, auto &&col_ptr) {
+        sdsl::bit_vector reduced_column(row_pointers.size(), false);
+        for (size_t r = 0; r < row_pointers.size(); ++r) {
+            reduced_column[r] = (*col_ptr)[row_pointers[r]];
+        }
+        columns[j] = std::make_unique<bit_vector_smart>(std::move(reduced_column));
+        ++progress_bar;
+    }, get_num_threads());
 
     logger->trace("Start compressing the assignment vector");
 
@@ -752,23 +769,21 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
                                    size_t max_brwt_arity) {
     LEncoder label_encoder;
 
-    auto call_columns = [&](const CallColumn &call_column) {
+    auto call_columns = [&](const CallColumn &call_column, size_t num_threads) {
         label_encoder.clear();
 
         bool success = ColumnCompressed<>::merge_load(
             annotation_files,
-            [&](uint64_t /*j*/,
+            [&](uint64_t j,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
-                call_column(std::move(column));
+                call_column(j, std::move(column));
                 label_encoder.insert_and_encode(label);
             },
-            0
+            num_threads
         );
-        if (!success) {
-            logger->error("Can't load annotation columns");
+        if (!success)
             exit(1);
-        }
     };
 
     auto matrix = convert_to_RainbowBRWT(call_columns, max_brwt_arity);
@@ -813,10 +828,8 @@ void convert_batch_to_row_disk(
             num_threads
     );
 
-    if (!success) {
-        logger->error("Can't load annotation columns");
+    if (!success)
         exit(1);
-    }
 
     // this must be done after loading all columns
     // to keep their order correct
@@ -987,7 +1000,7 @@ void convert_to_row_disk(
     if (!files.size())
         return;
 
-    assert(utils::ends_with(result_fname, file_extension));
+    assert(result_fname.ends_with(file_extension));
 
     double density_prediction = 0.01; // TODO: predict it better?
 
@@ -1358,9 +1371,10 @@ convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator)
         annotator.get_matrix().data()
     );
     auto matrix = convert_to_RainbowBRWT(
-        [&](const auto &callback) {
-            for (auto &column : columns) {
-                callback(std::move(column));
+        [&](const auto &callback, size_t num_threads) {
+            #pragma omp parallel for if(num_threads > 0) num_threads(num_threads) schedule(dynamic)
+            for (size_t j = 0; j < columns.size(); ++j) {
+                callback(j, std::move(columns[j]));
             }
         }
     );
@@ -1439,7 +1453,7 @@ void merge_row_compressed(const std::vector<std::string> &filenames,
     std::vector<std::unique_ptr<StreamRows<>>> streams;
 
     for (auto filename : filenames) {
-        if (!utils::ends_with(filename, RowCompressed<>::kExtension))
+        if (!filename.ends_with(RowCompressed<>::kExtension))
             throw std::runtime_error("Can't merge annotations of mixed types");
 
         label_encoders.emplace_back(RowCompressed<>::read_label_encoder(filename));
@@ -1470,7 +1484,6 @@ void merge_brwt(const std::vector<std::string> &filenames,
     for (auto filename : filenames) {
         MultiBRWTAnnotator annotator;
         if (!annotator.load(filename)) {
-            logger->error("Cannot load annotations from file '{}'", filename);
             exit(1);
         }
 

@@ -350,16 +350,6 @@ class AlignmentGraph {
     }
 };
 
-template <typename T>
-struct template_parameter;
-
-template <template <typename...> class C, typename T>
-struct template_parameter<C<T>> {
-    using type = T;
-};
-
-template <typename T>
-using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
 
 std::vector<Anchor> ExactSeeder::get_anchors() const {
     const DeBruijnGraph &graph = query_.get_graph();
@@ -582,10 +572,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 auto invalid_char = sshash->get_invalid_char_mask(this_query);
 
                 std::visit([&](const auto &dict) {
-                    using kmer_t = get_kmer_t<decltype(dict)>;
-                    const auto &buckets = dict.data();
-                    const auto &minimizers = dict.get_minimizers();
-                    const auto &offsets = buckets.offsets;
+                    using kmer_t = typename std::decay_t<decltype(dict)>::kmer_type;
+                    const auto &offsets = dict.strings_offsets();
+                    auto offset_to_id = [&](uint64_t offset) {
+                        sshash::lookup_result res;
+                        res.kmer_offset = offset;
+                        offsets.offset_to_id(res, offsets.decode(offset), dict.k());
+                        return res;
+                    };
                     size_t m = dict.m();
                     common::logger->trace("Mininizer size: {}", m);
                     size_t k = dict.k();
@@ -661,40 +655,36 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             ? mmer : std::min(mmer, mmer_rc)
                         );
 
-                        uint64_t bucket_id = minimizers.lookup(mmer_lookup);
-                        auto [begin, end] = buckets.locate_bucket(bucket_id);
-                        for (size_t super_kmer_id = begin; super_kmer_id < end; ++super_kmer_id) {
-                            // std::cerr << "\t" << super_kmer_id << "\n";
-                            uint64_t offset = offsets.access(super_kmer_id);
+                        dict.call_minimizer_positions(mmer_lookup, [&](uint64_t offset) {
 
-                            // auto [res, contig_end] = buckets.offset_to_id(offset, k);
-                            auto res = buckets.offset_to_id(offset, k);
+                            // auto [res, contig_end] = offset_to_id(offset);
+                            auto res = offset_to_id(offset);
                             // The stored offset is the minimizer position, not a k-mer start.
                             // Include k-m preceding bases, stopping at the contig boundary.
-                            offset -= std::min<uint64_t>(res.kmer_id_in_contig, k - m);
-                            res = buckets.offset_to_id(offset, k);
-                            assert(res.contig_id != sshash::constants::invalid_uint64);
-                            assert(res.contig_size);
+                            offset -= std::min<uint64_t>(res.kmer_id_in_string, k - m);
+                            res = offset_to_id(offset);
+                            assert(res.string_id != sshash::constants::invalid_uint64);
+                            assert((res.string_end - res.string_begin - k + 1));
 
-                            uint64_t contig_end = res.contig_end(k);
+                            uint64_t contig_end = res.string_end;
                             if (offset + k - 1 >= contig_end)
-                                continue;
+                                return;
 
                             assert(contig_end > offset);
-                            assert(res.kmer_id_in_contig < res.contig_size);
+                            assert(res.kmer_id_in_string < (res.string_end - res.string_begin - k + 1));
 
-                            assert(offset >= res.kmer_id_in_contig);
-                            // auto contig_begin = offset - res.kmer_id_in_contig;
-                            auto contig_begin = res.contig_begin(k);
+                            assert(offset >= res.kmer_id_in_string);
+                            // auto contig_begin = offset - res.kmer_id_in_string;
+                            auto contig_begin = res.string_begin;
                             assert(contig_begin <= offset);
 
                             assert(contig_begin < contig_end);
 
                             size_t contig_length = contig_end - contig_begin;
                             std::ignore = contig_length;
-                            assert(contig_length == res.contig_size + k - 1);
+                            assert(contig_length == (res.string_end - res.string_begin - k + 1) + k - 1);
 
-                            sshash::kmer_iterator<kmer_t> start_bv_it(dict.strings(), m, kmer_t::bits_per_char * offset);
+                            sshash::kmer_iterator<kmer_t, bits::bit_vector> start_bv_it(dict.strings(), m, kmer_t::bits_per_char * offset);
                             // sshash::bit_vector_iterator<kmer_t> start_bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                             assert(offset + m <= contig_end);
                             uint64_t window_size = std::min<uint64_t>({
@@ -709,7 +699,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 if (start_read_kmer != mmer)
                                     continue;
 
-                                sshash::kmer_iterator<kmer_t> bv_it(dict.strings(), m, kmer_t::bits_per_char * offset);
+                                sshash::kmer_iterator<kmer_t, bits::bit_vector> bv_it(dict.strings(), m, kmer_t::bits_per_char * offset);
                                 // sshash::bit_vector_iterator<kmer_t> bv_it(dict.strings(), kmer_t::bits_per_char * offset);
                                 for (size_t w = 0; w < window_size; ++w) {
                                     // kmer_t read_kmer = bv_it.read_and_advance_by_char(kmer_t::bits_per_char * m);
@@ -741,11 +731,11 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     // std::cerr << "\t\t" << i_shift << "\n";
 
-                                    size_t i_in_contig = res.kmer_id_in_contig + w;
+                                    size_t i_in_contig = res.kmer_id_in_string + w;
 
-                                    if (!orientation && i_in_contig < res.contig_size && i_shift + min_match_length <= this_query.size()) {
+                                    if (!orientation && i_in_contig < (res.string_end - res.string_begin - k + 1) && i_shift + min_match_length <= this_query.size()) {
                                         // forward
-                                        assert(res.kmer_id_in_contig + w + k <= contig_length);
+                                        assert(res.kmer_id_in_string + w + k <= contig_length);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w);
                                         if (i_shift >= nodes.size() || node != nodes[i_shift]) {
                                             std::string spelling = graph.get_node_sequence(node);
@@ -772,7 +762,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
 
-                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation && res.kmer_id_in_contig + w + m >= k && i_shift + m >= k) {
+                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation && res.kmer_id_in_string + w + m >= k && i_shift + m >= k) {
                                         // rev comp
                                         assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
                                         assert(res.kmer_id + w + m >= k);
@@ -814,7 +804,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 }
                                 break;
                             }
-                        }
+                        });
                     }
                 }, sshash->data());
             }

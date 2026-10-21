@@ -71,7 +71,7 @@ struct Unaligned;
  * Representation of an unaligned value of a POD type.
  */
 template <class T>
-struct Unaligned<T, typename std::enable_if<std::is_pod<T>::value>::type> {
+struct Unaligned<T, std::enable_if_t<std::is_trivial_v<T> && std::is_standard_layout_v<T>>> {
     Unaligned() = default; // uninitialized
     /* implicit */ Unaligned(T v) : value(v) {}
     T value;

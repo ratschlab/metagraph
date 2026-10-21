@@ -1,11 +1,9 @@
 #include <random>
 
 #include "gtest/gtest.h"
+
 #include "test_helpers.hpp"
-
 #include "common/threads/threading.hpp"
-
-#define private public
 #include "common/vectors/bitmap.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
@@ -18,8 +16,7 @@ namespace {
 
 using namespace mtg;
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
+const std::string test_dump_basename = test_dump_dir() + "/bitmap_dump_test";
 
 
 void reference_based_test(const bitmap &vector,
@@ -162,7 +159,7 @@ Bitmap build_bitmap(const sdsl::bit_vector &data) {
 
 template <class Bitmap>
 Bitmap build_bitmap(const std::initializer_list<bool> &data) {
-    return build_bitmap<Bitmap>(sdsl::bit_vector(data));
+    return build_bitmap<Bitmap>(sdsl::bit_vector(data.begin(), data.end()));
 }
 
 template <class Bitmap>
@@ -609,7 +606,11 @@ TYPED_TEST(BitmapTest, operator_neq) {
 }
 
 TEST(BitmapAdaptiveTest, switch_type) {
-    bitmap_adaptive bm(bitmap_adaptive::kRowCutoff - 2);
+    constexpr size_t row_cutoff = 1'000'000;
+    constexpr size_t max_num_indices_log_ratio = 8;
+    constexpr size_t num_indices_margin = 2;
+
+    bitmap_adaptive bm(row_cutoff - 2);
 
     uint64_t i = 0;
 
@@ -617,7 +618,7 @@ TEST(BitmapAdaptiveTest, switch_type) {
     EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
         << bm.size() << " " << i << " " << bm.num_set_bits();
 
-    for (; i + 1 < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
+    for (; i + 1 < (bm.size() >> max_num_indices_log_ratio); ++i) {
         bm.set(i, true);
         EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
             << bm.size() << " " << i << " " << bm.num_set_bits();
@@ -635,8 +636,8 @@ TEST(BitmapAdaptiveTest, switch_type) {
     // start unsetting bits
     ASSERT_LT(0u, i);
     for (--i; bm.num_set_bits()
-            > (bm.size() >> (bitmap_adaptive::kMaxNumIndicesLogRatio
-                + bitmap_adaptive::kNumIndicesMargin)); --i) {
+            > (bm.size() >> (max_num_indices_log_ratio
+                + num_indices_margin)); --i) {
         ASSERT_LT(0u, i);
         bm.set(i, false);
         EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
@@ -650,7 +651,7 @@ TEST(BitmapAdaptiveTest, switch_type) {
 
     // start resetting bits back to 1
     for (; bm.num_set_bits() + 1
-            < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
+            < (bm.size() >> max_num_indices_log_ratio); ++i) {
         bm.set(i, true);
         EXPECT_TRUE(dynamic_cast<const bitmap_set*>(&bm.data()))
             << bm.size() << " " << i << " " << bm.num_set_bits();

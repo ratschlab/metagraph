@@ -1,6 +1,7 @@
 #ifndef __BOSS_HPP__
 #define __BOSS_HPP__
 
+#include <memory>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
@@ -77,13 +78,6 @@ class BOSS {
      */
     bool load_suffix_ranges(std::ifstream &instream);
     void serialize_suffix_ranges(std::ofstream &outstream) const;
-    // Estimate the size of the compressed index in bits
-    uint64_t get_suffix_ranges_index_size() const {
-        return indexed_suffix_ranges_.size()
-            ? footprint_sd_vector(indexed_suffix_ranges_.size(),
-                                  indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()))
-            : 0;
-    }
 
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
@@ -168,7 +162,7 @@ class BOSS {
         // make one traversal step
         edge = fwd(edge);
         // pick the row-diff successor
-        if (&rd_succ != last_ && !get_last(edge - 1)) {
+        if (&rd_succ != last_.get() && !get_last(edge - 1)) {
             while (!rd_succ[edge]) {
                 assert(edge > 0);
                 edge--;
@@ -505,20 +499,22 @@ class BOSS {
     static constexpr size_t kSentinel = '$';
 
   private:
+    friend struct BOSSConstructTestAccess;
+
     const mtg::kmer::KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
     // k-mer size
     size_t k_;
     // the bit array indicating the last outgoing edge of a node
-    bit_vector *last_;
+    std::unique_ptr<bit_vector> last_;
     // offsets for the boss edges with a given penultimate character
     // F_[c] points to the last boss edge with its penultimate character < c
     std::vector<edge_index> F_;
     // node offsets: NF_[c] = rank_last(F_[c]), a helper array
     std::vector<node_index> NF_;
     // the array containing the edge labels
-    wavelet_tree *W_;
+    std::unique_ptr<wavelet_tree> W_;
 
     State state = State::DYN;
 
@@ -619,12 +615,24 @@ class BOSS {
 
     bool is_valid() const;
 
+    /**
+     * Make suffix ranges strictly increasing and build a compressed sd_vector, where
+     * select queries can be used to recover the original range values via get_suffix_range().
+     */
+    static sdsl::sd_vector<> build_suffix_ranges_sd(std::vector<edge_index>&& ranges,
+                                                    uint64_t num_edges);
+
   public:
     class Chunk;
     void initialize(Chunk *chunk);
-    // Initialize a BOSS table from Chunk and serialize without loading to RAM.
-    // FYI: Note that suffix ranges will not be indexed.
-    static void serialize(Chunk&& chunk, std::ofstream &outstream, State state = State::STAT);
+    /**
+     * Initialize a BOSS table from Chunk and immediately serialize without loading to RAM.
+     * If mode >= 0, it is serialized after the BOSS data (for DBGSuccinct).
+     * If serialize_suffix_ranges is true, the index of suffix ranges is appended.
+     */
+    static void serialize(Chunk&& chunk, std::ofstream &outstream,
+                          State state = State::STAT, int mode = -1,
+                          bool serialize_suffix_ranges = false);
 };
 
 std::ostream& operator<<(std::ostream &os, const BOSS &graph);

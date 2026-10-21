@@ -6,6 +6,9 @@
 #include <filesystem>
 
 #include "common/threads/threading.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/logger.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "seq_io/formats.hpp"
@@ -62,6 +65,7 @@ Config::Config(int argc, char *argv[]) {
     } else if (!strcmp(argv[1], "server_query")) {
         identity = SERVER_QUERY;
         num_top_labels = 10'000;
+        memory_available = 0;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -116,7 +120,11 @@ Config::Config(int argc, char *argv[]) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--mmap")) {
-            utils::with_mmap(true);
+            utils::set_mmap(true);
+        } else if (!strcmp(argv[i], "--madv-random")) {
+            utils::set_madvise(true);
+        } else if (!strcmp(argv[i], "--one-pass-brwt")) {
+            annot::matrix::set_one_pass_brwt(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {
@@ -131,6 +139,10 @@ Config::Config(int argc, char *argv[]) {
             print_counts_hist = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
+        } else if (!strcmp(argv[i], "--index-header-coords")) {
+            index_header_coords = true;
+        } else if (!strcmp(argv[i], "--no-coord-mapping")) {
+            no_coord_mapping = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
             // FYI: experimental
             std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
@@ -236,6 +248,8 @@ Config::Config(int argc, char *argv[]) {
             align_sequences = true;
         } else if (!strcmp(argv[i], "--align-only-forwards")) {
             align_only_forwards = true;
+        } else if (!strcmp(argv[i], "--align-output-path")) {
+            align_output_path = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
         } else if (!strcmp(argv[i], "--align-chain")) {
@@ -371,8 +385,8 @@ Config::Config(int argc, char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
-        } else if (!strcmp(argv[i], "--inplace")) {
-            inplace = true;
+        } else if (!strcmp(argv[i], "--in-ram")) {
+            in_ram = true;
         } else if (!strcmp(argv[i], "--index-ranges")) {
             node_suffix_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--no-postprocessing")) {
@@ -625,12 +639,30 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
-        if (to_row_diff && !infbase.size()) {
+        // For row_diff_brwt and row_diff_flat inputs, the anchor and fork-succ
+        // bitmaps are embedded in the .annodbg, so no graph is needed when
+        // re-formatting to another row_diff representation.
+        const bool input_has_embedded_anchor = fnames.size()
+                && (fnames.front().ends_with(annot::RowDiffBRWTAnnotator::kExtension)
+                        || fnames.front().ends_with(annot::RowDiffRowFlatAnnotator::kExtension));
+        if (input_has_embedded_anchor && fnames.size() != 1) {
+            std::cerr << "Can only convert " << fnames.front()
+                      << " annotations one at a time" << std::endl;
+            print_usage_and_exit = true;
+        }
+        if (to_row_diff && !infbase.size() && !input_has_embedded_anchor) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
         } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types" << std::endl;
+            std::cerr << "Graph is only required for transform to row_diff types"
+                      << std::endl;
             print_usage_and_exit = true;
+        } else if (input_has_embedded_anchor && infbase.size()) {
+            common::logger->warn(
+                    "Graph is not needed when the input annotation has embedded "
+                    "anchors (row_diff_brwt, row_diff_flat); ignoring '-i {}'",
+                    infbase);
+            infbase.clear();
         }
     }
 
@@ -987,7 +1019,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct] / sshash\n");
             fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
-            fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph in-place and serialize without loading to RAM [off]\n");
+            fprintf(stderr, "\t   --in-ram \t\tconstruct succinct graph in RAM instead of inplace [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
@@ -1005,7 +1037,7 @@ if (advanced) {
 }
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
 if (advanced) {
-            fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph) [off]\n");
+            fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph; requires --in-ram) [off]\n");
 }
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
@@ -1086,6 +1118,7 @@ if (advanced) {
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
+            fprintf(stderr, "\t   --align-output-path \t\t\t\twith --json, also emit the VG-style path.mapping object [off]\n");
 }
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
@@ -1243,6 +1276,7 @@ if (advanced) {
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
+            fprintf(stderr, "\t   --index-header-coords \tgenerate a CoordToHeader mapping (.seqs file) from input FASTA files [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
@@ -1258,13 +1292,20 @@ if (advanced) {
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --aggregate-columns \t\taggregate annotation columns into a bitmask (new column) [off]\n");
             fprintf(stderr, "\t                       \t\t\tFormula: min-count <= \\sum_i 1{min-value <= c_i <= max-value} <= max-count\n");
+            fprintf(stderr, "\t                       \t\t\tWith --count-kmers: min-count <= \\sum_i c_i 1{min-value <= c_i <= max-value} <= max-count\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tname of the aggregated output column [mask]\n");
-            fprintf(stderr, "\t   --min-value [INT] \t\tmin value for filtering [1]\n");
-            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers appearing in fewer than this number of columns [1]\n");
+            fprintf(stderr, "\t   --count-kmers \t\tsum up k-mer counts across columns [off]\n");
+            fprintf(stderr, "\t   --count-width [INT] \t\tnumber of bits for aggregated k-mer counts (--count-kmers only) [8]\n");
+            fprintf(stderr, "\t                       \t\tvalid range: [2, 32]. Values saturate at 2^W - 1.\n");
+            fprintf(stderr, "\t   --min-value [INT] \t\tignore pre-aggregation counts smaller than this [1]\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers with aggregated count smaller than this [1]\n");
             fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
-            fprintf(stderr, "\t   --max-value [INT] \t\tmax value for filtering [inf]\n");
-            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
+            fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --min-count instead\n");
+            fprintf(stderr, "\t   --max-value [INT] \t\tignore pre-aggregation counts larger than this [inf]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers with aggregated count larger than this [inf]\n");
+            fprintf(stderr, "\t                       \t\tin --count-kmers mode: max_count+1 must fit in count_width bits (unless inf)\n");
             fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
+            fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --max-count instead\n");
             fprintf(stderr, "\t   --compute-overlap [STR] \tcompute the number of shared bits in columns of this annotation and ANNOTATOR [off]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
@@ -1318,12 +1359,15 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(LABELS).c_str());
+            fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(MATCHES).c_str());
             fprintf(stderr, "\t       Available modes:\n");
             fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
-            fprintf(stderr, "\t                %s \tprint number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
+            fprintf(stderr, "\t                %s \tprint labels and the number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
+            fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers\n", querymode_to_string(SIGNATURE).c_str());
+            fprintf(stderr, "\t                \t\t\t\tOutput format: run-length encoding 'x<N>o<N>...' where x=present, o=absent\n"
+                            "\t                \t\t\t\t    e.g. 'x3o2x2o1' for bitmask '11100110'\n"
+                            "\t                \t\t\t\tWith --verbose-output: full binary string, e.g. '11100110'\n");
 if (advanced) {
-            fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
             fprintf(stderr, "\t                %s \tprint sum of counts for the matched k-mers, requires count or coord annotation (...)\n", querymode_to_string(COUNTS_SUM).c_str());
 }
             fprintf(stderr, "\t                %s \t\tprint k-mer counts, requires count or coord annotation (...)\n", querymode_to_string(COUNTS).c_str());
@@ -1335,11 +1379,12 @@ if (advanced) {
                             "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
                             "\t                \t\t\t\tAll positions start with 0\n");
 if (advanced) {
-            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
+            fprintf(stderr, "\t   --verbose-output \t\tfor coords/counts: do not collapse ranges; for signature: print full mask instead of RLE [off]\n");
 }
             fprintf(stderr, "\t   --num-top-labels [INT] \t\tmaximum number of top labels to output [inf]\n");
             fprintf(stderr, "\t   --min-kmers-fraction-label [FLOAT] \tmin fraction of k-mers from the query required to be present in a label [0.7]\n");
             fprintf(stderr, "\t   --min-kmers-fraction-graph [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
+            fprintf(stderr, "\t   --no-coord-mapping \t\t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
@@ -1353,6 +1398,7 @@ if (advanced) {
             fprintf(stderr, "\t   --threads-each [INT]\tnumber of parallel batches [1]\n");
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }
+            fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
 if (advanced) {
@@ -1373,7 +1419,7 @@ if (advanced) {
             fprintf(stderr, "\t   --max-hull-depth [INT]\tmaximum number of steps to traverse when expanding query graph [max_nodes_per_seq_char * max_seq_len]\n");
             fprintf(stderr, "\n");
 }
-            fprintf(stderr, "Advanced options for scoring:\n");
+            fprintf(stderr, "\tAdvanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
             fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
@@ -1384,7 +1430,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
 }
             fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for seeding:\n");
+            fprintf(stderr, "\tAdvanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [inf]\n");
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.7]\n");
@@ -1401,17 +1447,25 @@ if (advanced) {
             fprintf(stderr, "Available options for server_query:\n");
             fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
             fprintf(stderr, "\t   --address \t\tinterface for incoming connections (default: all)\n");
+if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+}
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
+            fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
+            fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
+            fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
         } break;
     }
 
     fprintf(stderr, "\nGeneral options:\n");
     fprintf(stderr, "\t   --mmap \t\tuse memory mapping when loading to reduce RAM [off]\n");
+    if (identity == SERVER_QUERY)
+        fprintf(stderr, "\t   --madv-random \tenable MADV_RANDOM hints for graphs loaded with mmap (speeds up tiny queries, may slow down large ones) [off]\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
     fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");

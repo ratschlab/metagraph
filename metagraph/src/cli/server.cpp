@@ -35,7 +35,7 @@ Json::Value process_search_request(const Json::Value &json,
                                    const Config &config_orig) {
     const auto &fasta = json["FASTA"];
     if (fasta.isNull())
-        throw std::domain_error("No input sequences received from client");
+        throw std::invalid_argument("No input sequences received from client");
 
     Config config(config_orig);
     // discovery_fraction a proxy of 1 - %similarity
@@ -51,14 +51,14 @@ Json::Value process_search_request(const Json::Value &json,
         config.alignment_max_nodes_per_seq_char).asDouble();
 
     if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Discovery fraction should be within [0, 1.0]. Instead got "
                 + std::to_string(config.discovery_fraction));
     }
 
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }
@@ -112,16 +112,13 @@ Json::Value process_search_request(const Json::Value &json,
     tf.ofstream() << fasta.asString();
     tf.ofstream().close();
 
-    // dummy pool doing everything in the caller thread
-    ThreadPool dummy_pool(0);
-    QueryExecutor engine(config, anno_graph, std::move(aligner_config), dummy_pool);
-
     // Query sequences and callback by appending result to vector with mutex for thread safety
-    engine.query_fasta(tf.name(),
+    query_fasta(tf.name(),
         [&](const SeqSearchResult &result) {
             std::lock_guard<std::mutex> lock(result_mutex);
             search_results.emplace_back(std::move(result));
-        }
+        },
+        config, anno_graph, aligner_config.get()
     );
 
     // Ensure JSON results are sorted by their ID
@@ -133,7 +130,7 @@ Json::Value process_search_request(const Json::Value &json,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.verbose_output, anno_graph));
+        search_response.append(seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k()));
     }
 
     return search_response;
@@ -172,7 +169,7 @@ Json::Value process_align_request(const std::string &received_message,
 
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
-        throw std::domain_error(
+        throw std::invalid_argument(
                 "Minimum exact match should be within [0, 1.0]. Instead got "
                 + std::to_string(config.alignment_min_exact_match));
     }
@@ -243,24 +240,12 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     }
     server_startup.config.port = config.port;
     server_startup.config.timeout_request = 30;    // 30 sec to finish headers
-    server_startup.config.timeout_content = 1800;  // 30 minutes for body/compute (per request) max
+    server_startup.config.timeout_content = 900;   // 15 minutes for body/compute (per request) max
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
     logger->info("[Server] Maximum connections: {}", num_threads);
     return std::thread([&server_startup]() { server_startup.start(); });
-}
-
-template<typename T>
-bool check_data_ready(std::shared_future<T> &data, shared_ptr<HttpServer::Response> response) {
-    if (data.wait_for(0s) != std::future_status::ready) {
-        logger->info("[Server] Got a request during initialization. Asked to come back later");
-        response->write(SimpleWeb::StatusCode::server_error_service_unavailable,
-                        "Server is currently initializing, please come back later.");
-        return false;
-    }
-
-    return true;
 }
 
 std::vector<std::string> filter_graphs_from_list(
@@ -304,15 +289,21 @@ int run_server(Config *config) {
 
     tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
+    ThreadPool graphs_pool(get_num_threads(), 1000 /* max_num_tasks */);
+    size_t num_server_threads = std::max(1u, get_num_threads());
+    set_num_threads(std::max(1u, config->parallel_each));
+    config->parallel_each = 1;  // query one batch at a time
+    logger->info("[Server] Threads per graph: {}", get_num_threads());
+
+    VectorMap<std::pair<std::string, std::string>, std::unique_ptr<AnnotatedDBG>> graphs_cache;
+    bool loaded_with_mmap = utils::with_mmap();
+
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
         anno_graph = graph_loader.enqueue([&]() {
-            logger->info("[Server] Loading graph...");
-            auto graph = load_critical_dbg(config->infbase);
-            logger->info("[Server] Graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
-
-            auto anno_graph = initialize_annotated_dbg(graph, *config);
-            logger->info("[Server] Annotated graph loaded too. Current mem usage: {} MiB", get_curr_RSS() >> 20);
+            logger->info("[Server] Loading graph and annotation in parallel...");
+            auto anno_graph = initialize_annotated_dbg(*config);
+            logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
             return anno_graph;
         });
     } else {
@@ -352,82 +343,186 @@ int run_server(Config *config) {
         for (const auto &[name, _] : indexes) {
             names.push_back(name);
         }
-        logger->info("[Server] Loaded paths for {} graphs for {} names: {}",
+        logger->info("[Server] Loaded a list of {} graphs for {} names: {}",
                      num_indexes, indexes.size(), fmt::join(names, ", "));
-        if (!utils::with_mmap()) {
-            logger->warn("[Server] --mmap wasn't passed but all indexes will be loaded with mmap."
-                         " Make sure they're on a fast disk.");
-            utils::with_mmap(true);
+        if (loaded_with_mmap) {
+            logger->info("[Server] Graphs will be loaded with mmap (--mmap set)."
+                         " Make sure they're on a fast drive.");
+        } else {
+            logger->info("[Server] Graphs will be loaded into RAM (--mmap not set)."
+                         " Total memory ≈ sum of all graph+annotation file sizes.");
         }
+
+        // Deduplicate graph paths so the same underlying graph file is loaded only
+        // once, even if it appears in multiple (graph, annotation) entries.
+        std::vector<std::string> unique_graph_paths;
+        tsl::hopscotch_map<std::string, size_t> graph_path_to_idx;
+        for (const auto &[name, graphs] : indexes) {
+            for (const auto &[graph_fname, anno_fname] : graphs) {
+                if (graph_path_to_idx.emplace(graph_fname, unique_graph_paths.size()).second)
+                    unique_graph_paths.push_back(graph_fname);
+                graphs_cache[{ graph_fname, anno_fname }] = nullptr;
+            }
+        }
+        if (graphs_cache.empty()) {
+            logger->error("[Server] No graphs to serve. Exiting.");
+            exit(1);
+        }
+        if (unique_graph_paths.size() < graphs_cache.size()) {
+            logger->info("[Server] Deduplicated {} graph references down to {} unique graph files.",
+                         graphs_cache.size(), unique_graph_paths.size());
+        }
+
+        logger->info("[Server] Loading {} unique graph(s)...", unique_graph_paths.size());
+        std::vector<std::shared_ptr<DeBruijnGraph>> loaded_graphs(unique_graph_paths.size());
+        #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
+        for (size_t i = 0; i < unique_graph_paths.size(); ++i) {
+            loaded_graphs[i] = load_critical_dbg(unique_graph_paths[i]);
+        }
+
+        logger->info("[Server] Loading {} annotation(s)...", graphs_cache.size());
+        #pragma omp parallel for num_threads(get_num_threads() * num_server_threads) schedule(dynamic)
+        for (size_t i = 0; i < graphs_cache.size(); ++i) {
+            Config config_copy = *config;
+            auto it = graphs_cache.nth(i);
+            const auto &[graph_fname, anno_fname] = it.key();
+            config_copy.infbase = graph_fname;
+            config_copy.infbase_annotators = { anno_fname };
+            it.value() = initialize_annotated_dbg(loaded_graphs[graph_path_to_idx.at(graph_fname)],
+                                                  config_copy);
+        }
+        logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
+                     loaded_with_mmap ? "with mmap" : "into RAM");
+        // Dynamic per-request loads (in_ram path) should always be in RAM.
+        utils::set_mmap(false);
     }
 
-    ThreadPool graphs_pool(get_num_threads());
-    size_t num_server_threads = std::max(1u, get_num_threads());
-    set_num_threads(0);
-
-    logger->info("Collecting graph stats...");
-    tsl::hopscotch_map<std::string, std::vector<std::string>> name_labels;
-    for (const auto &[name, graphs] : indexes) {
-        for (const auto &[graph_fname, anno_fname] : graphs) {
-            auto &out = name_labels[name];
-            const auto &labels = read_labels(anno_fname);
-            out.insert(out.end(), labels.begin(), labels.end());
-        }
-    }
-
-    logger->info("All graphs were loaded and stats collected. Ready to serve queries.");
+    size_t memory_all = config->memory_available * 1e9;
+    size_t memory_left = memory_all;
+    std::atomic<size_t> graphs_being_queried = 0;
+    std::condition_variable space_cv;
+    std::mutex space_mutex;
 
     // the actual server
     HttpServer server;
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
-        process_request(response, request, request_id, [&](const std::string &content) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+        process_request(response, request, request_id, [&](const std::string& content) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();  // the index is not loaded yet, so we can't process the request
 
             Json::Value content_json = parse_json_string(content);
-            logger->info("Request {}: {}", request_id, content_json.toStyledString());
+            logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
             Json::Value result;
 
             // simple case with a single graph pair
             if (!config->fnames.size()) {
                 if (content_json.isMember("graphs"))
                     throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
-                result = process_search_request(content_json, *anno_graph.get(), *config);
+                logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
+                              request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
+                try {
+                    result = process_search_request(content_json, *anno_graph.get(), *config);
+                } catch (...) {
+                    graphs_being_queried--;
+                    throw;
+                }
+                graphs_being_queried--;
             } else {
                 std::vector<std::string> graphs_to_query
                         = filter_graphs_from_list(indexes, content_json, request_id);
                 std::mutex mu;
-                std::vector<std::shared_future<void>> futures;
+                std::vector<std::shared_future<std::exception_ptr>> futures;
                 for (const auto &name : graphs_to_query) {
                     for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                        Config config_copy = *config;
-                        config_copy.infbase = graph_fname;
-                        config_copy.infbase_annotators = { anno_fname };
-                        futures.push_back(graphs_pool.enqueue([config_copy{std::move(config_copy)},&content_json,&result,&mu]() {
-                            auto index = initialize_annotated_dbg(config_copy);
-                            auto json = process_search_request(content_json, *index, config_copy);
-                            std::lock_guard<std::mutex> lock(mu);
-                            if (result.empty()) {
-                                result = std::move(json);
-                            } else {
-                                assert(json.size() == result.size());
-                                for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
-                                    if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
-                                            != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
-                                        throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                        futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                            logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
+                                          request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
+                            size_t index_size_reserved = 0;
+                            auto release_memory = [&]() {
+                                if (!index_size_reserved)
+                                    return;
+                                {
+                                    std::unique_lock<std::mutex> lock(space_mutex);
+                                    memory_left += index_size_reserved;
+                                }
+                                index_size_reserved = 0;
+                                space_cv.notify_all();
+                            };
+                            try {
+                                std::unique_ptr<AnnotatedDBG> index_loaded;
+                                const AnnotatedDBG *index;
+                                bool in_ram = content_json.isMember("in_ram") && content_json["in_ram"].asBool();
+                                if (in_ram && !loaded_with_mmap)
+                                    in_ram = false;  // already in RAM, no need to re-load
+                                size_t index_size = in_ram ? std::filesystem::file_size(graph_fname)
+                                                                + std::filesystem::file_size(anno_fname)
+                                                           : -1;
+                                if (in_ram && index_size > memory_all) {
+                                    logger->warn("Request {}: Graph of size {} GB is too large to fit into "
+                                                 "RAM (reserved memory: {} GB). It will be queried with mmap",
+                                                 request_id, index_size / 1e9, memory_all / 1e9);
+                                    in_ram = false;
+                                }
+                                Timer timer;
+                                if (in_ram) {
+                                    {
+                                        std::unique_lock<std::mutex> lock(space_mutex);
+                                        space_cv.wait(lock, [&]() {
+                                            return memory_left >= index_size;
+                                        });
+                                        memory_left -= index_size;
                                     }
-                                    for (auto&& value : json[i]["results"]) {
-                                        result[i]["results"].append(std::move(value));
+                                    index_size_reserved = index_size;
+                                    logger->trace("Request {}: Loading graph {} of size {} GB to RAM...",
+                                                  request_id, graph_fname, index_size / 1e9);
+                                    timer.reset();
+                                    Config config_copy = *config;
+                                    config_copy.infbase = graph_fname;
+                                    config_copy.infbase_annotators = { anno_fname };
+                                    index_loaded = initialize_annotated_dbg(config_copy);
+                                    index = index_loaded.get();
+                                } else {
+                                    index = graphs_cache.at({ graph_fname, anno_fname }).get();
+                                }
+
+                                auto json = process_search_request(content_json, *index, *config);
+                                logger->trace("Request {}: {} graph {} {} in {} sec",
+                                              request_id, in_ram ? "Loaded and searched" : "Searched",
+                                              graph_fname, anno_fname, timer.elapsed());
+
+                                index_loaded.reset();
+                                release_memory();
+
+                                std::lock_guard<std::mutex> lock(mu);
+                                if (result.empty()) {
+                                    result = std::move(json);
+                                } else {
+                                    assert(json.size() == result.size());
+                                    for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
+                                        if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
+                                                != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
+                                            throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                                        }
+                                        for (auto&& value : json[i]["results"]) {
+                                            result[i]["results"].append(std::move(value));
+                                        }
                                     }
                                 }
+                            } catch (...) {
+                                release_memory();
+                                graphs_being_queried--;
+                                return std::current_exception();
                             }
+                            graphs_being_queried--;
+                            return std::exception_ptr();
                         }));
                     }
                 }
                 for (auto &future : futures) {
-                    future.wait();
+                    if (auto ex = future.get())
+                        std::rethrow_exception(ex);
                 }
             }
             return result;
@@ -437,8 +532,8 @@ int run_server(Config *config) {
     server.resource["^/align"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                              shared_ptr<HttpServer::Request> request) {
         process_request(response, request, num_requests++, [&](const std::string &content) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
             if (!config->fnames.size())
                 return process_align_request(content, anno_graph.get()->get_graph(), *config);
@@ -450,9 +545,9 @@ int run_server(Config *config) {
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                     shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, num_requests++, [&](const std::string &) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
 
             Json::Value root(Json::arrayValue);
             if (!config->fnames.size()) {
@@ -461,9 +556,12 @@ int run_server(Config *config) {
                     root.append(label);
                 }
             } else {
-                for (const auto &[name, labels] : name_labels) {
-                    for (const std::string &label : labels) {
-                        root.append(label);
+                for (const auto &[name, graphs] : indexes) {
+                    for (const auto &[graph_fname, anno_fname] : graphs) {
+                        const auto &labels = graphs_cache.at({ graph_fname, anno_fname })->get_annotator().get_label_encoder().get_labels();
+                        for (const std::string &label : labels) {
+                            root.append(label);
+                        }
                     }
                 }
             }
@@ -473,16 +571,46 @@ int run_server(Config *config) {
 
     server.resource["^/stats"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                             shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, num_requests++, [&](const std::string &) {
-            if (!config->fnames.size() && !check_data_ready(anno_graph, response))
-                throw CustomResponse();  // the index is not loaded yet, so we can't process the request
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError(); // the index is not loaded yet, so we can't process the request
+
+            auto get_num_labels = [](const AnnotatedDBG &anno_dbg) {
+                uint64_t num_labels = 0;
+                if (const auto *coord_to_header = anno_dbg.get_coord_to_header()) {
+                    for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
+                        num_labels += coord_to_header->num_sequences(col);
+                    }
+                } else {
+                    num_labels = anno_dbg.get_annotator().num_labels();
+                }
+                return num_labels;
+            };
 
             Json::Value root;
             if (config->fnames.size()) {
                 // for scenarios with multiple graphs
+                const auto &graph = graphs_cache.begin()->second->get_graph();
+                size_t k = graph.get_k();
+                bool is_consistent_k = true;
+                bool is_canonical = (graph.get_mode() == graph::DeBruijnGraph::CANONICAL);
+                bool is_consistent_canonical = true;
+                for (const auto &[graph_anno, anno_dbg] : graphs_cache) {
+                    const auto &graph = anno_dbg->get_graph();
+                    if (k != graph.get_k())
+                        is_consistent_k = false;
+                    if (is_canonical != (graph.get_mode() == graph::DeBruijnGraph::CANONICAL))
+                        is_consistent_canonical = false;
+                }
+                if (is_consistent_k)
+                    root["graph"]["k"] = static_cast<uint64_t>(k);
+                if (is_consistent_canonical)
+                    root["graph"]["is_canonical_mode"] = is_canonical;
                 uint64_t num_labels = 0;
-                for (const auto &[name, labels] : name_labels) {
-                    num_labels += labels.size();
+                for (const auto &[name, graphs] : indexes) {
+                    for (const auto &[graph_fname, anno_fname] : graphs) {
+                        num_labels += get_num_labels(*graphs_cache.at({ graph_fname, anno_fname }));
+                    }
                 }
                 root["annotation"]["labels"] = num_labels;
             } else {
@@ -493,17 +621,19 @@ int run_server(Config *config) {
                                                         == graph::DeBruijnGraph::CANONICAL);
                 const auto &annotation = anno_graph.get()->get_annotator();
                 root["annotation"]["filename"] = std::filesystem::path(config->infbase_annotators.front()).filename().string();
-                root["annotation"]["labels"] = static_cast<uint64_t>(annotation.num_labels());
+                root["annotation"]["labels"] = get_num_labels(*anno_graph.get());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
-                root["annotation"]["relations"] = static_cast<uint64_t>(annotation.num_relations());
             }
             return root;
         });
     };
 
-    server.default_resource["GET"] = [](shared_ptr<HttpServer::Response> response,
+    server.default_resource["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                         shared_ptr<HttpServer::Request> request) {
-        logger->info("Not found " + request->path);
+        size_t request_id = num_requests++;
+        logger->warn("[Server] Not found {} for {} request {} from {}",
+                     request->path, request->method, request_id,
+                     request->remote_endpoint().address().to_string());
         response->write(SimpleWeb::StatusCode::client_error_not_found,
                         "Could not find path " + request->path);
     };
@@ -514,7 +644,7 @@ int run_server(Config *config) {
         // Handle errors here, ignoring a few trivial ones.
         if (ec.value() != asio::stream_errc::eof
                 && ec.value() != asio::error::operation_aborted) {
-            logger->info("[Server] Got error {} {} {}",
+            logger->warn("[Server] Got error {} {} {}",
                          ec.message(), ec.category().name(), ec.value());
         }
     };

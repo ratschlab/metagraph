@@ -1,10 +1,11 @@
-cmake_minimum_required(VERSION 3.16...3.30)
+cmake_minimum_required(VERSION 3.19...3.30)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 cmake_policy(SET CMP0015 NEW)
 
 # Read version from JSON
-file(READ ${CMAKE_SOURCE_DIR}/../package.json MY_JSON_STRING)
+# Use CMAKE_CURRENT_SOURCE_DIR to work correctly when used as a submodule
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/../package.json MY_JSON_STRING)
 string(JSON VERSION GET ${MY_JSON_STRING} version)
 message(STATUS "Current MetaGraph version: ${VERSION}")
 
@@ -13,7 +14,8 @@ project(MetaGraph
   DESCRIPTION "A tool for scalable construction of annotated genome graphs and sequence-to-graph alignment"
 )
 
-add_definitions(-DVERSION="${VERSION}")
+set(METAGRAPH_PUBLIC_DEFS)
+list(APPEND METAGRAPH_PUBLIC_DEFS VERSION="${VERSION}")
 include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
@@ -21,7 +23,7 @@ include(CMakeListsHelpers.txt)
 enable_testing()
 include(GoogleTest)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_VERBOSE_MAKEFILE 1)
@@ -64,6 +66,14 @@ endfunction()
 
 enableCCache()
 
+# Option to build the metagraph executable and tests
+# Default is ON when MetaGraph is the top-level project, OFF otherwise
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  option(METAGRAPH_BUILD_EXECUTABLE "Build the metagraph CLI executable" ON)
+else()
+  option(METAGRAPH_BUILD_EXECUTABLE "Build the metagraph CLI executable" OFF)
+endif()
+
 if(BUILD_STATIC)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
   set(BUILD_SHARED_LIBS OFF)
@@ -90,18 +100,21 @@ if(NOT CMAKE_DBG_ALPHABET)
 endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
-  add_definitions(-D_DNA_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _DNA_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
-  add_definitions(-D_DNA5_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _DNA5_GRAPH)
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
-  add_definitions(-D_DNA_CASE_SENSITIVE_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _DNA_CASE_SENSITIVE_GRAPH)
 else()
-  add_definitions(-D_PROTEIN_GRAPH)
+  set(METAGRAPH_ALPHABET_DEF _PROTEIN_GRAPH)
 endif()
 message(STATUS "Compile for ${BoldCyan}${CMAKE_DBG_ALPHABET}${ColourReset} alphabet")
+list(APPEND METAGRAPH_PUBLIC_DEFS ${METAGRAPH_ALPHABET_DEF})
 
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(external-libraries/jsoncpp)
+set_property(TARGET jsoncpp_lib APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+  $<TARGET_PROPERTY:jsoncpp_lib,INTERFACE_INCLUDE_DIRECTORIES>)
 
 add_compile_options(
   -Wall -Wextra -Werror
@@ -127,12 +140,6 @@ endif()
 
 if(APPLE)
   # add path to system libraries but avoid cross-compilation errors
-  include_directories(SYSTEM /usr/local/include)
-  include_directories(SYSTEM /opt/homebrew/include)
-  link_directories(/usr/local/lib)
-  if(EXISTS /opt/homebrew/lib)
-    link_directories(/opt/homebrew/lib)
-  endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
@@ -152,12 +159,12 @@ if(APPLE)
 endif()
 
 # Check if 128 bit integers are supported
-try_compile(MODE_TI
+try_compile(METAGRAPH_HAS_UINT128
   "${PROJECT_BINARY_DIR}"
-  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/check_mode_ti.cpp"
+  "${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/CMakeModules/MODETI.cpp"
 )
-if(MODE_TI)
-  add_definitions(-DMODE_TI)
+if(METAGRAPH_HAS_UINT128)
+  list(APPEND METAGRAPH_PUBLIC_DEFS MODE_TI)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(arm|aarch64|arm64)")
       add_compile_options(-mcx16)
   endif()
@@ -189,13 +196,15 @@ endif()
 # KMC k-mer counter
 #-------------------
 set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
-if(NOT DEFINED BUILD_KMC)
-set(BUILD_KMC TRUE)
-endif()
+# BUILD_KMC controls the standalone executable; the KMC library is always built.
+option(BUILD_KMC "Build the standalone KMC executable" OFF)
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
-execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
+  -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
+  -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
+  .
   RESULT_VARIABLE result
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
+  WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/KMC
 )
 if(result)
   message(FATAL_ERROR "CMake step for KMC failed: ${result}")
@@ -207,7 +216,7 @@ if(N EQUAL 0)
 endif()
 execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j${N}
   RESULT_VARIABLE result
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
+  WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/KMC
 )
 if(result)
   message(FATAL_ERROR "Build step for KMC failed: ${result}")
@@ -259,90 +268,61 @@ set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
-link_directories(
-  ${CMAKE_BINARY_DIR}/external-libraries/htslib/lib
-  ${CMAKE_BINARY_DIR}/KMC
-  external-libraries/sdsl-lite/lib
-)
-
-include_directories(
- PUBLIC
-  external-libraries/KMC/kmc_api
-  external-libraries/sdsl-lite/include
-  external-libraries/hopscotch-map/include
-  external-libraries/ordered-map/include
-  external-libraries/cpp_progress_bar
-  external-libraries/Priority-Deque
-  external-libraries/rollinghashcpp
-  external-libraries/spdlog/include
-  ${CMAKE_BINARY_DIR}/external-libraries/htslib/include
-  external-libraries/zlib
-  external-libraries/sdust
-  ${PROJECT_SOURCE_DIR}/src
-)
-
-# TODO: move ASIO out of here once it replaces sprintf with snprintf
-include_directories(
-  PUBLIC SYSTEM
-  external-libraries/asio/asio/include
-  external-libraries/simde-no-tests
-)
-
-add_library(ips4o INTERFACE)
-target_include_directories(ips4o INTERFACE external-libraries/ips4o)
+buildCommonDependencies()
 
 add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 add_library(eigen INTERFACE)
-target_include_directories(eigen INTERFACE external-libraries/eigen)
+target_include_directories(eigen SYSTEM INTERFACE external-libraries/eigen)
 target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+# Allow MetaGraph's custom Find*.cmake modules to be picked up even when the
+# project is included as a subdirectory.
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
 
 find_package(zstd)
 if(ZSTD_FOUND)
-  add_definitions(-D_SUPPORT_ZSTD)
-  if(APPLE)
-    if(EXISTS /opt/homebrew/opt/icu4c)
-      set(ICU_ROOT "/opt/homebrew/opt/icu4c")
-    elseif(EXISTS /usr/local/opt/icu4c)
-      set(ICU_ROOT "/usr/local/opt/icu4c")
-    else()
-      execute_process(COMMAND conda info --base
-                      OUTPUT_VARIABLE ICU_ROOT
-                      OUTPUT_STRIP_TRAILING_WHITESPACE)
-    endif()
-    find_package(ICU COMPONENTS data REQUIRED)
-    get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
-    link_directories(${ICU_DATA_LIBRARY_PATH})
-  endif()
+  list(APPEND METAGRAPH_PUBLIC_DEFS _SUPPORT_ZSTD)
 else()
   message(WARNING "Disabling zstd support.")
 endif()
 
-set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost REQUIRED COMPONENTS iostreams)
-
-findFolly()
-if(FOLLY_FOUND)
-  add_definitions(-D_USE_FOLLY)
-  if(Jemalloc_FOUND)
-    add_definitions(-DUSE_JEMALLOC)
+if(APPLE)
+  if(${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
+    set(HOMEBREW_DIR /opt/homebrew)
   else()
-    message(WARNING "Jemalloc not found, some optimizations will be disabled.")
+    set(HOMEBREW_DIR /usr/local)
   endif()
-  include_directories(SYSTEM
-    external-libraries/folly
-    ${CMAKE_BINARY_DIR}/external-libraries/folly/include
-  )
-  set(METALIBS ${METALIBS} fbvector)
 endif()
 
-# makes ASIO not depend on boost
-add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
+if(APPLE)
+  if(NOT DEFINED ICU_ROOT AND NOT DEFINED ENV{ICU_ROOT})
+    if(EXISTS ${HOMEBREW_DIR}/opt/icu4c)
+      set(ICU_ROOT "${HOMEBREW_DIR}/opt/icu4c")
+    else()
+      find_program(CONDA_EXECUTABLE conda)
+      if(CONDA_EXECUTABLE)
+        execute_process(COMMAND ${CONDA_EXECUTABLE} info --base
+                        OUTPUT_VARIABLE ICU_ROOT
+                        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      endif()
+    endif()
+  endif()
+  find_package(ICU COMPONENTS data REQUIRED)
+  get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
+endif()
+
+set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost REQUIRED COMPONENTS iostreams)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate HINTS ENV LIBRARY_PATH
+             PATHS ${HOMEBREW_DIR}/lib REQUIRED)
+
+# makes ASIO not depend on boost (used by Simple-Web-Server via CMake variable)
 set(USE_STANDALONE_ASIO ON)
-set(ASIO_PATH external-libraries/asio/asio)
+add_library(asio INTERFACE)
+add_library(asio::asio ALIAS asio)
+target_include_directories(asio SYSTEM INTERFACE external-libraries/asio/asio/include)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -352,9 +332,13 @@ IF(APPLE)
     set(CMAKE_USE_PTHREADS_INIT 1)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
-add_subdirectory(external-libraries/spdlog)
-add_subdirectory(external-libraries/sshash SYSTEM)
-add_subdirectory(external-libraries/DYNAMIC)
+buildLogging()
+list(APPEND METAGRAPH_PUBLIC_DEFS SPDLOG_FMT_EXTERNAL)
+set(SSHASH_BUILD_EXECUTABLES OFF)
+add_subdirectory(external-libraries/sshash)
+set_property(TARGET sshash_static APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+  $<TARGET_PROPERTY:sshash_static,INTERFACE_INCLUDE_DIRECTORIES>)
+target_include_directories(sshash_static PRIVATE external-libraries/zlib)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
   PRIVATE
@@ -367,18 +351,8 @@ target_compile_options(zlib
     -Wno-maybe-uninitialized
 )
 
-add_library(folly STATIC
-  external-libraries/folly/folly/lang/SafeAssert.cpp
-  external-libraries/folly/folly/lang/ToAscii.cpp
-)
-
-add_library(progress_bar STATIC
-  external-libraries/cpp_progress_bar/progress_bar.cpp
-)
-
-add_library(mersenne_twister STATIC
-  external-libraries/rollinghashcpp/mersennetwister.cpp
-)
+buildProgressBar(${PROJECT_SOURCE_DIR}/external-libraries PROGRESS_BAR_LIBRARY)
+buildMersenneTwister(${PROJECT_SOURCE_DIR}/external-libraries MERSENNE_TWISTER_LIBRARY)
 
 add_library(sdust STATIC
   external-libraries/sdust/sdust.c
@@ -402,16 +376,25 @@ function(make_osx_arch_flags outvar)
 endfunction()
 make_osx_arch_flags(OSX_ARCH_FLAGS)
 
+set(HTSLIB_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/htslib)
+# Set up ccache wrapper for HTSLIB if available
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+  set(HTSLIB_CC "${CCACHE_PROGRAM} ${CMAKE_C_COMPILER}")
+else()
+  set(HTSLIB_CC "${CMAKE_C_COMPILER}")
+endif()
+
 include(ExternalProject)
-set(HTSLIB_INSTALL ${CMAKE_BINARY_DIR}/external-libraries/htslib)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  PREFIX "${CMAKE_BINARY_DIR}/HTSLIB-build"
+  PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
   CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
-      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
-      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_SOURCE_DIR}/external-libraries/zlib"
-      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${CMAKE_BINARY_DIR}/external-libraries/zlib"
+      "CC=${HTSLIB_CC}"
+      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
+      "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${PROJECT_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
   BUILD_COMMAND $(MAKE) -j${N} lib-static
   #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
@@ -419,7 +402,7 @@ ExternalProject_Add(HTSLIB
   INSTALL_COMMAND
     ${CMAKE_COMMAND} -E make_directory       ${HTSLIB_INSTALL}/lib
     && ${CMAKE_COMMAND} -E make_directory    ${HTSLIB_INSTALL}/include/htslib
-    && ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
+    && ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_BINARY_DIR}/HTSLIB-build/src/HTSLIB-build/libhts.a ${HTSLIB_INSTALL}/lib/
     && ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/htslib ${HTSLIB_INSTALL}/include/htslib
   DEPENDS zlib
 )
@@ -445,48 +428,108 @@ message(STATUS "Compile flags used:"
   " ${OTHER_COMPILER_FLAGS}"
 )
 
-file(GLOB metagraph_core_files
-  "src/*.cpp"
-  "src/*/*.cpp"
-  "src/*/*/*.cpp"
-  "src/*/*/*/*.cpp"
-)
-
-# for compiling faster
-list(REVERSE metagraph_core_files)
-
+# Create metagraph-core target early so we can use target_include_directories
+file(GLOB_RECURSE metagraph_core_files "src/*.cpp")
+list(REVERSE metagraph_core_files)  # for compiling faster
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
-
 add_library(metagraph-core STATIC ${metagraph_core_files})
 
-file(GLOB metagraph_cli_files
-  "src/cli/*.cpp"
-  "src/cli/*/*.cpp"
-  "src/cli/*/*/*.cpp"
+# Set up include directories for metagraph-core
+target_include_directories(metagraph-core PUBLIC
+  ${PROJECT_SOURCE_DIR}/src
+  external-libraries/KMC/kmc_api
+  external-libraries/Priority-Deque
+  ${PROJECT_BINARY_DIR}/external-libraries/htslib/include
+  external-libraries/zlib
+  external-libraries/sdust
 )
+
+# Propagate OpenMP flags to consumers (compile and link)
+# GCC needs -fopenmp during both compilation and linking to auto-link -lgomp
+if(OpenMP_CXX_FLAGS)
+  # Convert space-separated string to list for proper handling by target_*_options
+  separate_arguments(OpenMP_CXX_FLAGS_LIST UNIX_COMMAND "${OpenMP_CXX_FLAGS}")
+  target_compile_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS_LIST})
+  target_link_options(metagraph-core PUBLIC ${OpenMP_CXX_FLAGS_LIST})
+endif()
+
+target_link_directories(metagraph-core INTERFACE
+  ${PROJECT_BINARY_DIR}/KMC
+  ${HTSLIB_INSTALL}/lib
+)
+
+if(APPLE)
+  target_link_directories(metagraph-core INTERFACE ${HOMEBREW_DIR}/lib)
+endif()
+
+if(ICU_DATA_LIBRARY_PATH)
+  target_link_directories(metagraph-core INTERFACE ${ICU_DATA_LIBRARY_PATH})
+endif()
+
+# Configure Folly if available
+findFolly()
+if(FOLLY_FOUND)
+  list(APPEND METAGRAPH_PUBLIC_DEFS _USE_FOLLY)
+  if(Jemalloc_FOUND)
+    # Keep the stable je_* aliases available before any jemalloc header inclusion.
+    list(APPEND METAGRAPH_PUBLIC_DEFS USE_JEMALLOC JEMALLOC_NO_DEMANGLE)
+  else()
+    message(WARNING "Jemalloc not found, some optimizations will be disabled.")
+  endif()
+endif()
+
+# Propagate public compile definitions to dependents during build
+target_compile_definitions(metagraph-core PUBLIC ${METAGRAPH_PUBLIC_DEFS})
+
+# Generate config header with all compile definitions for external consumers
+# External consumers will get definitions from the header instead of CMake
+# Convert list items to #define directives - process both the variable and target property
+get_target_property(TARGET_DEFS metagraph-core COMPILE_DEFINITIONS)
+if(TARGET_DEFS)
+  list(APPEND METAGRAPH_PUBLIC_DEFS ${TARGET_DEFS})
+  list(REMOVE_DUPLICATES METAGRAPH_PUBLIC_DEFS)
+endif()
+
+foreach(def ${METAGRAPH_PUBLIC_DEFS})
+  if(def MATCHES "^([^=]+)=(.*)$")
+    # Definition with value: FOO=bar -> #define FOO bar
+    set(${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")
+  else()
+    # Boolean definition: FOO -> #define FOO
+    set(${def} 1)
+  endif()
+endforeach()
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/compile_definitions.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/gen/include/common/compile_definitions.hpp
+    @ONLY
+)
+
+# Add the generated header to include path
+target_include_directories(metagraph-core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/gen/include)
+
+file(GLOB_RECURSE metagraph_cli_files "src/cli/*.cpp")
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
 
-add_executable(metagraph "src/main.cpp")
-set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts
   zlib
-  deflate
+  ${LIBDEFLATE_LIBRARY}
   Boost::iostreams
-  -lsdsl
   jsoncpp_lib
-  progress_bar
-  mersenne_twister
+  ${PROGRESS_BAR_LIBRARY}
+  ${MERSENNE_TWISTER_LIBRARY}
   sdust
   spdlog::spdlog
+  fmt::fmt
   sshash_static
-  XXSDS_DYNAMIC
-  ips4o
+  metagraph-common-dependencies
   caches
   eigen
   folly
@@ -508,174 +551,264 @@ if(BUILD_STATIC AND NOT APPLE)
   set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl -Wl,--whole-archive -lpthread -Wl,--no-whole-archive)
 endif()
 
-# check for std::filesystem::temp_directory_path
-include(CheckCXXSourceRuns)
-set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-check_cxx_source_runs("
-    #include <iostream>
-    #include <filesystem>
-    int main() {
-        std::cout << std::filesystem::temp_directory_path();
-        return 0;
-    }
-" CPPNOFS)
-if(NOT CPPNOFS)
-  set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-  set(CMAKE_REQUIRED_LIBRARIES "c++fs")
-  check_cxx_source_runs("
-      #include <iostream>
-      #include <filesystem>
-      int main() {
-          std::cout << std::filesystem::temp_directory_path();
-          return 0;
-      }
-  " CPPFS)
-  unset(CMAKE_REQUIRED_FLAGS)
-  unset(CMAKE_REQUIRED_LIBRARIES)
-  if(CPPFS)
-    set(METALIBS ${METALIBS} -lc++fs)
-  else()
-    set(CMAKE_REQUIRED_FLAGS " -std=c++17")
-    set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
-    check_cxx_source_runs("
-        #include <iostream>
-        #include <filesystem>
-        int main() {
-            std::cout << std::filesystem::temp_directory_path();
-            return 0;
-        }
-    " STDCPPFS)
-    unset(CMAKE_REQUIRED_FLAGS)
-    unset(CMAKE_REQUIRED_LIBRARIES)
-    if(STDCPPFS)
-      set(METALIBS ${METALIBS} -lstdc++fs)
-    else()
-      message(FATAL_ERROR "std::filesystem not found")
-    endif()
-  endif()
+checkFileSystem()
+list(APPEND METALIBS ${FILESYSTEM_LIBRARY})
+
+target_link_libraries(metagraph-core PUBLIC ${METALIBS})
+# Resolve the requested OpenSSL before Simple-Web-Server replaces its root on macOS.
+if(APPLE AND (NOT DEFINED USE_OPENSSL OR USE_OPENSSL))
+  find_package(OpenSSL)
 endif()
-
-target_link_libraries(metagraph-core ${METALIBS})
 add_subdirectory(external-libraries/Simple-Web-Server)
-target_link_libraries(metagraph-cli PRIVATE metagraph-core simple-web-server)
-target_link_libraries(metagraph metagraph-core metagraph-cli)
+target_link_libraries(metagraph-cli PUBLIC metagraph-core PRIVATE simple-web-server)
 
-add_custom_target(link_target ALL
-  COMMAND ${CMAKE_COMMAND} -E
-  create_symlink
-    "metagraph_${CMAKE_DBG_ALPHABET}"
-    "metagraph"
-)
+if(METAGRAPH_BUILD_EXECUTABLE)
+  add_executable(metagraph "src/main.cpp")
+  set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
+  target_link_libraries(metagraph metagraph-core metagraph-cli)
 
-add_dependencies(metagraph link_target)
+  add_custom_target(link_target ALL
+    COMMAND ${CMAKE_COMMAND} -E
+    create_symlink
+      "metagraph_${CMAKE_DBG_ALPHABET}"
+      "metagraph"
+  )
+
+  add_dependencies(metagraph link_target)
+endif()
 
 
 #-------------------
 # install library
 #-------------------
 
-file(GLOB header_files
-  "src/*.hpp"
-  "src/*/*.hpp"
-  "src/*/*/*.hpp"
-)
+# Run the header installation at install time (after ExternalProjects are built)
+install(CODE "
+  set(INCLUDE_DIRS \"$<TARGET_PROPERTY:metagraph-core,INCLUDE_DIRECTORIES>;$<TARGET_PROPERTY:metagraph-cli,INCLUDE_DIRECTORIES>\")
 
-install(TARGETS metagraph-core DESTINATION lib)
-install(FILES ${header_files} DESTINATION include/metagraph)
-install(TARGETS metagraph DESTINATION bin)
+  list(REMOVE_DUPLICATES INCLUDE_DIRS)
+  foreach(dir \${INCLUDE_DIRS})
+    # Do not package system headers or flatten SSHash's private dependency trees.
+    string(FIND \"\${dir}/\" \"${PROJECT_SOURCE_DIR}/\" source_prefix)
+    string(FIND \"\${dir}/\" \"${PROJECT_BINARY_DIR}/\" binary_prefix)
+    string(FIND \"\${dir}/\" \"${PROJECT_SOURCE_DIR}/external-libraries/sshash/\" sshash_prefix)
+    if((NOT source_prefix EQUAL 0 AND NOT binary_prefix EQUAL 0)
+       OR sshash_prefix EQUAL 0 OR \"\${dir}\" STREQUAL \"${PROJECT_SOURCE_DIR}\")
+      continue()
+    endif()
 
-#-------------------
-# Unit Tests
-#-------------------
-# There is an old gtest library shipped with sdsl.
-# Remove it as we are going to use a more recent one.
-execute_process(COMMAND rm -rf ${PROJECT_SOURCE_DIR}/external-libraries/sdsl-lite/include/gtest)
+    if(NOT EXISTS \"\${dir}\")
+      continue()
+    endif()
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
-target_compile_options(gtest_main PRIVATE -w)
-target_compile_options(gtest PRIVATE -w)
+    file(INSTALL \"\${dir}/\"
+         DESTINATION \"\${CMAKE_INSTALL_PREFIX}/include\"
+         FILES_MATCHING
+         PATTERN \"*.h\" PATTERN \"*.hpp\" PATTERN \"*.ipp\" PATTERN \"*.inl\"
+         REGEX \"/external-libraries/eigen/(Eigen|unsupported/Eigen)(/[^/]+)*/[A-Z][^/.]*$\")
+  endforeach()
+")
 
-set(DEATH_TEST_FLAG "")
-if(NO_DEATH_TESTS)
-  message(STATUS "Disabling death tests in gtest")
-  set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+# Collect static libraries from metagraph-core's dependencies
+# Use $<TARGET_FILE:...> to get actual library paths
+set(BUNDLE_LIBS_LIST "$<TARGET_FILE:metagraph-core>")
+
+get_target_property(LINK_LIBS metagraph-core LINK_LIBRARIES)
+if(LINK_LIBS)
+  foreach(LIB ${LINK_LIBS})
+    # Skip if not a CMake target
+    if(NOT TARGET ${LIB})
+      continue()
+    endif()
+    
+    # Check if it's a static library target
+    get_target_property(LIB_TYPE ${LIB} TYPE)
+    if(LIB_TYPE STREQUAL "STATIC_LIBRARY")
+      # Skip imported libraries (e.g., system Boost)
+      get_target_property(IS_IMPORTED ${LIB} IMPORTED)
+      if(IS_IMPORTED)
+        continue()
+      endif()
+      
+      # Add our internal static library
+      string(APPEND BUNDLE_LIBS_LIST ";$<TARGET_FILE:${LIB}>")
+    endif()
+  endforeach()
 endif()
 
-file(GLOB unit_tests_files
-  "tests/*.cpp"
-  "tests/*/*.cpp"
-  "tests/*/*/*.cpp"
-  "tests/*/*/*/*.cpp"
-)
-list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
+# Add external libraries built by ExternalProject (not CMake targets)
+string(APPEND BUNDLE_LIBS_LIST ";${HTSLIB_INSTALL}/lib/libhts.a")
+string(APPEND BUNDLE_LIBS_LIST ";${PROJECT_BINARY_DIR}/KMC/libKMC.a")
 
-link_directories(
-  ${CMAKE_BINARY_DIR}
-)
+# Bundle all internal dependencies into libmetagraph-core.a during install
+# This creates a combined static library containing metagraph-core and all bundled dependencies
+install(CODE "
+  set(PROJECT_BINARY_DIR \"${PROJECT_BINARY_DIR}\")
+  set(PROJECT_SOURCE_DIR \"${PROJECT_SOURCE_DIR}\")
+  set(HTSLIB_INSTALL \"${HTSLIB_INSTALL}\")
+  set(CMAKE_AR \"${CMAKE_AR}\")
+  set(BUNDLE_LIBS_LIST \"${BUNDLE_LIBS_LIST}\")
+  
+  message(STATUS \"Bundling dependencies into libmetagraph-core-bundle.a...\")
+  
+  # Create temporary directory for bundling
+  file(REMOVE_RECURSE \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle)
+  
+  # Extract each library into its own subdirectory to avoid filename collisions
+  foreach(LIB \${BUNDLE_LIBS_LIST})
+    if(NOT EXISTS \"\${LIB}\")
+      message(FATAL_ERROR \"Required library not found for bundling: \${LIB}\")
+    endif()
+    message(STATUS \"  Extracting: \${LIB}\")
+    
+    # Get library name without path and extension for subdirectory
+    get_filename_component(LIB_NAME \"\${LIB}\" NAME_WE)
+    string(REGEX REPLACE \"^lib\" \"\" LIB_NAME \"\${LIB_NAME}\")
+    
+    # Create subdirectory for this library
+    file(MAKE_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle/\${LIB_NAME})
+    
+    # Extract into subdirectory
+    execute_process(COMMAND \${CMAKE_AR} x \${LIB}
+                    WORKING_DIRECTORY \${PROJECT_BINARY_DIR}/metagraph-core-bundle/\${LIB_NAME}
+                    RESULT_VARIABLE AR_RESULT)
+    if(AR_RESULT)
+      message(FATAL_ERROR \"Failed to extract \${LIB} (exit code: \${AR_RESULT})\")
+    endif()
+  endforeach()
+  
+  # Create the combined archive with -bundle suffix to avoid overwriting the original
+  execute_process(COMMAND /bin/bash \${PROJECT_SOURCE_DIR}/scripts/bundle_static_libs.sh 
+                          \${PROJECT_BINARY_DIR}/metagraph-core-bundle 
+                          \${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a 
+                          \${CMAKE_AR}
+                  RESULT_VARIABLE BUNDLE_RESULT)
+  if(BUNDLE_RESULT)
+    message(FATAL_ERROR \"Failed to bundle static libraries (exit code: \${BUNDLE_RESULT})\")
+  endif()
+  
+  if(NOT EXISTS \"\${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a\")
+    message(FATAL_ERROR \"Bundled libmetagraph-core-bundle.a was not created\")
+  endif()
+  
+  execute_process(COMMAND du -h \${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a
+                  OUTPUT_VARIABLE BUNDLE_SIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+  string(REGEX REPLACE \"^([^\\t]+).*\" \"\\\\1\" BUNDLE_SIZE \"\${BUNDLE_SIZE}\")
+  message(STATUS \"Created libmetagraph-core-bundle.a (\${BUNDLE_SIZE})\")
+")
 
-add_executable(unit_tests ${unit_tests_files})
-target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
-target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
+# Install the bundled library as libmetagraph-core.a (without -bundle suffix)
+install(FILES ${PROJECT_BINARY_DIR}/libmetagraph-core-bundle.a DESTINATION lib RENAME libmetagraph-core.a)
+install(TARGETS metagraph-cli DESTINATION lib)
 
-target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
+if(METAGRAPH_BUILD_EXECUTABLE)
+  install(TARGETS metagraph DESTINATION bin)
 
-#-------------------
-# Benchmarks
-#-------------------
-add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
+  #-------------------
+  # Unit Tests
+  #-------------------
 
-file(GLOB benchmark_files
-  "benchmarks/*.cpp"
-  "benchmarks/*/*.cpp"
-)
-list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
+  add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/googletest EXCLUDE_FROM_ALL)
+  target_compile_options(gtest_main PRIVATE -w)
+  target_compile_options(gtest PRIVATE -w)
 
-add_executable(benchmarks ${benchmark_files})
-target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
-target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
+  set(DEATH_TEST_FLAG "")
+  if(NO_DEATH_TESTS)
+    message(STATUS "Disabling death tests in gtest")
+    set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+  endif()
 
-target_compile_options(benchmarks PRIVATE)
+  file(GLOB unit_tests_files
+    "tests/*.cpp"
+    "tests/*/*.cpp"
+    "tests/*/*/*.cpp"
+    "tests/*/*/*/*.cpp"
+  )
+  list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
-#-------------------
-# Tests
-#-------------------
-find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
+  add_executable(unit_tests ${unit_tests_files})
+  target_link_directories(unit_tests PRIVATE ${PROJECT_BINARY_DIR})
+  target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+  target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
 
-add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/test_venv/DONE
-  COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv
-)
-execute_process(COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv)
+  target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 
-# creating a make target, s.t. the environment can be set up explicitly
-add_custom_target(install_test_environment
-  DEPENDS ${PROJECT_BINARY_DIR}/test_venv/DONE
-)
+  #-------------------
+  # Benchmarks
+  #-------------------
+  set(BENCHMARK_ENABLE_TESTING OFF)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/external-libraries/benchmark EXCLUDE_FROM_ALL)
 
-# --- integration tests ---
-add_custom_target(integration_tests
-  COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
-  DEPENDS metagraph
-  DEPENDS install_test_environment
-)
-# --- integration tests + unit tests ---
-add_custom_target(check_all
-  COMMAND make integration_tests
-  COMMAND unit_tests
-  DEPENDS integration_tests unit_tests
-)
-add_test(NAME integration_tests COMMAND make integration_tests)
-add_test(NAME unit_tests COMMAND unit_tests)
+  file(GLOB benchmark_files
+    "benchmarks/*.cpp"
+    "benchmarks/*/*.cpp"
+  )
+  list(FILTER benchmark_files EXCLUDE REGEX ".*\\._.*")
 
-# --- integration tests runner ---
-get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
-file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
-file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
-)
-file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
-  DESTINATION "${PROJECT_BINARY_DIR}"
-  FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                   GROUP_READ GROUP_EXECUTE
-                   WORLD_READ WORLD_EXECUTE
-)
+  add_executable(benchmarks ${benchmark_files})
+  target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
+  target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli)
+
+  target_compile_options(benchmarks PRIVATE)
+
+  #-------------------
+  # Tests
+  #-------------------
+  find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
+
+  add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/test_venv/DONE
+    COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv
+  )
+  execute_process(COMMAND ${PROJECT_SOURCE_DIR}/integration_tests/install_test_environment.sh ${PROJECT_SOURCE_DIR}/api/python ${PROJECT_BINARY_DIR}/test_venv)
+
+  # creating a make target, s.t. the environment can be set up explicitly
+  add_custom_target(install_test_environment
+    DEPENDS ${PROJECT_BINARY_DIR}/test_venv/DONE
+  )
+
+  # --- integration tests ---
+  add_custom_target(integration_tests
+    COMMAND ${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py
+    DEPENDS metagraph
+    DEPENDS install_test_environment
+  )
+  # --- integration tests + unit tests ---
+  add_custom_target(check_all
+    COMMAND make integration_tests
+    COMMAND unit_tests
+    DEPENDS integration_tests unit_tests
+  )
+  add_test(NAME integration_tests COMMAND make integration_tests)
+  add_test(NAME unit_tests COMMAND unit_tests)
+
+  # --- integration tests runner ---
+  get_target_property(PythonPath Python3::Interpreter IMPORTED_LOCATION)
+  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests" "#!/bin/bash\n")
+  file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+    "\n${PROJECT_BINARY_DIR}/test_venv/bin/python ${PROJECT_SOURCE_DIR}/integration_tests/main.py \"$@\""
+  )
+  file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
+    DESTINATION "${PROJECT_BINARY_DIR}"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                     GROUP_READ GROUP_EXECUTE
+                     WORLD_READ WORLD_EXECUTE
+  )
+
+  # --- parallel unit-tests runner (Google Test sharding) ---
+  # `:=` preserves a user-supplied UNIT_TESTS override (handy for driving the
+  # wrapper with a stub binary when testing the script itself).
+  file(WRITE "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel" "#!/usr/bin/env bash\n")
+  file(APPEND "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
+    "\n: \"\${UNIT_TESTS:=${PROJECT_BINARY_DIR}/unit_tests}\""
+    "\nexport UNIT_TESTS"
+    "\nexec ${PROJECT_SOURCE_DIR}/scripts/unit_tests_parallel.sh \"$@\"\n"
+  )
+  file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/unit_tests_parallel"
+    DESTINATION "${PROJECT_BINARY_DIR}"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                     GROUP_READ GROUP_EXECUTE
+                     WORLD_READ WORLD_EXECUTE
+  )
+
+endif() # CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME

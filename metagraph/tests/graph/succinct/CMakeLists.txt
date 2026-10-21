@@ -1,8 +1,8 @@
 # Build file for the unit-tests in graph/succint
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.19)
 project(test_succint)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../..)
@@ -21,7 +21,6 @@ enableCCache()
 findOpenMP()
 buildProgressBar(EXTERNAL_LIB_DIR progress_bar)
 buildMersenneTwister(EXTERNAL_LIB_DIR mersenne_twister)
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 
 enable_testing()
 findGTest()
@@ -29,7 +28,6 @@ findGTest()
 file(GLOB test_files "*.cpp")
 add_executable(tests ${test_files})
 
-target_compile_definitions(tests PUBLIC TEST_DATA_DIR="${PROJECT_PARENT_DIR}/tests/data")
 target_include_directories(tests
   PRIVATE
     ${PROJECT_PARENT_DIR}/
@@ -42,7 +40,7 @@ target_link_libraries(tests
     metagraph_common
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
-    ${SDSL_LIBRARY}
+
     ${progress_bar}
     ${mersenne_twister}
     test_utils

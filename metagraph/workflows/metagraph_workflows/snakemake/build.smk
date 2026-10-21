@@ -20,17 +20,15 @@ rule build:
         k=config['k'],
         tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_RULE, config).get_mem_buffer_gib(),
-        disk_cap=BuildGraphResources(BUILD_RULE, config).get_disk_cap(),
     log: utils.get_log_path(BUILD_RULE, config)
     shell:
         """
         cat {input} | {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         -k {params.k} \
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
-        --disk-cap-gb {params.disk_cap} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -43,10 +41,7 @@ canonical_graph_path=wdir/f'{graph}_canonical.dbg'
 
 joint_contigs_path=wdir/f'{graph}_primary.fasta.gz'
 
-
-sample_ids_spec = False
 orig_samples_path=wdir/'orig_samples'
-
 
 
 STAGE_SAMPLES_RULE="stage_samples"
@@ -60,7 +55,7 @@ rule stage_samples:
     log: utils.get_log_path(STAGE_SAMPLES_RULE, config, ['sample_id'])
     shell:
         """
-        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options} > {log} 2>&1
+        bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options} 2>&1 | tee {log} {log_tail}
         """
 
 EXTRACT_KMER_COUNTS_RULE="extract_kmer_counts"
@@ -106,16 +101,14 @@ rule extract_kmer_counts:
              FORMAT_FLAG="-fm"
         fi
         
-        {time_cmd} kmc -v -k{params.k} -m{params.mem_buffer} -sm -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG $INPUT {params.base} {output.temp_dir} > {log} 2>&1
+        {time_cmd} kmc -v -k{params.k} -m{params.mem_buffer} -sm -t{threads} -ci1 -cs65535 -n$KMC_BINS -j{output.summary} $FORMAT_FLAG $INPUT {params.base} {output.temp_dir} 2>&1 | tee {log} {log_tail}
         """
-
-kmer_estimates=True
 
 BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="build_canonical_graph_single_sample"
 rule build_canonical_graph_single_sample:
     input:
         seq=utils.get_build_single_sample_input(config, orig_samples_path, seq_ids_dict),
-        kmer=kmc_dir/"{sample_id}.json" if kmer_estimates else []
+        kmer=kmc_dir/"{sample_id}.json"
     output:
         graph=temp(canonical_graphs_dir/"{sample_id}.dbg"),
         temp_dir=temp(directory(wdir / "temp_build_canonical_{sample_id}")),
@@ -129,29 +122,26 @@ rule build_canonical_graph_single_sample:
         tempdir_opt=utils.temp_dir_config(config),
         temp_file=wdir,
         mem_buffer=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem_buffer_gib(),
-        disk_cap=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_disk_cap(),
     log: utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
-        
         INPUT_CMD="echo {input.seq}"
-        
+
         mkdir -p {output.temp_dir}
-        
+
         SAMPLE_FILE={output.temp_dir}/samples.lst
         if [ -d {input.seq} ]; then
             ls {input.seq}/* > $SAMPLE_FILE
             INPUT_CMD="cat $SAMPLE_FILE"
         fi
-        
+
         $INPUT_CMD | {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         --mode canonical \
         -k {params.k} \
         -o {output.graph} \
         --mem-cap-gb {params.mem_buffer} \
-        --disk-cap-gb {params.disk_cap} \
-        {params.tempdir_opt} > {log} 2>&1  
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -169,8 +159,8 @@ rule primarize_canonical_graph_single_sample:
         echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
-        --parallel {threads} \
-        -o {output} > {log} 2>&1
+        -p {threads} \
+        -o {output} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -187,7 +177,6 @@ rule build_joint_graph:
         separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_mem_buffer_gib(),
-        disk_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_disk_cap(),
     log: utils.get_log_path(BUILD_JOINT_GRAPH_RULE, config)
     shell:
         """
@@ -199,14 +188,12 @@ rule build_joint_graph:
         fi
 
         cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         --mode canonical \
         -k {params.k} \
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
-        --disk-cap-gb {params.disk_cap} \
-        {params.tempdir_opt} > {log} 2>&1
-        
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
 
 PRIMARIZE_JOINT_GRAPH_RULE="primarize_joint_graph"
@@ -222,8 +209,8 @@ rule primarize_joint_graph:
         echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
         --to-fasta \
         --primary-kmers \
-        --parallel {threads} \
-        -o {output} > {log} 2>&1
+        -p {threads} \
+        -o {output} 2>&1 | tee {log} {log_tail}
         """
 
 
@@ -239,17 +226,17 @@ rule build_joint_primary:
         k=config['k'],
         tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_mem_buffer_gib(),
-        disk_cap=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_disk_cap()
     log: utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
     shell:
         """
         {time_cmd} {metagraph_cmd} build {verbose_opt} \
-        --parallel {threads} \
+        -p {threads} \
         --mode primary \
         -k {params.k} \
         -o {output} \
         --mem-cap-gb {params.mem_buffer} \
-        --disk-cap-gb {params.disk_cap} \
         {input} \
-        {params.tempdir_opt} > {log} 2>&1
+        {params.tempdir_opt} 2>&1 | tee {log} {log_tail}
         """
+
+

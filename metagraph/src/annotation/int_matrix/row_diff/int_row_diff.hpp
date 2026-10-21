@@ -50,10 +50,16 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
     IntRowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
-    std::vector<Row> get_column(Column j) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<Row> get_column(Column column) const override {
+        return get_column_from_rows(*this, column);
+    }
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const override;
+    // no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
+    std::vector<SetBitPositions>
+    get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
     // query integer values
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const override;
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
+                                          size_t num_threads = 1) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -76,78 +82,50 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
 
 
 template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    // TODO: implement a more efficient algorithm
-    std::vector<Row> result;
-    graph_->call_nodes([&](auto node) {
-        auto i = graph::AnnotatedDBG::graph_to_anno_index(node);
-        SetBitPositions set_bits = get_rows({ i })[0];
-        if (std::binary_search(set_bits.begin(), set_bits.end(), j))
-            result.push_back(i);
-    });
-    return result;
-}
-
-template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
-IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows;
-    rows.reserve(row_ids.size());
-    for (const auto &row : get_row_values(row_ids)) {
-        rows.emplace_back();
-        rows.back().reserve(row.size());
-        for (const auto &[j, _] : row) {
-            rows.back().push_back(j);
-        }
-    }
+IntRowDiff<BaseMatrix>::get_rows(std::span<const Row> row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    call_rows(row_ids,
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
+            return diffs_.get_row_values(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](size_t i, const RowValues &row) { rows[i] = utils::get_firsts<SetBitPositions>(row); },
+        1
+    );
     return rows;
 }
 
 template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+IntRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
+    std::vector<SetBitPositions> rows_dict(rows->size());
+    call_rows(*rows,
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
+            return diffs_.get_row_values(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](size_t i, const RowValues &row) {
+            rows_dict[i] = utils::get_firsts<SetBitPositions>(row);
+            (*rows)[i] = i;
+        },
+        num_threads
+    );
+    return rows_dict;
+}
+
+template <class BaseMatrix>
 std::vector<IntMatrix::RowValues>
-IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    // get row-diff paths
-    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
-
-    std::vector<RowValues> rd_rows = diffs_.get_row_values(rd_ids);
-    for (auto &row : rd_rows) {
-        decode_diffs(&row);
-    }
-
-    rd_ids = std::vector<Row>();
-
-    // reconstruct annotation rows from row-diff
+IntRowDiff<BaseMatrix>::get_row_values(std::span<const Row> row_ids, size_t num_threads) const {
     std::vector<RowValues> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        RowValues &result = rows[i];
-        // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            if (--times_traversed[*it]) {
-                rd_rows[*it] = result;
-            } else {
-                // free memory
-                rd_rows[*it] = {};
-            }
-        }
-        assert(std::all_of(result.begin(), result.end(),
-                           [](auto &p) { return p.second; }));
-        assert(std::all_of(result.begin(), result.end(),
-                           [](auto &p) { return (int64_t)p.second > 0; }));
-    }
-
+    call_rows(row_ids,
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
+            return diffs_.get_row_values(rd_ids, num_threads);
+        },
+        add_diff, decode_diffs,
+        [&](size_t i, const RowValues &row) { rows[i] = row; },
+        num_threads
+    );
     return rows;
 }
 
@@ -155,7 +133,12 @@ template <class BaseMatrix>
 bool IntRowDiff<BaseMatrix>::load(std::istream &in) {
     std::string version(4, '\0');
     in.read(version.data(), 4);
-    return anchor_.load(in) && fork_succ_.load(in) && diffs_.load(in);
+    auto anchor_start = in.tellg();
+    if (!anchor_.load(in) || !fork_succ_.load(in))
+        return false;
+    // anchor_ / fork_succ_ are accessed randomly, hint the kernel.
+    utils::madvise_random_range(in, anchor_start, in.tellg() - anchor_start);
+    return diffs_.load(in);
 }
 
 template <class BaseMatrix>
@@ -177,6 +160,8 @@ template <class BaseMatrix>
 void IntRowDiff<BaseMatrix>::add_diff(const RowValues &diff, RowValues *row) {
     assert(std::is_sorted(row->begin(), row->end()));
     assert(std::is_sorted(diff.begin(), diff.end()));
+    assert(std::all_of(row->begin(), row->end(),
+                       [](auto &p) { return (int64_t)p.second > 0; }));
 
     if (diff.empty())
         return;
@@ -204,6 +189,9 @@ void IntRowDiff<BaseMatrix>::add_diff(const RowValues &diff, RowValues *row) {
     std::copy(it2, diff.end(), std::back_inserter(result));
 
     row->swap(result);
+
+    assert(std::all_of(row->begin(), row->end(),
+                       [](auto &p) { return (int64_t)p.second > 0; }));
 }
 
 } // namespace matrix
