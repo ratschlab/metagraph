@@ -266,7 +266,10 @@ class AppendixBAndSinceV8Test(unittest.TestCase):
         self.assertIn("1 not verified", text)
         self.assertIn("the deploy gate's policy pins", text)
         self.assertIn("not exercised in this run", text)       # the table's other cases
-        self.assertEqual(text.count("\\texttt{graphlet."), 4)
+        import compare as cmp
+        # one row per case of the table the comparison reads (here the tree's: its case count is an input, it
+        # changes when a case lands or leaves, e.g. round 7's arm-absent cases)
+        self.assertEqual(text.count("\\texttt{graphlet."), len(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)[0]))
         self.assertEqual(graphlets.by_design_g_section(_Stub(run=_Stub(manifest={}, _graphlets=None))), "")
 
     def test_added_scenarios(self):
