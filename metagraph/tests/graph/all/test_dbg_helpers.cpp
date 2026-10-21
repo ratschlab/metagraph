@@ -157,8 +157,28 @@ build_graph<DBGSSHash>(uint64_t k,
     if (sequences.empty())
         return std::make_shared<DBGSSHash>(k, mode);
 
-    // use DBGHashFast to get contigs for SSHash
-    auto string_graph = build_graph<DBGHashFast>(k, sequences, mode);
+#if _DNA5_GRAPH
+    // SSHash uses a DNA4 alphabet even when the temporary graph uses DNA5.
+    // Split invalid symbols before they can be normalized to N by that graph.
+    std::vector<std::string> dna_sequences;
+    for (const auto &sequence : sequences) {
+        size_t begin = 0;
+        for (size_t end = 0; end <= sequence.size(); ++end) {
+            if (end == sequence.size() || !DBGSSHash::kmer_t<uint64_t>::is_valid(sequence[end])) {
+                if (end - begin >= k)
+                    dna_sequences.push_back(sequence.substr(begin, end - begin));
+                begin = end + 1;
+            }
+        }
+    }
+    sequences = std::move(dna_sequences);
+#endif
+
+    // In DNA5 builds SSHash still packs two bits per base and supports larger
+    // k than DBGHashFast. Use string storage for those test fixtures.
+    auto string_graph = k <= max_test_k<DBGHashFast>()
+        ? build_graph<DBGHashFast>(k, sequences, mode)
+        : build_graph<DBGHashString>(k, sequences, mode);
 
     std::vector<std::string> contigs;
     size_t num_kmers = 0;
