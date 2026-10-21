@@ -688,3 +688,11 @@ class BaselineReviewFixesV8Test(unittest.TestCase):
         self.assertEqual(sections.noted_problems_text(run), "")
         run.gate = {"passed": True, "problems": []}
         self.assertEqual(sections.noted_problems_text(run), "")
+
+    def test_gate_box_note_with_a_problem_of_no_scenario(self):
+        import sections
+        note = {"scenario": "N-x", "arm": "mcp", "repeat": 0, "text": "lost", "source": "s"}
+        run = _Stub(gate={"passed": False, "problems": [{"scenario": "N-x", "arm": "mcp", "kind": "outcome"},
+                                                        {"kind": "identity", "detail": "x"}]},
+                    identity={"problem_notes": [note]})
+        self.assertEqual(sections.noted_problems_text(run), "")

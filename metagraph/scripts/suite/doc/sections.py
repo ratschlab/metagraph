@@ -1782,8 +1782,12 @@ def noted_problems_text(run):
     ident = getattr(run, "identity", None)
     notes = [n for n in ((ident or {}).get("problem_notes") or []) if isinstance(n, dict)] if isinstance(ident, dict) \
         else []
-    on = sorted(set((p.get("scenario"), p.get("arm")) for p in problems))
-    if not notes or not all(_run_problem_note(run, sid, arm) for sid, arm in on):
+    on = set((p.get("scenario"), p.get("arm")) for p in problems)
+    # a problem of no scenario (identity, configuration) has no note: the box then names none
+    if not notes or any(not isinstance(sid, str) or not isinstance(arm, str) for sid, arm in on):
+        return ""
+    on = sorted(on)
+    if not all(_run_problem_note(run, sid, arm) for sid, arm in on):
         return ""
     texts = []
     for sid, arm in on:
