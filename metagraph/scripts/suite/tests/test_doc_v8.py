@@ -408,3 +408,13 @@ class RealRunV8Test(unittest.TestCase):
         self.assertIn("1 execution ran warm after an interrupted one and is in no bucket.", one)
         four = facts.fill(tpl, dict(base, warm_after_interrupted_n="4", warm_after_interrupted_one=False))
         self.assertIn("4 executions ran warm after an interrupted one and are in no bucket.", four)
+
+    def test_g_pair_prose_names_the_rows_pair_when_present(self):
+        import facts
+        text = prose("G")["families"]["G-pair"]["prose"]
+        without = facts.fill(text, {"xr": {"G-pair-rows-0002": facts._Blank()}})
+        self.assertIn("one seed under two label caps, and constrain against annotate;", without)
+        self.assertNotIn("compare rows", without)
+        withp = facts.fill(text, {"xr": {"G-pair-rows-0002": {"id": "G-pair-rows-0002"}}})
+        self.assertIn("constrain against annotate, and a column walk at a small label cap against a trie of one seed, "
+                      "whose compare rows page on the service's tools;", withp)

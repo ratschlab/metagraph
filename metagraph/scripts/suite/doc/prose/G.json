@@ -35,7 +35,7 @@
   },
   "G-pair": {
    "title": "compare partners",
-   "prose": "The partners of the graphlet_compare pairs: one seed at two radii, two seeds of one locus, one seed under two label caps, and constrain against annotate; each is fetched and processed as a corpus graphlet, with its own short op plan."
+   "prose": "The partners of the graphlet_compare pairs: one seed at two radii, two seeds of one locus, one seed under two label caps[[xr[G-pair-rows-0002][id] ?, constrain against annotate, and a column walk at a small label cap against a trie of one seed, whose compare rows page on the service's tools | , and constrain against annotate]]; each is fetched and processed as a corpus graphlet, with its own short op plan."
   },
   "G-warm": {
    "title": "warm-ups of the long walk",
