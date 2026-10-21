@@ -98,7 +98,7 @@ TEST(BossRanges, EachLabelIsCalledOnce) {
             const size_t right = left + length - 1;
             std::set<unsigned int> expected, actual;
             for (unsigned int symbol = 1; symbol < boss.alph_size; ++symbol) {
-                auto start = left, end = right;
+                boss::BOSS::edge_index start = left, end = right;
                 if (boss.tighten_range(&start, &end, symbol)) {
                     expected.insert(symbol);
                     size_t occurrences = 0;
