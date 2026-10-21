@@ -175,6 +175,45 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
 
 TYPED_TEST_SUITE(LabeledAlignerRedoneTest, FewGraphAnnotationPairTypes);
 
+TYPED_TEST(LabeledAlignerRedoneTest, SharedSeedKeepsAllLabels) {
+    const std::string sequence = "AACGT";
+    const std::vector<std::string> labels { "A", "B" };
+
+    for (bool coordinates : { false, true }) {
+        if (coordinates
+                && !std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>)
+            continue;
+        SCOPED_TRACE(coordinates);
+
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            sequence.size(), { sequence, sequence }, labels, DeBruijnGraph::BASIC, coordinates);
+        AnnotationBuffer buffer(anno_graph->get_graph(), anno_graph->get_annotator());
+        Query query(anno_graph->get_graph(), sequence);
+        DBGAlignerConfig config;
+        config.min_seed_length = sequence.size();
+        config.max_seed_length = sequence.size();
+        LabeledSeeder seeder(buffer, query, config);
+
+        // The shared seed introduces {A, B}; splitting it into singleton label
+        // sets grows the cache while get_anchors() is iterating its labels.
+        auto anchors = seeder.get_anchors();
+        ASSERT_EQ(labels.size(), anchors.size());
+        std::vector<std::string> actual_labels;
+        for (const auto &anchor : anchors) {
+            const auto &columns = buffer.get_cached_column_set(anchor.get_label_class());
+            ASSERT_EQ(1u, columns.size());
+            actual_labels.push_back(anno_graph->get_annotator().get_label_encoder().decode(columns[0]));
+            EXPECT_EQ(sequence, anchor.get_seed());
+            EXPECT_EQ(0u, anchor.get_clipping());
+            EXPECT_FALSE(anchor.get_orientation());
+            EXPECT_EQ(coordinates ? 0 : Anchor::ncoord, anchor.get_coord());
+        }
+        std::sort(actual_labels.begin(), actual_labels.end());
+        EXPECT_EQ(labels, actual_labels);
+    }
+}
+
 TYPED_TEST(LabeledAlignerRedoneTest, SimpleLinearGraph) {
     size_t k = 4;
     /*
