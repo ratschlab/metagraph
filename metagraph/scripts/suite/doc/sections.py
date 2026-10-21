@@ -25,6 +25,7 @@ import latex  # noqa: E402
 import merge_run  # noqa: E402
 import reader  # noqa: E402
 import report  # noqa: E402
+import resources  # noqa: E402
 import suite_common as sc  # noqa: E402
 import vocabulary  # noqa: E402
 from cells import ARMS, fmt_t, fmt_delta, fmt_pair, fmt_n  # noqa: E402
@@ -4995,6 +4996,8 @@ def closing(ctx):
     if wai:
         out += ("%d execution%s ran warm after an interrupted execution and %s counted in neither bucket.\n\n" % (
             wai, "" if wai == 1 else "s", "is" if wai == 1 else "are"))
+    if (cells._num((ctx.run.manifest or {}).get("manifest_version")) or 0) >= 8:
+        out += resources.section(ctx)   # Timing 8, the resources per task (manifest v8 on)
     return out
 
 
