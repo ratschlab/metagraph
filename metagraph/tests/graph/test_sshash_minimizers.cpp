@@ -1,6 +1,9 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
+#include <random>
+
 
 #include <gtest/gtest.h>
 
@@ -9,8 +12,69 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include <include/builder/util.hpp>
+#include <kmer_iterator.hpp>
 
 namespace {
+
+template <typename Word>
+void check_reverse_refill() {
+    using Kmer = mtg::graph::DBGSSHash::kmer_t<Word>;
+    constexpr size_t k = Kmer::max_k;
+    std::mt19937 random(672);
+    std::string sequence(400, 'A');
+    bits::bit_vector::builder builder;
+    for (char &c : sequence) {
+        c = Kmer::alphabet[random() % Kmer::alphabet_size];
+        builder.append_bits(Kmer::char_to_uint(c), Kmer::bits_per_char);
+    }
+    // SSHash normally supplies padded storage for word-sized reads.
+    for (size_t i = 0; i < Kmer::uint_kmer_bits / 64 + 1; ++i)
+        builder.append_bits(0, 64);
+    bits::bit_vector strings;
+    builder.build(strings);
+    sshash::kmer_iterator<Kmer, bits::bit_vector> it(strings, k,
+                                                   sequence.size() * Kmer::bits_per_char);
+    for (size_t end = sequence.size(); end >= k; --end) {
+        auto expected = sshash::util::string_to_uint_kmer<Kmer>(sequence.data() + end - k, k);
+        ASSERT_TRUE(expected == it.get_reverse()) << "end=" << end << " k=" << k;
+        it.next_reverse();
+    }
+}
+
+TEST(SSHashIterator, ReverseRefill64) { check_reverse_refill<uint64_t>(); }
+TEST(SSHashIterator, ReverseRefill128) { check_reverse_refill<__uint128_t>(); }
+TEST(SSHashIterator, ReverseRefill256) { check_reverse_refill<sdsl::uint256_t>(); }
+
+TEST(SSHashFormat, AcceptsSameMajorVersion) {
+    using mtg::graph::DBGSSHash;
+    auto graph = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
+    std::stringstream bytes;
+    static_cast<const DBGSSHash&>(*graph).serialize(bytes);
+    bytes.seekp(2 * sizeof(size_t) + sizeof(DBGSSHash::Mode) + 1);
+    bytes.put(sshash::constants::current_version_number::y + 1);
+    DBGSSHash loaded(3);
+    ASSERT_TRUE(loaded.load(bytes));
+    ASSERT_EQ(graph->num_nodes(), loaded.num_nodes());
+    for (size_t node = 1; node <= graph->num_nodes(); ++node)
+        EXPECT_EQ(graph->get_node_sequence(node), loaded.get_node_sequence(node));
+}
+
+TEST(SSHashFormat, RejectsDifferentMajorVersion) {
+    using mtg::graph::DBGSSHash;
+    auto graph = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
+    std::stringstream bytes;
+    static_cast<const DBGSSHash&>(*graph).serialize(bytes);
+    // The wrapper's node count, k, and mode precede the dictionary version.
+    bytes.seekp(2 * sizeof(size_t) + sizeof(DBGSSHash::Mode));
+    bytes.put(sshash::constants::current_version_number::x + 1);
+    DBGSSHash loaded(3);
+    try {
+        loaded.load(bytes);
+        FAIL() << "An incompatible major version must not load";
+    } catch (const std::runtime_error &error) {
+        EXPECT_NE(std::string::npos, std::string(error.what()).find("rebuild"));
+    }
+}
 
 TEST(SSHashMinimizers, EmptyAndFinalTupleBuckets) {
     sshash::minimizers_tuples_iterator empty(nullptr, nullptr);
