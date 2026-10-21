@@ -34,7 +34,8 @@ entry's absence_scope or strands are no longer marked not implemented via MCP (a
 the MCP's answer states them per database, checks.MCP_PATTERN_DATABASE_FIELDS), so P-scope-0004 / -0006 run on the
 MCP arm again.
 
-v8 (the owner's design of 2026-10-19, DESIGN-v8 / FORMAT-v8; not frozen) is v7's scenarios, unchanged and in v7's
+v8 (the owner's design of 2026-10-19, DESIGN-v8 / FORMAT-v8; frozen by the owner on 2026-10-21 at content 1cffcea3,
+manifest/suite_v8.json, built with --stop-scenarios) is v7's scenarios, unchanged and in v7's
 order, followed by area G (areas.gen_G, area_g.py): the graphlet processing tools run five ways on a corpus of
 graphlets, built from the corpus file the rehearsal writes (--corpus; provisional without one: the first candidate of
 every slot, preconditions pending) with the library pin --library-commit; the slots the MCP cannot express on staging
@@ -83,7 +84,7 @@ from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
 MANIFEST_VERSION = 7
-# the versions this builder makes: v6 and v7 (frozen; rebuilt byte for byte) and v8 (area G; not frozen)
+# the versions this builder makes: v6, v7 and v8 (frozen; rebuilt byte for byte; v8 with --stop-scenarios)
 BUILDABLE_VERSIONS = (6, 7, 8)
 GRAPHLET_VERSION = 8
 DEFAULT_CORPUS = os.path.join(truth.TRUTH_DIR, "area_g", "corpus.json")

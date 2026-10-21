@@ -5160,6 +5160,9 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   JSON_EXPORT_DROP the export's: the pinned library's to_json writes none, a newer one does), and a sticky later
   pattern's memory_bytes (the request's memory peak so far) is no work (checks._sticky_problems, the oracle's
   stop.sticky_unknown).
+- The owner froze v8 on 2026-10-21 at content 1cffcea3d67feb82... (manifest/suite_v8.json and suite_smoke_v8.json,
+  written by `build_manifest.py --manifest-version 8 --stop-scenarios --freeze`, the freeze check passing against
+  gate/declared_v8_rt.json and both v8 policies). run_suite.sh's default manifest is unchanged.
 - The first v8 baseline: `shadow_run.py --baseline --expect-service-commit SHA [--out DIR]` runs the shadow pipeline
   judged by the committed freeze package instead of a re-pin: the build step is a dry freeze into DIR/suite_v8.json
   (refused unless gate/declared_v8_rt.json and both v8 policies pin it), the declared and policy steps copy those

@@ -1120,6 +1120,19 @@ class BuiltV8(unittest.TestCase):
         self.assertTrue(probs[3].startswith("the build has no stop scenarios") and "--stop-scenarios" in probs[3])
         self.assertTrue(probs[4].startswith("the build with --stop-scenarios is the pinned one") and
                         probs[4].endswith("pass --stop-scenarios"), probs[4])
+        # the owner's freeze (2026-10-21, content 1cffcea3): manifest/suite_v8.json and its smoke are this build, byte
+        # for byte (created_utc aside), and no build may write over them
+        suite_dir = os.path.dirname(HERE)
+        for name, built in (("suite_v8.json", stop), ("suite_smoke_v8.json", bm.smoke_of(stop))):
+            path = os.path.join(suite_dir, "manifest", name)
+            frozen = sc.read_json(path)
+            self.assertEqual(sc.manifest_problems(frozen), [], name)
+            for x in (frozen, built):
+                x.pop("created_utc", None)
+            self.assertEqual(ml.canonical_json(frozen), ml.canonical_json(json.loads(json.dumps(built))), name)
+            self.assertTrue(bm.frozen_target(path), name)
+        self.assertTrue(sc.read_json(os.path.join(suite_dir, "manifest", "suite_v8.json"))["content_sha256"].startswith(
+            "1cffcea3d67feb82"))
         # the freeze package (round 7 item 4): gate/declared_v8_rt.json and both v8 policies pin this build (with the
         # stop scenarios) as manifest/suite_v8.json, v7's declared entries unchanged, nothing of area G set aside,
         # both by-design tables pinned; the policies regenerate identical (generated_utc aside)
