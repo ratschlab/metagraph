@@ -219,6 +219,18 @@ class Canonical(unittest.TestCase):
         b = {"path": "/srv/y.fa", "bytes": 140, "records": 4}
         self.assertEqual(cg.canonical_answer("graphlet_export", a), cg.canonical_answer("graphlet_export", b))
 
+    def test_a_json_export_is_read_without_work(self):
+        # the engine deploy's work block (work.memory_bytes, timing.cpu_ms / page_faults): a library newer than the
+        # pin writes it into to_json, the pinned one does not; the drift lane compares the two, which agree
+        rec = {"tool": "graphlet_export", "args_resolved": {"format": "json"}}
+        pinned = {"seed": {"seed_id": "s"}, "arms": {"left": {"segments": []}}, "timing": {"total_ms": 3}}
+        head = dict(pinned, work={"memory_bytes": 2862, "steps": 75}, timing={"total_ms": 4, "cpu_ms": 2,
+                                                                               "page_faults": 0})
+        self.assertEqual(cg.file_view(rec, json.dumps(pinned)), cg.file_view(rec, json.dumps(head)))
+        self.assertNotIn("work", cg.file_view(rec, json.dumps(head))["json"])
+        other = dict(head, arms={"left": {"segments": [1]}})
+        self.assertNotEqual(cg.file_view(rec, json.dumps(pinned)), cg.file_view(rec, json.dumps(other)))
+
 
 class Cut(unittest.TestCase):
     UNCUT = {"handle": "<handle>", "summary": {"caveats": [{"kind": "k", "effect": "long text"}, {"kind": "j"}],
