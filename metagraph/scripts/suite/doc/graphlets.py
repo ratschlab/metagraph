@@ -573,7 +573,7 @@ def chapter_s_sections(ctx):
         for l in run.arm_lines(sid, "direct-local"):
             # how the request ended: run to completion, or stopped by its own time budget (the runner's
             # time_limited: the full run is then longer than the wall, which is a lower bound of it)
-            ended = ("stopped by its time budget: %s" % esc(l.get("time_limited"))) if l.get("time_limited") \
+            ended = esc(l.get("time_limited")) if l.get("time_limited") \
                 else ("complete" if l.get("outcome") == "pass" else "–")
             base.append([latex.breakable_id(sid), "r%s" % l.get("repeat"), esc(l.get("outcome")), ended,
                          esc(cells.fmt_t(l.get("wall_ms")) if l.get("wall_ms") is not None else "–"),
@@ -581,7 +581,7 @@ def chapter_s_sections(ctx):
                              if isinstance(l.get("server"), dict) and (l.get("server") or {}).get("elapsed_ms")
                              is not None else "–")])
     if base:
-        out += latex.plain_table(latex.spec_p([26, 8, 14, 56, 18, 18], aligns=["raggedright"] * 4
+        out += latex.plain_table(latex.spec_p([30, 8, 16, 48, 20, 20], aligns=["raggedright"] * 4
                                               + ["raggedleft", "raggedleft"]),
                                  ["base request", "", "outcome", "ended", "wall", "server"], base,
                                  "the stops' base requests run without a stop on direct-local: repeat 1 is the warm "

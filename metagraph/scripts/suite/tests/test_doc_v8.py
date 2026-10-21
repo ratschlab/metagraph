@@ -156,7 +156,7 @@ class ChapterSTest(unittest.TestCase):
         self.assertIn("repeat 1 is the warm time a stop must beat", text)
         self.assertIn("& r1 & pass & complete & 9.0 s & 9.0 s", text)
         # a base request its own time budget stopped (the shadow run's S-base-0001): the wall is a lower bound
-        self.assertIn("& r0 & pass & stopped by its time budget: seed 0 stopped by its time budget & 15 s & 15 s", text)
+        self.assertIn("& r0 & pass & seed 0 stopped by its time budget & 15 s & 15 s", text)
         text = graphlets.chapter_s_sections(_Stub(run=self.run_stub(None)))
         self.assertIn("no stop record", text)
         empty = _Stub(order=[], scenario=lambda sid: {}, arm_lines=lambda sid, arm: [])
