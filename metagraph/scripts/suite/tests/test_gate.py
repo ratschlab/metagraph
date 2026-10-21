@@ -254,8 +254,7 @@ class PinnedTable(unittest.TestCase):
         self.assertEqual([c["id"] for c in g],
                          ["graphlet.max_bytes_above_service_cap", "graphlet.body_over_in_service_ceiling",
                           "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body",
-                          "graphlet.compare_export_line", "graphlet.walks_arm_absent.two_arms",
-                          "graphlet.walks_arm_absent.one_arm"])
+                          "graphlet.compare_export_line"])
 
     def test_every_shipped_policy_pins_the_tables_sha(self):
         # VERIFY-D VD1: a new v4-v7 gate run snapshots the tree's table; its sha is the one every shipped policy pins

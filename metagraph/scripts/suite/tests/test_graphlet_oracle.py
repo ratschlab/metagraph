@@ -926,6 +926,11 @@ class Normalisation(unittest.TestCase):
         self.assertEqual(n["arms"]["right"]["needed_budgets"], [0.5, 2.5])
         self.assertEqual(n["arms"]["right"]["growth"][0]["label_ends"], {})
         self.assertEqual(r["arms"]["right"]["needed_budgets"], [2.5, 0.5])   # the input is left as it is
+        # the engine's per-request counters (work.memory_bytes, the deploy of 2026-10-21): dropped
+        r["work"] = {"memory_bytes": 2862, "steps": 75}
+        n = O.normalise_full_result(r)
+        self.assertNotIn("work", n)
+        self.assertIn("work", r)
 
     def test_body_digest(self):
         """FORMAT-v8 §3: H seed_index masked, J and Z excluded."""
@@ -1292,6 +1297,13 @@ class MemoryBudgetTwin(unittest.TestCase):
             self.assertEqual(O.compare(j, other)["outcome"], "disagree", sid)
             j0 = O.answer("graphlet_export", {"format": "json"}, f, mgt)
             self.assertEqual(O.compare(j0, want)["outcome"], "disagree", sid)
+            # the engine deploy's work block (work.memory_bytes) on the twin's result, none in the pinned library's
+            # export: W5 answers from the twin, the export's view is read without it, they agree
+            fw = copy.deepcopy(f)
+            fw["results"][0]["work"] = {"memory_bytes": 2862, "steps": 75}
+            jw = O.answer("graphlet_export", {"format": "json"}, fw, mgt, {"strategy": g["strategy"]})
+            self.assertEqual(O.compare(jw, want)["outcome"], "agree", sid)
+            self.assertNotIn("work", jw["answer"]["json"])
 
     def test_twin_with_the_budget(self):
         """documents/budgets/memory_soft: both executions under max_memory_mb 1 state memory_bound_soft; nothing

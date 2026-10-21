@@ -381,24 +381,28 @@ class ByDesignLinks(unittest.TestCase):
         self.assertIsNone(case(area_g._op("c", "graphlet_compare", area_g.C("G-x-0001", mode="all")), {}))
         self.assertIsNone(case(dict(cmp_, cut_of="cmp-claims-all"), {}))
         self.assertIsNone(case(cmp_, {"failed": True}))
-        # an arm sent null: the arm-absent case of the graphlet's shape; a stated arm: none
+        # an arm sent null: no case since the service's arm fix 9abe8517 (VERIFY-D-R5 R5-1: W3 answers as the
+        # library, bad_arm on two arms, the only arm on one), on either shape
         for tool, args in (("graphlet_walks", area_g.W(None)), ("graphlet_walk", {"arm": None, "walk": 0}),
                            ("graphlet_sequence", area_g.S(None, walk=0))):
             o = area_g._op("x", tool, args)
-            self.assertEqual(case(o, {"arms": ["left", "right"]}), area_g.ARM_ABSENT_TWO_CASE, tool)
-            self.assertEqual(case(o, {"arms": ["right"]}), area_g.ARM_ABSENT_ONE_CASE, tool)
-            self.assertIsNone(case(dict(o, ways=["W1", "W2", "W5"]), {"arms": ["right"]}), tool)
+            self.assertIsNone(case(o, {"arms": ["left", "right"]}), tool)
+            self.assertIsNone(case(o, {"arms": ["right"]}), tool)
+        self.assertFalse(hasattr(area_g, "ARM_ABSENT_TWO_CASE") or hasattr(area_g, "ARM_ABSENT_ONE_CASE"))
         self.assertIsNone(case(area_g._op("w", "graphlet_walks", area_g.W("left")), {"arms": ["left", "right"]}))
         self.assertIsNone(case(area_g._op("l", "graphlet_labels", area_g.L()), {"arms": ["left", "right"]}))
         direct = dict(walks, ways=["W1", "W2"])
         self.assertIsNone(case(direct, {}))           # no W3 call: nothing the service answers by design
 
     def test_direct_only_keeps_the_library_behaviour(self):
-        # the shadow run's cases (W3's export line, an arm sent null) leave the library's behaviour checked: on a
-        # direct-only graphlet the ops stay on W1 / W2 / W5, unlinked
+        # the shadow run's case (W3's export line) leaves the library's behaviour checked: on a direct-only graphlet
+        # the ops stay on W1 / W2 / W5, unlinked; an arm sent null is linked to nothing (every way the library's
+        # answer, VERIFY-D-R5 R5-1)
         facts = {"arms": ["left", "right"], "walks": {"left": 2, "right": 2}}
         mcp = dict((o["id"], o) for o in area_g.op_plan("G-x-0001", "two_arms", facts, False, [("G-x-0001", False)]))
-        self.assertEqual(mcp["walks-arm-none"]["by_design"], area_g.ARM_ABSENT_TWO_CASE)
+        self.assertNotIn("by_design", mcp["walks-arm-none"])
+        self.assertNotIn("ways", mcp["walks-arm-none"])        # the scenario's ways: all five, W3 among them
+        self.assertNotIn("W3", mcp["walks-arm-none"].get("not_exposed") or {})
         self.assertEqual(mcp["self-claims-all"]["by_design"], area_g.COMPARE_EXPORT_CASE)
         self.assertNotIn("by_design", mcp["self-bad-mode"])
         direct = dict((o["id"], o) for o in area_g.op_plan("G-x-0001", "two_arms", facts, False,
@@ -920,7 +924,7 @@ FIRST_G_CASES_COMMIT = "f994e3e2880e3f21c51577d75926cfb35c3d4355"  # async's BY-
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
     service_commit states the commit their cases cite (the v7 table 22d034ba; area G's own the latest a case cites,
-    c60b753e (VERIFY-D-R5 R5-4): its first four cases cite f994e3e2, the shadow run's three c60b753e)."""
+    c60b753e (VERIFY-D-R5 R5-4): its first four cases cite f994e3e2, the shadow run's export case c60b753e)."""
 
     def test_the_defaults_agree(self):
         import inspect
@@ -933,8 +937,8 @@ class Defaults(unittest.TestCase):
         self.assertEqual(ginfo["service_commit"], SHADOW_CASES_COMMIT)
         cited = dict((cid, c.get("source_commit")) for cid, c in gcases.items())
         self.assertEqual(set(cited.values()), {FIRST_G_CASES_COMMIT, SHADOW_CASES_COMMIT})
-        for cid in (area_g.COMPARE_EXPORT_CASE, area_g.ARM_ABSENT_TWO_CASE, area_g.ARM_ABSENT_ONE_CASE):
-            self.assertEqual(cited[cid], SHADOW_CASES_COMMIT, cid)
+        self.assertEqual(sorted(cid for cid, c in cited.items() if c == SHADOW_CASES_COMMIT),
+                         [area_g.COMPARE_EXPORT_CASE])   # the arm-absent two gone (VERIFY-D-R5 R5-1)
         self.assertEqual(sorted(cid for cid, c in cited.items() if c == FIRST_G_CASES_COMMIT),
                          ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
                           "graphlet.export_mgt_is_the_stored_body", "graphlet.max_bytes_above_service_cap"])
@@ -1116,6 +1120,19 @@ class BuiltV8(unittest.TestCase):
         self.assertTrue(probs[3].startswith("the build has no stop scenarios") and "--stop-scenarios" in probs[3])
         self.assertTrue(probs[4].startswith("the build with --stop-scenarios is the pinned one") and
                         probs[4].endswith("pass --stop-scenarios"), probs[4])
+        # the owner's freeze (2026-10-21, content 1cffcea3): manifest/suite_v8.json and its smoke are this build, byte
+        # for byte (created_utc aside), and no build may write over them
+        suite_dir = os.path.dirname(HERE)
+        for name, built in (("suite_v8.json", stop), ("suite_smoke_v8.json", bm.smoke_of(stop))):
+            path = os.path.join(suite_dir, "manifest", name)
+            frozen = sc.read_json(path)
+            self.assertEqual(sc.manifest_problems(frozen), [], name)
+            for x in (frozen, built):
+                x.pop("created_utc", None)
+            self.assertEqual(ml.canonical_json(frozen), ml.canonical_json(json.loads(json.dumps(built))), name)
+            self.assertTrue(bm.frozen_target(path), name)
+        self.assertTrue(sc.read_json(os.path.join(suite_dir, "manifest", "suite_v8.json"))["content_sha256"].startswith(
+            "1cffcea3d67feb82"))
         # the freeze package (round 7 item 4): gate/declared_v8_rt.json and both v8 policies pin this build (with the
         # stop scenarios) as manifest/suite_v8.json, v7's declared entries unchanged, nothing of area G set aside,
         # both by-design tables pinned; the policies regenerate identical (generated_utc aside)

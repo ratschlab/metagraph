@@ -431,6 +431,12 @@ class UnmaskedRelations(unittest.TestCase):
                'patterns': [{'iupac': 'GNNNA'}, {'dna': 'ACGTA'}]}
         answer = R.render_answer(index, config, req, 100000, (0, 2))
         self.assertEqual(C.INCONCLUSIVE, outcome(C.compare_pattern(index, config, req, answer)))
+        # the engine deploy's memory peak so far (the engine fixture paths_max_steps: p1 memory_bytes 2862 after
+        # p0's max_steps stop): no work of the later pattern
+        answer['patterns'][1]['work']['memory_bytes'] = 2862
+        self.assertEqual(C.INCONCLUSIVE, outcome(C.compare_pattern(index, config, req, answer)))
+        failed = {x['check'] for x in C.compare_pattern(index, config, req, answer)[1][1].failed()}
+        self.assertNotIn('stop.sticky_unknown', failed)
         answer['patterns'][1]['work']['steps'] = 3
         failed = {x['check'] for x in C.compare_pattern(index, config, req, answer)[1][1].failed()}
         self.assertIn('stop.sticky_unknown', failed)

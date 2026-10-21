@@ -131,8 +131,10 @@ ROW_ENV_KEYS = {"graphlet_list": ("accessed", "created")}
 # arms/<way dir>/raw/<raw>): their files are compared by content (file_view), not only their receipts
 FILE_TOOLS = ("graphlet_export", "graphlet_save")
 # the per-request values of an export's json (to_json: the seed summary's timing, and the annotation's lookahead
-# counters, which differ between two engine runs of one request: FORMAT v2 E1)
-JSON_EXPORT_DROP = ("timing",)
+# counters, which differ between two engine runs of one request: FORMAT v2 E1); `work` (the engine's per-request
+# counters, work.memory_bytes among them), which a library newer than the pin writes and the pinned one does not
+# (the drift lane compares the two)
+JSON_EXPORT_DROP = ("timing", "work")
 ANNOTATION_LOOKAHEAD = ("direct_reads", "keys_mapped")
 # a cut answer may add these keys (the ceiling's markers); a cut answer may lack these keys (per tool) and the keys
 # its own fields_cut / cut_fields name

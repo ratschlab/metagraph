@@ -5136,9 +5136,10 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   paging passes that page; the rehearsal's analysis shadow-runs the plans the build makes from its corpus; the
   chosen corpus is committed (truth/area_g/corpus.json) and `--freeze` refuses a provisional corpus or anything
   pending.
-- After the shadow run (round 7): async's three cases of it are in service_by_design_g.json: W3's export line of
+- After the shadow run (round 7): async's three cases of it went into service_by_design_g.json: W3's export line of
   graphlet_compare (graphlet.compare_export_line, linked on every answered compare W3 runs) and an arm sent null to
-  graphlet_walks / _walk / _sequence (graphlet.walks_arm_absent.two_arms / .one_arm, by the graphlet's arms). A case
+  graphlet_walks / _walk / _sequence (graphlet.walks_arm_absent.two_arms / .one_arm, by the graphlet's arms; gone
+  since round 8: the service's arm fix 9abe8517 makes W3 answer as the library, see below). A case
   whose service side pins a key of the library's own answer (export) excuses that key only: W3's value is read from
   its answer and must be the pinned text, and W3-W4 must agree with the key left out of both. A failed seed carries
   no budget_respected; graphlet_list's accessed / created are not compared (drift); compare_graphlets.py as a script
@@ -5150,6 +5151,24 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   pairs with (cut_lists) and no conditional tag, and its corpus entry is what rehearse_g.corpus_entry writes for a
   partner that passed every verdict but its slot's (partner_passed true, passed false; the slot stays without it).
   No judging step reads a scenario's slot or those tags: the v8 policies' required calls and checks are unchanged.
+  The arm-absent cases (graphlet.walks_arm_absent.two_arms / .one_arm) are gone with the service's arm fix 9abe8517
+  (an arm sent null reaches the library: W3 answers bad_arm on two arms, the only arm on one): their 9 ops
+  (walks-arm-none, walks-arm-only) link no case and expect the library's answer on every way; v8 is rebuilt and its
+  declared file and policies regenerated (VERIFY-D-R5 R5-1).
+- The engine deploy's work block (work.memory_bytes, timing.cpu_ms / page_faults on every answer, round 8b): a json
+  export is compared without `work` (graphlet_oracle.normalise_full_result drops the twin's, compare_graphlets'
+  JSON_EXPORT_DROP the export's: the pinned library's to_json writes none, a newer one does), and a sticky later
+  pattern's memory_bytes (the request's memory peak so far) is no work (checks._sticky_problems, the oracle's
+  stop.sticky_unknown).
+- The owner froze v8 on 2026-10-21 at content 1cffcea3d67feb82... (manifest/suite_v8.json and suite_smoke_v8.json,
+  written by `build_manifest.py --manifest-version 8 --stop-scenarios --freeze`, the freeze check passing against
+  gate/declared_v8_rt.json and both v8 policies). run_suite.sh's default manifest is unchanged.
+- The first v8 baseline: `shadow_run.py --baseline --expect-service-commit SHA [--out DIR]` runs the shadow pipeline
+  judged by the committed freeze package instead of a re-pin: the build step is a dry freeze into DIR/suite_v8.json
+  (refused unless gate/declared_v8_rt.json and both v8 policies pin it), the declared and policy steps copy those
+  three files into DIR (each checked against the build), and the gate step judges the run with both policies
+  (policy_v8_rtp_mcp.json into RUN/gate.json, policy_v8_rt_mcp.json into RUN/gate_policy_v8_rt_mcp.json), with
+  --expect-service-commit and --expect-library-commit (default the library pin); it logs to DIR/baseline.log.
 - The v8 freeze package: gate/declared_v8_rt.json (v7's entries re-pinned, nothing of area G set aside) and
   gate/policy_v8_rt_mcp.json / policy_v8_rtp_mcp.json (v7's parameters: arms direct-local and mcp, warm_every 10,
   require_agreement false) pin manifest/suite_v8.json as `build_manifest.py --manifest-version 8 --stop-scenarios

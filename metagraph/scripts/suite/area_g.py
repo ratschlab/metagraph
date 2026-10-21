@@ -957,16 +957,15 @@ def plan_failed(p: Plan, other: str) -> None:
 BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async's case (service_by_design_g.json, 2026-10-20)
 BIG_BODY_SUMMARY_CASE = BIG_BODY_CASE + ".summary"         # graphlet_summary answered from the stored row
 MGT_EXPORT_CASE = "graphlet.export_mgt_is_the_stored_body"  # async's 4th case: W3's mgt receipt is the body's link
-# async's cases of the shadow run (BY-DESIGN-G-CASES-2.json, service c60b753e): W3 rewrites graphlet_compare's export
-# line (the case pins W3's text and excuses that key only); an arm sent null to graphlet_walks / _walk / _sequence is
-# bad_argument on W3 (the MCP wrapper drops a null argument), the library's bad_arm on two arms, the only arm on one
+# async's case of the shadow run (BY-DESIGN-G-CASES-2.json, service c60b753e): W3 rewrites graphlet_compare's export
+# line (the case pins W3's text and excuses that key only). Its two arm-absent cases (an arm sent null to
+# graphlet_walks / _walk / _sequence was bad_argument on W3) are gone since the service's arm fix 9abe8517: W3 answers
+# as the library (bad_arm on two arms, the only arm on one), so those ops expect the library's answer on every way
+# (VERIFY-D-R5 R5-1)
 COMPARE_EXPORT_CASE = "graphlet.compare_export_line"
-ARM_ABSENT_TWO_CASE = "graphlet.walks_arm_absent.two_arms"
-ARM_ABSENT_ONE_CASE = "graphlet.walks_arm_absent.one_arm"
-ARM_ABSENT_TOOLS = ("graphlet_walks", "graphlet_walk", "graphlet_sequence")
 COMPARE_MODES = ("claims", "walks", "labels", "prefix_subset")
 # the cases whose library behaviour a direct-only graphlet still runs (the op kept on W1 / W2 / W5, the case unlinked)
-DIRECT_KEPT_CASES = (MGT_EXPORT_CASE, COMPARE_EXPORT_CASE, ARM_ABSENT_TWO_CASE, ARM_ABSENT_ONE_CASE)
+DIRECT_KEPT_CASES = (MGT_EXPORT_CASE, COMPARE_EXPORT_CASE)
 IN_SERVICE_MAX_BODY_BYTES = 8 * 1024 * 1024
 LIBRARY_MAX_BYTES = 16 * 1024 * 1024                       # the cap case's upper bound (the library's own limit)
 # the tools each case covers (async's BY-DESIGN-G-CASES.json graphlet.tools)
@@ -981,10 +980,9 @@ def by_design_case(o: dict, facts: dict) -> Optional[str]:
     presigned link with its own receipt; the file is still compared by content); max_bytes above the service's
     262,144 (the cap's refusal comes first: the route refuses it before the handle, the token or the body is looked
     at); else, on a body over the in-service ceiling (facts over_8mib), graphlet_summary the .summary case (answered
-    from the row) and the refusing tools the body case (graphlet_export only for fasta / gfa / json); then an arm
-    sent null to graphlet_walks / _walk / _sequence the arm-absent case of the graphlet's shape (two arms: the
-    library's bad_arm; one: its only arm); an answered graphlet_compare (a mode, not a deliberate cut) the export
-    case."""
+    from the row) and the refusing tools the body case (graphlet_export only for fasta / gfa / json); then an
+    answered graphlet_compare (a mode, not a deliberate cut) the export case. An arm sent null names no case (W3 answers
+    as the library since the service's 9abe8517)."""
     ways = o.get("ways") or ALL_WAYS
     if "W3" not in ways or facts.get("failed"):
         return None   # a failed seed: every way answers no_graphlet, no case's sides can hold (VERIFY-D VD3)
@@ -1003,8 +1001,6 @@ def by_design_case(o: dict, facts: dict) -> Optional[str]:
             return BIG_BODY_SUMMARY_CASE
         if o["tool"] in BIG_BODY_TOOLS and not (o["tool"] == "graphlet_export" and o["args"].get("format") == "mgt"):
             return BIG_BODY_CASE
-    if o["tool"] in ARM_ABSENT_TOOLS and "arm" in args and args["arm"] is None:
-        return ARM_ABSENT_TWO_CASE if len(facts.get("arms") or []) == 2 else ARM_ABSENT_ONE_CASE
     if o["tool"] == "graphlet_compare" and args.get("mode") in COMPARE_MODES and not o.get("cut_of"):
         return COMPARE_EXPORT_CASE
     return None
@@ -1569,12 +1565,8 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
         seen = set()
         # over the in-service ceiling: the rehearsal's service facts, else the slot's expectation (facts_of)
         big = (g.get("facts") or {}).get("body_over_8mib")
-        d = st.get("direction") or "both"
         gf = dict(g, _facts={"over_8mib": bool(big if big is not None else g.get("slot") == "over_8mib"),
-                             "failed": bool((g.get("preconditions") or {}).get("no_graphlet")),
-                             # the graphlet's arms (the arm-absent cases): the rehearsal's, else the direction's
-                             "arms": (g.get("preconditions") or {}).get("arms") or (
-                                 ["left", "right"] if d == "both" else [d])})
+                             "failed": bool((g.get("preconditions") or {}).get("no_graphlet"))})
         for o in g.get("ops") or []:
             oid = o.get("id")
             if oid in seen:

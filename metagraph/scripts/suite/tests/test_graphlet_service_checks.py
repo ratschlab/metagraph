@@ -610,16 +610,15 @@ class ByDesign(ServiceBase):
         lib_sf["graphlet"]["library"]["service_fields"] = {"x": 1}
         self.assertIn("on the service side only", "; ".join(cmp.table_problems([lib_sf])))
         # the real tables load: async's four area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20) and the shadow
-        # run's three (BY-DESIGN-G-CASES-2.json, 2026-10-21) in area G's own table (VERIFY-D VD1), each valid; the
-        # service-by-design table holds none
+        # run's export case (BY-DESIGN-G-CASES-2.json, 2026-10-21; its arm-absent two gone since 9abe8517) in area
+        # G's own table (VERIFY-D VD1), each valid; the service-by-design table holds none
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         self.assertFalse([cid for cid, c in cases.items() if "graphlet" in c])
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         g = sorted(cid for cid, c in cases.items() if "graphlet" in c)
         self.assertEqual(g, ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
                              "graphlet.compare_export_line", "graphlet.export_mgt_is_the_stored_body",
-                             "graphlet.max_bytes_above_service_cap", "graphlet.walks_arm_absent.one_arm",
-                             "graphlet.walks_arm_absent.two_arms"])
+                             "graphlet.max_bytes_above_service_cap"])
         # the export case pins a key of the library's answer: it excuses that key only (pinned_answer_keys)
         self.assertEqual(gs.pinned_answer_keys("graphlet_compare", cases["graphlet.compare_export_line"]["graphlet"][
             "service"]), {"export"})

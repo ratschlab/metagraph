@@ -2655,6 +2655,12 @@ def _known_counts(counts: Any, path: str = "") -> List[str]:
     return out
 
 
+# the work fields a sticky later pattern may state nonzero: memory_bytes, the request's memory peak so far (the
+# engine deploy of 2026-10-21 states it on every entry: the engine fixture paths_max_steps' p1 states 2862 after p0's
+# max_steps stop)
+STICKY_NOT_WORK = ("memory_bytes",)
+
+
 def _sticky_problems(sc: dict, i: int, e: dict, first: dict) -> List[str]:
     """What entry i, a later pattern after |first|, an earlier pattern's budget stop of the search, states otherwise
     than SPEC-pattern-search §7.6 has it (one budget per request, the stop sticky): the same stop in phase discovery
@@ -2675,7 +2681,10 @@ def _sticky_problems(sc: dict, i: int, e: dict, first: dict) -> List[str]:
         out.append("p%d: after a %s stop of an earlier pattern, %d count(s) not unknown (%s; every count is unknown: "
                    "§7.6)" % (i, first.get("reason"), len(known), known[0]))
     work = e.get("work") if isinstance(e.get("work"), dict) else {}
-    busy = ["%s %s" % (k, v) for k, v in work.items() if isinstance(v, (int, float)) and not isinstance(v, bool) and v]
+    # memory_bytes is no work of this entry: the engine states each entry's memory peak so far, nonzero after an
+    # earlier charged pattern (STICKY_NOT_WORK)
+    busy = ["%s %s" % (k, v) for k, v in work.items() if k not in STICKY_NOT_WORK and isinstance(v, (int, float))
+            and not isinstance(v, bool) and v]
     busy += ["steps_by_mismatches.%s %s" % (k, v) for k, v in (work.get("steps_by_mismatches") or {}).items()
              if isinstance(v, (int, float)) and v]
     if busy:

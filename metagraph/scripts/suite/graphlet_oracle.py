@@ -890,8 +890,11 @@ def normalise_full_result(result: dict) -> dict:
     library's): `timing` removed everywhere and segment events sorted within equal at_bp, needed_budgets sorted
     (DESIGN §9 T37; SPEC §7.1 "events at one at_bp are unordered", §7.2 needed_budgets a histogram); growth
     label_ends null read as {} (DESIGN §2.5); annotation's direct_reads and keys_mapped dropped (SPEC §8.3: they
-    count lookahead work, which differs between executions)."""
+    count lookahead work, which differs between executions); the result's `work` dropped (the engine's per-request
+    counters, work.memory_bytes among them: a twin's results[i] states them, the pinned library's to_json export does
+    not write them)."""
     r = _drop_timing(copy.deepcopy(result))
+    r.pop("work", None)
     ann = r.get("annotation")
     if isinstance(ann, dict):
         for k in ("direct_reads", "keys_mapped"):
