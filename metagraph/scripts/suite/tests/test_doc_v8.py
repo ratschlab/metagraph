@@ -565,3 +565,78 @@ class RealRunV8Test(unittest.TestCase):
         self.assertIn("the comparison's code", text)
         run.gate_stale = ["executions.jsonl"]
         self.assertIn("judged other contents of executions.jsonl than the run has now", sections.stale_gate_text(run))
+
+
+class ProblemNotesV8Test(unittest.TestCase):
+    """The v8 baseline (2026-10-21): the gate's one problem, N-realrep-0023 mcp r0, got no answer although the
+    service's log shows it sent: the identity input's problem_notes put that note beside the execution in I.1."""
+
+    NOTE = {"scenario": "N-x-0001", "arm": "mcp", "repeat": 0, "source": "the operator's log check",
+            "text": "the answer left the service with status 200 after 3.1 s."}
+
+    def _ctx(self, notes):
+        rows = {"mcp": [{"scenario": "N-x-0001", "arm": "mcp", "repeat": 0, "outcome": "error"}]}
+        comp = {"N-x-0001": {"mcp_agreement": {"class": "disagree", "differing_checks": [], "outcome_differs": []}}}
+        ident = {"service_commit": "abc"}
+        if notes is not None:
+            ident["problem_notes"] = notes
+        run = _Stub(order=["N-x-0001"], arm_lines=lambda sid, arm: rows.get(arm, []),
+                    comp_entry=lambda sid: comp.get(sid, {}), comp_relations=lambda: {},
+                    scenario=lambda sid: {"title": "a title"}, identity=ident)
+        return _Stub(run=run, units=_Stub(by_scenario={}), chapters=[])
+
+    def _items(self, notes):
+        import sections
+        groups = dict(sections.principal_findings(self._ctx(notes)))
+        return " ".join(i for t in groups for i in groups[t])
+
+    def test_note_beside_the_execution(self):
+        items = self._items([self.NOTE])
+        self.assertIn("mcp r0 error (no HTTP answer): the answer left the service with status 200 after 3.1~s (the "
+                      "service's own log, checked separately; not part of the run's files)", items)
+        self.assertIn("the outcomes differ; the MCP execution's error above, with its note", items)
+        self.assertNotIn("operator", items)
+
+    def test_no_note_no_text(self):
+        for notes in (None, [], [dict(self.NOTE, repeat=1)], [dict(self.NOTE, arm="direct-local")]):
+            items = self._items(notes)
+            self.assertIn("mcp r0 error (no HTTP answer)", items)
+            self.assertNotIn("own log", items)
+            if notes != [dict(self.NOTE, repeat=1)]:
+                # the disagreement names a note on any repeat of its arm
+                self.assertNotIn("with its note", items)
+
+    def test_note_must_name_an_execution_that_did_not_pass(self):
+        import tempfile
+        import reader
+        rows = [{"scenario": "N-x-0001", "arm": "mcp", "repeat": 0, "outcome": "error",
+                 "started_utc": "2026-10-21T12:02:38Z", "ended_utc": "2026-10-21T12:04:23Z"},
+                {"scenario": "N-x-0001", "arm": "mcp", "repeat": 1, "outcome": "pass",
+                 "started_utc": "2026-10-21T12:04:34Z", "ended_utc": "2026-10-21T12:04:37Z"}]
+        stub = _Stub(rows=rows, run={"release": None}, mcp_run={}, service_identity=None, manifest={},
+                     run_id=lambda: "R")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "identity.json")
+            for note, refusal in ((self.NOTE, None),
+                                  (dict(self.NOTE, repeat=1), "no recorded execution that did not pass"),
+                                  (dict(self.NOTE, scenario="N-y-0001"), "no recorded execution that did not pass"),
+                                  (dict(self.NOTE, text=" "), "is not {scenario, arm, repeat, text"),
+                                  (dict(self.NOTE, repeat=True), "is not {scenario, arm, repeat, text")):
+                with open(path, "w") as f:
+                    json.dump({"run": "R", "service_commit": "abc1234", "problem_notes": [note]}, f)
+                if refusal is None:
+                    self.assertEqual(reader.Run._load_identity(stub, path)["problem_notes"], [note])
+                else:
+                    with self.assertRaises(reader.RunError) as cm:
+                        reader.Run._load_identity(stub, path)
+                    self.assertIn(refusal, str(cm.exception))
+            with open(path, "w") as f:
+                json.dump({"run": "R", "service_commit": "abc1234", "problem_notes": {"x": 1}}, f)
+            with self.assertRaises(reader.RunError):
+                reader.Run._load_identity(stub, path)
+
+    def test_notes_in_the_evidence(self):
+        import sections
+        ev = sections._identity_evidence(_Stub(service_identity={"recorded": False}, mcp_run={}),
+                                         {"source": "s", "service_commit": "abc", "problem_notes": [self.NOTE]})
+        self.assertEqual(ev["problem_notes"], [self.NOTE])

@@ -1721,9 +1721,23 @@ def _finding_evidence(line):
     return text.split(" (", 1)[0] if " (" in text else text
 
 
+def _problem_note(ctx, sid, arm, repeat=None):
+    """The identity input's note on one execution the gate holds against the run (make_doc --identity:
+    `problem_notes` [{scenario, arm, repeat, text, source}]; reader._load_identity refuses a note on no recorded
+    execution that did not pass): its text, '' without one; |repeat| None matches any repeat of the arm."""
+    ident = getattr(ctx.run, "identity", None)
+    notes = ident.get("problem_notes") if isinstance(ident, dict) else None
+    for n in notes if isinstance(notes, list) else []:
+        if isinstance(n, dict) and n.get("scenario") == sid and n.get("arm") == arm and \
+                (repeat is None or n.get("repeat") == repeat) and str(n.get("text") or "").strip():
+            return str(n["text"]).strip().rstrip(".")
+    return ""
+
+
 def principal_findings(ctx):
     """The findings, failures, errors and disagreements of the whole run, one line per scenario, linked where the
-    chapter is built; empty lists when there are none."""
+    chapter is built; empty lists when there are none. An execution the identity input notes (problem_notes: the
+    service's own log on it, checked separately) carries the note in its line; the disagreement it causes names it."""
     run = ctx.run
     findings, failures, disagreements = {}, {}, []
     for sid in run.order:
@@ -1738,6 +1752,10 @@ def principal_findings(ctx):
                     what = ("%s: %s" % (esc(failed[0].get("check")),
                                         latex.join_units(cells.esc_times(failed[0].get("detail"), 120)))) if failed \
                         else esc(cells.WORD.get(l.get("outcome"), l.get("outcome")))
+                    note = _problem_note(ctx, sid, arm, l.get("repeat"))
+                    if note:
+                        what += ": %s (the service's own log, checked separately; not part of the run's files)" % (
+                            latex.join_units(cells.esc_times(note)))
                     failures.setdefault(sid, []).append("%s r%s %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
                                                                        esc(l.get("repeat")), what))
         e = run.comp_entry(sid)
@@ -1753,6 +1771,8 @@ def principal_findings(ctx):
                     od = [o for o in (a.get("outcome_differs") or []) if isinstance(o, dict)]
                     what = "the outcomes differ" + ((", repeat %s: %s" % (od[0].get("repeat"), od[0].get("detail")))
                                                     if od and od[0].get("detail") else "")
+                    if who == "mcp" and _problem_note(ctx, sid, "mcp"):
+                        what += "; the MCP execution's error above, with its note"
                 disagreements.append("%s (%s: %s)" % (_link_sid(ctx, sid), who, esc(what, 160)))
     comp_rel = run.comp_relations()
     failed_rel = []
@@ -5569,6 +5589,9 @@ def _identity_evidence(run, ident):
             # the service's log as the input states it, with its source (the document's body names neither the
             # log's file nor its internal states; RV8)
             part["service_log"] = i["service_log"]
+        if isinstance(i.get("problem_notes"), list):
+            # the notes on the gate's problems, with their sources (I.1 prints the text only)
+            part["problem_notes"] = i["problem_notes"]
         return dict(part, sha256_canonical=hashlib.sha256(json.dumps(i, sort_keys=True, separators=(",", ":")).encode(
             "utf-8")).hexdigest())
     rec = _recorded_identity_evidence(run)
