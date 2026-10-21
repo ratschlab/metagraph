@@ -34,7 +34,8 @@ entry's absence_scope or strands are no longer marked not implemented via MCP (a
 the MCP's answer states them per database, checks.MCP_PATTERN_DATABASE_FIELDS), so P-scope-0004 / -0006 run on the
 MCP arm again.
 
-v8 (the owner's design of 2026-10-19, DESIGN-v8 / FORMAT-v8; not frozen) is v7's scenarios, unchanged and in v7's
+v8 (the owner's design of 2026-10-19, DESIGN-v8 / FORMAT-v8; frozen by the owner on 2026-10-21 at content 1cffcea3,
+manifest/suite_v8.json, built with --stop-scenarios) is v7's scenarios, unchanged and in v7's
 order, followed by area G (areas.gen_G, area_g.py): the graphlet processing tools run five ways on a corpus of
 graphlets, built from the corpus file the rehearsal writes (--corpus; provisional without one: the first candidate of
 every slot, preconditions pending) with the library pin --library-commit; the slots the MCP cannot express on staging
@@ -42,8 +43,11 @@ every slot, preconditions pending) with the library pin --library-commit; the sl
 of 2026-10-19; --no-direct-only leaves them out). The G block is appended
 after every v7 layout step, so no v7 scenario moves and the deploy gate's warm repeats stay v7's; the relations are
 v7's. A v8 build is refused into manifest/ without --freeze (the owner freezes v8); `graphlets` (outside the content
-digest) states the corpus file, the pin and what the freeze still needs (pending). --rehearse G (rehearse_g.py) runs
-the candidates on staging and writes the corpus file and the rehearsal report.
+digest) states the corpus file, the pin and what the freeze still needs (pending). --freeze refuses a build other
+than the one the committed gate files pin as manifest/suite_v8.json (gate/declared_v8_rt.json, gate/policy_v8_*.json:
+the build with --stop-scenarios), naming --stop-scenarios when the build without it is the cause; with outputs outside
+manifest/ it is a dry freeze, checked alike. --rehearse G (rehearse_g.py) runs the candidates on staging and writes
+the corpus file and the rehearsal report.
 
 --capabilities DIR: the capabilities snapshot (capabilities.json, pattern_capabilities.json,
 traverse_capabilities.json; default truth/staging_capabilities/): the C scenarios, the relations between the three
@@ -80,7 +84,7 @@ from manifest_lib import DB, Ctx, canonical_json, sha256_json  # noqa: E402
 
 DEFAULT_SEED = 20261013
 MANIFEST_VERSION = 7
-# the versions this builder makes: v6 and v7 (frozen; rebuilt byte for byte) and v8 (area G; not frozen)
+# the versions this builder makes: v6, v7 and v8 (frozen; rebuilt byte for byte; v8 with --stop-scenarios)
 BUILDABLE_VERSIONS = (6, 7, 8)
 GRAPHLET_VERSION = 8
 DEFAULT_CORPUS = os.path.join(truth.TRUTH_DIR, "area_g", "corpus.json")
@@ -238,6 +242,7 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
             # the owner's decision: only once async's MCP runner has the stop flow (--stop-scenarios)
             scenarios += areas.gen_stop(ctx, seeds_from)
             graphlets["stop_scenarios"] = list(areas.STOP_IDS)
+            graphlets["stop_base_scenarios"] = list(areas.STOP_BASE_IDS)
     tag_scenarios(scenarios, recs)
     relations = ctx.relations
     problems = validate(scenarios) + validate_relations(relations, scenarios) + warm_repeat_problems(scenarios) + \
@@ -284,10 +289,13 @@ def build(seed: int, fetch: bool, only_areas=None, capabilities_dir: str = DEFAU
     return manifest
 
 
-def freeze_problems(m: dict) -> List[str]:
+def freeze_problems(m: dict, gate_dir: Optional[str] = None, rebuild=None) -> List[str]:
     """Why a built v8 must not be frozen into manifest/ (VERIFY-D VD12): a provisional corpus (no rehearsal's corpus
-    file), or anything the freeze still needs (graphlets.pending: the library pin, frozen preconditions, a by-design
-    case the tables lack)."""
+    file), anything the freeze still needs (graphlets.pending: the library pin, frozen preconditions, a by-design case
+    the tables lack), or a build other than the one the committed gate files pin as manifest/suite_v<N>.json
+    (pin_problems; VERIFY-D-R5 R5-3: the v8 declared file and policies pin the build with --stop-scenarios).
+    |gate_dir| the gate files' directory (GATE_DIR); |rebuild| (optional) builds the same manifest with
+    --stop-scenarios toggled, to name the flag when that build is the pinned one."""
     g = m.get("graphlets")
     if m.get("manifest_version", 0) < GRAPHLET_VERSION or not isinstance(g, dict):
         return []
@@ -296,6 +304,78 @@ def freeze_problems(m: dict) -> List[str]:
         out.append("the area G corpus is provisional (commit the rehearsal's corpus as %s, or pass --corpus)"
                    % os.path.relpath(DEFAULT_CORPUS, HERE))
     out += ["pending: %s" % p for p in g.get("pending") or []]
+    out += pin_problems(m, committed_pins(m["manifest_version"], gate_dir), rebuild)
+    return out
+
+
+# the gate files (declared files, policies) a freeze must match: each pins the manifest file it names
+GATE_DIR = os.path.join(HERE, "gate")
+# what a gate file pins of its manifest (gate_policy.build_policy's manifest block; a declared file: the content)
+PIN_KEYS = ("content_sha256", "relations_sha256", "manifest_version", "index_fp")
+
+
+def build_identity(m: dict) -> dict:
+    """A built manifest's identity as a gate file pins it (PIN_KEYS)."""
+    return {"content_sha256": m.get("content_sha256"), "relations_sha256": m.get("relations_sha256"),
+            "manifest_version": m.get("manifest_version"), "index_fp": (m.get("index") or {}).get("index_fp")}
+
+
+def committed_pins(version: int, gate_dir: Optional[str] = None) -> List[tuple]:
+    """[(gate file, the gate file's JSON)] of every gate file of |gate_dir| (GATE_DIR) whose manifest block names
+    manifest/suite_v<version>.json, the file the freeze writes, in file order."""
+    gate_dir = gate_dir or GATE_DIR
+    name = "manifest/suite_v%d.json" % version
+    out = []
+    for path in sorted(glob.glob(os.path.join(gate_dir, "*.json"))):
+        with open(path) as f:
+            doc = json.load(f)
+        if isinstance(doc, dict) and isinstance(doc.get("manifest"), dict) and doc["manifest"].get("file") == name:
+            out.append(("gate/" + os.path.basename(path), doc))
+    return out
+
+
+def _pin_differs(m: dict, pins: List[tuple]) -> List[tuple]:
+    ident = build_identity(m)
+    out = []
+    for f, doc in pins:
+        keys = [k for k in PIN_KEYS if k in doc["manifest"] and doc["manifest"][k] != ident[k]]
+        if keys:
+            out.append((f, doc, keys))
+    return out
+
+
+def pin_problems(m: dict, pins: List[tuple], rebuild=None) -> List[str]:
+    """Each committed pin (committed_pins) the build |m| does not match, as a sentence ([] when every pin is the
+    build's: a freeze of another build would leave the committed gate files failing their identity check, closed).
+    The cause it names: a build without the stop scenarios that a pinned policy requires (S-stop / S-base: only
+    --stop-scenarios builds them); with |rebuild| (the same build, --stop-scenarios toggled) it states whether that
+    build is the pinned one."""
+    differ = _pin_differs(m, pins)
+    if not differ:
+        return []
+    ident = build_identity(m)
+    out = ["%s pins manifest/suite_v%s.json at %s, not this build's %s" % (
+        f, m.get("manifest_version"), ", ".join("%s %s" % (k, str(doc["manifest"][k])[:16]) for k in keys),
+        ", ".join("%s %s" % (k, str(ident[k])[:16]) for k in keys)) for f, doc, keys in differ]
+    has_stop = "stop_scenarios" in (m.get("graphlets") or {})
+    ids = set(s.get("id") for s in m.get("scenarios") or [])
+    stop_ids = set(areas.STOP_IDS) | set(areas.STOP_BASE_IDS)
+    lacking = sorted(set(r.get("scenario") for _f, doc, _k in differ for r in doc.get("required") or []
+                         if isinstance(r, dict) and r.get("scenario") in stop_ids) - ids)
+    if lacking and not has_stop:
+        out.append("the build has no stop scenarios, and the pinned policies require %s: build with "
+                   "--stop-scenarios" % ", ".join(lacking))
+    if rebuild is not None:
+        other = rebuild()
+        flag = "without" if has_stop else "with"
+        if not _pin_differs(other, [(f, doc) for f, doc, _k in differ]):
+            out.append("the build %s --stop-scenarios is the pinned one (content %s): %s" % (
+                flag, str(other.get("content_sha256"))[:16],
+                "leave --stop-scenarios out" if has_stop else "pass --stop-scenarios"))
+        else:
+            out.append("the build %s --stop-scenarios is not the pinned one either (content %s): the committed gate "
+                       "files pin another build (regenerate them, or build from the commit they were made at)" % (
+                           flag, str(other.get("content_sha256"))[:16]))
     return out
 
 
@@ -947,7 +1027,9 @@ def main(argv=None) -> int:
                          "/resolve; mcp.flow), only once async's MCP runner has the stop flow (the owner, 2026-10-19)")
     ap.add_argument("--freeze", action="store_true",
                     help="v8: allow the default outputs manifest/suite_v8.json / suite_smoke_v8.json (the owner's "
-                         "freeze)")
+                         "freeze); refused unless the build is the one the committed gate files pin (freeze_problems: "
+                         "the v8 policies pin the build with --stop-scenarios); with --out / --smoke-out elsewhere a "
+                         "dry freeze, checked alike")
     ap.add_argument("--rehearse", metavar="AREA", default=None,
                     help="G: the area G rehearsal (rehearse_g.py; its own arguments follow --)")
     args, rest = ap.parse_known_args(argv)
@@ -1022,8 +1104,14 @@ def main(argv=None) -> int:
               stop_scenarios=args.stop_scenarios)
     if only:
         m["partial_build"] = True
-    if args.freeze and (manifest_path(args.out) or manifest_path(args.smoke_out)):
-        probs = freeze_problems(m)
+    if args.freeze:
+        # into manifest/ the owner's freeze; into other files a dry freeze, checked alike
+        def rebuild() -> dict:
+            return build(args.seed, fetch=not args.no_fetch, only_areas=only, capabilities_dir=args.capabilities,
+                         exposure_file=args.exposure or None, manifest_version=args.manifest_version,
+                         corpus_file=args.corpus, library_commit=args.library_commit,
+                         include_direct_only=args.include_direct_only, stop_scenarios=not args.stop_scenarios)
+        probs = freeze_problems(m, rebuild=rebuild)
         if probs:
             raise SystemExit("v%d is not ready to freeze:\n  %s" % (args.manifest_version, "\n  ".join(probs[:20])))
     write(args.out, m)

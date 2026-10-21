@@ -35,6 +35,10 @@ problems: tools, args predicates over args_resolved, the library ways' expectati
 when the op's tool is listed, the args predicates hold, every library way the op runs matches `library` and W3
 matches `service`; then W3-W4 and W3-W5 may differ and the op is service_by_design (verified), its library pairs
 still compared. A pair that does not hold is a disagreement naming the side (table, request, library, service).
+A case whose service side pins a key of the library's own answer (service_fields naming a key of compare_graphlets.
+ANSWER_KEYS[tool], e.g. graphlet_compare's export: W3 rewrites the library's line, async's 2026-10-21 case) narrows
+what it excuses to those keys: W3's value is read from its answer and must be the pinned one, and a W3-W4 answer
+difference is excused only when the two answers agree with those keys left out of both (pinned_answer_keys).
 """
 
 import os
@@ -476,11 +480,47 @@ def expectation_holds(want, rec, way):
             if not sc.json_equal(fields.get(k), v):
                 return False, "%s's error field %s %s, the case says %s" % (way, k, gp.compact(fields.get(k)),
                                                                              gp.compact(v))
+    pinned = pinned_answer_keys(rec.get("tool"), want)
     for k, v in sorted((want.get("service_fields") or {}).items()):
-        got = service_fields(rec).get(k, gp.MISSING)
+        if k in pinned:   # a key of the library's own answer: W3's value is the one in its answer
+            ans = rec.get("answer") if isinstance(rec.get("answer"), dict) else {}
+            got = ans.get(k, gp.MISSING)
+        else:
+            got = service_fields(rec).get(k, gp.MISSING)
         if got is gp.MISSING or not sc.json_equal(got, v):
             return False, "%s's service field %s %s, the case says %s" % (way, k, gp.compact(got), gp.compact(v))
     return True, ""
+
+
+def pinned_answer_keys(tool, side):
+    """The keys a case side's service_fields pins that are keys of the library's own answer of |tool|
+    (compare_graphlets.ANSWER_KEYS): W3 changes the library's value there (module docstring). -> set."""
+    keys = cg.ANSWER_KEYS.get(tool) or frozenset()
+    fields = (side or {}).get("service_fields") if isinstance((side or {}).get("service_fields"), dict) else {}
+    return set(k for k in fields if k in keys)
+
+
+def _without(rec, keys):
+    """A copy of a record whose answer leaves out |keys|."""
+    out = dict(rec)
+    if isinstance(rec.get("answer"), dict):
+        out["answer"] = dict((k, v) for k, v in rec["answer"].items() if k not in keys)
+    return out
+
+
+def narrow_pair_agrees(pair, sid, oid, recs, keys):
+    """(agrees, detail) of a disagreeing W3-W<n> pair compared again with |keys| left out of both answers (a case
+    pinning keys of the library's answer excuses those keys only): the same comparison (compare_graphlets.
+    compare_records), never W5 (its answer differences are of kind oracle, which no case excuses)."""
+    a, b = pair["pair"].split("-", 1)
+    ra, rb = recs.get(a, {}).get((sid, oid)), recs.get(b, {}).get((sid, oid))
+    if ra is None or rb is None or b not in gp.LIBRARY_WAYS:
+        return False, "%s: not compared again" % pair["pair"]
+    again = cg.compare_records(a, _without(ra, keys), b, _without(rb, keys), pair.get("what"))
+    if again.get("outcome") == "agree":
+        return True, ""
+    return False, "%s still differs without %s: %s" % (pair["pair"], ", ".join(sorted(keys)),
+                                                      again.get("pointer") or again.get("detail") or "?")
 
 
 def judge_by_design(entry, scen, op, recs, cases):
@@ -530,6 +570,9 @@ def judge_by_design(entry, scen, op, recs, cases):
                     res.update(side=problems[0][0], detail="; ".join(x[1] for x in problems))
                 else:
                     res.update(verified=True, detail="the library ways and W3 answer as %s states" % cid)
+                pinned = pinned_answer_keys(op.get("tool"), g.get("service"))
+                if pinned:
+                    res["pinned_answer_keys"] = sorted(pinned)
         results.append(res)
     entry["by_design"] = results
     if entry["outcome"] in ("precondition_failed",) or entry.get("smoke"):
@@ -537,8 +580,24 @@ def judge_by_design(entry, scen, op, recs, cases):
     # a verified case excuses only the declared difference: a W3-W4 or W3-W5 disagreement of kind error / answer,
     # never differing args_resolved, a selector (VERIFY-C VC11) or a file's content (kind file)
     kinds = dict((p.get("pair"), p.get("kind")) for p in entry.get("pairs") or [] if p.get("outcome") == "disagree")
-    rest = [p for p in entry.get("disagreeing") or []
-            if not (p in BY_DESIGN_PAIRS and kinds.get(p) in BY_DESIGN_KINDS)]
+    # a verified case pinning keys of the library's answer excuses an answer difference in those keys only; any
+    # other verified case the declared pair as a whole
+    broad = any(r["verified"] and not r.get("pinned_answer_keys") for r in results)
+    narrow = set(k for r in results if r["verified"] for k in r.get("pinned_answer_keys") or [])
+    by_pair = dict((p.get("pair"), p) for p in entry.get("pairs") or [] if p.get("outcome") == "disagree")
+
+    def excused(p):
+        if p not in BY_DESIGN_PAIRS or kinds.get(p) not in BY_DESIGN_KINDS:
+            return False
+        if broad:
+            return True
+        if narrow and kinds.get(p) == "answer":
+            ok, why = narrow_pair_agrees(by_pair[p], sid, oid, recs, narrow)
+            if not ok:
+                entry.setdefault("by_design_narrow", []).append(why)
+            return ok
+        return False
+    rest = [p for p in entry.get("disagreeing") or [] if not excused(p)]
     unverified = ["by-design %s: %s" % (r["case"], r["side"]) for r in results if not r["verified"]]
     if rest or unverified:
         entry["outcome"] = "disagree"

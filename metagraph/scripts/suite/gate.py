@@ -905,6 +905,7 @@ def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect
     passed = judged = 0
     passed_by_arm = {}
     by_design_mcp_only = 0
+    mcp_only_by_plan = 0
     for (sid, arm, rep), r in sorted(recorded.items(), key=lambda kv: (pos.get(kv[0][0], len(pos)),
                                                                         sc.ARMS.index(kv[0][1])
                                                                         if kv[0][1] in sc.ARMS else 9, kv[0][2])):
@@ -1009,7 +1010,12 @@ def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect
                                              % _describe_agreement(ma), sid, "mcp"))
                 elif not direct_ran:
                     by_design_mcp_only += 1
-            if policy.get("require_agreement"):
+            if policy.get("require_agreement") and cls == "no_direct_reference" and \
+                    (scen.get(sid) or {}).get("direct_not_run"):
+                # an MCP-only scenario (direct_not_run: v8's stop scenarios) has no direct reference by construction;
+                # its MCP execution is judged by its own checks above (VERIFY-D-R2 R2-6)
+                mcp_only_by_plan += 1
+            elif policy.get("require_agreement"):
                 if cls not in ("agree", "service_by_design") or (cls == "service_by_design"
                                                                  and ma.get("verified") is not True):
                     if cls != "disagree":
@@ -1033,6 +1039,9 @@ def judge(run_dir, policy, reevaluated=False, expect_service_commit=None, expect
     if by_design_mcp_only:
         notes.append("%d by-design scenario(s) verified on the MCP side only (no direct arm ran them)"
                      % by_design_mcp_only)
+    if mcp_only_by_plan:
+        notes.append("%d MCP-only scenario(s) (direct_not_run) not compared with a direct arm: none runs them"
+                     % mcp_only_by_plan)
     judged_with = (comp or {}).get("judged_with") or {}
     if judged_with.get("live_suite_common_differs"):
         # a note, not a problem: the checks judged with the run's own suite_common, the pipeline is this tree's

@@ -1,0 +1,21 @@
+{
+ "about": "Owner-declared entries of the v8 deploy gates (gate_policy.py --declared), read by both v8 policies: policy_v8_rt_mcp.json (POST /resolve, POST /traverse, GET /traverse/capabilities) and policy_v8_rtp_mcp.json (the same routes and POST /pattern), pinned to manifest/suite_v8.json as the owner's freeze writes it (build_manifest.py --manifest-version 8 --stop-scenarios --freeze): v7's 725 scenarios byte-identical, R-warm-0009..0018, area G and the two stop scenarios. The entries are v7's, unchanged (declared_v7_rt.json: REL-subset-0007 on mcp); area G sets nothing aside (graphlet_not_required and graphlet_service_checks_not_required empty: every planned op call and service check is required). The stop scenarios run on the MCP arm only (direct_not_run): the policy requires no direct execution of them, and with require_agreement false (as in v7) their missing direct reference is no problem (R2-6). Frozen only by the owner's freeze.",
+ "declared_version": 1,
+ "exclusions": [],
+ "graphlet_not_required": [],
+ "graphlet_service_checks_not_required": [],
+ "manifest": {
+  "content_sha256": "1cffcea3d67feb82bdaa7fee88fc8dc2b2c7e8d52c6105d272a659f62152e570",
+  "file": "manifest/suite_v8.json"
+ },
+ "not_required": [],
+ "relations_excluded": [
+  {
+   "arms": [
+    "mcp"
+   ],
+   "reason": "service-side by design (round 2, the owner's decision 4 of 2026-10-16): its side b, P-modes-0004, sends max_contexts 10,001, which the service refuses at submit by the by-design table's case pattern.max_contexts_above_10000 (pattern_out_of_bounds on caps.max_contexts; the host clamps the value to 10,000 and answers, the service never lowers it), so P-modes-0002's partial list can never be held within P-modes-0004's on the MCP arm (the v5 baseline: inconclusive, http 200 / 400). P-modes-0004's own MCP execution stays required as the named by-design case, and the relation stays required on direct-local, where both sides answer.",
+   "relation": "REL-subset-0007"
+  }
+ ]
+}

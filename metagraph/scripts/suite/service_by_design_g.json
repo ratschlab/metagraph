@@ -1,7 +1,7 @@
 {
  "version": 1,
- "service_commit": "f994e3e2880e3f21c51577d75926cfb35c3d4355",
- "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table)",
+ "service_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+ "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20, and the export case of BY-DESIGN-G-CASES-2.json of the v8 shadow run, 2026-10-21), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table). service_commit is the latest commit a case cites; each case's source_commit names its own: f994e3e2 for the first four, c60b753e for graphlet.compare_export_line. The shadow run's graphlet.walks_arm_absent.two_arms / .one_arm are gone since the service's arm fix 9abe8517 (an arm sent null reaches the library: W3 answers as the library, bad_arm on two arms, the only arm on one)",
  "cases": [
   {
    "id": "graphlet.max_bytes_above_service_cap",
@@ -327,6 +327,57 @@
       "export_id": null,
       "format": "mgt",
       "status": "done"
+     }
+    }
+   }
+  },
+  {
+   "id": "graphlet.compare_export_line",
+   "areas": [
+    "G"
+   ],
+   "scenario_match": "an area G op of graphlet_compare that is answered on every way and whose answer keeps the `export` key (the library cuts it first under a tight ceiling: compare_graphlets.OPTIONAL_KEYS): W3 carries the service's export line, the library ways the library's; every other answer field is the same",
+   "direct_expectation": {
+    "http": null,
+    "code": null,
+    "text": null,
+    "text_source": "vendor/metagraph_traverse/mcp_tools.py:2356 (graphlet_compare's base answer, vendored fdff625e)",
+    "behaviour": "the library ways answer graphlet_compare with 'export': 'graphlet_export(format=json, what=compare) writes the complete lists' in every answered compare (comparable true, qualified or false, and a local stop alike), unless the ceiling cut it (fields_cut names export)"
+   },
+   "service_answer": {
+    "tool": "graphlet_compare",
+    "outcome": "answered",
+    "http": null,
+    "code": null,
+    "text_contains": null,
+    "field": null,
+    "keys": {
+     "export": "complete lists: download both bodies (format=mgt) and compare locally"
+    },
+    "stage": "worker",
+    "detail": "The worker runs the library's graphlet_compare and, in _finish (app/traversal/ops_runtime.py:594-595), replaces the export value when it equals ops_contract.LIBRARY_COMPARE_EXPORT_LINE (app/traversal/ops_contract.py:704) with ops_contract.COMPARE_EXPORT_LINE (app/traversal/ops_contract.py:705): what=compare is deferred on the service (D6; graphlet_export refuses it), so the library's line would point to a call the service does not offer. Exact replacement only: an export value that differs (none today) or an absent one (cut by the library under the ceiling) is left as it is. Nothing else in the answer changes for this reason. The MCP tool relays the answer unchanged (app/mcp_server.py _graphlet_op). Byte reserve: the worker calls the library with max_bytes minus base_reserve_bytes (app/traversal/ops_contract.py:715-724: json_size(COMPARE) - json_size(LIBRARY) = 1 byte, plus the D1 label fields when that explanation can apply, app/traversal/ops_runtime.py:570-573), so at a page edge W3's library call has slightly less room than W4's: a page may end one row earlier, which the assembled answer (graphlet_paging) does not show, but a single-page op could in principle show another cut marker. The shadow run's 40 ops differed on export only."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/traversal/ops_runtime.py:594",
+    "app/traversal/ops_runtime.py:595",
+    "app/traversal/ops_contract.py:704",
+    "app/traversal/ops_contract.py:705",
+    "app/traversal/ops_contract.py:715",
+    "vendor/metagraph_traverse/mcp_tools.py:2356"
+   ],
+   "source_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+   "graphlet": {
+    "tools": [
+     "graphlet_compare"
+    ],
+    "library": {
+     "answered": true
+    },
+    "service": {
+     "answered": true,
+     "service_fields": {
+      "export": "complete lists: download both bodies (format=mgt) and compare locally"
      }
     }
    }

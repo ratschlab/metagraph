@@ -394,6 +394,65 @@ class Required(unittest.TestCase):
         self.assertEqual(gs.required_service_checks(gf.manifest([gf.scenario(ways=["W1", "W2", "W4"])])), [])
 
 
+LIBRARY_EXPORT = "graphlet_export(format=json, what=compare) writes the complete lists"
+SERVICE_EXPORT = "complete lists: download both bodies (format=mgt) and compare locally"
+EXPORT_CASE = {"id": "graphlet.compare_export_line", "areas": ["G"], "agreement": "by_design",
+               "scenario_match": "an answered graphlet_compare: W3 carries the service's export line",
+               "direct_expectation": {"behaviour": "the library's export line"},
+               "service_answer": {"tool": "graphlet_compare", "outcome": "answered",
+                                  "keys": {"export": SERVICE_EXPORT}},
+               "graphlet": {"tools": ["graphlet_compare"], "library": {"answered": True},
+                            "service": {"answered": True, "service_fields": {"export": SERVICE_EXPORT}}},
+               "source": ["test"]}
+
+
+class NarrowByDesign(ServiceBase):
+    """A case pinning a key of the library's own answer (graphlet_compare's export, async's 2026-10-21 case): W3's
+    value is read from its answer, and only that key's difference is excused."""
+    OP = {"id": "cmp", "tool": "graphlet_compare", "by_design": EXPORT_CASE["id"],
+          "args": {"b": {"graphlet": SID_B}, "mode": "claims", "max_bytes": 262144}, "ways": FOUR}
+
+    def run_with(self, w3_export, w3_counts=None):
+        a = gf.scenario(sid=SID, ops=[self.OP], facts={"cut_lists": False})
+        b = gf.scenario(sid=SID_B, ops=[], facts={"cut_lists": False})
+        self.make([a, b], table=[EXPORT_CASE])
+        lib = dict(compare_answer(), export=LIBRARY_EXPORT)
+        w3 = dict(compare_answer(UUID, UUID_B, counts=w3_counts), export=w3_export)
+        if w3_export is None:
+            del w3["export"]
+        self.put(SID, self.OP, {"*": lib, "W3": w3}, sf={})
+        return self.result()["scenarios"][SID]["ops"]["cmp"]
+
+    def test_the_pinned_key_alone_is_excused(self):
+        self.assertEqual(gs.pinned_answer_keys("graphlet_compare", EXPORT_CASE["graphlet"]["service"]), {"export"})
+        self.assertEqual(gs.pinned_answer_keys("graphlet_walks", EXPORT_CASE["graphlet"]["service"]), set())
+        e = self.run_with(SERVICE_EXPORT)
+        self.assertTrue(e["by_design"][0]["verified"], e["by_design"])
+        self.assertEqual(e["by_design"][0]["pinned_answer_keys"], ["export"])
+        self.assertEqual(e["outcome"], "service_by_design", e)
+        self.assertNotIn("disagreeing", e)
+        w34 = next(p for p in e["pairs"] if p["pair"] == "W3-W4")
+        self.assertEqual((w34["outcome"], w34["pointer"]), ("disagree", "/answer/export"))   # recorded, excused
+
+    def test_another_difference_is_not_excused(self):
+        e = self.run_with(SERVICE_EXPORT, w3_counts={"only_in_a": 1, "only_in_b": 0, "differ": 0})
+        self.assertTrue(e["by_design"][0]["verified"], e["by_design"])
+        self.assertEqual(e["outcome"], "disagree", e)
+        self.assertIn("W3-W4", e["disagreeing"])
+        self.assertIn("W3-W4 still differs without export: /answer/counts", e["by_design_narrow"][0])
+
+    def test_the_pinned_text_must_be_the_services(self):
+        # W3 answering the library's line: no answer difference, yet the case does not hold on W3
+        e = self.run_with(LIBRARY_EXPORT)
+        self.assertFalse(e["by_design"][0]["verified"])
+        self.assertIn("W3's service field export", e["by_design"][0]["detail"])
+        self.assertEqual(e["outcome"], "disagree", e)
+        self.assertIn("by-design graphlet.compare_export_line: service", e["disagreeing"])
+        # an answer without the key (the library cut it under the ceiling): missing, the case does not hold
+        e = self.run_with(None)
+        self.assertFalse(e["by_design"][0]["verified"])
+
+
 class ByDesign(ServiceBase):
     OP = {"id": "walks-cap", "tool": "graphlet_walks", "ways": FOUR, "by_design": CAP_CASE["id"],
           "args": {"arm": "left", "rank": "id", "n": 10, "max_bytes": 262145}}
@@ -449,6 +508,25 @@ class ByDesign(ServiceBase):
         self.assertIn("W3-W4", e["disagreeing"])
         p = next(p for p in e["pairs"] if p["pair"] == "W3-W4")
         self.assertEqual((p["kind"], p["pointer"][:5]), ("file", "/file"), p)
+
+    def test_the_cli_writes_the_stages(self):
+        # the shadow run: compare_graphlets.py run as __main__ registered the stages in a second module copy, so its
+        # graphlet_compare.json lacked the by-design pairs and the service checks; the file must equal the gate's
+        # in-memory comparison
+        import subprocess
+        self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
+        self.put(SID, self.OP, {"*": gf.walks_answer()}, errors={"W3": self.REFUSED})
+        memory = self.result()
+        out = os.path.join(self.run_.dir, "cli.json")
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "compare_graphlets.py"), self.run_.dir,
+                        "--out", out], check=True, capture_output=True)
+        with open(out) as fh:
+            cli = json.load(fh)
+        e_mem, e_cli = (x["scenarios"][SID]["ops"]["walks-cap"] for x in (memory, cli))
+        self.assertEqual(e_cli["outcome"], "service_by_design", e_cli)
+        self.assertEqual(e_cli.get("by_design"), e_mem.get("by_design"))
+        self.assertEqual([c["check"] for c in cli["service_checks"]], list(gs.SERVICE_CHECKS))
+        self.assertEqual(cli["summary"], memory["summary"])
 
     def test_a_pair_that_does_not_hold_names_its_side(self):
         self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
@@ -531,14 +609,23 @@ class ByDesign(ServiceBase):
         lib_sf = copy.deepcopy(CAP_CASE)
         lib_sf["graphlet"]["library"]["service_fields"] = {"x": 1}
         self.assertIn("on the service side only", "; ".join(cmp.table_problems([lib_sf])))
-        # the real tables load: async's four area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20) in area G's own
-        # table (VERIFY-D VD1), each valid; the service-by-design table holds none
+        # the real tables load: async's four area G cases (BY-DESIGN-G-CASES.json, landed 2026-10-20) and the shadow
+        # run's export case (BY-DESIGN-G-CASES-2.json, 2026-10-21; its arm-absent two gone since 9abe8517) in area
+        # G's own table (VERIFY-D VD1), each valid; the service-by-design table holds none
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)
         self.assertFalse([cid for cid, c in cases.items() if "graphlet" in c])
         cases, info = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         g = sorted(cid for cid, c in cases.items() if "graphlet" in c)
         self.assertEqual(g, ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
-                             "graphlet.export_mgt_is_the_stored_body", "graphlet.max_bytes_above_service_cap"])
+                             "graphlet.compare_export_line", "graphlet.export_mgt_is_the_stored_body",
+                             "graphlet.max_bytes_above_service_cap"])
+        # the export case pins a key of the library's answer: it excuses that key only (pinned_answer_keys)
+        self.assertEqual(gs.pinned_answer_keys("graphlet_compare", cases["graphlet.compare_export_line"]["graphlet"][
+            "service"]), {"export"})
+        # the service's exact text pinned (the shadow run's W3 line), the library's line of its vendored library
+        self.assertEqual(cases["graphlet.compare_export_line"]["graphlet"]["service"]["service_fields"],
+                         {"export": SERVICE_EXPORT})
+        self.assertIn(LIBRARY_EXPORT, cases["graphlet.compare_export_line"]["direct_expectation"]["behaviour"])
         for cid in g:
             self.assertEqual(cmp.graphlet_case_problems(cases[cid]), [], cid)
 

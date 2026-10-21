@@ -2655,6 +2655,12 @@ def _known_counts(counts: Any, path: str = "") -> List[str]:
     return out
 
 
+# the work fields a sticky later pattern may state nonzero: memory_bytes, the request's memory peak so far (the
+# engine deploy of 2026-10-21 states it on every entry: the engine fixture paths_max_steps' p1 states 2862 after p0's
+# max_steps stop)
+STICKY_NOT_WORK = ("memory_bytes",)
+
+
 def _sticky_problems(sc: dict, i: int, e: dict, first: dict) -> List[str]:
     """What entry i, a later pattern after |first|, an earlier pattern's budget stop of the search, states otherwise
     than SPEC-pattern-search §7.6 has it (one budget per request, the stop sticky): the same stop in phase discovery
@@ -2675,7 +2681,10 @@ def _sticky_problems(sc: dict, i: int, e: dict, first: dict) -> List[str]:
         out.append("p%d: after a %s stop of an earlier pattern, %d count(s) not unknown (%s; every count is unknown: "
                    "§7.6)" % (i, first.get("reason"), len(known), known[0]))
     work = e.get("work") if isinstance(e.get("work"), dict) else {}
-    busy = ["%s %s" % (k, v) for k, v in work.items() if isinstance(v, (int, float)) and not isinstance(v, bool) and v]
+    # memory_bytes is no work of this entry: the engine states each entry's memory peak so far, nonzero after an
+    # earlier charged pattern (STICKY_NOT_WORK)
+    busy = ["%s %s" % (k, v) for k, v in work.items() if k not in STICKY_NOT_WORK and isinstance(v, (int, float))
+            and not isinstance(v, bool) and v]
     busy += ["steps_by_mismatches.%s %s" % (k, v) for k, v in (work.get("steps_by_mismatches") or {}).items()
              if isinstance(v, (int, float)) and v]
     if busy:
@@ -4972,14 +4981,18 @@ def check_invariants(sc, ans, a, arm, client=None):
 #   stop_answer    traverse_stop's answer states what args expect (running, cancel_supported, cancel, bound_seconds_gt);
 #   job_terminal   the job ends with a status in args.status_in, within the stop's bound_seconds (+ margin_s);
 #   attempt_state  every attempt row settled, on the server instance it was reserved for;
-#   token_release  each attempt's release record as the stop's route allows:
-#                  /traverse: reason finished (site stop, released), tombstone (released: the switch on), or with the
-#                    switch off and a covering tombstone reason lease / decision would_release / detail
-#                    tombstone_would_release_ok; a normal end (completed), the sweep (swept) or evidence after the lease
-#                    (decision after_lease); any other hold only with a detail that fits the stop's evidence (STOP_HOLD_FITS);
-#                  /resolve: reason grace, detail grace_<N>s (grace_0), at = the connection's close + N s (the close: the
-#                    stop's answer, within the worker's poll; +- grace_margin_s), or reason lease / decision held / detail
-#                    grace_capped when the lease ends first (at = lease_until); completed (the resolve ended first);
+#   token_release  each attempt's release record as the stop's route allows (VERIFY-D-R3 R3-2):
+#                  /traverse: pass on completed (decision null: on a healthy host the worker's release on the host's
+#                    answer, which comes before the stop site decides), finished (released) or tombstone (released);
+#                    a hold (lease: held / would_release / after_lease) or the sweep is inconclusive, so a regression to
+#                    "always held to the lease" blocks; the stop site's own judgement (re-cancel; pinned finished /
+#                    covering tombstone / lease) runs only when the host never answers, which MCP cannot provoke: async's
+#                    unit and parity tests cover it, not the suite;
+#                  /resolve: pass on grace (detail grace_<N>s, at = the connection's close + N s, the close: the stop's
+#                    answer, within the worker's poll; +- grace_margin_s) or grace_capped (lease / held, at = lease_until
+#                    when the lease ends first); completed (the resolve ended before the stop: a race) and the sweep
+#                    are inconclusive;
+#                  decision is null exactly for completed and grace (async's rule): any other value there fails;
 #                  every release no later than the token's lease: lease_until + lease_margin_s (async's caveat 1: on a
 #                    contract host the Redis token may outlive the row's lease by max(TRAVERSAL_STOP_CONFIRM_S, the HTTP
 #                    phase margin)), or dispatched_at + token_lease_ms where the row states it; decision error fails.
@@ -5000,10 +5013,10 @@ STOP_LEASE_HOLD_S = {"contract": STOP_CONFIRM_S, "legacy": STOP_HTTP_PHASE_MARGI
 # A /traverse job can read stopped up to ~40 s before the stop site writes its release record (M1): a release written
 # up to this long after the job's end is on time; async's runner waits until lease_until + 35 s, at most 90 s after
 STOP_RELEASE_WRITE_WINDOW_S = 45.0
-# traverse_stop's codes: one that says an earlier call of the same stop took (async's STOP_TOOK, VERIFY-D VD7), and
-# those that say the stop was never answered (no answer, busy past the runner's retries): not tested, never a refusal
+# traverse_stop's code that says an earlier call of the same stop took (async's STOP_TOOK, VERIFY-D VD7): taken, its
+# answer states only what it states; any stop not taken (no answer, busy past the runner's retries, another refusal)
+# is an error (the owner's rule, VERIFY-D-R2 R2-4)
 STOP_TOOK_CODES = ("already_stopping",)
-STOP_UNANSWERED_CODES = ("temporarily_unavailable", "timeout", "transport", "no_answer", "connection_error")
 RESOLVE_STOP_GRACE_S = 20.0        # TRAVERSAL_RESOLVE_STOP_GRACE_S
 STOP_GRACE_MARGIN_S = 5.0               # the worker closes the connection within its stop poll; the clocks
 STOP_TERMINAL_MARGIN_S = 5.0            # job_terminal: the stop's bound plus this
@@ -5065,19 +5078,37 @@ def _sf_stop_answer(rec, args, scenario):
     stop = rec.get("stop")
     if not isinstance(stop, dict):
         return INCONCLUSIVE, "no stop was sent: %s" % (rec.get("error") or "the flow ended before it")
+    taken_earlier = False
     if stop.get("error"):
         err = str(stop["error"])
         if err in STOP_TOOK_CODES and stop.get("took") is not False:
-            # the runner resent an unanswered stop (idempotent) and records the last answer: an earlier call took
-            return PASS, "traverse_stop: %s, an earlier call of this stop took (%d call(s))" % (
-                err, stop.get("calls") or 1)
-        if err in STOP_UNANSWERED_CODES or (stop.get("answer") is None and stop.get("took") is False and
-                                            ":" in err):
-            return INCONCLUSIVE, "the stop was never answered (%s): nothing of it to test" % err
-        return FAIL, "traverse_stop answered error %s" % err
+            # the runner resent an unanswered stop (idempotent) and records the last answer: an earlier call took;
+            # this answer states what it states, the rest of the expected answer was never seen
+            taken_earlier = True
+        else:
+            return FAIL, "the stop was not taken: %s (%d call(s))" % (err, stop.get("calls") or 1)
+    elif stop.get("took") is False:
+        return FAIL, "the stop was not taken (the runner's took false)"
     ans = stop.get("answer")
     if not isinstance(ans, dict):
-        return FAIL, "traverse_stop's answer is not an object"
+        if taken_earlier:
+            ans = {}
+        else:
+            return FAIL, "traverse_stop's answer is not an object"
+    if taken_earlier:
+        seen = dict((k, w) for k, w in args.items() if (k[:-3] if k.endswith("_gt") else k) in ans)
+        unseen = sorted(set(args) - set(seen))
+        bad = []
+        for key, want in sorted(seen.items()):
+            got = ans.get(key[:-3] if key.endswith("_gt") else key)
+            if key.endswith("_gt") and not (_sf_num(got) is not None and _sf_num(got) > want):
+                bad.append("%s %r, expected > %r" % (key[:-3], got, want))
+            elif not key.endswith("_gt") and got != want:
+                bad.append("%s %r, expected %r" % (key, got, want))
+        if bad:
+            return FAIL, "; ".join(bad)
+        return PASS, "traverse_stop: %s, an earlier call of this stop took (%d call(s)); not seen: %s" % (
+            stop["error"], stop.get("calls") or 1, ", ".join(unseen) or "nothing")
     bad = []
     for key, want in sorted(args.items()):
         if key.endswith("_gt"):
@@ -5155,31 +5186,6 @@ def _sf_attempt_state(rec, args, scenario):
 
 
 # a hold (reason lease, decision held) is acceptable on a /traverse stop only when its detail fits the evidence
-def _sf_running_at_stop(rec, a):
-    ans = ((rec.get("stop") or {}).get("answer")) or {}
-    settled = _sf_utc(a.get("settled_at"))
-    sent = _sf_utc((rec.get("stop") or {}).get("sent_utc"))
-    return (_sf_num(ans.get("running")) or 0) >= 1 and not (settled and sent and settled < sent)
-
-
-STOP_HOLD_FITS = {
-    "stopping": ("the attempt was running when the stop came", _sf_running_at_stop),
-    "switch_off": ("the attempt was running when the stop came (no release on a tombstone with the switch off)",
-                   _sf_running_at_stop),
-    "lease_passed": ("the release is at or after the lease",
-                     lambda rec, a: _sf_after(a.get("release", {}).get("at"), a.get("lease_until"), -1.0)),
-    "no_answer": ("the attempt states no answer of its host",
-                  lambda rec, a: a.get("http_status") is None or bool(a.get("error_class"))),
-    "no_attempt_contract": ("the attempt states no contract bound",
-                            lambda rec, a: a.get("bound_ms") is None and a.get("not_after_ms") is None),
-}
-
-
-def _sf_after(x, y, slack_s=0.0):
-    tx, ty = _sf_utc(x), _sf_utc(y)
-    return bool(tx and ty and (tx - ty).total_seconds() >= slack_s)
-
-
 def _sf_lease_bound(a, args, route="traverse"):
     """(the latest release time the token's lease allows, how it was read) of an attempt row: dispatched_at +
     token_lease_ms where the row states it, else lease_until plus the token's hold past it (STOP_LEASE_HOLD_S: 30 s
@@ -5197,26 +5203,29 @@ def _sf_lease_bound(a, args, route="traverse"):
     return lease + datetime.timedelta(seconds=margin), "lease_until + %g s (%s)" % (margin, host)
 
 
+# async's rule (RELEASE-RECORD.md, "Settled" 2026-10-20): decision is null exactly for reason completed and grace (no
+# judgement: an answer arrived, a timed lapse); any other value there fails
+STOP_NULL_DECISION_REASONS = ("completed", "grace")
+
+
 def _sf_judge_traverse(rec, a, rel):
+    """The coordinator's rule (VERIFY-D-R3 R3-2): a /traverse stop passes on completed (decision null: on a healthy
+    host the worker's release on the host's answer), finished (released) or tombstone (released); a hold (lease:
+    held, would_release, after_lease) and the sweep are inconclusive, so a regression to "always held to the lease"
+    blocks; anything else fails."""
     reason, decision, detail = rel.get("reason"), rel.get("decision"), rel.get("detail")
+    if reason in STOP_NULL_DECISION_REASONS and decision is not None:
+        return FAIL, "reason %s with decision %r (async's rule: null)" % (reason, decision)
+    if reason == "completed":
+        return PASS, "completed (site %s, %s): the worker's release on the host's answer" % (rel.get("site"), detail)
     if reason == "finished" and decision == "released":
         return PASS, "finished (site %s)" % rel.get("site")
     if reason == "tombstone" and decision == "released":
         return PASS, "tombstone (site %s, the switch on)" % rel.get("site")
-    if reason == "lease" and decision == "would_release" and detail == "tombstone_would_release_ok":
-        return PASS, "lease: would_release on a covering tombstone (the switch off)"
-    if reason == "lease" and decision == "after_lease":
-        return PASS, "lease: evidence after the lease (%s)" % detail
-    if reason == "completed":
-        return PASS, "completed (site %s, %s): the attempt ended" % (rel.get("site"), detail)
-    if reason == "swept" and decision == "released":
-        return PASS, "swept (%s)" % detail
-    if reason == "lease" and decision == "held":
-        fit = STOP_HOLD_FITS.get(str(detail))
-        if fit and fit[1](rec, dict(a, release=rel)):
-            return PASS, "held (%s): %s" % (detail, fit[0])
-        return FAIL, "held with detail %r, which does not fit the stop's evidence%s" % (
-            detail, " (%s)" % fit[0] if fit else "")
+    if reason == "lease" and decision in ("held", "would_release", "after_lease"):
+        return INCONCLUSIVE, "lease: %s (%s): a hold, not the stop's release" % (decision, detail)
+    if reason == "swept":
+        return INCONCLUSIVE, "swept (%s, decision %r): the sweep, not the stop's release" % (detail, decision)
     return FAIL, "reason %r decision %r detail %r on a /traverse stop" % (reason, decision, detail)
 
 
@@ -5227,6 +5236,8 @@ def _sf_judge_resolve(rec, a, rel, args):
     stop = rec.get("stop") or {}
     lo, hi = _sf_utc(stop.get("sent_utc")), _sf_utc(stop.get("answered_utc")) or _sf_utc(stop.get("sent_utc"))
     at = _sf_utc(rel.get("at"))
+    if reason in STOP_NULL_DECISION_REASONS and decision is not None:
+        return FAIL, "reason %s with decision %r (async's rule: null)" % (reason, decision)
     if reason == "grace":
         want = "grace_%gs" % grace if grace > 0 else "grace_0"
         if detail != want:
@@ -5250,9 +5261,10 @@ def _sf_judge_resolve(rec, a, rel, args):
                                                                                               grace)
         return PASS, "grace_capped: the lease ended first (%s)" % a.get("lease_until")
     if reason == "completed":
-        return PASS, "completed (%s): the resolve ended first" % detail
-    if reason == "swept" and decision == "released":
-        return PASS, "swept (%s)" % detail
+        # the resolve ended before the stop took effect: a race (VERIFY-D-R3 R3-2), never a pass
+        return INCONCLUSIVE, "completed (%s): the resolve ended before the stop (a race)" % detail
+    if reason == "swept":
+        return INCONCLUSIVE, "swept (%s, decision %r): the sweep, not the stop's release" % (detail, decision)
     return FAIL, "reason %r decision %r detail %r on a /resolve stop (expected grace)" % (reason, decision, detail)
 
 
