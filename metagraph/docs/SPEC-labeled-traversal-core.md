@@ -212,9 +212,12 @@ Plus counts `{candidates, eligible, selected}` and the normalized policy. The li
   "selection": {"policy": {...}, "counts": {...}, "seeds": [{"seed_id": "…", "sequence": "…", "labels": [...],
                 "label_population": {...}}]},
   "capabilities": {"...": "§10.3"},
-  "timing": {"elapsed_ms": 12}
+  "timing": {"elapsed_ms": 12, "cpu_ms": 11.7, "page_faults": {"minor": 210, "major": 0}}
 }
 ```
+
+`timing.cpu_ms` and `timing.page_faults` (Linux only) are the request's own CPU time and page faults, read from
+per-thread clocks (§7.2.1).
 
 `run_format: "rle"` emits runs as the existing presence-mask RLE (`encode_presence_mask`, `query.cpp:131`, moved
 to a header). A request with `bounds.time_budget_ms` also carries `limits` and `stop` (§4.5); a request without
@@ -1958,6 +1961,40 @@ Consistency invariants (tested, T25): Σ_bins steps = counters.steps; Σ_bins la
 ends by reason; splits of kind `ambiguous` = Σ_bins ambiguous branches taken; max live paths in any bin ≤
 `max_live_paths`.
 
+#### 7.2.1 What a request cost: `timing.cpu_ms`, `timing.page_faults`
+
+*(The owner, 2026-10-21: "record timing.cpu_ms, work.page_faults, work.memory_bytes, ideally specific for a
+task" — CPU and memory are the two costs of a request on a host whose memory is fixed and shared. The page faults
+are in `timing`, not `work`: they vary from run to run.)* Every `/traverse` and `/resolve` answer states its own
+CPU time and, on Linux, its page faults — `/traverse` per request and per seed. Both are read from **per-thread
+clocks** (`clock_gettime(CLOCK_THREAD_CPUTIME_ID)`, `getrusage(RUSAGE_THREAD)`), never from the process's figures,
+which the concurrent requests share. That is exact because a request's work runs on the one thread of its HTTP
+handler, from its body's parse to its answer's text and compression: nothing of it runs elsewhere — the annotation
+is read with one thread (RowDiff and BRWT rows with `num_threads` 1, whose OpenMP region is a team of one: the
+calling thread; the budget-aware decode serial), the path cache is the request's own, the attempt machinery has no
+thread of its own (GET /traverse/attempt and POST /traverse/cancel run on other handler threads and only read or
+flag the attempt). Only an `in_ram` load uses other threads (the graph is loaded asynchronously), and it is outside
+the spans below (`timing.load_ms`).
+
+- `cpu_ms` (number, milliseconds, user + system time of the thread). Top level: from the start of the request's
+  processing — after the body's parse and the index lease — to the writing of the top-level `timing` block:
+  every seed's walk and result, its text included (the server writes each seed's text as soon as it is built);
+  not the response's final assembly, its compression and the transport, which follow. Per seed
+  (`results[i].timing`): from the seed's start to its result built, the graphlet text included — the span of
+  `elapsed_ms` + `serialize_ms`. `/resolve`: from the start of its processing to its `timing` block (the
+  mapping, the reads, the discovery, the selection, the answer's tree; not its text). The top-level figure is at
+  least the sum of the seeds'.
+- `page_faults` `{minor, major}` (integers, the same spans). `minor`: a page mapped without I/O — an index page
+  already in the page cache, fresh heap. `major`: a page read from the disk — an index page not resident, what a
+  cold memory-mapped request pays (the index pages a request faults in are not in `work.memory_bytes`).
+  **Linux only**: where the platform has no per-thread rusage (macOS) the field is absent, never 0.
+
+Both vary between runs (load, caches, frequency scaling) and live only inside the `timing` blocks, which
+determinism and every replay comparison exclude (`output.timing: false` omits them with the blocks; a seed result
+without a `timing` block — a failed, refused or never started seed — has none, its CPU is in the top-level
+figure). A graphlet's body carries neither (MGT v1 is frozen): they are in the JSON summary beside it,
+`results[i].timing`. An attempt's `usage` carries them as `usage.timing` (below).
+
 ### 7.3 Provenance (response level)
 
 `k`, `regime`, `alphabet`, graph and annotation types, annotation access path, `algorithm_version`,
@@ -2009,6 +2046,12 @@ attempt) nor a 400 for a malformed id:
   in the CLI). A request that failed before it was parsed states `seeds: 0`,
   `time_budget_ms: null` and the cap.
 - `not_after_ms` (pass 5): the request's own, echoed only when it gave one (§5).
+- `timing` `{cpu_ms, page_faults?}` (every usage; §7.2.1): the CPU time and page faults of the attempt's handler
+  thread since the attempt was created at the handler's start — the body's parse and an `in_ram` lease included
+  (the load's own threads not counted) — so at least the response's `timing.cpu_ms`. The response's usage states
+  them so far; the usage the attempt's state keeps (GET /traverse/attempt) is built when the response has been
+  written and includes its writing and compression, as its `elapsed_ms`. `page_faults` on Linux only. Volatile,
+  like `elapsed_ms`.
 - `observed_max_uninterruptible_ms` (pass 5; every response with `usage`): the longest single uninterruptible
   piece of the attempt's walks — a chunk of a split read, a read decoded whole because its deadline was far
   (§6.8, chunked deadlines), or, from feature level 6, a head piece (the walk between two readings of the clock
@@ -2290,7 +2333,8 @@ natural(right); seed coordinate of outward `i`: |seed| + i (right), −(i+1) (le
 ```
 
 No names, per-segment, per-leaf or per-label data (they are in the text). `timing` (per seed and per response)
-gains `serialize_ms`, the time spent building the response for it (JSON and text).
+gains `serialize_ms`, the time spent building the response for it (JSON and text), and carries `cpu_ms` and
+`page_faults` (§7.2.1) as in every detail: JSON beside the body, never in it.
 
 #### 7.5.6 Stored and derived
 

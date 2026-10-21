@@ -4819,6 +4819,10 @@ Json::Value process_traverse_request(const Json::Value &json,
                                      const IndexIdentity *identity,
                                      Attempt *attempt,
                                      ResultTexts *texts) {
+    // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
+    // on this thread from here to its top-level timing block, each seed's result written as text
+    // included (the envelope's final assembly and compression come after it)
+    const common::ThreadUsageMeter request_usage;
     TraverseRequest req = parse_traverse_request(json);
     std::unique_ptr<Attempt> local;
     if (!attempt && !req.attempt_id.empty()) {
@@ -5070,6 +5074,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             attempt->seed_started(i);
         }
         Timer seed_timer;
+        // the seed's own: its walk and its result built (results[i].timing.cpu_ms)
+        const common::ThreadUsageMeter seed_usage;
         AttemptMeter meter;
         control.meter = &meter;
         // What the seed's walk consumed and what stopped it, recorded when its walk is over
@@ -5183,8 +5189,10 @@ Json::Value process_traverse_request(const Json::Value &json,
             }
             const double seconds = serialize.elapsed();
             serialize_seconds += seconds;
-            if (req.timing)
+            if (req.timing) {
                 rj["timing"]["serialize_ms"] = seconds * 1000;
+                put_thread_usage(&rj["timing"], seed_usage.elapsed());
+            }
             const std::string outcome = rj["outcome"]["walks"].asString();
             append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
             delivered(outcome);
@@ -5263,6 +5271,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         // index into RAM (0: served by the index the server holds)
         if (limits.load_ms)
             t["load_ms"] = *limits.load_ms;
+        put_thread_usage(&t, request_usage.elapsed());
         out["timing"] = std::move(t);
     }
     return out;
@@ -5381,6 +5390,9 @@ Json::Value process_resolve_request(
         const ResolveTimeLimits &time,
         ResolveDelivery *delivery,
         const std::function<std::chrono::steady_clock::time_point()> &clock) {
+    // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
+    // on this thread from here to its timing block (the answer's text and compression after it)
+    const common::ThreadUsageMeter request_usage;
     using graph::pattern::Deadline;
     // the deadline of a request with bounds.time_budget_ms starts here, its body parsed (as
     // /pattern's, DESIGN-pattern-search.md §5.3), before its fields are read; a request without
@@ -5494,6 +5506,7 @@ Json::Value process_resolve_request(
     }
     Json::Value t;
     t["elapsed_ms"] = timer.elapsed() * 1000;
+    put_thread_usage(&t, request_usage.elapsed());
     out["timing"] = std::move(t);
     if (req.options.finish_check)
         req.options.finish_check();

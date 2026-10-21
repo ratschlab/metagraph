@@ -24,6 +24,8 @@
 
 #include <json/json.h>
 
+#include "common/threads/thread_usage.hpp"
+
 
 namespace mtg {
 namespace cli {
@@ -216,6 +218,44 @@ class StrictObject {
 };
 
 inline Json::Value uint_json(uint64_t x) { return Json::Value(static_cast<Json::UInt64>(x)); }
+
+/**
+ * The volatile figures of a span of a thread's work (common::ThreadUsage), into a `timing`
+ * block of /traverse, /resolve or /pattern: `cpu_ms`, the thread's CPU time (user and system),
+ * and `page_faults` {minor, major} where the platform reads them per thread (Linux). A figure
+ * the platform does not give is absent, never 0. Both vary between runs, as everything in
+ * `timing` does.
+ */
+inline void put_thread_usage(Json::Value *timing, const common::ThreadUsage &d) {
+    if (d.has_cpu)
+        (*timing)["cpu_ms"] = d.cpu_ms();
+    if (d.has_faults) {
+        Json::Value faults;
+        faults["minor"] = uint_json(d.minor_faults);
+        faults["major"] = uint_json(d.major_faults);
+        (*timing)["page_faults"] = std::move(faults);
+    }
+}
+
+// The figures put_thread_usage wrote into |timing| (a part of a request measured on another
+// thread, read back from its answer); a figure absent there is absent here
+inline common::ThreadUsage thread_usage_of(const Json::Value &timing) {
+    common::ThreadUsage u;
+    if (!timing.isObject())
+        return u;
+    if (timing.isMember("cpu_ms") && timing["cpu_ms"].isNumeric()) {
+        u.has_cpu = true;
+        u.cpu_ns = static_cast<uint64_t>(std::llround(timing["cpu_ms"].asDouble() * 1e6));
+    }
+    const Json::Value &faults = timing.isMember("page_faults") ? timing["page_faults"]
+                                                               : Json::Value::nullSingleton();
+    if (faults.isObject() && faults["minor"].isIntegral() && faults["major"].isIntegral()) {
+        u.has_faults = true;
+        u.minor_faults = faults["minor"].asUInt64();
+        u.major_faults = faults["major"].asUInt64();
+    }
+    return u;
+}
 
 // A number of milliseconds or bits as JSON: an integer when it is one (the flags are integers
 // and a client compares them as written), else the double

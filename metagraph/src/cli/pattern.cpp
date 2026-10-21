@@ -1538,6 +1538,10 @@ Json::Value process_pattern_request(
         PatternDelivery *delivery,
         const std::function<Deadline::Clock::time_point()> &clock,
         const RetrievalHooks *hooks) {
+    // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
+    // on this thread from here to its top-level timing block (the answer's text and compression
+    // after it); a multi-graph server runs each pair's request on one thread of its pool
+    const common::ThreadUsageMeter request_usage;
     // the request's one deadline starts here, its body parsed (§5.3)
     const std::function<Deadline::Clock::time_point()> now
             = clock ? clock : std::function<Deadline::Clock::time_point()>(&Deadline::Clock::now);
@@ -1817,6 +1821,8 @@ Json::Value process_pattern_request(
         std::optional<SupportedEntry> supported;
         // the slot error mismatches_above_cap: the cap applied (SPEC §21.8)
         std::optional<uint64_t> mismatch_cap;
+        // the CPU time and page faults of the pattern's work phase (its entry's timing)
+        common::ThreadUsage usage;
     };
 
     /**
@@ -2527,6 +2533,7 @@ Json::Value process_pattern_request(
     std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
     for (const PatternSpec &spec : req.patterns) {
+        const common::ThreadUsageMeter pattern_usage;
         Answered a;
         a.results = Json::Value(Json::arrayValue);
         if (spec.pattern && req.request.max_mismatches) {
@@ -2537,6 +2544,7 @@ Json::Value process_pattern_request(
             if (req.request.max_mismatches > cap) {
                 a.result = above_cap_result(*spec.pattern, k, req.request, cap);
                 a.mismatch_cap = cap;
+                a.usage = pattern_usage.elapsed();
                 answered.push_back(std::move(a));
                 continue;
             }
@@ -2580,6 +2588,7 @@ Json::Value process_pattern_request(
             if (a.labels && a.labels->unrepresentable)
                 refuse_unrepresentable(a, *a.labels->unrepresentable);
         }
+        a.usage = pattern_usage.elapsed();
         answered.push_back(std::move(a));
     }
     if (hooks && hooks->work_done_hook)
@@ -2687,6 +2696,10 @@ Json::Value process_pattern_request(
                 notes.append(kNoteProjectionNotRead);
             }
         }
+        // the pattern's work phase, in an entry that states its time (an answered entry;
+        // its finalisation is in the request's figure)
+        if (entry.isMember("timing") && entry["timing"].isObject())
+            put_thread_usage(&entry["timing"], a.usage);
         entries.append(std::move(entry));
     }
 
@@ -2810,6 +2823,7 @@ Json::Value process_pattern_request(
 
     Json::Value timing;
     timing["elapsed_ms"] = elapsed_ms;
+    put_thread_usage(&timing, request_usage.elapsed());
     out["timing"] = std::move(timing);
     out["patterns"] = std::move(entries);
 

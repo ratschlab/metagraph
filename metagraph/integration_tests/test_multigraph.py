@@ -705,6 +705,28 @@ class TestMultiGraphServer(TestingBase):
         finally:
             server.stop()
 
+    # -------------------------------------------------------------------- per-task figures
+
+    def test_pattern_envelope_states_the_cpu_of_its_pairs(self):
+        """The envelope's timing.cpu_ms (SPEC-pattern-search.md §24.1, §8.4): its own thread's
+        part and every pair's work on its pool thread, so at least the answered pairs' own
+        cpu_ms together; page_faults on Linux only, likewise summed."""
+        ecoli = self.records['ecoli'][0]
+        out = self.post('pattern', {'patterns': [{'dna': ecoli[5000:5020]}], 'mode': 'count',
+                                    'graphs': ['enterics', 'pseudo']})
+        answered = [a for a in out['answers'] if a['outcome'] == 'answered']
+        self.assertEqual(3, len(answered))
+        linux = sys.platform.startswith('linux')
+        for t in [out['timing']] + [a['timing'] for a in answered]:
+            self.assertGreater(t['cpu_ms'], 0)
+            self.assertEqual(linux, 'page_faults' in t)
+        self.assertGreaterEqual(out['timing']['cpu_ms'],
+                                sum(a['timing']['cpu_ms'] for a in answered))
+        if linux:
+            for k in ('minor', 'major'):
+                self.assertGreaterEqual(out['timing']['page_faults'][k],
+                                        sum(a['timing']['page_faults'][k] for a in answered))
+
     # -------------------------------------------------------------------- in_ram
 
     def test_in_ram_loads_the_pair_for_the_request(self):

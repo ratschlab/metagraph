@@ -704,6 +704,16 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
     // the longest read or head piece of the request's walks: how late a stop could be seen
     // in them (an observation of this attempt, not a bound; see deadline_check)
     u["observed_max_uninterruptible_ms"] = ceil_ms_json(max_uninterruptible_ms_);
+    // The request's CPU time and page faults so far, on its handler's thread (where its whole
+    // work runs) since the attempt was created at the handler's start: the body's parse, an
+    // in_ram lease (the load's own threads not counted), the walks and their results' text;
+    // in the usage finish() keeps for GET also the response's writing and compression. Every
+    // usage is built on that thread (the response, an error, finish); elsewhere none is stated
+    if (std::this_thread::get_id() == handler_thread_) {
+        Json::Value timing(Json::objectValue);
+        put_thread_usage(&timing, common::ThreadUsage::now().since(handler_start_));
+        u["timing"] = std::move(timing);
+    }
     Json::Value memory;
     memory["peak_admitted_bytes"] = uint_json(peak);
     // the soft part is observed only under a memory budget, and per seed (each seed's excess

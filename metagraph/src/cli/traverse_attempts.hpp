@@ -15,10 +15,13 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <json/json.h>
+
+#include "common/threads/thread_usage.hpp"
 
 #include "graph/traversal/walker.hpp"
 
@@ -418,6 +421,10 @@ class Attempt {
     Json::Value seeds_json() const;
 
     const size_t request_id_;
+    // the thread that created the attempt — its request's handler, which builds every usage —
+    // and its CPU time and page faults then (usage.timing: the request's own from there)
+    const std::thread::id handler_thread_ = std::this_thread::get_id();
+    const common::ThreadUsage handler_start_ = common::ThreadUsage::now();
     AttemptSettings settings_;
     const std::string server_instance_;
     const bool enforced_;

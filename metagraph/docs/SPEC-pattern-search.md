@@ -985,6 +985,8 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `selection_ms` | number | increment 5b, every answered entry of a request with a predicate: the selection pass (its lookups, reads and decisions; 0 where it did not run; for a pattern longer than k under `"supported_paths"` the decisions and mirror reads after the search, §20.9). Varies between runs |
 | `support_ms` | number | increment 5s, entries of a pattern longer than k under `long_search: "supported_paths"`: the search's annotation reads, merges and the occurrences of its kept paths (part of `extension_ms`, §20.6). Varies between runs |
 | `load_ms` | number | top level, a request with `in_ram` (§24): the time before the deadline started, the wait for the memory and the load of the index into RAM; `0` when nothing was loaded (a server that holds its indexes in RAM, a single-graph server, a pair above `--mem-cap-gb`). Varies between runs |
+| `cpu_ms` | number | every answer and every entry that states a time (2026-10-21, the owner's per-task figures): the CPU time (user + system, milliseconds) of the thread that did the work, read from a per-thread clock (`CLOCK_THREAD_CPUTIME_ID`), never the process's, which concurrent requests share. The request runs on one thread from its body's parse to its answer's text (a multi-graph server: each pair's request on one thread of the graph pool), so the figure is the request's own. Top level: from the start of the request's processing to this block (the patterns' work and the entries' finalisation; not the answer's text, compression and transport, nor an `in_ram` load, whose graph loads on another thread); in an entry: that pattern's work phase (the span of its `elapsed_ms`; its entry's assembly is in the top-level figure). Varies between runs |
+| `page_faults` | object `{minor, major}` | the same spans, **Linux only** (`getrusage(RUSAGE_THREAD)`; absent, never 0, where the platform has no per-thread figures, e.g. macOS): `minor` the pages mapped without I/O (an index page in the page cache, fresh heap), `major` the pages read from the disk (an index page that was not resident). Varies between runs |
 
 ### 8.5 A pattern's entry
 
@@ -4251,7 +4253,7 @@ how the search service uses it; the route serves any number.
 | `answered` | integer | the entries with `outcome: "answered"` |
 | `refused` | integer | the entries with `outcome: "refused"`; `answered + refused` is the number of entries |
 | `answers` | list of objects | one per pair, in the order above: the answer of §8 on that pair with the fields of `answer_pair`, or, for a refused pair, the fields of `answer_pair` alone (`refusal` among them) |
-| `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included. Varies between runs |
+| `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included; `cpu_ms` (and `page_faults` on Linux, §8.4): the request's own thread (the parse, the checks, the envelope) plus every pair's work on its pool thread, from its index lease to its entry — an answered pair's top-level `cpu_ms` and the work of a pair refused after its lease (the loads' own threads not counted). Varies between runs |
 
 <!-- schema: answer_pair -->
 | field | type | meaning |

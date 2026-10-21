@@ -1728,6 +1728,82 @@ class TestTraverseAPI(TestTraverseBase):
         return requests.post(url=f'http://{self.host}:{self.port}/{route}',
                              data=json.dumps(payload))
 
+    def _thread_figures(self, timing, where):
+        """The per-task figures of a timing block (SPEC §7.2.1): cpu_ms > 0, and page_faults
+        {minor, major} exactly on Linux (absent, never 0, elsewhere)."""
+        self.assertIsInstance(timing, dict, where)
+        self.assertIsInstance(timing.get('cpu_ms'), (int, float), where)
+        self.assertGreater(timing['cpu_ms'], 0, where)
+        if sys.platform.startswith('linux'):
+            faults = timing.get('page_faults')
+            self.assertEqual({'minor', 'major'}, set(faults or {}), where)
+            for v in faults.values():
+                self.assertIsInstance(v, int, where)
+                self.assertGreaterEqual(v, 0, where)
+        else:
+            self.assertNotIn('page_faults', timing, where)
+
+    def test_api_task_resources(self):
+        """The per-task figures on the server and the CLI (SPEC §7.2.1, SPEC-pattern-search.md
+        §8.4): timing.cpu_ms (and timing.page_faults on Linux) on /traverse per request and
+        per seed in every detail, never in a graphlet's body and nowhere without timing; on
+        /resolve; on /pattern per request and per entry; in an attempt's usage, the response's
+        and the one GET /traverse/attempt keeps (written after the response: no less)."""
+        seeds = [{'sequence': self.element}, {'sequence': self.left1[20:80]}]
+        for detail in ('full', 'summary', 'graphlet'):
+            out = self._post('traverse', {
+                'seeds': seeds, 'strategy': {'bounds': {'max_extension_bp': BLOCK},
+                                             'output': {'detail': detail}}})
+            self.assertEqual(200, out.status_code, out.text)
+            out = out.json()
+            self._thread_figures(out['timing'], detail)
+            self.assertEqual(2, len(out['results']))
+            for r in out['results']:
+                self._thread_figures(r['timing'], detail + ' seed')
+                if detail == 'graphlet':
+                    self.assertNotIn('cpu_ms', r['graphlet'])
+                    self.assertNotIn('page_faults', r['graphlet'])
+            self.assertGreaterEqual(out['timing']['cpu_ms'],
+                                    sum(r['timing']['cpu_ms'] for r in out['results']))
+        # without timing: none anywhere
+        out = self._post('traverse', {'seeds': seeds, 'strategy': {'output': {'timing': False}}})
+        self.assertEqual(200, out.status_code, out.text)
+        self.assertNotIn('timing', out.json())
+        self.assertNotIn('timing', out.json()['results'][0])
+        # the CLI states them as the server does
+        cli, code = self._traverse({'seeds': seeds, 'strategy': {}})
+        self.assertEqual(0, code)
+        self._thread_figures(cli['timing'], 'CLI')
+        self._thread_figures(cli['results'][0]['timing'], 'CLI seed')
+
+        resolve = self._post('resolve', {'sequence': self.records['acc1'][40:300],
+                                         'discover': {'max_labels': 10},
+                                         'select': {'max_seeds': 2}})
+        self.assertEqual(200, resolve.status_code, resolve.text)
+        self._thread_figures(resolve.json()['timing'], 'resolve')
+
+        pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]},
+                                                      {'dna': self.right1[5:35]}],
+                                         'mode': 'partial'})
+        self.assertEqual(200, pattern.status_code, pattern.text)
+        pattern = pattern.json()
+        self._thread_figures(pattern['timing'], 'pattern')
+        for e in pattern['patterns']:
+            self._thread_figures(e['timing'], 'pattern entry')
+
+        # an attempt: the response's usage, and the state's after the response was written
+        ret = self._post('traverse', {'attempt_id': 'resources-1', 'seeds': seeds,
+                                      'strategy': {}})
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        self._thread_figures(out['usage']['timing'], 'usage')
+        self.assertGreaterEqual(out['usage']['timing']['cpu_ms'], out['timing']['cpu_ms'])
+        state = requests.get(f'http://{self.host}:{self.port}/traverse/attempt/resources-1')
+        self.assertEqual(200, state.status_code, state.text)
+        kept = state.json()['usage']
+        self._thread_figures(kept['timing'], 'GET usage')
+        self.assertGreaterEqual(kept['timing']['cpu_ms'], out['usage']['timing']['cpu_ms'])
+
     def test_api_graphlet(self):
         """T37/T40 over HTTP: the graphlet body of a gzip-compressed response reproduces
         the detail: full result; the server's index identity is in capabilities, in the

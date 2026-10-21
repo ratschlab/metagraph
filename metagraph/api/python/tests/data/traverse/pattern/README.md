@@ -10,7 +10,8 @@ Regenerate with `pattern_fixtures.py`, verify with `pattern_fixtures.py --check`
 field lists.
 
 Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`
-(and every `timing` value of a pattern), `server_instance`, and the counts and work of
+(and every `timing` value of a pattern; `cpu_ms` and `page_faults`, dropped: Linux
+alone states page faults), `server_instance`, and the counts and work of
 the first `determinism: time_limited` pattern of an answer (and, when the clock cut its
 release, its `returned` and `results`; the later ones, stopped by the same budget, are
 compared as they are).

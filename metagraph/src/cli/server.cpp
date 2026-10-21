@@ -1213,6 +1213,9 @@ int run_server(Config *config) {
                                    const std::function<bool()> &gone,
                                    PatternDelivery *delivery) {
         Timer timer;
+        // the request's CPU time and page faults: this thread's own part (the parse, the
+        // checks, the envelope) and each pair's work on its pool thread (Slot::usage)
+        const common::ThreadUsageMeter own_usage;
         Json::Value json = parse_pattern_body(content);
         if (!json.isObject())
             throw PatternRefusal(400, "invalid_request", "request: expected an object");
@@ -1241,6 +1244,9 @@ int run_server(Config *config) {
             // when answered: the pair's deadline, from which the envelope's is taken
             graph::pattern::Deadline::Clock::time_point start;
             double budget_ms = 0;
+            // the pair's work on its pool thread, from its index lease to its entry (an
+            // answer, or a refusal after the lease)
+            common::ThreadUsage usage = common::ThreadUsage::zero();
         };
         std::vector<Slot> slots(targets.size());
         std::vector<std::shared_future<void>> futures;
@@ -1262,6 +1268,13 @@ int run_server(Config *config) {
                     const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
                                                    gone, /* for_pattern */ true);
                     const IndexIdentity identity = identity_of_pair(pair, lease->index());
+                    const common::ThreadUsageMeter work_usage;
+                    // what the pair's work used, however it ends
+                    struct Measured {
+                        const common::ThreadUsageMeter &meter;
+                        common::ThreadUsage &into;
+                        ~Measured() { into = meter.elapsed(); }
+                    } measured { work_usage, slot.usage };
                     PatternDelivery own;
                     own.set_abort(gone);
                     slot.start = graph::pattern::Deadline::Clock::now();
@@ -1323,10 +1336,13 @@ int run_server(Config *config) {
         }
         std::vector<Json::Value> entries;
         entries.reserve(slots.size());
+        common::ThreadUsage pairs = common::ThreadUsage::zero();
         for (Slot &slot : slots) {
+            pairs.add(slot.usage);
             entries.push_back(std::move(slot.entry));
         }
         Json::Value out = pattern_envelope(names, std::move(entries), timer.elapsed() * 1000);
+        put_thread_usage(&out["timing"], own_usage.elapsed().add(pairs));
         logger->info("[Server] Request {}: /pattern envelope: {} pair(s) answered, {} refused",
                      request_id, out["answered"].asUInt(), out["refused"].asUInt());
         delivery->check();

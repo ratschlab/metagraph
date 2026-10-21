@@ -60,7 +60,9 @@ graph in CanonicalDBG) and alphabet_unsupported (a graph of another alphabet doe
 this build).
 
 Volatile values: every answer is stored as the server wrote it, but `timing.elapsed_ms` (and
-every other `timing` value of a pattern), the per-process `server_instance`, and the counts and
+every other `timing` value of a pattern; every block's `cpu_ms` and `page_faults`, the per-task
+figures, are dropped on both sides: page faults are stated on Linux only), the per-process
+`server_instance`, and the counts and
 work of the FIRST `determinism: time_limited` pattern of an answer (the one the clock stopped:
 how far it got; when the clock cut its release, also its `returned` and `results`) depend on the
 run; --check blanks them on both sides, and a regeneration keeps
@@ -2560,6 +2562,12 @@ def blanked(answer):
 
     def walk(x):
         if isinstance(x, dict):
+            if isinstance(x.get('timing'), dict):
+                # the per-task figures (SPEC §8.4): every run's own, and the page faults on
+                # Linux only, so absent from a body recorded elsewhere -- not compared, as
+                # if never stated
+                x['timing'].pop('cpu_ms', None)
+                x['timing'].pop('page_faults', None)
             for k in x:
                 if k == 'server_instance':
                     x[k] = BLANK
@@ -2621,7 +2629,8 @@ def readme(fixtures):
         'field lists.',
         '',
         'Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`',
-        '(and every `timing` value of a pattern), `server_instance`, and the counts and work of',
+        '(and every `timing` value of a pattern; `cpu_ms` and `page_faults`, dropped: Linux',
+        'alone states page faults), `server_instance`, and the counts and work of',
         'the first `determinism: time_limited` pattern of an answer (and, when the clock cut its',
         'release, its `returned` and `results`; the later ones, stopped by the same budget, are',
         'compared as they are).',

@@ -267,6 +267,9 @@ SCHEMA = {
                'max_mismatches', 'clamped'],
     'clamped': ['field', 'requested', 'effective'],
     'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms',
+               # the per-task figures (SPEC §8.4, 2026-10-21): the thread's CPU time, and on
+               # Linux its page faults
+               'cpu_ms', 'page_faults',
                # the labels of paths (SPEC §12.1)
                'label_intersection_ms', 'verification_ms',
                # a predicate (SPEC §19.10)
@@ -1620,7 +1623,8 @@ class Checker:
                 else a['graphs'] == sorted(a['graphs']), 'graphs',
                 'the names, deduplicated, in byte order')
         self.ok(len(a['answers']) == pairs * len(a['graphs']), 'answers', 'one per pair')
-        self.keys(a['timing'], ['elapsed_ms'], 'timing')
+        self.keys(a['timing'], ['elapsed_ms'] + self.thread_figures(a['timing'], 'timing'),
+                  'timing')
         names = [x['graph'] for x in a['answers']]
         self.ok(names == sorted(names) and set(names) == set(a['graphs']), 'answers',
                 'in the order of the names')
@@ -1735,9 +1739,26 @@ class Checker:
                   + (['support_ms'] if supported else [])
                   + (['label_intersection_ms', 'verification_ms'] if labelled and extension
                      else [])
-                  + (['selection_ms'] if selection else []), path)
+                  + (['selection_ms'] if selection else [])
+                  + self.thread_figures(t, path), path)
         for k, v in t.items():
-            self.ok(is_num(v) and v >= 0, f'{path}.{k}')
+            if k != 'page_faults':
+                self.ok(is_num(v) and v >= 0, f'{path}.{k}')
+
+    def thread_figures(self, t, path):
+        """The per-task figures of a timing block (SPEC §8.4): cpu_ms, and page_faults {minor,
+        major} where the server's platform reads them per thread (Linux); a body recorded
+        before they existed has neither. Page faults never without the CPU time. Returns the
+        ones present, for the block's key check."""
+        present = [k for k in ('cpu_ms', 'page_faults') if k in t]
+        self.ok('page_faults' not in t or 'cpu_ms' in t, path + '.page_faults',
+                'page faults without cpu_ms')
+        if 'page_faults' in t:
+            faults = t['page_faults']
+            self.keys(faults, ['minor', 'major'], path + '.page_faults')
+            for k in ('minor', 'major'):
+                self.ok(is_int(faults[k]) and faults[k] >= 0, f'{path}.page_faults.{k}')
+        return present
 
     def paths_count(self, c, anchors, e, strand_stated, limits, path):
         """counts.paths of a pattern longer than k under long_search "paths" (SPEC §12.1): the
