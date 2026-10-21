@@ -92,6 +92,22 @@ def test_chaining_options(graph):
             assert hits[0]["query_end"] > hits[0]["query_start"]
 
 
+def test_inexact_chain_errors_leave_workers_usable(graph):
+    query = REFERENCE[:8] + "C" + REFERENCE[9:]
+    # A raw chain has an unresolved graph gap and cannot use the alignment
+    # JSON schema. The failed batch must drain and raise, not abort Python.
+    with pytest.raises(ValueError, match="connect_anchors=True"):
+        graph.align([query, REFERENCE], seed_length=5, min_exact_match=0,
+                    only_forwards=True, connect_anchors=False, extend_chains=False)
+    for extend in (False, True):
+        hits = graph.align(query, seed_length=5, min_exact_match=0,
+                           only_forwards=True, extend_chains=extend)
+        assert hits
+        assert hits[0]["annotation"]["ref_sequence"] == REFERENCE
+        assert hits[0]["annotation"]["cigar"] == "8=1X18="
+    assert graph.align(REFERENCE, seed_length=5, only_forwards=True)
+
+
 @pytest.mark.parametrize("options", [
     {"xdrop": -1}, {"rel_score_cutoff": 1.1}, {"min_exact_match": float("nan")},
     {"max_alternative_alignments": 0}, {"seed_length": -1},

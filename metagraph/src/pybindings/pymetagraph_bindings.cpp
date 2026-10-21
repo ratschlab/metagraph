@@ -54,16 +54,29 @@ mtg::cli::Config make_config(const std::string &graph,
     return mtg::cli::Config(static_cast<int>(argv.size()), argv.data());
 }
 
-// Tasks capture the batch by reference. Drain every task before propagating
-// an exception, so another worker cannot outlive its input or output storage.
-void finish_batch(const std::vector<std::shared_future<void>> &futures) {
-    std::exception_ptr failure;
-    for (const auto &future : futures) {
-        try { future.get(); }
-        catch (...) { if (!failure) failure = std::current_exception(); }
+// ThreadPool deliberately rethrows task failures on the worker thread. Capture
+// them inside each task so Python receives an exception after every task drains.
+template <typename Callback>
+void run_batch(ThreadPool &pool, size_t size, const Callback &callback) {
+    std::vector<std::exception_ptr> failures(size);
+    std::vector<std::shared_future<void>> futures;
+    futures.reserve(size);
+    try {
+        for (size_t i = 0; i < size; ++i) {
+            futures.push_back(pool.enqueue([&, i]() {
+                try { callback(i); }
+                catch (...) { failures[i] = std::current_exception(); }
+            }));
+        }
+    } catch (...) {
+        // Even an enqueue failure must not leave workers using stack storage.
+        for (const auto &future : futures) future.wait();
+        throw;
     }
-    if (failure)
-        std::rethrow_exception(failure);
+    for (const auto &future : futures) future.get();
+    for (const auto &failure : failures) {
+        if (failure) std::rethrow_exception(failure);
+    }
 }
 
 } // namespace
@@ -110,18 +123,12 @@ class AnnotatedGraph {
                 "discovery_fraction and presence_fraction must be in [0, 1]");
         }
         std::vector<Hits> results(seqs.size());
-        std::vector<std::shared_future<void>> futures;
-        futures.reserve(seqs.size());
-        for (size_t i = 0; i < seqs.size(); ++i) {
-            if (seqs[i].size() < k())
-                continue;
-            futures.push_back(thread_pool_->enqueue([&, i]() {
+        run_batch(*thread_pool_, seqs.size(), [&](size_t i) {
+            if (seqs[i].size() >= k())
                 results[i] = anno_dbg_->get_top_labels(seqs[i], num_top_labels,
                                                        discovery_fraction,
                                                        presence_fraction);
-            }));
-        }
-        finish_batch(futures);
+        });
         return results;
     }
 
@@ -152,52 +159,53 @@ class AnnotatedGraph {
         config.set_scoring_matrix();
 
         std::vector<std::vector<std::string>> results(seqs.size());
-        std::vector<std::shared_future<void>> futures;
-        futures.reserve(seqs.size());
-        for (size_t i = 0; i < seqs.size(); ++i) {
-            futures.push_back(thread_pool_->enqueue([&, i]() {
-                ar::Query query(*graph_, seqs[i]);
-                std::optional<ar::AnnotationBuffer> annotations;
-                std::unique_ptr<ar::ExactSeeder> seeder;
-                std::unique_ptr<ar::Extender> extender;
-                if (anno_dbg_) {
-                    annotations.emplace(*graph_, anno_dbg_->get_annotator());
-                    seeder = std::make_unique<ar::LabeledSeeder>(*annotations, query, config);
-                    extender = std::make_unique<ar::LabeledExtender>(*annotations, query, config);
-                } else {
-                    seeder = std::make_unique<ar::ExactSeeder>(query, config);
-                    extender = std::make_unique<ar::Extender>(query, config);
+        run_batch(*thread_pool_, seqs.size(), [&](size_t i) {
+            ar::Query query(*graph_, seqs[i]);
+            std::optional<ar::AnnotationBuffer> annotations;
+            std::unique_ptr<ar::ExactSeeder> seeder;
+            std::unique_ptr<ar::Extender> extender;
+            if (anno_dbg_) {
+                annotations.emplace(*graph_, anno_dbg_->get_annotator());
+                seeder = std::make_unique<ar::LabeledSeeder>(*annotations, query, config);
+                extender = std::make_unique<ar::LabeledExtender>(*annotations, query, config);
+            } else {
+                seeder = std::make_unique<ar::ExactSeeder>(query, config);
+                extender = std::make_unique<ar::Extender>(query, config);
+            }
+            auto callback = [&](ar::Alignment&& path) {
+                if (!connect_anchors
+                        && (path.get_spelling().find('$') != std::string_view::npos
+                            || std::find(path.get_path().begin(), path.get_path().end(),
+                                         mtg::graph::DeBruijnGraph::npos) != path.get_path().end()))
+                    throw std::invalid_argument(
+                        "Unconnected chains cannot be serialized; use connect_anchors=True");
+                mtg::graph::align::Alignment displayed(
+                    path.get_seed(), std::vector(path.get_path()), std::string(path.get_spelling()),
+                    ar::score_match(path, config),
+                    mtg::graph::align::Cigar(path.get_cigar().to_string()), 0, path.get_orientation());
+                const auto *encoder = anno_dbg_ ? &anno_dbg_->get_annotator().get_label_encoder() : nullptr;
+                if (annotations) {
+                    const auto &cols = annotations->get_cached_column_set(path.get_label_classes()[0]);
+                    displayed.label_columns.assign(cols.begin(), cols.end());
+                    displayed.label_coordinates = path.get_coords();
                 }
-                auto callback = [&](ar::Alignment&& path) {
-                    mtg::graph::align::Alignment displayed(
-                        path.get_seed(), std::vector(path.get_path()), std::string(path.get_spelling()),
-                        ar::score_match(path, config),
-                        mtg::graph::align::Cigar(path.get_cigar().to_string()), 0, path.get_orientation());
-                    const auto *encoder = anno_dbg_ ? &anno_dbg_->get_annotator().get_label_encoder() : nullptr;
-                    if (annotations) {
-                        const auto &cols = annotations->get_cached_column_set(path.get_label_classes()[0]);
-                        displayed.label_columns.assign(cols.begin(), cols.end());
-                        displayed.label_coordinates = path.get_coords();
-                    }
-                    auto result = displayed.to_json(k(), !results[i].empty(), {}, {}, encoder,
-                        anno_dbg_ ? anno_dbg_->get_coord_to_header() : nullptr, false);
-                    result["sequence"] = seqs[i];
-                    result["strand"] = path.get_orientation() ? "-" : "+";
-                    result["query_start"] = Json::UInt64(path.get_orientation()
-                        ? path.get_end_clipping() : path.get_clipping());
-                    result["query_end"] = Json::UInt64(seqs[i].size() - (path.get_orientation()
-                        ? path.get_clipping() : path.get_end_clipping()));
-                    Json::StreamWriterBuilder writer;
-                    writer["indentation"] = "";
-                    results[i].push_back(Json::writeString(writer, result));
-                };
-                if (extend_chains)
-                    ar::align_query(query, *seeder, *extender, callback, connect_anchors);
-                else
-                    ar::align_query(query, *seeder, callback, connect_anchors);
-            }));
-        }
-        finish_batch(futures);
+                auto result = displayed.to_json(k(), !results[i].empty(), {}, {}, encoder,
+                    anno_dbg_ ? anno_dbg_->get_coord_to_header() : nullptr, false);
+                result["sequence"] = seqs[i];
+                result["strand"] = path.get_orientation() ? "-" : "+";
+                result["query_start"] = Json::UInt64(path.get_orientation()
+                    ? path.get_end_clipping() : path.get_clipping());
+                result["query_end"] = Json::UInt64(seqs[i].size() - (path.get_orientation()
+                    ? path.get_clipping() : path.get_end_clipping()));
+                Json::StreamWriterBuilder writer;
+                writer["indentation"] = "";
+                results[i].push_back(Json::writeString(writer, result));
+            };
+            if (extend_chains)
+                ar::align_query(query, *seeder, *extender, callback, connect_anchors);
+            else
+                ar::align_query(query, *seeder, callback, connect_anchors);
+        });
         return results;
     }
 
