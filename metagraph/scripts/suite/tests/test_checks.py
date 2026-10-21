@@ -877,9 +877,16 @@ class PatternChecks(unittest.TestCase):
 
         self.assertEqual(outcome(sc(), answer(lambda e: None), "counts_consistent")[0], "pass")
         self.assertEqual(outcome(sc(2), answer(lambda e: None, 2), "counts_consistent")[0], "pass")
+        # the engine deploy's memory peak so far (the engine fixture paths_max_steps: p1 memory_bytes 2862 after
+        # p0's max_steps stop): no work of the later pattern
+        self.assertEqual(outcome(sc(), answer(lambda e: e["work"].update(memory_bytes=2862)), "counts_consistent")[0],
+                         "pass")
+        self.assertEqual(outcome(sc(2), answer(lambda e: e["work"].update(memory_bytes=2862), 2),
+                                 "counts_consistent")[0], "pass")
         cases = (
             (0, lambda e: e["counts"]["contexts"].update(relation="at_least", value=1), "count(s) not unknown"),
             (0, lambda e: e["work"].update(steps=50), "work steps 50"),
+            (0, lambda e: e["work"].update(steps=50, memory_bytes=2862), "work steps 50"),
             (0, lambda e: e["counts"]["contexts"]["by_offset"]["0"].update(relation="exact", value=0),
              "contexts.by_offset.0 exact 0"),
             (0, lambda e: e.update(stop={"phase": "mask_scan", "reason": "max_steps"}), "the sticky stop is"),

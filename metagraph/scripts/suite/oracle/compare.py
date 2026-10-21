@@ -213,7 +213,9 @@ def compare_entry(index, config, request, position, entry, previous_stop=None,
                                                             'by_orientation', 'by_mismatches')
                                                 for v in (cc.get(key) or {}).values()]
         work = entry.get('work') or {}
-        zero = all(v == 0 for k, v in work.items() if isinstance(v, (int, float))) and all(
+        # memory_bytes is the request's memory peak so far (the engine states it on every entry, nonzero after an
+        # earlier charged pattern), no work of this entry
+        zero = all(v == 0 for k, v in work.items() if k != 'memory_bytes' and isinstance(v, (int, float))) and all(
             v == 0 for v in (work.get('steps_by_mismatches') or {}).values())
         checks.add('stop.sticky_unknown', all(isinstance(p, dict) and p.get('relation') ==
                                               'unknown' for p in parts) and zero,
