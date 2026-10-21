@@ -450,6 +450,25 @@ class ByDesign(ServiceBase):
         p = next(p for p in e["pairs"] if p["pair"] == "W3-W4")
         self.assertEqual((p["kind"], p["pointer"][:5]), ("file", "/file"), p)
 
+    def test_the_cli_writes_the_stages(self):
+        # the shadow run: compare_graphlets.py run as __main__ registered the stages in a second module copy, so its
+        # graphlet_compare.json lacked the by-design pairs and the service checks; the file must equal the gate's
+        # in-memory comparison
+        import subprocess
+        self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
+        self.put(SID, self.OP, {"*": gf.walks_answer()}, errors={"W3": self.REFUSED})
+        memory = self.result()
+        out = os.path.join(self.run_.dir, "cli.json")
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "compare_graphlets.py"), self.run_.dir,
+                        "--out", out], check=True, capture_output=True)
+        with open(out) as fh:
+            cli = json.load(fh)
+        e_mem, e_cli = (x["scenarios"][SID]["ops"]["walks-cap"] for x in (memory, cli))
+        self.assertEqual(e_cli["outcome"], "service_by_design", e_cli)
+        self.assertEqual(e_cli.get("by_design"), e_mem.get("by_design"))
+        self.assertEqual([c["check"] for c in cli["service_checks"]], list(gs.SERVICE_CHECKS))
+        self.assertEqual(cli["summary"], memory["summary"])
+
     def test_a_pair_that_does_not_hold_names_its_side(self):
         self.make([gf.scenario(ops=[self.OP])], table=[CAP_CASE])
         ans = gf.walks_answer()

@@ -1268,4 +1268,8 @@ def _load_stages():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # run as the module compare_graphlets, not as __main__: graphlet_service_checks imports compare_graphlets and
+    # registers its stages (by-design pairs, service checks) in that module's STAGES; a __main__ copy computed without
+    # them (graphlet_compare.json of the shadow run, 2026-10-21)
+    import compare_graphlets as _module
+    sys.exit(_module.main())
