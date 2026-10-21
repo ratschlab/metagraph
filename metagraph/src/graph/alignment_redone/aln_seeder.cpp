@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <map>
 #include <unordered_set>
+#include <array>
+#include <optional>
 
 #include <tsl/hopscotch_set.h>
 
@@ -199,6 +201,117 @@ using TraverseCallback = std::function<void(DeBruijnGraph::node_index, Anchor::l
 using EdgeCallback = std::function<void(DeBruijnGraph::node_index, char, Anchor::label_class_t)>;
 using Terminator = std::function<bool()>;
 
+namespace {
+
+// Wavefront states revisit the same graph nodes at different query positions.
+// Cache only raw adjacency; labels and coordinates are still checked per state.
+// Fixed inline storage bounds the cache independently of the search size.
+class SuccinctTraversalCache {
+  public:
+    using node_index = DeBruijnGraph::node_index;
+
+    SuccinctTraversalCache(const DBGSuccinct &graph, bool backward)
+          : graph_(graph), backward_(backward),
+            first_cache_(graph.get_extension_threadsafe<NodeFirstCache>()) {}
+
+    bool backward() const { return backward_; }
+
+    bool has_single(node_index node) {
+        auto &entry = get(node);
+        if (!entry.degree_known) {
+            entry.single = backward_ ? graph_.has_single_incoming(node)
+                                     : graph_.has_single_outgoing(node);
+            entry.degree_known = true;
+        }
+        return entry.single;
+    }
+
+    template <class Callback>
+    void call_edges(node_index node, const Callback &callback) {
+        auto &entry = get(node);
+        if (!entry.edges_known) {
+            size_t count = 0;
+            call_raw(node, [&](node_index next, char c) {
+                if (count < entry.edges.size())
+                    entry.edges[count] = { next, c };
+                ++count;
+            });
+            if (count > entry.edges.size()) {
+                // High-degree protein nodes use the uncached graph interface.
+                call_raw(node, callback);
+                return;
+            }
+            entry.count = count;
+            entry.edges_known = true;
+        }
+        // A callback can visit another node mapping to the same cache slot.
+        const auto edges = entry.edges;
+        const size_t count = entry.count;
+        for (size_t i = 0; i < count; ++i)
+            callback(edges[i].first, edges[i].second);
+    }
+
+    template <class Callback>
+    void traverse(node_index node, std::string_view seq,
+                  const Callback &callback, const Terminator &terminate) {
+        for (size_t i = 0; i < seq.size() && !terminate(); ++i) {
+            if (!backward_ && node == 1) {
+                // The BOSS root has outgoing dummy edges, but sequence
+                // traversal stops at its sentinel label.
+                graph_.traverse(node, seq.substr(i), callback, terminate);
+                return;
+            }
+            const char c = backward_ ? seq[seq.size() - 1 - i] : seq[i];
+            node_index next = DeBruijnGraph::npos;
+            call_edges(node, [&](node_index candidate, char label) {
+                if (label == c)
+                    next = candidate;
+            });
+            if (!next)
+                return;
+            node = next;
+            callback(node);
+        }
+    }
+
+  private:
+    struct Entry {
+        node_index node = DeBruijnGraph::npos;
+        std::array<std::pair<node_index, char>, 4> edges{};
+        size_t count = 0;
+        bool edges_known = false;
+        bool degree_known = false;
+        bool single = false;
+    };
+
+    Entry &get(node_index node) {
+        assert(node);
+        auto &entry = entries_[node % entries_.size()];
+        if (entry.node != node) {
+            entry = Entry{};
+            entry.node = node;
+        }
+        return entry;
+    }
+
+    template <class Callback>
+    void call_raw(node_index node, const Callback &callback) const {
+        if (!backward_)
+            graph_.call_outgoing_kmers(node, callback);
+        else if (first_cache_)
+            first_cache_->call_incoming_kmers(node, callback);
+        else
+            graph_.call_incoming_kmers(node, callback);
+    }
+
+    const DBGSuccinct &graph_;
+    bool backward_;
+    const NodeFirstCache *first_cache_;
+    std::array<Entry, 128> entries_{};
+};
+
+} // namespace
+
 class AlignmentGraph {
   public:
     using node_index = DeBruijnGraph::node_index;
@@ -206,12 +319,13 @@ class AlignmentGraph {
 
     AlignmentGraph(const DeBruijnGraph &graph,
                    AnnotationBuffer *anno_buffer = nullptr,
-                   label_class_t target = Anchor::nannot)
-          : graph_(graph), anno_buffer_(anno_buffer), target_(target) {
+                   label_class_t target = Anchor::nannot,
+                   SuccinctTraversalCache *cache = nullptr)
+          : graph_(graph), anno_buffer_(anno_buffer), target_(target), cache_(cache) {
         assert((target == Anchor::nannot) == !anno_buffer_);
         // Use the succinct graph's existing cache for backward edge labels.
         // Wrappers such as CanonicalDBG manage their own traversal semantics.
-        if (dynamic_cast<const DBGSuccinct*>(&graph_))
+        if (!cache_ && dynamic_cast<const DBGSuccinct*>(&graph_))
             first_cache_ = graph_.get_extension_threadsafe<NodeFirstCache>();
     }
 
@@ -254,23 +368,28 @@ class AlignmentGraph {
     void traverse(node_index node, std::string_view seq,
                   const TraverseCallback &callback,
                   const Terminator &terminate = [](){ return false; },
-                  size_t min_dist_before_check_anno = 0) const {
+                  size_t min_dist_before_check_anno = 0,
+                  bool query_is_valid = false) const {
         // Exact extension ends at an ambiguous base. In particular, passing N
         // to a two-bit hash graph would violate its encoded-edge precondition.
-        seq = seq.substr(0, seq.find_first_not_of(graph_.alphabet()));
+        if (!query_is_valid)
+            seq = seq.substr(0, seq.find_first_not_of(graph_.alphabet()));
+        auto traverse = [&](const std::function<void(node_index)> &call) {
+            if (cache_ && !cache_->backward())
+                cache_->traverse(node, seq, call, terminate);
+            else
+                graph_.traverse(node, seq, call, terminate);
+        };
         if (target_ == Anchor::nannot) {
-            graph_.traverse(node, seq,
-                            [&](node_index next) {
-                                assert(has_labels(next, target_));
-                                callback(next, target_);
-                            }, terminate);
+            traverse([&](node_index next) {
+                assert(has_labels(next, target_));
+                callback(next, target_);
+            });
             return;
         }
 
         std::vector<node_index> forward_nodes;
-        graph_.traverse(node, seq,
-                        [&](node_index next) { forward_nodes.emplace_back(next); },
-                        terminate);
+        traverse([&](node_index next) { forward_nodes.emplace_back(next); });
         if (forward_nodes.size() < min_dist_before_check_anno)
             return;
 
@@ -293,11 +412,18 @@ class AlignmentGraph {
     void traverse_back(node_index node, std::string_view prefix_seq,
                        const TraverseCallback &callback,
                        const Terminator &terminate = [](){ return false; },
-                       size_t min_dist_before_check_anno = 0) const {
-        const auto invalid = prefix_seq.find_last_not_of(graph_.alphabet());
-        if (invalid != std::string_view::npos)
-            prefix_seq.remove_prefix(invalid + 1);
+                       size_t min_dist_before_check_anno = 0,
+                       bool query_is_valid = false) const {
+        if (!query_is_valid) {
+            const auto invalid = prefix_seq.find_last_not_of(graph_.alphabet());
+            if (invalid != std::string_view::npos)
+                prefix_seq.remove_prefix(invalid + 1);
+        }
         auto traverse = [&](const std::function<void(node_index)> &call) {
+            if (cache_ && cache_->backward()) {
+                cache_->traverse(node, prefix_seq, call, terminate);
+                return;
+            }
             if (!first_cache_) {
                 graph_.traverse_back(node, prefix_seq, call, terminate);
                 return;
@@ -347,12 +473,18 @@ class AlignmentGraph {
     }
 
     void call_outgoing_kmers(node_index node, const EdgeCallback &callback) const {
+        auto call_outgoing = [&](const DeBruijnGraph::OutgoingEdgeCallback &call) {
+            if (cache_ && !cache_->backward())
+                cache_->call_edges(node, call);
+            else
+                graph_.call_outgoing_kmers(node, call);
+        };
         if (target_ == Anchor::nannot) {
-            graph_.call_outgoing_kmers(node, [&](node_index next, char c) { callback(next, c, target_); });
+            call_outgoing([&](node_index next, char c) { callback(next, c, target_); });
         } else {
             std::vector<node_index> forward_n;
             std::vector<char> forward_c;
-            graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
+            call_outgoing([&](node_index next, char c) {
                 if (c != boss::BOSS::kSentinel) {
                     forward_n.emplace_back(next);
                     forward_c.emplace_back(c);
@@ -377,7 +509,9 @@ class AlignmentGraph {
     void call_incoming_kmers(node_index node, const EdgeCallback &callback) const {
         // std::cerr << "cik\t" << node << "\t" << target_ << std::endl;
         auto call_incoming = [&](const DeBruijnGraph::IncomingEdgeCallback &call) {
-            if (first_cache_)
+            if (cache_ && cache_->backward())
+                cache_->call_edges(node, call);
+            else if (first_cache_)
                 first_cache_->call_incoming_kmers(node, call);
             else
                 graph_.call_incoming_kmers(node, call);
@@ -410,6 +544,8 @@ class AlignmentGraph {
     }
 
     bool has_single_outgoing(node_index node) const {
+        if (target_ == Anchor::nannot && cache_ && !cache_->backward())
+            return cache_->has_single(node);
         if (target_ == Anchor::nannot)
             return graph_.has_single_outgoing(node);
 
@@ -419,6 +555,8 @@ class AlignmentGraph {
     }
 
     bool has_single_incoming(node_index node) const {
+        if (target_ == Anchor::nannot && cache_ && cache_->backward())
+            return cache_->has_single(node);
         // std::cerr << "hsi\t" << node << "\t" << target_ << std::endl;
         if (target_ == Anchor::nannot) {
             return graph_.has_single_incoming(node);
@@ -500,6 +638,7 @@ class AlignmentGraph {
     const DeBruijnGraph &graph_;
     AnnotationBuffer* const anno_buffer_;
     label_class_t target_;
+    SuccinctTraversalCache *cache_;
     const NodeFirstCache *first_cache_ = nullptr;
 
     label_class_t get_label_class(node_index node) const {
@@ -2147,10 +2286,20 @@ void align_bwd(const DeBruijnGraph &base_graph,
 
     using StrItr = std::string_view::iterator;
 
+    // Every exact-extension substring belongs to this window. Validate it once
+    // instead of scanning the remaining query at each wavefront state.
+    const bool query_is_valid = query_window.find_first_not_of(base_graph.alphabet())
+                                == std::string_view::npos;
+
+    std::optional<SuccinctTraversalCache> cache;
+    if (const auto *succinct = dynamic_cast<const DBGSuccinct*>(&base_graph))
+        cache.emplace(*succinct, true);
+
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             assert(cur_target);
-            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
+                                     cache ? &*cache : nullptr);
             if (coords.empty()) {
                 return aln_graph.has_single_incoming(node);
             } else {
@@ -2175,12 +2324,13 @@ void align_bwd(const DeBruijnGraph &base_graph,
 
             assert(cur_target);
             if (begin != end) {
-                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
+                                     cache ? &*cache : nullptr);
                 if (coords.empty()) {
                     aln_graph.traverse_back(
                         node,
                         std::string_view(&*begin, end - begin),
-                        callback, terminate
+                        callback, terminate, 0, query_is_valid
                     );
                 } else {
                     assert(anno_buffer);
@@ -2197,7 +2347,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
                                 stop_early = true;
                             }
                         },
-                        [&]() { return stop_early || terminate(); }
+                        [&]() { return stop_early || terminate(); }, 0, query_is_valid
                     );
                 }
             }
@@ -2208,7 +2358,8 @@ void align_bwd(const DeBruijnGraph &base_graph,
 
             assert(cur_target);
 
-            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
+                                     cache ? &*cache : nullptr);
             if (coords.empty()) {
                 aln_graph.call_incoming_kmers(node, callback);
             } else {
@@ -2265,6 +2416,13 @@ void align_fwd(const DeBruijnGraph &base_graph,
 
     using StrItr = std::reverse_iterator<std::string_view::iterator>;
 
+    const bool query_is_valid = query_window.find_first_not_of(base_graph.alphabet())
+                                == std::string_view::npos;
+
+    std::optional<SuccinctTraversalCache> cache;
+    if (const auto *succinct = dynamic_cast<const DBGSuccinct*>(&base_graph))
+        cache.emplace(*succinct, false);
+
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             assert(cur_target);
@@ -2272,7 +2430,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
             if (dist < suffix.size())
                 return true;
 
-            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+            AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
+                                     cache ? &*cache : nullptr);
             if (coords.empty()) {
                 return aln_graph.has_single_outgoing(node);
             } else {
@@ -2311,11 +2470,12 @@ void align_fwd(const DeBruijnGraph &base_graph,
             }
 
             if (begin != end) {
-                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
+                                     cache ? &*cache : nullptr);
                 if (coords.empty()) {
                     aln_graph.traverse(
                         node, std::string_view(&*begin, end - begin),
-                        callback, terminate
+                        callback, terminate, 0, query_is_valid
                     );
                 } else {
                     assert(anno_buffer);
@@ -2332,7 +2492,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
                                 stop_early = true;
                             }
                         },
-                        [&]() { return stop_early || terminate(); }
+                        [&]() { return stop_early || terminate(); }, 0, query_is_valid
                     );
                 }
             }
@@ -2345,7 +2505,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
                 assert(node == start_node);
                 callback(node, suffix[dist], cur_target);
             } else {
-                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target);
+                AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
+                                     cache ? &*cache : nullptr);
                 if (coords.empty()) {
                     aln_graph.call_outgoing_kmers(node, callback);
                 } else {

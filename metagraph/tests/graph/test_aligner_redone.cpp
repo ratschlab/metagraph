@@ -64,6 +64,33 @@ TEST(AlignmentCigarRedone, EmptyAndMalformedLengths) {
     }
 }
 
+TEST(AlignmentCigarRedone, StrictParsingAndClipping) {
+    EXPECT_TRUE(Cigar("").empty());
+    for (const auto &text : { "3", "2=1", "1Q", "1a=", "1=xyz", "=1",
+                              "-1=", "+1=", "1 =", "0=", "1=0I" }) {
+        EXPECT_THROW(Cigar{ text }, std::invalid_argument) << text;
+    }
+    EXPECT_THROW(Cigar{ "4294967296=" }, std::out_of_range);
+    EXPECT_THROW(Cigar{ "999999999999999999999999=" }, std::out_of_range);
+
+    Cigar empty;
+    empty.extend_clipping(0);
+    EXPECT_TRUE(empty.empty());
+    Cigar exact("2=");
+    exact.extend_clipping(0);
+    EXPECT_EQ("2=", exact.to_string());
+    EXPECT_TRUE(exact.is_valid("AA", "AA"));
+    EXPECT_FALSE(Cigar("1=1S1=").is_valid("AA", "AAA"));
+    EXPECT_TRUE(Cigar("1S1=1S").is_valid("A", "AAA"));
+}
+
+TEST(AlignmentCigarRedone, CountersUseSizeType) {
+    const Cigar cigar("2147483648=1I2D1X");
+    EXPECT_EQ(size_t{2147483648}, cigar.get_num_matches());
+    EXPECT_EQ(size_t{2147483650}, cigar.get_num_query());
+    EXPECT_EQ(size_t{2147483651}, cigar.get_num_ref());
+}
+
 TEST(AlignmentScoringRedone, DefaultsAndInvalidBytes) {
     DBGAlignerConfig config;
     config.set_scoring_matrix();
@@ -280,6 +307,28 @@ TYPED_TEST(DBGAlignerRedoneTest, NonuniformSubstitutionScores) {
                   { reference }, { "8=1X18=" }, 0, true, true);
 }
 
+TYPED_TEST(DBGAlignerRedoneTest, LongBranchingExtension) {
+    uint32_t state = 7;
+    std::string reference;
+    for (size_t i = 0; i < 400; ++i) {
+        state = state * 1664525u + 1013904223u;
+        reference += "ACGT"[state >> 30];
+    }
+    auto change = [](char c) { return c == 'A' ? 'C' : 'A'; };
+    std::string branch = reference;
+    branch[100] = change(branch[100]);
+    auto graph = build_graph_batch<TypeParam>(17, { reference, branch });
+    std::string query = reference;
+    for (size_t i : { 8, 199, 391 })
+        query[i] = change(query[i]);
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.forward_and_reverse_complement = false;
+    run_alignment(*graph, config, query, { reference },
+                  { "8=1X190=1X191=1X8=" }, 0, true, true);
+}
+
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerRedoneTest, ExactShortcutComparesBothOrientations) {
     auto graph = build_graph_batch<TypeParam>(3, { "AAACCC", "GGGTTT" });
@@ -311,6 +360,23 @@ TYPED_TEST(DBGAlignerRedoneTest, ProteinBlosumExtension) {
     config.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
     config.max_nodes_per_seq_char = 5;
     config.max_ram_per_alignment = 200;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.forward_and_reverse_complement = false;
+    run_alignment(*graph, config, "MKWVTFISLL" "Y" "LFSSAYS",
+                  { reference }, { "10=1X7=" }, 0, true, true);
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, ProteinHighDegreeExtension) {
+    const std::string reference = "MKWVTFISLLFLFSSAYS";
+    std::vector<std::string> references{ reference };
+    for (char c : std::string("ACGTW")) {
+        auto branch = reference;
+        branch[5] = c;
+        references.push_back(branch);
+    }
+    auto graph = build_graph_batch<TypeParam>(5, references);
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
     config.left_end_bonus = config.right_end_bonus = 5;
     config.forward_and_reverse_complement = false;
     run_alignment(*graph, config, "MKWVTFISLL" "Y" "LFSSAYS",
