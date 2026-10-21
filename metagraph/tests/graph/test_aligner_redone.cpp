@@ -33,6 +33,21 @@ class DBGAlignerRedoneTest : public DeBruijnGraphTest<Graph> {};
 typedef ::testing::Types<DBGHashFast, DBGSuccinctCached, DBGSSHash> AlignGraphTypes;
 TYPED_TEST_SUITE(DBGAlignerRedoneTest, AlignGraphTypes);
 
+TEST(AlignmentQuery, ForwardAndReverseComplement) {
+    DBGHashFast graph(3);
+    Query empty(graph, "");
+    EXPECT_TRUE(empty.get_query().empty());
+    EXPECT_TRUE(empty.get_query(true).empty());
+
+    Query short_query(graph, "AACG");
+    EXPECT_EQ("AACG", short_query.get_query());
+    EXPECT_EQ("CGTT", short_query.get_query(true));
+
+    Query long_query(graph, std::string(1000, 'A'));
+    EXPECT_EQ(std::string(1000, 'A'), long_query.get_query());
+    EXPECT_EQ(std::string(1000, 'T'), long_query.get_query(true));
+}
+
 void run_alignment(const DeBruijnGraph &graph,
                    DBGAlignerConfig config,
                    std::string_view query,
