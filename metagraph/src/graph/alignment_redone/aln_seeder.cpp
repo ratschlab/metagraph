@@ -2647,6 +2647,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             if (a_i.get_orientation() != a_j.get_orientation() || a_i.get_label_class() != a_j.get_label_class())
                 continue;
 
+            // Repeated k-mers can have identical paths at different reference
+            // coordinates. Merge only occurrences on the same diagonal.
+            if (a_i.get_coord() != Anchor::ncoord && a_j.get_coord() != Anchor::ncoord
+                    && a_j.get_coord() - a_i.get_coord()
+                        != static_cast<int64_t>(a_j.get_clipping()) - static_cast<int64_t>(a_i.get_clipping()))
+                continue;
+
             if (a_i.get_seed().size() < config_.max_seed_length
                     && a_i.get_end_clipping() == a_j.get_end_clipping() + 1
                     && graph.has_single_outgoing(a_i.get_path().back())

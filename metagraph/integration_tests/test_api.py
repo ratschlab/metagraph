@@ -332,9 +332,13 @@ class TestAPIClient(TestAPIBase):
         self.assertIn('cigar', align_res.columns)
         self.assertIn('max_score', align_res.columns)
         self.assertIn('orientation', align_res.columns)
-        # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
-        # but here it turns out to be the case
-        self.assertEqual(len(align_res), repetitions *  alignment_cnt)
+        # The alternative count is a ceiling; the default relative-score
+        # cutoff can discard weaker completed alignments.
+        groups = align_res.groupby('seq_description')
+        self.assertEqual(len(groups), repetitions)
+        for _, hits in groups:
+            self.assertTrue(1 <= len(hits) <= alignment_cnt)
+            self.assertGreaterEqual(hits['score'].min(), 0.95 * hits['score'].max())
 
     def test_api_align_df_too_divergent(self):
         repetitions = 4
@@ -792,7 +796,11 @@ class TestAPIClientParallel(TestAPIBase):
             self.assertIn('cigar', dfs[graph].columns)
             self.assertIn('max_score', dfs[graph].columns)
             self.assertIn('orientation', dfs[graph].columns)
-            self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
+            groups = dfs[graph].groupby('seq_description')
+            self.assertEqual(len(groups), repetitions)
+            for _, hits in groups:
+                self.assertTrue(1 <= len(hits) <= alignment_cnt)
+                self.assertGreaterEqual(hits['score'].min(), 0.95 * hits['score'].max())
 
     def test_api_parallel_query_error(self):
         futures = self.graph_client.search(self.sample_query, parallel=True,
