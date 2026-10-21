@@ -771,10 +771,13 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     common::logger->trace("Mininizer size: {}", m);
                     size_t k = dict.k();
                     size_t min_match_length = std::max(m, config_.min_seed_length);
-                    auto invalid_mmer = utils::drag_and_mark_segments(invalid_char, true, m);
-
-                    if (m > this_query.size())
+                    if (!m || m > this_query.size())
                         return;
+
+                    // drag_and_mark_segments marks window ends. Index this mask
+                    // by m-mer start, as with the encoded m-mers below.
+                    auto invalid_mmer = utils::drag_and_mark_segments(invalid_char, true, m);
+                    invalid_mmer.erase(invalid_mmer.begin(), invalid_mmer.begin() + m - 1);
 
                     std::vector<kmer_t> mmers(this_query.size() - m + 1);
                     std::vector<kmer_t> mmers_rc(this_query.size() - m + 1);
@@ -808,7 +811,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         flush_mmer = true;
                         kmer_t mmer_rc;
                         for (size_t i = 0; i + m <= rc_query.size(); ++i) {
-                            if (invalid_mmer[i]) {
+                            size_t j = rc_query.size() - m - i;
+                            if (invalid_mmer[j]) {
                                 flush_mmer = true;
                                 continue;
                             }
@@ -824,7 +828,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 // mmer_rc.kth_char_or(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
                             }
 
-                            size_t j = rc_query.size() - m - i;
                             assert(j < mmers_rc.size());
                             mmers_rc[j] = mmer_rc;
                         }

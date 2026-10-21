@@ -11,6 +11,7 @@
 #include "all/test_dbg_helpers.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
+#include "graph/alignment_redone/aln_seeder.hpp"
 #include <include/builder/util.hpp>
 #include <kmer_iterator.hpp>
 
@@ -92,6 +93,56 @@ TEST(SSHashMinimizers, EmptyAndFinalTupleBuckets) {
     EXPECT_EQ(2u, it.minimizer());
     it.next();
     EXPECT_FALSE(it.has_next());
+}
+
+TEST(SSHashSeeds, AmbiguousShortQueries) {
+    using namespace mtg::graph;
+    using namespace mtg::graph::align_redone;
+    const std::string reference =
+        "AACCGACAGAACTGATGGCAGGGCCTAGTCTCCGAACTTCTGTTAAGACAGGCGAAAGTTAACC";
+    const std::string filename = test_dump_dir() + "/ambiguous_short_seeds.fa";
+    { std::ofstream out(filename); out << ">reference\n" << reference << '\n'; }
+#if _PROTEIN_GRAPH
+    const char invalid = '*';
+    const std::vector<DBGSSHash::Mode> modes { DBGSSHash::BASIC };
+#else
+    const char invalid = 'N';
+    const std::vector<DBGSSHash::Mode> modes { DBGSSHash::BASIC, DBGSSHash::CANONICAL };
+#endif
+    for (auto mode : modes) {
+        SCOPED_TRACE(mode);
+        // Choose m=3 so an invalid character can lie inside a seed window.
+        DBGSSHash graph(filename, 7, mode, 8, test_dump_dir());
+        std::visit([](const auto &dict) { ASSERT_EQ(3u, dict.m()); }, graph.data());
+        DBGAlignerConfig config;
+        config.min_seed_length = 3;
+        config.max_seed_length = graph.get_k();
+        size_t valid_flank_seeds = 0;
+        for (size_t length = 3; length < graph.get_k(); ++length) {
+            for (size_t start = 0; start + length <= reference.size(); ++start) {
+                for (size_t ambiguous = 0; ambiguous < length; ++ambiguous) {
+                    std::string sequence = reference.substr(start, length);
+                    sequence[ambiguous] = invalid;
+                    SCOPED_TRACE(sequence);
+                    Query query(graph, sequence);
+                    for (const auto &anchor : ExactSeeder(query, config).get_anchors()) {
+                        ASSERT_EQ(1u, anchor.get_path().size());
+                        EXPECT_EQ(std::string::npos, anchor.get_seed().find(invalid));
+                        EXPECT_EQ(anchor.get_seed(),
+                                  graph.get_node_sequence(anchor.get_path().front())
+                                      .substr(0, anchor.get_seed().size()));
+                        ++valid_flank_seeds;
+                    }
+                }
+            }
+        }
+        EXPECT_GT(valid_flank_seeds, 0u);
+        Query ambiguous(graph, std::string(6, invalid));
+        EXPECT_TRUE(ExactSeeder(ambiguous, config).get_anchors().empty());
+        DBGSSHash empty(7, mode);
+        Query empty_query(empty, "ACGTT");
+        EXPECT_TRUE(ExactSeeder(empty_query, config).get_anchors().empty());
+    }
 }
 
 #if ! _PROTEIN_GRAPH
