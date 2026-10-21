@@ -524,3 +524,11 @@ class RealRunV8Test(unittest.TestCase):
         self.assertEqual(sections.traversal_tools_not_called_text(_Stub(mcp_tool_calls=lambda: dict(base, **g))),
                          "the graphlet processing tools (graphlet_export's other formats), traverse_lock and "
                          "traverse_capabilities")
+
+    def test_disagreements_ragged(self):
+        import graphlets
+        g = {"scenarios": {"G-x-0001": {"ops": {"walks-arm-only": {"outcome": "disagree", "tool": "graphlet_walks",
+                                                                   "disagreeing": ["W3-W4"], "pairs": []}}}}}
+        text = graphlets.disagreements_section(g)
+        self.assertIn("1 op call disagreed", text)
+        self.assertIn("{\\small\\raggedright\\begin{itemize}", text)

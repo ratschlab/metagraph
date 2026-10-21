@@ -204,7 +204,9 @@ def disagreements_section(g, max_items=MAX_ITEMS):
         out += ("%d op call%s disagreed, in %d kind%s of difference; each kind with its op calls, the pairs that "
                 "differ, where they differ and both values of the first call, then its two answers (cut to a "
                 "line):\n" % (len(dis), "" if len(dis) == 1 else "s", len(groups), "" if len(groups) == 1 else "s"))
-        out += "{\\small\\begin{itemize}\\setlength\\itemsep{1pt}\n"
+        # ragged: the answers are JSON in typewriter, breakable only at its punctuation, which a justified line
+        # cannot stretch to (the shadow run's arm-absent answers ran 44 pt into the margin)
+        out += "{\\small\\raggedright\\begin{itemize}\\setlength\\itemsep{1pt}\n"
         for grp in groups[:max_items]:
             calls = grp["calls"]
             named = "; ".join("%s %s" % (latex.breakable_id(sid), tt(oid)) for sid, oid in calls[:8]) + (
@@ -223,7 +225,7 @@ def disagreements_section(g, max_items=MAX_ITEMS):
     if other:
         out += ("%d op call%s inconclusive or with failed preconditions (each blocks the gate):\n" % (
             len(other), " was" if len(other) == 1 else "s were"))
-        out += "{\\small\\begin{itemize}\\setlength\\itemsep{0pt}\n"
+        out += "{\\small\\raggedright\\begin{itemize}\\setlength\\itemsep{0pt}\n"
         for sid, oid, e in other[:max_items]:
             out += "\\item %s %s (%s): %s: %s\n" % (latex.breakable_id(sid), tt(oid), tt(e.get("tool")),
                                                   esc((e.get("outcome") or "").replace("_", " ")),
