@@ -1247,8 +1247,17 @@ def g_scenario(sid: str, title: str, c: dict, corpus: dict, library_commit: Opti
     tags = sorted(set(tags + ["graphlet", "area-g", "slot-" + c["slot"]] +
                       ([] if expressible(c) else ["direct-only"]) + (["conditional"] if c["conditional"] else []) +
                       ([] if measured.get("preconditions") or failed else ["rehearsal-pending"])))
-    return scenario(sid, AREA, title, "POST /traverse", request, truth, expect, timing_class=timing_class, tags=tags,
-                    mcp=mcp, graphlet=g)
+    out = scenario(sid, AREA, title, "POST /traverse", request, truth, expect, timing_class=timing_class, tags=tags,
+                   mcp=mcp, graphlet=g)
+    if failed:
+        # a failed seed walks nothing: no check that needs a walked seed (budget_respected, which scenario() adds for
+        # a stated time budget, is inconclusive there by construction and blocks the gate: the shadow run)
+        out["expect"] = [e for e in out["expect"] if e["check"] not in SEEDLESS_INCONCLUSIVE_CHECKS]
+    return out
+
+
+# the checks that need a walked seed (inconclusive on a failed seed: "no walked seed: nothing the budget governs")
+SEEDLESS_INCONCLUSIVE_CHECKS = ("budget_respected",)
 
 
 def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,

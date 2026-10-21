@@ -422,6 +422,16 @@ class ByDesignLinks(unittest.TestCase):
         next(o for o in b["graphlet"]["ops"] if o["id"] == "exp-mgt")["by_design"] = area_g.MGT_EXPORT_CASE
         self.assertTrue([p_ for p_ in area_g.validate_g(bad, None)[0] if "G-fail-0001/exp-mgt" in p_])
 
+    def test_a_failed_seed_carries_no_check_that_needs_a_walk(self):
+        # the shadow run: budget_respected read inconclusive on G-fail-0001 ("no walked seed"), blocking the gate
+        g, _ = provisional()
+        fail = next(s for s in g if s["id"] == "G-fail-0001")
+        names = [e["check"] for e in fail["expect"]]
+        self.assertNotIn("budget_respected", names)
+        self.assertEqual(names, ["status", "invariants", "traverse_seed_outcome"])
+        other = next(s for s in g if s["id"] == "G-arms2-0001")
+        self.assertIn("budget_respected", [e["check"] for e in other["expect"]])   # a walked seed keeps it
+
     def test_every_mgt_export_links_the_stored_body_case(self):
         g, _ = provisional(include_direct_only=True)
         seen = 0
