@@ -696,3 +696,44 @@ class BaselineReviewFixesV8Test(unittest.TestCase):
                                                         {"kind": "identity", "detail": "x"}]},
                     identity={"problem_notes": [note]})
         self.assertEqual(sections.noted_problems_text(run), "")
+
+
+class OwnerExceptionV8Test(unittest.TestCase):
+    """The owner's exception 1 of 2026-10-21 (gate/declared_v8_rt_x1.json): the run verdict, the gate box and appendix
+    H read a declared exclusion with a granted object as an exception granted after the run."""
+
+    EX = {"scenario": "N-x", "arms": ["mcp"], "reason": "the answer was lost",
+          "granted": {"by": "the owner", "utc": "2026-10-21T13:45:00Z", "after_run": "R", "kind": "after the run"}}
+
+    def _run(self, exclusions, rows=None, comp=None):
+        rows = rows if rows is not None else [{"scenario": "N-x", "arm": "mcp", "repeat": 0, "outcome": "error"},
+                                              {"scenario": "N-x", "arm": "mcp", "repeat": 1, "outcome": "pass"}]
+        comp = comp if comp is not None else {"N-x": {"mcp_agreement": {"class": "disagree"}}}
+        return _Stub(declared={"exclusions": exclusions}, rows=rows, order=sorted(set(r["scenario"] for r in rows)),
+                     comp_entry=lambda sid: comp.get(sid, {}), comp_relations=lambda: {},
+                     verdict="FAIL (1 failed or errored execution, 0 direct and 1 MCP disagreement); 8 inconclusive "
+                             "executions (not counted as pass)")
+
+    def test_verdict_pass_with_the_excepted_execution(self):
+        import sections
+        run = self._run([self.EX])
+        self.assertEqual(sections.doc_verdict_text(run), "PASS with 1 owner-excepted execution (N-x mcp r0: error, and "
+                         "the MCP disagreement it causes; the owner's exception granted after the run, appendix H); 8 "
+                         "inconclusive executions (not counted as pass)")
+        self.assertEqual(sections.exceptions_clause(run), "; N-x on mcp set aside by the owner's exception granted "
+                         "after the run (appendix H)")
+        self.assertEqual(sections.excepted_executions(run, self.EX), [("mcp", 0, "error"), ("mcp", 1, "pass")])
+
+    def test_no_exception_no_change(self):
+        import sections
+        plain = dict(self.EX)
+        plain.pop("granted")
+        for exclusions in ([], [plain], [dict(self.EX, scenario="N-y")], [dict(self.EX, repeats=[1])]):
+            run = self._run(exclusions)
+            self.assertTrue(sections.doc_verdict_text(run).startswith("FAIL ("), exclusions)
+
+    def test_a_failure_outside_the_exception_keeps_fail(self):
+        import sections
+        rows = [{"scenario": "N-x", "arm": "mcp", "repeat": 0, "outcome": "error"},
+                {"scenario": "R-y", "arm": "direct-local", "repeat": 0, "outcome": "fail"}]
+        self.assertTrue(sections.doc_verdict_text(self._run([self.EX], rows=rows)).startswith("FAIL ("))

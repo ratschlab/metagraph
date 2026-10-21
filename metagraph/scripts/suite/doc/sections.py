@@ -42,7 +42,7 @@ PART_ONE = [("decision", "Decision summary", "I.1"), ("methods", "Methods", "I.2
 APPENDICES = [("A", "The check catalogue"), ("B", "The by-design table"), ("C", "The relations"),
               ("D", "Record key and glossary"), ("E", "Index of test ids"),
               ("F", "Environment, vocabulary and the gate in full"),
-              ("G", "Known MCP limits and owner-declared exemptions")]
+              ("G", "Known MCP limits and owner-declared exemptions"), ("H", "Exceptions to the deploy gate")]
 # the closing section's displayed prefix (READ-009: chapter C is capabilities and appendix C the relations, so the
 # timing sections are not C.1 .. C.7 on the page; the LaTeX labels sec:C1 .. sec:C7 stay, so that links hold)
 CLOSING_PREFIX = "Timing"
@@ -679,8 +679,9 @@ def gate_text(word, how, counts_text, problems_text, run=None):
     scope = gate_scope(run)["text"] if run is not None else "the policy's selection"
     passed = run is not None and bool((run.gate or {}).get("passed"))
     if passed:
-        return "%s: nothing blocks (%s); %s; the gate covers %s; %s" % (
-            word, problems_text, counts_text, scope, _without_access_paths(how, run))
+        return "%s: nothing blocks (%s%s); %s; the gate covers %s; %s" % (
+            word, problems_text, exceptions_clause(run) if run is not None else "", counts_text, scope,
+            _without_access_paths(how, run))
     groups = gate_groups_text(run) if run is not None else "–"
     head, kinds = _problems_head_and_kinds(problems_text)
     noted = noted_problems_text(run) if run is not None else ""
@@ -1537,6 +1538,19 @@ def doc_verdict_text(run):
     # the document's convention (I.2): "access paths" in the prose, "arms" for row labels only (RV11); counts in
     # proper plurals, never "execution(s)" (RV12)
     v = (run.verdict or "–").replace("between the arms", "between the access paths")
+    if v.startswith("FAIL ("):
+        ex = excepted_verdict(run)
+        if ex:
+            # the head's parenthesis closed at its own depth; the rest (inconclusive count, notes) kept
+            depth, end = 0, None
+            for i, ch in enumerate(v):
+                depth += ch == "("
+                depth -= ch == ")"
+                if ch == ")" and depth == 0:
+                    end = i
+                    break
+            if end is not None:
+                v = excepted_verdict_head(run, ex) + v[end + 1:]
     m = _FINDINGS_VERDICT.match(v)
     if not m:
         return plural_counts(v)
@@ -1573,7 +1587,16 @@ def gate_summary(ctx):
         word = "GATE PASS" if gate.get("passed") else "GATE FAIL"
         problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
         if run.gate_offline:
-            if run.gate_stale and same_recorded_verdict(run, gate):
+            rec = run.gate_recorded if isinstance(run.gate_recorded, dict) else None
+            rec_pol = (rec or {}).get("policy") or {}
+            if rec and rec_pol.get("sha256") and pol.get("sha256") and rec_pol["sha256"] != pol["sha256"]:
+                # the run's gate.json was judged by another policy (the frozen one, before the owner's exception)
+                n_rec = len([p for p in (rec.get("problems") or []) if isinstance(p, dict)])
+                recorded = ("a gate.json of %s judged by another policy, %s: %s, %d problem%s%s" % (
+                    str(rec.get("judged_utc") or "–")[:19].replace("T", " "), rec_pol.get("name") or "–",
+                    "PASS" if rec.get("passed") else "FAIL", n_rec, "" if n_rec == 1 else "s",
+                    "; this document's policy adds the owner's exception, appendix H" if owner_exceptions(run) else ""))
+            elif run.gate_stale and same_recorded_verdict(run, gate):
                 recorded = "a gate.json with the same verdict, counts and problems: %s" % same_verdict_text(run)
             elif run.gate_stale:
                 recorded = "a stale gate.json: %s" % stale_gate_text(run)
@@ -1733,8 +1756,9 @@ def gate_line(ctx):
     held = (IDENTITY_HELD_CLAUSE if identity_held(run) else "") + (LIBRARY_HELD_CLAUSE if library_held(run) else "")
     if passed:
         # "by design" never hyphenated in the box (RV12)
-        return "\\textbf{\\large %s}: nothing blocks (%s); %s%s; the gate covers %s; %s" % (
-            esc(word), esc(problems_text), esc(counts_text).replace("by design", "\\mbox{by design}"), esc(held),
+        return "\\textbf{\\large %s}: nothing blocks (%s%s); %s%s; the gate covers %s; %s" % (
+            esc(word), esc(problems_text), esc(exceptions_clause(run)),
+            esc(counts_text).replace("by design", "\\mbox{by design}"), esc(held),
             esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run)))
     head, kinds = _problems_head_and_kinds(problems_text)
     noted = noted_problems_text(run)
@@ -1830,6 +1854,8 @@ def principal_findings(ctx):
                     if note:
                         what += ": %s (the service's own log, checked separately; not part of the run's files)" % (
                             latex.join_units(cells.esc_times(note)))
+                    if _excepted(run, sid, arm, l.get("repeat")):
+                        what += "; set aside by the owner's exception granted after the run (appendix H)"
                     failures.setdefault(sid, []).append("%s r%s %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
                                                                        esc(l.get("repeat")), what))
         e = run.comp_entry(sid)
@@ -6314,6 +6340,158 @@ def appendices(ctx):
     out += latex.section("G\\qd %s" % titles["G"], "app:G")
     out += appendix_lead(ctx, "appendix_G")
     out += mcp_limits(ctx)
+    if (ctx.run.manifest or {}).get("manifest_version", 0) >= 8:
+        # the owner's request of 2026-10-21: every exception of the deploy gate listed at the document's end
+        out += latex.section("H\\qd %s" % titles["H"], "app:H")
+        out += exceptions_appendix(ctx)
+    return out
+
+
+# -- the owner's exceptions: declared entries granted after the run ------------------------------------------------
+# A declared entry with a `granted` object {by, utc, after_run, kind} is an exception the owner granted after seeing
+# the run (gate/declared_v8_rt_x1.json: N-realrep-0023 on mcp, whose cold answer the test client lost): the gate
+# applies it as any declared entry; the document names it on the cover, in I.1 and in appendix H.
+
+def owner_exceptions(run):
+    """The declared file's entries with a `granted` object, as (kind, entry), in the file's order."""
+    dec = getattr(run, "declared", None)
+    out = []
+    if isinstance(dec, dict):
+        for kind in ("exclusions", "not_required", "relations_excluded"):
+            for e in dec.get(kind) or []:
+                if isinstance(e, dict) and isinstance(e.get("granted"), dict):
+                    out.append((kind, e))
+    return out
+
+
+def _excepted(run, sid, arm, repeat=None):
+    """Whether an owner exception (an exclusion granted after the run) sets aside |sid| on |arm| (|repeat| None: every
+    repeat)."""
+    for kind, e in owner_exceptions(run):
+        if kind != "exclusions" or e.get("scenario") != sid or arm not in (e.get("arms") or []):
+            continue
+        reps = e.get("repeats")
+        if reps is None or (repeat is not None and repeat in reps):
+            return True
+    return False
+
+
+def excepted_executions(run, e):
+    """The run's executions an exclusion |e| sets aside, as (arm, repeat, outcome) in the run's order."""
+    reps = e.get("repeats")
+    return [(l.get("arm"), l.get("repeat"), l.get("outcome")) for l in run.rows
+            if l.get("scenario") == e.get("scenario") and l.get("arm") in (e.get("arms") or [])
+            and (reps is None or l.get("repeat") in reps)]
+
+
+def excepted_verdict(run):
+    """(failing executions, disagreements) when every failed or errored execution and every disagreement between
+    access paths of the run is set aside by an owner exception, no relation failed and nothing else blocks the
+    run verdict's FAIL; else None. The executions are (scenario, arm, repeat, outcome)."""
+    if not owner_exceptions(run):
+        return None
+    failing = [(l.get("scenario"), l.get("arm"), l.get("repeat"), l.get("outcome")) for l in run.rows
+               if l.get("outcome") in ("fail", "error", cmp.OTHER_OUTCOME)]
+    dis = []
+    for sid in run.order:
+        e = run.comp_entry(sid)
+        for key, arm in (("direct_agreement", "direct-remote"), ("mcp_agreement", "mcp")):
+            if (e.get(key) or {}).get("class") == "disagree":
+                dis.append((sid, arm))
+    rel = [r for r in (run.comp_relations() or {}).values()
+           if any((v or {}).get("outcome") == "fail" for v in ((r or {}).get("arms") or {}).values())]
+    if rel or not (failing or dis):
+        return None
+    if not all(_excepted(run, sid, arm, rep) for sid, arm, rep, _ in failing):
+        return None
+    if not all(_excepted(run, sid, arm) for sid, arm in dis):
+        return None
+    return failing, dis
+
+
+def excepted_verdict_head(run, ex):
+    """'PASS with 1 owner-excepted execution (N-realrep-0023 mcp r0: error, and the MCP disagreement it causes; the
+    owner's exception granted after the run, appendix H)'."""
+    failing, dis = ex
+    names = ["%s %s r%s: %s" % (sid, arm, rep, out) for sid, arm, rep, out in failing]
+    tail = ""
+    if dis:
+        tail = ", and the %s it causes" % (
+            "MCP disagreement" if len(dis) == 1 and dis[0][1] == "mcp" else "%d disagreements" % len(dis))
+    return "PASS with %d owner-excepted execution%s (%s%s; the owner's exception granted after the run, appendix H)" % (
+        len(failing), "" if len(failing) == 1 else "s", "; ".join(names), tail)
+
+
+def exceptions_clause(run):
+    """'; N-realrep-0023 on mcp set aside by the owner's exception granted after the run (appendix H)' for the gate
+    box, '' without one."""
+    ex = [e for kind, e in owner_exceptions(run) if kind == "exclusions"]
+    if not ex:
+        return ""
+    return "; %s set aside by the owner's exception%s granted after the run (appendix H)" % (
+        "; ".join("%s on %s%s" % (e.get("scenario"), ", ".join(e.get("arms") or []),
+                                  (" r%s" % ", r".join(str(r) for r in e["repeats"])) if e.get("repeats") else "")
+                  for e in ex), "" if len(ex) == 1 else "s")
+
+
+def exceptions_appendix(ctx):
+    """Appendix H: every exception the deploy gate of this document applied (the owner's request of 2026-10-21): the
+    owner's exceptions granted after the run with their executions, the owner's entries declared before it, and the
+    policy's automatic exclusions by rule."""
+    run = ctx.run
+    pol = run.policy or {}
+    out = ("An exception changes what the deploy gate requires, never what the run observed: every execution below "
+           "stays recorded and printed in its chapter with its own outcome. The gate of this document (policy %s) "
+           "reads the owner's declared file %s.\par\n" % (
+               esc(pol.get("name") or "–"), tt(((run.declared or {}).get("_file")) or "–")))
+    out += "\\parhead{The owner's exceptions granted after the run}\n"
+    rows = []
+    for kind, e in owner_exceptions(run):
+        g = e["granted"]
+        execs = "; ".join("%s r%s %s" % (a, r, o) for a, r, o in excepted_executions(run, e)) \
+            if kind == "exclusions" else "–"
+        rows.append([latex.breakable_id(e.get("scenario") or e.get("relation") or "–"),
+                     esc(", ".join(e.get("arms") or []) + ((" r%s" % ", r".join(str(r) for r in e["repeats"]))
+                                                            if e.get("repeats") else " (every repeat)")),
+                     esc("%s, %s, after run " % (g.get("by") or "–", str(g.get("utc") or "–")[:16].replace("T", " ")))
+                     + latex.breakable_id(g.get("after_run") or "–"),
+                     esc(execs), esc_wrap(e.get("reason"))])
+    if rows:
+        out += latex.plain_table(latex.spec_p([22, 18, 30, 26, 76]),
+                                 ["scenario", "set aside on", "granted", "executions set aside", "the owner's reason"],
+                                 rows)
+    else:
+        out += "None: the gate applied no exception granted after the run.\n\n"
+    out += "\\parhead{The owner's entries declared before the run}\n"
+    rows = []
+    for kind in ("exclusions", "not_required", "relations_excluded"):
+        for e in ((run.declared or {}).get(kind) or []) if isinstance(run.declared, dict) else []:
+            if isinstance(e, dict) and not isinstance(e.get("granted"), dict):
+                rows.append([esc(kind.replace("_", " ")), latex.breakable_id(e.get("scenario") or e.get("relation") or "–"),
+                             esc(", ".join(e.get("arms") or [])), esc_wrap(latex.cut_text(str(e.get("reason") or ""), 300))])
+    if rows:
+        out += latex.plain_table(latex.spec_p([22, 26, 16, 108]),
+                                 ["kind", "scenario or relation", "access paths", "the owner's reason (appendix G: what "
+                                  "it changes)"], rows)
+    else:
+        out += "None.\n\n"
+    out += "\\parhead{The policy's automatic exclusions}\n"
+    counts = {}
+    for e in pol.get("exclusions") or []:
+        if isinstance(e, dict) and "declared" not in (e.get("rules") or []):
+            for r in e.get("rules") or ["–"]:
+                c = counts.setdefault(r, [0, set()])
+                c[0] += 1
+                c[1].update(e.get("arms") or [])
+    if counts:
+        out += latex.plain_table(latex.spec_p([40, 22, 40]), ["rule", "scenarios", "access paths"],
+                                 [[esc(r.replace("_", " ")), esc(c[0]), esc(", ".join(sorted(c[1])))]
+                                  for r, c in sorted(counts.items(), key=lambda kv: (-kv[1][0], kv[0]))])
+        out += ("\\noindent{\\small Set aside by the policy's own rules when it was written, before the run (each "
+                "scenario with its rule and reason in the policy file; the gate's record in appendix F). A scenario can "
+                "fall under more than one rule.}\\par\n")
+    else:
+        out += "None.\n\n"
     return out
 
 
