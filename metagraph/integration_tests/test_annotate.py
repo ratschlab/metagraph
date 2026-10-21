@@ -27,6 +27,55 @@ class TestAnnotate(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
+    @parameterized.expand([(coords, reverse, existing)
+                           for coords in (False, True)
+                           for reverse in ((False,) if PROTEIN_MODE else (False, True))
+                           for existing in (False, True)])
+    def test_separate_header_records(self, coords, reverse, existing):
+        from pathlib import Path
+        root = Path(self.tempdir.name)
+        sequences = ["AAAAAAC", "CCCCCGT", "GGGGGAT"]
+        first, second, all_records = [root / name for name in ("first.fa", "second.fa", "all.fa")]
+        first.write_text("".join(f">same\n{seq}\n" for seq in sequences[:2]))
+        second.write_text(f">same\n{sequences[2]}\n")
+        all_records.write_text(first.read_text() + second.read_text())
+
+        def run(*args):
+            result = subprocess.run([METAGRAPH, *map(str, args)],
+                                    stdout=PIPE, stderr=PIPE, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        graph = root / "graph"
+        run("build", "-k", "5", "-o", graph, all_records)
+        graph = graph.with_suffix(".dbg")
+        directory = root / "chunks"
+        if existing:
+            directory.mkdir()
+        options = (["--coordinates"] if coords else []) + (["--fwd-and-reverse"] if reverse else [])
+        # Header extraction is implied; repeated headers are separate records.
+        run("annotate", "-p", "2", "-i", graph, "--separate-header", "-o", directory,
+            *options, first, second)
+        chunks = sorted(directory.glob("*.column.annodbg"))
+        self.assertEqual(len(chunks), 3)
+        self.assertFalse(list(root.glob("chunks.*")))
+        query_options = ["--query-mode", "coords"] if coords else []
+        for i, chunk in enumerate(chunks):
+            record = root / f"record{i}.fa"
+            record.write_text(f">same\n{sequences[i]}\n")
+            expected = root / f"expected{i}"
+            run("annotate", "-i", graph, "--anno-header", "-o", expected, *options, record)
+            expected = Path(str(expected) + ".column.annodbg")
+            if coords:
+                actual_coords, expected_coords = root / f"actual-coords{i}", root / f"expected-coords{i}"
+                run("transform_anno", "--anno-type", "column_coord", "-o", actual_coords, chunk)
+                run("transform_anno", "--anno-type", "column_coord", "-o", expected_coords, expected)
+                chunk = Path(str(actual_coords) + ".column_coord.annodbg")
+                expected = Path(str(expected_coords) + ".column_coord.annodbg")
+            actual_result = run("query", "-i", graph, "-a", chunk, *query_options, all_records)
+            expected_result = run("query", "-i", graph, "-a", expected, *query_options, all_records)
+            self.assertEqual(actual_result, expected_result)
+
     @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, graph_repr):
 

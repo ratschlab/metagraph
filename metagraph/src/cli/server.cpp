@@ -97,8 +97,8 @@ Json::Value process_search_request(const Json::Value &json,
         ));
     }
 
-    config.alignment_extend_chains = json.get("extend_chains", true).asBool();
-    config.alignment_connect_anchors = json.get("connect_anchors", true).asBool();
+    if (json.isMember("extend_chains") || json.isMember("connect_anchors"))
+        throw std::invalid_argument("Use /align for extend_chains and connect_anchors options");
 
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
@@ -152,9 +152,11 @@ Json::Value process_align_request(const std::string &received_message,
         "max_alternative_alignments",
         (uint64_t)config.alignment_num_alternative_paths).asInt();
 
-    config.alignment_min_seed_length = json.get(
-        "seed_length",
-        (uint64_t)config.alignment_min_seed_length).asInt();
+    const auto seed_length = json.get(
+        "seed_length", Json::UInt64(config.alignment_min_seed_length));
+    if (!seed_length.isUInt64())
+        throw std::invalid_argument("seed_length must be a nonnegative integer");
+    config.alignment_min_seed_length = seed_length.asUInt64();
 
     if (!config.alignment_num_alternative_paths) {
         // TODO: better throw an exception and send an error response to the client

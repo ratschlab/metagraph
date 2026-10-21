@@ -82,6 +82,25 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 400)
         self.assertIn("Bad json received:", ret.json()['error'])
 
+    def test_api_raw_align_invalid_seed_length(self):
+        for seed_length in (-1, 1.5, "bad"):
+            ret = self.raw_post_request('align', json.dumps({
+                "FASTA": ">query\nTCGA", "seed_length": seed_length}))
+            self.assertEqual(ret.status_code, 400)
+            self.assertIn("seed_length", ret.json()['error'])
+
+    def test_api_raw_search_rejects_alignment_tuning(self):
+        for option in ("extend_chains", "connect_anchors"):
+            ret = self.raw_post_request('search', json.dumps({
+                "FASTA": ">query\nTCGA", "align": True, option: False}))
+            self.assertEqual(ret.status_code, 400)
+            self.assertIn("/align", ret.json()['error'])
+
+    def test_api_client_align_negative_seed_length(self):
+        client = GraphClientJson(self.host, self.port)
+        with self.assertRaisesRegex(ValueError, "seed_length"):
+            client.align("TCGA", seed_length=-1)
+
     def test_api_raw_invalid_params(self):
         payload = json.dumps({
                     "top_labels": 'not_a_number',

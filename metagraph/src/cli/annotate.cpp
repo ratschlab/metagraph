@@ -5,6 +5,7 @@
 #include <omp.h>
 
 #include "common/logger.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
 #include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
@@ -46,7 +47,8 @@ void call_annotations(const std::string &file,
                       const std::string &fasta_anno_comment_delim,
                       const std::string &fasta_header_delimiter,
                       const std::vector<std::string> &anno_labels,
-                      const Callback &callback) {
+                      const Callback &callback,
+                      const std::function<void()> &on_record = [](){}) {
     size_t total_seqs = 0;
 
     Timer timer;
@@ -105,6 +107,7 @@ void call_annotations(const std::string &file,
         read_fasta_file_critical(
             file,
             [&](kseq_t *read_stream) {
+                on_record();
                 // add sequence header to labels
                 if (annotate_sequence_headers) {
                     for (const auto &label
@@ -137,6 +140,10 @@ void call_annotations(const std::string &file,
                 }
 
                 callback(read_stream->seq.s, labels, abundance);
+                if (forward_and_reverse) {
+                    reverse_complement(read_stream->seq);
+                    callback(read_stream->seq.s, labels, abundance);
+                }
 
                 total_seqs += 1;
 
@@ -148,7 +155,7 @@ void call_annotations(const std::string &file,
 
                 labels.resize(num_base_labels);
             },
-            forward_and_reverse
+            false
         );
     } else {
         logger->error("Unknown filetype for file '{}'", file);
@@ -283,11 +290,18 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         return;
     }
 
-    std::vector<std::string> last_labels;
+    bool chunk_has_records = false;
+    if (config.separate_header) {
+        for (const auto &file : files) {
+            if (file_format(file) != "FASTA" && file_format(file) != "FASTQ")
+                throw std::invalid_argument("--separate-header requires FASTA or FASTQ input");
+        }
+    }
     if (config.coordinates) {
         #pragma omp parallel num_threads(get_num_threads())
         #pragma omp single
         for (const auto &file : files) {
+            bool new_record = false;
             using Seq = std::tuple<std::string, std::vector<std::string>, uint64_t>;
             BatchAccumulator<Seq> batcher(
                 [&anno_graph](std::vector<Seq>&& data) {
@@ -334,9 +348,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     if (sequence.size() >= k) {
                         uint64_t num_kmers = sequence.size() - k + 1;
                         if (config.separate_header) {
-                            bool flush = last_labels.size() && labels != last_labels;
-                            last_labels = labels;
-                            if (flush) {
+                            if (new_record && chunk_has_records) {
                                 batcher.process_all_buffered();
                                 #pragma omp taskwait
                                 anno_graph->get_annotator().serialize(
@@ -344,23 +356,26 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                                 );
                                 anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
                             }
+                            new_record = false;
+                            chunk_has_records = true;
                         }
                         batcher.push_and_pay(sequence.size(),
                                              std::move(sequence), std::move(labels), coord);
                         if (!config.annotate_sequence_headers)
                             coord += num_kmers;
                     }
-                }
+                },
+                [&]() { new_record = true; }
             );
         }
 
         #pragma omp taskwait
 
-        if (config.separate_header) {
+        if (config.separate_header && chunk_has_records) {
             anno_graph->get_annotator().serialize(
                 fmt::format("{}.{}", annotator_filename, cur_chunk_id++)
             );
-        } else {
+        } else if (!config.separate_header) {
             anno_graph->get_annotator().serialize(annotator_filename);
         }
 
@@ -370,6 +385,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     #pragma omp parallel num_threads(get_num_threads())
     #pragma omp single
     for (const auto &file : files) {
+        bool new_record = false;
         using Seq = std::pair<std::string, std::vector<std::string>>;
         BatchAccumulator<Seq> batcher(
             [&anno_graph](std::vector<Seq>&& data) {
@@ -398,9 +414,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             [&](std::string sequence, auto labels, uint64_t) {
                 if (sequence.size() >= k) {
                     if (config.separate_header) {
-                        bool flush = last_labels.size() && labels != last_labels;
-                        last_labels = labels;
-                        if (flush) {
+                        if (new_record && chunk_has_records) {
                             batcher.process_all_buffered();
                             #pragma omp taskwait
                             anno_graph->get_annotator().serialize(
@@ -408,11 +422,14 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                             );
                             anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
                         }
+                        new_record = false;
+                        chunk_has_records = true;
                     }
                     batcher.push_and_pay(sequence.size(),
                                          std::move(sequence), std::move(labels));
                 }
-            }
+            },
+            [&]() { new_record = true; }
         );
     }
 
@@ -494,11 +511,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     #pragma omp taskwait
 
-    if (config.separate_header) {
+    if (config.separate_header && chunk_has_records) {
         anno_graph->get_annotator().serialize(
             fmt::format("{}.{}", annotator_filename, cur_chunk_id++)
         );
-    } else {
+    } else if (!config.separate_header) {
         anno_graph->get_annotator().serialize(annotator_filename);
     }
 }
@@ -527,7 +544,13 @@ int annotate_graph(Config *config) {
 
     if (!config->separately) {
         omp_set_max_active_levels(2);
-        annotate_data(graph, *config, files, config->outfbase);
+        if (config->separate_header) {
+            const fs::path directory = config->outfbase.empty() ? "." : config->outfbase;
+            fs::create_directories(directory);
+            annotate_data(graph, *config, files, (directory / "annotation").string());
+        } else {
+            annotate_data(graph, *config, files, config->outfbase);
+        }
 
     } else {
         // |config->separately| is true

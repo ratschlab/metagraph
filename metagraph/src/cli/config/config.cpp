@@ -320,6 +320,7 @@ Config::Config(int argc, char *argv[]) {
             separately = true;
         } else if (!strcmp(argv[i], "--separate-header")) {
             separate_header = true;
+            annotate_sequence_headers = true;
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -1133,6 +1134,8 @@ if (advanced) {
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
 if (advanced) {
+            fprintf(stderr, "\t   --align-no-connect-anchors\t\tskip alignment between anchors [off]\n");
+            fprintf(stderr, "\t   --align-no-extend-chains\t\tskip extension beyond chains [off]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum search workspace in MB, excluding graph/annotations/results [200.0]\n");

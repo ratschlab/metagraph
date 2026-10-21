@@ -112,6 +112,9 @@ class GraphClientJson:
         if max_num_nodes_per_seq_char < 0:
             warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
 
+        if seed_length < 0:
+            raise ValueError(f"seed_length must be nonnegative. Got {seed_length}")
+
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
                   'min_exact_match': min_exact_match,
@@ -242,8 +245,8 @@ class GraphClient:
         :type       max_alternative_alignments:  int
         :param      max_num_nodes_per_seq_char:  The maximum number of nodes to consider per sequence character during extension [default: 10.0]
         :type       max_num_nodes_per_seq_char:  float
-        :param      seed_length                  The minimum seed length
-        :type       seed_length                  int
+        :param      seed_length:                 The minimum seed length
+        :type       seed_length:                 int
         :param      connect_anchors:             If True, traverse the graph to align the query regions that fall between anchors
         :type       connect_anchors:             bool
         :param      extend_chains:               If True, perform ends-free extension from the first and last anchors in a chain
