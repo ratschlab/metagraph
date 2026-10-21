@@ -15,6 +15,9 @@
 #include <include/builder/util.hpp>
 #include <kmer_iterator.hpp>
 #include <streaming_query.hpp>
+// Lookup is a template defined outside dictionary.hpp. Include its definition
+// here rather than relying on instantiations emitted by another object file.
+#include <src/dictionary.cpp>
 #include <sdsl/memory_management.hpp>
 
 namespace {
