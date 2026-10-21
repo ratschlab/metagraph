@@ -26,6 +26,8 @@
 # Long: ~5 min (the comparison is recomputed in memory, xelatex runs two or three times); run it in the background.
 # Exit 0 built and every check clean, 1 built with a check to look at, 2 refused (inputs), 3 the build failed.
 set -u
+# the whole body is one function, parsed before it runs: an edit of this file during a build cannot derail it
+main() {
 SUITE=$(cd "$(dirname "$0")/.." && pwd)
 if [ $# -lt 3 ]; then
   sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
@@ -96,8 +98,9 @@ if cmp -s "$OUT/inputs/units_v8.json" doc/units/suite_v8.json; then
   echo "units    doc/units/suite_v8.json (keyed to the given manifest)"
 else
   UNITS=$OUT/inputs/units_v8.json
-  echo "units    built from the given manifest: $UNITS (doc/units/suite_v8.json is keyed to another content:"
-  echo "         commit this file as doc/units/suite_v8.json; the document is the same either way)"
+  echo "units    built from the given manifest: $UNITS (doc/units/suite_v8.json is keyed to another content;"
+  echo "         the document reads the same either way; to keep it in the tree, before the build:"
+  echo "         python3 -I -B doc/units_v8_build.py MANIFEST doc/units/suite_v8.json, commit, build again)"
 fi
 
 # the declared file the deploy policy pins (relative to the suite's tree, as gate/ names it)
@@ -204,3 +207,6 @@ EOF
 echo "bundle   $OUT: $(cd "$OUT" && echo $FILES) SHA256SUMS"
 if [ $PROBLEMS = 0 ]; then echo "CHECKS CLEAN"; exit 0; fi
 echo "CHECKS: $PROBLEMS to look at"; exit 1
+}
+main "$@"
+exit $?
