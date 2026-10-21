@@ -394,6 +394,65 @@ class Required(unittest.TestCase):
         self.assertEqual(gs.required_service_checks(gf.manifest([gf.scenario(ways=["W1", "W2", "W4"])])), [])
 
 
+LIBRARY_EXPORT = "graphlet_export(format=json, what=compare) writes the complete lists"
+SERVICE_EXPORT = "complete lists: download both bodies (format=mgt) and compare locally"
+EXPORT_CASE = {"id": "graphlet.compare_export_line", "areas": ["G"], "agreement": "by_design",
+               "scenario_match": "an answered graphlet_compare: W3 carries the service's export line",
+               "direct_expectation": {"behaviour": "the library's export line"},
+               "service_answer": {"tool": "graphlet_compare", "outcome": "answered",
+                                  "keys": {"export": SERVICE_EXPORT}},
+               "graphlet": {"tools": ["graphlet_compare"], "library": {"answered": True},
+                            "service": {"answered": True, "service_fields": {"export": SERVICE_EXPORT}}},
+               "source": ["test"]}
+
+
+class NarrowByDesign(ServiceBase):
+    """A case pinning a key of the library's own answer (graphlet_compare's export, async's 2026-10-21 case): W3's
+    value is read from its answer, and only that key's difference is excused."""
+    OP = {"id": "cmp", "tool": "graphlet_compare", "by_design": EXPORT_CASE["id"],
+          "args": {"b": {"graphlet": SID_B}, "mode": "claims", "max_bytes": 262144}, "ways": FOUR}
+
+    def run_with(self, w3_export, w3_counts=None):
+        a = gf.scenario(sid=SID, ops=[self.OP], facts={"cut_lists": False})
+        b = gf.scenario(sid=SID_B, ops=[], facts={"cut_lists": False})
+        self.make([a, b], table=[EXPORT_CASE])
+        lib = dict(compare_answer(), export=LIBRARY_EXPORT)
+        w3 = dict(compare_answer(UUID, UUID_B, counts=w3_counts), export=w3_export)
+        if w3_export is None:
+            del w3["export"]
+        self.put(SID, self.OP, {"*": lib, "W3": w3}, sf={})
+        return self.result()["scenarios"][SID]["ops"]["cmp"]
+
+    def test_the_pinned_key_alone_is_excused(self):
+        self.assertEqual(gs.pinned_answer_keys("graphlet_compare", EXPORT_CASE["graphlet"]["service"]), {"export"})
+        self.assertEqual(gs.pinned_answer_keys("graphlet_walks", EXPORT_CASE["graphlet"]["service"]), set())
+        e = self.run_with(SERVICE_EXPORT)
+        self.assertTrue(e["by_design"][0]["verified"], e["by_design"])
+        self.assertEqual(e["by_design"][0]["pinned_answer_keys"], ["export"])
+        self.assertEqual(e["outcome"], "service_by_design", e)
+        self.assertNotIn("disagreeing", e)
+        w34 = next(p for p in e["pairs"] if p["pair"] == "W3-W4")
+        self.assertEqual((w34["outcome"], w34["pointer"]), ("disagree", "/answer/export"))   # recorded, excused
+
+    def test_another_difference_is_not_excused(self):
+        e = self.run_with(SERVICE_EXPORT, w3_counts={"only_in_a": 1, "only_in_b": 0, "differ": 0})
+        self.assertTrue(e["by_design"][0]["verified"], e["by_design"])
+        self.assertEqual(e["outcome"], "disagree", e)
+        self.assertIn("W3-W4", e["disagreeing"])
+        self.assertIn("W3-W4 still differs without export: /answer/counts", e["by_design_narrow"][0])
+
+    def test_the_pinned_text_must_be_the_services(self):
+        # W3 answering the library's line: no answer difference, yet the case does not hold on W3
+        e = self.run_with(LIBRARY_EXPORT)
+        self.assertFalse(e["by_design"][0]["verified"])
+        self.assertIn("W3's service field export", e["by_design"][0]["detail"])
+        self.assertEqual(e["outcome"], "disagree", e)
+        self.assertIn("by-design graphlet.compare_export_line: service", e["disagreeing"])
+        # an answer without the key (the library cut it under the ceiling): missing, the case does not hold
+        e = self.run_with(None)
+        self.assertFalse(e["by_design"][0]["verified"])
+
+
 class ByDesign(ServiceBase):
     OP = {"id": "walks-cap", "tool": "graphlet_walks", "ways": FOUR, "by_design": CAP_CASE["id"],
           "args": {"arm": "left", "rank": "id", "n": 10, "max_bytes": 262145}}
