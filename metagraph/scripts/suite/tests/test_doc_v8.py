@@ -532,3 +532,13 @@ class RealRunV8Test(unittest.TestCase):
         text = graphlets.disagreements_section(g)
         self.assertIn("1 op call disagreed", text)
         self.assertIn("{\\small\\raggedright\\begin{itemize}", text)
+
+    def test_agreement_not_planned_not_implemented(self):
+        import sections
+        comp = {"G-a-0001": {"mcp_agreement": {"class": "agree"}, "direct_agreement": {"class": "identical"}},
+                "G-d-0001": {"mcp_agreement": {"class": "not_implemented_mcp"}},
+                "G-w-0001": {"mcp_agreement": {"class": "not_implemented_mcp"}}}
+        run = _Stub(comp_entry=lambda sid: comp[sid], depth={}, planned_on=lambda sid, arm: sid != "G-w-0001")
+        _, mtext = sections._agreement_counts(_Stub(run=run), list(comp))
+        self.assertIn("1 not implemented", mtext)
+        self.assertIn("1 with no MCP execution planned", mtext)

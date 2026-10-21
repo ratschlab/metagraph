@@ -2989,8 +2989,10 @@ def _agreement_counts(ctx, sids):
         mc = (e.get("mcp_agreement") or {}).get("class")
         if dc:
             direct[dc] = direct.get(dc, 0) + 1
-        if mc == "missing" and not cells.planned_on(run, sid, "mcp"):
-            # no MCP execution because the plan runs the test on the direct access paths alone: not missing (M1)
+        if mc in ("missing", "not_implemented_mcp") and not cells.planned_on(run, sid, "mcp"):
+            # no MCP execution because the plan runs the test on the direct access paths alone: not missing (M1),
+            # nor not implemented (manifest v8's warm-ups of the long walk and the stops' base requests carry the
+            # mark but the plan schedules no MCP execution for them: their standing is '–', as I.1 counts them)
             mc = "not_planned"
         if mc:
             mcp[mc] = mcp.get(mc, 0) + 1
