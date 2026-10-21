@@ -2869,8 +2869,8 @@
   "S-base": {
    "family": "S-base",
    "unit_type": "list",
-   "unit_title": "the stops' base requests run to completion",
-   "property": "The request a stop interrupts, run to completion twice on direct-local: the warm full-run time (repeat 1) the stop must beat.",
+   "unit_title": "the stops' base requests run without a stop",
+   "property": "The request a stop interrupts, run without a stop twice on direct-local: the warm time (repeat 1) the stop must beat.",
    "n": 2,
    "members": [
     "S-base-0001",
@@ -9179,7 +9179,7 @@
   "unit_id": "S-base",
   "unit_type": "list",
   "variant": "of S-stop-0001 (a walk)",
-  "unit_title": "the stops' base requests run to completion"
+  "unit_title": "the stops' base requests run without a stop"
  },
  "S-base-0002": {
   "chapter": "S",
@@ -9187,6 +9187,6 @@
   "unit_id": "S-base",
   "unit_type": "list",
   "variant": "of S-stop-0002 (a discovery)",
-  "unit_title": "the stops' base requests run to completion"
+  "unit_title": "the stops' base requests run without a stop"
  }
 }

@@ -135,7 +135,8 @@ class ChapterSTest(unittest.TestCase):
         lines = {("S-stop-0001", "mcp"): [{"scenario": "S-stop-0001", "repeat": 0, "outcome": "pass",
                                            "stop_flow": rec}],
                  ("S-base-0001", "direct-local"): [{"scenario": "S-base-0001", "repeat": 0, "outcome": "pass",
-                                                    "wall_ms": 15002.0, "server": {"elapsed_ms": 15000.0}},
+                                                    "wall_ms": 15002.0, "server": {"elapsed_ms": 15000.0},
+                                                    "time_limited": "seed 0 stopped by its time budget"},
                                                    {"scenario": "S-base-0001", "repeat": 1, "outcome": "pass",
                                                     "wall_ms": 9000.0, "server": {"elapsed_ms": 8990.0}}]}
         return _Stub(order=list(scen), scenario=lambda sid: scen.get(sid) or {},
@@ -152,8 +153,10 @@ class ChapterSTest(unittest.TestCase):
         self.assertIn("taken; running 1, cancel supported, bound 55 s", text)
         self.assertIn("completed, site worker, decision null, response", text)
         self.assertIn("stopped", text)
-        self.assertIn("repeat 1 is the warm full-run time", text)
-        self.assertIn("& r1 & pass & 9.0 s & 9.0 s", text)
+        self.assertIn("repeat 1 is the warm time a stop must beat", text)
+        self.assertIn("& r1 & pass & complete & 9.0 s & 9.0 s", text)
+        # a base request its own time budget stopped (the shadow run's S-base-0001): the wall is a lower bound
+        self.assertIn("& r0 & pass & stopped by its time budget: seed 0 stopped by its time budget & 15 s & 15 s", text)
         text = graphlets.chapter_s_sections(_Stub(run=self.run_stub(None)))
         self.assertIn("no stop record", text)
         empty = _Stub(order=[], scenario=lambda sid: {}, arm_lines=lambda sid, arm: [])

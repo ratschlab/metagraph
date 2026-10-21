@@ -546,17 +546,22 @@ def chapter_s_sections(ctx):
         if not str(sid).startswith("S-base-"):
             continue
         for l in run.arm_lines(sid, "direct-local"):
-            base.append([latex.breakable_id(sid), "r%s" % l.get("repeat"), esc(l.get("outcome")),
+            # how the request ended: run to completion, or stopped by its own time budget (the runner's
+            # time_limited: the full run is then longer than the wall, which is a lower bound of it)
+            ended = ("stopped by its time budget: %s" % esc(l.get("time_limited"))) if l.get("time_limited") \
+                else ("complete" if l.get("outcome") == "pass" else "–")
+            base.append([latex.breakable_id(sid), "r%s" % l.get("repeat"), esc(l.get("outcome")), ended,
                          esc(cells.fmt_t(l.get("wall_ms")) if l.get("wall_ms") is not None else "–"),
                          esc(cells.fmt_t(((l.get("server") or {}).get("elapsed_ms")))
                              if isinstance(l.get("server"), dict) and (l.get("server") or {}).get("elapsed_ms")
                              is not None else "–")])
     if base:
-        out += latex.plain_table(latex.spec_p([34, 8, 22, 20, 20], aligns=["raggedright", "raggedright",
-                                                                           "raggedright", "raggedleft", "raggedleft"]),
-                                 ["base request", "", "outcome", "wall", "server"], base,
-                                 "the stops' base requests run to completion on direct-local: repeat 1 is the warm "
-                                 "full-run time a stop must beat")
+        out += latex.plain_table(latex.spec_p([26, 8, 14, 56, 18, 18], aligns=["raggedright"] * 4
+                                              + ["raggedleft", "raggedleft"]),
+                                 ["base request", "", "outcome", "ended", "wall", "server"], base,
+                                 "the stops' base requests run without a stop on direct-local: repeat 1 is the warm "
+                                 "time a stop must beat, the full run's where the request completed, a lower bound "
+                                 "of it where its own time budget stopped it")
     return out
 
 

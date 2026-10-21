@@ -17,7 +17,7 @@
   "*What remains uncovered.* On a healthy host the host answers the cancelled request before the stop site decides, so a /traverse stop's release is the worker's `completed`, and a /resolve stop's is the stop site's grace of 20 s. The stop site's own judgement (the re-cancel, a pinned finished state, a covering tombstone, the lease) runs only when the host never answers within the exchange budget, which MCP cannot provoke: it is covered by the service's own unit and parity tests, not by this suite. A null release on a terminal job reads inconclusive, never a pass; the runner polls a /traverse stop's record for about 45 s after the job ends before it judges it null."
  ],
  "intro": [
-  "Each stop scenario runs on the MCP access path only (`direct_not_run`): the runner starts the request as a job, sends `traverse_stop` as soon as the job runs, then reads the job's status until it ends and the service's admin job record until every host attempt states its release. The base requests run the same request to completion twice on direct-local, the second time warm: the full-run time a stop must beat. The checks read the runner's record: the stop's answer, the job's terminal status, each attempt's state and its token's release."
+  "Each stop scenario runs on the MCP access path only (`direct_not_run`): the runner starts the request as a job, sends `traverse_stop` as soon as the job runs, then reads the job's status until it ends and the service's admin job record until every host attempt states its release. The base requests run the same request without a stop twice on direct-local, the second time warm: the time a stop must beat (the full run's, or a lower bound of it where the request's own time budget ended it; the table of the base requests says which). The checks read the runner's record: the stop's answer, the job's terminal status, each attempt's state and its token's release."
  ],
  "families": {
   "S-stop": {
@@ -26,11 +26,11 @@
   },
   "S-base": {
    "title": "the stops' base requests",
-   "prose": "The two stopped requests run to completion on direct-local, twice each."
+   "prose": "The two stopped requests run without a stop on direct-local, twice each."
   }
  },
  "units": {
   "S-stop": "traverse_stop sent via MCP to a running request: the stop taken, the job ended as stopped, each host attempt settled and its token released, as the release record states.",
-  "S-base": "The stopped request run to completion on direct-local: repeat 1 is the warm full-run time."
+  "S-base": "The stopped request run without a stop on direct-local: repeat 1 is the warm time a stop must beat."
  }
 }
