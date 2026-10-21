@@ -483,3 +483,17 @@ class RealRunV8Test(unittest.TestCase):
         withp = facts.fill(text, {"xr": {"G-pair-rows-0002": {"id": "G-pair-rows-0002"}}})
         self.assertIn("constrain against annotate, and a column walk at a small label cap against a trie of one seed, "
                       "whose compare rows page on the service's tools;", withp)
+
+    def test_by_design_pairs_by_case(self):
+        import graphlets
+        ops = dict(("cmp-%02d" % i, {"by_design": [{"case": "graphlet.compare_export_line", "verified": True}]})
+                   for i in range(45))
+        ops["exp-mgt"] = {"by_design": [{"case": "graphlet.export_mgt_is_the_stored_body", "verified": False,
+                                         "side": "W3", "detail": "W3 answered otherwise"}]}
+        g = {"scenarios": {"G-x-0001": {"ops": ops}}}
+        text = graphlets.by_design_and_drift_section(g)
+        self.assertEqual(text.count("\\texttt{graphlet."), 3)        # two case rows, the unverified pair's row
+        self.assertIn("& 45 & 45 &", text)
+        self.assertIn("cmp-44", text.replace("\\_", "_").replace("\\allowbreak{}", ""))   # no cap on the names
+        self.assertIn("the by-design pairs not verified", text)
+        self.assertIn("W3 answered otherwise", text)

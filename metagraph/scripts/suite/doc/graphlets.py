@@ -331,14 +331,39 @@ def by_design_and_drift_section(g, max_items=MAX_ITEMS):
     bd = [(sid, oid, r) for sid, sv in sorted(scen.items()) for oid, e in sorted((sv.get("ops") or {}).items())
           for r in e.get("by_design") or []]
     if bd:
+        # one row per case (the shadow run had 59 pairs over 5 cases: a row per pair ran to pages and the cap cut 19
+        # without saying so); every op call is named under its case, and a pair not verified is listed apart with
+        # the comparison's detail
+        by_case = {}
+        for sid, oid, r in bd:
+            by_case.setdefault(r.get("case"), []).append((sid, oid, r))
+        rows = []
+        for case in sorted(by_case, key=str):
+            items = by_case[case]
+            n_ver = sum(1 for _, _, r in items if r.get("verified"))
+            per_sid = {}
+            for sid, oid, _ in items:
+                per_sid.setdefault(sid, []).append(oid)
+            where = "; ".join("%s: %s" % (sid, ", ".join(oids)) for sid, oids in sorted(per_sid.items()))
+            rows.append([tt(case), str(len(items)),
+                         str(n_ver) if n_ver == len(items) else cells.attn("%d of %d" % (n_ver, len(items))),
+                         "{\\scriptsize %s}" % esc(where)])
         out += latex.section("Declared per-way differences", "g:bydesign", level="subsection")
-        out += latex.plain_table(latex.spec_p([30, 26, 38, 14, 56]),
-                                 ["scenario", "op", "case", "verified", "detail"],
-                                 [[latex.breakable_id(sid), tt(oid), tt(r.get("case")),
-                                   "yes" if r.get("verified") else cells.attn("no (%s)" % esc(r.get("side"))),
-                                   esc(r.get("detail"), 200)] for sid, oid, r in bd[:max_items]],
-                                 "the by-design pairs: a difference of W3 the service documents (the area G by-design "
-                                 "table), verified on both sides")
+        out += latex.plain_table(latex.spec_p([46, 12, 16, 90], aligns=["raggedright", "raggedleft", "raggedleft",
+                                                                       "raggedright"]),
+                                 ["case", "op calls", "verified", "the op calls (scenario: ops)"], rows,
+                                 "the by-design pairs by case: a difference of W3 the service documents (area G's "
+                                 "by-design table, appendix B), verified when both sides answer as the case states")
+        unverified = [(sid, oid, r) for sid, oid, r in bd if not r.get("verified")]
+        if unverified:
+            out += latex.plain_table(latex.spec_p([30, 26, 38, 14, 56]),
+                                     ["scenario", "op", "case", "verified", "detail"],
+                                     [[latex.breakable_id(sid), tt(oid), tt(r.get("case")),
+                                       cells.attn("no (%s)" % esc(r.get("side"))), esc(r.get("detail"), 200)]
+                                      for sid, oid, r in unverified[:max_items]],
+                                     "the by-design pairs not verified, each with the comparison's detail%s" % (
+                                         " (the first %d of %d)" % (max_items, len(unverified))
+                                         if len(unverified) > max_items else ""))
     d = g.get("drift") or {}
     if d.get("calls"):
         out += latex.section("The drift lane", "g:drift", level="subsection")
