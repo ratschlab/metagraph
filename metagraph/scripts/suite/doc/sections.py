@@ -1587,7 +1587,16 @@ def gate_summary(ctx):
         word = "GATE PASS" if gate.get("passed") else "GATE FAIL"
         problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
         if run.gate_offline:
-            if run.gate_stale and same_recorded_verdict(run, gate):
+            rec = run.gate_recorded if isinstance(run.gate_recorded, dict) else None
+            rec_pol = (rec or {}).get("policy") or {}
+            if rec and rec_pol.get("sha256") and pol.get("sha256") and rec_pol["sha256"] != pol["sha256"]:
+                # the run's gate.json was judged by another policy (the frozen one, before the owner's exception)
+                n_rec = len([p for p in (rec.get("problems") or []) if isinstance(p, dict)])
+                recorded = ("a gate.json of %s judged by another policy, %s: %s, %d problem%s%s" % (
+                    str(rec.get("judged_utc") or "–")[:19].replace("T", " "), rec_pol.get("name") or "–",
+                    "PASS" if rec.get("passed") else "FAIL", n_rec, "" if n_rec == 1 else "s",
+                    "; this document's policy adds the owner's exception, appendix H" if owner_exceptions(run) else ""))
+            elif run.gate_stale and same_recorded_verdict(run, gate):
                 recorded = "a gate.json with the same verdict, counts and problems: %s" % same_verdict_text(run)
             elif run.gate_stale:
                 recorded = "a stale gate.json: %s" % stale_gate_text(run)
@@ -6444,8 +6453,8 @@ def exceptions_appendix(ctx):
         rows.append([latex.breakable_id(e.get("scenario") or e.get("relation") or "–"),
                      esc(", ".join(e.get("arms") or []) + ((" r%s" % ", r".join(str(r) for r in e["repeats"]))
                                                             if e.get("repeats") else " (every repeat)")),
-                     esc("%s, %s, after run %s" % (g.get("by") or "–", str(g.get("utc") or "–")[:16].replace("T", " "),
-                                                    g.get("after_run") or "–")),
+                     esc("%s, %s, after run " % (g.get("by") or "–", str(g.get("utc") or "–")[:16].replace("T", " ")))
+                     + latex.breakable_id(g.get("after_run") or "–"),
                      esc(execs), esc_wrap(e.get("reason"))])
     if rows:
         out += latex.plain_table(latex.spec_p([22, 18, 30, 26, 76]),
