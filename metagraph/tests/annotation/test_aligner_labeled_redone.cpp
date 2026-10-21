@@ -72,6 +72,15 @@ void run_alignment(const AnnotatedDBG &anno_graph,
         std::sort(paths_no_align.begin(), paths_no_align.end(), aln_sort);
         std::sort(paths.begin(), paths.end(), aln_sort);
 
+        // These fixtures specify the best alignment for each label. Extending
+        // isolated seeds can also produce lower-scoring paths for that label.
+        for (auto *candidates : { &paths, &paths_no_extend, &paths_no_align }) {
+            tsl::hopscotch_set<Anchor::label_class_t> labels;
+            std::erase_if(*candidates, [&](const auto &path) {
+                return !labels.insert(path.get_label_classes()[0]).second;
+            });
+        }
+
         ASSERT_LE(mappings.size(), paths.size()) << mx;
         paths.resize(mappings.size());
 
@@ -180,7 +189,8 @@ TYPED_TEST(LabeledAlignerRedoneTest, SharedSeedKeepsAllLabels) {
             sequence.size(), { sequence, sequence }, labels, DeBruijnGraph::BASIC, coordinates);
         AnnotationBuffer buffer(anno_graph->get_graph(), anno_graph->get_annotator());
         Query query(anno_graph->get_graph(), sequence);
-        DBGAlignerConfig config;
+        DBGAlignerConfig config{};
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
         config.min_seed_length = sequence.size();
         config.max_seed_length = sequence.size();
         LabeledSeeder seeder(buffer, query, config);
@@ -201,6 +211,22 @@ TYPED_TEST(LabeledAlignerRedoneTest, SharedSeedKeepsAllLabels) {
         }
         std::sort(actual_labels.begin(), actual_labels.end());
         EXPECT_EQ(labels, actual_labels);
+
+        // Public emission merges the two identical paths, retaining both
+        // labels and their coordinates despite the one-alternative limit.
+        LabeledExtender extender(buffer, query, config);
+        std::vector<Alignment> results;
+        align_query(query, seeder, extender, [&](Alignment&& aln) {
+            results.push_back(std::move(aln));
+        });
+        ASSERT_EQ(1u, results.size());
+        const auto &columns = buffer.get_cached_column_set(results[0].get_label_classes()[0]);
+        EXPECT_EQ(2u, columns.size());
+        if (coordinates) {
+            ASSERT_EQ(2u, results[0].get_coords().size());
+            EXPECT_EQ(AnnotationBuffer::Tuple({ 0 }), results[0].get_coords()[0]);
+            EXPECT_EQ(AnnotationBuffer::Tuple({ 0 }), results[0].get_coords()[1]);
+        }
     }
 }
 

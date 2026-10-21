@@ -202,6 +202,7 @@ class Alignment : public Match {
     }
 
     const std::vector<label_class_t>& get_label_classes() const { return label_classes_; }
+    const CoordinateSet& get_coords() const { return coords_; }
 
     void set_coords(CoordinateSet&& coords) { coords_ = std::move(coords); }
 

@@ -1,6 +1,7 @@
 #include "aln_seeder.hpp"
 
 #include <queue>
+#include <map>
 
 #include <tsl/hopscotch_set.h>
 
@@ -15,22 +16,115 @@
 
 namespace mtg::graph::align_redone {
 
+namespace {
+
+void emit_alignments(const Query &query, const DBGAlignerConfig &config,
+                     AnnotationBuffer *annotations, std::vector<Alignment>&& candidates,
+                     const std::function<void(Alignment&&)> &callback) {
+    using Columns = AnnotationBuffer::Columns;
+    using Coordinates = AnnotationBuffer::CoordinateSet;
+    using Key = std::tuple<bool, std::vector<Match::node_index>, std::string>;
+    std::map<Key, size_t> positions;
+    std::vector<Alignment> unique;
+    auto relabel = [&](const Alignment &aln, Columns&& columns, Coordinates&& coords) {
+        auto label = annotations->cache_column_set(std::move(columns));
+        return Alignment(query.get_graph(), aln.get_query(), aln.get_orientation(),
+                         std::vector(aln.get_path()), Cigar(aln.get_cigar()),
+                         aln.get_path_spelling(), aln.get_end_trim(), label, std::move(coords));
+    };
+    for (auto &aln : candidates) {
+        if (aln.empty() || score_match(aln, config) < config.min_path_score
+                || aln.get_cigar().get_num_matches()
+                     < config.min_exact_match * query.get_query().size())
+            continue;
+        auto [it, inserted] = positions.emplace(
+            Key(aln.get_orientation(), aln.get_path(), aln.get_cigar().to_string()), unique.size());
+        if (inserted) {
+            unique.push_back(std::move(aln));
+        } else if (annotations) {
+            auto &previous = unique[it->second];
+            const auto &a = annotations->get_cached_column_set(previous.get_label_classes()[0]);
+            const auto &b = annotations->get_cached_column_set(aln.get_label_classes()[0]);
+            Columns columns;
+            Coordinates coords;
+            size_t i = 0, j = 0;
+            while (i < a.size() || j < b.size()) {
+                auto column = std::min(i < a.size() ? a[i] : AnnotationBuffer::ncolumn,
+                                       j < b.size() ? b[j] : AnnotationBuffer::ncolumn);
+                columns.push_back(column);
+                AnnotationBuffer::Tuple merged;
+                if (i < a.size() && a[i] == column) {
+                    if (!previous.get_coords().empty()) merged = previous.get_coords()[i];
+                    ++i;
+                }
+                if (j < b.size() && b[j] == column) {
+                    if (!aln.get_coords().empty()) {
+                        const auto &row = aln.get_coords()[j];
+                        merged.insert(merged.end(), row.begin(), row.end());
+                    }
+                    ++j;
+                }
+                if (annotations->has_coordinates()) {
+                    std::sort(merged.begin(), merged.end());
+                    merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+                    coords.push_back(std::move(merged));
+                }
+            }
+            previous = relabel(previous, std::move(columns), std::move(coords));
+        }
+    }
+    std::stable_sort(unique.begin(), unique.end(), [&](const auto &a, const auto &b) {
+        return std::tuple(score_match(a, config), a.get_seed().size(), !a.get_orientation())
+             > std::tuple(score_match(b, config), b.get_seed().size(), !b.get_orientation());
+    });
+    std::map<AnnotationBuffer::Column, size_t> reported;
+    size_t unlabeled_count = 0;
+    for (auto &aln : unique) {
+        if (!annotations) {
+            if (unlabeled_count++ == config.num_alternative_paths) break;
+            callback(std::move(aln));
+            continue;
+        }
+        const auto &all_columns = annotations->get_cached_column_set(aln.get_label_classes()[0]);
+        Columns columns;
+        Coordinates coords;
+        for (size_t i = 0; i < all_columns.size(); ++i) {
+            if (reported[all_columns[i]] >= config.num_alternative_paths) continue;
+            ++reported[all_columns[i]];
+            columns.push_back(all_columns[i]);
+            if (!aln.get_coords().empty()) coords.push_back(aln.get_coords()[i]);
+        }
+        if (columns.empty()) continue;
+        if (columns.size() != all_columns.size())
+            aln = relabel(aln, std::move(columns), std::move(coords));
+        callback(std::move(aln));
+    }
+}
+
+AnnotationBuffer* annotation_buffer(const Seeder &seeder) {
+    const auto *labeled = dynamic_cast<const LabeledSeeder*>(&seeder);
+    return labeled ? &labeled->get_buffer() : nullptr;
+}
+
+} // namespace
+
 void align_query(const Query &query,
                  const Seeder &seeder,
                  const Extender &extender,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
-    align_query(query, seeder,
-                [&](Alignment&& base_path) { extender.extend(base_path, callback); });
+    std::vector<Alignment> candidates;
+    for (auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
+        extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); });
+    emit_alignments(query, seeder.config_, annotation_buffer(seeder), std::move(candidates), callback);
 }
 
 void align_query(const Query &query,
                  const Seeder &seeder,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
-    for (Alignment &path : seeder.get_inexact_anchors(connect_anchors_in_chain)) {
-        callback(std::move(path));
-    }
+    emit_alignments(query, seeder.config_, annotation_buffer(seeder),
+                    seeder.get_inexact_anchors(connect_anchors_in_chain), callback);
 }
 
 using TraverseCallback = std::function<void(DeBruijnGraph::node_index, Anchor::label_class_t)>;
@@ -89,6 +183,9 @@ class AlignmentGraph {
                   const TraverseCallback &callback,
                   const Terminator &terminate = [](){ return false; },
                   size_t min_dist_before_check_anno = 0) const {
+        // Exact extension ends at an ambiguous base. In particular, passing N
+        // to a two-bit hash graph would violate its encoded-edge precondition.
+        seq = seq.substr(0, seq.find_first_not_of(graph_.alphabet()));
         if (target_ == Anchor::nannot) {
             graph_.traverse(node, seq,
                             [&](node_index next) {
@@ -125,6 +222,9 @@ class AlignmentGraph {
                        const TraverseCallback &callback,
                        const Terminator &terminate = [](){ return false; },
                        size_t min_dist_before_check_anno = 0) const {
+        const auto invalid = prefix_seq.find_last_not_of(graph_.alphabet());
+        if (invalid != std::string_view::npos)
+            prefix_seq.remove_prefix(invalid + 1);
         if (target_ == Anchor::nannot) {
             graph_.traverse_back(node, prefix_seq,
                                  [&](node_index prev) {
@@ -515,7 +615,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             [&](edge_index next_first, edge_index next_last, boss::BOSS::TAlphabet s) {
                                 char c = boss.decode(s);
                                 bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
-                                if (!canonical || next_is_exact_match || nodes[i] == DeBruijnGraph::npos) {
+                                if (cur_match_size + 1 < k
+                                        && (!canonical || next_is_exact_match
+                                            || i >= nodes.size() || nodes[i] == DeBruijnGraph::npos)) {
                                     traverse.emplace_back(next_first, next_last, suffix + c,
                                                         next_is_exact_match);
                                 }
@@ -815,6 +917,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     for (auto &cur_max_seeds : max_seeds) {
         for (auto &bucket : cur_max_seeds) {
             for (auto it = bucket.begin(); it != bucket.end(); ++it) {
+                if (it->second.get_orientation() && !config_.forward_and_reverse_complement)
+                    continue;
                 auto &cov = coverage[it->second.get_orientation()];
                 std::fill(cov.begin() + it->second.get_clipping(),
                           cov.begin() + it->second.get_clipping() + it->second.get_seed().size(),
@@ -1059,9 +1163,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     assert(gap_ext > 0);
     assert(gap_opn >= gap_ext);
 
-    assert(mismatch_cost % 2 == 0);
-    assert(gap_ext % 2 == 0);
-    assert(gap_opn % 2 == 0);
+    // Odd match rewards produce odd gap costs. The complete path still has
+    // an integral score after cost_to_score() applies the factor of two.
 
     common::logger->trace("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
 
@@ -1848,9 +1951,9 @@ void align_bwd(const DeBruijnGraph &base_graph,
                         node,
                         std::string_view(&*begin, end - begin),
                         [&](DeBruijnGraph::node_index prev, Anchor::label_class_t prev_target) {
-                            if (subset_coords(*anno_buffer, target, coords, prev_target, prev,
-                                              -static_cast<ssize_t>(next_dist++))) {
-                                callback(prev, prev_target);
+                            if (auto subset = subset_coords(*anno_buffer, target, coords, prev_target, prev,
+                                                            -static_cast<ssize_t>(next_dist++))) {
+                                callback(prev, subset);
                             } else {
                                 stop_early = true;
                             }
@@ -1984,8 +2087,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
                         node,
                         std::string_view(&*begin, end - begin),
                         [&](DeBruijnGraph::node_index next, Anchor::label_class_t next_target) {
-                            if (subset_coords(*anno_buffer, target, coords, next_target, next, next_dist++)) {
-                                callback(next, next_target);
+                            if (auto subset = subset_coords(*anno_buffer, target, coords, next_target, next, next_dist++)) {
+                                callback(next, subset);
                             } else {
                                 stop_early = true;
                             }
@@ -2176,9 +2279,15 @@ void Extender::extend(const Alignment &aln,
             aln.get_trim_spelling(),
             anno_buffer,
             target,
-            anno_buffer ? anno_buffer->get_label_path_coords({ aln.get_path().back() },
-                                                             { target })
-                        : AnnotationBuffer::CoordinateSet()
+            [&]() {
+                auto coords = anno_buffer
+                    ? anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes())
+                    : AnnotationBuffer::CoordinateSet();
+                for (auto &column : coords)
+                    for (auto &coord : column)
+                        coord += aln.get_path().size() - 1;
+                return coords;
+            }()
         );
 
         if (fwd_exts.empty())
@@ -2298,8 +2407,8 @@ void Extender::extend(const Alignment &aln,
             },
             anno_buffer,
             fwd_ext.get_label_classes()[0],
-            anno_buffer ? anno_buffer->get_label_path_coords({ fwd_ext.get_path()[0] },
-                                                             { fwd_ext.get_label_classes()[0] })
+            anno_buffer ? anno_buffer->get_label_path_coords(fwd_ext.get_path(),
+                                                            fwd_ext.get_label_classes())
                         : AnnotationBuffer::CoordinateSet()
         );
 
@@ -2759,24 +2868,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
             ext_success = false;
 
-            bool ret_val = (!chain[0].first->get_clipping() && !chain[0].first->get_end_clipping())
-                            || chain.size() > 1
-                            || std::any_of(chain.begin(), chain.end(),
-                                           [this](const auto &a) { return a.first->get_seed().size() > config_.min_seed_length
-                                                                            || a.first->get_path().size() > 1; });
-
-            // ret_val &= std::all_of(chain.begin(), chain.end(),
-            //                        [&](const auto &a) { return !selected[a.first - anchors.begin()]
-            //                                                     && (a.first->get_label_class() == Anchor::nannot
-            //                                                             || !found_labels.count(a.first->get_label_class())); });
-
-            // ret_val &= std::all_of(chain.begin(), chain.end(),
-            //                        [&](const auto &a) { return a.first->get_label_class() == Anchor::nannot
-            //                                                             || !found_labels.count(a.first->get_label_class()); });
-
-            // common::logger->info("Try Chain\t{}\t{}", score_traceback.back(), ret_val);
-            if (!ret_val)
-                return false;
+            // An isolated seed of exactly min_seed_length is still a valid
+            // local alignment and must be offered to the extender.
+            bool ret_val = true;
 
             last_chain_score = score_traceback.back();
             ret_val = score_traceback.back() >= first_chain_score * config_.rel_score_cutoff;
@@ -2809,28 +2903,38 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             // std::cerr << "try\t" << *next << " -> " << aln << std::endl;
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
             const auto &graph = query_.get_graph();
-            if (next->get_seed().begin() + next->get_path().size() == last->get_seed().begin() && traversal_dist == next->get_path().size()) {
+            const size_t query_dist = last->get_clipping() - next->get_clipping();
+            if (query_dist == traversal_dist && traversal_dist <= next->get_path().size()) {
+                // Splice an exact prefix onto the existing alignment. Overlapping
+                // seeds can share more than k-1 bases, including whole nodes.
+                const size_t overlap = std::min(next->get_path().size() - traversal_dist,
+                                                aln.get_path().size());
+                if (!std::equal(next->get_path().begin() + traversal_dist,
+                                next->get_path().begin() + traversal_dist + overlap,
+                                aln.get_path().begin()))
+                    return;
                 // simple extension
                 // std::cerr << "\tSimple extension" << std::endl;
 #ifndef NDEBUG
                 size_t k = graph.get_k();
-                if (graph.traverse(next->get_path().back(), aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
+                if (traversal_dist == next->get_path().size()
+                        && graph.traverse(next->get_path().back(), aln.get_path_spelling()[k-1]) != aln.get_path()[0]) {
                     std::cerr << "\t" << next->get_path().back() << " > " << aln.get_path_spelling()[k-1] << "\t" << graph.traverse(next->get_path()[0], aln.get_path_spelling()[k-1]) << " vs. " << aln.get_path()[0] << std::endl;
                     assert(false);
                 }
 #endif
                 // common::logger->info("Simple extension {} -> {}", *next, aln);
                 std::vector<DeBruijnGraph::node_index> path;
-                path.resize(aln.get_path().size() + next->get_path().size());
-                std::copy(next->get_path().begin(), next->get_path().end(), path.begin());
-                std::copy(aln.get_path().begin(), aln.get_path().end(), path.begin() + next->get_path().size());
+                path.resize(aln.get_path().size() + traversal_dist);
+                std::copy_n(next->get_path().begin(), traversal_dist, path.begin());
+                std::copy(aln.get_path().begin(), aln.get_path().end(), path.begin() + traversal_dist);
 
                 Cigar cigar(Cigar::CLIPPED, next->get_clipping());
 
                 Cigar aln_cigar = aln.get_cigar();
                 aln_cigar.trim_clipping();
 
-                cigar.append(Cigar::MATCH, next->get_path().size());
+                cigar.append(Cigar::MATCH, traversal_dist);
                 cigar.append(std::move(aln_cigar));
 
                 Alignment next_aln(graph,
@@ -2838,7 +2942,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                 aln.get_orientation(),
                                 std::move(path),
                                 std::move(cigar),
-                                std::string(next->get_seed().substr(0, next->get_path().size())) + aln.get_path_spelling(),
+                                std::string(next->get_seed().substr(0, traversal_dist)) + aln.get_path_spelling(),
                                 aln.get_end_trim(),
                                 next->get_label_class());
                 // std::cerr << "\tnew aln: " << next_aln << std::endl;

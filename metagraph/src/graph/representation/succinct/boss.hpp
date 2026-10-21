@@ -712,10 +712,8 @@ inline void BOSS
             if (TAlphabet s = get_W(e) % alph_size) {
                 edge_index next_rl = rl;
                 edge_index next_ru = ru;
-                bool ret_val = tighten_range(&next_rl, &next_ru, s);
-                std::ignore = ret_val;
-                assert(ret_val);
-                callback(next_rl, next_ru, s);
+                if (tighten_range(&next_rl, &next_ru, s))
+                    callback(next_rl, next_ru, s);
             }
         }
     }

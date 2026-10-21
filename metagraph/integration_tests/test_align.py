@@ -708,9 +708,8 @@ class TestAlignCoordToHeader(TestingBase):
             ('seq1', 'AAAAACGTACGT'),
             ('seq2', 'ACGTTTTTTTTT'),
         ])
-        # The aligner finds a 16bp path crossing the boundary (8bp soft
-        # clip at the start, since the first 8 query bp cannot extend into
-        # a longer run than the cross-boundary one).
+        # A four-base insertion retains all 20 reference bases, scoring 38
+        # with both end bonuses; the former 8S16= alignment scored 37.
         query_fa = self._write_fa('query.fa', [
             ('q_concat', 'AAAAACGTACGTACGTTTTTTTTT'),
         ])
@@ -720,10 +719,11 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(len(rows), 1)
 
         self.assertEqual(rows[0][0], 'q_concat')
-        self.assertEqual(rows[0][6], '8S16=')
-        # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        self.assertEqual(rows[0][6], '4=4I16=')
+        self.assertEqual(int(rows[0][4]), 38)
+        # Range 12 nt in seq1 (local 1-12) + 8 nt in seq2 (local 1-8).
         # seq1 -> 12 nt, seq2 -> 12 nt.
-        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-8')
+        self.assertEqual(rows[0][8], 'seq1/12:1-12;seq2/12:1-8')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_json_labels_array(self, anno_repr):
@@ -856,12 +856,13 @@ class TestAlignCoordToHeader(TestingBase):
 
         records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]['annotation']['cigar'], '8S16=')
+        self.assertEqual(records[0]['annotation']['cigar'], '4=4I16=')
+        self.assertEqual(records[0]['score'], 38)
         by_sample = {entry['sample']: entry for entry in records[0]['annotation']['labels']}
         self.assertEqual(set(by_sample), {'seq1', 'seq2'})
-        # 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        # 12 nt in seq1 (local 1-12) + 8 nt in seq2 (local 1-8).
         self.assertEqual(by_sample['seq1']['nt_length'], 12)
-        self.assertEqual(by_sample['seq1']['nt_coords'], '5-12')
+        self.assertEqual(by_sample['seq1']['nt_coords'], '1-12')
         self.assertEqual(by_sample['seq2']['nt_length'], 12)
         self.assertEqual(by_sample['seq2']['nt_coords'], '1-8')
 

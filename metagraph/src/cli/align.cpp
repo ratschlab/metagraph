@@ -8,8 +8,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-// #include "graph/alignment/dbg_aligner.hpp"
-// #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/alignment.hpp"
 #include "graph/alignment_redone/aligner_config.hpp"
 #include "graph/alignment_redone/aln_query.hpp"
 #include "graph/alignment_redone/aln_seeder.hpp"
@@ -255,6 +254,68 @@ void gfa_map_files(const Config *config,
     }
 }
 
+namespace {
+
+std::string format_alignment(const std::string &header, const std::string &query,
+                             const std::vector<align_redone::Alignment> &paths,
+                             const DeBruijnGraph &graph, const Config &config,
+                             const align_redone::DBGAlignerConfig &scoring,
+                             const align_redone::AnnotationBuffer *annotations,
+                             const annot::CoordToHeader *cth) {
+    const auto *encoder = annotations
+        ? &annotations->get_annotator().get_label_encoder() : nullptr;
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    std::ostringstream output;
+    if (!config.output_json)
+        output << header << '\t' << query;
+    bool secondary = false;
+    for (const auto &path : paths) {
+        // Reuse the established output schema and coordinate/header mapping.
+        // The refactored path starts at the first base of its first node.
+        graph::align::Alignment displayed(
+            path.get_seed(), std::vector(path.get_path()), std::string(path.get_spelling()),
+            align_redone::score_match(path, scoring),
+            graph::align::Cigar(path.get_cigar().to_string()), 0, path.get_orientation());
+        if (annotations && !path.get_label_classes().empty()) {
+            const auto &columns = annotations->get_cached_column_set(path.get_label_classes()[0]);
+            displayed.label_columns.assign(columns.begin(), columns.end());
+            displayed.label_coordinates = path.get_coords();
+        }
+        if (config.output_json) {
+            output << Json::writeString(builder,
+                displayed.to_json(graph.get_k(), secondary, header, {}, encoder, cth,
+                                  config.align_output_path)) << '\n';
+        } else {
+            output << '\t' << displayed;
+            if (!displayed.label_coordinates.empty()) {
+                output << '\t' << (cth ? displayed.format_coords(*cth, graph.get_k())
+                                        : displayed.format_coords(*encoder));
+            } else if (!displayed.label_columns.empty()) {
+                const char *delimiter = "\t";
+                for (auto column : displayed.label_columns) {
+                    output << delimiter << encoder->decode(column);
+                    delimiter = ";";
+                }
+            }
+        }
+        secondary = true;
+    }
+    if (paths.empty()) {
+        if (config.output_json) {
+            output << Json::writeString(builder,
+                graph::align::Alignment().to_json(graph.get_k(), false, header)) << '\n';
+        } else {
+            output << "\t*\t*\t" << config.alignment_min_path_score << "\t*\t*\t*";
+        }
+    }
+    if (!config.output_json)
+        output << '\n';
+    return output.str();
+}
+
+} // namespace
+
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -441,22 +502,12 @@ int align_to_graph(Config *config) {
                                                   config->alignment_connect_anchors);
                     }
 
+                    auto output = format_alignment(header, query, paths, *aln_graph,
+                                                   *config, aligner_config,
+                                                   anno_buffer ? &*anno_buffer : nullptr,
+                                                   anno_dbg ? anno_dbg->get_coord_to_header() : nullptr);
                     std::lock_guard<std::mutex> lock(print_mutex);
-                    *out << header << "\t" << query;
-                    if (paths.size()) {
-                        for (const auto &path : paths) {
-                            *out << "\t" << path;
-                            if (anno_buffer) {
-                                *out << "\t" << anno_buffer->generate_column_set_str(path.get_label_classes()[0],
-                                                                                     path.get_spelling().size());
-                            } else {
-                                *out << "\t";
-                            }
-                        }
-                        *out << "\n";
-                    } else {
-                        *out << "\t*\t*\t*\t*\t*\t*\t*\n";
-                    }
+                    *out << output;
                 }
             });
 

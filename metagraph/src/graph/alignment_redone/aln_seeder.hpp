@@ -10,6 +10,7 @@
 namespace mtg::graph::align_redone {
 
 class AlignmentGraph;
+class Extender;
 
 class Seeder {
   public:
@@ -22,6 +23,12 @@ class Seeder {
     virtual std::vector<Alignment> get_inexact_anchors(bool align = true) const = 0;
 
     const Query& get_query() const { return query_; }
+
+  private:
+    friend void align_query(const Query&, const Seeder&, const Extender&,
+                            const std::function<void(Alignment&&)>&, bool);
+    friend void align_query(const Query&, const Seeder&,
+                            const std::function<void(Alignment&&)>&, bool);
 
   protected:
     const Query &query_;

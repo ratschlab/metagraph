@@ -151,6 +151,43 @@ TYPED_TEST(DBGAlignerRedoneTest, align_empty) {
     run_alignment(*graph, config, query, {}, {});
 }
 
+TYPED_TEST(DBGAlignerRedoneTest, PipelineExtendsIsolatedSeedsAndLimitsResults) {
+    const std::string reference = "TAGCTTCGAGGCCAA";
+    auto graph = build_graph_batch<TypeParam>(5, { reference });
+    // The five-base seed before N must survive selection, and extension must
+    // stop exact traversal at N before continuing with a mismatch.
+    Query query(*graph, "TAGCTNCGAGGCCAA");
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = 5;
+    config.max_seed_length = 5;
+    config.forward_and_reverse_complement = false;
+    for (size_t limit : { 0, 1, 2 }) {
+        config.num_alternative_paths = limit;
+        ExactSeeder seeder(query, config);
+        Extender extender(query, config);
+        std::vector<Alignment> results;
+        align_query(query, seeder, extender, [&](Alignment&& aln) {
+            results.push_back(std::move(aln));
+        });
+        ASSERT_LE(results.size(), limit);
+        if (!limit) continue;
+        ASSERT_FALSE(results.empty());
+        EXPECT_EQ(reference, results[0].get_spelling());
+        EXPECT_EQ("5=1X9=", results[0].get_cigar().to_string());
+        for (const auto &aln : results) EXPECT_FALSE(aln.get_orientation());
+        if (results.size() == 2) {
+            EXPECT_NE(results[0].get_cigar().to_string(), results[1].get_cigar().to_string());
+        }
+    }
+    config.min_exact_match = 1.0;
+    ExactSeeder seeder(query, config);
+    Extender extender(query, config);
+    align_query(query, seeder, extender, [&](Alignment&&) {
+        ADD_FAILURE() << "A mismatching alignment cannot satisfy min_exact_match=1";
+    });
+}
+
 TYPED_TEST(DBGAlignerRedoneTest, align_sequence_much_too_short) {
     size_t k = 4;
     std::string reference = "CATTT";
