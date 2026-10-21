@@ -1,42 +1,34 @@
 #include "aln_cigar.hpp"
 
+#include <limits>
+#include <stdexcept>
+
 #include "graph/representation/succinct/boss.hpp"
 
 namespace mtg::graph::align_redone {
 
 
 Cigar::Cigar(std::string_view cigar_str) {
-    std::string op_count;
+    LengthType count = 0;
+    bool have_count = false;
     for (char c : cigar_str) {
-        switch (c) {
-            case '=':
-                cigar_.emplace_back(Cigar::MATCH, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'X':
-                cigar_.emplace_back(Cigar::MISMATCH, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'I':
-                cigar_.emplace_back(Cigar::INSERTION, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'D':
-                cigar_.emplace_back(Cigar::DELETION, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'S':
-                cigar_.emplace_back(Cigar::CLIPPED, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'G':
-                cigar_.emplace_back(Cigar::NODE_INSERTION, std::stol(op_count));
-                op_count.clear();
-                break;
-            default:
-                op_count += c;
+        if (c >= '0' && c <= '9') {
+            const auto digit = static_cast<LengthType>(c - '0');
+            if (count > (std::numeric_limits<LengthType>::max() - digit) / 10)
+                throw std::out_of_range("CIGAR operation length is too large");
+            count = count * 10 + digit;
+            have_count = true;
+            continue;
         }
+        const auto op = std::string_view(op_str_).find(c);
+        if (op == std::string_view::npos || !have_count || !count)
+            throw std::invalid_argument("Invalid CIGAR operation");
+        cigar_.emplace_back(static_cast<Operator>(op), count);
+        count = 0;
+        have_count = false;
     }
+    if (have_count)
+        throw std::invalid_argument("CIGAR length has no operation");
 }
 
 std::string Cigar::to_string() const {
@@ -84,6 +76,10 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
 
         switch (op.first) {
             case CLIPPED: {
+                if (i && i + 1 != cigar_.size()) {
+                    std::cerr << "Internal clipping in CIGAR" << std::endl;
+                    return false;
+                }
                 if (op.second > query.size() - alt_pos) {
                     std::cerr << "Query too short after "
                                 << Cigar::opt_to_char(op.first) << std::endl
