@@ -497,3 +497,14 @@ class RealRunV8Test(unittest.TestCase):
         self.assertIn("cmp-44", text.replace("\\_", "_").replace("\\allowbreak{}", ""))   # no cap on the names
         self.assertIn("the by-design pairs not verified", text)
         self.assertIn("W3 answered otherwise", text)
+
+    def test_run_directory_outside_the_tree(self):
+        import facts
+        text = prose("overview")["appendix_F"]["paragraphs"][0]
+        inside = facts.fill(text, {"run_id": "R1", "run_dir_in_tree": True})
+        self.assertIn("The run directory, metagraph/scripts/suite/runs/R1, is not in the repository (runs/ is "
+                      "git-ignored): it stays in the working tree that ran the suite, so", inside)
+        outside = facts.fill(text, {"run_id": "R1", "run_dir_in_tree": False})
+        self.assertIn("The run directory, R1, is not in the repository: it was written outside the working tree that "
+                      "ran the suite (evidence.json names its folder), so", outside)
+        self.assertIn("run_dir_in_tree", prose("overview")["placeholders"])

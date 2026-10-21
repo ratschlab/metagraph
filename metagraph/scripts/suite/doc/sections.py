@@ -155,6 +155,7 @@ class Context(object):
         stops = self._resolve_stops
         table = run.table_meta or {}
         return {"release": run.run.get("release") or "–", "run_id": run.run_id(),
+                "run_dir_in_tree": str(latex.public_paths(run.dir) or "").startswith(latex.SUITE_TREE),
                 "database": index.get("database") or "–", "k": index.get("k") or "–",
                 "scenarios": len(run.order), "n_scenarios": len(run.order),
                 "manifest_version": manifest.get("manifest_version") or "–",
@@ -5666,7 +5667,10 @@ def evidence_manifest(ctx):
     record = ctx.data_files.get(GATE_PROBLEMS_FILE)
     return {
         "path_bases": {"inputs": "the run directory (run_directory below; metagraph/scripts/suite/runs/ is "
-                                 "git-ignored: the directory travels as a copy, its files checked by these sha256)",
+                                 "git-ignored: the directory travels as a copy, its files checked by these sha256)"
+                       if str(latex.public_paths(run.dir) or "").startswith(latex.SUITE_TREE) else
+                       "the run directory (run_directory below, written outside the repository's working tree: the "
+                       "directory travels as a copy, its files checked by these sha256)",
                        "gate.record": "the document's build directory, beside doc.pdf and this file",
                        "other paths": "the repository root"},
         "document": {"run_id": run.run_id(), "set": "re-evaluated" if run.reevaluated else "recorded",
