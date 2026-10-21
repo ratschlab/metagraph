@@ -35,7 +35,13 @@ static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bit
 #endif
 
 
-const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
+#if _PROTEIN_GRAPH
+const std::string DBGSSHash::alphabet_ = kmer::alphabets::kAlphabetProtein;
+#else
+// SSHash's nucleotide dictionary has a two-bit alphabet, including in a DNA5
+// build. N must interrupt lookup instead of being encoded as a fifth symbol.
+const std::string DBGSSHash::alphabet_ = kmer::alphabets::kAlphabetDNA;
+#endif
 
 size_t DBGSSHash::dict_size() const {
     return std::visit([](const auto& d) { return d.num_kmers(); }, dict_);

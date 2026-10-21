@@ -92,6 +92,18 @@ def test_chaining_options(graph):
             assert hits[0]["query_end"] > hits[0]["query_start"]
 
 
+def test_search_limits(graph):
+    query = REFERENCE[:8] + "C" + REFERENCE[9:]
+    assert graph.align(REFERENCE, seed_length=5, max_num_seeds_per_locus=0) == []
+    for options in ({"max_num_nodes_per_seq_char": 0}, {"max_ram_per_alignment": 0}):
+        hits = graph.align(query, seed_length=5, min_exact_match=0,
+                           only_forwards=True, **options)
+        assert hits
+        assert hits[0]["query_end"] - hits[0]["query_start"] < len(query)
+    assert graph.align(query, seed_length=5, min_exact_match=0, only_forwards=True,
+                       max_num_nodes_per_seq_char=1000, max_ram_per_alignment=1)[0]["annotation"]["cigar"] == "8=1X18="
+
+
 def test_inexact_chain_errors_leave_workers_usable(graph):
     query = REFERENCE[:8] + "C" + REFERENCE[9:]
     # A raw chain has an unresolved graph gap and cannot use the alignment
@@ -112,6 +124,7 @@ def test_inexact_chain_errors_leave_workers_usable(graph):
     {"xdrop": -1}, {"rel_score_cutoff": 1.1}, {"min_exact_match": float("nan")},
     {"max_alternative_alignments": 0}, {"seed_length": -1},
     {"rel_score_cutoff": float("inf")},
+    {"max_num_nodes_per_seq_char": -1}, {"max_ram_per_alignment": float("nan")},
 ])
 def test_invalid_alignment_options(graph, options):
     with pytest.raises((ValueError, TypeError)):

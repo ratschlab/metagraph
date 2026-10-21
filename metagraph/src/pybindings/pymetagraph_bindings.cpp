@@ -136,11 +136,14 @@ class AnnotatedGraph {
             const std::vector<std::string> &seqs, size_t seed_length,
             size_t max_alternative_alignments, double min_exact_match,
             int32_t xdrop, double rel_score_cutoff, bool only_forwards,
-            bool connect_anchors, bool extend_chains) const {
+            bool connect_anchors, bool extend_chains, size_t max_num_seeds_per_locus,
+            double max_num_nodes_per_seq_char, double max_ram_per_alignment) const {
         namespace ar = mtg::graph::align_redone;
         if (!max_alternative_alignments || xdrop < 0
                 || !std::isfinite(min_exact_match) || min_exact_match < 0 || min_exact_match > 1
-                || !std::isfinite(rel_score_cutoff) || rel_score_cutoff < 0 || rel_score_cutoff > 1)
+                || !std::isfinite(rel_score_cutoff) || rel_score_cutoff < 0 || rel_score_cutoff > 1
+                || !std::isfinite(max_num_nodes_per_seq_char) || max_num_nodes_per_seq_char < 0
+                || !std::isfinite(max_ram_per_alignment) || max_ram_per_alignment < 0)
             throw std::invalid_argument("invalid alignment limits or score thresholds");
 
         ar::DBGAlignerConfig config{};
@@ -148,6 +151,9 @@ class AnnotatedGraph {
         config.max_seed_length = std::numeric_limits<size_t>::max();
         config.num_alternative_paths = max_alternative_alignments;
         config.min_exact_match = min_exact_match;
+        config.max_num_seeds_per_locus = max_num_seeds_per_locus;
+        config.max_nodes_per_seq_char = max_num_nodes_per_seq_char;
+        config.max_ram_per_alignment = max_ram_per_alignment;
         config.xdrop = xdrop;
         config.rel_score_cutoff = rel_score_cutoff;
         config.forward_and_reverse_complement = !only_forwards;
@@ -234,5 +240,9 @@ PYBIND11_MODULE(_pymetagraph_core, m) {
              py::arg("xdrop") = 27,
              py::arg("rel_score_cutoff") = 0.95,
              py::arg("only_forwards") = false, py::arg("connect_anchors") = true,
-             py::arg("extend_chains") = true, py::call_guard<py::gil_scoped_release>());
+             py::arg("extend_chains") = true,
+             py::arg("max_num_seeds_per_locus") = 1000,
+             py::arg("max_num_nodes_per_seq_char") = 5.0,
+             py::arg("max_ram_per_alignment") = 200.0,
+             py::call_guard<py::gil_scoped_release>());
 }

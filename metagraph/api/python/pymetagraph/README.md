@@ -78,6 +78,17 @@ With `connect_anchors=False`, a result containing an unresolved graph gap raises
 connection enabled to obtain inexact alignments. Batch failures drain all workers
 before raising, and the loaded graph remains usable.
 
+Search limits use the CLI defaults: `max_num_seeds_per_locus=1000`,
+`max_num_nodes_per_seq_char=5`, and `max_ram_per_alignment=200` (decimal MB).
+Overfull seed loci are discarded. Each connection or extension window stops at
+its graph-position or allocated-workspace limit and retains valid partial results;
+a limit can therefore reduce alignment sensitivity. The RAM cap covers the
+dynamic-programming tables, hash buckets, search queue and visited-position set,
+including allocated capacity. A graph position is a node and its distance from
+the seed; repeated scoring visits count once. It excludes loaded indices,
+seed/annotation caches and result storage,
+so it is not a process RSS limit. Zero node/RAM limits disable extension search.
+
 ## Tests and limits
 
 ```sh

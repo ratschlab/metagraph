@@ -74,8 +74,7 @@ TEST(SSHashMinimizers, EnumeratesAllBucketSizes) {
             ASSERT_EQ(3u, dict.m());
             std::map<uint64_t, std::set<uint64_t>> expected;
             for (uint64_t id = 0; id < dict.num_kmers(); ++id) {
-                std::string sequence(k, 'A');
-                dict.access(id, sequence.data());
+                auto sequence = graph.get_node_sequence(DBGSSHash::sshash_to_graph_index(id));
                 auto word = sshash::util::string_to_uint_kmer<Kmer>(sequence.data(), k);
                 auto mini = sshash::util::compute_minimizer(word, k, dict.m(), dict.hasher());
                 if (mode == DBGSSHash::CANONICAL) {

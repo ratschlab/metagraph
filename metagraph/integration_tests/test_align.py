@@ -21,7 +21,8 @@ graph_file_extension = {'succinct': '.dbg',
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
-@unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
+@unittest.skipUnless(DNA_MODE and 'DNA5' not in os.readlink(os.path.join(os.getcwd(), 'metagraph')),
+                     "These alignment tests are only for the DNA4 alphabet")
 class TestDNAAlign(TestingBase):
     def setUp(self):
         super().setUpClass()
@@ -396,10 +397,61 @@ class TestProteinAlign(TestingBase):
     def setUp(self):
         super().setUpClass()
 
-    # TODO: test alignment for protein sequences
-    # @parameterized.expand(GRAPH_TYPES)
-    # def test_simple_align_all_graphs(self, representation):
-    #     pass
+    @parameterized.expand(['succinct', 'hashfast', 'sshash'])
+    def test_blosum_exact_and_inexact(self, representation):
+        reference = 'MKWVTFISLLFLFSSAYS'
+        fasta = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        with open(fasta, 'w') as out:
+            out.write('>protein\n' + reference + '\n')
+        with open(query, 'w') as out:
+            out.write('>exact\n' + reference + '\n>changed\nMKWVTFISLLYLFSSAYS\n')
+        graph_base = self.tempdir.name + '/graph'
+        # This reference is one nonbranching path, suitable for SSHash input.
+        build = [METAGRAPH, 'build', '--graph', representation, '-k', '5',
+                 '--disk-swap', self.tempdir.name, '-o', graph_base, fasta]
+        res = subprocess.run(build, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        extension = '.sshashdbg' if representation == 'sshash' else graph_file_extension[representation]
+        res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
+                              '--align-min-seed-length', '5', '--align-min-exact-match', '0',
+                              '-i', graph_base + extension, query], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        records = {r['name']: r for r in map(json.loads, res.stdout.decode().splitlines())}
+        self.assertEqual(records['exact']['annotation']['cigar'], '18=')
+        self.assertEqual(records['exact']['score'], 101)
+        self.assertEqual(records['changed']['annotation']['cigar'], '10=1X7=')
+        self.assertEqual(records['changed']['score'], 98)
+        self.assertEqual(records['changed']['annotation']['ref_sequence'], reference)
+
+
+@unittest.skipUnless('DNA5' in os.readlink(os.path.join(os.getcwd(), 'metagraph')),
+                     'Requires the DNA5 alphabet')
+class TestDNA5Align(TestingBase):
+    def setUp(self):
+        super().setUpClass()
+
+    @parameterized.expand(['succinct', 'hashfast'])
+    def test_ambiguous_reference_bases(self, representation):
+        fasta = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        reference = 'AACGTNACGTNACCT'
+        with open(fasta, 'w') as out:
+            out.write('>reference\n' + reference + '\n')
+        with open(query, 'w') as out:
+            out.write('>exact\n' + reference + '\n>changed\nAACGTNATGTNACCT\n')
+        graph_base = self.tempdir.name + '/graph'
+        self._build_graph(fasta, graph_base, 5, representation)
+        res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
+                              '--align-min-seed-length', '5', '--align-min-exact-match', '0',
+                              '-i', graph_base + graph_file_extension[representation], query],
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        records = {r['name']: r for r in map(json.loads, res.stdout.decode().splitlines())}
+        self.assertEqual(records['exact']['annotation']['cigar'], '15=')
+        self.assertEqual(records['exact']['score'], 40)
+        self.assertEqual(records['changed']['annotation']['cigar'], '7=1X7=')
+        self.assertEqual(records['changed']['score'], 35)
 
 
 coord_anno_file_extension = {

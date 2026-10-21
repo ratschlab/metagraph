@@ -58,7 +58,8 @@ class AnnotatedGraph:
               xdrop: int = 27,
               rel_score_cutoff: float = 0.95,
               only_forwards: bool = False, connect_anchors: bool = True,
-              extend_chains: bool = True):
+              extend_chains: bool = True, max_num_seeds_per_locus: int = 1000,
+              max_num_nodes_per_seq_char: float = 5.0, max_ram_per_alignment: float = 200.0):
         """Align sequences, optionally constrained by annotation labels.
 
         Return one list of result dictionaries per query, or just that list
@@ -71,6 +72,7 @@ class AnnotatedGraph:
         single = isinstance(seqs, str)
         batches = self._graph.align(
             [seqs] if single else list(seqs), seed_length, max_alternative_alignments,
-            min_exact_match, xdrop, rel_score_cutoff, only_forwards, connect_anchors, extend_chains)
+            min_exact_match, xdrop, rel_score_cutoff, only_forwards, connect_anchors, extend_chains,
+            max_num_seeds_per_locus, max_num_nodes_per_seq_char, max_ram_per_alignment)
         results = [[json.loads(result) for result in batch] for batch in batches]
         return results[0] if single else results

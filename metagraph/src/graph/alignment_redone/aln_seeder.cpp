@@ -1,7 +1,11 @@
 #include "aln_seeder.hpp"
 
 #include <queue>
+#include <cmath>
+#include <memory>
+#include <stdexcept>
 #include <map>
+#include <unordered_set>
 
 #include <tsl/hopscotch_set.h>
 
@@ -17,6 +21,13 @@
 namespace mtg::graph::align_redone {
 
 namespace {
+
+DBGAlignerConfig::score_t maximum_match_score(const DBGAlignerConfig &config) {
+    DBGAlignerConfig::score_t result = 0;
+    for (size_t c = 0; c < config.score_matrix.size(); ++c)
+        result = std::max(result, static_cast<DBGAlignerConfig::score_t>(config.score_matrix[c][c]));
+    return result;
+}
 
 void emit_alignments(const Query &query, const DBGAlignerConfig &config,
                      AnnotationBuffer *annotations, std::vector<Alignment>&& candidates,
@@ -106,6 +117,54 @@ AnnotationBuffer* annotation_buffer(const Seeder &seeder) {
     return labeled ? &labeled->get_buffer() : nullptr;
 }
 
+bool emit_optimal_exact(const Query &query, const Seeder &seeder,
+                        const DBGAlignerConfig &config,
+                        const std::function<void(Alignment&&)> &callback) {
+    // One unlabeled exact path reaches the score ceiling. Additional seeding
+    // cannot improve it; labeled searches still need results for other labels.
+    if (!dynamic_cast<const ExactSeeder*>(&seeder) || annotation_buffer(seeder)
+            || config.num_alternative_paths != 1 || !config.max_num_seeds_per_locus
+            || query.get_query().size() < std::max(query.get_graph().get_k(), config.min_seed_length)
+            || config.gap_opening_penalty >= 0 || config.gap_extension_penalty >= 0
+            || config.left_end_bonus < 0 || config.right_end_bonus < 0)
+        return false;
+    const auto &graph = query.get_graph();
+    auto score_ceiling = [&](std::string_view sequence) {
+        DBGAlignerConfig::score_t score = config.left_end_bonus + config.right_end_bonus;
+        for (unsigned char q : sequence) {
+            if (q >= config.score_matrix.size())
+                return std::numeric_limits<DBGAlignerConfig::score_t>::max();
+            DBGAlignerConfig::score_t best = 0;
+            for (unsigned char c : graph.alphabet())
+                best = std::max(best, static_cast<DBGAlignerConfig::score_t>(config.score_matrix[c][q]));
+            score += best;
+        }
+        return score;
+    };
+    auto ceiling = score_ceiling(query.get_query(false));
+#if ! _PROTEIN_GRAPH
+    if (config.forward_and_reverse_complement)
+        ceiling = std::max(ceiling, score_ceiling(query.get_query(true)));
+#endif
+    if (ceiling == std::numeric_limits<DBGAlignerConfig::score_t>::max()) return false;
+    for (bool orientation : { false, true }) {
+#if _PROTEIN_GRAPH
+        if (orientation) break;
+#endif
+        if (orientation && !config.forward_and_reverse_complement) break;
+        const auto &sequence = query.get_query(orientation);
+        if (config.match_score(sequence) + config.left_end_bonus + config.right_end_bonus < ceiling)
+            continue;
+        auto path = map_to_nodes_sequentially(graph, sequence);
+        if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) != path.end()) continue;
+        Alignment exact(Anchor(sequence, 0, sequence.size(), orientation, std::move(path)));
+        if (score_match(exact, config) >= config.min_path_score)
+            callback(std::move(exact));
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 void align_query(const Query &query,
@@ -113,6 +172,7 @@ void align_query(const Query &query,
                  const Extender &extender,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
+    if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
     std::vector<Alignment> candidates;
     for (auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
         extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); });
@@ -123,6 +183,7 @@ void align_query(const Query &query,
                  const Seeder &seeder,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
+    if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
     emit_alignments(query, seeder.config_, annotation_buffer(seeder),
                     seeder.get_inexact_anchors(connect_anchors_in_chain), callback);
 }
@@ -461,7 +522,18 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     std::vector<std::vector<DeBruijnGraph::node_index>> mapped_nodes(2);
     std::vector<std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, Anchor>>> max_seeds(2);
 
+    auto add_seed = [&](auto &bucket, DeBruijnGraph::node_index node) {
+        auto it = bucket.find(node);
+        if (it != bucket.end()) return std::make_pair(it, false);
+        if (bucket.size() > config_.max_num_seeds_per_locus)
+            return std::make_pair(bucket.end(), false);
+        return bucket.try_emplace(node, Anchor());
+    };
+
     for (bool orientation : { false, true }) {
+#if _PROTEIN_GRAPH
+        if (orientation) break;
+#endif
         std::string_view this_query = query_.get_query(orientation);
         auto &nodes = mapped_nodes[orientation];
         nodes = map_to_nodes_sequentially(graph, this_query);
@@ -483,6 +555,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     }
 
     for (bool orientation : { false, true }) {
+#if _PROTEIN_GRAPH
+        if (orientation) break;
+#endif
         std::string_view this_query = query_.get_query(orientation);
         std::string_view rc_query = query_.get_query(!orientation);
         auto &nodes = mapped_nodes[orientation];
@@ -532,6 +607,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             size_t i_rc = this_query.size() - (i + match_size);
                             dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
                                 node = canonical->reverse_complement(node);
+                                if (max_seeds[!orientation][i_rc].size() > config_.max_num_seeds_per_locus)
+                                    return;
                                 bool inserted = true;
                                 auto it = max_seeds[!orientation][i_rc].find(node);
                                 if (it != max_seeds[!orientation][i_rc].end() && match_size <= it->second.get_seed().size())
@@ -545,7 +622,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                   rc_query.begin() + i_rc + match_size,
                                                   spelling.begin(), spelling.begin() + match_size));
 
-                                std::tie(it, inserted) = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                std::tie(it, inserted) = add_seed(max_seeds[!orientation][i_rc], node);
                                 it.value() = Anchor(rc_query,
                                                     i_rc, i_rc + match_size,
                                                     !orientation,
@@ -591,8 +668,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         is_exact_match &= last_char_matches;
 
                                         if (!is_exact_match) {
-                                            auto [it, inserted] = cur_max_seeds[i].try_emplace(node, Anchor());
-                                            if (full_match_size > it->second.get_seed().size()) {
+                                            auto [it, inserted] = add_seed(cur_max_seeds[i], node);
+                                            if (it != cur_max_seeds[i].end() && full_match_size > it->second.get_seed().size()) {
                                                 it.value() = Anchor(this_query,
                                                                     i, i + full_match_size,
                                                                     orientation,
@@ -641,6 +718,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             continue;
 
                                         bool inserted = true;
+                                        if (max_seeds[!orientation][i_rc].size() > config_.max_num_seeds_per_locus)
+                                            return;
                                         auto it = max_seeds[!orientation][i_rc].find(node);
                                         if (it != max_seeds[!orientation][i_rc].end() && next_match_size <= it->second.get_seed().size())
                                             continue;
@@ -653,7 +732,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                           rc_query.begin() + i_rc + next_match_size,
                                                           spelling.begin(), spelling.begin() + next_match_size));
 
-                                        std::tie(it, inserted) = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
+                                        std::tie(it, inserted) = add_seed(max_seeds[!orientation][i_rc], node);
                                         it.value() = Anchor(rc_query,
                                                             i_rc, i_rc + next_match_size,
                                                             !orientation,
@@ -849,8 +928,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             size_t full_match_size = jt - spelling.begin();
                                             assert(full_match_size <= k);
                                             if (full_match_size >= config_.min_seed_length) {
-                                                auto [it, inserted] = cur_max_seeds[i_shift].try_emplace(node, Anchor());
-                                                if (full_match_size > it->second.get_seed().size()) {
+                                                auto [it, inserted] = add_seed(cur_max_seeds[i_shift], node);
+                                                if (it != cur_max_seeds[i_shift].end() && full_match_size > it->second.get_seed().size()) {
                                                     it.value() = Anchor(this_query,
                                                                         i_shift, i_shift + full_match_size,
                                                                         orientation,
@@ -885,8 +964,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             size_t i_rc = this_query.size() - (i_back_shift + full_match_size);
                                             node = canonical ? canonical->reverse_complement(node)
                                                              : sshash->reverse_complement(node);
-                                            auto [it, inserted] = max_seeds[!orientation][i_rc].try_emplace(node, Anchor());
-                                            if (full_match_size > it->second.get_seed().size()) {
+                                            auto [it, inserted] = add_seed(max_seeds[!orientation][i_rc], node);
+                                            if (it != max_seeds[!orientation][i_rc].end() && full_match_size > it->second.get_seed().size()) {
                                                 ::reverse_complement(spelling.begin(), spelling.end());
                                                 assert(graph.get_node_sequence(node) == spelling);
                                                 assert(std::equal(rc_query.begin() + i_rc,
@@ -916,6 +995,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     std::vector<sdsl::bit_vector> coverage(2, sdsl::bit_vector(query_.get_query(false).size()));
     for (auto &cur_max_seeds : max_seeds) {
         for (auto &bucket : cur_max_seeds) {
+            if (bucket.size() > config_.max_num_seeds_per_locus)
+                continue;
             for (auto it = bucket.begin(); it != bucket.end(); ++it) {
                 if (it->second.get_orientation() && !config_.forward_and_reverse_complement)
                     continue;
@@ -1015,6 +1096,75 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
     return labeled_anchors;
 }
 
+namespace {
+
+struct SearchLimitReached {};
+
+// Account for allocated capacity, including hash buckets and queue growth.
+// This is a workspace cap, not a process RSS or loaded-index limit.
+struct SearchWorkspace {
+    explicit SearchWorkspace(double megabytes) : limit(megabytes * 1'000'000.0L) {
+        if (std::isnan(megabytes) || megabytes < 0)
+            throw std::invalid_argument("Alignment RAM limit must be nonnegative");
+    }
+    void acquire(size_t bytes) {
+        if (bytes > limit - used) throw SearchLimitReached{};
+        used += bytes;
+    }
+    void release(size_t bytes) { assert(bytes <= used); used -= bytes; }
+    long double limit;
+    size_t used = 0;
+};
+
+thread_local SearchWorkspace *active_workspace = nullptr;
+
+struct WorkspaceScope {
+    explicit WorkspaceScope(SearchWorkspace &workspace)
+        : previous(active_workspace) { active_workspace = &workspace; }
+    ~WorkspaceScope() { active_workspace = previous; }
+    SearchWorkspace *previous;
+};
+
+template <typename T>
+struct WorkspaceAllocator {
+    using value_type = T;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap = std::true_type;
+    WorkspaceAllocator() : workspace(active_workspace) {}
+    template <typename U>
+    WorkspaceAllocator(const WorkspaceAllocator<U> &other) : workspace(other.workspace) {}
+    T* allocate(size_t n) {
+        if (n > std::numeric_limits<size_t>::max() / sizeof(T))
+            throw std::bad_array_new_length();
+        if (workspace) workspace->acquire(n * sizeof(T));
+        try { return std::allocator<T>{}.allocate(n); }
+        catch (...) {
+            if (workspace) workspace->release(n * sizeof(T));
+            throw;
+        }
+    }
+    void deallocate(T *ptr, size_t n) {
+        std::allocator<T>{}.deallocate(ptr, n);
+        if (workspace) workspace->release(n * sizeof(T));
+    }
+    template <typename U>
+    bool operator==(const WorkspaceAllocator<U> &other) const { return workspace == other.workspace; }
+    template <typename U>
+    bool operator!=(const WorkspaceAllocator<U> &other) const { return !(*this == other); }
+    SearchWorkspace *workspace;
+};
+
+template <typename T>
+using WorkspaceVector = std::vector<T, WorkspaceAllocator<T>>;
+
+template <typename T>
+using WorkspaceMap = tsl::ordered_map<DeBruijnGraph::node_index, T,
+    std::hash<DeBruijnGraph::node_index>, std::equal_to<DeBruijnGraph::node_index>,
+    WorkspaceAllocator<std::pair<DeBruijnGraph::node_index, T>>,
+    WorkspaceVector<std::pair<DeBruijnGraph::node_index, T>>, uint64_t>;
+
+} // namespace
+
 template <typename T>
 class OffsetVector {
   public:
@@ -1047,6 +1197,8 @@ class OffsetVector {
     }
 
     T& get(size_t i) {
+        if (data_.empty())
+            offset_ = i;
         if (i < offset_) {
             data_.insert(data_.begin(), offset_ - i, null_);
             offset_ = i;
@@ -1067,7 +1219,7 @@ class OffsetVector {
         return i >= offset_ ? data_[i - offset_] : null_;
     }
 
-    using const_iterator = typename std::vector<T>::const_iterator;
+    using const_iterator = typename WorkspaceVector<T>::const_iterator;
     const_iterator begin() const { return data_.begin(); }
     const_iterator end() const { return data_.end(); }
     const_iterator cbegin() const { return data_.cbegin(); }
@@ -1076,14 +1228,14 @@ class OffsetVector {
   private:
     size_t offset_;
     const T null_;
-    std::vector<T> data_;
+    WorkspaceVector<T> data_;
 };
 
 template <typename Tuple>
-using WaveFront = OffsetVector<VectorMap<DeBruijnGraph::node_index, Tuple>>; // S(cost)
+using WaveFront = OffsetVector<WorkspaceMap<Tuple>>; // S(cost)
 
 template <typename Tuple>
-using ScoreTable = std::vector<WaveFront<Tuple>>;
+using ScoreTable = WorkspaceVector<WaveFront<Tuple>>;
 
 DBGAlignerConfig::score_t cost_to_score(size_t cost,
                                         size_t query_size,
@@ -1148,25 +1300,38 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     const auto query_window_rend = std::make_reverse_iterator(query_window_begin);
 
     // derived from 2.4.1 in https://doi.org/10.1101/2022.01.12.476087 (v1)
-    DBGAlignerConfig::score_t match_score = config.match_score("A");
-    DBGAlignerConfig::score_t mismatch_score = config.score_sequences("A", "T");
+    DBGAlignerConfig::score_t match_score = maximum_match_score(config);
 
     assert(config.gap_opening_penalty <= config.gap_extension_penalty);
     assert(config.gap_extension_penalty < 0);
-    assert(mismatch_score < match_score);
-
-    ssize_t mismatch_cost = (match_score - mismatch_score) * 2;
+    auto substitution_cost = [&](char reference, char query) -> size_t {
+        auto score = config.score_matrix[static_cast<unsigned char>(reference)]
+                                        [static_cast<unsigned char>(query)];
+        assert(score <= match_score);
+        return 2 * (match_score - score);
+    };
+    // Only zero-cost matches can be consumed greedily. BLOSUM diagonals differ,
+    // so other exact residues must enter the wavefront at their actual cost.
+    auto zero_cost_end = [&](auto begin, auto end) {
+        return std::find_if(begin, end, [&](char c) { return substitution_cost(c, c) != 0; });
+    };
     ssize_t gap_ext = match_score - 2 * config.gap_extension_penalty;
     ssize_t gap_opn = match_score - 2 * config.gap_opening_penalty;
 
-    assert(mismatch_cost > 0);
     assert(gap_ext > 0);
     assert(gap_opn >= gap_ext);
 
     // Odd match rewards produce odd gap costs. The complete path still has
     // an integral score after cost_to_score() applies the factor of two.
 
-    common::logger->trace("x: {}\to: {}\te: {}", mismatch_cost, gap_opn, gap_ext);
+    common::logger->trace("match bound: {}\to: {}\te: {}", match_score, gap_opn, gap_ext);
+
+    if (std::isnan(config.max_nodes_per_seq_char) || config.max_nodes_per_seq_char < 0)
+        throw std::invalid_argument("Alignment node limit must be nonnegative");
+    const long double node_limit = static_cast<long double>(config.max_nodes_per_seq_char) * query_size;
+    SearchWorkspace workspace(config.max_ram_per_alignment);
+    WorkspaceScope workspace_scope(workspace);
+    bool limited = false;
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
@@ -1194,11 +1359,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
         if (cost >= table.size()) {
             inserted = true;
             table.resize(cost + 1);
-        }
-
-        if (query_dist >= table[cost].size()) {
-            inserted = true;
-            table[cost].resize(query_dist + 1);
         }
 
         auto &bucket = table[cost].get(query_dist)[node];
@@ -1256,8 +1416,27 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
         return inserted;
     };
 
-    size_t num_explored_nodes = 0;
+    using GraphPosition = std::pair<node_index, size_t>;
+    struct PositionHash {
+        size_t operator()(const GraphPosition &position) const {
+            size_t node = std::hash<node_index>{}(position.first);
+            return node ^ (std::hash<size_t>{}(position.second)
+                           + 0x9e3779b9 + (node << 6) + (node >> 2));
+        }
+    };
+    std::unordered_set<GraphPosition, PositionHash, std::equal_to<GraphPosition>,
+                       WorkspaceAllocator<GraphPosition>> explored;
     size_t max_explored_dist = 0;
+    auto visit_node = [&](node_index node, size_t distance) {
+        // Different score/diagonal states revisit the same graph column,
+        // especially with BLOSUM scores. Charge each (node, distance) once.
+        const GraphPosition position(node, distance);
+        if (explored.count(position)) return;
+        if (explored.size() >= node_limit) throw SearchLimitReached{};
+        explored.insert(position);
+    };
+    try {
+    if (!node_limit) throw SearchLimitReached{};
     {
         size_t query_dist = 0;
         DeBruijnGraph::node_index node = start_node;
@@ -1282,10 +1461,11 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             );
         }
 
-        traverse_back(node, query_window_begin, query_window_end, best_dist, cur_target,
+        const auto exact_end = zero_cost_end(query_window_rbegin, query_window_rend);
+        traverse_back(node, exact_end.base(), query_window_end, best_dist, cur_target,
             [&](DeBruijnGraph::node_index prev, AlignmentGraph::label_class_t prev_target) {
                 auto &[best_dist, last_ext, last_node, last_op, c, num_matches, cur_target] = data;
-                ++num_explored_nodes;
+                visit_node(prev, best_dist + 1);
                 ++max_explored_dist;
                 ++best_dist;
                 ++query_dist;
@@ -1338,7 +1518,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     for (size_t cost = 0; cost < S.size(); ++cost) {
         bool done = false;
         using HeapEntry = std::tuple<size_t, size_t, DeBruijnGraph::node_index>;
-        std::priority_queue<HeapEntry> queue;
+        std::priority_queue<HeapEntry, WorkspaceVector<HeapEntry>> queue;
         for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
             for (const auto &[node, data] : S[cost][query_dist]) {
                 size_t best_dist = std::get<0>(data);
@@ -1408,7 +1588,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 if (best_dist < max_dist) {
                     std::vector<std::tuple<node_index, char, AlignmentGraph::label_class_t>> prevs;
                     call_incoming_kmers(node, [&](auto prev, char c, AlignmentGraph::label_class_t prev_target) {
-                        ++num_explored_nodes;
+                        visit_node(prev, best_dist + 1);
                         if (c != boss::BOSS::kSentinel)
                             prevs.emplace_back(prev, c, prev_target);
                     }, best_dist, cur_target);
@@ -1432,7 +1612,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                                     last_prevs = prevs;
                                 } else {
                                     call_incoming_kmers(node, [&](auto prev, char c, auto prev_target) {
-                                        ++num_explored_nodes;
+                                        visit_node(prev, last_dist + 1);
                                         if (c != boss::BOSS::kSentinel)
                                             last_prevs.emplace_back(prev, c, prev_target);
                                     }, last_dist, last_target);
@@ -1478,12 +1658,12 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                             SMap data(best_dist + 1, 1, node, Cigar::MATCH, c, num_matches + 1, prev_target);
                             auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches, cur_target] = data;
                             size_t cur_query_dist = query_dist + 1;
-                            size_t cur_cost = cost;
+                            const auto char_cost = substitution_cost(c, *local_query_window_rbegin);
+                            size_t cur_cost = cost + char_cost;
                             if (c != *local_query_window_rbegin) {
-                                cur_cost += mismatch_cost;
                                 op = Cigar::MISMATCH;
                                 cur_num_matches = 0;
-                            } else if (last_op == Cigar::MATCH) {
+                            } else if (last_op == Cigar::MATCH && !char_cost) {
                                 continue;
                             }
 
@@ -1508,15 +1688,17 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                                 }
                             }
 
+                            const auto exact_end = zero_cost_end(local_query_window_rbegin + 1,
+                                                                  local_query_window_rend);
                             traverse_back(
                                 prev,
-                                local_query_window_rend.base(),
+                                exact_end.base(),
                                 (local_query_window_rbegin + 1).base(),
                                 cur_best, cur_target,
                                 [&](DeBruijnGraph::node_index pprev, AlignmentGraph::label_class_t pprev_target) {
                                     auto &[cur_best, num_ops, last_node, op, cur_c, cur_num_matches, cur_target] = data;
                                     prev = pprev;
-                                    ++num_explored_nodes;
+                                    visit_node(pprev, cur_best + 1);
                                     ++cur_best;
                                     max_explored_dist = std::max(max_explored_dist, cur_best);
                                     ++cur_query_dist;
@@ -1575,6 +1757,25 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
 
         if (done)
             break;
+    }
+
+    } catch (const SearchLimitReached&) {
+        limited = true;
+        common::logger->trace("Alignment search limit reached after {} graph positions, {} workspace bytes",
+                              explored.size(), workspace.used);
+    }
+    if (limited) {
+        // A limit can interrupt expansion after storing a valid state but before
+        // visiting it. Update the best-score callback before selecting traceback
+        // starts; every retained state still has its complete predecessor chain.
+        for (size_t cost = 0; cost < S.size(); ++cost) {
+            for (size_t q = S[cost].offset(); q < S[cost].size(); ++q) {
+                for (const auto &[node, state] : S[cost][q]) {
+                    if (std::get<3>(state) != Cigar::CLIPPED)
+                        terminate(cost, state, q, node);
+                }
+            }
+        }
     }
 
     // backtrack
@@ -1772,7 +1973,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     std::reverse(path.begin() + cur_path_size, path.end());
                     std::reverse(spelling.begin() + cur_path_size, spelling.end());
 
-                    size_t prev_cost = cost - (last_op == Cigar::MATCH ? 0 : mismatch_cost);
+                    size_t prev_cost = cost - substitution_cost(mismatch_char,
+                                                                 *(query_window_rbegin + prev_query));
                     assert(prev_cost <= cost);
 
                     const auto *check_bt = bt;
@@ -1811,7 +2013,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
         }
     }
     common::logger->trace("Explored {} nodes. q: {}\td: {} / {}",
-                          num_explored_nodes, query_size, max_explored_dist, max_dist);
+                          explored.size(), query_size, max_explored_dist, max_dist);
 }
 
 template <class T1, class T2>
@@ -2150,7 +2352,7 @@ void Extender::extend(const Alignment &aln,
                       const std::function<void(Alignment&&)> &callback,
                       bool no_bwd, bool no_fwd) const {
     // std::cerr << "Base " << aln << "\n";
-    DBGAlignerConfig::score_t match_score = config_.match_score("A");
+    DBGAlignerConfig::score_t match_score = maximum_match_score(config_);
 
     auto set_coords = [&](Alignment &aln) {
         assert(aln.get_label_classes().size());
@@ -2485,10 +2687,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
     auto *anno_buffer = make_aln_graph(anchors[0].get_label_class()).get_anno_buffer();
 
     bool ext_success = false;
+    bool incomplete_connection = false;
     Anchor::score_t last_chain_score = 0;
     common::logger->trace("Chaining");
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
-        [this,k,sshash,match_score=config_.match_score("A"),&dummy](
+        [this,k,sshash,match_score=maximum_match_score(config_),&dummy](
                 const Anchor &a_j,
                 ssize_t max_dist,
                 AnchorIt rbegin,
@@ -2893,7 +3096,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
             return ret_val;
         },
-        [this,align,anno_buffer,match_score=config_.match_score("A")](
+        [this,align,anno_buffer,&incomplete_connection,match_score=maximum_match_score(config_)](
                 AnchorIt last,
                 AnchorIt next,
                 Alignment&& aln,
@@ -3135,8 +3338,9 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                             : AnnotationBuffer::CoordinateSet()
             );
             if (!aln_found) {
-                std::cerr << "q: " << aln.get_clipping() - next->get_clipping() << "\td: " << next_to_last_dist - last->get_seed().size() + next->get_seed().size() << "\t" << *next << " " << next->get_path_spelling() << " -> " << aln << std::endl;
-                throw std::runtime_error("Failed to connect anchors");
+                // Resource exhaustion can stop the connection before reaching
+                // its target. Preserve independent seeds instead of throwing.
+                incomplete_connection = true;
             }
         },
         [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score](Alignment&& aln) {
@@ -3175,6 +3379,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         []() { return false; },
         anno_buffer
     );
+
+    if (incomplete_connection) {
+        for (const auto &anchor : anchors) {
+            Alignment partial(anchor);
+            partial.trim_end();
+            alignments.emplace_back(std::move(partial));
+        }
+    }
 
     // size_t num_selected = sdsl::util::cnt_one_bits(selected);
     // common::logger->info("Selected {} / {} anchors from {} chains. Produced {} alignments",

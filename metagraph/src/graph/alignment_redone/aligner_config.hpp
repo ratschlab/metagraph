@@ -20,6 +20,7 @@ struct DBGAlignerConfig {
     size_t num_alternative_paths = 1;
     size_t min_seed_length = 0;
     size_t max_seed_length = 0;
+    // Discard query-position/orientation buckets with more candidate nodes.
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
     size_t max_dist_between_seeds = 400;
@@ -39,7 +40,12 @@ struct DBGAlignerConfig {
     score_t xdrop = std::numeric_limits<score_t>::max();
 
     double min_exact_match = 0.0;
+    // Each connection/extension window permits this many graph positions
+    // (node, distance from seed) per query character. Repeated score states
+    // share a position. Zero disables search beyond the available seeds.
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
+    // Allocated DP-table/hash/queue/position capacity, in MB, per search window.
+    // Loaded indices, seed/annotation caches and returned paths are excluded.
     double max_ram_per_alignment = std::numeric_limits<double>::max();
     double rel_score_cutoff = 0.0;
 

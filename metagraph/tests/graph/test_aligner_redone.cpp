@@ -23,9 +23,6 @@ using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
-const std::string test_data_dir = "../tests/data";
-//const bool PICK_REV_COMP = true;
-
 
 template <typename Graph>
 class DBGAlignerRedoneTest : public DeBruijnGraphTest<Graph> {};
@@ -151,6 +148,72 @@ TYPED_TEST(DBGAlignerRedoneTest, align_empty) {
     run_alignment(*graph, config, query, {}, {});
 }
 
+TYPED_TEST(DBGAlignerRedoneTest, NonuniformSubstitutionScores) {
+    const std::string reference = "AACGTTGCAATGCCGATTCAGGCTAAC";
+    auto graph = build_graph_batch<TypeParam>(5, { reference });
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -3);
+    config.score_matrix['C']['C'] = 4;
+    config.score_matrix['G']['G'] = 6;
+    config.score_matrix['T']['T'] = 8;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.forward_and_reverse_complement = false;
+    run_alignment(*graph, config, "AACGTTGC" "G" "ATGCCGATTCAGGCTAAC",
+                  { reference }, { "8=1X18=" }, 0, true, true);
+}
+
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, ExactShortcutComparesBothOrientations) {
+    auto graph = build_graph_batch<TypeParam>(3, { "AAACCC", "GGGTTT" });
+    Query query(*graph, "AAACCC");
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -3);
+    config.score_matrix['C']['C'] = 4;
+    config.score_matrix['G']['G'] = 6;
+    config.score_matrix['T']['T'] = 8;
+    config.min_seed_length = 3;
+    ExactSeeder seeder(query, config);
+    Extender extender(query, config);
+    size_t count = 0;
+    align_query(query, seeder, extender, [&](Alignment&& aln) {
+        ++count;
+        EXPECT_TRUE(aln.get_orientation());
+        EXPECT_EQ(42, score_match(aln, config));
+        EXPECT_EQ("6=", aln.get_cigar().to_string());
+    });
+    EXPECT_EQ(1u, count);
+}
+#endif
+
+#if _PROTEIN_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, ProteinBlosumExtension) {
+    const std::string reference = "MKWVTFISLLFLFSSAYS";
+    auto graph = build_graph_batch<TypeParam>(5, { reference });
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
+    config.max_nodes_per_seq_char = 5;
+    config.max_ram_per_alignment = 200;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.forward_and_reverse_complement = false;
+    run_alignment(*graph, config, "MKWVTFISLL" "Y" "LFSSAYS",
+                  { reference }, { "10=1X7=" }, 0, true, true);
+}
+#endif
+
+#if _DNA5_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, Dna5RetainsAmbiguousReferenceBases) {
+    if constexpr(!std::is_same_v<DBGSSHash, TypeParam>) {
+        const std::string reference = "AACGTNACGTNACCT";
+        auto graph = build_graph_batch<TypeParam>(5, { reference });
+        DBGAlignerConfig config{};
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -3);
+        config.left_end_bonus = config.right_end_bonus = 5;
+        config.forward_and_reverse_complement = false;
+        run_alignment(*graph, config, reference, { reference }, { "15=" });
+    }
+}
+#endif
+
 TYPED_TEST(DBGAlignerRedoneTest, PipelineExtendsIsolatedSeedsAndLimitsResults) {
     const std::string reference = "TAGCTTCGAGGCCAA";
     auto graph = build_graph_batch<TypeParam>(5, { reference });
@@ -186,6 +249,62 @@ TYPED_TEST(DBGAlignerRedoneTest, PipelineExtendsIsolatedSeedsAndLimitsResults) {
     align_query(query, seeder, extender, [&](Alignment&&) {
         ADD_FAILURE() << "A mismatching alignment cannot satisfy min_exact_match=1";
     });
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, SearchLimitsRetainValidPartialAlignments) {
+    const std::string reference = "TAGCTTCGAGGCCAA";
+    auto graph = build_graph_batch<TypeParam>(5, { reference });
+    Query query(*graph, "TAGCTNCGAGGCCAA");
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = config.max_seed_length = 5;
+    config.forward_and_reverse_complement = false;
+    for (double nodes : { 0.0, 0.1, 1.0, 1000.0 }) {
+        for (double ram : { 0.0, 0.0001, 0.001, 0.01, 1.0 }) {
+            SCOPED_TRACE(nodes);
+            SCOPED_TRACE(ram);
+            config.max_nodes_per_seq_char = nodes;
+            config.max_ram_per_alignment = ram;
+            ExactSeeder seeder(query, config);
+            Extender extender(query, config);
+            std::vector<Alignment> results;
+            align_query(query, seeder, extender, [&](Alignment&& aln) {
+                ASSERT_TRUE(aln.get_cigar().is_valid(aln.get_spelling(), aln.get_query()));
+                results.push_back(std::move(aln));
+            });
+            ASSERT_FALSE(results.empty());
+            if (nodes == 1000 && ram == 1) {
+                EXPECT_EQ("5=1X9=", results[0].get_cigar().to_string());
+            } else if (!nodes || !ram) {
+                EXPECT_LT(results[0].get_seed().size(), query.get_query().size());
+            }
+        }
+    }
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, SeedLimitRejectsAmbiguousLoci) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+        size_t ambiguous = 0;
+        for (const std::string prefix : { "AAAAAA", "AACGTT", "CGTACG", "GACTGA" }) {
+            auto graph = build_graph_batch<TypeParam>(7,
+                { prefix + "A", prefix + "C", prefix + "G", prefix + "T" });
+            Query query(*graph, prefix);
+            DBGAlignerConfig config{};
+            config.min_seed_length = 6;
+            config.max_seed_length = 7;
+            config.forward_and_reverse_complement = false;
+            auto unlimited = ExactSeeder(query, config).get_anchors();
+            // SSHash can seed a sub-k query only when it contains a stored
+            // minimizer; exercise the loci that have multiple candidates.
+            if (unlimited.size() <= 1) continue;
+            ++ambiguous;
+            config.max_num_seeds_per_locus = 1;
+            EXPECT_TRUE(ExactSeeder(query, config).get_anchors().empty());
+            config.max_num_seeds_per_locus = unlimited.size();
+            EXPECT_EQ(unlimited.size(), ExactSeeder(query, config).get_anchors().size());
+        }
+        EXPECT_GT(ambiguous, 0u);
+    }
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_sequence_much_too_short) {
@@ -955,6 +1074,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 // }
 #endif
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
     size_t k = 7;
     std::string reference =    "AAAAGCTTTCGAGGCCAA";
@@ -987,6 +1107,8 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
         }
     }
 }
+
+#endif
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;

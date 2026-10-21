@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <cstring>
+#include <cmath>
 #include <iostream>
 #include <unordered_set>
 #include <filesystem>
@@ -683,6 +684,12 @@ Config::Config(int argc, char *argv[]) {
         print_usage(argv[0], identity);
     }
 
+    if (!std::isfinite(alignment_max_nodes_per_seq_char) || alignment_max_nodes_per_seq_char < 0
+            || !std::isfinite(alignment_max_ram) || alignment_max_ram < 0) {
+        std::cerr << "Error: alignment node and RAM limits must be finite and nonnegative" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (alignment_max_seed_length < alignment_min_seed_length) {
         std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
         print_usage_and_exit = true;
@@ -1128,7 +1135,7 @@ if (advanced) {
 if (advanced) {
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum search workspace in MB, excluding graph/annotations/results [200.0]\n");
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
@@ -1408,7 +1415,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum search workspace in MB, excluding graph/annotations/results [200.0]\n");
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
