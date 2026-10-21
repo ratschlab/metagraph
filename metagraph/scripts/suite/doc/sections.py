@@ -1638,7 +1638,15 @@ def stale_gate_text(run):
     pol = rec.get("policy") or {}
     return "the verdict of %s (policy %s, %s) judged other contents of %s than the run has now" % (
         str(rec.get("judged_utc") or "–")[:19].replace("T", " "), pol.get("name") or "–",
-        "PASS" if rec.get("passed") else "FAIL", ", ".join(run.gate_stale))
+        "PASS" if rec.get("passed") else "FAIL", ", ".join(STALE_NAME_WORDS.get(n, n) for n in run.gate_stale))
+
+
+# manifest v8: the gate records chapter G's inputs as one digest that includes the comparison's code
+# (compare_graphlets.input_digests), so a document built from a tree whose comparison code differs from the one that
+# judged reads the run as changed, its records unchanged; the name says so (the dry build of 2026-10-21)
+STALE_NAME_WORDS = {"graphlet_inputs": "chapter G's inputs (graphlet_inputs: one digest over the ways' records and "
+                                       "documents, the by-design tables and the comparison's code, so a document "
+                                       "built with other comparison code than the gate's reads it as changed)"}
 
 
 IDENTITY_HELD_CLAUSE = "; the recorded service commit was held to the deployed commit (I.4)"

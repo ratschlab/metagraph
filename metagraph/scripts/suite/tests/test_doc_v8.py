@@ -554,3 +554,14 @@ class RealRunV8Test(unittest.TestCase):
         import sections
         import task_resources
         self.assertIn(task_resources.HOST_MEMORY_FILE, sections.EVIDENCE_RUN_FILES)
+
+    def test_stale_graphlet_inputs_named(self):
+        import sections
+        run = _Stub(gate_recorded={"judged_utc": "2026-10-21T12:40:00Z", "policy": {"name": "v8-rtp-mcp"},
+                                   "passed": True}, gate_stale=["graphlet_inputs"])
+        text = sections.stale_gate_text(run)
+        self.assertIn("(policy v8-rtp-mcp, PASS) judged other contents of chapter G's inputs (graphlet_inputs: one "
+                      "digest over", text)
+        self.assertIn("the comparison's code", text)
+        run.gate_stale = ["executions.jsonl"]
+        self.assertIn("judged other contents of executions.jsonl than the run has now", sections.stale_gate_text(run))
