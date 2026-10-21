@@ -6,6 +6,7 @@
 #include <limits>
 #include <numeric>
 #include <string_view>
+#include <stdexcept>
 
 
 namespace mtg::graph::align_redone {
@@ -62,19 +63,24 @@ struct DBGAlignerConfig {
     bool no_backtrack = false;
     bool seed_complexity_filter = true;
 
-    bool alignment_edit_distance;
-    int8_t alignment_match_score;
-    int8_t alignment_mm_transition_score;
-    int8_t alignment_mm_transversion_score;
+    bool alignment_edit_distance = false;
+    int8_t alignment_match_score = 2;
+    int8_t alignment_mm_transition_score = 3;
+    int8_t alignment_mm_transversion_score = 3;
 
     ScoreMatrix score_matrix;
 
     void print_summary() const;
 
     score_t score_sequences(std::string_view a, std::string_view b) const {
+        if (a.size() != b.size())
+            throw std::invalid_argument("Scored sequences must have the same length");
         return std::inner_product(
             a.begin(), a.end(), b.begin(), score_t(0), std::plus<score_t>(),
-            [&](char a, char b) -> score_t { return score_matrix[a][b]; }
+            [&](unsigned char a, unsigned char b) -> score_t {
+                // Non-ASCII bytes use the invalid-character row/column.
+                return score_matrix[a < 128 ? a : 0][b < 128 ? b : 0];
+            }
         );
     }
 

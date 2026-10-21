@@ -38,6 +38,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     std::vector<node_index> queued_nodes;
     std::vector<Row> queued_rows;
+    std::vector<std::pair<node_index, node_index>> pending_aliases;
 
     const DeBruijnGraph *base_graph = &graph_;
     const auto *sshash = dynamic_cast<const DBGSSHash*>(base_graph);
@@ -81,10 +82,16 @@ void AnnotationBuffer::fetch_queued_annotations() {
                     if (path[i] != base_path[i])
                         label_coords_.emplace_back();
                 }
-            } else if (base_path[i] != path[i] && it->second != nannot) {
-                auto [jt, jnserted] = node_to_cols_.try_emplace(path[i], it->second);
-                if (jnserted && has_coordinates())
-                    label_coords_.emplace_back(label_coords_[it - node_to_cols_.begin()]);
+            } else if (base_path[i] != path[i]) {
+                const auto base_index = it - node_to_cols_.begin();
+                const auto label_class = it->second;
+                auto [jt, jnserted] = node_to_cols_.try_emplace(path[i], label_class);
+                if (jnserted) {
+                    if (jt->second == nannot)
+                        pending_aliases.emplace_back(path[i], base_path[i]);
+                    if (has_coordinates())
+                        label_coords_.emplace_back(label_coords_[base_index]);
+                }
             }
         }
     }
@@ -148,6 +155,15 @@ void AnnotationBuffer::fetch_queued_annotations() {
             std::sort(labels.begin(), labels.end());
             push_node_labels(node_it++, row_it++, std::move(labels), nullptr);
         }
+    }
+
+    for (const auto &[node, base_node] : pending_aliases) {
+        auto base_it = node_to_cols_.find(base_node);
+        auto alias_it = node_to_cols_.find(node);
+        alias_it.value() = base_it->second;
+        if (has_coordinates())
+            label_coords_[alias_it - node_to_cols_.begin()]
+                = label_coords_[base_it - node_to_cols_.begin()];
     }
 
 #ifndef NDEBUG
@@ -256,40 +272,6 @@ auto AnnotationBuffer
     assert(it_s == source_columns.end());
 
     return ret_val;
-}
-
-std::string AnnotationBuffer::generate_column_set_str(label_class_t i, size_t spelling_size) const {
-    if (i == nannot)
-        return "*";
-
-    std::ostringstream ostd;
-    const Columns &columns = get_cached_column_set(i);
-    if (columns.empty())
-        return "*";
-
-    assert(columns[0] != ncolumn);
-    assert(columns[0] < annotator_.get_label_encoder().size());
-    ostd << annotator_.get_label_encoder().decode(columns[0]);
-    if (label_coords_.size()) {
-        assert(label_coords_.size() == node_to_cols_.size());
-        for (auto coord : label_coords_[i][0]) {
-            ostd << ":" << coord + 1 << "-" << coord + spelling_size;
-        }
-    }
-
-    for (Column c = 1; c < columns.size(); ++c) {
-        assert(columns[c] != ncolumn);
-        assert(columns[c] < annotator_.get_label_encoder().size());
-        ostd << ";" << annotator_.get_label_encoder().decode(columns[c]);
-        if (label_coords_.size()) {
-            assert(label_coords_.size() == node_to_cols_.size());
-            for (auto coord : label_coords_[i][c]) {
-                ostd << ":" << coord + 1 << "-" << coord + spelling_size;
-            }
-        }
-    }
-
-    return ostd.str();
 }
 
 } // namespace align

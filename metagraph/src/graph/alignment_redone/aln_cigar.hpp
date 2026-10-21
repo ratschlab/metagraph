@@ -1,11 +1,11 @@
 #pragma once
 
-#include <array>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace mtg::graph::align_redone {
@@ -118,11 +118,6 @@ class Cigar {
     static constexpr char op_str_[] = "SX=DIG";
     std::vector<value_type> cigar_;
 };
-
-
-typedef std::array<std::array<Cigar::Operator, 128>, 128> OperatorTable;
-OperatorTable initialize_opt_table();
-static const OperatorTable kCharToOp = initialize_opt_table();
 
 
 } // namespace mtg::graph::align

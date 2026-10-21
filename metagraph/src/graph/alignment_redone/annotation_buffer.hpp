@@ -88,8 +88,6 @@ class AnnotationBuffer {
         return column_sets_.data()[i];
     }
 
-    std::string generate_column_set_str(label_class_t i, size_t spelling_size) const;
-
     CoordinateSet get_label_path_coords(const std::vector<node_index> &path,
                                         const std::vector<label_class_t> &label_path) const;
 

@@ -1,6 +1,7 @@
 #ifndef __BOSS_HPP__
 #define __BOSS_HPP__
 
+#include <bitset>
 #include <memory>
 #include <type_traits>
 
@@ -708,8 +709,10 @@ inline void BOSS
                 callback(next_rl, next_ru, s);
         }
     } else {
+        std::bitset<256> seen;
         for (edge_index e = rl; e <= ru; ++e) {
-            if (TAlphabet s = get_W(e) % alph_size) {
+            if (TAlphabet s = get_W(e) % alph_size; s && !seen[s]) {
+                seen[s] = true;
                 edge_index next_rl = rl;
                 edge_index next_ru = ru;
                 if (tighten_range(&next_rl, &next_ru, s))

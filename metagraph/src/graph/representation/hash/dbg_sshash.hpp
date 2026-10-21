@@ -34,11 +34,12 @@ class DBGSSHash : public DeBruijnGraph {
                                 sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
+    // Construction uses scratch files; an empty swap_dir selects the system temp directory.
     DBGSSHash(const std::string& input_filename,
               size_t k,
               Mode mode = BASIC,
               size_t num_chars = 0,
-              const std::filesystem::path &swap_dir = "/tmp/");
+              const std::filesystem::path &swap_dir = {});
 
     // SequenceGraph overrides
     void add_sequence(

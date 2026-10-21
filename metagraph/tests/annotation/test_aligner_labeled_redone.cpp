@@ -29,6 +29,43 @@ using namespace mtg::kmer;
 
 
 
+
+#if ! _PROTEIN_GRAPH
+TEST(AnnotationBufferRedone, PendingReverseComplementAliases) {
+    auto anno_graph = build_anno_graph<DBGSSHash, annot::ColumnCompressed<>>(
+        3, { "AACGT" }, { "reference" }, DeBruijnGraph::CANONICAL);
+    const auto &graph = dynamic_cast<const DBGSSHash&>(anno_graph->get_graph());
+    // Queue every base node before its reverse complement, in both insertion
+    // orders and with a fetch either between orientations or after both.
+    for (bool reverse_first : { false, true }) {
+        for (bool fetch_between : { false, true }) {
+            AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+            std::vector<DeBruijnGraph::node_index> nodes;
+            graph.call_nodes([&](auto node) {
+                if (graph.get_base_node(node) == node)
+                    nodes.push_back(node);
+            });
+            ASSERT_FALSE(nodes.empty());
+            for (auto node : nodes)
+                buffer.queue_path({ reverse_first ? graph.reverse_complement(node) : node });
+            if (fetch_between)
+                buffer.fetch_queued_annotations();
+            for (auto node : nodes)
+                buffer.queue_path({ reverse_first ? node : graph.reverse_complement(node) });
+            buffer.fetch_queued_annotations();
+            for (auto node : nodes) {
+                const auto *forward = buffer.get_labels(node);
+                const auto *reverse = buffer.get_labels(graph.reverse_complement(node));
+                ASSERT_NE(nullptr, forward);
+                ASSERT_NE(nullptr, reverse);
+                ASSERT_FALSE(forward->empty());
+                EXPECT_EQ(*forward, *reverse);
+            }
+        }
+    }
+}
+#endif
+
 void run_alignment(const AnnotatedDBG &anno_graph,
                    DBGAlignerConfig config,
                    std::string_view query,
@@ -113,19 +150,16 @@ void run_alignment(const AnnotatedDBG &anno_graph,
                     ASSERT_LE(target, old_num_column_sets);
 
                     const auto &path_targets = path.get_label_classes();
-                    std::string path_target_labels = anno_buffer.generate_column_set_str(path_targets[0], path.get_spelling().size());
+                    std::vector<std::string> decoded_labels;
+                    for (auto column : anno_buffer.get_cached_column_set(path_targets[0]))
+                        decoded_labels.push_back(label_encoder.decode(column));
+                    const std::string path_target_labels = fmt::format("{}", fmt::join(decoded_labels, ";"));
 
                     if (path_targets.size() > 1) {
                         ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
                                                 [&](auto node_target) { return node_target == path_targets[0]; }))
                             << path << "\t" << path_target_labels << "\t" << fmt::format("{}", fmt::join(path_targets, ","));
                     }
-                    // for (auto node_target : path_targets) {
-                    //     for (auto column : anno_buffer.get_cached_column_set(node_target)) {
-                    //         path_target_labels += label_encoder.decode(column) + ",";
-                    //     }
-                    //     path_target_labels += ";";
-                    // }
                     ASSERT_TRUE(std::all_of(path_targets.begin(), path_targets.end(),
                                             [&](auto node_target) { return node_target == target; }))
                         << path << "\t" << path_target_labels << " vs. " << label << "\t"

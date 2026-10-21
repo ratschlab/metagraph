@@ -18,7 +18,7 @@ See :ref:`installation` for platform-specific troubleshooting.
 - **Compiler too old:** Need GCC 9+ or Clang 9+
 
 SSHash index versions
-====================
+=====================
 
 This version of MetaGraph reads SSHash major-version-5 indices. An index with
 another major version is rejected with an error showing the index and reader

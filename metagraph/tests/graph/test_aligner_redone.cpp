@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <set>
 
 #include "all/test_dbg_helpers.hpp"
 #include "../test_helpers.hpp"
@@ -44,6 +45,93 @@ TEST(AlignmentQuery, ForwardAndReverseComplement) {
     EXPECT_EQ(std::string(1000, 'A'), long_query.get_query());
     EXPECT_EQ(std::string(1000, 'T'), long_query.get_query(true));
 }
+
+
+TEST(AlignmentCigarRedone, EmptyAndMalformedLengths) {
+    Alignment empty;
+    EXPECT_EQ(0u, empty.get_clipping());
+    EXPECT_EQ(0u, empty.get_end_clipping());
+    EXPECT_TRUE(empty.generate_cigar().is_valid({}, {}));
+    EXPECT_EQ("2G3=", Cigar("2G3=").to_string());
+    EXPECT_TRUE(Cigar("2G3=").is_valid("ACG", "ACG"));
+    for (const auto &cigar : { "4294967295=", "4294967295X", "4294967295I",
+                              "4294967295D", "4294967295S", "1=1I1D" }) {
+        EXPECT_FALSE(Cigar(cigar).is_valid("A", "AC")) << cigar;
+        EXPECT_FALSE(Cigar(cigar).is_valid({}, {})) << cigar;
+    }
+}
+
+TEST(AlignmentScoringRedone, DefaultsAndInvalidBytes) {
+    DBGAlignerConfig config;
+    config.set_scoring_matrix();
+    EXPECT_FALSE(config.alignment_edit_distance);
+#if _PROTEIN_GRAPH
+    EXPECT_EQ(4, config.match_score("A"));
+#else
+    EXPECT_EQ(2, config.match_score("A"));
+#endif
+    for (unsigned int byte = 128; byte < 256; ++byte) {
+        const std::string invalid(1, static_cast<char>(byte));
+        EXPECT_EQ(config.score_matrix[0]['A'], config.score_sequences(invalid, "A"));
+        EXPECT_EQ(config.score_matrix['A'][0], config.score_sequences("A", invalid));
+        DBGHashFast graph(3);
+        EXPECT_THROW(Query(graph, invalid), std::invalid_argument);
+    }
+    EXPECT_THROW(config.score_sequences("AA", "A"), std::invalid_argument);
+#if _DNA_CASE_SENSITIVE_GRAPH
+    EXPECT_EQ(8, config.match_score("acgt"));
+    EXPECT_EQ(-3, config.score_sequences("a", "g"));
+    EXPECT_EQ(-3, config.score_sequences("A", "a"));
+    config.alignment_edit_distance = true;
+    config.set_scoring_matrix();
+    EXPECT_EQ(5, config.match_score("acgtN"));
+    EXPECT_EQ(-1, config.score_sequences("A", "a"));
+#endif
+}
+
+TEST(BossRanges, EachLabelIsCalledOnce) {
+    auto graph = build_graph_batch<DBGSuccinct>(3, { "AAACAAAGAAATAACACCAGCAT" });
+    const auto &boss = dynamic_cast<const DBGSuccinct&>(*graph).get_boss();
+    bool tested_repeated_label = false;
+    for (size_t left = 1; left < boss.num_edges(); ++left) {
+        for (size_t length = 1; length < static_cast<size_t>(boss.alph_size - 1) && left + length - 1 <= boss.num_edges(); ++length) {
+            const size_t right = left + length - 1;
+            std::set<unsigned int> expected, actual;
+            for (unsigned int symbol = 1; symbol < boss.alph_size; ++symbol) {
+                auto start = left, end = right;
+                if (boss.tighten_range(&start, &end, symbol)) {
+                    expected.insert(symbol);
+                    size_t occurrences = 0;
+                    for (size_t i = left; i <= right; ++i)
+                        occurrences += static_cast<unsigned int>(boss.get_W(i) % boss.alph_size) == symbol;
+                    tested_repeated_label |= occurrences > 1;
+                }
+            }
+            size_t callbacks = 0;
+            boss.call_tighter_ranges(left, right, [&](auto, auto, auto symbol) {
+                ++callbacks;
+                actual.insert(symbol);
+            });
+            EXPECT_EQ(expected, actual);
+            EXPECT_EQ(actual.size(), callbacks) << left << "," << right;
+        }
+    }
+    EXPECT_TRUE(tested_repeated_label);
+}
+
+#if ! _PROTEIN_GRAPH
+TEST(CanonicalBounds, InvalidNodesAreAbsent) {
+    auto base = std::make_shared<DBGHashFast>(3, DeBruijnGraph::PRIMARY);
+    base->add_sequence("AACGT");
+    CanonicalDBG graph(base);
+    EXPECT_FALSE(graph.in_graph(0));
+    EXPECT_FALSE(graph.in_graph(graph.max_index() + 1));
+    EXPECT_FALSE(graph.in_graph(std::numeric_limits<DeBruijnGraph::node_index>::max()));
+    auto node = graph.kmer_to_node("AAC");
+    ASSERT_NE(DeBruijnGraph::npos, node);
+    EXPECT_TRUE(graph.in_graph(node));
+}
+#endif
 
 void run_alignment(const DeBruijnGraph &graph,
                    DBGAlignerConfig config,

@@ -197,7 +197,10 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
-    build_config.tmp_dirname = swap_dir;
+    // SSHash construction always uses temporary files. An empty caller path
+    // selects the system temporary directory, just like the default argument.
+    build_config.tmp_dirname = swap_dir.empty() ? std::filesystem::temp_directory_path()
+                                               : swap_dir;
     build_config.canonical = mode != BASIC;
 
     std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <algorithm>
+#include <stdexcept>
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -25,6 +27,8 @@ class Query {
     std::string rc_;
 
     std::string generate_rc() {
+        if (std::any_of(fwd_.begin(), fwd_.end(), [](unsigned char c) { return c >= 128; }))
+            throw std::invalid_argument("Alignment queries must contain ASCII characters");
         std::string rc = fwd_;
         reverse_complement(rc.begin(), rc.end());
         return rc;

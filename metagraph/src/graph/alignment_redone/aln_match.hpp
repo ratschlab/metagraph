@@ -50,9 +50,9 @@ class Match {
 
     bool empty() const { return path_.empty(); }
 
-    size_t get_clipping() const { return seed_.data() - query_.data(); }
+    size_t get_clipping() const { return query_.empty() ? 0 : seed_.data() - query_.data(); }
     size_t get_end_clipping() const {
-        return query_.data() + query_.size() - (seed_.data() + seed_.size());
+        return query_.empty() ? 0 : query_.size() - get_clipping() - seed_.size();
     }
 
     bool is_spelling_valid(const DeBruijnGraph &graph) const {

@@ -133,7 +133,10 @@ void DBGAlignerConfig::set_scoring_matrix() {
         #elif _DNA5_GRAPH
             const auto *alphabet = kmer::alphabets::kAlphabetDNA5;
             const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
-        #elif _DNA_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+        #elif _DNA_CASE_SENSITIVE_GRAPH
+            const auto *alphabet = kmer::alphabets::kAlphabetDNACaseSent;
+            const auto *alphabet_encoding = kmer::alphabets::kCharToDNACaseSent;
+        #elif _DNA_GRAPH
             const auto *alphabet = kmer::alphabets::kAlphabetDNA;
             const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
         #else
@@ -180,7 +183,13 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
     score_matrix['C']['C'] = match_score;
     score_matrix['G']['G'] = match_score;
     score_matrix['T']['T'] = match_score;
-#if _DNA5_GRAPH
+#if _DNA_CASE_SENSITIVE_GRAPH
+    for (char a : std::string("acgt")) {
+        for (char b : std::string("acgt"))
+            score_matrix[a][b] = score_matrix[toupper(a)][toupper(b)];
+    }
+#endif
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     score_matrix['N']['N'] = match_score;
 #endif
 
@@ -199,15 +208,13 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
     for (uint8_t c : alphabet) {
         // if a character is invalid, don't count matches of that character
         if (encoding[c] == encoding[0]
-#if _DNA5_GRAPH
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
                 && c != 'N'
 #endif
                 )
             continue;
 
-        char upper = toupper(c);
-
-        score_matrix[upper][upper] = match_score;
+        score_matrix[c][c] = match_score;
     }
 
     return score_matrix;
