@@ -90,7 +90,6 @@ class AnnotatedGraph {
                    unsigned int threads) {
         if (!threads)
             throw std::invalid_argument("threads must be at least 1");
-        set_num_threads(threads);
         graph_ = mtg::cli::load_critical_dbg(graph);
         if (!annotation.empty()) {
             auto config = make_config(graph, annotation, threads);

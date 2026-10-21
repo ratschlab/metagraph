@@ -7,7 +7,7 @@ import subprocess
 import pytest
 import pymetagraph
 
-METAGRAPH = os.environ.get("METAGRAPH") or shutil.which("metagraph")
+METAGRAPH = shutil.which(os.environ.get("METAGRAPH") or "metagraph")
 pytestmark = pytest.mark.skipif(METAGRAPH is None, reason="metagraph binary not found")
 REFERENCE = "AACGTTGCAATGCCGATTCAGGCTAAC"
 OTHER = "TTGATAGCCTTGACCGATAGCTTCCA"
@@ -129,3 +129,9 @@ def test_inexact_chain_errors_leave_workers_usable(graph):
 def test_invalid_alignment_options(graph, options):
     with pytest.raises((ValueError, TypeError)):
         graph.align(REFERENCE, **options)
+
+
+def test_non_ascii_batch_leaves_workers_usable(graph):
+    with pytest.raises(ValueError, match="ASCII"):
+        graph.align([REFERENCE, "ACGéT", OTHER], seed_length=5)
+    assert graph.align(REFERENCE, seed_length=5)

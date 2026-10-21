@@ -21,7 +21,7 @@ classifiers = [
 [tool.scikit-build]
 build-dir = "build"
 cmake.source-dir = "../../.."
-cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON"]
+cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DMETAGRAPH_BUILD_EXECUTABLE=OFF"]
 cmake.build-type = "Release"
 wheel.packages = ["pymetagraph"]
 build.targets = ["_pymetagraph_core"]

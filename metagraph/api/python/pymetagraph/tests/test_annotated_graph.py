@@ -16,7 +16,7 @@ import pymetagraph
 
 DATA = Path(__file__).resolve().parents[4] / "tests" / "data" / "metasub_fake_data.fa"
 K = 21
-METAGRAPH = os.environ.get("METAGRAPH") or shutil.which("metagraph")
+METAGRAPH = shutil.which(os.environ.get("METAGRAPH") or "metagraph")
 
 pytestmark = pytest.mark.skipif(METAGRAPH is None, reason="metagraph binary not found")
 
@@ -104,3 +104,16 @@ def test_invalid_arguments(graph, index):
         pymetagraph.AnnotatedGraph(*index, threads=0)
     with pytest.raises(ValueError):
         graph.query(["ACGT"], discovery_fraction=1.5)
+
+
+def test_concurrent_graph_construction(index, graph):
+    from concurrent.futures import ThreadPoolExecutor
+    query = next(iter(read_fasta(DATA).values()))[:100]
+    expected = graph.query(query)
+
+    def load_and_query(threads):
+        loaded = pymetagraph.AnnotatedGraph(*index, threads=threads)
+        return loaded.query(query)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        assert list(executor.map(load_and_query, (1, 2, 3, 3, 2, 1))) == [expected] * 6
