@@ -403,6 +403,16 @@ def _applied_offset(run):
     return None
 
 
+def _steps_recorded_text(run, loop):
+    """', by failed steps only: ... (every planned execution recorded)' when the loop is unfinished only by failed
+    steps whose executions were recorded (report.failed_steps_only; VERIFY-V8 M1), else ''."""
+    missing = (getattr(run, "missing", None) or [], getattr(run, "plan_source", None))
+    if not loop or loop.get("state") in (None, "done") or not report.failed_steps_only(loop, missing):
+        return ""
+    return " by failed steps only: %s (every planned execution recorded, %s of the plan)" % (
+        esc(", ".join(str(x) for x in loop["failed_steps"])), esc(len(getattr(run, "rows", []) or [])))
+
+
 def _sessions_text(run):
     """The orchestrator's sessions (run_suite.sh invocations: the first runs the loop, a later one resumes it),
     each with its start, its loop state and its direct requests, and the mex clock offset the comparison applied
@@ -420,6 +430,8 @@ def _sessions_text(run):
                 text += " (%s)" % esc(loop["reason"], 120)
             if "completed" in loop or "scenarios" in loop:
                 text += ", %s of %s scenarios" % (esc(loop.get("completed", "–")), esc(loop.get("scenarios", "–")))
+            if i == len(sessions) - 1:
+                text += _steps_recorded_text(run, loop)
             if loop.get("direct_requests") is not None:
                 text += ", %s direct request%s" % (esc(loop["direct_requests"]),
                                                    "" if loop["direct_requests"] == 1 else "s")
@@ -671,9 +683,10 @@ def gate_text(word, how, counts_text, problems_text, run=None):
             word, problems_text, counts_text, scope, _without_access_paths(how, run))
     groups = gate_groups_text(run) if run is not None else "–"
     head, kinds = _problems_head_and_kinds(problems_text)
-    return ("%s: the run does not authorise a deploy. %s, by what would clear them: %s (by the gate's kinds: %s); the "
-            "count is not a count of service defects; %s; the gate covers %s; %s" % (
-                word, head[:1].upper() + head[1:], groups, kinds, counts_text, scope,
+    noted = noted_problems_text(run) if run is not None else ""
+    return ("%s: the run does not authorise a deploy. %s%s, by what would clear them: %s (by the gate's kinds: %s); "
+            "the count is not a count of service defects; %s; the gate covers %s; %s" % (
+                word, (noted + " ") if noted else "", head[:1].upper() + head[1:], groups, kinds, counts_text, scope,
                 _without_access_paths(how, run) if run is not None else how))
 
 
@@ -1560,9 +1573,14 @@ def gate_summary(ctx):
         word = "GATE PASS" if gate.get("passed") else "GATE FAIL"
         problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
         if run.gate_offline:
+            if run.gate_stale and same_recorded_verdict(run, gate):
+                recorded = "a gate.json with the same verdict, counts and problems: %s" % same_verdict_text(run)
+            elif run.gate_stale:
+                recorded = "a stale gate.json: %s" % stale_gate_text(run)
+            else:
+                recorded = "no gate.json"
             how = ("judged offline by gate.py for this document (the run recorded %s); policy %s%s" % (
-                "a stale gate.json: %s" % stale_gate_text(run) if run.gate_stale else "no gate.json",
-                os.path.basename(pol.get("path") or "–"), deploy_label_text(run)))
+                recorded, os.path.basename(pol.get("path") or "–"), deploy_label_text(run)))
             # gate.py's sha256 is that of the policy's canonical JSON; the deploy notes cite the file's bytes, so
             # both are printed (VERIFY-COLOURS-V5 item 9)
             file_sha = run.policy_file_sha256() if hasattr(run, "policy_file_sha256") else None
@@ -1631,6 +1649,29 @@ def judged_outcomes_text(run, counts, policy=None):
     return " (%s)" % ", ".join(parts)
 
 
+def same_recorded_verdict(run, gate):
+    """Whether the recorded gate.json is stale only by chapter G's inputs digest (which includes the comparison's
+    code) and states the offline verdict's verdict, counts and problems (VERIFY-V8 M2: a document tree with other
+    comparison code than the gate's, the run's records unchanged)."""
+    rec = run.gate_recorded if isinstance(run.gate_recorded, dict) else None
+    if not rec or not isinstance(gate, dict) or list(run.gate_stale or []) != ["graphlet_inputs"]:
+        return False
+    def key(g):
+        return (bool(g.get("passed")), json.dumps(g.get("counts"), sort_keys=True),
+                sorted(json.dumps(p, sort_keys=True) for p in (g.get("problems") or [])))
+    return key(rec) == key(gate)
+
+
+def same_verdict_text(run):
+    """The recorded verdict that same_recorded_verdict found equal to the offline one, and why it was not taken."""
+    rec = run.gate_recorded or {}
+    pol = rec.get("policy") or {}
+    return ("the verdict of %s (policy %s, %s); only its digest of chapter G's inputs differs from this document's, "
+            "because that digest includes the comparison's code and this document's tree has other comparison code "
+            "than the gate's" % (str(rec.get("judged_utc") or "–")[:19].replace("T", " "), pol.get("name") or "–",
+                                 "PASS" if rec.get("passed") else "FAIL"))
+
+
 def stale_gate_text(run):
     """Why a recorded gate.json is stale (gate.stale_inputs): the verdict of <utc> judged other contents of the
     named files than the run has now (the report's 'GATE verdict STALE')."""
@@ -1696,9 +1737,11 @@ def gate_line(ctx):
             esc(word), esc(problems_text), esc(counts_text).replace("by design", "\\mbox{by design}"), esc(held),
             esc(gate_scope(run)["text"]), esc(_without_access_paths(how, run)))
     head, kinds = _problems_head_and_kinds(problems_text)
-    return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s, by what would clear them: %s (by the "
+    noted = noted_problems_text(run)
+    return ("\\textbf{\\large %s}: the run does not authorise a deploy. %s%s, by what would clear them: %s (by the "
             "gate's kinds: %s); the count is not a count of service defects; %s; the gate covers %s; %s" % (
-                esc(word), esc(head[:1].upper() + head[1:]), esc(gate_groups_text(run)), esc(kinds),
+                esc(word), (latex.join_units(esc(noted)) + " ") if noted else "", esc(head[:1].upper() + head[1:]),
+                esc(gate_groups_text(run)), esc(kinds),
                 esc(counts_text).replace("by design", "\\mbox{by design}") + esc(held), esc(gate_scope(run)["text"]),
                 esc(_without_access_paths(how, run))))
 
@@ -1721,9 +1764,54 @@ def _finding_evidence(line):
     return text.split(" (", 1)[0] if " (" in text else text
 
 
+def _problem_note(ctx, sid, arm, repeat=None):
+    """The identity input's note on one execution the gate holds against the run (make_doc --identity:
+    `problem_notes` [{scenario, arm, repeat, text, source}]; reader._load_identity refuses a note on no recorded
+    execution that did not pass): its text, '' without one; |repeat| None matches any repeat of the arm."""
+    return _run_problem_note(ctx.run, sid, arm, repeat)
+
+
+def noted_problems_text(run):
+    """'Every problem is on N-realrep-0023 mcp r0: <its note> (the service's own log, checked separately; I.1).' when
+    the gate failed and each of its problems is on a scenario and access path the identity input notes (the reader
+    review of the v8 document, RV8-2: the cause beside the verdict), else ''."""
+    gate = run.gate if isinstance(getattr(run, "gate", None), dict) else {}
+    problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
+    if gate.get("passed") or not problems:
+        return ""
+    ident = getattr(run, "identity", None)
+    notes = [n for n in ((ident or {}).get("problem_notes") or []) if isinstance(n, dict)] if isinstance(ident, dict) \
+        else []
+    on = set((p.get("scenario"), p.get("arm")) for p in problems)
+    # a problem of no scenario (identity, configuration) has no note: the box then names none
+    if not notes or any(not isinstance(sid, str) or not isinstance(arm, str) for sid, arm in on):
+        return ""
+    on = sorted(on)
+    if not all(_run_problem_note(run, sid, arm) for sid, arm in on):
+        return ""
+    texts = []
+    for sid, arm in on:
+        for n in notes:
+            if n.get("scenario") == sid and n.get("arm") == arm:
+                texts.append("%s %s r%s: %s" % (sid, arm, n.get("repeat"), str(n["text"]).strip().rstrip(".")))
+    return "Every problem is on %s (the service's own log, checked separately; I.1)." % "; ".join(texts)
+
+
+def _run_problem_note(run, sid, arm, repeat=None):
+    """_problem_note of a run (the gate box has the run, not the context)."""
+    ident = getattr(run, "identity", None)
+    notes = ident.get("problem_notes") if isinstance(ident, dict) else None
+    for n in notes if isinstance(notes, list) else []:
+        if isinstance(n, dict) and n.get("scenario") == sid and n.get("arm") == arm and \
+                (repeat is None or n.get("repeat") == repeat) and str(n.get("text") or "").strip():
+            return str(n["text"]).strip().rstrip(".")
+    return ""
+
+
 def principal_findings(ctx):
     """The findings, failures, errors and disagreements of the whole run, one line per scenario, linked where the
-    chapter is built; empty lists when there are none."""
+    chapter is built; empty lists when there are none. An execution the identity input notes (problem_notes: the
+    service's own log on it, checked separately) carries the note in its line; the disagreement it causes names it."""
     run = ctx.run
     findings, failures, disagreements = {}, {}, []
     for sid in run.order:
@@ -1738,6 +1826,10 @@ def principal_findings(ctx):
                     what = ("%s: %s" % (esc(failed[0].get("check")),
                                         latex.join_units(cells.esc_times(failed[0].get("detail"), 120)))) if failed \
                         else esc(cells.WORD.get(l.get("outcome"), l.get("outcome")))
+                    note = _problem_note(ctx, sid, arm, l.get("repeat"))
+                    if note:
+                        what += ": %s (the service's own log, checked separately; not part of the run's files)" % (
+                            latex.join_units(cells.esc_times(note)))
                     failures.setdefault(sid, []).append("%s r%s %s" % (esc(cells.ARM_SHORT.get(arm, arm)),
                                                                        esc(l.get("repeat")), what))
         e = run.comp_entry(sid)
@@ -1753,6 +1845,8 @@ def principal_findings(ctx):
                     od = [o for o in (a.get("outcome_differs") or []) if isinstance(o, dict)]
                     what = "the outcomes differ" + ((", repeat %s: %s" % (od[0].get("repeat"), od[0].get("detail")))
                                                     if od and od[0].get("detail") else "")
+                    if who == "mcp" and _problem_note(ctx, sid, "mcp"):
+                        what += "; the MCP execution's error above, with its note"
                 disagreements.append("%s (%s: %s)" % (_link_sid(ctx, sid), who, esc(what, 160)))
     comp_rel = run.comp_relations()
     failed_rel = []
@@ -2564,9 +2658,9 @@ def provenance_table(ctx):
         first = sessions[0]
         loop = first.get("loop") or {}
         applied = _applied_offset(run)
-        rows.append(("sessions", "%d (%s); the loop %s of %s scenarios%s; mex clock offset %s" % (
+        rows.append(("sessions", "%d (%s); the loop %s of %s scenarios%s%s; mex clock offset %s" % (
             len(sessions), esc(first.get("mode") or "–"), esc(loop.get("completed", "–")), esc(loop.get("scenarios", "–")),
-            (", %s" % esc(loop.get("state"))) if loop.get("state") else "",
+            (", %s" % esc(loop.get("state"))) if loop.get("state") else "", _steps_recorded_text(run, loop),
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
     rows.append(("comparison", comparison_lines_text(run, short=True)))
     lib = library_identity_text(run)
@@ -5569,6 +5663,9 @@ def _identity_evidence(run, ident):
             # the service's log as the input states it, with its source (the document's body names neither the
             # log's file nor its internal states; RV8)
             part["service_log"] = i["service_log"]
+        if isinstance(i.get("problem_notes"), list):
+            # the notes on the gate's problems, with their sources (I.1 prints the text only)
+            part["problem_notes"] = i["problem_notes"]
         return dict(part, sha256_canonical=hashlib.sha256(json.dumps(i, sort_keys=True, separators=(",", ":")).encode(
             "utf-8")).hexdigest())
     rec = _recorded_identity_evidence(run)

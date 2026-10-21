@@ -433,6 +433,24 @@ class Run(object):
                         problems.append("service_log time %s lies outside the run (%s to %s)" % (
                             t, min(r.get("started_utc") for r in self.rows if r.get("started_utc")),
                             max(r.get("ended_utc") or "" for r in self.rows)))
+        # notes on the executions the gate holds against the run (printed beside the execution in I.1): each one
+        # {scenario, arm, repeat, text[, source]} on a recorded execution that did not pass (the v8 baseline's
+        # N-realrep-0023 mcp r0, whose answer the service's log shows sent)
+        notes = data.get("problem_notes")
+        if notes is not None:
+            if not isinstance(notes, list):
+                problems.append("problem_notes is not a list of {scenario, arm, repeat, text[, source]}")
+            else:
+                for n in notes:
+                    if not isinstance(n, dict) or not str(n.get("text") or "").strip() or not n.get("scenario") \
+                            or not n.get("arm") or isinstance(n.get("repeat"), bool) \
+                            or not isinstance(n.get("repeat"), int):
+                        problems.append("a problem note is not {scenario, arm, repeat, text[, source]}: %r" % (n,))
+                    elif not any(r.get("scenario") == n["scenario"] and r.get("arm") == n["arm"]
+                                 and r.get("repeat") == n["repeat"]
+                                 and r.get("outcome") not in ("pass", "service_by_design") for r in self.rows):
+                        problems.append("problem note on %s %s r%s: no recorded execution that did not pass" % (
+                            n["scenario"], n["arm"], n["repeat"]))
         # the deployed commit from the deployment record (the deploy's own record), with its source: the gate compares
         # the recorded identity with it (RV3, V3); a commit the run recorded otherwise is the gate's problem, not a
         # refusal here
