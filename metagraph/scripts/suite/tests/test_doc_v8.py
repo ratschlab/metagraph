@@ -409,6 +409,48 @@ class RealRunV8Test(unittest.TestCase):
         four = facts.fill(tpl, dict(base, warm_after_interrupted_n="4", warm_after_interrupted_one=False))
         self.assertIn("4 executions ran warm after an interrupted one and are in no bucket.", four)
 
+    def test_declared_by_path(self):
+        import tempfile
+        import reader
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "declared_x.json")
+            with open(path, "w") as fh:
+                json.dump({"declared_version": 1, "exclusions": []}, fh)
+            data = reader.Run._load_declared(_Stub(), path)
+            self.assertEqual(data["_file"], "declared_x.json")
+            self.assertEqual(data["_path"], os.path.abspath(path))
+
+    def test_graphlet_evidence(self):
+        import sections
+        run = _Stub(manifest={"manifest_version": 7, "scenarios": []}, dir="/nowhere")
+        run._graphlets = None
+        self.assertEqual(sections.graphlet_evidence(run), {})
+        self.assertIsNone(sections.by_design_g_table_text(run))
+        run = _Stub(manifest={"manifest_version": 8, "scenarios": []}, dir="/nowhere", policy={})
+        run._graphlets = {"summary": {}}
+        run._graphlet_digests = {"manifest.json": "a" * 64, "arms/dl-lib/graphlet_ops.jsonl": "b" * 64,
+                                 "docs": "c" * 64, "code": "d" * 64, "by_design_g_table": "e" * 64}
+        ev = sections.graphlet_evidence(run)
+        self.assertEqual(sorted(ev["graphlet_inputs"]), ["by_design_g_table", "code", "docs"])
+        self.assertIn("by_design_table_g", ev)
+
+    def test_by_design_g_table_text(self):
+        import graphlets
+        import sections
+        info = {"version": 1, "cases": 5, "service_commit": "f" * 40, "sha256": "1" * 64, "path": "/x"}
+        orig = graphlets.by_design_g_table
+        try:
+            graphlets.by_design_g_table = lambda run: ({}, info)
+            run = _Stub(dir="/nowhere", policy={"graphlets": {"by_design_g_table": {"sha256": "1" * 64}}})
+            run._graphlets = {"summary": {}}
+            text = sections.by_design_g_table_text(run)
+            self.assertIn("version 1, 5 cases", text)
+            self.assertIn("the deploy gate's policy pins it", text)
+            run.policy = {"graphlets": {"by_design_g_table": {"sha256": "2" * 64}}}
+            self.assertIn("\\textbf{not} the table the deploy gate's policy pins", sections.by_design_g_table_text(run))
+        finally:
+            graphlets.by_design_g_table = orig
+
     def test_g_pair_prose_names_the_rows_pair_when_present(self):
         import facts
         text = prose("G")["families"]["G-pair"]["prose"]

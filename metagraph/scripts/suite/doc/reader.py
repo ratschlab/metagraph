@@ -368,7 +368,14 @@ class Run(object):
 
     def _load_declared(self, declared):
         if declared:
-            return sc.read_json(declared)
+            # a declared file given by path (make_doc --declared, the real build's: the policy's own): its name and
+            # path kept beside it, as a file found in gate/ keeps its name, for I.4, appendix G and evidence.json
+            data = sc.read_json(declared)
+            if isinstance(data, dict):
+                data = dict(data)
+                data["_file"] = os.path.basename(declared)
+                data["_path"] = os.path.abspath(declared)
+            return data
         sha = self.manifest.get("content_sha256")
         gate_dir = os.path.join(SUITE_DIR, "gate")
         if not sha or not os.path.isdir(gate_dir):

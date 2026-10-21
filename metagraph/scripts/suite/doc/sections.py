@@ -2556,6 +2556,9 @@ def provenance_table(ctx):
     lib = library_identity_text(run)
     if lib:
         rows.append(("graphlet library", lib))
+    gtable = by_design_g_table_text(run)
+    if gtable:
+        rows.append(("area G by-design table", gtable))
     for entry in getattr(run, "also_gates", None) or []:
         rows.append(("other gate policy", esc(also_gate_text(entry, run))))
     if run.reruns:
@@ -5563,6 +5566,61 @@ def _recorded_identity_evidence(run):
             "invocations": rec.get("invocations")}
 
 
+def by_design_g_table_text(run):
+    """I.4's area G by-design table (manifest v8): its version, cases, service commit and sha256 as the comparison
+    read it, and whether the deploy gate's policy pins it; None before v8."""
+    g = graphlets.data(run)
+    if g is None or g.get("error"):
+        return None
+    _, info = graphlets.by_design_g_table(run)
+    if not info:
+        return "none read (appendix B)"
+    text = "version %s, %s case%s, service commit %s…, sha256 %s…" % (
+        esc(info.get("version")), esc(info.get("cases")), "" if info.get("cases") == 1 else "s",
+        tt(_short(info.get("service_commit"), 12)), tt(_short(info.get("sha256"), 12)))
+    pin = (((run.policy.get("graphlets") or {}).get("by_design_g_table") or {}) if isinstance(
+        getattr(run, "policy", None), dict) else {}).get("sha256")
+    if pin:
+        text += "; the deploy gate's policy pins it" if pin == info.get("sha256") else \
+            "; \\textbf{not} the table the deploy gate's policy pins (%s…)" % tt(_short(pin, 12))
+    return text
+
+
+def _graphlet_input_digests(run):
+    """compare_graphlets.input_digests of a run with area G scenarios (manifest v8), computed once; None before v8
+    or when it cannot be computed."""
+    if hasattr(run, "_graphlet_digests"):
+        return run._graphlet_digests
+    out = None
+    g = graphlets.data(run)
+    if g is not None and not g.get("error"):
+        try:
+            import compare_graphlets as cg
+            out = cg.input_digests(run.dir)
+        except Exception:   # evidence.json then lists the run's files without chapter G's digests
+            out = None
+    run._graphlet_digests = out
+    return out
+
+
+def graphlet_evidence(run):
+    """evidence.json's area G entries (manifest v8; {} before): area G's by-design table the comparison read (its
+    path inside the run directory when it is the run's snapshot) and chapter G's input digests that are not files of
+    the run (the documents' and the export files' trees, the by-design tables, the comparison's code)."""
+    dig = _graphlet_input_digests(run)
+    if not dig:
+        return {}
+    _, info = graphlets.by_design_g_table(run)
+    path = (info or {}).get("path")
+    if path:
+        rel = cmp.run_relative(path, run.dir)
+        path = rel if rel != path else latex.public_paths(path)
+    return {"by_design_table_g": {"path": path, "sha256": (info or {}).get("sha256"),
+                                  "cases": (info or {}).get("cases")} if info else None,
+            "graphlet_inputs": dict((k, v) for k, v in sorted(dig.items())
+                                    if not ("/" in k or k.endswith(".json") or k.endswith(".jsonl")))}
+
+
 def evidence_manifest(ctx):
     """{document, run_directory, inputs, gate, by_design_table, service_identity} of this build (V6-004): every run
     file the document read (the set it read marked), the gate's record and policies, the declared file, the
@@ -5580,6 +5638,14 @@ def evidence_manifest(ctx):
                 other = True
             inputs.append({"path": name, "sha256": _file_sha256(path), "role": "present, not read" if other
                            else "read by this document"})
+    listed = set(i["path"] for i in inputs)
+    for name, sha in sorted((_graphlet_input_digests(run) or {}).items()):
+        # chapter G's comparison reads these records (compare_graphlets.input_digests: the ways' op records, the
+        # MCP's job and identity records); its digests over the documents, files, tables and code are listed apart
+        if "/" in name or name.endswith(".json") or name.endswith(".jsonl"):
+            if name not in listed and sha:
+                inputs.append({"path": name, "sha256": sha, "role": "read by this document (chapter G)"})
+                listed.add(name)
     if getattr(run, "mcp_raw_files", None):
         # the MCP runner's raw records, read for the tool names I.2's scope note prints (W3)
         inputs.append({"path": "arms/mcp/raw/", "files": run.mcp_raw_files,
@@ -5593,7 +5659,8 @@ def evidence_manifest(ctx):
              "verdict": None if not isinstance(e.get("verdict"), dict) else
              ("PASS" if e["verdict"].get("passed") else "FAIL")} for e in (getattr(run, "also_gates", None) or [])]
     dec = run.declared if isinstance(run.declared, dict) else None
-    dec_path = os.path.join(reader.SUITE_DIR, "gate", dec["_file"]) if dec and dec.get("_file") else None
+    dec_path = (dec.get("_path") or (os.path.join(reader.SUITE_DIR, "gate", dec["_file"]) if dec.get("_file")
+                                     else None)) if dec else None
     table = run.table_meta or {}
     ident = run.identity if isinstance(getattr(run, "identity", None), dict) else None
     record = ctx.data_files.get(GATE_PROBLEMS_FILE)
@@ -5616,9 +5683,11 @@ def evidence_manifest(ctx):
                      "_file"), "sha256_file": _file_sha256(dec_path) if dec_path else None,
                      # the policy pins the declared file by the sha256 of its canonical JSON (gate_policy.py)
                      "sha256_canonical": hashlib.sha256(sc.canonical_json(dict(
-                         (k, v) for k, v in dec.items() if k != "_file"))).hexdigest()}},
+                         (k, v) for k, v in dec.items() if k not in ("_file", "_path")))).hexdigest()}},
         "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
         if table.get("path") else None,
+        # manifest v8: area G's own table and every input of chapter G's comparison (absent before v8)
+        **graphlet_evidence(run),
         "service_identity": _identity_evidence(run, ident),
         # the previous edition's run, an input of 'Since the previous edition' (make_doc --previous)
         "previous_run": None if getattr(run, "previous", None) is None else {
