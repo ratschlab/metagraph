@@ -19,11 +19,13 @@ import blocks  # noqa: E402
 import cells  # noqa: E402
 import compare as cmp  # noqa: E402
 import facts  # noqa: E402
+import graphlets  # noqa: E402
 import gate as gate_mod  # noqa: E402
 import latex  # noqa: E402
 import merge_run  # noqa: E402
 import reader  # noqa: E402
 import report  # noqa: E402
+import resources  # noqa: E402
 import suite_common as sc  # noqa: E402
 import vocabulary  # noqa: E402
 from cells import ARMS, fmt_t, fmt_delta, fmt_pair, fmt_n  # noqa: E402
@@ -154,6 +156,7 @@ class Context(object):
         stops = self._resolve_stops
         table = run.table_meta or {}
         return {"release": run.run.get("release") or "–", "run_id": run.run_id(),
+                "run_dir_in_tree": str(latex.public_paths(run.dir) or "").startswith(latex.SUITE_TREE),
                 "database": index.get("database") or "–", "k": index.get("k") or "–",
                 "scenarios": len(run.order), "n_scenarios": len(run.order),
                 "manifest_version": manifest.get("manifest_version") or "–",
@@ -469,6 +472,8 @@ def checks_commit_text(run):
 TRAVERSAL_TOOLS = ("traverse_resolve", "traverse_fetch", "traverse_status", "traverse_results", "traverse_stop",
                    "traverse_lock", "traverse_capabilities", "graphlet_summary", "graphlet_walks", "graphlet_walk",
                    "graphlet_labels", "graphlet_sequence", "graphlet_compare", "graphlet_export")
+# the formats the service's graphlet_export writes (DESIGN-v8 §1: fasta, gfa, json and mgt, the stored body)
+GRAPHLET_EXPORT_FORMATS = ("fasta", "gfa", "json", "mgt")
 MCP_TOOL_ORDER = ("traverse_resolve", "traverse_fetch", "traverse_status", "traverse_results", "pattern_search",
                   "get_status", "get_results", "catalog", "graphlet_export")
 
@@ -499,14 +504,18 @@ def traversal_tools_not_called_text(run):
     if not calls:
         return ""
     graphlet = [t for t in TRAVERSAL_TOOLS if t.startswith("graphlet_") and t != "graphlet_export" and t not in calls]
+    # graphlet_export's formats the runner did not use (v4-v7: MGT only; manifest v8's area G uses all four)
+    used = set(str(f).lower() for f in ((calls.get("graphlet_export") or {}).get("formats") or {}))
+    other_formats = "graphlet_export" in calls and not set(GRAPHLET_EXPORT_FORMATS) <= used
     parts = []
-    if graphlet or "graphlet_export" in calls:
+    if graphlet or other_formats or "graphlet_export" not in calls:
         inner = ["%s" % t for t in graphlet]
-        if "graphlet_export" in calls:
+        if other_formats:
             inner.append("graphlet_export's other formats")
-        elif "graphlet_export" in TRAVERSAL_TOOLS:
+        elif "graphlet_export" not in calls and "graphlet_export" in TRAVERSAL_TOOLS:
             inner.append("graphlet_export")
-        parts.append("the graphlet processing tools (%s)" % facts._join(inner))
+        if inner:
+            parts.append("the graphlet processing tools (%s)" % facts._join(inner))
     parts += ["%s" % t for t in TRAVERSAL_TOOLS if t.startswith("traverse_") and t not in calls]
     return facts._join(parts)
 
@@ -747,10 +756,10 @@ def by_design_table_text(run):
     return text
 
 
-def gate_scope(run):
+def gate_scope(run, policy=None):
     """What the deploy gate covers, read from the policy, never from its file name (READ-002): {routes, arms,
-    selected, text}; dashes without a policy."""
-    pol = run.policy if isinstance(run.policy, dict) else {}
+    selected, text}; dashes without a policy. |policy|: another than the deploy gate's (manifest v8's second one)."""
+    pol = policy if isinstance(policy, dict) else (run.policy if isinstance(run.policy, dict) else {})
     sel = pol.get("selection") if isinstance(pol.get("selection"), dict) else {}
     routes = [str(r) for r in (sel.get("routes") or [])]
     arms = [str(a) for a in (pol.get("arms") or [])]
@@ -781,11 +790,12 @@ GATE_RULE_WORDS = (
 GATE_MCP_EXPRESS_RULES = ("manifest_not_implemented", "table_not_expressible")
 
 
-def gate_population(run):
+def gate_population(run, policy=None):
     """The deploy gate's populations from the policy (V6-001): the route selection, the policy's automatic
     exclusions grouped by rules / access paths / repeats, the owner's declared exclusions, and per gated access path
-    the scenarios and executions the policy requires. None without a policy."""
-    pol = run.policy if isinstance(run.policy, dict) else None
+    the scenarios and executions the policy requires. None without a policy. |policy|: another than the deploy
+    gate's."""
+    pol = policy if isinstance(policy, dict) else (run.policy if isinstance(run.policy, dict) else None)
     if not pol:
         return None
     rank = dict((r, i) for i, (r, _) in enumerate(GATE_RULE_WORDS))
@@ -824,10 +834,10 @@ def _gate_auto_kind(rules):
         rules[0] if rules else "", rules[0] if rules else "?")
 
 
-def gate_auto_text(run):
+def gate_auto_text(run, policy=None):
     """The policy's automatic exclusions in one plain clause (V6-001): '94 entries: 35 budget-stress tests on
     direct-local and mcp, 57 requests the MCP tools cannot express on mcp, ...'; '' without a policy."""
-    pop = gate_population(run)
+    pop = gate_population(run, policy)
     if pop is None:
         return ""
     kinds = {}
@@ -977,6 +987,20 @@ def gate_group_of(problem):
         if detail.startswith("inconclusive") or detail.startswith("by-design"):
             return "unproven"
         return "violation"
+    if kind == "graphlet":
+        # area G (manifest v8): a disagreement, a failed pre-check or a failed service check is a violation; an
+        # inconclusive call, a pre-check or service check not decided, a run-level record not shown; a comparison
+        # that cannot be computed or a manifest problem missing evidence
+        if "could not be computed" in detail or "without the owner's reason" in detail:
+            return "evidence"
+        if " disagrees " in detail:
+            return "violation"
+        words = detail.split(" ")
+        if detail.startswith("pre-check ") and len(words) > 2:
+            return "violation" if words[2].startswith("fail") else "unproven"
+        if detail.startswith("service check ") and len(words) > 3:
+            return "violation" if words[3].startswith("fail") else "unproven"
+        return "unproven"
     return "violation"
 
 
@@ -1017,15 +1041,102 @@ def gate_decision_short(run):
     return gate_decision_text(run)
 
 
+def graphlet_population_text(policy, verdict):
+    """Area G's population of a policy with a graphlets block (manifest v8): the scenarios, the op calls required with
+    the records per way, the calls W3 does not expose, the service checks; and what the gate judged of them; '' for a
+    policy without the block."""
+    gl = ((policy or {}).get("counts") or {}).get("graphlets")
+    if not isinstance(gl, dict):
+        return ""
+    ways = gl.get("ways") or {}
+    text = "%d scenarios, %d op calls required (%s records), %d calls W3 does not expose, %d service checks" % (
+        gl.get("scenarios", 0), gl.get("op_calls", 0), ", ".join("%s %d" % (w, ways[w]) for w in
+                                                                  ("W1", "W2", "W3", "W4", "W5") if w in ways),
+        gl.get("w3_not_exposed", 0), gl.get("service_checks", 0))
+    go = ((verdict or {}).get("counts") or {}).get("graphlet_ops")
+    if isinstance(go, dict):
+        text += "; judged %d: %d agree, %d by design%s" % (
+            go.get("judged", 0), go.get("agree", 0), go.get("service_by_design", 0),
+            (", %d not required by the declared file" % go["not_required"]) if go.get("not_required") else "")
+    return text
+
+
+def _population_column(run, policy, verdict):
+    """One policy's cells of the v8 populations table, in the rows' order."""
+    pop = gate_population(run, policy)
+    if pop is None:
+        return None
+    scope = gate_scope(run, policy)
+    counts = (verdict or {}).get("counts") or {}
+    judged = judged_outcomes_text(run, counts, policy)
+    cells_ = {"selected by route": esc("%d of the run's %d scenarios (%s)" % (pop["selected"], pop["n_run"],
+                                                                            scope["routes"])),
+              "the policy's automatic exclusions": esc(gate_auto_text(run, policy))}
+    for arm, s_, e_ in pop["required"]:
+        cells_["required on %s" % arm] = "%d scenarios, %d executions (repeats included)" % (s_, e_)
+    cells_["required in all"] = esc("%d executions%s" % (pop["n_required"], judged.replace(",", ":", 1)
+                                                        if judged.startswith(",") else judged))
+    g = graphlet_population_text(policy, verdict)
+    if g:
+        cells_["area G (graphlet tools)"] = esc(g)
+    return cells_
+
+
+def gate_population_table_v8(ctx):
+    """Manifest v8's populations table: the deploy gate's policy and the other policy reported beside it in two
+    columns, each with area G's population (its graphlets block: scenarios, op calls per way, the calls W3 does not
+    expose, the service checks, what the gate judged of them)."""
+    run = ctx.run
+    gate = run.gate if isinstance(run.gate, dict) else None
+    cols = [(policy_label(run.policy), "the deploy gate", run.policy, gate)]
+    for e in getattr(run, "also_gates", None) or []:
+        if isinstance(e.get("policy"), dict) and isinstance(e.get("verdict"), dict):
+            cols.append((policy_label(e["policy"]), "", e["policy"], e["verdict"]))
+    built = [(label, note, _population_column(run, pol, ver)) for label, note, pol, ver in cols]
+    built = [b for b in built if b[2] is not None]
+    if not built:
+        return ""
+    order = ["selected by route", "the policy's automatic exclusions"]
+    for arm in sc.ARMS:
+        key = "required on %s" % arm
+        if any(key in b[2] for b in built):
+            order.append(key)
+    order += ["required in all", "area G (graphlet tools)"]
+    dec = declared_counts(run)
+    exempt = (esc("%d exclusion%s, %d check%s not required, %d relation%s excluded (appendix G)" % (
+        dec["exclusions"], "" if dec["exclusions"] == 1 else "s", dec["not_required"], "" if dec["not_required"] == 1
+        else "s", dec["relations_excluded"], "" if dec["relations_excluded"] == 1 else "s"))
+        if isinstance(getattr(run, "declared", None), dict) else "no declared file")
+    rows = []
+    for key in order:
+        if not any(key in b[2] for b in built):
+            continue
+        rows.append([esc(key)] + [b[2].get(key, "–") for b in built])
+        if key == "the policy's automatic exclusions":
+            rows.append(["the owner's exemptions"] + [exempt] * len(built))
+    width = 128.0 / len(built)
+    head = ["population"] + ["%s%s" % (tt(label), (", %s" % esc(note)) if note else "") for label, note, _ in built]
+    ungated = [a for a in ARMS if a not in ((run.policy or {}).get("arms") or [])]
+    note = (" %s is reported but not gated." % facts._join(ungated)) if ungated else ""
+    return latex.plain_table(latex.spec_p([46] + [width] * len(built)), head, rows,
+                             "the gate policies' populations: the deploy gate's and the policy reported beside it; "
+                             "exclusion entries are not distinct tests (an entry can apply to one access path or one "
+                             "repeat), and scenario counts are not added across access paths;%s" % esc(note),
+                             needspace=len(rows) + 4)
+
+
 def gate_population_table(ctx):
     """I.1's table of the gate's populations (R2-003): the route selection, the policy's automatic exclusions, the
     owner's exemptions, the required scenarios and executions per gated access path and in all, with the judged
-    executions by outcome; empty without a policy."""
+    executions by outcome; empty without a policy. Manifest v8 (a policy with a graphlets block): both policies side
+    by side with area G's rows (gate_population_table_v8)."""
     run = ctx.run
     pop = gate_population(run)
     gate = run.gate if isinstance(run.gate, dict) else None
     if pop is None or not gate:
         return ""
+    if isinstance((run.policy or {}).get("graphlets"), dict):
+        return gate_population_table_v8(ctx)
     scope = gate_scope(run)
     dec = declared_counts(run)
     rows = [["selected by route", esc("%d of the run's %d scenarios (%s)" % (pop["selected"], pop["n_run"],
@@ -1338,7 +1449,10 @@ def front_matter(ctx):
     if ctx.sample or set(ctx.chapters) != set(ctx.units.chapters):
         rows.append(("chapters built", "%s of %s (Part II holds %s; the whole-run summary is shown for context)" % (
             esc(", ".join(ctx.chapters)), esc(", ".join(ctx.units.chapters)), esc(", ".join(ctx.chapters)))))
-    return _kv_table(rows)
+    # manifest v8: area G's verdict in a box of its own under the run verdict and the deploy gate's
+    area = graphlets.area_line(ctx)
+    box = ("\\coverbox{Area G (graphlet tools)}{%s}\n\\vspace{1em}\n" % area) if area else ""
+    return box + _kv_table(rows)
 
 
 FINDING_KIND_WORDS = {
@@ -1464,6 +1578,11 @@ def gate_summary(ctx):
         counts_text = "%s executions judged%s, %s planned, %s required" % (
             counts.get("judged", "–"), judged_outcomes_text(run, counts), counts.get("planned", "–"),
             counts.get("required", "–"))
+        go = counts.get("graphlet_ops")
+        if isinstance(go, dict):
+            # manifest v8: area G's op calls beside the executions
+            counts_text += "; area G: %d op calls judged (%d agree, %d by design), %d required" % (
+                go.get("judged", 0), go.get("agree", 0), go.get("service_by_design", 0), go.get("required", 0))
         by_kind = "; ".join("%d %s" % (sum(1 for p in problems if p.get("kind") == k), k)
                             for k in gate_mod.KINDS if any(p.get("kind") == k for p in problems))
         problems_text = "%d problem%s%s" % (len(problems), "" if len(problems) == 1 else "s",
@@ -1519,10 +1638,32 @@ def stale_gate_text(run):
     pol = rec.get("policy") or {}
     return "the verdict of %s (policy %s, %s) judged other contents of %s than the run has now" % (
         str(rec.get("judged_utc") or "–")[:19].replace("T", " "), pol.get("name") or "–",
-        "PASS" if rec.get("passed") else "FAIL", ", ".join(run.gate_stale))
+        "PASS" if rec.get("passed") else "FAIL", ", ".join(STALE_NAME_WORDS.get(n, n) for n in run.gate_stale))
+
+
+# manifest v8: the gate records chapter G's inputs as one digest that includes the comparison's code
+# (compare_graphlets.input_digests), so a document built from a tree whose comparison code differs from the one that
+# judged reads the run as changed, its records unchanged; the name says so (the dry build of 2026-10-21)
+STALE_NAME_WORDS = {"graphlet_inputs": "chapter G's inputs (graphlet_inputs: one digest over the ways' records and "
+                                       "documents, the by-design tables and the comparison's code, so a document "
+                                       "built with other comparison code than the gate's reads it as changed)"}
 
 
 IDENTITY_HELD_CLAUSE = "; the recorded service commit was held to the deployed commit (I.4)"
+LIBRARY_HELD_CLAUSE = "; the recorded graphlet library commit was held to the deployed and the pinned one (I.4)"
+
+
+def library_held(run):
+    """Whether the gate held the graphlet library's commit the MCP runner recorded to a deployed commit and found it
+    equal on every invocation and to the manifest's pin (gate record library_identity; manifest v8)."""
+    gate = run.gate if isinstance(getattr(run, "gate", None), dict) else {}
+    li = gate.get("library_identity") if isinstance(gate.get("library_identity"), dict) else {}
+    rec = li.get("recorded") if isinstance(li.get("recorded"), dict) else None
+    if not li.get("expected") or not rec or not rec.get("recorded") or not rec.get("library_commits"):
+        return False
+    problems, _ = gate_mod.library_identity_problems(rec, li["expected"], (gate.get("policy") or {}).get("arms")
+                                                     or ["mcp"], li.get("pin"), True)
+    return not problems
 
 
 def identity_held(run):
@@ -1548,7 +1689,7 @@ def gate_line(ctx):
         return "\\textbf{\\large Deploy gate: %s}\\ (%s)" % (esc(word), esc(how))
     run = ctx.run
     passed = bool((run.gate or {}).get("passed"))
-    held = IDENTITY_HELD_CLAUSE if identity_held(run) else ""
+    held = (IDENTITY_HELD_CLAUSE if identity_held(run) else "") + (LIBRARY_HELD_CLAUSE if library_held(run) else "")
     if passed:
         # "by design" never hyphenated in the box (RV12)
         return "\\textbf{\\large %s}: nothing blocks (%s); %s%s; the gate covers %s; %s" % (
@@ -1921,8 +2062,9 @@ def decision_summary(ctx):
     `closing`); the per-arm outcome table is I.4's."""
     out = ctx.prose_paragraphs("decision")
     out += chapter_map_table(ctx)
-    out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n\\par\\endgroup\\medskip\n\n" % (
-        verdict_line(ctx), gate_line(ctx))
+    area = graphlets.area_line(ctx, cover=False)
+    out += "\\begingroup\\sffamily\n\\bline{run verdict}{%s}\n\\bline{deploy gate}{%s}\n%s\\par\\endgroup\\medskip\n\n" % (
+        verdict_line(ctx), gate_line(ctx), ("\\bline{area G}{%s}\n" % area) if area else "")
     out += ctx.prose_paragraphs("decision", "verdict", optional=True)
     out += gate_population_table(ctx)
     out += attention_table(ctx)
@@ -2427,6 +2569,12 @@ def provenance_table(ctx):
             (", %s" % esc(loop.get("state"))) if loop.get("state") else "",
             ("%+.3f s applied to direct-local" % applied) if applied is not None else "not applied")))
     rows.append(("comparison", comparison_lines_text(run, short=True)))
+    lib = library_identity_text(run)
+    if lib:
+        rows.append(("graphlet library", lib))
+    gtable = by_design_g_table_text(run)
+    if gtable:
+        rows.append(("area G by-design table", gtable))
     for entry in getattr(run, "also_gates", None) or []:
         rows.append(("other gate policy", esc(also_gate_text(entry, run))))
     if run.reruns:
@@ -2455,6 +2603,30 @@ def policy_routes(pol):
     """The routes a policy selects by (its counts.by_route), in the document's order."""
     routes = list(((pol or {}).get("counts") or {}).get("by_route") or {})
     return sorted(routes, key=lambda r: (ROUTE_ORDER.index(r) if r in ROUTE_ORDER else len(ROUTE_ORDER), r))
+
+
+def library_identity_text(run):
+    """I.4's line on the graphlet library (manifest v8): the commit the MCP runner recorded, the manifest's pin and the
+    deployed commit given; '' for a run recording none."""
+    rec = merge_run.library_identity(run.dir, {"mcp": run.mcp_run}) if hasattr(merge_run, "library_identity") and \
+        getattr(run, "mcp_run", None) else None
+    if not isinstance(rec, dict) or not rec.get("library_commits"):
+        return ""
+    commits = rec["library_commits"]
+    pin = ((run.manifest or {}).get("graphlets") or {}).get("library_commit")
+    text = "commit %s as the MCP runner recorded it (%s)" % (
+        ", ".join(tt(_short(c, 12)) + "…" for c in commits),
+        ", ".join("%d invocations" % k for k in commits.values()))
+    if pin:
+        text += "; the manifest pins %s…%s" % (tt(_short(pin, 12)), "" if any(gate_mod.commit_matches(c, pin)
+                                                                          for c in commits) else ", " + cells.attn(
+            "not the recorded one"))
+    dep = (getattr(run, "identity", None) or {}).get("deployed_library_commit")
+    if isinstance(dep, dict) and dep.get("commit"):
+        same = all(gate_mod.commit_matches(c, dep["commit"]) for c in commits)
+        text += "; %s the deployed commit, taken from %s" % ("equal to" if same else cells.attn("not"),
+                                                             esc(dep.get("source") or "the identity input"))
+    return text
 
 
 def also_gate_text(entry, run=None):
@@ -2636,6 +2808,24 @@ def _argument_changes(prev, cur):
     return out
 
 
+def added_scenarios_text(run, added):
+    """The scenarios a manifest added, by area in the manifest's order (since manifest v8, whose 33 are area G's,
+    the stops' and T-walk-0024's warm-ups): the ids of an area when they read short (at most 60 characters as
+    ranges), its count otherwise, and the chapter that reports it."""
+    by_area, order = {}, []
+    for sid in run.order:
+        if sid in added:
+            area = (run.scenario(sid) or {}).get("area") or sid.split("-")[0]
+            if area not in by_area:
+                order.append(area)
+            by_area.setdefault(area, []).append(sid)
+    out = []
+    for a in order:
+        ids = facts.ids_ranges(by_area[a])
+        out.append("%s (chapter %s)" % (ids if len(ids) <= 60 else "%d scenarios" % len(by_area[a]), a))
+    return "; ".join(out)
+
+
 def since_previous(ctx):
     """I.4's 'Since the previous edition' (the reader review of the v7 document, RV7): computed from the previous
     edition's run given as an input (make_doc --previous, reader.PreviousRun): the scenarios, the manifest's MCP marks
@@ -2655,6 +2845,8 @@ def since_previous(ctx):
     else:
         items.append("%d scenarios against %d (%d added, %d removed); %d executions against %d" % (
             len(c_ids), len(p_ids), len(c_ids - p_ids), len(p_ids - c_ids), len(clines), len(plines)))
+        if (cells._num(cm.get("manifest_version")) or 0) >= 8 and c_ids - p_ids:
+            items[-1] += "; added: %s" % added_scenarios_text(run, c_ids - p_ids)
     # the manifest's MCP marks, scenario by scenario
     removed_level, removed_prop, moved, added = [], {}, [], []
     for sid in run.order:
@@ -2725,7 +2917,8 @@ def since_previous(ctx):
     for key in sorted(set(plines) | set(clines), key=lambda k: (str(k[0]), str(k[1]), str(k[2]))):
         a = (plines.get(key) or {}).get("outcome")
         b = (clines.get(key) or {}).get("outcome")
-        if a != b and key[0] in c_ids:
+        # a scenario the previous manifest lacks is counted under 'added' above, not as changed outcomes
+        if a != b and key[0] in c_ids and key[0] in p_ids:
             changes.setdefault((a, b), []).append(key)
     if changes:
         parts = []
@@ -2805,8 +2998,10 @@ def _agreement_counts(ctx, sids):
         mc = (e.get("mcp_agreement") or {}).get("class")
         if dc:
             direct[dc] = direct.get(dc, 0) + 1
-        if mc == "missing" and not cells.planned_on(run, sid, "mcp"):
-            # no MCP execution because the plan runs the test on the direct access paths alone: not missing (M1)
+        if mc in ("missing", "not_implemented_mcp") and not cells.planned_on(run, sid, "mcp"):
+            # no MCP execution because the plan runs the test on the direct access paths alone: not missing (M1),
+            # nor not implemented (manifest v8's warm-ups of the long walk and the stops' base requests carry the
+            # mark but the plan schedules no MCP execution for them: their standing is '–', as I.1 counts them)
             mc = "not_planned"
         if mc:
             mcp[mc] = mcp.get(mc, 0) + 1
@@ -2831,6 +3026,9 @@ def _agreement_counts(ctx, sids):
                 mcp.get("disagree", 0), (", %d missing" % mcp["missing"]) if mcp.get("missing") else "")
     if mcp.get("not_planned"):
         mtext += ", %d with no MCP execution planned" % mcp["not_planned"]
+    if mcp.get("no_direct_reference"):
+        # manifest v8's stop scenarios run on MCP alone (direct_not_run): judged by their own checks, no pair
+        mtext += ", %d run via MCP only (no direct answer to compare with)" % mcp["no_direct_reference"]
     return esc(dtext), esc(mtext)
 
 
@@ -4226,6 +4424,11 @@ def chapter(ctx, ch):
         out += "Every property check of this chapter was passed by at least one execution of each test.\n\n"
     out += "\\parhead{Background}\n"
     out += background(ctx, prose, values)
+    # manifest v8: chapter G's five-way comparison and chapter S's stop records, before the families' tables
+    if any(isinstance(ctx.run.scenario(s).get("graphlet"), dict) for s in sids):
+        out += graphlets.chapter_g_sections(ctx)
+    if any(isinstance((ctx.run.scenario(s).get("mcp") or {}).get("flow"), dict) for s in sids):
+        out += graphlets.chapter_s_sections(ctx)
     # the compact record key right before the first family's tables (re-verification N-1)
     out += record_key_paragraph(ctx, ch)
     return out + body
@@ -4536,6 +4739,7 @@ def closing_values(ctx):
             b = ((t.get(arm) or {}).get("by_host_cache") or {}).get(cells.WARM_AFTER_INTERRUPTED) or {}
             wai += (b.get("wall") or {}).get("n") or 0
     v["warm_after_interrupted_n"] = str(wai)
+    v["warm_after_interrupted_one"] = wai == 1   # the singular (the shadow run of 2026-10-20 had one)
     hc = run.comp.get("host_cache") or {}
     v["warm_window_s"] = fmt_n(hc.get("warm_window_s", 60), 0)
     totals = s.get("totals") or {}
@@ -4814,6 +5018,8 @@ def closing(ctx):
     if wai:
         out += ("%d execution%s ran warm after an interrupted execution and %s counted in neither bucket.\n\n" % (
             wai, "" if wai == 1 else "s", "is" if wai == 1 else "are"))
+    if (cells._num((ctx.run.manifest or {}).get("manifest_version")) or 0) >= 8:
+        out += resources.section(ctx)   # Timing 8, the resources per task (manifest v8 on)
     return out
 
 
@@ -5143,6 +5349,13 @@ def _sort_key(term):
     return t
 
 
+def glossary_for(entries, manifest_version):
+    """The glossary entries a document of |manifest_version| prints: an entry with `since` (a term of a later
+    manifest, area G's and the stops' since v8) only from that version on."""
+    version = cells._num(manifest_version) or 0
+    return [e for e in entries if not (cells._num(e.get("since")) and version < cells._num(e.get("since")))]
+
+
 def glossary(ctx):
     """Appendix D: the full record key first (labelled rk:D, linked from every matrix's legend and from the
     compact key of I.3: re-verification N-1), then the short glossary of glossary.json ({term, definition | text,
@@ -5174,7 +5387,8 @@ def glossary(ctx):
         # two columns at footnote size (READ-020: readable at ordinary page size, two pages if need be)
         out += ("\\begin{multicols}{2}\\footnotesize\\raggedright\\setlength{\\columnsep}{5mm}"
                 "\\setlength{\\parskip}{0pt}\n")
-        for e in sorted(entries, key=lambda e: _sort_key(e["term"])):
+        for e in sorted(glossary_for(entries, (ctx.run.manifest or {}).get("manifest_version")),
+                        key=lambda e: _sort_key(e["term"])):
             text = inline(ctx.fill(e.get("definition") or e.get("text") or ""))
             see = e.get("see")
             see_text = inline(", ".join(str(x) for x in see)) if isinstance(see, list) and see else None
@@ -5328,7 +5542,10 @@ EVIDENCE_FILE = "evidence.json"
 EVIDENCE_RUN_FILES = ("manifest.json", "run.json", "run.reevaluated.json", "executions.jsonl",
                       "executions.reevaluated.jsonl", "compare.json", "compare.reevaluated.json", "reevaluated.json",
                       "plan.json", "orchestrator.json", "samples.jsonl", "gate.json", "gate.reevaluated.json",
-                      "arms/direct-local/run.json", "arms/direct-remote/run.json", "arms/mcp/run.json")
+                      "arms/direct-local/run.json", "arms/direct-remote/run.json", "arms/mcp/run.json",
+                      # manifest v8: the engine container's memory snapshots Timing 8 reads (task_resources), when
+                      # the run directory holds them (written by hand at the run's start and end)
+                      "host_memory.json")
 
 
 def _file_sha256(path):
@@ -5372,6 +5589,61 @@ def _recorded_identity_evidence(run):
             "invocations": rec.get("invocations")}
 
 
+def by_design_g_table_text(run):
+    """I.4's area G by-design table (manifest v8): its version, cases, service commit and sha256 as the comparison
+    read it, and whether the deploy gate's policy pins it; None before v8."""
+    g = graphlets.data(run)
+    if g is None or g.get("error"):
+        return None
+    _, info = graphlets.by_design_g_table(run)
+    if not info:
+        return "none read (appendix B)"
+    text = "version %s, %s case%s, service commit %s…, sha256 %s…" % (
+        esc(info.get("version")), esc(info.get("cases")), "" if info.get("cases") == 1 else "s",
+        tt(_short(info.get("service_commit"), 12)), tt(_short(info.get("sha256"), 12)))
+    pin = (((run.policy.get("graphlets") or {}).get("by_design_g_table") or {}) if isinstance(
+        getattr(run, "policy", None), dict) else {}).get("sha256")
+    if pin:
+        text += "; the deploy gate's policy pins it" if pin == info.get("sha256") else \
+            "; \\textbf{not} the table the deploy gate's policy pins (%s…)" % tt(_short(pin, 12))
+    return text
+
+
+def _graphlet_input_digests(run):
+    """compare_graphlets.input_digests of a run with area G scenarios (manifest v8), computed once; None before v8
+    or when it cannot be computed."""
+    if hasattr(run, "_graphlet_digests"):
+        return run._graphlet_digests
+    out = None
+    g = graphlets.data(run)
+    if g is not None and not g.get("error"):
+        try:
+            import compare_graphlets as cg
+            out = cg.input_digests(run.dir)
+        except Exception:   # evidence.json then lists the run's files without chapter G's digests
+            out = None
+    run._graphlet_digests = out
+    return out
+
+
+def graphlet_evidence(run):
+    """evidence.json's area G entries (manifest v8; {} before): area G's by-design table the comparison read (its
+    path inside the run directory when it is the run's snapshot) and chapter G's input digests that are not files of
+    the run (the documents' and the export files' trees, the by-design tables, the comparison's code)."""
+    dig = _graphlet_input_digests(run)
+    if not dig:
+        return {}
+    _, info = graphlets.by_design_g_table(run)
+    path = (info or {}).get("path")
+    if path:
+        rel = cmp.run_relative(path, run.dir)
+        path = rel if rel != path else latex.public_paths(path)
+    return {"by_design_table_g": {"path": path, "sha256": (info or {}).get("sha256"),
+                                  "cases": (info or {}).get("cases")} if info else None,
+            "graphlet_inputs": dict((k, v) for k, v in sorted(dig.items())
+                                    if not ("/" in k or k.endswith(".json") or k.endswith(".jsonl")))}
+
+
 def evidence_manifest(ctx):
     """{document, run_directory, inputs, gate, by_design_table, service_identity} of this build (V6-004): every run
     file the document read (the set it read marked), the gate's record and policies, the declared file, the
@@ -5389,6 +5661,14 @@ def evidence_manifest(ctx):
                 other = True
             inputs.append({"path": name, "sha256": _file_sha256(path), "role": "present, not read" if other
                            else "read by this document"})
+    listed = set(i["path"] for i in inputs)
+    for name, sha in sorted((_graphlet_input_digests(run) or {}).items()):
+        # chapter G's comparison reads these records (compare_graphlets.input_digests: the ways' op records, the
+        # MCP's job and identity records); its digests over the documents, files, tables and code are listed apart
+        if "/" in name or name.endswith(".json") or name.endswith(".jsonl"):
+            if name not in listed and sha:
+                inputs.append({"path": name, "sha256": sha, "role": "read by this document (chapter G)"})
+                listed.add(name)
     if getattr(run, "mcp_raw_files", None):
         # the MCP runner's raw records, read for the tool names I.2's scope note prints (W3)
         inputs.append({"path": "arms/mcp/raw/", "files": run.mcp_raw_files,
@@ -5402,13 +5682,17 @@ def evidence_manifest(ctx):
              "verdict": None if not isinstance(e.get("verdict"), dict) else
              ("PASS" if e["verdict"].get("passed") else "FAIL")} for e in (getattr(run, "also_gates", None) or [])]
     dec = run.declared if isinstance(run.declared, dict) else None
-    dec_path = os.path.join(reader.SUITE_DIR, "gate", dec["_file"]) if dec and dec.get("_file") else None
+    dec_path = (dec.get("_path") or (os.path.join(reader.SUITE_DIR, "gate", dec["_file"]) if dec.get("_file")
+                                     else None)) if dec else None
     table = run.table_meta or {}
     ident = run.identity if isinstance(getattr(run, "identity", None), dict) else None
     record = ctx.data_files.get(GATE_PROBLEMS_FILE)
     return {
         "path_bases": {"inputs": "the run directory (run_directory below; metagraph/scripts/suite/runs/ is "
-                                 "git-ignored: the directory travels as a copy, its files checked by these sha256)",
+                                 "git-ignored: the directory travels as a copy, its files checked by these sha256)"
+                       if str(latex.public_paths(run.dir) or "").startswith(latex.SUITE_TREE) else
+                       "the run directory (run_directory below, written outside the repository's working tree: the "
+                       "directory travels as a copy, its files checked by these sha256)",
                        "gate.record": "the document's build directory, beside doc.pdf and this file",
                        "other paths": "the repository root"},
         "document": {"run_id": run.run_id(), "set": "re-evaluated" if run.reevaluated else "recorded",
@@ -5425,9 +5709,11 @@ def evidence_manifest(ctx):
                      "_file"), "sha256_file": _file_sha256(dec_path) if dec_path else None,
                      # the policy pins the declared file by the sha256 of its canonical JSON (gate_policy.py)
                      "sha256_canonical": hashlib.sha256(sc.canonical_json(dict(
-                         (k, v) for k, v in dec.items() if k != "_file"))).hexdigest()}},
+                         (k, v) for k, v in dec.items() if k not in ("_file", "_path")))).hexdigest()}},
         "by_design_table": {"path": latex.public_paths(table.get("path")), "sha256": table.get("sha256")}
         if table.get("path") else None,
+        # manifest v8: area G's own table and every input of chapter G's comparison (absent before v8)
+        **graphlet_evidence(run),
         "service_identity": _identity_evidence(run, ident),
         # the previous edition's run, an input of 'Since the previous edition' (make_doc --previous)
         "previous_run": None if getattr(run, "previous", None) is None else {
@@ -5540,6 +5826,36 @@ def identity_note_text(ctx):
     return _break_hex(esc(text)), notes
 
 
+def library_note_text(ctx):
+    """(appendix F's note on the graphlet library's identity in plain words, the gate notes it replaces): manifest v8,
+    the library commit the MCP runner recorded on every invocation against the deployed one and the manifest's pin;
+    ('', []) for a run recording none (v4..v7)."""
+    run = ctx.run
+    gate = run.gate if isinstance(run.gate, dict) else {}
+    li = gate.get("library_identity") if isinstance(gate.get("library_identity"), dict) else {}
+    rec = li.get("recorded") if isinstance(li.get("recorded"), dict) else None
+    if not rec or not rec.get("recorded") or not rec.get("library_commits"):
+        return "", []
+    expected, pin = li.get("expected"), li.get("pin")
+    arms = (gate.get("policy") or {}).get("arms") or ["mcp"]
+    problems, notes = gate_mod.library_identity_problems(rec, expected, arms, pin, isinstance(
+        (gate.get("policy") or {}).get("graphlets"), dict) or bool(pin))
+    commits = rec["library_commits"]
+    n = rec.get("invocations") or sum(commits.values())
+    if problems or len(commits) != 1:
+        return "", []
+    commit = list(commits)[0]
+    text = "the graphlet library's commit, as the MCP runner recorded it, is %s on all %d MCP invocations" % (commit, n)
+    if pin:
+        text += ", the commit the manifest pins"
+    if expected:
+        dep = (getattr(run, "identity", None) or {}).get("deployed_library_commit") or {}
+        text += ", and equals the deployed one (%s)" % (dep.get("source") or "as the gate's record names it")
+    else:
+        text += "; the gate was given no record of the deployed library, so this is checked against the pin only"
+    return _break_hex(esc(text)), notes
+
+
 def by_design_tie_text(run):
     """The by-design table tied to the service that answered (RV3): the commit and date it was generated at, and how
     many of the run's by-design pairs were verified against the deployed commit (the identity input's, equal to the
@@ -5578,7 +5894,8 @@ def gate_problems(ctx):
     if not isinstance(gate, dict):
         return "\\textbf{%s}: %s.\n\n" % (esc(word), esc(how))
     out = "\\textbf{%s}: %s; %s; %s%s.\n\n" % (esc(word), esc(how), esc(counts_text), esc(problems_text),
-                                             esc(IDENTITY_HELD_CLAUSE) if identity_held(run) else "")
+                                             (esc(IDENTITY_HELD_CLAUSE) if identity_held(run) else "")
+                                             + (esc(LIBRARY_HELD_CLAUSE) if library_held(run) else ""))
     out += "%s What the gate read: %s.\n\n" % (inline(gate_decision_text(run)), esc(gate_read_text(run)))
     out += gate_ledger(ctx)
     problems = [p for p in (gate.get("problems") or []) if isinstance(p, dict)]
@@ -5652,7 +5969,10 @@ def gate_problems(ctx):
     ident_text, ident_notes = identity_note_text(ctx)
     if ident_text:
         out += "{\\small\\color{black!60}note: %s}\\par\n" % ident_text
-    for n in [x for x in (gate.get("notes") or []) if x not in ident_notes][:6]:
+    lib_text, lib_notes = library_note_text(ctx)
+    if lib_text:
+        out += "{\\small\\color{black!60}note: %s}\\par\n" % lib_text
+    for n in [x for x in (gate.get("notes") or []) if x not in ident_notes and x not in lib_notes][:6]:
         out += gate_note_tex(n)
     return out + "\n"
 
@@ -5876,6 +6196,7 @@ def appendices(ctx):
     out += check_catalogue(ctx)
     out += latex.section("B\\qd %s" % titles["B"], "app:B")
     out += by_design_table(ctx)
+    out += graphlets.by_design_g_section(ctx)   # manifest v8: area G's own table ('' before)
     out += latex.section("C\\qd %s" % titles["C"], "app:C", needspace=12)
     out += relations_appendix(ctx)
     out += latex.section("D\\qd %s" % titles["D"], "app:D")

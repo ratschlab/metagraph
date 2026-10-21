@@ -1570,6 +1570,10 @@ def chapter_facts(ctx, ch):
     # it imports this module)
     import sections as _sections
     v["memory_note"] = _sections.memory_chapter_note(ctx, ch) if getattr(ctx, "run", None) is not None else ""
+    # manifest v8: chapter G's five-way comparison and chapter S's stop records (doc/graphlets.py)
+    if getattr(ctx, "run", None) is not None:
+        import graphlets as _graphlets
+        v.update(_graphlets.chapter_values(ctx, ch))
     cold_by_family = [(fam[fid]["n_cold_dl"], fid) for fid in fams if fam[fid]["n_cold_dl"]]
     v["cold_dl_families"] = ", ".join("%s %d" % (fid, n) for n, fid in sorted(cold_by_family, key=lambda t: (-t[0], t[1])))
     held, unsupported, items = _claims(ctx, ch, fam)

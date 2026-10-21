@@ -1579,8 +1579,9 @@ class VerifyRoundTwoTest(unittest.TestCase):
         overview = sc.read_json(os.path.join(PROSE_DIR, "overview.json")) or {}
         heads = [p.split("*")[1] for p in overview["sections"]["methods"]["paragraphs"]]
         # RV14: what the suite does not cover via MCP follows the access paths (manifest v7 and later)
-        self.assertEqual(heads, ["The three access paths.", "Not covered.", "Execution order.", "Ground truth.",
-                                 "Times and load."])
+        # manifest v8: a second "Not covered" paragraph, its own version's (only one prints in a build)
+        self.assertEqual(heads, ["The three access paths.", "Not covered.", "Not covered.", "Execution order.",
+                                 "Ground truth.", "Times and load."])
         self.assertEqual(len(overview["appendix_F"]["rules"]), 2)
         self.assertNotIn("*Coverage.*", json.dumps(overview["sections"]["provenance"]))
 
@@ -4743,7 +4744,9 @@ class ReadabilityReviewTest(unittest.TestCase):
         self.assertIn("*The result units.*", decision["paragraphs"][1])
         self.assertIn("*Two ways in.*", decision["paragraphs"][2])
         self.assertTrue(decision["paragraphs"][3].startswith("*Scope.*"))
-        self.assertEqual([e["chapter"] for e in decision["chapter_map"]], ["R", "T", "P", "L", "X", "M", "Q", "C", "N", "D"])
+        # G and S since manifest v8 (a v5 to v7 build's units have neither chapter, so its map is as it was)
+        self.assertEqual([e["chapter"] for e in decision["chapter_map"]],
+                         ["R", "T", "P", "L", "X", "M", "Q", "C", "N", "D", "G", "S"])
         ctx = self.ctx(overview=self.overview)
         table = sections.chapter_map_table(ctx)
         self.assertIn("where to look: the chapters by the question they answer", table)

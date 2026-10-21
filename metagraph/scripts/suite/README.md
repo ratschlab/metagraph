@@ -5182,6 +5182,57 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   differs and, when the build lacks the stop scenarios the policies require, `--stop-scenarios`, confirmed by building
   again with the flag toggled. `--freeze` with `--out` / `--smoke-out` outside manifest/ is a dry freeze, checked alike.
 
+## Manifest v8: the resources per task (lane S-res, 2026-10-21)
+The owner's request: each task's cost in the report, CPU time and memory ("the second critical thing next to cpu
+time"). The engine (gr/task-resources) states per request of POST /traverse, /resolve and /pattern, top level and per
+seed / pattern entry, `timing.cpu_ms` (the request's thread), `timing.page_faults {minor, major}` (Linux) and
+`work.memory_bytes` (the peak of the request's memory account). Report-only: no check, digest, identity or gate verdict
+reads them (cpu_ms and the faults vary run to run; memory_bytes is deterministic but stays report-only in v8).
+
+- `task_resources.py`: per execution the three figures (null when nothing states them: an older engine, a refusal),
+  each from the line's `server` block, else from the raw answer's body (async's runner keeps the engine's
+  memory_bytes of an MCP /traverse or /resolve only there); an answer stating a figure per entry only (an MCP
+  /pattern: `timing.entries` / `by_pattern`) gives the entries' sum (the maximum for memory_bytes); `sources` names
+  where each came from. Summaries per area, arm and host-cache state (compare.timing_cache: cold, warm, warm after a
+  cut, as Timing 7) and per test and arm with the host-cold execution apart from the warm repeats: n, p10, p50, p90,
+  max of cpu_ms, elapsed_ms, cpu/elapsed, minor and major faults, memory_bytes; the 20 tests with the most CPU time,
+  the largest memory account and the most major faults. Its docstring defines `host_memory.json`.
+- `host_memory.json` (optional, in the run directory, written by hand at the run's start and end): `{"before": SNAP,
+  "after": SNAP}`, SNAP the engine container's cgroup v2 figures flat (`current`, `peak`, `max`, `stat.*`,
+  `events.*`, `page_bytes`, `host_available_kib`, `label`, `utc`, `container`). Levels per snapshot (`peak` is since
+  the container started), counters as after minus before; pages evicted under the container's limit
+  (`pgsteal_direct`) apart from those the host's reclaim evicted (`pgsteal_kswapd`), refaults, in pages and GiB.
+- compare.json: `summary.task_resources` and, per scenario and arm, `task_resources` (the executions' figures, the
+  host states' statistics). report.md: "Resources per task" (sources per arm, CPU time beside the engine's elapsed
+  time, major faults and memory per area / arm / host cache, the heaviest tests, host_memory.json) for a manifest v8
+  or later, a run whose answers state cpu_ms or page faults, or a run with host_memory.json; the v1-v7 reports are
+  unchanged. The report and the document compute the figures from the lines, whatever compare.json holds.
+- The document (manifest v8): Timing 8 "Resources per task" (doc/resources.py, prose closing.json `resources`):
+  what each figure counts and what it does not, the tables above, the service's graphlet-tool figures (area G: "not
+  stated" unless an answer carries `usage` / `cpu_ms`) and the container's memory over the run.
+- Tests: tests/test_task_resources.py.
+
+## The v8 results document: the real build in one step (lane S-dry, 2026-10-21)
+`doc/build_real_v8.sh RUN_DIR MANIFEST POLICY [ALSO_POLICY ...]` (environment: `OUT`, a new folder; `IDENTITY`, the
+deployed service's identity input; `PREVIOUS`, default the v7 baseline run; `RECORDED=1`; `XELATEX`; `ALLOW_DIRTY=1`)
+builds the document of a v8 run with make_doc.py and writes the bundle the v7 edition shipped: doc.pdf, evidence.json,
+gate_problems.json, the identity input and SHA256SUMS. It refuses inputs that disagree (the run's manifest content
+against MANIFEST's, any policy pinning another manifest, an existing OUT) and a dirty tree (evidence.json names doc/'s
+last commit as the generator). The unit mapping comes from MANIFEST (`doc/units_v8_build.py MANIFEST OUT`, v7's mapping
+plus R's warm-ups and chapters G and S; doc/units/suite_v8.json is the one of the frozen manifest), the declared file
+is the deploy policy's own, area G's by-design table is the run's snapshot as the comparison reads it. It prints the
+checks: pages, missing characters, undefined references, overfull boxes (the cover's 1.1 pt box is the known one),
+placeholders, make_doc's warnings, local paths in the PDF text, every evidence input against the run directory, the
+gate record's sha256, the verdicts, the G table against every policy's pin, chapter G's input digests and the
+mapping's `_manifest`; exit 0 when all are clean, 1 with a check to look at (a FAIL verdict among them), 2 refused,
+3 the build failed. evidence.json of a v8 run lists, beside v7's inputs, the records chapter G read
+(compare_graphlets.input_digests), its digests over the documents, export files, tables and code (`graphlet_inputs`),
+area G's table (`by_design_table_g`) and host_memory.json when present. The v8 baseline:
+
+    OUT=<new folder> IDENTITY=<identity file> sh doc/build_real_v8.sh \
+        ~/.cache/metagraph-traverse-plans/2026-10-19/v8/baseline/<dir>/runs/<run id> manifest/suite_v8.json \
+        gate/policy_v8_rtp_mcp.json gate/policy_v8_rt_mcp.json
+
 ## Glossary
 
 The full vocabulary of the suite and of its results document (`doc/make_doc.py`), one entry per term, in alphabetical order (a leading article ignored). The document's appendix D carries a one-page selection of about 25 of these terms and points here for the rest, so this section is **version-pinned**: it was written for the checks of commit c11db9dd and manifest version 4, and a results document names on its title page the checks commit and the manifest version it was built with; when the rules change, change the entry here in the same commit as the code, and the pin below.

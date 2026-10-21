@@ -258,6 +258,52 @@
    "see": [
     "column label, header label"
    ]
+  },
+  {
+   "term": "graphlet, graphlet tools",
+   "since": 8,
+   "definition": "A /traverse answer with `output.detail: graphlet`: the walks of one seed as one document, which the service stores in its MGT form (SPEC-labeled-traversal-core section 7.5). The graphlet tools read it: summary, walks, walk, labels, sequence, export and compare in the service and the library, and support, claims, splits, subtrie, save and load in the library only (chapter G).",
+   "see": [
+    "way (W1 to W5)"
+   ]
+  },
+  {
+   "term": "way (W1 to W5)",
+   "since": 8,
+   "definition": "One of the five ways an area G op call runs (DESIGN-v8 section 2): W1 direct-local's graphlet answer read by the library, W2 direct-remote's read by the library, W3 the service's graphlet tools on its stored body, W4 the body the MCP exported read by the library, W5 the suite's own reading of the `detail: full` twin and the MGT tokens, with no library import. W1 to W4 agreeing is consistency; W5 is the one correctness check.",
+   "see": [
+    "consistency, correctness coverage"
+   ]
+  },
+  {
+   "term": "consistency, correctness coverage",
+   "since": 8,
+   "definition": "Consistency: the ways answer alike (they could share a library defect). Correctness: W5's independent reading agrees on the fields it checks, read from an engine value or a SPEC token, or re-derived from a DESIGN formula (which catches an implementation slip, not a wrong rule). A field W5 does not check is consistency only.",
+   "see": [
+    "way (W1 to W5)"
+   ]
+  },
+  {
+   "term": "op call, op plan, selector",
+   "since": 8,
+   "definition": "An op call is one tool call of an area G scenario's op plan, run on each way that applies; an argument is a literal or a selector resolved at run time from the same way's earlier answers, recorded as resolved and compared across the ways before their answers are.",
+   "see": [
+    "way (W1 to W5)"
+   ]
+  },
+  {
+   "term": "pre-check (area G)",
+   "since": 8,
+   "definition": "Checked before a scenario's op calls are compared: the bodies of W1, W2 and W4 equal (body), their envelopes equal but for the per-request values (envelope), the full twin's paths equal the graphlet's (twin), the strategy equal (strategy), the manifest's structural preconditions met (preconditions), and every MCP call's library commit the deployed and pinned one (library commit).",
+   "see": [
+    "way (W1 to W5)"
+   ]
+  },
+  {
+   "term": "stop, release record",
+   "since": 8,
+   "definition": "traverse_stop ends a running walk or discovery via MCP (chapter S). The service's admin job record states each host attempt's release once (reason, site, decision, detail): on a healthy host a /traverse stop's is the worker's completed, a /resolve stop's the stop site's grace; a null release on a terminal job reads inconclusive.",
+   "see": []
   }
  ],
  "records_key": {
