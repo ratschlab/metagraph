@@ -25,9 +25,9 @@ def df_from_align_result(json_res):
     # flatten out json result
     lst = [(alignment['cigar'],
             alignment['score'],
-            alignment['max_score'],
+            alignment.get('max_score'),
             alignment['sequence'],
-            alignment['orientation'],
+            alignment.get('orientation'),
             result['seq_description'])
            for result in json_res for alignment in result['alignments']]
 
