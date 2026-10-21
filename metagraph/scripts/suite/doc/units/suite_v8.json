@@ -1,9 +1,9 @@
 {
- "_about": "Unit mapping of manifest v8 (content_sha256 432f478ebd74bcdca67dea9db16825cb5650fb2d0108db6021bcbbb10b6072b4, 758 scenarios) for the suite results document: every scenario -> chapter, family, unit, unit_type, variant and optional group; _units carries each unit's title, type and property line; _families each family's chapter and title. Built by units_v8_build.py from the v7 mapping: v7's entries, units and families as they are; R-warm's unit gains the ten warm-ups of T-walk-0024; chapter G (the graphlet tools: the corpus, its compare partners, the long walk's warm-ups) and chapter S (the stops and their base requests) are new.",
+ "_about": "Unit mapping of manifest v8 (content_sha256 1cffcea3d67feb82bdaa7fee88fc8dc2b2c7e8d52c6105d272a659f62152e570, 760 scenarios) for the suite results document: every scenario -> chapter, family, unit, unit_type, variant and optional group; _units carries each unit's title, type and property line; _families each family's chapter and title. Built by units_v8_build.py from the v7 mapping: v7's entries, units and families as they are; R-warm's unit gains the ten warm-ups of T-walk-0024; chapter G (the graphlet tools: the corpus, its compare partners, the long walk's warm-ups) and chapter S (the stops and their base requests) are new.",
  "_manifest": {
   "version": 8,
-  "content_sha256": "432f478ebd74bcdca67dea9db16825cb5650fb2d0108db6021bcbbb10b6072b4",
-  "scenarios": 758
+  "content_sha256": "1cffcea3d67feb82bdaa7fee88fc8dc2b2c7e8d52c6105d272a659f62152e570",
+  "scenarios": 760
  },
  "_chapters": {
   "R": "Resolve",
@@ -2836,12 +2836,14 @@
    "unit_type": "list",
    "unit_title": "the compare partners",
    "property": "The partner graphlet of a `graphlet_compare` pair: fetched and processed as the corpus graphlets, its own op plan small; the pair's compare calls are counted under its corpus graphlet.",
-   "n": 4,
+   "n": 6,
    "members": [
     "G-pair-radius-0001",
     "G-pair-seeds-0001",
     "G-pair-cap-0001",
-    "G-pair-annot-0001"
+    "G-pair-annot-0001",
+    "G-pair-rows-0001",
+    "G-pair-rows-0002"
    ]
   },
   "G-warm": {
@@ -9156,6 +9158,22 @@
   "unit_type": "list",
   "variant": "output.sequences false (no_bases, compare unknown) (no_bases.1)",
   "unit_title": "the corpus graphlets, fetched and processed five ways"
+ },
+ "G-pair-rows-0001": {
+  "chapter": "G",
+  "family": "G-pair",
+  "unit_id": "G-pair",
+  "unit_type": "list",
+  "variant": "a column walk at a small cap and a trie of one seed (compare rows, W3 paging) (b: over_8mib.1)",
+  "unit_title": "the compare partners"
+ },
+ "G-pair-rows-0002": {
+  "chapter": "G",
+  "family": "G-pair",
+  "unit_id": "G-pair",
+  "unit_type": "list",
+  "variant": "a column walk at a small cap and a trie of one seed (compare rows, W3 paging) (a: cut_lists.2)",
+  "unit_title": "the compare partners"
  },
  "S-stop-0001": {
   "chapter": "S",

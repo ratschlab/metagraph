@@ -73,8 +73,15 @@ class V8MappingTest(unittest.TestCase):
                          ["G-corpus", "G-pair", "G-warm", "S-base", "S-stop"])
         units = units_mod.resolve(m8, units_mod.load_mapping(os.path.join(DOC, "units", "suite_v8.json")))
         self.assertEqual(units_mod.validate(units, m8), [])
-        self.assertEqual(len(units.chapter_scenarios("G")), 19)
+        self.assertEqual(len(units.chapter_scenarios("G")), sum(1 for k, v in raw8.items()
+                                                               if not k.startswith("_") and v["chapter"] == "G"))
         self.assertEqual(len(units.chapter_scenarios("S")), 4)
+        # the frozen manifest v8 (the owner's freeze, 2026-10-21): the mapping is keyed to it and maps every scenario
+        frozen = sc.read_json(os.path.join(SUITE, "manifest", "suite_v8.json"))
+        self.assertEqual(raw8["_manifest"]["content_sha256"], frozen["content_sha256"])
+        self.assertEqual(units_mod.default_mapping_path(frozen), os.path.join(DOC, "units", "suite_v8.json"))
+        self.assertEqual(units_mod.validate(units_mod.resolve(frozen, units_mod.load_mapping(
+            os.path.join(DOC, "units", "suite_v8.json"))), frozen), [])
 
 
 class ChapterGTest(unittest.TestCase):
