@@ -1360,21 +1360,28 @@ def _variant(c: dict, cid: str, overrides: Optional[dict] = None, seed: Optional
 # evidence (every compare of the shadow run counted 0 rows); of the rehearsed candidates on one seed, cut_lists.2 (a
 # column walk of T-labels-0003's eco seed at 50 bp, cap 8) and over_8mib.1 (a trie of the same seed at 500 bp) do: on
 # rehearsal 1's documents their walks compare counts 298 rows (claims 310, prefix_subset 300), all qualified, whole in
-# 177,051 bytes; cmp-paged-w3 pages it (2 whole pages at 131,072, and at W3's budget less 512). Both run every way;
-# b (the trie) first, without compares of its own.
+# 159,694 bytes (the library's compact JSON); cmp-paged-w3 pages it (2 whole pages at 131,072, and at W3's budget less
+# 512). Both run every way; b (the trie) first, without compares of its own. b is not its candidate's slot's graphlet
+# (over_8mib, v9: its body is not over 8 MiB): the corpus keeps it as a partner (rehearse_g.partner_passed: every
+# verdict but the slot's), and its scenario, like every pair partner's, carries the slot of the graphlet it pairs with
+# and no conditional tag (VERIFY-D-R5 R5-4).
 ROWS_PAIR = {"a": "cut_lists.2", "b": "over_8mib.1", "id_a": "G-pair-rows-0002", "id_b": "G-pair-rows-0001"}
 ROWS_PAIR_PAGE = 131072
 
 
 def rows_pair(cands: List[dict], corpus: dict, library_commit: Optional[str]) -> List[dict]:
     """The rows pair's two scenarios (b, then a with its compares and cmp-paged-w3), [] when a candidate is missing
-    or the corpus holds no rehearsal of it (a provisional corpus)."""
+    or the corpus holds no passing rehearsal of it (a provisional corpus; b may pass as a partner: partner_passed)."""
     by = dict((c["cid"], c) for c in cands)
     entries = corpus.get("candidates") or {}
     ca, cb = by.get(ROWS_PAIR["a"]), by.get(ROWS_PAIR["b"])
-    if ca is None or cb is None or not (entries.get(ca["cid"]) or {}).get("preconditions") or \
-            not (entries.get(cb["cid"]) or {}).get("preconditions"):
+
+    def kept(c: Optional[dict]) -> bool:
+        e = (entries.get(c["cid"]) or {}) if c is not None else {}
+        return bool(e.get("preconditions")) and bool(e.get("passed") or e.get("partner_passed"))
+    if not (kept(ca) and kept(cb)):
         return []
+    cb = dict(cb, slot=ca["slot"], conditional=False)   # a pair partner: the slot it pairs with, not over_8mib's
     ida, idb = ROWS_PAIR["id_a"], ROWS_PAIR["id_b"]
     title = "area G pair rows: a column walk at a small cap and a trie of one seed (compare rows, W3 paging)"
     fb = facts_of(cb, corpus)

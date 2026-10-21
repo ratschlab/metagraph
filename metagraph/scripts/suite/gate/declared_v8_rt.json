@@ -5,7 +5,7 @@
  "graphlet_not_required": [],
  "graphlet_service_checks_not_required": [],
  "manifest": {
-  "content_sha256": "b3dc1cd6a943fa4e184a1347b72c981d42b20aeb1ca56c2024afdfe96ce008ab",
+  "content_sha256": "a9c3ccb3c6836b32a8ac35cd94c5c0fda429507a427ad6bc6e78fa82bc041dc5",
   "file": "manifest/suite_v8.json"
  },
  "not_required": [],

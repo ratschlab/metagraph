@@ -70,7 +70,7 @@
  "declared": {
   "declared_version": 1,
   "file": "gate/declared_v8_rt.json",
-  "sha256": "d7850b28d96d5795c37477ff87f587e47d80ffb065c7939a52a7b5cd2ea557c4"
+  "sha256": "2b0d7bd18c012ea0dc69b5d557f6135aba6376569c067360dd7818c9a6ce28eb"
  },
  "exclusions": [
   {
@@ -1177,12 +1177,12 @@
   }
  ],
  "generated_by": "gate_policy.py",
- "generated_utc": "2026-10-21T01:57:42.850Z",
+ "generated_utc": "2026-10-21T05:40:11.542Z",
  "graphlets": {
   "by_design_g_table": {
    "cases": 7,
-   "service_commit": "f994e3e2880e3f21c51577d75926cfb35c3d4355",
-   "sha256": "c6459a2ff60becc9a8771e8c986e0099dd368897f1beaeb491036e6ebc24b0aa",
+   "service_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+   "sha256": "692e82c6ad52d25eaffe3086db2c169cfe815ea803dc540c0e45948487fbc1f1",
    "version": 1
   },
   "drift": "report_only",
@@ -20516,7 +20516,7 @@
   "whitelist_sha256": "9cb305bdfa6d6b075355e780c37b03860b611bb134f00d4e7bb0d80b48daaf42"
  },
  "manifest": {
-  "content_sha256": "b3dc1cd6a943fa4e184a1347b72c981d42b20aeb1ca56c2024afdfe96ce008ab",
+  "content_sha256": "a9c3ccb3c6836b32a8ac35cd94c5c0fda429507a427ad6bc6e78fa82bc041dc5",
   "file": "manifest/suite_v8.json",
   "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
   "manifest_version": 8,

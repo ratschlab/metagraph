@@ -143,6 +143,64 @@ class RichSet(unittest.TestCase):
         self.assertIn("one rich graphlet per seed", c["rich_note"])
 
 
+class PartnerPassed(unittest.TestCase):
+    """VERIFY-D-R5 R5-4: a pair's partner outside its slot (the rows pair's b, over_8mib.1) passes as a partner on
+    every verdict but its slot's; its corpus entry keeps what a passing candidate's keeps, passed stays false, and the
+    slot stays without it."""
+
+    VERDICTS = {"bodies": "pass", "echo": "pass", "envelope": "pass", "fit": "pass", "headroom": "pass",
+                "plan": "pass", "slot": "fail: not the slot's shape: a body over 8 MiB", "twin": "pass"}
+    FACTS = {"arms": ["left", "right"], "segments": {"left": 3, "right": 2}, "walks": {"left": 2, "right": 1},
+             "merges": {"left": 0, "right": 0}, "bases": True, "cut_lists": False, "label_names": ["562"],
+             "max_labels_per_node": 1, "walk_bp": {"left": [100, 90], "right": [80]}, "body_bytes": 305290}
+
+    def result(self, verdicts):
+        import rehearse_g
+        return {"verdicts": dict(verdicts), "passed": rehearse_g.passed(verdicts), "facts": dict(self.FACTS),
+                "times_ms": {"dl0": 1.0}, "bodies": {"dl0": "d" * 64}, "echo": {"direction": "both"}}
+
+    def test_the_entry(self):
+        import rehearse_g
+        e = rehearse_g.corpus_entry("over_8mib.1", self.result(self.VERDICTS))
+        self.assertEqual((e["passed"], e["partner_passed"]), (False, True))
+        self.assertEqual(e["preconditions"], rehearse_g.preconditions_of(self.FACTS))
+        self.assertEqual(e["service_facts"], rehearse_g.service_facts(self.FACTS))
+        self.assertEqual((e["strategy"], e["reference"]), ({"direction": "both"},
+                                                           {"body_digest": "d" * 64, "engine_ms": {"dl0": 1.0}}))
+        # another verdict failing, or a candidate no pair takes outside its slot: no partner, nothing the build reads
+        for cid, verdicts in (("over_8mib.1", dict(self.VERDICTS, twin="fail: x")),
+                              ("over_8mib.2", self.VERDICTS)):
+            e = rehearse_g.corpus_entry(cid, self.result(verdicts))
+            self.assertFalse(e["passed"])
+            self.assertNotIn("partner_passed", e)
+            self.assertNotIn("preconditions", e)
+        # a passing candidate: as before, no partner flag
+        e = rehearse_g.corpus_entry("cut_lists.2", self.result(dict(self.VERDICTS, slot="pass")))
+        self.assertTrue(e["passed"])
+        self.assertNotIn("partner_passed", e)
+        self.assertIn("preconditions", e)
+
+    def test_the_slot_keeps_only_a_passing_candidate(self):
+        import rehearse_g
+        cands = dict((c["cid"], c) for c in area_g.candidates(FakeCtx(), v7_scenarios()))
+        meta = {"G-big-c1": {"cid": "over_8mib.1", "slot": "over_8mib", "candidate": cands["over_8mib.1"]}}
+        corpus = rehearse_g.choose_corpus({"G-big-c1": self.result(self.VERDICTS)}, meta, {"G-big-c1": {}}, None)
+        self.assertIsNone(corpus["slots"]["over_8mib"]["candidate"])
+        self.assertTrue(corpus["candidates"]["over_8mib.1"]["partner_passed"])
+
+    def test_the_committed_entry_is_the_codes(self):
+        # the committed entry is what corpus_entry writes from its own record: preconditions and service facts from
+        # its facts, partner_passed from its verdicts (rehearsal 1's G-big-c1: D-scratch/r8/partner_entry.py)
+        import build_manifest as bm
+        import rehearse_g
+        e = area_g.load_corpus(bm.DEFAULT_CORPUS)["candidates"]["over_8mib.1"]
+        self.assertTrue(rehearse_g.partner_passed("over_8mib.1", e["verdicts"]))
+        self.assertEqual((e["passed"], e["partner_passed"]), (False, True))
+        self.assertEqual(e["preconditions"], rehearse_g.preconditions_of(e["facts"]))
+        self.assertEqual(e["service_facts"], rehearse_g.service_facts(e["facts"]))
+        self.assertEqual(e["reference"]["engine_ms"], e["times_ms"])
+
+
 class StopRehearsal(unittest.TestCase):
     """The stop rehearsal (rehearsal 3, VERIFY-D VD6): each stop scenario three times, interleaved, MCP only; the
     constrain / annotate partner (VD8) direct-local; the entry verdict over recorded stop_flow records."""

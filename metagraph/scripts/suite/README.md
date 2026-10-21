@@ -5144,6 +5144,12 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   no budget_respected; graphlet_list's accessed / created are not compared (drift); compare_graphlets.py as a script
   writes the by-design and service-check stages; the rows pair (G-pair-rows-0001 / -0002) gives W3 a compare with
   rows that pages (cmp-paged-w3).
+- After VERIFY-D-R5 (round 8): service_by_design_g.json's service_commit is the latest commit a case cites
+  (c60b753e), each case's source_commit its own (f994e3e2 for the first four). The rows pair's b (over_8mib.1, a
+  trie whose body is not over 8 MiB) is a pair partner, not its candidate's v9 slot: its scenario carries the slot it
+  pairs with (cut_lists) and no conditional tag, and its corpus entry is what rehearse_g.corpus_entry writes for a
+  partner that passed every verdict but its slot's (partner_passed true, passed false; the slot stays without it).
+  No judging step reads a scenario's slot or those tags: the v8 policies' required calls and checks are unchanged.
 - The v8 freeze package: gate/declared_v8_rt.json (v7's entries re-pinned, nothing of area G set aside) and
   gate/policy_v8_rt_mcp.json / policy_v8_rtp_mcp.json (v7's parameters: arms direct-local and mcp, warm_every 10,
   require_agreement false) pin manifest/suite_v8.json as `build_manifest.py --manifest-version 8 --stop-scenarios

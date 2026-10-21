@@ -1,7 +1,7 @@
 {
  "version": 1,
- "service_commit": "f994e3e2880e3f21c51577d75926cfb35c3d4355",
- "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table)",
+ "service_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+ "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20, and BY-DESIGN-G-CASES-2.json of the v8 shadow run, 2026-10-21), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table). service_commit is the latest commit a case cites; each case's source_commit names its own: f994e3e2 for the first four, c60b753e for the shadow run's three (graphlet.compare_export_line, graphlet.walks_arm_absent.two_arms / .one_arm)",
  "cases": [
   {
    "id": "graphlet.max_bytes_above_service_cap",

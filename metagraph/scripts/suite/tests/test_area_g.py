@@ -874,6 +874,17 @@ class RowsPair(unittest.TestCase):
             self.assertIn("W3", x["graphlet"]["ways"]["default"])
             self.assertIn("pair-rows", x["tags"])
             self.assertTrue(x["graphlet"]["preconditions"])
+        # b is a pair partner (VERIFY-D-R5 R5-4): the slot it pairs with, not its candidate's v9 slot, no conditional
+        # tag; the corpus keeps it as a partner (every verdict but the slot's), its preconditions from its own facts
+        self.assertEqual((b["graphlet"]["slot"], a["graphlet"]["slot"]), ("cut_lists", "cut_lists"))
+        self.assertEqual(sorted(b["tags"]), ["area-g", "graphlet", "pair", "pair-rows", "slot-cut_lists"])
+        self.assertEqual(b["graphlet"]["facts"]["body_over_8mib"], False)
+        entry = corpus["candidates"]["over_8mib.1"]
+        self.assertEqual((entry["passed"], entry["partner_passed"]), (False, True))
+        self.assertEqual([k for k, v in entry["verdicts"].items() if not v.startswith("pass")], ["slot"])
+        import rehearse_g
+        self.assertEqual(b["graphlet"]["preconditions"], rehearse_g.preconditions_of(entry["facts"]))
+        self.assertEqual(b["graphlet"]["facts"], rehearse_g.service_facts(entry["facts"]))
         self.assertEqual(a["request"]["seeds"][0]["sequence"], b["request"]["seeds"][0]["sequence"])
         self.assertFalse([o for o in b["graphlet"]["ops"] if o["tool"] == "graphlet_compare"])
         ops = dict((o["id"], o) for o in a["graphlet"]["ops"])
@@ -892,15 +903,24 @@ class RowsPair(unittest.TestCase):
                                           None), [])
         self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}}}}, None),
                          [])
+        # preconditions without a pass (passed, or partner_passed for b) are no rehearsal the pair takes
+        passed = {"preconditions": {"a": 1}, "passed": True}
+        for b in ({"preconditions": {"a": 1}}, {"preconditions": {"a": 1}, "passed": False},
+                  {"preconditions": {}, "partner_passed": True}):
+            self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": passed, "over_8mib.1": b}}, None),
+                             [], b)
+        self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}},
+                                                                 "over_8mib.1": passed}}, None), [])
 
 
 SHADOW_CASES_COMMIT = "c60b753eef5bf31a73c5fe91d55afd4437eecaba"   # async's BY-DESIGN-G-CASES-2.json
+FIRST_G_CASES_COMMIT = "f994e3e2880e3f21c51577d75926cfb35c3d4355"  # async's BY-DESIGN-G-CASES.json
 
 
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
-    service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2: its first four
-    cases; the shadow run's three cite theirs, c60b753e)."""
+    service_commit states the commit their cases cite (the v7 table 22d034ba; area G's own the latest a case cites,
+    c60b753e (VERIFY-D-R5 R5-4): its first four cases cite f994e3e2, the shadow run's three c60b753e)."""
 
     def test_the_defaults_agree(self):
         import inspect
@@ -910,11 +930,14 @@ class Defaults(unittest.TestCase):
             self.assertIs(inspect.signature(fn).parameters["include_direct_only"].default, True, fn.__name__)
         self.assertTrue(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[1]["service_commit"].startswith("22d034ba"))
         gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
-        self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
+        self.assertEqual(ginfo["service_commit"], SHADOW_CASES_COMMIT)
         cited = dict((cid, c.get("source_commit")) for cid, c in gcases.items())
-        self.assertEqual(set(cited.values()) - {None}, {ginfo["service_commit"], SHADOW_CASES_COMMIT})
+        self.assertEqual(set(cited.values()), {FIRST_G_CASES_COMMIT, SHADOW_CASES_COMMIT})
         for cid in (area_g.COMPARE_EXPORT_CASE, area_g.ARM_ABSENT_TWO_CASE, area_g.ARM_ABSENT_ONE_CASE):
             self.assertEqual(cited[cid], SHADOW_CASES_COMMIT, cid)
+        self.assertEqual(sorted(cid for cid, c in cited.items() if c == FIRST_G_CASES_COMMIT),
+                         ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
+                          "graphlet.export_mgt_is_the_stored_body", "graphlet.max_bytes_above_service_cap"])
 
 
 class Freeze(unittest.TestCase):

@@ -1479,7 +1479,7 @@
      "right": 18
     }
    },
-   "pair_note": "the rows pair's a (G-pair-rows-0002, R4-1): its walks compare against over_8mib.1 on rehearsal 1's documents counts differ 14, only_in_a 3, only_in_b 281, all qualified, 177,051 bytes whole; cmp-paged-w3's page 131,072 takes 2 whole pages there and at W3's budget less 512 (D-scratch/r7/measure_rows.py)",
+   "pair_note": "the rows pair's a (G-pair-rows-0002, R4-1): its walks compare against over_8mib.1 on rehearsal 1's documents counts differ 14, only_in_a 3, only_in_b 281, all qualified, 159,694 bytes whole (the library's compact JSON, the pair's scenario ids); cmp-paged-w3's page 131,072 takes 2 whole pages there and at W3's budget less 512 (D-scratch/r7/measure_rows.py)",
    "passed": true,
    "plan_problems": [],
    "preconditions": {
@@ -4855,7 +4855,8 @@
      "right": 1036
     }
    },
-   "pair_note": "the rows pair's b (G-pair-rows-0001, VERIFY-D-R4 R4-1): passed every verdict but the slot's (its body, 305,290 bytes, is not over 8 MiB), so its preconditions, service facts, echo and reference are rehearsal 1's G-big-c1, written as choose_corpus writes a passing candidate's",
+   "pair_note": "the rows pair's b (G-pair-rows-0001, VERIFY-D-R4 R4-1): not its slot's graphlet (its body, 305,290 bytes, is not over 8 MiB: the slot verdict fails, passed false), it passed every other verdict, so as the pair's partner (partner_passed, VERIFY-D-R5 R5-4) its entry is rehearsal 1's G-big-c1 as rehearse_g.corpus_entry writes it: the preconditions, service facts, echo and reference a passing candidate's entry keeps; its scenario carries the slot of the graphlet it pairs with (cut_lists)",
+   "partner_passed": true,
    "passed": false,
    "plan_problems": [],
    "preconditions": {

@@ -1458,6 +1458,36 @@ def _partner_b(s: dict) -> str:
     raise ValueError("%s: a pair without a compare" % s["id"])
 
 
+# the candidates a pair takes as its partner outside their slot (area_g.ROWS_PAIR's b: over_8mib.1, a trie whose body
+# is not the v9 slot's over 8 MiB): a slot keeps only a passing candidate, a pair takes such a partner when it passed
+# every verdict but its slot's shape (VERIFY-D-R5 R5-4)
+PARTNER_CIDS = (area_g.ROWS_PAIR["b"],)
+
+
+def partner_passed(cid: str, verdicts: dict) -> bool:
+    """Whether |cid|, a partner outside its slot (PARTNER_CIDS), passed every verdict but its slot's."""
+    return cid in PARTNER_CIDS and passed(dict((k, v) for k, v in verdicts.items() if k != "slot"))
+
+
+def corpus_entry(cid: str, r: dict) -> dict:
+    """A rehearsed candidate's corpus entry: its verdicts, passed, facts, times and timeouts; for a passing candidate,
+    or a partner that passed as one (partner_passed true, passed stays the slot's false), what the build reads too:
+    preconditions, service facts, the strategy echo and the reference digests."""
+    entry = {"verdicts": r["verdicts"], "passed": r["passed"], "facts": r["facts"], "times_ms": r["times_ms"],
+             "timeouts": r.get("timeouts") or {}, "plan_problems": r.get("plan_problems") or []}
+    partner = not r["passed"] and partner_passed(cid, r["verdicts"])
+    if partner:
+        entry["partner_passed"] = True
+    if r["passed"] or partner:
+        entry["preconditions"] = preconditions_of(r["facts"])
+        entry["service_facts"] = service_facts(r["facts"])
+        if r.get("echo") is not None:
+            entry["strategy"] = r["echo"]
+        body = next((b for b in r["bodies"].values() if b), None)
+        entry["reference"] = {"body_digest": body, "engine_ms": r["times_ms"]}
+    return entry
+
+
 def choose_corpus(results: Dict, meta: Dict, scen: Dict, library_commit: Optional[str]) -> dict:
     """corpus.json: per slot the first passing candidate (area_g order), its facts, preconditions, echo, timeouts,
     reference digests; the pairs whose partner of the chosen candidate passed; the three richest chosen graphlets."""
@@ -1479,17 +1509,7 @@ def choose_corpus(results: Dict, meta: Dict, scen: Dict, library_commit: Optiona
                        if pick else ("; ".join(why) if why else "no candidate rehearsed"),
                        "tried": tried}
     for sid, r in results.items():
-        m = meta[sid]
-        entry = {"verdicts": r["verdicts"], "passed": r["passed"], "facts": r["facts"], "times_ms": r["times_ms"],
-                 "timeouts": r.get("timeouts") or {}, "plan_problems": r.get("plan_problems") or []}
-        if r["passed"]:
-            entry["preconditions"] = preconditions_of(r["facts"])
-            entry["service_facts"] = service_facts(r["facts"])
-            if r.get("echo") is not None:
-                entry["strategy"] = r["echo"]
-            body = next((b for b in r["bodies"].values() if b), None)
-            entry["reference"] = {"body_digest": body, "engine_ms": r["times_ms"]}
-        cands[m["cid"]] = entry
+        cands[meta[sid]["cid"]] = corpus_entry(meta[sid]["cid"], r)
     chosen = [(slot, slots[slot]["candidate"]) for slot in slots if slots[slot]["candidate"]]
     direct_only = set(m["cid"] for m in meta.values() if not area_g.expressible(m["candidate"]))
     # the richest: most segments, the graphlets the MCP can express first (a direct-only one enters the corpus only

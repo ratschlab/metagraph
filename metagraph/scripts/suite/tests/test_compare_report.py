@@ -503,7 +503,8 @@ class CompareTest(unittest.TestCase):
                                           "graphlet.max_bytes_above_service_cap",
                                           "graphlet.walks_arm_absent.one_arm",
                                           "graphlet.walks_arm_absent.two_arms"])
-        self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
+        # its service_commit is the latest commit a case cites, c60b753e (VERIFY-D-R5 R5-4)
+        self.assertTrue(ginfo["service_commit"].startswith("c60b753e"))
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07),
         # and the field the merge removes from the MCP answer, results.1.duplicate (T-edge-0008, by design)
