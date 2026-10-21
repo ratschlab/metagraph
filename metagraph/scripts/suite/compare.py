@@ -16,7 +16,10 @@ Everything timed keys on the execution's `host_cache` (merge_run: cold = the sce
 host in this run, warm = another one within 60 s, aged = older): overheads of §5 pair warm lines only
 (direct-remote minus direct-local: network + front, without the connection set-up, which is reported apart;
 MCP minus direct with and without the queue; the MCP phases), and the cold figures are reported on their own;
-timing distributions and resource use (samples joined by time) per area, arm and host cache.
+timing distributions and resource use (samples joined by time) per area, arm and host cache. The per-task figures
+the engine states (timing.cpu_ms, timing.page_faults, work.memory_bytes; task_resources.py): per execution in each
+scenario's arm view (`task_resources`), per area, arm and host cache with the heaviest tests in the summary
+(`summary.task_resources`); report-only, read by no verdict.
 
 Service-side by design: async's table (service_by_design.json next to this script, from the search-service at
 commit 22d034ba; --by-design overrides) holds cases {id, direct_expectation, service_answer, agreement}. A
@@ -53,6 +56,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_run  # noqa: E402
 import suite_common as sc  # noqa: E402
+import task_resources as tr  # noqa: E402
 
 # the counted outcomes; `other` counts an outcome outside the vocabulary (sc.outcome_known of sc.recorded_outcome:
 # also one merge_run read as error), read as a failure
@@ -3330,6 +3334,14 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
                        "wall_ms": sc.summarise([wall_net(r) for r in arm_lines]),
                        "resources": resources(arm_lines, index)}
 
+    # the per-task figures the engine states (cpu_ms, page faults, memory_bytes; task_resources): per execution in each
+    # scenario's arm view, the run's block in the summary; report-only, never read by a verdict
+    task_execs = tr.run_figures(rows, run_dir, scen_by_id)
+    task_by_scenario = tr.per_scenario(task_execs)
+    for sid, entry in scenarios.items():
+        for arm, view in entry["arms"].items():
+            view["task_resources"] = (task_by_scenario.get(sid) or {}).get(arm)
+
     timing = {}
     for area, by_arm in timing_vals.items():
         for arm, tv in by_arm.items():
@@ -3373,6 +3385,7 @@ def compare(run_dir, by_design=None, relation_evaluator="auto", reevaluated=Fals
             "cold_warm": dict((arm, {"n": len(v["delta_ms"]), "delta_ms": sc.summarise(v["delta_ms"]),
                                      "ratio": sc.summarise(v["ratio"])}) for arm, v in cw_vals.items()),
             "resources": resources_out,
+            "task_resources": tr.summarise_run(task_execs, manifest_order),
         },
     }
 
