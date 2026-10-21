@@ -11,8 +11,10 @@ Sections: verdict and environment (with the load caveat), outcomes per area and 
 expectation and the observed value, agreement of the direct arms and of the MCP arm, chapter G (manifest v8's
 graphlet tools compared five ways: per tool, disagreements, pre-checks, service checks, correctness coverage; only
 for a manifest with graphlet scenarios), timing per area and arm
-(p50 / p90 / max; cold vs warm), overheads (front; MCP phases), resource use per area, and with --compare the
-deltas against the earlier run. Tables are plain pipe tables with ASCII-safe cells. compare.json is computed
+(p50 / p90 / max; cold vs warm), overheads (front; MCP phases), resource use per area, the resources per task
+(task_resources.py: the engine's cpu_ms, major faults and memory_bytes per area and arm, the heaviest tests, the
+container's memory over the run from host_memory.json; manifest v8 on, or a run whose answers state them), and with
+--compare the deltas against the earlier run. Tables are plain pipe tables with ASCII-safe cells. compare.json is computed
 when missing (compare.py).
 """
 
@@ -29,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import compare as cmp  # noqa: E402
 import gate as gate_mod  # noqa: E402
 import suite_common as sc  # noqa: E402
+import task_resources as tr  # noqa: E402
 
 ARM_LABEL = {"direct-local": "direct-local", "direct-remote": "direct-remote", "mcp": "mcp"}
 # The load above which the timings carry the Logan caveat: sra_all busier than 4 cores, or load1 above half the
@@ -1766,6 +1769,157 @@ def resources_section(comp, lf=None):
     return "\n".join(out)
 
 
+TASK_SOURCE_WORDS = (("server", "server"), ("server_entries", "server (entries summed)"), ("raw", "raw answer"),
+                     ("raw_entries", "raw answer (entries summed)"), ("none", "none"))
+TASK_HOST_LABELS = ("cold", "warm", cmp.WARM_AFTER_INTERRUPTED, "aged", "not_reached", "unknown")
+
+
+def task_resources_wanted(manifest, rows, host_memory):
+    """Whether the report has a per-task section: a manifest v8 or later, a line whose server block states a figure
+    only the per-task engine states (cpu_ms, page faults), or a host_memory.json; the reports of v1-v7 runs stay as
+    they were (their /pattern answers' memory_bytes alone does not ask for it)."""
+    version = (manifest or {}).get("manifest_version") if isinstance(manifest, dict) else None
+    return (isinstance(version, int) and version >= 8) or tr.engine_states_figures(rows) or \
+        bool(host_memory.get("figures") or host_memory.get("problem"))
+
+
+def fmt_bytes(v):
+    """A byte count in KiB / MiB / GiB (the unit stated with the figure)."""
+    if v is None:
+        return "-"
+    for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
+        if abs(v) >= size:
+            return "%.1f %s" % (v / float(size), unit)
+    return "%d B" % v
+
+
+def _sources_text(counts):
+    return ", ".join("%s %d" % (word, counts[key]) for key, word in TASK_SOURCE_WORDS if counts.get(key)) or "-"
+
+
+def _top_rows(entries, figure):
+    rows = []
+    for i, e in enumerate(entries, 1):
+        at = "%s r%s %s" % (e.get("arm"), e.get("repeat"), HOST_CACHE_LABEL.get(e.get("host"), e.get("host")))
+        if figure == "cpu_ms":
+            cells = [fmt_ms(e["value"]), fmt_ms(e.get("elapsed_ms")), fmt_num(e.get("cpu_ratio"), 2),
+                     fmt_ms(e.get("cold")), fmt_ms(e.get("warm_median")), fmt_ms(e.get("median"))]
+        elif figure == "memory_bytes":
+            cells = [fmt_bytes(e["value"]), fmt_bytes(e.get("median"))]
+        else:
+            cells = [fmt_num(e["value"], 0), fmt_num(e.get("cold"), 0), fmt_num(e.get("warm_median"), 0),
+                     fmt_num(e.get("median"), 0)]
+        rows.append([str(i), md(e["scenario"]), md(e.get("area")), md(at)] + cells + [e.get("n")])
+    return rows
+
+
+def host_memory_lines(hm):
+    """The host_memory.json part of the per-task section (markdown lines)."""
+    out = ["## The engine container's memory over the run", ""]
+    f = hm.get("figures")
+    if f is None:
+        out.append("No `host_memory.json` in the run directory%s: the container's cgroup counters over the run are not "
+                   "stated." % ((" (%s)" % md(hm["problem"])) if hm.get("problem") else ""))
+        return out + [""]
+    out.append("Two snapshots of the engine container's cgroup (%s; before %s, after %s): levels per snapshot (`peak` "
+               "is the high-water mark since the container started, not the run's), counters as after minus before. "
+               "Pages evicted under the container's own limit are its direct reclaim (`pgsteal_direct`; `events.max` "
+               "counts the times a charge met the limit), pages evicted by the host's background reclaim are "
+               "`pgsteal_kswapd`; a refault is an evicted file page read again (`workingset_refault_file`); GiB at "
+               "%d bytes per page." % (md(f.get("container") or "-"), md((f.get("before") or {}).get("utc") or "-"),
+                                       md((f.get("after") or {}).get("utc") or "-"), int(f["page_bytes"])))
+    out.append("")
+    rows = []
+    for k in tr.HOST_LEVELS:
+        lv = f["levels"][k]
+        fmt = (lambda v: "-" if v is None else "%.2f" % (v / 1024.0 ** 2)) if k == "host_available_kib" else fmt_gib
+        rows.append([md(k), "GiB", fmt(lv["before"]), fmt(lv["after"]), ""])
+    for k in tr.HOST_COUNTERS:
+        d = f["deltas"].get(k)
+        gib = f["pages_gib"].get(k) if k in tr.HOST_PAGE_COUNTERS else None
+        rows.append([md(k), "pages" if k in tr.HOST_PAGE_COUNTERS else "count", "", "",
+                     "-" if d is None else ("%d (%.2f GiB)" % (d, gib) if gib is not None else "%d" % d)])
+    out.append(table(["cgroup figure", "unit", "before", "after", "after - before"], rows,
+                      align=["l", "l", "r", "r", "r"]))
+    for n in f.get("notes") or []:
+        out.append("Note: %s." % md(n))
+    return out + [""]
+
+
+def task_resources_section(run_dir, rows, manifest):
+    """The per-task figures (task_resources.py): what each figure counts, where each access path's figures come
+    from, per area / arm / host cache the CPU time beside the engine's elapsed time, the major faults and the memory
+    account, the 20 heaviest tests by each, and the engine container's memory over the run (host_memory.json)."""
+    s = tr.of_run(run_dir, rows, manifest)
+    hm = tr.host_memory_of_run(run_dir)
+    out = ["# Resources per task", "",
+           "The engine's own figures per request of POST /traverse, /resolve and /pattern: CPU time (`timing.cpu_ms`: "
+           "the request's thread from the route's work to its timing block; not the body's parse, the index load, the "
+           "compression or the write), major page faults (`timing.page_faults.major`, Linux: pages read from disk, "
+           "index pages the page cache did not hold) and the memory account (`work.memory_bytes`: the peak the engine "
+           "accounts for the request; not the process RSS, not the caches, not the index pages in the page cache). "
+           "cpu/elapsed is the CPU time over the engine's elapsed time of the same answer: well below 1, the request "
+           "waited (disk reads) rather than computed. A figure comes from the execution's server block, else from its "
+           "raw answer; `-` where an answer states none (an older engine, a refusal). Host cache as in the timing "
+           "tables. Report-only: no check, digest or verdict reads these figures.", ""]
+    rows_ = []
+    for arm in sorted(s["executions"], key=lambda a: (merge_run_order(a), a)):
+        src = s["sources"].get(arm) or {}
+        rows_.append([md(arm), s["executions"][arm], md(_sources_text(src.get("cpu_ms") or {})),
+                      md(_sources_text(src.get("page_faults") or {})), md(_sources_text(src.get("memory_bytes") or {}))])
+    out.append(table(["arm", "task executions", "cpu_ms from", "page faults from", "memory_bytes from"], rows_))
+    cpu_rows, mem_rows = [], []
+    for area in sorted(s["by_area"], key=lambda a: (a == "all", area_sort_key(a))):
+        for arm in sorted(s["by_area"][area], key=lambda a: (merge_run_order(a), a)):
+            states = s["by_area"][area][arm]
+            for hc in sorted(states, key=lambda h: TASK_HOST_LABELS.index(h) if h in TASK_HOST_LABELS else 9):
+                g = states[hc]
+                c, e, r = g["cpu_ms"], g["elapsed_ms"], g["cpu_ratio"]
+                mj, mb = g["major_faults"], g["memory_bytes"]
+                if not (c["n"] or mj["n"] or mb["n"]):
+                    continue
+                label = [md(area), md(arm), md(HOST_CACHE_LABEL.get(hc, hc))]
+                if c["n"]:
+                    cpu_rows.append(label + ["%d/%d" % (c["n"], g["executions"]), fmt_ms(c["p50"]), fmt_ms(c["p90"]),
+                                             fmt_ms(c["max"]), fmt_ms(e["p50"]), fmt_num(r["p10"], 2),
+                                             fmt_num(r["p50"], 2)])
+                mem_rows.append(label + ["%d/%d" % (mj["n"], g["executions"]), fmt_num(mj["p50"], 0),
+                                         fmt_num(mj["p90"], 0), fmt_num(mj["max"], 0),
+                                         "%d/%d" % (mb["n"], g["executions"]), fmt_bytes(mb["p50"]),
+                                         fmt_bytes(mb["p90"]), fmt_bytes(mb["max"])])
+    out += ["## CPU time per area, arm and host cache", "",
+            "n = executions stating cpu_ms / task executions; times in ms; area all = every area.", ""]
+    out.append(table(["area", "arm", "host cache", "n", "cpu p50", "cpu p90", "cpu max", "elapsed p50",
+                      "cpu/elapsed p10", "cpu/elapsed p50"], cpu_rows))
+    out += ["## Major faults and the memory account per area, arm and host cache", ""]
+    out.append(table(["area", "arm", "host cache", "faults n", "major p50", "major p90", "major max", "memory n",
+                      "memory p50", "memory p90", "memory max"], mem_rows))
+    for figure, title, cols in (
+            ("cpu_ms", "The %d tests with the most CPU time" % tr.TOP_N,
+             ["cpu ms", "elapsed ms", "cpu/elapsed", "cold", "warm p50", "median"]),
+            ("memory_bytes", "The %d tests with the largest memory account" % tr.TOP_N, ["memory", "median"]),
+            ("major_faults", "The %d tests with the most major faults" % tr.TOP_N,
+             ["major faults", "cold", "warm p50", "median"])):
+        out += ["## %s" % title, "",
+                "Per test its execution with the largest figure (arm, repeat, host cache), the host-cold "
+                "execution's figure apart from the warm repeats' median, the median over its executions that state "
+                "it and how many do.", ""]
+        out.append(table(["#", "scenario", "area", "execution"] + cols + ["n"], _top_rows(s["top"][figure], figure)))
+    g = tr.graphlet_service_figures(run_dir)
+    if g is not None:
+        out.append("Area G: the service's graphlet tools (W3) answered %d op call(s); %s." % (
+            g["ops"], ("%d state their own cost (`usage` / `cpu_ms`), cpu p50 %s ms, max %s ms" % (
+                g["stating"], fmt_ms(g["cpu_ms"]["p50"]), fmt_ms(g["cpu_ms"]["max"]))) if g["stating"] else
+            "none states its own cost: not stated"))
+        out.append("")
+    out += host_memory_lines(hm)
+    return "\n".join(out)
+
+
+def merge_run_order(arm):
+    return {"direct-local": 0, "direct-remote": 1, "mcp": 2}.get(arm, 9)
+
+
 def compare_runs_section(comp, old, old_dir):
     out = ["# Change against %s" % md(old.get("run_id") or os.path.basename(old_dir)), ""]
     if old.get("manifest_sha256") != comp.get("manifest_sha256"):
@@ -1946,6 +2100,8 @@ def build_report(run_dir, compare_dir=None, max_failures=200, by_design_path=Non
         parts.append(again)
     parts.append(overhead_section(comp))
     parts.append(resources_section(comp, load_figures(samples)))
+    if task_resources_wanted(manifest, rows, tr.host_memory_of_run(run_dir)):
+        parts.append(task_resources_section(run_dir, rows, manifest))
     if compare_dir:
         # like with like: the earlier run's re-evaluated set where it has one
         old_re = reevaluated and os.path.exists(os.path.join(compare_dir, "reevaluated.json"))
