@@ -2009,8 +2009,12 @@ gives the same value; unless a time stop or an attempt's stop cut the work) and 
   (`memory_allotments`: a quarter of the budget, at most 64 MiB, for the label cache and a sixteenth for the
   lookahead) — so the figure is the same with and without a budget that does not bind: the walker keeps this
   account for every request (its charges are made with or without a budget; the budget only compares them), and
-  a non-binding `max_memory_mb` or `max_work_units` changes no charge. At least what the result holds when the
-  walk ended. A result without a walk (a failed derivation, a seed the graph does not hold, a seed never
+  a non-binding `max_memory_mb` or `max_work_units` changes no charge. One case is by design: in detail `tree`
+  and `full` under a memory budget a merge keeps the arrival order where the account charges the displayed chain
+  (§7.1, item 23 of §13: without the budget the majority parent is first), so the paths' display and the chain
+  they charge differ there, and `memory_bytes` with them (on mini_refseq's blaNDM seed at 1,000 bp: 4,548,945
+  without, 4,547,985 under 4 GiB, beside differing segments and route_bp; `summary` and `graphlet` equal). At
+  least what the result holds when the walk ended. A result without a walk (a failed derivation, a seed the graph does not hold, a seed never
   started) states what it holds: its fixed part and its echo of `seed_id`, as priced (`final_bytes` in an
   attempt's usage); a seed refused after its walk (an unrepresentable name) or failed by a budget states the
   walk's peak. Because the output is priced in the requested detail, the figure differs between details (and a
