@@ -17,6 +17,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 namespace mtg::graph::align_redone {
 
@@ -208,6 +209,10 @@ class AlignmentGraph {
                    label_class_t target = Anchor::nannot)
           : graph_(graph), anno_buffer_(anno_buffer), target_(target) {
         assert((target == Anchor::nannot) == !anno_buffer_);
+        // Use the succinct graph's existing cache for backward edge labels.
+        // Wrappers such as CanonicalDBG manage their own traversal semantics.
+        if (dynamic_cast<const DBGSuccinct*>(&graph_))
+            first_cache_ = graph_.get_extension_threadsafe<NodeFirstCache>();
     }
 
     AnnotationBuffer* get_anno_buffer() const { return anno_buffer_; }
@@ -292,20 +297,35 @@ class AlignmentGraph {
         const auto invalid = prefix_seq.find_last_not_of(graph_.alphabet());
         if (invalid != std::string_view::npos)
             prefix_seq.remove_prefix(invalid + 1);
+        auto traverse = [&](const std::function<void(node_index)> &call) {
+            if (!first_cache_) {
+                graph_.traverse_back(node, prefix_seq, call, terminate);
+                return;
+            }
+            for (auto it = prefix_seq.rbegin(); it != prefix_seq.rend(); ++it) {
+                if (terminate())
+                    return;
+                node_index prev = DeBruijnGraph::npos;
+                first_cache_->call_incoming_kmers(node, [&](node_index candidate, char c) {
+                    if (c == *it)
+                        prev = candidate;
+                });
+                if (!prev)
+                    return;
+                node = prev;
+                call(node);
+            }
+        };
         if (target_ == Anchor::nannot) {
-            graph_.traverse_back(node, prefix_seq,
-                                 [&](node_index prev) {
-                                     assert(has_labels(prev, target_));
-                                     callback(prev, target_);
-                                 },
-                                 terminate);
+            traverse([&](node_index prev) {
+                assert(has_labels(prev, target_));
+                callback(prev, target_);
+            });
             return;
         }
 
         std::vector<node_index> backward_nodes;
-        graph_.traverse_back(node, prefix_seq,
-                             [&](node_index prev) { backward_nodes.emplace_back(prev); },
-                             terminate);
+        traverse([&](node_index prev) { backward_nodes.emplace_back(prev); });
         if (backward_nodes.size() < min_dist_before_check_anno)
             return;
 
@@ -356,12 +376,18 @@ class AlignmentGraph {
 
     void call_incoming_kmers(node_index node, const EdgeCallback &callback) const {
         // std::cerr << "cik\t" << node << "\t" << target_ << std::endl;
+        auto call_incoming = [&](const DeBruijnGraph::IncomingEdgeCallback &call) {
+            if (first_cache_)
+                first_cache_->call_incoming_kmers(node, call);
+            else
+                graph_.call_incoming_kmers(node, call);
+        };
         if (target_ == Anchor::nannot) {
-            graph_.call_incoming_kmers(node, [&](node_index prev, char c) { callback(prev, c, target_); });
+            call_incoming([&](node_index prev, char c) { callback(prev, c, target_); });
         } else {
             std::vector<node_index> backward_n;
             std::vector<char> backward_c;
-            graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
+            call_incoming([&](node_index prev, char c) {
                 if (c != boss::BOSS::kSentinel) {
                     backward_n.emplace_back(prev);
                     backward_c.emplace_back(c);
@@ -474,6 +500,7 @@ class AlignmentGraph {
     const DeBruijnGraph &graph_;
     AnnotationBuffer* const anno_buffer_;
     label_class_t target_;
+    const NodeFirstCache *first_cache_ = nullptr;
 
     label_class_t get_label_class(node_index node) const {
         assert(anno_buffer_);
@@ -1321,7 +1348,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     };
     // Only zero-cost matches can be consumed greedily. BLOSUM diagonals differ,
     // so other exact residues must enter the wavefront at their actual cost.
+    // Ordinary DNA windows have a uniform diagonal: check once instead of
+    // rescanning their remaining suffix at every wavefront state.
+    const bool all_matches_zero_cost = std::all_of(query_window_begin, query_window_end,
+        [&](char c) { return substitution_cost(c, c) == 0; });
     auto zero_cost_end = [&](auto begin, auto end) {
+        if (all_matches_zero_cost)
+            return end;
         return std::find_if(begin, end, [&](char c) { return substitution_cost(c, c) != 0; });
     };
     ssize_t gap_ext = match_score - 2 * config.gap_extension_penalty;
