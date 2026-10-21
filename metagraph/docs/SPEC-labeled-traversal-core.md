@@ -1978,13 +1978,15 @@ flag the attempt). Only an `in_ram` load uses other threads (the graph is loaded
 the spans below (`timing.load_ms`).
 
 - `cpu_ms` (number, milliseconds, user + system time of the thread). Top level: from the start of the request's
-  processing — after the body's parse and the index lease — to the writing of the top-level `timing` block:
-  every seed's walk and result, its text included (the server writes each seed's text as soon as it is built);
-  not the response's final assembly, its compression and the transport, which follow. Per seed
-  (`results[i].timing`): from the seed's start to its result built, the graphlet text included — the span of
-  `elapsed_ms` + `serialize_ms`. `/resolve`: from the start of its processing to its `timing` block (the
-  mapping, the reads, the discovery, the selection, the answer's tree; not its text). The top-level figure is at
-  least the sum of the seeds'.
+  processing, before its fields are read — the parsing and validation of the request's fields (seeds, strategy,
+  bounds, the server's clamps) included — to the writing of the top-level `timing` block: every seed's walk and
+  result, its text included (the server writes each seed's text as soon as it is built). Outside it: only the
+  HTTP body's text-to-JSON parse and, on a multi-graph server, the graph's selection and its index lease (an
+  `in_ram` load: `timing.load_ms`) before it, and the response's final assembly, its compression and the
+  transport after it. Per seed (`results[i].timing`): from the seed's start to its result built, the graphlet
+  text included — the span of `elapsed_ms` + `serialize_ms`. `/resolve`: likewise from before its fields are
+  read (their parsing and validation included) to its `timing` block (the mapping, the reads, the discovery, the
+  selection, the answer's tree; not its text). The top-level figure is at least the sum of the seeds'.
 - `page_faults` `{minor, major}` (integers, the same spans). `minor`: a page mapped without I/O — an index page
   already in the page cache, fresh heap. `major`: a page read from the disk — an index page not resident, what a
   cold memory-mapped request pays (the index pages a request faults in are not in `work.memory_bytes`).
