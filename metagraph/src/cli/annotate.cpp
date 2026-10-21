@@ -546,6 +546,20 @@ int annotate_graph(Config *config) {
         omp_set_max_active_levels(2);
         if (config->separate_header) {
             const fs::path directory = config->outfbase.empty() ? "." : config->outfbase;
+            if (fs::exists(directory) && !fs::is_directory(directory)) {
+                logger->error("Output path {} is not a directory", directory.string());
+                return 1;
+            }
+            if (fs::is_directory(directory)) {
+                for (const auto &entry : fs::directory_iterator(directory)) {
+                    const auto name = entry.path().filename().string();
+                    if (name.rfind("annotation.", 0) == 0) {
+                        logger->error("Output directory {} already contains annotation chunks; "
+                                      "choose a new directory", directory.string());
+                        return 1;
+                    }
+                }
+            }
             fs::create_directories(directory);
             annotate_data(graph, *config, files, (directory / "annotation").string());
         } else {

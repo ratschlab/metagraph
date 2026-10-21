@@ -27,6 +27,35 @@ class TestAnnotate(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
+    @parameterized.expand([("file",), ("previous_chunks",)])
+    def test_separate_header_rejects_existing_output(self, kind):
+        from pathlib import Path
+        root = Path(self.tempdir.name)
+        fasta = root / "input.fa"
+        fasta.write_text(">one\nAACGTACGT\n")
+        graph = root / "graph"
+        built = subprocess.run([METAGRAPH, "build", "-k", "5", "-o", str(graph), str(fasta)],
+                               stdout=PIPE, stderr=PIPE, text=True)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        output = root / "output"
+        if kind == "file":
+            output.write_bytes(b"existing file\n")
+            previous = {output: output.read_bytes()}
+        else:
+            output.mkdir()
+            previous = {output / f"annotation.{i}.column.annodbg": f"old chunk {i}\n".encode()
+                        for i in range(2)}
+            for path, contents in previous.items():
+                path.write_bytes(contents)
+        result = subprocess.run([METAGRAPH, "annotate", "-i", str(graph) + ".dbg",
+                                 "--separate-header", "-o", str(output), str(fasta)],
+                                stdout=PIPE, stderr=PIPE, text=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("not a directory" if kind == "file" else "already contains", result.stderr)
+        self.assertEqual(previous, {path: path.read_bytes() for path in previous})
+        if kind != "file":
+            self.assertEqual(set(previous), set(output.iterdir()))
+
     @parameterized.expand([(coords, reverse, existing)
                            for coords in (False, True)
                            for reverse in ((False,) if PROTEIN_MODE else (False, True))
