@@ -377,8 +377,29 @@ class ByDesignLinks(unittest.TestCase):
         cmp_ = area_g._op("c", "graphlet_compare", area_g.C("G-x-0001", mode="labels", max_bytes=2048))
         self.assertEqual(case(cmp_, {"over_8mib": True}), area_g.BIG_BODY_CASE)
         self.assertIsNone(case(cmp_, {}))
+        # an arm sent null: the arm-absent case of the graphlet's shape; a stated arm: none
+        for tool, args in (("graphlet_walks", area_g.W(None)), ("graphlet_walk", {"arm": None, "walk": 0}),
+                           ("graphlet_sequence", area_g.S(None, walk=0))):
+            o = area_g._op("x", tool, args)
+            self.assertEqual(case(o, {"arms": ["left", "right"]}), area_g.ARM_ABSENT_TWO_CASE, tool)
+            self.assertEqual(case(o, {"arms": ["right"]}), area_g.ARM_ABSENT_ONE_CASE, tool)
+            self.assertIsNone(case(dict(o, ways=["W1", "W2", "W5"]), {"arms": ["right"]}), tool)
+        self.assertIsNone(case(area_g._op("w", "graphlet_walks", area_g.W("left")), {"arms": ["left", "right"]}))
+        self.assertIsNone(case(area_g._op("l", "graphlet_labels", area_g.L()), {"arms": ["left", "right"]}))
         direct = dict(walks, ways=["W1", "W2"])
         self.assertIsNone(case(direct, {}))           # no W3 call: nothing the service answers by design
+
+    def test_direct_only_keeps_the_library_behaviour(self):
+        # the shadow run's arm-absent cases leave the library's behaviour checked: on a direct-only graphlet the ops
+        # stay on W1 / W2 / W5, unlinked
+        facts = {"arms": ["left", "right"], "walks": {"left": 2, "right": 2}}
+        mcp = dict((o["id"], o) for o in area_g.op_plan("G-x-0001", "two_arms", facts, False, [("G-x-0001", False)]))
+        self.assertEqual(mcp["walks-arm-none"]["by_design"], area_g.ARM_ABSENT_TWO_CASE)
+        direct = dict((o["id"], o) for o in area_g.op_plan("G-x-0001", "two_arms", facts, False,
+                                                           [("G-x-0001", False)], direct_only=True))
+        for oid in ("walks-arm-none",):
+            self.assertNotIn("by_design", direct[oid], oid)
+            self.assertEqual(direct[oid]["ways"], area_g.DIRECT_ONLY_WAYS, oid)
 
     def test_validation_names_a_missing_or_a_wrong_link(self):
         g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {}}
@@ -867,9 +888,13 @@ class RowsPair(unittest.TestCase):
                          [])
 
 
+SHADOW_CASES_COMMIT = "c60b753eef5bf31a73c5fe91d55afd4437eecaba"   # async's BY-DESIGN-G-CASES-2.json
+
+
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
-    service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2)."""
+    service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2: its first four
+    cases; the shadow run's cite theirs, c60b753e)."""
 
     def test_the_defaults_agree(self):
         import inspect
@@ -880,7 +905,10 @@ class Defaults(unittest.TestCase):
         self.assertTrue(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[1]["service_commit"].startswith("22d034ba"))
         gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
-        self.assertEqual(set(c.get("source_commit") for c in gcases.values()) - {None}, {ginfo["service_commit"]})
+        cited = dict((cid, c.get("source_commit")) for cid, c in gcases.items())
+        self.assertEqual(set(cited.values()) - {None}, {ginfo["service_commit"], SHADOW_CASES_COMMIT})
+        for cid in (area_g.ARM_ABSENT_TWO_CASE, area_g.ARM_ABSENT_ONE_CASE):
+            self.assertEqual(cited[cid], SHADOW_CASES_COMMIT, cid)
 
 
 class Freeze(unittest.TestCase):

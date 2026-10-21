@@ -492,13 +492,16 @@ class CompareTest(unittest.TestCase):
         # lane S8g: the discovery cap 1000 of async's fb66f1dd; integration stage 2: traverse.duplicate_seeds also
         # explains the merged seed's missing result
         self.assertEqual(info["sha256"], "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44")
-        # v8 (VERIFY-D VD1): area G's four cases are a table of their own, the v1-v7 table above byte-identical
+        # v8 (VERIFY-D VD1): area G's cases are a table of their own, the v1-v7 table above byte-identical (async's
+        # four of 2026-10-20 and the shadow run's arm-absent two of 2026-10-21)
         self.assertFalse([cid for cid, c in cases.items() if "graphlet" in c])
         gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         self.assertEqual(sorted(gcases), ["graphlet.body_over_in_service_ceiling",
                                           "graphlet.body_over_in_service_ceiling.summary",
                                           "graphlet.export_mgt_is_the_stored_body",
-                                          "graphlet.max_bytes_above_service_cap"])
+                                          "graphlet.max_bytes_above_service_cap",
+                                          "graphlet.walks_arm_absent.one_arm",
+                                          "graphlet.walks_arm_absent.two_arms"])
         self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
         self.assertTrue(info["service_commit"].startswith("22d034ba"))
         # e427d503: traverse.duplicate_seeds explains only a merge, "N results for M seeds (N distinct)" (B5b-07),
