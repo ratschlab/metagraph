@@ -451,6 +451,29 @@ class RealRunV8Test(unittest.TestCase):
         finally:
             graphlets.by_design_g_table = orig
 
+    def test_units_builder_keys_the_given_manifest(self):
+        import subprocess
+        import tempfile
+        m8, ids7, raw8 = v8_manifest_stub()
+        with tempfile.TemporaryDirectory() as d:
+            for s in m8["scenarios"]:
+                if s["id"] not in ids7:
+                    s.setdefault("route", "POST /traverse")
+            m8["content_sha256"] = "f" * 64
+            mpath, out = os.path.join(d, "m8.json"), os.path.join(d, "units.json")
+            with open(mpath, "w") as fh:
+                json.dump(m8, fh)
+            proc = subprocess.run([sys.executable, "-I", "-B", os.path.join(DOC, "units_v8_build.py"), mpath, out],
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            built = sc.read_json(out)
+            self.assertEqual(built["_manifest"], {"version": 8, "content_sha256": "f" * 64,
+                                                  "scenarios": len(m8["scenarios"])})
+            self.assertEqual(built["_units"]["S-base"]["unit_title"], raw8["_units"]["S-base"]["unit_title"])
+            self.assertEqual(built["_families"], raw8["_families"])
+            for uid, u in raw8["_units"].items():
+                self.assertEqual(built["_units"][uid]["members"], u["members"], uid)
+
     def test_g_pair_prose_names_the_rows_pair_when_present(self):
         import facts
         text = prose("G")["families"]["G-pair"]["prose"]
