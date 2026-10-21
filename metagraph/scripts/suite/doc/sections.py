@@ -471,6 +471,8 @@ def checks_commit_text(run):
 TRAVERSAL_TOOLS = ("traverse_resolve", "traverse_fetch", "traverse_status", "traverse_results", "traverse_stop",
                    "traverse_lock", "traverse_capabilities", "graphlet_summary", "graphlet_walks", "graphlet_walk",
                    "graphlet_labels", "graphlet_sequence", "graphlet_compare", "graphlet_export")
+# the formats the service's graphlet_export writes (DESIGN-v8 §1: fasta, gfa, json and mgt, the stored body)
+GRAPHLET_EXPORT_FORMATS = ("fasta", "gfa", "json", "mgt")
 MCP_TOOL_ORDER = ("traverse_resolve", "traverse_fetch", "traverse_status", "traverse_results", "pattern_search",
                   "get_status", "get_results", "catalog", "graphlet_export")
 
@@ -501,14 +503,18 @@ def traversal_tools_not_called_text(run):
     if not calls:
         return ""
     graphlet = [t for t in TRAVERSAL_TOOLS if t.startswith("graphlet_") and t != "graphlet_export" and t not in calls]
+    # graphlet_export's formats the runner did not use (v4-v7: MGT only; manifest v8's area G uses all four)
+    used = set(str(f).lower() for f in ((calls.get("graphlet_export") or {}).get("formats") or {}))
+    other_formats = "graphlet_export" in calls and not set(GRAPHLET_EXPORT_FORMATS) <= used
     parts = []
-    if graphlet or "graphlet_export" in calls:
+    if graphlet or other_formats or "graphlet_export" not in calls:
         inner = ["%s" % t for t in graphlet]
-        if "graphlet_export" in calls:
+        if other_formats:
             inner.append("graphlet_export's other formats")
-        elif "graphlet_export" in TRAVERSAL_TOOLS:
+        elif "graphlet_export" not in calls and "graphlet_export" in TRAVERSAL_TOOLS:
             inner.append("graphlet_export")
-        parts.append("the graphlet processing tools (%s)" % facts._join(inner))
+        if inner:
+            parts.append("the graphlet processing tools (%s)" % facts._join(inner))
     parts += ["%s" % t for t in TRAVERSAL_TOOLS if t.startswith("traverse_") and t not in calls]
     return facts._join(parts)
 

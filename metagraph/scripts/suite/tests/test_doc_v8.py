@@ -508,3 +508,19 @@ class RealRunV8Test(unittest.TestCase):
         self.assertIn("The run directory, R1, is not in the repository: it was written outside the working tree that "
                       "ran the suite (evidence.json names its folder), so", outside)
         self.assertIn("run_dir_in_tree", prose("overview")["placeholders"])
+
+    def test_tools_not_called_with_every_export_format(self):
+        import sections
+        base = {"traverse_resolve": {"n": 1, "formats": {}}, "traverse_fetch": {"n": 1, "formats": {}}}
+        v7 = _Stub(mcp_tool_calls=lambda: dict(base, graphlet_export={"n": 3, "formats": {"mgt": 3}}))
+        self.assertIn("the graphlet processing tools (graphlet_summary", sections.traversal_tools_not_called_text(v7))
+        self.assertIn("graphlet_export's other formats", sections.traversal_tools_not_called_text(v7))
+        g = dict((t, {"n": 1, "formats": {}}) for t in sections.TRAVERSAL_TOOLS
+                 if t.startswith("graphlet_") or t in ("traverse_status", "traverse_results", "traverse_stop"))
+        g["graphlet_export"] = {"n": 4, "formats": {"fasta": 1, "gfa": 1, "json": 1, "mgt": 1}}
+        v8 = _Stub(mcp_tool_calls=lambda: dict(base, **g))
+        self.assertEqual(sections.traversal_tools_not_called_text(v8), "traverse_lock and traverse_capabilities")
+        g["graphlet_export"] = {"n": 2, "formats": {"mgt": 1, "json": 1}}
+        self.assertEqual(sections.traversal_tools_not_called_text(_Stub(mcp_tool_calls=lambda: dict(base, **g))),
+                         "the graphlet processing tools (graphlet_export's other formats), traverse_lock and "
+                         "traverse_capabilities")
