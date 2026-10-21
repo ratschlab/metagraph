@@ -554,6 +554,15 @@ def attention_line(rows, manifest, comp=None):
     return marked("Needs attention, in tests (scenarios): %s." % md("; ".join(parts)), "red")
 
 
+def failed_steps_only(loop, missing):
+    """Whether the orchestrator's loop is unfinished only by failed steps (ARM:SCENARIO:EXIT) while the run's plan
+    reconciled with its records found nothing missing (|missing| (keys, plan source) with a source and no key) and
+    the runner recorded every MCP execution: the steps' executions were recorded, so the run is complete."""
+    keys, source = missing or ([], None)
+    return bool(loop.get("reason") == "failed_steps" and loop.get("failed_steps") and source and not keys
+                and not loop.get("mcp_missing") and not loop.get("mcp_missing_count"))
+
+
 def verdict_text(run, comp, rows, reevaluated=False, missing=None, manifest=None, cases=None):
     """The verdict word and its reason, as verdict_section prints it, and the facts it was decided on: {incomplete,
     loop, mixed, stub, untested, totals, no_pass_arms}. The results document (doc/make_doc.py) states the same
@@ -579,9 +588,17 @@ def verdict_text(run, comp, rows, reevaluated=False, missing=None, manifest=None
         incomplete.append("%d planned execution(s) not recorded (%s; plan of %s)" % (
             len(keys), ", ".join("%s %d" % kv for kv in sorted(per_arm.items())), source))
     loop = orchestrator_session(run).get("loop") or {}
+    steps_note = ""
     if loop and loop.get("state") not in (None, "done"):
-        incomplete.append("the %s loop (%s%s)" % (loop.get("mode", "paired"), loop.get("state"),
-                                                  (": %s" % loop["reason"]) if loop.get("reason") else ""))
+        if not incomplete and failed_steps_only(loop, missing):
+            # every arm finished and the plan reconciled with nothing missing: the failed steps' executions were
+            # recorded (the v8 baseline's ssh exit after T-walk-0017's execution, VERIFY-V8 M1): a note, not unfinished
+            steps_note = "; every planned execution recorded, the %s loop's failed step%s %s notwithstanding" % (
+                loop.get("mode", "paired"), "" if len(loop["failed_steps"]) == 1 else "s",
+                ", ".join(str(x) for x in loop["failed_steps"]))
+        else:
+            incomplete.append("the %s loop (%s%s)" % (loop.get("mode", "paired"), loop.get("state"),
+                                                      (": %s" % loop["reason"]) if loop.get("reason") else ""))
     # a run that spans two deployments (merge_run.release_identity) tested no single one: never PASS
     mixed = mixed_releases_text(run)
     dis_direct = s["direct_agreement"].get("disagree", 0)
@@ -632,8 +649,9 @@ def verdict_text(run, comp, rows, reevaluated=False, missing=None, manifest=None
         verdict = "PASS (no failed execution, no finding, no disagreement between the arms)"
     if inconclusive and not incomplete and not verdict.startswith("INCONCLUSIVE (no execution passed"):
         verdict += "; %d inconclusive execution(s) (not counted as pass)" % inconclusive
-    return verdict, {"incomplete": incomplete, "loop": loop, "mixed": mixed, "stub": stub, "untested": untested,
-                     "totals": totals, "no_pass_arms": no_pass_arms}
+    return verdict + steps_note, {"incomplete": incomplete, "loop": loop, "mixed": mixed, "stub": stub,
+                                  "untested": untested, "totals": totals, "no_pass_arms": no_pass_arms,
+                                  "steps_note": steps_note}
 
 
 EXPLORATORY_LABEL = "Exploratory verdict (not the deploy decision, which is the gate's %s)"

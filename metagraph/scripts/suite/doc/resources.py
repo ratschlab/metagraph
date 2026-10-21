@@ -101,6 +101,11 @@ def values(ctx, s, host, graphlet):
         "task_top_n": str(tr.TOP_N),
         "task_any_stated": stated,
         "task_host_memory": bool(f),
+        # RV8-4: the limit met over the run, in one sentence before the method (the counters' growth)
+        "task_host_at_limit": bool(((f.get("deltas") or {}).get("events.max")) or 0),
+        "task_host_limit_hits": fmt_count((f.get("deltas") or {}).get("events.max")),
+        "task_host_evicted_gib": cells.fmt_gib(((f.get("pages_gib") or {}).get("stat.pgsteal_direct") or 0) * (1 << 30)),
+        "task_host_oom_kills": fmt_count((f.get("deltas") or {}).get("events.oom_kill")),
         "task_host_before": ((f.get("before") or {}).get("utc")) or "–",
         "task_host_after": ((f.get("after") or {}).get("utc")) or "–",
         "task_page_bytes": fmt_count(f.get("page_bytes")),

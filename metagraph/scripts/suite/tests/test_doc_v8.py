@@ -640,3 +640,51 @@ class ProblemNotesV8Test(unittest.TestCase):
         ev = sections._identity_evidence(_Stub(service_identity={"recorded": False}, mcp_run={}),
                                          {"source": "s", "service_commit": "abc", "problem_notes": [self.NOTE]})
         self.assertEqual(ev["problem_notes"], [self.NOTE])
+
+
+class BaselineReviewFixesV8Test(unittest.TestCase):
+    """The reviews of the v8 baseline document (VERIFY-V8 M1-M3, READER-V8 RV8-2, RV8-4)."""
+
+    def test_failed_steps_with_every_execution_recorded(self):
+        import report
+        loop = {"state": "incomplete", "reason": "failed_steps", "failed_steps": ["direct-local:T-walk-0017:255"],
+                "mcp_missing": []}
+        self.assertTrue(report.failed_steps_only(loop, ([], "plan.json")))
+        self.assertFalse(report.failed_steps_only(loop, ([("T-walk-0017", "direct-local", 0)], "plan.json")))
+        self.assertFalse(report.failed_steps_only(loop, ([], None)))
+        self.assertFalse(report.failed_steps_only(dict(loop, mcp_missing=["X:r0"]), ([], "plan.json")))
+        self.assertFalse(report.failed_steps_only(dict(loop, reason="interrupted"), ([], "plan.json")))
+
+    def test_entry_wall_time_includes_its_phases(self):
+        import task_resources as tr
+        e = {"cpu_ms": 12604.2, "elapsed_ms": 236.8, "placement_ms": 1411.3, "selection_ms": 15742.3,
+             "label_discovery_ms": 0.0}
+        f = tr._timing_figures({}, [e], "mcp")
+        self.assertAlmostEqual(f["elapsed_ms"], 236.8 + 1411.3 + 15742.3)
+        self.assertEqual(f["sources"]["cpu_ms"], "mcp_entries")
+        self.assertAlmostEqual(tr._entry_elapsed({"elapsed_ms": 5.0}), 5.0)
+        self.assertIsNone(tr._entry_elapsed({"placement_ms": 5.0}))
+
+    def test_stale_only_by_chapter_g_digest_with_the_same_verdict(self):
+        import sections
+        g = {"passed": False, "counts": {"judged": 3}, "problems": [{"scenario": "N-x", "arm": "mcp", "kind": "outcome"}]}
+        run = _Stub(gate_recorded=dict(g, judged_utc="2026-10-21T12:44:44Z", policy={"name": "v8-rtp-mcp"}),
+                    gate_stale=["graphlet_inputs"])
+        self.assertTrue(sections.same_recorded_verdict(run, dict(g)))
+        self.assertIn("only its digest of chapter G's inputs differs", sections.same_verdict_text(run))
+        self.assertFalse(sections.same_recorded_verdict(run, dict(g, counts={"judged": 4})))
+        run.gate_stale = ["graphlet_inputs", "executions.jsonl"]
+        self.assertFalse(sections.same_recorded_verdict(run, dict(g)))
+
+    def test_gate_box_names_the_noted_execution(self):
+        import sections
+        note = {"scenario": "N-x", "arm": "mcp", "repeat": 0, "text": "the answer was lost.", "source": "s"}
+        probs = [{"scenario": "N-x", "arm": "mcp", "kind": "outcome", "repeat": 0},
+                 {"scenario": "N-x", "arm": "mcp", "kind": "disagreement", "repeat": None}]
+        run = _Stub(gate={"passed": False, "problems": probs}, identity={"problem_notes": [note]})
+        self.assertEqual(sections.noted_problems_text(run), "Every problem is on N-x mcp r0: the answer was lost "
+                         "(the service's own log, checked separately; I.1).")
+        run.gate = {"passed": False, "problems": probs + [{"scenario": "R-y", "arm": "mcp", "kind": "outcome"}]}
+        self.assertEqual(sections.noted_problems_text(run), "")
+        run.gate = {"passed": True, "problems": []}
+        self.assertEqual(sections.noted_problems_text(run), "")

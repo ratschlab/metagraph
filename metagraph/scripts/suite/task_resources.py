@@ -93,6 +93,19 @@ def _entry_list(obj, *keys):
     return []
 
 
+# an entry's elapsed_ms is its search; its cpu_ms also covers these phases, which its timing states apart (the
+# direct request's elapsed_ms holds them): the entry's wall time is their sum (VERIFY-V8 M3)
+ENTRY_PHASES = ("placement_ms", "selection_ms", "label_discovery_ms")
+
+
+def _entry_elapsed(e):
+    """An entry's wall time: its elapsed_ms plus the phases it states apart (ENTRY_PHASES); None without one."""
+    el = _num(e.get("elapsed_ms"))
+    if el is None:
+        return None
+    return el + sum(_num(e.get(k)) or 0.0 for k in ENTRY_PHASES)
+
+
 def _timing_figures(timing, entries, scope):
     """{cpu_ms, elapsed_ms, minor_faults, major_faults} and their sources from a request-level timing object and the
     entries' timing objects: the request's own figure where it states one, else the sum over the entries that state
@@ -108,7 +121,7 @@ def _timing_figures(timing, entries, scope):
         with_cpu = [e for e in entries if _num(e.get("cpu_ms")) is not None]
         if with_cpu:
             out["cpu_ms"] = float(sum(e["cpu_ms"] for e in with_cpu))
-            el = [_num(e.get("elapsed_ms")) for e in with_cpu]
+            el = [_entry_elapsed(e) for e in with_cpu]
             out["elapsed_ms"] = float(sum(el)) if all(x is not None for x in el) else None
             out["sources"]["cpu_ms"] = scope + "_entries"
     pf = timing.get("page_faults")
