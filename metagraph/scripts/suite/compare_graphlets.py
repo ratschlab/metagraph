@@ -124,6 +124,9 @@ ERROR_CODE_ONLY = ("no_graphlet",)
 RUNNER_ERRORS = gp.RUNNER_ERRORS
 # per tool, answer keys whose value depends on where the way ran, left out of the comparison
 ENV_KEYS = {"graphlet_export": ("path", "bytes"), "graphlet_save": ("path", "bytes")}
+# per-row environment keys: the store's bookkeeping times of graphlet_list's rows (when this way's process loaded and
+# last touched the graphlet), which differ between any two processes (the shadow run's drift lane, R4-5)
+ROW_ENV_KEYS = {"graphlet_list": ("accessed", "created")}
 # the tools that make a file (FORMAT v2 B3: the record's `file` {name, bytes, sha256, raw}, the text kept at
 # arms/<way dir>/raw/<raw>): their files are compared by content (file_view), not only their receipts
 FILE_TOOLS = ("graphlet_export", "graphlet_save")
@@ -239,10 +242,14 @@ def _canon(obj, roles, drop_local, top=False, tool=None):
 def canonical_answer(tool, answer, keep_local=False):
     """An answer as the ways compare it: handles to symbols (handle_roles, then <handle:N> in sorted-key order for
     any other handle-valued key; a raw handle inside a string too), cursors removed, the local block (and
-    evidence.limitations.local) removed unless |keep_local|, the tool's ENV_KEYS removed."""
+    evidence.limitations.local) removed unless |keep_local|, the tool's ENV_KEYS removed, and its rows' ROW_ENV_KEYS."""
     if not isinstance(answer, dict):
         return answer
-    return _canon(answer, handle_roles(tool, answer), not keep_local, top=True, tool=tool)
+    out = _canon(answer, handle_roles(tool, answer), not keep_local, top=True, tool=tool)
+    if tool in ROW_ENV_KEYS and isinstance(out.get("rows"), list):
+        out["rows"] = [dict((k, v) for k, v in r.items() if k not in ROW_ENV_KEYS[tool]) if isinstance(r, dict) else r
+                       for r in out["rows"]]
+    return out
 
 
 def canonical_error(error, keep_local=False):
@@ -893,11 +900,12 @@ def compare_op(scenario, op, recs, precheck, manifest):
         entry["ways"]["W3"] = "not_exposed"
         if why is None:
             entry["problems"].append("W3 is left out without the owner's reason (not_exposed)")
-        w4 = (op.get("not_exposed") or {}).get("W4") if isinstance(op.get("not_exposed"), dict) else None
-        if "W4" not in ways and isinstance(w4, str) and w4.strip():
-            # a direct-only scenario (no MCP job, so no W4 document): stated, never missing
-            entry["not_exposed"]["W4"] = w4.strip()
-            entry["ways"]["W4"] = "not_exposed"
+    w4 = (op.get("not_exposed") or {}).get("W4") if isinstance(op.get("not_exposed"), dict) else None
+    if "W4" not in ways and isinstance(w4, str) and w4.strip():
+        # no W4 document: a direct-only scenario (no MCP job), or a failed seed, whose W3 still runs (the service
+        # keeps no document for it, VERIFY-D VD2 / R2-7): stated with its reason, never missing
+        entry.setdefault("not_exposed", {})["W4"] = w4.strip()
+        entry["ways"]["W4"] = "not_exposed"
     if ((precheck or {}).get("preconditions") or {}).get("outcome") == "precondition_failed":
         for w in ways:
             entry["ways"][w] = "not_compared"
@@ -1267,4 +1275,8 @@ def _load_stages():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # run as the module compare_graphlets, not as __main__: graphlet_service_checks imports compare_graphlets and
+    # registers its stages (by-design pairs, service checks) in that module's STAGES; a __main__ copy computed without
+    # them (graphlet_compare.json of the shadow run, 2026-10-21)
+    import compare_graphlets as _module
+    sys.exit(_module.main())

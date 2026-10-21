@@ -49,6 +49,9 @@
      "left": 0,
      "right": 0
     },
+    "page_bytes": {
+     "cmp-paged": 6144
+    },
     "seed_bp": null,
     "segments": {
      "left": 31,
@@ -109,6 +112,111 @@
     "dl0": 1096.983337,
     "dl1": 22.934146,
     "dl2": 23.976125
+   },
+   "verdicts": {
+    "bodies": "pass",
+    "envelope": "pass",
+    "fit": "pass",
+    "headroom": "pass",
+    "mcp": "not expressible (direct-only)",
+    "plan": "pass",
+    "slot": "pass",
+    "twin": "pass"
+   }
+  },
+  "annotate.1+constrain": {
+   "facts": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "body_bytes": 3206,
+    "complete_to_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "continuation": {
+     "left": true,
+     "right": true
+    },
+    "cut_lists": false,
+    "label_names": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1",
+     "NC_017255.1",
+     "NC_017253.1",
+     "NC_002528.1",
+     "NZ_ACFK01000001.1",
+     "NC_017252.1"
+    ],
+    "labels": 8,
+    "max_labels_per_node": 8,
+    "merges": {
+     "left": 0,
+     "right": 0
+    },
+    "seed_bp": null,
+    "segments": {
+     "left": 1,
+     "right": 5
+    },
+    "stop": null,
+    "summary_cut_bytes": 1900,
+    "walk_bp": {
+     "left": 200,
+     "right": 200
+    },
+    "walks": {
+     "left": 1,
+     "right": 3
+    }
+   },
+   "passed": true,
+   "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "NC_017254.1",
+     "NC_011833.1",
+     "NC_011834.1"
+    ],
+    "segments_min": {
+     "left": 1,
+     "right": 5
+    },
+    "walk_bp_min": {
+     "left": 200,
+     "right": 200
+    },
+    "walks_min": {
+     "left": 1,
+     "right": 3
+    }
+   },
+   "reference": {
+    "body_digest": "4bdfba5b3200eed62f725d0f213a95b0e904eded2699a811d620e374a3d8e485",
+    "engine_ms": {
+     "dl0": 610.122063,
+     "dl1": 13.876026,
+     "dl2": 14.194308
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 8
+   },
+   "timeouts": {},
+   "times_ms": {
+    "dl0": 610.122063,
+    "dl1": 13.876026,
+    "dl2": 14.194308
    },
    "verdicts": {
     "bodies": "pass",
@@ -1352,6 +1460,9 @@
      "left": 2,
      "right": 1
     },
+    "page_bytes": {
+     "cmp-paged-w3": 131072
+    },
     "seed_bp": null,
     "segments": {
      "left": 19,
@@ -1368,6 +1479,7 @@
      "right": 18
     }
    },
+   "pair_note": "the rows pair's a (G-pair-rows-0002, R4-1): its walks compare against over_8mib.1 on rehearsal 1's documents counts differ 14, only_in_a 3, only_in_b 281, all qualified, 159,694 bytes whole (the library's compact JSON, the pair's scenario ids); cmp-paged-w3's page 131,072 takes 2 whole pages there and at W3's budget less 512 (D-scratch/r7/measure_rows.py)",
    "passed": true,
    "plan_problems": [],
    "preconditions": {
@@ -2522,6 +2634,14 @@
     "merges": {
      "right": 0
     },
+    "page_bytes": {
+     "claims-paged": null,
+     "labels-paged": null,
+     "lims-paged": null,
+     "splits-paged": null,
+     "walk-paged-right": null,
+     "walks-paged-right": null
+    },
     "seed_bp": null,
     "segments": {
      "right": 1
@@ -2695,6 +2815,16 @@
     "merges": {
      "left": 8,
      "right": 7
+    },
+    "page_bytes": {
+     "claims-paged": 2560,
+     "labels-paged": 2048,
+     "lims-paged": 1312,
+     "splits-paged": 1472,
+     "walk-paged-left": 12288,
+     "walk-paged-right": 12288,
+     "walks-paged-left": null,
+     "walks-paged-right": 928
     },
     "seed_bp": null,
     "segments": {
@@ -3490,6 +3620,14 @@
     "max_labels_per_node": 1,
     "merges": {
      "left": 0
+    },
+    "page_bytes": {
+     "claims-paged": 2560,
+     "labels-paged": null,
+     "lims-paged": null,
+     "splits-paged": 928,
+     "walk-paged-left": 1088,
+     "walks-paged-left": 2048
     },
     "seed_bp": null,
     "segments": {
@@ -4717,8 +4855,68 @@
      "right": 1036
     }
    },
+   "pair_note": "the rows pair's b (G-pair-rows-0001, VERIFY-D-R4 R4-1): not its slot's graphlet (its body, 305,290 bytes, is not over 8 MiB: the slot verdict fails, passed false), it passed every other verdict, so as the pair's partner (partner_passed, VERIFY-D-R5 R5-4) its entry is rehearsal 1's G-big-c1 as rehearse_g.corpus_entry writes it: the preconditions, service facts, echo and reference a passing candidate's entry keeps; its scenario carries the slot of the graphlet it pairs with (cut_lists)",
+   "partner_passed": true,
    "passed": false,
    "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "244319",
+     "562",
+     "28901"
+    ],
+    "segments_min": {
+     "left": 1152,
+     "right": 1923
+    },
+    "walk_bp_min": {
+     "left": 88,
+     "right": 78
+    },
+    "walks_min": {
+     "left": 620,
+     "right": 1036
+    }
+   },
+   "reference": {
+    "body_digest": "584ce77dd9ddcfb559238fed7c0eb378ccd780953b1fd53aef6252fdce90ee1a",
+    "engine_ms": {
+     "dl0": 739.567125,
+     "dl1": 680.3580179999999,
+     "dl2": 669.7516489999999,
+     "mcp": 5015.9677010000005
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 873
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 500,
+     "max_live_paths": 1000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "time_budget_ms": 30000
+    },
+    "direction": "both",
+    "exhaustive": true,
+    "labels": {
+     "max_labels_per_node": 10000,
+     "mode": "constrain",
+     "seed_label_kind": "column"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
    "timeouts": {},
    "times_ms": {
     "dl0": 739.567125,
@@ -6197,6 +6395,16 @@
      "left": 0,
      "right": 5
     },
+    "page_bytes": {
+     "claims-paged": 16384,
+     "labels-paged": 16384,
+     "lims-paged": 1984,
+     "splits-paged": null,
+     "walk-paged-left": 1792,
+     "walk-paged-right": 3072,
+     "walks-paged-left": 1856,
+     "walks-paged-right": 1664
+    },
     "seed_bp": null,
     "segments": {
      "left": 5,
@@ -7420,16 +7628,20 @@
    }
   }
  },
- "library_commit": "44583b51307ed3242e19c051aaf133c671107956",
+ "library_commit": "fdff625ef7322e919b28da4b81763acec65591af",
+ "library_commit_note": "the library staging serves since a5767cfc (2026-10-20, the coordinator R3-1; the follow-up deploy c60b753e does not re-vendor); the rehearsals ran 44583b51",
+ "page_bytes_note": "facts.page_bytes (round 5, R3-4): per paging pass of a rich graphlet the largest max_bytes at which the local library takes at least two pages of the listing on the rehearsal's document and still at least two whole pages (no error, no cut row) at W3's real budget, max_bytes - max(96, W3's overhead: walks / walk 82 = reserve 30 + handle 22 + the handle in next_cursor 30; others 52); null: no size does, the pass is left out (D-scratch/r5/measure_pages2.py)",
  "provisional": false,
  "rehearsal": {
+  "stop_rehearsal": "s2-prepared-20261020T074516Z (2026-10-20T20:06-20:17Z): the constrain partner annotate.1+constrain; annotate.1's cmp-paged page (walks mode, 28 rows)",
   "utc": "2026-10-19T22:08:45Z"
  },
  "rich": [
   "merges",
-  "cut_lists",
-  "two_arms"
+  "two_arms",
+  "one_arm"
  ],
+ "rich_note": "the coordinator, 2026-10-20/21 (VERIFY-D-R2 R2-5, VERIFY-D-R4 R4-2): one rich graphlet per seed; merges.1 and cut_lists.1 are one seed and graph, so cut_lists.1 leaves the rich set; two_arms.1 (7 walks, 27 segments, 5 merges, cut lists) stays; the third is one_arm.1, whose walk, walks, splits and claims listings page whole at W3's budget (long_walk.4, one walk of one segment, pages none)",
  "slots": {
   "annotate": {
    "candidate": "annotate.1",

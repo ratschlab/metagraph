@@ -24,7 +24,8 @@ quoted per candidate: run 20261019T111815Z_refseq97-1009f77c, the MCP's cold eng
 or drawn here from the truth records. `build_manifest.py --rehearse G` runs every candidate on staging and writes the
 corpus file (rehearse_g.py): the candidate chosen per slot, its measured facts (preconditions), the MCP's strategy
 echo and the per-op timeouts. Without a corpus file the build is provisional: the first candidate of every slot the
-MCP can express, preconditions empty (to be frozen from the rehearsal).
+MCP can express, preconditions empty (to be frozen from the rehearsal). Beside the 5 pairs, the rows pair (ROWS_PAIR,
+VERIFY-D-R4 R4-1): two rehearsed candidates of one seed whose compare has rows, with a compare W3 pages.
 
 Pure stdlib; the builder never imports the traversal library (the op plans are checked against it in the tests).
 """
@@ -47,7 +48,7 @@ CUT_PAGE = 2048                    # a paging pass's page (the tools' default ce
 # pages small enough to page on the corpus (VERIFY-D VD8; measured on the rehearsals' documents, W1): a limitations
 # listing takes 2-3 pages at 1,024 bytes on every rich graphlet (one row needs up to ~500 bytes: 384 is too small)
 LIMS_PAGE = 1024
-COMPARE_PAGE = 1024                # cmp-paged: a claims compare with rows (the constrain / annotate pair)
+COMPARE_PAGE = 1024                # cmp-paged: a walks compare with rows (the constrain / annotate pair: 28 rows)
 ROW_PAGE = 4096                    # a paging pass over rows with label lists (walk segments, claims, compare)
 SERVICE_CAP_CASE = "graphlet.max_bytes_above_service_cap"   # async's case (service_by_design_g.json, 2026-10-20)
 ALL_WAYS = ["W1", "W2", "W3", "W4", "W5"]
@@ -566,6 +567,18 @@ def lib(o: dict, reason: str) -> dict:
     return o
 
 
+# A paging pass (an op id holding "-paged") must really page on its graphlet (the coordinator, round 5): its
+# max_bytes is the graphlet's measured one, facts page_bytes {op id: bytes}, the largest page at which the local
+# library (W1) took at least two pages of the listing on the rehearsal's document (D-scratch/r5/measure_pages.py);
+# null: the listing has one row and cannot page there, so the pass is left out; without a measurement the default.
+def page_of(facts: dict, oid: str, default: int) -> Optional[int]:
+    pb = facts.get("page_bytes")
+    if isinstance(pb, dict) and oid in pb:
+        v = pb[oid]
+        return v if isinstance(v, int) and not isinstance(v, bool) and v >= 64 else None
+    return default
+
+
 class Plan(object):
     """An op plan under construction: unique op ids, the facts of the graphlet."""
 
@@ -606,8 +619,9 @@ def plan_summary(p: Plan) -> None:
     for a in arms:
         p.add(_op("sum-%s" % a, "graphlet_summary", {"arm": a, "detail": "summary", "max_bytes": MAXB}))
     p.add(_op("lims", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": MAXB}, paging="all"))
-    if p.rich:
-        p.add(_op("lims-paged", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": LIMS_PAGE},
+    lims = page_of(p.facts, "lims-paged", LIMS_PAGE)
+    if p.rich and lims:
+        p.add(_op("lims-paged", "graphlet_summary", {"arm": None, "detail": "limitations", "max_bytes": lims},
                   paging="all"))
     p.add(_op("sum-bad-detail", "graphlet_summary", {"arm": None, "detail": "full", "max_bytes": 2048}))
     p.add(_op("sum-bad-arm", "graphlet_summary", {"arm": "up", "detail": "summary", "max_bytes": 2048}))
@@ -648,11 +662,15 @@ def plan_walks_and_walk(p: Plan) -> None:
         for i in idx:
             p.add(_op("walk-%d-%s" % (i, a), "graphlet_walk",
                       {"arm": a, "walk": ref("walks-id-%s" % a, "/rows/%d/walk" % i), "max_bytes": MAXB}))
-        if p.rich:
+        wpage = page_of(p.facts, "walk-paged-%s" % a, ROW_PAGE)
+        if p.rich and wpage:
             p.add(_op("walk-paged-%s" % a, "graphlet_walk",
-                      {"arm": a, "walk": ref("walks-length-%s" % a, "/rows/0/walk"), "max_bytes": ROW_PAGE},
+                      {"arm": a, "walk": ref("walks-length-%s" % a, "/rows/0/walk"), "max_bytes": wpage},
                       paging="all"))
-            p.add(_op("walks-paged-%s" % a, "graphlet_walks", W(a, **PAGED_WALKS), paging="all"))
+        wspage = page_of(p.facts, "walks-paged-%s" % a, PAGED_WALKS["max_bytes"])
+        if p.rich and wspage:
+            p.add(_op("walks-paged-%s" % a, "graphlet_walks", W(a, **dict(PAGED_WALKS, max_bytes=wspage)),
+                      paging="all"))
         # the rehearsal's shadow run: merge_walk False when no sampled walk passes a merge
         mw = (p.facts.get("merge_walk") or {}).get(a)
         if p.merges(a) and (mw if mw is not None else p.rich):
@@ -695,8 +713,9 @@ def plan_labels(p: Plan) -> None:
         p.add(_op("labels-atpast-%s" % a, "graphlet_labels",
                   L(arm=a, at_bp=sel("slice_past_end", length_of="walks-length-%s" % a, part="end",
                                      walk=ref("walks-length-%s" % a, "/rows/0/walk"), past=1)), paging="all"))
-    if p.rich:
-        p.add(_op("labels-paged", "graphlet_labels", L(max_bytes=1024), paging="all"))
+    lpage = page_of(p.facts, "labels-paged", 1024)
+    if p.rich and lpage:
+        p.add(_op("labels-paged", "graphlet_labels", L(max_bytes=lpage), paging="all"))
     # name=: up to 3 labels, by {ref}, by {name}, by a bare string; per arm and both
     n = min(3, max(1, p.labels()))
     forms = [("ref", lambda i: sel("top_label", labels="labels-all-direct", index=i)),
@@ -803,11 +822,13 @@ def plan_library_only(p: Plan, partner: Optional[str]) -> None:
                            "allow_unverified_index": False, "max_bytes": 16384, "reset_branches": False}),
                       OWNER_NOT_SERVED))
     a = arms[0]
-    if p.rich:
+    spage, cpage = page_of(p.facts, "splits-paged", 1024), page_of(p.facts, "claims-paged", ROW_PAGE)
+    if p.rich and spage:
         p.add(lib(_op("splits-paged", "graphlet_splits", {"arm": a, "n": 10000, "min_labels_before": 0,
-                                                          "max_bytes": 1024}, paging="all"), OWNER_LIBRARY_ONLY))
+                                                          "max_bytes": spage}, paging="all"), OWNER_LIBRARY_ONLY))
+    if p.rich and cpage:
         p.add(lib(_op("claims-paged", "graphlet_claims", {"arm": a, "min_bp": 0, "route_consistent": False,
-                                                          "labels": None, "max_bytes": ROW_PAGE}, paging="all"),
+                                                          "labels": None, "max_bytes": cpage}, paging="all"),
                   OWNER_LIBRARY_ONLY))
     p.add(lib(_op("splits-n0", "graphlet_splits", {"arm": a, "n": 0, "min_labels_before": 0, "max_bytes": 2048}),
               OWNER_LIBRARY_ONLY))
@@ -936,6 +957,16 @@ def plan_failed(p: Plan, other: str) -> None:
 BIG_BODY_CASE = "graphlet.body_over_in_service_ceiling"   # async's case (service_by_design_g.json, 2026-10-20)
 BIG_BODY_SUMMARY_CASE = BIG_BODY_CASE + ".summary"         # graphlet_summary answered from the stored row
 MGT_EXPORT_CASE = "graphlet.export_mgt_is_the_stored_body"  # async's 4th case: W3's mgt receipt is the body's link
+# async's cases of the shadow run (BY-DESIGN-G-CASES-2.json, service c60b753e): W3 rewrites graphlet_compare's export
+# line (the case pins W3's text and excuses that key only); an arm sent null to graphlet_walks / _walk / _sequence is
+# bad_argument on W3 (the MCP wrapper drops a null argument), the library's bad_arm on two arms, the only arm on one
+COMPARE_EXPORT_CASE = "graphlet.compare_export_line"
+ARM_ABSENT_TWO_CASE = "graphlet.walks_arm_absent.two_arms"
+ARM_ABSENT_ONE_CASE = "graphlet.walks_arm_absent.one_arm"
+ARM_ABSENT_TOOLS = ("graphlet_walks", "graphlet_walk", "graphlet_sequence")
+COMPARE_MODES = ("claims", "walks", "labels", "prefix_subset")
+# the cases whose library behaviour a direct-only graphlet still runs (the op kept on W1 / W2 / W5, the case unlinked)
+DIRECT_KEPT_CASES = (MGT_EXPORT_CASE, COMPARE_EXPORT_CASE, ARM_ABSENT_TWO_CASE, ARM_ABSENT_ONE_CASE)
 IN_SERVICE_MAX_BODY_BYTES = 8 * 1024 * 1024
 LIBRARY_MAX_BYTES = 16 * 1024 * 1024                       # the cap case's upper bound (the library's own limit)
 # the tools each case covers (async's BY-DESIGN-G-CASES.json graphlet.tools)
@@ -950,7 +981,10 @@ def by_design_case(o: dict, facts: dict) -> Optional[str]:
     presigned link with its own receipt; the file is still compared by content); max_bytes above the service's
     262,144 (the cap's refusal comes first: the route refuses it before the handle, the token or the body is looked
     at); else, on a body over the in-service ceiling (facts over_8mib), graphlet_summary the .summary case (answered
-    from the row) and the refusing tools the body case (graphlet_export only for fasta / gfa / json)."""
+    from the row) and the refusing tools the body case (graphlet_export only for fasta / gfa / json); then an arm
+    sent null to graphlet_walks / _walk / _sequence the arm-absent case of the graphlet's shape (two arms: the
+    library's bad_arm; one: its only arm); an answered graphlet_compare (a mode, not a deliberate cut) the export
+    case."""
     ways = o.get("ways") or ALL_WAYS
     if "W3" not in ways or facts.get("failed"):
         return None   # a failed seed: every way answers no_graphlet, no case's sides can hold (VERIFY-D VD3)
@@ -969,6 +1003,10 @@ def by_design_case(o: dict, facts: dict) -> Optional[str]:
             return BIG_BODY_SUMMARY_CASE
         if o["tool"] in BIG_BODY_TOOLS and not (o["tool"] == "graphlet_export" and o["args"].get("format") == "mgt"):
             return BIG_BODY_CASE
+    if o["tool"] in ARM_ABSENT_TOOLS and "arm" in args and args["arm"] is None:
+        return ARM_ABSENT_TWO_CASE if len(facts.get("arms") or []) == 2 else ARM_ABSENT_ONE_CASE
+    if o["tool"] == "graphlet_compare" and args.get("mode") in COMPARE_MODES and not o.get("cut_of"):
+        return COMPARE_EXPORT_CASE
     return None
 
 
@@ -1049,9 +1087,9 @@ def op_plan(sid: str, slot: str, facts: dict, rich: bool, pairs: Optional[List[T
     if direct_only:
         kept = []
         for o in p.ops:
-            if o.get("probe") or o.get("by_design") not in (None, MGT_EXPORT_CASE):
+            if o.get("probe") or o.get("by_design") not in (None,) + DIRECT_KEPT_CASES:
                 continue   # W3's own behaviour: nothing to probe without an MCP job
-            o.pop("by_design", None)   # the mgt export runs on the direct ways like any op; no W3, no case
+            o.pop("by_design", None)   # the library's behaviour runs on the direct ways like any op; no W3, no case
             o["ways"] = [w for w in o.get("ways") or DIRECT_ONLY_WAYS if w in DIRECT_ONLY_WAYS]
             o["not_exposed"] = {"W3": reason, "W4": reason}
             kept.append(o)
@@ -1066,11 +1104,13 @@ def add_extras(p: Plan, extras: dict) -> None:
     if extras.get("summary_cut"):
         cut = int(p.facts.get("summary_cut_bytes") or SUMMARY_CUT_BYTES)
         p.add(_op("sum-cut", "graphlet_summary", {"arm": None, "detail": "summary", "max_bytes": cut}, cut_of="sum"))
-    if extras.get("page_cut") and any(o["id"] == "walks-paged-%s" % a for o in p.ops):
+    paged = next((o for o in p.ops if o["id"] == "walks-paged-%s" % a), None)
+    if extras.get("page_cut") and paged is not None:
         # the first page of a listing is the page cut (cut_of); its cursor reused with other arguments: bad_cursor
-        p.add(_op("walks-p1", "graphlet_walks", W(a, **PAGED_WALKS), paging={"pages": 1},
+        page = dict(PAGED_WALKS, max_bytes=paged["args"]["max_bytes"])
+        p.add(_op("walks-p1", "graphlet_walks", W(a, **page), paging={"pages": 1},
                   cut_of="walks-paged-%s" % a))
-        p.add(_op("walks-reuse", "graphlet_walks", W(a, **dict(PAGED_WALKS, rank="length",
+        p.add(_op("walks-reuse", "graphlet_walks", W(a, **dict(page, rank="length",
                                                                cursor={"cursor_of": "walks-p1"}))))
     if extras.get("ceiling_cut"):
         p.add(_op("walks-too-large", "graphlet_walks", W(a, max_bytes=64), cut_of="walks-id-%s" % a))
@@ -1086,8 +1126,16 @@ def add_extras(p: Plan, extras: dict) -> None:
         p.add(_op("cmp-cut", "graphlet_compare", C(partner, mode="claims", max_bytes=1024), paging="all",
                   cut_of="cmp-claims-all"))
     if extras.get("compare_paged"):
-        p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="claims", max_bytes=COMPARE_PAGE),
-                  paging="all"))
+        cmp_page = page_of(p.facts, "cmp-paged", COMPARE_PAGE)
+        if cmp_page:
+            p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="walks", max_bytes=cmp_page),
+                      paging="all"))
+    if extras.get("compare_paged_w3"):
+        # a compare with rows that W3 pages (the rows pair, VERIFY-D-R4 R4-1): the service's compare paging path
+        page = page_of(p.facts, "cmp-paged-w3", ROWS_PAIR_PAGE)
+        if page:
+            p.add(_op("cmp-paged-w3", "graphlet_compare", C(extras["compare_paged_w3"], mode="walks", max_bytes=page),
+                      paging="all"))
     if extras.get("probes"):
         for probe in ("wrong_token", "bad_handle"):
             p.add(_op("probe-%s" % probe.replace("_", "-"), "graphlet_summary",
@@ -1223,8 +1271,17 @@ def g_scenario(sid: str, title: str, c: dict, corpus: dict, library_commit: Opti
     tags = sorted(set(tags + ["graphlet", "area-g", "slot-" + c["slot"]] +
                       ([] if expressible(c) else ["direct-only"]) + (["conditional"] if c["conditional"] else []) +
                       ([] if measured.get("preconditions") or failed else ["rehearsal-pending"])))
-    return scenario(sid, AREA, title, "POST /traverse", request, truth, expect, timing_class=timing_class, tags=tags,
-                    mcp=mcp, graphlet=g)
+    out = scenario(sid, AREA, title, "POST /traverse", request, truth, expect, timing_class=timing_class, tags=tags,
+                   mcp=mcp, graphlet=g)
+    if failed:
+        # a failed seed walks nothing: no check that needs a walked seed (budget_respected, which scenario() adds for
+        # a stated time budget, is inconclusive there by construction and blocks the gate: the shadow run)
+        out["expect"] = [e for e in out["expect"] if e["check"] not in SEEDLESS_INCONCLUSIVE_CHECKS]
+    return out
+
+
+# the checks that need a walked seed (inconclusive on a failed seed: "no walked seed: nothing the budget governs")
+SEEDLESS_INCONCLUSIVE_CHECKS = ("budget_respected",)
 
 
 def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_commit: Optional[str] = None,
@@ -1276,6 +1333,7 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
                               pc, corpus, library_commit, ops, ["pair", "pair-" + ps["pair"]]))
     # partners first: a compare's b must have run (its MCP job) before the op that names it
     out = reorder_pairs(out, pair_specs)
+    out += rows_pair(cands, corpus, library_commit)
     if "long_walk" in present:
         # the long walk's warm-ups right before it (the owner, 2026-10-19)
         i = next(j for j, s in enumerate(out) if s["id"] == ids["long_walk"])
@@ -1296,6 +1354,43 @@ def _variant(c: dict, cid: str, overrides: Optional[dict] = None, seed: Optional
     v["source"] = source or v["source"]
     v["expected"] = dict((k, v2) for k, v2 in v["expected"].items() if k in ("arms", "labels", "failed"))
     return v
+
+
+# A compare with rows on W3 (VERIFY-D-R4 R4-1): no MCP-expressible pair of the corpus differs within its common
+# evidence (every compare of the shadow run counted 0 rows); of the rehearsed candidates on one seed, cut_lists.2 (a
+# column walk of T-labels-0003's eco seed at 50 bp, cap 8) and over_8mib.1 (a trie of the same seed at 500 bp) do: on
+# rehearsal 1's documents their walks compare counts 298 rows (claims 310, prefix_subset 300), all qualified, whole in
+# 159,694 bytes (the library's compact JSON); cmp-paged-w3 pages it (2 whole pages at 131,072, and at W3's budget less
+# 512). Both run every way; b (the trie) first, without compares of its own. b is not its candidate's slot's graphlet
+# (over_8mib, v9: its body is not over 8 MiB): the corpus keeps it as a partner (rehearse_g.partner_passed: every
+# verdict but the slot's), and its scenario, like every pair partner's, carries the slot of the graphlet it pairs with
+# and no conditional tag (VERIFY-D-R5 R5-4).
+ROWS_PAIR = {"a": "cut_lists.2", "b": "over_8mib.1", "id_a": "G-pair-rows-0002", "id_b": "G-pair-rows-0001"}
+ROWS_PAIR_PAGE = 131072
+
+
+def rows_pair(cands: List[dict], corpus: dict, library_commit: Optional[str]) -> List[dict]:
+    """The rows pair's two scenarios (b, then a with its compares and cmp-paged-w3), [] when a candidate is missing
+    or the corpus holds no passing rehearsal of it (a provisional corpus; b may pass as a partner: partner_passed)."""
+    by = dict((c["cid"], c) for c in cands)
+    entries = corpus.get("candidates") or {}
+    ca, cb = by.get(ROWS_PAIR["a"]), by.get(ROWS_PAIR["b"])
+
+    def kept(c: Optional[dict]) -> bool:
+        e = (entries.get(c["cid"]) or {}) if c is not None else {}
+        return bool(e.get("preconditions")) and bool(e.get("passed") or e.get("partner_passed"))
+    if not (kept(ca) and kept(cb)):
+        return []
+    cb = dict(cb, slot=ca["slot"], conditional=False)   # a pair partner: the slot it pairs with, not over_8mib's
+    ida, idb = ROWS_PAIR["id_a"], ROWS_PAIR["id_b"]
+    title = "area G pair rows: a column walk at a small cap and a trie of one seed (compare rows, W3 paging)"
+    fb = facts_of(cb, corpus)
+    fb.pop("over_8mib", None)   # a pair partner, not the v9 slot
+    ops_b = op_plan(idb, cb["slot"], fb, False, [(ida, False)], partner_of=ida, extras={"no_compare": True})
+    ops_a = op_plan(ida, ca["slot"], facts_of(ca, corpus), False, [(idb, False)], partner_of=idb,
+                    extras={"compare_paged_w3": idb})
+    return [g_scenario(idb, title + " (b: %s)" % cb["cid"], cb, corpus, library_commit, ops_b, ["pair", "pair-rows"]),
+            g_scenario(ida, title + " (a: %s)" % ca["cid"], ca, corpus, library_commit, ops_a, ["pair", "pair-rows"])]
 
 
 def pair_plan(present: Dict[str, dict], ids: Dict[str, str], corpus: dict) -> List[dict]:
@@ -1474,8 +1569,12 @@ def validate_g(scenarios: List[dict], cases: Optional[set] = None) -> Tuple[List
         seen = set()
         # over the in-service ceiling: the rehearsal's service facts, else the slot's expectation (facts_of)
         big = (g.get("facts") or {}).get("body_over_8mib")
+        d = st.get("direction") or "both"
         gf = dict(g, _facts={"over_8mib": bool(big if big is not None else g.get("slot") == "over_8mib"),
-                             "failed": bool((g.get("preconditions") or {}).get("no_graphlet"))})
+                             "failed": bool((g.get("preconditions") or {}).get("no_graphlet")),
+                             # the graphlet's arms (the arm-absent cases): the rehearsal's, else the direction's
+                             "arms": (g.get("preconditions") or {}).get("arms") or (
+                                 ["left", "right"] if d == "both" else [d])})
         for o in g.get("ops") or []:
             oid = o.get("id")
             if oid in seen:

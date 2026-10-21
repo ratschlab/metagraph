@@ -253,7 +253,9 @@ class PinnedTable(unittest.TestCase):
             g = json.load(fh)["cases"]
         self.assertEqual([c["id"] for c in g],
                          ["graphlet.max_bytes_above_service_cap", "graphlet.body_over_in_service_ceiling",
-                          "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body"])
+                          "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body",
+                          "graphlet.compare_export_line", "graphlet.walks_arm_absent.two_arms",
+                          "graphlet.walks_arm_absent.one_arm"])
 
     def test_every_shipped_policy_pins_the_tables_sha(self):
         # VERIFY-D VD1: a new v4-v7 gate run snapshots the tree's table; its sha is the one every shipped policy pins
@@ -1029,6 +1031,19 @@ class JudgeTest(GateCase):
         d = make_run(self.run_dir(), self.m, mcp_lines(self.m), direct=True)
         v = gate.judge(d, policy_of(self.m, arms=("direct-local", "direct-remote", "mcp"), require_agreement=True))
         self.assertTrue(v["passed"], gate.render(v))
+
+    def test_an_mcp_only_scenario_needs_no_direct_reference(self):
+        # VERIFY-D-R2 R2-6: a direct_not_run scenario (v8's stop scenarios) runs on the MCP arm only; with
+        # require_agreement its class no_direct_reference is by construction, not an agreement problem
+        stop = dict(scenario("S-stop-0001", "POST /traverse"), direct_not_run="the stop flow is MCP only")
+        m = manifest_of(scenarios() + [stop])
+        d = make_run(self.run_dir(), m, mcp_lines(m), direct=True)
+        with open(os.path.join(d, "compare.json")) as fh:
+            self.assertEqual(json.load(fh)["scenarios"]["S-stop-0001"]["mcp_agreement"]["class"],
+                             "no_direct_reference")
+        v = gate.judge(d, policy_of(m, arms=("direct-local", "direct-remote", "mcp"), require_agreement=True))
+        self.assertTrue(v["passed"], gate.render(v))
+        self.assertIn("1 MCP-only scenario(s) (direct_not_run) not compared with a direct arm", " ".join(v["notes"]))
 
     def test_missing_mcp_execution_fails(self):
         v = self.judge(make_run(self.run_dir(), self.m, mcp_lines(self.m, skip=[("R-002", 1)])))

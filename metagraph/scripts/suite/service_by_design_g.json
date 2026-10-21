@@ -1,7 +1,7 @@
 {
  "version": 1,
- "service_commit": "f994e3e2880e3f21c51577d75926cfb35c3d4355",
- "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table)",
+ "service_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+ "note": "area G's by-design cases (async's BY-DESIGN-G-CASES.json, 2026-10-20, and BY-DESIGN-G-CASES-2.json of the v8 shadow run, 2026-10-21), kept apart from service_by_design.json so that the v1-v7 table stays byte-identical (sha d4b8636c): the same schema, loaded alongside it by the area G comparison (graphlet_service_checks) and pinned by a v8 policy's graphlets block (by_design_g_table). service_commit is the latest commit a case cites; each case's source_commit names its own: f994e3e2 for the first four, c60b753e for the shadow run's three (graphlet.compare_export_line, graphlet.walks_arm_absent.two_arms / .one_arm)",
  "cases": [
   {
    "id": "graphlet.max_bytes_above_service_cap",
@@ -327,6 +327,174 @@
       "export_id": null,
       "format": "mgt",
       "status": "done"
+     }
+    }
+   }
+  },
+  {
+   "id": "graphlet.compare_export_line",
+   "areas": [
+    "G"
+   ],
+   "scenario_match": "an area G op of graphlet_compare that is answered on every way and whose answer keeps the `export` key (the library cuts it first under a tight ceiling: compare_graphlets.OPTIONAL_KEYS): W3 carries the service's export line, the library ways the library's; every other answer field is the same",
+   "direct_expectation": {
+    "http": null,
+    "code": null,
+    "text": null,
+    "text_source": "vendor/metagraph_traverse/mcp_tools.py:2356 (graphlet_compare's base answer, vendored fdff625e)",
+    "behaviour": "the library ways answer graphlet_compare with 'export': 'graphlet_export(format=json, what=compare) writes the complete lists' in every answered compare (comparable true, qualified or false, and a local stop alike), unless the ceiling cut it (fields_cut names export)"
+   },
+   "service_answer": {
+    "tool": "graphlet_compare",
+    "outcome": "answered",
+    "http": null,
+    "code": null,
+    "text_contains": null,
+    "field": null,
+    "keys": {
+     "export": "complete lists: download both bodies (format=mgt) and compare locally"
+    },
+    "stage": "worker",
+    "detail": "The worker runs the library's graphlet_compare and, in _finish (app/traversal/ops_runtime.py:594-595), replaces the export value when it equals ops_contract.LIBRARY_COMPARE_EXPORT_LINE (app/traversal/ops_contract.py:704) with ops_contract.COMPARE_EXPORT_LINE (app/traversal/ops_contract.py:705): what=compare is deferred on the service (D6; graphlet_export refuses it), so the library's line would point to a call the service does not offer. Exact replacement only: an export value that differs (none today) or an absent one (cut by the library under the ceiling) is left as it is. Nothing else in the answer changes for this reason. The MCP tool relays the answer unchanged (app/mcp_server.py _graphlet_op). Byte reserve: the worker calls the library with max_bytes minus base_reserve_bytes (app/traversal/ops_contract.py:715-724: json_size(COMPARE) - json_size(LIBRARY) = 1 byte, plus the D1 label fields when that explanation can apply, app/traversal/ops_runtime.py:570-573), so at a page edge W3's library call has slightly less room than W4's: a page may end one row earlier, which the assembled answer (graphlet_paging) does not show, but a single-page op could in principle show another cut marker. The shadow run's 40 ops differed on export only."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/traversal/ops_runtime.py:594",
+    "app/traversal/ops_runtime.py:595",
+    "app/traversal/ops_contract.py:704",
+    "app/traversal/ops_contract.py:705",
+    "app/traversal/ops_contract.py:715",
+    "vendor/metagraph_traverse/mcp_tools.py:2356"
+   ],
+   "source_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+   "graphlet": {
+    "tools": [
+     "graphlet_compare"
+    ],
+    "library": {
+     "answered": true
+    },
+    "service": {
+     "answered": true,
+     "service_fields": {
+      "export": "complete lists: download both bodies (format=mgt) and compare locally"
+     }
+    }
+   }
+  },
+  {
+   "id": "graphlet.walks_arm_absent.two_arms",
+   "areas": [
+    "G"
+   ],
+   "scenario_match": "an area G op of graphlet_walks (also graphlet_walk, graphlet_sequence: the same path, not observed in the shadow run) on a graphlet with BOTH arms whose args send arm null: the library ways answer bad_arm, W3 answers bad_argument",
+   "direct_expectation": {
+    "http": null,
+    "code": "bad_arm",
+    "text": null,
+    "text_source": "vendor/metagraph_traverse/mcp_tools.py:911-923 (_arm: g.arm(None) raises on a two-arm graphlet -> bad_arm), :1610, :1795, :2113 (arm is a positional parameter without a default)",
+    "behaviour": "a library way that passes arm=None explicitly (the plan's arm: null) reaches _arm, and g.arm(None) cannot pick an arm of a two-arm graphlet: {error: bad_arm}. A library way that OMITS arm gets bad_argument 'missing a required argument: 'arm'' from the tool wrapper's sig.bind (vendor/metagraph_traverse/mcp_tools.py:555, :567), the same as W3: no difference, so name this case only on ops whose args state arm: null and whose library ways pass it"
+   },
+   "service_answer": {
+    "tool": "graphlet_walks | graphlet_walk | graphlet_sequence",
+    "outcome": "refused_by_library",
+    "http": 422,
+    "code": "bad_argument",
+    "text_contains": "missing a required argument: 'arm'",
+    "field": null,
+    "stage": "worker",
+    "detail": "The MCP tool's arm is `str | None = None` and _graphlet_body (app/mcp_server.py:8077-8079) sends only the arguments that are not None ('None = the library's default, so it is not sent'), so an arm of null (or absent: the tool cannot tell them apart) is not in the loopback body. The route keeps only the keys set (payload.model_dump(exclude_unset=True), app/api/routes_graphlets.py:707) and the worker calls getattr(tools, tool)(handle, **args) (app/traversal/ops_runtime.py:657-659) without arm; the library's tool wrapper cannot bind the call (arm has no default) and answers {error: bad_argument, message: \"missing a required argument: 'arm'\"} (vendor/metagraph_traverse/mcp_tools.py:555, :567; checked locally on the vendored library 2026-10-21: all three tools). The route answers 422 (a library code, app/traversal/ops_contract.py:537) and the MCP tool error is {error: {code: bad_argument, message}}. Through REST an explicit \"arm\": null IS set and reaches the library as arm=None, i.e. the library's answer (bad_arm here): only the MCP wrapper differs."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/mcp_server.py:8077",
+    "app/mcp_server.py:8245",
+    "app/api/routes_graphlets.py:707",
+    "app/traversal/ops_runtime.py:657",
+    "app/traversal/ops_contract.py:537",
+    "vendor/metagraph_traverse/mcp_tools.py:555",
+    "vendor/metagraph_traverse/mcp_tools.py:567",
+    "vendor/metagraph_traverse/mcp_tools.py:911",
+    "vendor/metagraph_traverse/mcp_tools.py:1610"
+   ],
+   "source_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+   "graphlet": {
+    "tools": [
+     "graphlet_walks",
+     "graphlet_walk",
+     "graphlet_sequence"
+    ],
+    "args": [
+     {
+      "path": "arm",
+      "absent": true
+     }
+    ],
+    "library": {
+     "error": {
+      "code": "bad_arm"
+     }
+    },
+    "service": {
+     "error": {
+      "code": "bad_argument"
+     }
+    }
+   }
+  },
+  {
+   "id": "graphlet.walks_arm_absent.one_arm",
+   "areas": [
+    "G"
+   ],
+   "scenario_match": "an area G op of graphlet_walks (also graphlet_walk, graphlet_sequence: the same path, not observed in the shadow run) on a graphlet with ONE arm whose args send arm null: the library ways answer for the only arm, W3 answers bad_argument",
+   "direct_expectation": {
+    "http": null,
+    "code": null,
+    "text": null,
+    "text_source": "vendor/metagraph_traverse/mcp_tools.py:911-923 (_arm: g.arm(None) is the only arm of a one-arm graphlet)",
+    "behaviour": "a library way that passes arm=None explicitly answers as for the graphlet's only arm (walks of that arm, etc.). A library way that OMITS arm gets bad_argument from the wrapper, the same as W3 (see graphlet.walks_arm_absent.two_arms)"
+   },
+   "service_answer": {
+    "tool": "graphlet_walks | graphlet_walk | graphlet_sequence",
+    "outcome": "refused_by_library",
+    "http": 422,
+    "code": "bad_argument",
+    "text_contains": "missing a required argument: 'arm'",
+    "field": null,
+    "stage": "worker",
+    "detail": "The same path as graphlet.walks_arm_absent.two_arms. NOT PURE DESIGN: the MCP tools' docstrings say 'arm: left | right (l | r); required when the graphlet has both arms' (app/mcp_server.py:8245 walks, :8285 walk, :8318 sequence), i.e. optional on a one-arm graphlet, and the REST route already gives the library's answer for an explicit null; only the MCP wrapper's drop-None rule (app/mcp_server.py:8077-8079) loses it. A one-line service fix (send arm even when None for these three tools) would make W3 answer as the library on both shapes and retire both walks cases; the docstring alternative ('arm: required') would make this by design as written."
+   },
+   "agreement": "by_design",
+   "source": [
+    "app/mcp_server.py:8077",
+    "app/mcp_server.py:8245",
+    "app/mcp_server.py:8285",
+    "app/mcp_server.py:8318",
+    "app/api/routes_graphlets.py:707",
+    "app/traversal/ops_runtime.py:657",
+    "vendor/metagraph_traverse/mcp_tools.py:567",
+    "vendor/metagraph_traverse/mcp_tools.py:911"
+   ],
+   "source_commit": "c60b753eef5bf31a73c5fe91d55afd4437eecaba",
+   "graphlet": {
+    "tools": [
+     "graphlet_walks",
+     "graphlet_walk",
+     "graphlet_sequence"
+    ],
+    "args": [
+     {
+      "path": "arm",
+      "absent": true
+     }
+    ],
+    "library": {
+     "answered": true
+    },
+    "service": {
+     "error": {
+      "code": "bad_argument"
      }
     }
    }

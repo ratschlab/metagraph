@@ -837,6 +837,21 @@ class FiveWay(unittest.TestCase):
         self.assertEqual(e["outcome"], "inconclusive")
         self.assertIn("W5 could not judge the call", e["reason"])
 
+    def test_r4_5_the_store_times_of_a_list_row_are_environment(self):
+        # the shadow run's drift lane: graphlet_list rows' accessed / created differ between any two processes
+        row = {"handle": "g_0123456789ab", "bytes": 14644, "digest": "e7cb", "accessed": 1792544716.7,
+               "created": 1792544716.5}
+        a = cg.canonical_answer("graphlet_list", {"rows": [row], "total": 1})
+        b = cg.canonical_answer("graphlet_list", {"rows": [dict(row, accessed=1792544717.3, created=1792544717.1)],
+                                                  "total": 1})
+        self.assertEqual(a, b)
+        self.assertNotIn("accessed", a["rows"][0])
+        self.assertIn("digest", a["rows"][0])
+        c = cg.canonical_answer("graphlet_list", {"rows": [dict(row, bytes=1)], "total": 1})
+        self.assertNotEqual(a, c)                       # what is not a time still compares
+        self.assertEqual(cg.canonical_answer("graphlet_walks", {"rows": [{"accessed": 1}]})["rows"][0],
+                         {"accessed": 1})                # only the list's rows
+
     def test_vr4_a_failed_seed_scenario_can_pass(self):
         """A failed seed (FORMAT v2 D3): no way has a graphlet, W1/W2/W4 answer the runner's no_graphlet, W3 the
         service's, and W5 expects no_graphlet (lane O, VERIFY-C-R2 VR4: from the full twin's seed error): the op agrees
@@ -902,6 +917,9 @@ class FiveWay(unittest.TestCase):
                 self.assertEqual(e["outcome"], "inconclusive", e)
             else:
                 self.assertEqual(e["outcome"], "agree", e)
+                # R2-7: the entry states W4's reason, W3 running
+                self.assertEqual(e["not_exposed"], {"W4": "the service keeps no document for a failed seed"})
+                self.assertEqual((e["ways"]["W4"], e["ways"]["W3"]), ("not_exposed", "error"))
                 self.assertEqual(res["scenarios"][SID]["outcome"], "pass", res["scenarios"][SID])
             self.run_.cleanup()
             self.run_ = None

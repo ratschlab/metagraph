@@ -117,28 +117,140 @@ class W3Headroom(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class RichSet(unittest.TestCase):
+    """VERIFY-D-R2 R2-5 (the coordinator, round 5): one rich graphlet per seed; the committed corpus's rich set."""
+
+    def test_one_rich_graphlet_per_seed(self):
+        import rehearse_g
+        cands = dict((c["cid"], c) for c in area_g.candidates(FakeCtx(), v7_scenarios()))
+        meta, results, scen = {}, {}, {}
+        for cid, segs in (("merges.1", 51), ("cut_lists.1", 51), ("two_arms.1", 27), ("one_arm.1", 9),
+                          ("linear.1", 1)):
+            sid = "x-" + cid
+            meta[sid] = {"cid": cid, "slot": cands[cid]["slot"], "candidate": cands[cid]}
+            results[sid] = {"verdicts": {"bodies": "pass"}, "passed": True, "times_ms": {}, "bodies": {},
+                            "facts": {"arms": ["left"], "segments": {"left": segs}, "walks": {"left": 1},
+                                      "merges": {"left": 0}, "bases": True, "cut_lists": False, "label_names": [],
+                                      "max_labels_per_node": 1, "walk_bp": {"left": [100]}, "body_bytes": 1000}}
+            scen[sid] = {}
+        corpus = rehearse_g.choose_corpus(results, meta, scen, None)
+        self.assertEqual(corpus["rich"], ["merges", "two_arms", "one_arm"])   # cut_lists.1: merges.1's seed
+
+    def test_the_committed_corpus(self):
+        import build_manifest as bm
+        c = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        self.assertEqual(c["rich"], ["merges", "two_arms", "one_arm"])   # R4-2: one_arm.1 pages
+        self.assertIn("one rich graphlet per seed", c["rich_note"])
+
+
+class PartnerPassed(unittest.TestCase):
+    """VERIFY-D-R5 R5-4: a pair's partner outside its slot (the rows pair's b, over_8mib.1) passes as a partner on
+    every verdict but its slot's; its corpus entry keeps what a passing candidate's keeps, passed stays false, and the
+    slot stays without it."""
+
+    VERDICTS = {"bodies": "pass", "echo": "pass", "envelope": "pass", "fit": "pass", "headroom": "pass",
+                "plan": "pass", "slot": "fail: not the slot's shape: a body over 8 MiB", "twin": "pass"}
+    FACTS = {"arms": ["left", "right"], "segments": {"left": 3, "right": 2}, "walks": {"left": 2, "right": 1},
+             "merges": {"left": 0, "right": 0}, "bases": True, "cut_lists": False, "label_names": ["562"],
+             "max_labels_per_node": 1, "walk_bp": {"left": [100, 90], "right": [80]}, "body_bytes": 305290}
+
+    def result(self, verdicts):
+        import rehearse_g
+        return {"verdicts": dict(verdicts), "passed": rehearse_g.passed(verdicts), "facts": dict(self.FACTS),
+                "times_ms": {"dl0": 1.0}, "bodies": {"dl0": "d" * 64}, "echo": {"direction": "both"}}
+
+    def test_the_entry(self):
+        import rehearse_g
+        e = rehearse_g.corpus_entry("over_8mib.1", self.result(self.VERDICTS))
+        self.assertEqual((e["passed"], e["partner_passed"]), (False, True))
+        self.assertEqual(e["preconditions"], rehearse_g.preconditions_of(self.FACTS))
+        self.assertEqual(e["service_facts"], rehearse_g.service_facts(self.FACTS))
+        self.assertEqual((e["strategy"], e["reference"]), ({"direction": "both"},
+                                                           {"body_digest": "d" * 64, "engine_ms": {"dl0": 1.0}}))
+        # another verdict failing, or a candidate no pair takes outside its slot: no partner, nothing the build reads
+        for cid, verdicts in (("over_8mib.1", dict(self.VERDICTS, twin="fail: x")),
+                              ("over_8mib.2", self.VERDICTS)):
+            e = rehearse_g.corpus_entry(cid, self.result(verdicts))
+            self.assertFalse(e["passed"])
+            self.assertNotIn("partner_passed", e)
+            self.assertNotIn("preconditions", e)
+        # a passing candidate: as before, no partner flag
+        e = rehearse_g.corpus_entry("cut_lists.2", self.result(dict(self.VERDICTS, slot="pass")))
+        self.assertTrue(e["passed"])
+        self.assertNotIn("partner_passed", e)
+        self.assertIn("preconditions", e)
+
+    def test_the_slot_keeps_only_a_passing_candidate(self):
+        import rehearse_g
+        cands = dict((c["cid"], c) for c in area_g.candidates(FakeCtx(), v7_scenarios()))
+        meta = {"G-big-c1": {"cid": "over_8mib.1", "slot": "over_8mib", "candidate": cands["over_8mib.1"]}}
+        corpus = rehearse_g.choose_corpus({"G-big-c1": self.result(self.VERDICTS)}, meta, {"G-big-c1": {}}, None)
+        self.assertIsNone(corpus["slots"]["over_8mib"]["candidate"])
+        self.assertTrue(corpus["candidates"]["over_8mib.1"]["partner_passed"])
+
+    def test_the_committed_entry_is_the_codes(self):
+        # the committed entry is what corpus_entry writes from its own record: preconditions and service facts from
+        # its facts, partner_passed from its verdicts (rehearsal 1's G-big-c1: D-scratch/r8/partner_entry.py)
+        import build_manifest as bm
+        import rehearse_g
+        e = area_g.load_corpus(bm.DEFAULT_CORPUS)["candidates"]["over_8mib.1"]
+        self.assertTrue(rehearse_g.partner_passed("over_8mib.1", e["verdicts"]))
+        self.assertEqual((e["passed"], e["partner_passed"]), (False, True))
+        self.assertEqual(e["preconditions"], rehearse_g.preconditions_of(e["facts"]))
+        self.assertEqual(e["service_facts"], rehearse_g.service_facts(e["facts"]))
+        self.assertEqual(e["reference"]["engine_ms"], e["times_ms"])
+
+
 class StopRehearsal(unittest.TestCase):
     """The stop rehearsal (rehearsal 3, VERIFY-D VD6): each stop scenario three times, interleaved, MCP only; the
     constrain / annotate partner (VD8) direct-local; the entry verdict over recorded stop_flow records."""
 
     def test_its_manifest_and_plan(self):
+        # R2-3: production's warm state first (the warmers as in a v8 run, each stop's base request once to
+        # completion), then the tries; the pair (R2-5) at the end
         import rehearse_g
         scen, meta = rehearse_g.rehearsal3_scenarios(FakeCtx(), v7_scenarios())
         ids = [x["id"] for x in scen]
-        self.assertEqual(ids, ["S-stop-c1-t1", "S-stop-c2-t1", "G-pair-annot-c1", "S-stop-c1-t2", "S-stop-c2-t2",
-                               "S-stop-c1-t3", "S-stop-c2-t3"])
+        self.assertEqual(ids, ["T-walk-0028", "R-warm-0005", "T-labels-0003", "S-base-c1", "S-base-c2",
+                               "S-stop-c1-t1", "S-stop-c2-t1", "S-stop-c1-t2", "S-stop-c2-t2", "S-stop-c1-t3",
+                               "S-stop-c2-t3", "G-pair-annot-c1", "G-annot-c1"])
+        by = dict((x["id"], x) for x in scen)
+        for wid in ("T-walk-0028", "R-warm-0005", "T-labels-0003"):
+            self.assertTrue(meta[wid]["warmer"])
+            self.assertNotIn("warms", by[wid])
+        import areas
+        bases = dict(areas.stop_base_requests(v7_scenarios()))
+        for n, stop_id in ((1, "S-stop-0001"), (2, "S-stop-0002")):
+            b_ = by["S-base-c%d" % n]
+            self.assertEqual(meta[b_["id"]], {"base_of": stop_id})
+            self.assertIn("not_implemented", b_["mcp"])
+            self.assertEqual(b_["request"], bases[b_["route"]])
+            self.assertFalse(b_.get("direct_not_run"))
         for x in scen:
             if x["id"].startswith("S-stop"):
                 self.assertTrue(x["direct_not_run"])
                 self.assertEqual(sc.mcp_repeats(0, x, 0), [0])
+                self.assertEqual(x["mcp"]["flow"]["delay_s"], 0.0)
                 self.assertEqual(meta[x["id"]]["stop_of"], "S-stop-000%s" % x["id"][8])
-        partner = scen[2]
-        self.assertEqual(partner["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
-        self.assertEqual(partner["repeat"], 3)
+        partner, annot = by["G-pair-annot-c1"], by["G-annot-c1"]
+        for g in (partner, annot):
+            self.assertEqual(g["graphlet"]["ways"]["default"], area_g.DIRECT_ONLY_WAYS)
+            self.assertEqual(g["repeat"], 3)
         self.assertFalse([o["id"] for o in partner["graphlet"]["ops"] if o["id"].startswith("cmp")])
         self.assertEqual(meta["G-pair-annot-c1"]["cid"], "annotate.1+constrain")
+        self.assertEqual(meta["G-annot-c1"]["cid"], "annotate.1")
         p = rehearse_g.plan3(scen, meta)
-        self.assertEqual((p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"]), (6, 6, 8))
+        self.assertEqual((p["stop_tries"], p["mcp_jobs"], p["direct_local_requests"]), (6, 12, 17))
+
+    def test_the_pair_replans_without_compares(self):
+        # the analysis rebuilds the constrain partner's plan: no compares of its own, direct-only
+        import rehearse_g
+        scen, meta = rehearse_g.rehearsal3_scenarios(FakeCtx(), v7_scenarios())
+        partner = next(x for x in scen if x["id"] == "G-pair-annot-c1")
+        s2 = rehearse_g.replan(partner, meta["G-pair-annot-c1"], {"arms": ["left", "right"]})
+        self.assertFalse([o["id"] for o in s2["graphlet"]["ops"] if o["tool"] == "graphlet_compare"])
+        for o in s2["graphlet"]["ops"]:
+            self.assertNotIn("W3", o["ways"], o["id"])
 
     def test_the_entry_verdict(self):
         import rehearse_g

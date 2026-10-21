@@ -5120,12 +5120,48 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   /resolve. They run on the MCP arm only (direct_not_run: plan_executions skips them on the direct arms), expect
   the flow's checks only, and S-stop-0001 walks a CPU-bound 10 kbp sau walk that outlasts the stop on a warm host.
   `rehearse_g.py --rehearsal 3` rehearses them (3 tries each) with the constrain partner of the annotate pair.
+  On a healthy host the /traverse release is the worker's `completed` on the host's answer; the stop site's own
+  judgement (re-cancel; pinned finished / covering tombstone / lease) runs only when the host doesn't answer, which
+  MCP cannot provoke, so async's unit and parity tests cover it. A /traverse stop passes on completed (decision
+  null), finished or tombstone; a hold or the sweep is inconclusive; a /resolve stop passes on grace or grace_capped,
+  its completed (the resolve ended first) is inconclusive.
+- `shadow_run.py` runs a full v8 run end to end (the shadow run): build (v8 with the stop scenarios, outside
+  manifest/), the v7 declared entries re-pinned, the v8 policy (gate_policy.py, v7's rtp parameters), the deployed
+  library's tree, run_suite.sh --paired with all three arms (async's runner for MCP and W3), run_graphlet_local
+  (W1, W2, W4, drift), graphlet_oracle (W5), compare_graphlets (pre-checks, comparison, service checks), report.py
+  (chapter G) and gate.py with the v8 policy; --dry-run prints the steps and the expected load, --from resumes.
 - After the verifier (VERIFY-D): a failed seed's plan leaves W4 out (no document) and links no case; the W3
   headroom counts only a stated escalation; qualified_cause checks only the cut sides' caps; area G adds
   self-compares answering true and unknown, owner D1's constrain / annotate pair (direct-only, compare rows) and
   paging passes that page; the rehearsal's analysis shadow-runs the plans the build makes from its corpus; the
   chosen corpus is committed (truth/area_g/corpus.json) and `--freeze` refuses a provisional corpus or anything
   pending.
+- After the shadow run (round 7): async's three cases of it are in service_by_design_g.json: W3's export line of
+  graphlet_compare (graphlet.compare_export_line, linked on every answered compare W3 runs) and an arm sent null to
+  graphlet_walks / _walk / _sequence (graphlet.walks_arm_absent.two_arms / .one_arm, by the graphlet's arms). A case
+  whose service side pins a key of the library's own answer (export) excuses that key only: W3's value is read from
+  its answer and must be the pinned text, and W3-W4 must agree with the key left out of both. A failed seed carries
+  no budget_respected; graphlet_list's accessed / created are not compared (drift); compare_graphlets.py as a script
+  writes the by-design and service-check stages; the rows pair (G-pair-rows-0001 / -0002) gives W3 a compare with
+  rows that pages (cmp-paged-w3).
+- After VERIFY-D-R5 (round 8): service_by_design_g.json's service_commit is the latest commit a case cites
+  (c60b753e), each case's source_commit its own (f994e3e2 for the first four). The rows pair's b (over_8mib.1, a
+  trie whose body is not over 8 MiB) is a pair partner, not its candidate's v9 slot: its scenario carries the slot it
+  pairs with (cut_lists) and no conditional tag, and its corpus entry is what rehearse_g.corpus_entry writes for a
+  partner that passed every verdict but its slot's (partner_passed true, passed false; the slot stays without it).
+  No judging step reads a scenario's slot or those tags: the v8 policies' required calls and checks are unchanged.
+- The v8 freeze package: gate/declared_v8_rt.json (v7's entries re-pinned, nothing of area G set aside) and
+  gate/policy_v8_rt_mcp.json / policy_v8_rtp_mcp.json (v7's parameters: arms direct-local and mcp, warm_every 10,
+  require_agreement false) pin manifest/suite_v8.json as `build_manifest.py --manifest-version 8 --stop-scenarios
+  --freeze` writes it, and both by-design tables. Once the freeze has written it, `gate_policy.py manifest/suite_v8.json
+  --routes 'POST /resolve,POST /traverse,GET /traverse/capabilities,POST /pattern' --arms direct-local,mcp --declared
+  gate/declared_v8_rt.json --name v8-rtp-mcp --out gate/policy_v8_rtp_mcp.json` (without POST /pattern and named
+  v8-rt-mcp: the rt policy) regenerates them identically, generated_utc aside. The stop scenarios run on the MCP arm
+  only (direct_not_run): no direct execution is required of them, and a require_agreement policy reads their missing
+  direct reference as a note (R2-6). `--freeze` refuses a build that is not the one these gate files pin
+  (content_sha256, relations_sha256, manifest_version, index_fp; VERIFY-D-R5 R5-3): it names every gate file that
+  differs and, when the build lacks the stop scenarios the policies require, `--stop-scenarios`, confirmed by building
+  again with the flag toggled. `--freeze` with `--out` / `--smoke-out` outside manifest/ is a dry freeze, checked alike.
 
 ## Glossary
 

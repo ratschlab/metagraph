@@ -376,9 +376,36 @@ class ByDesignLinks(unittest.TestCase):
                              want, fmt)
         cmp_ = area_g._op("c", "graphlet_compare", area_g.C("G-x-0001", mode="labels", max_bytes=2048))
         self.assertEqual(case(cmp_, {"over_8mib": True}), area_g.BIG_BODY_CASE)
-        self.assertIsNone(case(cmp_, {}))
+        # an answered compare: W3's export line (async's shadow-run case); a bad mode or a deliberate cut: none
+        self.assertEqual(case(cmp_, {}), area_g.COMPARE_EXPORT_CASE)
+        self.assertIsNone(case(area_g._op("c", "graphlet_compare", area_g.C("G-x-0001", mode="all")), {}))
+        self.assertIsNone(case(dict(cmp_, cut_of="cmp-claims-all"), {}))
+        self.assertIsNone(case(cmp_, {"failed": True}))
+        # an arm sent null: the arm-absent case of the graphlet's shape; a stated arm: none
+        for tool, args in (("graphlet_walks", area_g.W(None)), ("graphlet_walk", {"arm": None, "walk": 0}),
+                           ("graphlet_sequence", area_g.S(None, walk=0))):
+            o = area_g._op("x", tool, args)
+            self.assertEqual(case(o, {"arms": ["left", "right"]}), area_g.ARM_ABSENT_TWO_CASE, tool)
+            self.assertEqual(case(o, {"arms": ["right"]}), area_g.ARM_ABSENT_ONE_CASE, tool)
+            self.assertIsNone(case(dict(o, ways=["W1", "W2", "W5"]), {"arms": ["right"]}), tool)
+        self.assertIsNone(case(area_g._op("w", "graphlet_walks", area_g.W("left")), {"arms": ["left", "right"]}))
+        self.assertIsNone(case(area_g._op("l", "graphlet_labels", area_g.L()), {"arms": ["left", "right"]}))
         direct = dict(walks, ways=["W1", "W2"])
         self.assertIsNone(case(direct, {}))           # no W3 call: nothing the service answers by design
+
+    def test_direct_only_keeps_the_library_behaviour(self):
+        # the shadow run's cases (W3's export line, an arm sent null) leave the library's behaviour checked: on a
+        # direct-only graphlet the ops stay on W1 / W2 / W5, unlinked
+        facts = {"arms": ["left", "right"], "walks": {"left": 2, "right": 2}}
+        mcp = dict((o["id"], o) for o in area_g.op_plan("G-x-0001", "two_arms", facts, False, [("G-x-0001", False)]))
+        self.assertEqual(mcp["walks-arm-none"]["by_design"], area_g.ARM_ABSENT_TWO_CASE)
+        self.assertEqual(mcp["self-claims-all"]["by_design"], area_g.COMPARE_EXPORT_CASE)
+        self.assertNotIn("by_design", mcp["self-bad-mode"])
+        direct = dict((o["id"], o) for o in area_g.op_plan("G-x-0001", "two_arms", facts, False,
+                                                           [("G-x-0001", False)], direct_only=True))
+        for oid in ("walks-arm-none", "self-claims-all", "self-walks-all"):
+            self.assertNotIn("by_design", direct[oid], oid)
+            self.assertEqual(direct[oid]["ways"], area_g.DIRECT_ONLY_WAYS, oid)
 
     def test_validation_names_a_missing_or_a_wrong_link(self):
         g = {"ways": {"default": area_g.ALL_WAYS}, "_facts": {}}
@@ -421,6 +448,16 @@ class ByDesignLinks(unittest.TestCase):
         b = next(s for s in bad if s["id"] == "G-fail-0001")
         next(o for o in b["graphlet"]["ops"] if o["id"] == "exp-mgt")["by_design"] = area_g.MGT_EXPORT_CASE
         self.assertTrue([p_ for p_ in area_g.validate_g(bad, None)[0] if "G-fail-0001/exp-mgt" in p_])
+
+    def test_a_failed_seed_carries_no_check_that_needs_a_walk(self):
+        # the shadow run: budget_respected read inconclusive on G-fail-0001 ("no walked seed"), blocking the gate
+        g, _ = provisional()
+        fail = next(s for s in g if s["id"] == "G-fail-0001")
+        names = [e["check"] for e in fail["expect"]]
+        self.assertNotIn("budget_respected", names)
+        self.assertEqual(names, ["status", "invariants", "traverse_seed_outcome"])
+        other = next(s for s in g if s["id"] == "G-arms2-0001")
+        self.assertIn("budget_respected", [e["check"] for e in other["expect"]])   # a walked seed keeps it
 
     def test_every_mgt_export_links_the_stored_body_case(self):
         g, _ = provisional(include_direct_only=True)
@@ -652,8 +689,18 @@ class StopScenarios(unittest.TestCase):
     def test_two_flow_scenarios(self):
         import build_manifest as bm
         out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
-        self.assertEqual([s["id"] for s in out], list(areas_mod().STOP_IDS))
-        walk, res = out
+        self.assertEqual([s["id"] for s in out], list(areas_mod().STOP_IDS) + list(areas_mod().STOP_BASE_IDS))
+        walk, res, base_walk, base_res = out
+        # R3-3: the base requests' warm full runs (repeat 1), direct-local only (the long class), MCP not implemented
+        for b, stop in ((base_walk, walk), (base_res, res)):
+            self.assertEqual((b["repeat"], b["timing_class"], b["route"]), (2, "long", stop["route"]))
+            self.assertEqual(b["request"], stop["request"])
+            self.assertIn("not_implemented", b["mcp"])
+            self.assertEqual([e["check"] for e in b["expect"]], ["status"])
+        for x in (walk, res):   # the coordinator's sentence on the release judgement's scope
+            self.assertEqual(x["truth"]["release_note"], areas_mod().STOP_RELEASE_NOTE)
+        self.assertIn("MCP cannot provoke", areas_mod().STOP_RELEASE_NOTE)
+        out = [walk, res]
         flow_keys = {"kind", "after", "delay_s", "observe", "poll_s", "release_wait_s"}   # async's FLOW_KEYS
         stop_checks = ["stop_answer", "job_terminal", "attempt_state", "token_release"]
         for s in out:
@@ -662,9 +709,13 @@ class StopScenarios(unittest.TestCase):
             self.assertEqual(s["direct_not_run"], areas_mod().STOP_DIRECT_NOT_RUN)                    # VD6
         self.assertEqual(walk["route"], "POST /traverse")
         self.assertEqual(walk["mcp"]["tool"], "traverse_fetch")
-        src = next(x for x in v7_scenarios() if x["id"] == areas_mod().STOP_WALK_SOURCE)
-        self.assertEqual(walk["request"]["seeds"], src["request"]["seeds"])
+        sw = areas_mod().STOP_WALK
+        self.assertEqual(walk["request"]["seeds"], [{"labels": ["NC_007795.1"], "sequence": sw["seed"]}])
+        self.assertEqual((walk["request"]["strategy"]["direction"], walk["truth"]["start"]), ("right", 1512368))
         self.assertEqual(walk["request"]["strategy"]["bounds"]["max_extension_bp"], 10000)
+        for s in out:
+            self.assertEqual(s["mcp"]["flow"]["delay_s"], 0.0)   # R2-1: the stop right after running
+            self.assertEqual(s["mcp"]["flow"]["poll_s"], 0.2)    # R3-3
         self.assertEqual(walk["mcp"]["arguments"]["overrides"]["bounds"]["max_extension_bp"], 10000)
         sa = dict((e["check"], e["args"]) for e in walk["expect"])["stop_answer"]
         self.assertTrue(sa["cancel_supported"])
@@ -672,10 +723,38 @@ class StopScenarios(unittest.TestCase):
         self.assertEqual(res["mcp"]["tool"], "traverse_resolve")
         sa = dict((e["check"], e["args"]) for e in res["expect"])["stop_answer"]
         self.assertEqual((sa["cancel_supported"], sa["cancel"]), (True, "disconnect"))
+        self.assertEqual(res["request"]["sequence"], areas_mod().STOP_RESOLVE["query"])
+        self.assertEqual(res["request"]["discover"], {"kind": "header", "max_labels": 1000})
+        self.assertEqual(res["mcp"]["arguments"]["sequence"], areas_mod().STOP_RESOLVE["query"])
+        self.assertNotIn("21", res["title"] + json.dumps(res["truth"]))   # R2-2: no unsourced timing claim
         self.assertEqual(bm.validate(out), [])
 
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_the_walk_meets_no_repeat_and_the_sequences_are_the_records(self):
+        # R2-1: every 30-mer from the seed to 10,260 bp past it occurs once in sau (either strand), so the header
+        # walk branches nowhere within its 10 kbp; the constants are the records' bases
+        recs = dict((r.key, r) for r in truth.load_with_sequences(fetch=False))
+        sw, sr = areas_mod().STOP_WALK, areas_mod().STOP_RESOLVE
+        sau = recs["sau"].seq
+        self.assertEqual(sau[sw["start"]:sw["start"] + len(sw["seed"])], sw["seed"])
+        self.assertEqual(recs["eco"].seq[sr["start"]:sr["start"] + 500], sr["query"])
+        k = 30
+        comp = str.maketrans("ACGT", "TGCA")
+
+        def canon(w):
+            r = w.translate(comp)[::-1]
+            return min(w, r)
+        window = sau[sw["start"]:sw["start"] + sw["no_repeat_bp"] + k]
+        want = set(canon(window[i:i + k]) for i in range(len(window) - k + 1))
+        self.assertEqual(len(want), len(window) - k + 1)   # no repeat inside the window
+        hits = 0
+        for i in range(len(sau) - k + 1):
+            if canon(sau[i:i + k]) in want:
+                hits += 1
+        self.assertEqual(hits, len(want))                 # and none elsewhere in the genome
+
     def test_only_the_mcp_arm_runs_them(self):
-        out = areas_mod().gen_stop(FakeCtx(), v7_scenarios())
+        out = [x for x in areas_mod().gen_stop(FakeCtx(), v7_scenarios()) if x["id"] in areas_mod().STOP_IDS]
         selected = list(enumerate(out))
         for arm in sc.DIRECT_ARMS:
             planned, skipped = sc.plan_executions(selected, arm, 10)
@@ -717,7 +796,7 @@ class Coverage(unittest.TestCase):
         self.assertEqual(annot["cmp-claims-all"]["not_exposed"]["W3"], area_g.REASON_DIRECT_ONLY)
         paged = annot["cmp-paged"]
         self.assertEqual((paged["args"]["mode"], paged["args"]["max_bytes"], paged["paging"]),
-                         ("claims", area_g.COMPARE_PAGE, "all"))
+                         ("walks", area_g.COMPARE_PAGE, "all"))   # rehearsal S2: the walks compare has the rows
         self.assertNotIn("cmp-paged", ops["G-pair-radius-0001"])
         self.assertIn("cmp-cut", ops["G-pair-radius-0001"])
         for sid, s in by.items():
@@ -732,9 +811,116 @@ class Coverage(unittest.TestCase):
         self.assertIn("cmp-paged", [o["id"] for o in radius["graphlet"]["ops"]])
 
 
+class PagingPasses(unittest.TestCase):
+    """The coordinator (round 5): every paging pass really pages on its graphlet: its max_bytes is the graphlet's
+    measured facts.page_bytes (at least two pages on the rehearsal's document, W1), a null leaves the pass out."""
+
+    def test_page_of_and_the_plan(self):
+        self.assertEqual(area_g.page_of({}, "walks-paged-left", 1200), 1200)
+        self.assertEqual(area_g.page_of({"page_bytes": {"walks-paged-left": 800}}, "walks-paged-left", 1200), 800)
+        self.assertIsNone(area_g.page_of({"page_bytes": {"walks-paged-left": None}}, "walks-paged-left", 1200))
+        facts = {"arms": ["left", "right"], "walks": {"left": 3, "right": 4},
+                 "page_bytes": {"walks-paged-left": 800, "walk-paged-left": None, "splits-paged": None,
+                                "lims-paged": 1312, "claims-paged": 2048, "labels-paged": 2048}}
+        ops = dict((o["id"], o) for o in area_g.op_plan("G-arms2-0001", "two_arms", facts, True,
+                                                        extras={"page_cut": True}))
+        self.assertEqual(ops["walks-paged-left"]["args"]["max_bytes"], 800)
+        self.assertEqual(ops["walks-p1"]["args"]["max_bytes"], 800)           # the page cut of the same listing
+        self.assertEqual(ops["walks-reuse"]["args"]["max_bytes"], 800)
+        self.assertNotIn("walk-paged-left", ops)
+        self.assertNotIn("splits-paged", ops)
+        self.assertEqual((ops["lims-paged"]["args"]["max_bytes"], ops["claims-paged"]["args"]["max_bytes"],
+                          ops["labels-paged"]["args"]["max_bytes"]), (1312, 2048, 2048))
+        self.assertEqual(ops["walk-paged-right"]["args"]["max_bytes"], area_g.ROW_PAGE)   # not measured: default
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_the_committed_corpus_pages_every_pass(self):
+        import build_manifest as bm
+        recs = truth.load_with_sequences(fetch=False)
+        ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
+        corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        g = dict((x["id"], x) for x in area_g.gen_G(ctx, v7_scenarios(), corpus, "a" * 40) if "graphlet" in x)
+        for sid in ("G-merge-0001", "G-arms2-0001", "G-arm1-0001"):
+            pb = corpus["candidates"][g[sid]["graphlet"]["candidate"]]["facts"]["page_bytes"]
+            ops = dict((o["id"], o) for o in g[sid]["graphlet"]["ops"])
+            for oid, size in pb.items():
+                if size is None:
+                    self.assertNotIn(oid, ops, (sid, oid))
+                else:
+                    self.assertEqual(ops[oid]["args"]["max_bytes"], size, (sid, oid))
+            for oid in ops:
+                if "-paged" in oid and oid != "cmp-paged":
+                    self.assertIn(oid, pb, (sid, oid))   # every paging pass of a rich graphlet is measured
+
+
+class RowsPair(unittest.TestCase):
+    """VERIFY-D-R4 R4-1: a W3 compare with rows that pages: cut_lists.2 (a) against over_8mib.1 (b, run first and
+    without compares), every way, cmp-paged-w3 in walks mode at a's measured page; left out on a corpus that holds no
+    rehearsal of either."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_the_committed_corpus_builds_the_pair(self):
+        import build_manifest as bm
+        recs = truth.load_with_sequences(fetch=False)
+        ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
+        corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        out = [x for x in area_g.gen_G(ctx, v7_scenarios(), corpus, "a" * 40) if "graphlet" in x]
+        ids = [x["id"] for x in out]
+        ia, ib = ids.index(area_g.ROWS_PAIR["id_a"]), ids.index(area_g.ROWS_PAIR["id_b"])
+        self.assertLess(ib, ia)                                   # b's MCP job before the compares that name it
+        a, b = out[ia], out[ib]
+        self.assertEqual((a["graphlet"]["candidate"], b["graphlet"]["candidate"]), ("cut_lists.2", "over_8mib.1"))
+        for x in (a, b):
+            self.assertIn("W3", x["graphlet"]["ways"]["default"])
+            self.assertIn("pair-rows", x["tags"])
+            self.assertTrue(x["graphlet"]["preconditions"])
+        # b is a pair partner (VERIFY-D-R5 R5-4): the slot it pairs with, not its candidate's v9 slot, no conditional
+        # tag; the corpus keeps it as a partner (every verdict but the slot's), its preconditions from its own facts
+        self.assertEqual((b["graphlet"]["slot"], a["graphlet"]["slot"]), ("cut_lists", "cut_lists"))
+        self.assertEqual(sorted(b["tags"]), ["area-g", "graphlet", "pair", "pair-rows", "slot-cut_lists"])
+        self.assertEqual(b["graphlet"]["facts"]["body_over_8mib"], False)
+        entry = corpus["candidates"]["over_8mib.1"]
+        self.assertEqual((entry["passed"], entry["partner_passed"]), (False, True))
+        self.assertEqual([k for k, v in entry["verdicts"].items() if not v.startswith("pass")], ["slot"])
+        import rehearse_g
+        self.assertEqual(b["graphlet"]["preconditions"], rehearse_g.preconditions_of(entry["facts"]))
+        self.assertEqual(b["graphlet"]["facts"], rehearse_g.service_facts(entry["facts"]))
+        self.assertEqual(a["request"]["seeds"][0]["sequence"], b["request"]["seeds"][0]["sequence"])
+        self.assertFalse([o for o in b["graphlet"]["ops"] if o["tool"] == "graphlet_compare"])
+        ops = dict((o["id"], o) for o in a["graphlet"]["ops"])
+        page = ops["cmp-paged-w3"]
+        self.assertEqual((page["args"]["mode"], page["args"]["max_bytes"], page["args"]["b"], page["paging"]),
+                         ("walks", 131072, {"graphlet": b["id"]}, "all"))
+        self.assertEqual(page["args"]["max_bytes"],
+                         corpus["candidates"]["cut_lists.2"]["facts"]["page_bytes"]["cmp-paged-w3"])
+        self.assertIn("cmp-walks-all", ops)
+
+    def test_left_out_without_a_rehearsal(self):
+        cands = [{"cid": "cut_lists.2"}, {"cid": "over_8mib.1"}]
+        self.assertEqual(area_g.rows_pair(cands, {"candidates": {}}, None), [])
+        self.assertEqual(area_g.rows_pair(cands[:1], {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}},
+                                                                   "over_8mib.1": {"preconditions": {"a": 1}}}},
+                                          None), [])
+        self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}}}}, None),
+                         [])
+        # preconditions without a pass (passed, or partner_passed for b) are no rehearsal the pair takes
+        passed = {"preconditions": {"a": 1}, "passed": True}
+        for b in ({"preconditions": {"a": 1}}, {"preconditions": {"a": 1}, "passed": False},
+                  {"preconditions": {}, "partner_passed": True}):
+            self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": passed, "over_8mib.1": b}}, None),
+                             [], b)
+        self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}},
+                                                                 "over_8mib.1": passed}}, None), [])
+
+
+SHADOW_CASES_COMMIT = "c60b753eef5bf31a73c5fe91d55afd4437eecaba"   # async's BY-DESIGN-G-CASES-2.json
+FIRST_G_CASES_COMMIT = "f994e3e2880e3f21c51577d75926cfb35c3d4355"  # async's BY-DESIGN-G-CASES.json
+
+
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
-    service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2)."""
+    service_commit states the commit their cases cite (the v7 table 22d034ba; area G's own the latest a case cites,
+    c60b753e (VERIFY-D-R5 R5-4): its first four cases cite f994e3e2, the shadow run's three c60b753e)."""
 
     def test_the_defaults_agree(self):
         import inspect
@@ -744,26 +930,125 @@ class Defaults(unittest.TestCase):
             self.assertIs(inspect.signature(fn).parameters["include_direct_only"].default, True, fn.__name__)
         self.assertTrue(cmp.load_by_design(cmp.DEFAULT_BY_DESIGN)[1]["service_commit"].startswith("22d034ba"))
         gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
-        self.assertTrue(ginfo["service_commit"].startswith("f994e3e2"))
-        self.assertEqual(set(c.get("source_commit") for c in gcases.values()) - {None}, {ginfo["service_commit"]})
+        self.assertEqual(ginfo["service_commit"], SHADOW_CASES_COMMIT)
+        cited = dict((cid, c.get("source_commit")) for cid, c in gcases.items())
+        self.assertEqual(set(cited.values()), {FIRST_G_CASES_COMMIT, SHADOW_CASES_COMMIT})
+        for cid in (area_g.COMPARE_EXPORT_CASE, area_g.ARM_ABSENT_TWO_CASE, area_g.ARM_ABSENT_ONE_CASE):
+            self.assertEqual(cited[cid], SHADOW_CASES_COMMIT, cid)
+        self.assertEqual(sorted(cid for cid, c in cited.items() if c == FIRST_G_CASES_COMMIT),
+                         ["graphlet.body_over_in_service_ceiling", "graphlet.body_over_in_service_ceiling.summary",
+                          "graphlet.export_mgt_is_the_stored_body", "graphlet.max_bytes_above_service_cap"])
 
 
 class Freeze(unittest.TestCase):
-    """VERIFY-D VD12: --freeze refuses a provisional corpus and anything still pending."""
+    """VERIFY-D VD12: --freeze refuses a provisional corpus and anything still pending; VERIFY-D-R5 R5-3: and a build
+    other than the one the committed gate files pin as manifest/suite_v8.json, naming --stop-scenarios when the build
+    without it is the cause."""
 
     def test_freeze_problems(self):
         import build_manifest as bm
         m = {"manifest_version": 8, "graphlets": {"corpus": {"file": None, "provisional": True},
                                                   "pending": ["G-x-0001: preconditions (the rehearsal freezes them)"]}}
-        probs = bm.freeze_problems(m)
-        self.assertTrue(any("corpus is provisional" in p for p in probs), probs)
-        self.assertIn("pending: G-x-0001: preconditions (the rehearsal freezes them)", probs)
-        m["graphlets"] = {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}
-        self.assertEqual(bm.freeze_problems(m), [])
+        with tempfile.TemporaryDirectory() as gate:   # no gate file pins it
+            probs = bm.freeze_problems(m, gate)
+            self.assertTrue(any("corpus is provisional" in p for p in probs), probs)
+            self.assertIn("pending: G-x-0001: preconditions (the rehearsal freezes them)", probs)
+            m["graphlets"] = {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}
+            self.assertEqual(bm.freeze_problems(m, gate), [])
         self.assertEqual(bm.freeze_problems({"manifest_version": 7}), [])
         self.assertTrue(os.path.exists(bm.DEFAULT_CORPUS))
         corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
         self.assertFalse(corpus.get("provisional"))
+
+    @staticmethod
+    def _built(content, stop):
+        m = {"manifest_version": 8, "content_sha256": content, "relations_sha256": "r" * 64,
+             "index": {"index_fp": "f" * 64}, "scenarios": [{"id": "G-x-0001"}], "skipped": [], "counts": {},
+             "graphlets": {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}}
+        if stop:
+            m["graphlets"]["stop_scenarios"] = ["S-stop-0001", "S-stop-0002"]
+            m["scenarios"] += [{"id": x} for x in ("S-stop-0001", "S-stop-0002", "S-base-0001", "S-base-0002")]
+        return m
+
+    def _gate(self, d, content):
+        pin = {"file": "manifest/suite_v8.json", "content_sha256": content, "relations_sha256": "r" * 64,
+               "manifest_version": 8, "index_fp": "f" * 64}
+        sc.write_json_atomic(os.path.join(d, "declared_v8_rt.json"),
+                             {"manifest": {"file": pin["file"], "content_sha256": content}})
+        sc.write_json_atomic(os.path.join(d, "policy_v8_rt_mcp.json"), {"manifest": pin, "required": [
+            {"arm": "mcp", "repeats": [0], "scenario": "G-x-0001"},
+            {"arm": "mcp", "repeats": [0], "scenario": "S-stop-0001"},
+            {"arm": "direct-local", "repeats": [0, 1], "scenario": "S-base-0001"}]})
+        # a gate file of another manifest is no pin of v8's
+        sc.write_json_atomic(os.path.join(d, "policy_v7_rt_mcp.json"), {"manifest": dict(
+            pin, file="manifest/suite_v7.json", content_sha256="7" * 64)})
+
+    def test_the_committed_pins(self):
+        import build_manifest as bm
+        with tempfile.TemporaryDirectory() as gate:
+            self._gate(gate, "a" * 64)
+            self.assertEqual([f for f, _doc in bm.committed_pins(8, gate)],
+                             ["gate/declared_v8_rt.json", "gate/policy_v8_rt_mcp.json"])
+            # the pinned build: no problem
+            self.assertEqual(bm.freeze_problems(self._built("a" * 64, True), gate), [])
+            # the build without --stop-scenarios: refused, every pin named, the flag named
+            probs = bm.freeze_problems(self._built("b" * 64, False), gate)
+            self.assertEqual(len(probs), 3, probs)
+            self.assertTrue(probs[0].startswith("gate/declared_v8_rt.json pins manifest/suite_v8.json at "
+                                                "content_sha256 aaaaaaaaaaaaaaaa, not this build's content_sha256 "
+                                                "bbbbbbbbbbbbbbbb"), probs)
+            self.assertTrue(probs[1].startswith("gate/policy_v8_rt_mcp.json pins"), probs)
+            self.assertEqual(probs[2], "the build has no stop scenarios, and the pinned policies require S-base-0001, "
+                                       "S-stop-0001: build with --stop-scenarios")
+            # with the rebuild (--stop-scenarios toggled) the cause is confirmed, or ruled out
+            probs = bm.freeze_problems(self._built("b" * 64, False), gate, rebuild=lambda: self._built("a" * 64, True))
+            self.assertEqual(probs[-1], "the build with --stop-scenarios is the pinned one (content aaaaaaaaaaaaaaaa): "
+                                        "pass --stop-scenarios")
+            probs = bm.freeze_problems(self._built("b" * 64, False), gate, rebuild=lambda: self._built("c" * 64, True))
+            self.assertIn("the build with --stop-scenarios is not the pinned one either", probs[-1])
+            # another build with the stop scenarios: refused, no flag to name; the rebuild without them is not it
+            probs = bm.freeze_problems(self._built("d" * 64, True), gate, rebuild=lambda: self._built("e" * 64, False))
+            self.assertEqual(len(probs), 3, probs)
+            self.assertFalse(any("build with --stop-scenarios" in p for p in probs), probs)
+            self.assertIn("the build without --stop-scenarios is not the pinned one either", probs[-1])
+            # another pinned key (the relations) differs alone
+            m = self._built("a" * 64, True)
+            m["relations_sha256"] = "x" * 64
+            probs = bm.freeze_problems(m, gate)
+            self.assertEqual(len(probs), 1, probs)
+            self.assertIn("relations_sha256 rrrrrrrrrrrrrrrr, not this build's relations_sha256 xxxxxxxxxxxxxxxx",
+                          probs[0])
+
+    def test_main_refuses_a_dry_freeze_of_another_build(self):
+        # --freeze into files outside manifest/ (a dry freeze) is checked alike; the rebuild toggles --stop-scenarios
+        import build_manifest as bm
+        from unittest import mock
+        calls = []
+
+        def fake_build(*a, **kw):
+            calls.append(kw.get("stop_scenarios"))
+            return self._built("a" * 64 if kw.get("stop_scenarios") else "b" * 64, kw.get("stop_scenarios"))
+        with tempfile.TemporaryDirectory() as d:
+            gate = os.path.join(d, "gate")
+            os.makedirs(gate)
+            self._gate(gate, "a" * 64)
+            out, smoke = os.path.join(d, "suite_v8.json"), os.path.join(d, "suite_smoke_v8.json")
+            argv = ["--manifest-version", "8", "--no-fetch", "--freeze", "--out", out, "--smoke-out", smoke]
+            with mock.patch.object(bm, "build", side_effect=fake_build), mock.patch.object(bm, "GATE_DIR", gate), \
+                    mock.patch.object(bm, "write") as write, mock.patch.object(bm, "smoke_of", return_value={
+                        "content_sha256": "s" * 64, "counts": {}}):
+                with self.assertRaises(SystemExit) as cm:
+                    bm.main(argv)
+                self.assertEqual(calls, [False, True])
+                text = str(cm.exception.code)
+                self.assertTrue(text.startswith("v8 is not ready to freeze:"), text)
+                self.assertIn("pass --stop-scenarios", text)
+                write.assert_not_called()
+                del calls[:]
+                with mock.patch("sys.stdout"):
+                    self.assertEqual(bm.main(argv + ["--stop-scenarios"]), 0)
+                self.assertEqual(calls, [True])   # the pinned build: no rebuild
+                self.assertEqual(write.call_args_list[0][0][0], out)
 
 
 @unittest.skipUnless(have_cache(), "no record cache")
@@ -800,11 +1085,12 @@ class BuiltV8(unittest.TestCase):
         # the rehearsal's corpus is committed (VERIFY-D VD12): the default build reads it, the pin from it
         self.assertEqual(m["graphlets"]["corpus"]["file"], "truth/area_g/corpus.json")
         self.assertFalse(m["graphlets"]["corpus"]["provisional"])
-        self.assertEqual(m["graphlets"]["library_commit"], "44583b51307ed3242e19c051aaf133c671107956")
-        # the constrain / annotate pair's partner (VERIFY-D VD8) waits for its rehearsal (REHEARSAL S)
-        self.assertEqual(m["graphlets"]["pending"], ["G-pair-annot-0001: preconditions (the rehearsal freezes them)"])
-        self.assertEqual(bm.freeze_problems(m), ["pending: G-pair-annot-0001: preconditions (the rehearsal freezes "
-                                                 "them)"])
+        self.assertEqual(m["graphlets"]["library_commit"], "fdff625ef7322e919b28da4b81763acec65591af")   # R3-1: staging's library
+        # the constrain / annotate pair's partner (VERIFY-D VD8) was rehearsed in REHEARSAL S2: nothing pending
+        self.assertEqual(m["graphlets"]["pending"], [])
+        annot = next(s for s in m["scenarios"] if s["id"] == "G-annot-0001")
+        paged = next(o for o in annot["graphlet"]["ops"] if o["id"] == "cmp-paged")
+        self.assertEqual((paged["args"]["mode"], paged["args"]["max_bytes"]), ("walks", 6144))
         # the paired plan's warm repeats of every v7 scenario unchanged
         w7 = dict((s["id"], k % 10 == 0) for k, s in enumerate(v7["scenarios"]))
         w8 = dict((s["id"], k % 10 == 0) for k, s in enumerate(m["scenarios"]))
@@ -820,6 +1106,46 @@ class BuiltV8(unittest.TestCase):
         for k, s in enumerate(stop["scenarios"]):
             if s["id"] in areas_mod().STOP_IDS:
                 self.assertEqual(sc.mcp_repeats(k, s, 10), [0], s["id"])
+        # the freeze (VERIFY-D-R5 R5-3): the committed gate files pin the build with the stop scenarios; the build
+        # without them is refused, the flag named (and confirmed by the rebuild)
+        self.assertEqual(bm.freeze_problems(stop), [])
+        probs = bm.freeze_problems(m, rebuild=lambda: stop)
+        self.assertEqual(len(probs), 5, probs)   # three gate files, the stop scenarios lacking, the rebuild
+        self.assertEqual([p.split(" ")[0] for p in probs[:3]], ["gate/declared_v8_rt.json", "gate/policy_v8_rt_mcp.json",
+                                                              "gate/policy_v8_rtp_mcp.json"])
+        self.assertTrue(probs[3].startswith("the build has no stop scenarios") and "--stop-scenarios" in probs[3])
+        self.assertTrue(probs[4].startswith("the build with --stop-scenarios is the pinned one") and
+                        probs[4].endswith("pass --stop-scenarios"), probs[4])
+        # the freeze package (round 7 item 4): gate/declared_v8_rt.json and both v8 policies pin this build (with the
+        # stop scenarios) as manifest/suite_v8.json, v7's declared entries unchanged, nothing of area G set aside,
+        # both by-design tables pinned; the policies regenerate identical (generated_utc aside)
+        import compare as cmp
+        import gate_policy
+        suite = os.path.dirname(HERE)
+        declared = sc.read_json(os.path.join(suite, "gate", "declared_v8_rt.json"))
+        d7 = sc.read_json(os.path.join(suite, "gate", "declared_v7_rt.json"))
+        self.assertEqual(declared["manifest"], {"file": "manifest/suite_v8.json",
+                                                "content_sha256": stop["content_sha256"]})
+        for k in ("exclusions", "not_required", "relations_excluded"):
+            self.assertEqual(declared[k], d7[k], k)
+        self.assertEqual((declared["graphlet_not_required"], declared["graphlet_service_checks_not_required"]), ([], []))
+        g_sha = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)[1]["sha256"]
+        for name, routes in (("v8-rt-mcp", ["POST /resolve", "POST /traverse", "GET /traverse/capabilities"]),
+                             ("v8-rtp-mcp", ["POST /resolve", "POST /traverse", "GET /traverse/capabilities",
+                                             "POST /pattern"])):
+            pol = sc.read_json(os.path.join(suite, "gate", "policy_%s.json" % name.replace("-", "_")))
+            self.assertEqual((pol["manifest"]["file"], pol["manifest"]["content_sha256"]),
+                             ("manifest/suite_v8.json", stop["content_sha256"]))
+            self.assertEqual(pol["graphlets"]["by_design_g_table"]["sha256"], g_sha)
+            self.assertEqual(pol["by_design_table"]["sha256"][:8], "d4b8636c")
+            self.assertEqual((pol["arms"], pol["require_agreement"], pol["warm_every"], pol["advanced_path"]),
+                             (["direct-local", "mcp"], False, 10, False))
+            new = gate_policy.build_policy(stop, routes, ["direct-local", "mcp"], cmp.DEFAULT_BY_DESIGN, False, 10,
+                                           False, None, name, "manifest/suite_v8.json", declared=declared,
+                                           declared_file="gate/declared_v8_rt.json")
+            for x in (pol, new):
+                x.pop("generated_utc", None)
+            self.assertEqual(ml.canonical_json(new), ml.canonical_json(pol), name)
 
 
 if __name__ == "__main__":
