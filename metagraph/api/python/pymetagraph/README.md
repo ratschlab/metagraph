@@ -89,6 +89,10 @@ the seed; repeated scoring visits count once. It excludes loaded indices,
 seed/annotation caches and result storage,
 so it is not a process RSS limit. Zero node/RAM limits disable extension search.
 
+`rel_score_cutoff` filters completed alignments relative to the best score for
+each label (or the best unlabeled result). Seed-chain scores are not used for
+this filter because extension can improve them.
+
 ## Tests and limits
 
 ```sh

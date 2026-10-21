@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <map>
 
 #include "../graph/all/test_dbg_helpers.hpp"
 #include "../test_helpers.hpp"
@@ -261,6 +262,29 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleLinearGraph) {
     for (const auto &[query, mappings] : exp_alignments) {
         run_alignment(*anno_graph, config, query, mappings);
     }
+}
+
+TYPED_TEST(LabeledAlignerRedoneTest, RelativeCutoffKeepsLabelsSeparate) {
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        4, { "GCAAT", "AATGCTT" }, { "A", "B" });
+    AnnotationBuffer buffer(anno_graph->get_graph(), anno_graph->get_annotator());
+    Query query(anno_graph->get_graph(), "GCAATGCTT");
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.min_seed_length = config.max_seed_length = 4;
+    config.forward_and_reverse_complement = false;
+    config.rel_score_cutoff = 0.95;
+    LabeledSeeder seeder(buffer, query, config);
+    LabeledExtender extender(buffer, query, config);
+    std::map<std::string, std::string> actual;
+    align_query(query, seeder, extender, [&](Alignment&& aln) {
+        for (auto column : buffer.get_cached_column_set(aln.get_label_classes()[0])) {
+            auto label = anno_graph->get_annotator().get_label_encoder().decode(column);
+            actual.emplace(label, aln.get_cigar().to_string());
+        }
+    });
+    EXPECT_EQ((std::map<std::string, std::string>{{ "A", "5=4S" }, { "B", "2S7=" }}), actual);
 }
 
 TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraph) {

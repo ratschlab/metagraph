@@ -27,6 +27,38 @@ class TestDNAAlign(TestingBase):
     def setUp(self):
         super().setUpClass()
 
+    def test_relative_cutoff_preserves_exact_transcript(self):
+        # Its exact path has fragmented seeds, while overlapping transcripts
+        # have longer individual seeds. A cutoff before extension loses it.
+        source = TEST_DATA_DIR + '/transcripts_1000.fa'
+        transcripts = {}
+        with open(source) as inp:
+            for line in inp:
+                if line.startswith('>'):
+                    label = line[1:].strip()
+                    transcripts[label] = ''
+                else:
+                    transcripts[label] += line.strip()
+        label = next(name for name in transcripts if name.startswith('ENST00000440196.3|'))
+        sequence = transcripts[label][13:1013]
+        query = self.tempdir.name + '/query.fa'
+        with open(query, 'w') as out:
+            out.write('>exact\n' + sequence + '\n')
+        graph_base = self.tempdir.name + '/graph'
+        self._build_graph(source, graph_base, 31, 'succinct')
+        res = subprocess.run([METAGRAPH, 'annotate', '--anno-header', '-i', graph_base + '.dbg',
+                              '-o', graph_base, source], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
+                              '-i', graph_base + '.dbg', '-a', graph_base + '.column.annodbg', query],
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        records = [r for r in map(json.loads, res.stdout.decode().splitlines())
+                   if any(item['sample'] == label for item in r['annotation']['labels'])]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['annotation']['cigar'], '1000=')
+        self.assertEqual(records[0]['score'], 2010)
+
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_all_graphs(self, representation):
 

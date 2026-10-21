@@ -89,9 +89,13 @@ void emit_alignments(const Query &query, const DBGAlignerConfig &config,
              > std::tuple(score_match(b, config), b.get_seed().size(), !b.get_orientation());
     });
     std::map<AnnotationBuffer::Column, size_t> reported;
+    std::map<AnnotationBuffer::Column, DBGAlignerConfig::score_t> best_scores;
+    const auto best_score = unique.empty() ? 0 : score_match(unique.front(), config);
     size_t unlabeled_count = 0;
     for (auto &aln : unique) {
         if (!annotations) {
+            if (score_match(aln, config) < best_score * config.rel_score_cutoff)
+                break;
             if (unlabeled_count++ == config.num_alternative_paths) break;
             callback(std::move(aln));
             continue;
@@ -100,6 +104,8 @@ void emit_alignments(const Query &query, const DBGAlignerConfig &config,
         Columns columns;
         Coordinates coords;
         for (size_t i = 0; i < all_columns.size(); ++i) {
+            auto [best, inserted] = best_scores.try_emplace(all_columns[i], score_match(aln, config));
+            if (score_match(aln, config) < best->second * config.rel_score_cutoff) continue;
             if (reported[all_columns[i]] >= config.num_alternative_paths) continue;
             ++reported[all_columns[i]];
             columns.push_back(all_columns[i]);
@@ -1331,7 +1337,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     const long double node_limit = static_cast<long double>(config.max_nodes_per_seq_char) * query_size;
     SearchWorkspace workspace(config.max_ram_per_alignment);
     WorkspaceScope workspace_scope(workspace);
-    bool limited = false;
 
     // S(cost, query_dist, node) = best_dist
     ScoreTable<SMap> S; // best cost
@@ -1760,20 +1765,16 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     }
 
     } catch (const SearchLimitReached&) {
-        limited = true;
         common::logger->trace("Alignment search limit reached after {} graph positions, {} workspace bytes",
                               explored.size(), workspace.used);
     }
-    if (limited) {
-        // A limit can interrupt expansion after storing a valid state but before
-        // visiting it. Update the best-score callback before selecting traceback
-        // starts; every retained state still has its complete predecessor chain.
-        for (size_t cost = 0; cost < S.size(); ++cost) {
-            for (size_t q = S[cost].offset(); q < S[cost].size(); ++q) {
-                for (const auto &[node, state] : S[cost][q]) {
-                    if (std::get<3>(state) != Cigar::CLIPPED)
-                        terminate(cost, state, q, node);
-                }
+    // Both early termination and a resource cap can leave valid states in
+    // later wavefronts. Include them when selecting the best traceback start.
+    for (size_t cost = 0; cost < S.size(); ++cost) {
+        for (size_t q = S[cost].offset(); q < S[cost].size(); ++q) {
+            for (const auto &[node, state] : S[cost][q]) {
+                if (std::get<3>(state) != Cigar::CLIPPED)
+                    terminate(cost, state, q, node);
             }
         }
     }
@@ -2469,8 +2470,10 @@ void Extender::extend(const Alignment &aln,
                 size_t dist = std::get<0>(data);
                 max_dist = std::max(dist, max_dist);
                 auto score = get_score(cost, dist, query_dist);
-                if (score >= best_score) {
+                if (score > best_score) {
                     best_score = score;
+                    max_query_dist = query_dist;
+                } else if (score == best_score) {
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
                 // if (query_dist == query_window.size())
@@ -2597,8 +2600,10 @@ void Extender::extend(const Alignment &aln,
                 size_t dist = std::get<0>(data);
                 max_dist = std::max(dist, max_dist);
                 auto score = get_score(cost, dist, query_dist);
-                if (score >= best_score) {
+                if (score > best_score) {
                     best_score = score;
+                    max_query_dist = query_dist;
+                } else if (score == best_score) {
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
                 // if (query_dist == query_window.size())
@@ -2678,17 +2683,31 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
 
     // sdsl::bit_vector selected(anchors.size(), false);
 
-    bool first_chain = true;
-    DBGAlignerConfig::score_t first_chain_score = DBGAlignerConfig::ninf;
-    size_t num_chains = 0;
-
     std::string dummy(query_.get_query().size(), '$');
 
     auto *anno_buffer = make_aln_graph(anchors[0].get_label_class()).get_anno_buffer();
 
-    bool ext_success = false;
-    bool incomplete_connection = false;
-    Anchor::score_t last_chain_score = 0;
+    auto save_alignment = [this,&alignments](Alignment&& aln) {
+        aln.trim_end();
+
+        assert(aln.get_label_classes().size());
+        if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer()) {
+            if (anno_buffer->has_coordinates()) {
+                auto coords = anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes());
+                assert(coords.size());
+                aln.set_coords(std::move(coords));
+            }
+        }
+
+        if (common::get_verbose()) {
+            common::logger->trace("Aln: {}\t{}\t{}\t{}",
+                                  aln.get_orientation() ? "-" : "+",
+                                  score_match(aln, config_), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
+        }
+        // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
+        alignments.emplace_back(std::move(aln));
+    };
+
     common::logger->trace("Chaining");
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),
         [this,k,sshash,match_score=maximum_match_score(config_),&dummy](
@@ -3066,37 +3085,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             // std::cerr << "round 2\n";
 
         },
-        [&](const AnchorChain<AnchorIt> &chain, const std::vector<DBGAlignerConfig::score_t> &score_traceback) {
-            assert(chain.size());
-
-            ext_success = false;
-
-            // An isolated seed of exactly min_seed_length is still a valid
-            // local alignment and must be offered to the extender.
-            bool ret_val = true;
-
-            last_chain_score = score_traceback.back();
-            ret_val = score_traceback.back() >= first_chain_score * config_.rel_score_cutoff;
-
-            if (ret_val) {
-                common::logger->trace("Chain\t{}\t{}", score_traceback.back(), ret_val);
-                // for (const auto &[it, dist] : chain) {
-                //     std::cerr << "\t" << *it << "\t" << dist << "\t" << it->get_label_class() << "\t" << it->get_path_spelling() << "\n";
-                // }
-            }
-
-            // if (ret_val) {
-            //     ++num_chains;
-            //     for (const auto &[it, dist] : chain) {
-            //         // selected[it - anchors.begin()] = true;
-            //         if (it->get_label_class() != Anchor::nannot)
-            //             found_labels.emplace(it->get_label_class());
-            //     }
-            // }
-
-            return ret_val;
+        [](const AnchorChain<AnchorIt>&, const std::vector<DBGAlignerConfig::score_t>&) {
+            // A seed-chain score is not an upper bound on its completed
+            // alignment. Apply the relative cutoff after extension, per label.
+            return true;
         },
-        [this,align,anno_buffer,&incomplete_connection,match_score=maximum_match_score(config_)](
+        [this,align,anno_buffer,&save_alignment,match_score=maximum_match_score(config_)](
                 AnchorIt last,
                 AnchorIt next,
                 Alignment&& aln,
@@ -3339,60 +3333,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             );
             if (!aln_found) {
                 // Resource exhaustion can stop the connection before reaching
-                // its target. Preserve independent seeds instead of throwing.
-                incomplete_connection = true;
+                // its target. Preserve the connected suffix and the preceding
+                // seed; restarting every seed would repeat the whole search.
+                save_alignment(std::move(aln));
+                save_alignment(Alignment(*next));
             }
         },
-        [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score](Alignment&& aln) {
-            aln.trim_end();
-
-            assert(aln.get_label_classes().size());
-            if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer()) {
-                if (anno_buffer->has_coordinates()) {
-                    auto coords = anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes());
-                    assert(coords.size());
-                    aln.set_coords(std::move(coords));
-                }
-            }
-
-            if (!ext_success) {
-                ++num_chains;
-                ext_success = true;
-                if (first_chain) {
-                    first_chain_score = last_chain_score;
-                    first_chain = false;
-                }
-                // for (auto label : aln.get_label_classes()) {
-                //     if (label != Anchor::nannot)
-                //         found_labels.emplace(label);
-                // }
-            }
-
-            if (common::get_verbose()) {
-                common::logger->trace("Aln: {}\t{}\t{}\t{}",
-                                      aln.get_orientation() ? "-" : "+",
-                                      score_match(aln, config_), aln.get_cigar().to_string(), aln.get_label_classes()[0]);
-            }
-            // std::cerr << "\tInit aln\t" << aln << "\t" << aln.get_label_classes()[0] << std::endl;
-            alignments.emplace_back(std::move(aln));
-        },
+        save_alignment,
         []() { return false; },
         anno_buffer
     );
-
-    if (incomplete_connection) {
-        for (const auto &anchor : anchors) {
-            Alignment partial(anchor);
-            partial.trim_end();
-            alignments.emplace_back(std::move(partial));
-        }
-    }
-
-    // size_t num_selected = sdsl::util::cnt_one_bits(selected);
-    // common::logger->info("Selected {} / {} anchors from {} chains. Produced {} alignments",
-    //                         num_selected,
-    //                         selected.size(),
-    //                         num_chains, alignments.size());
 
     return alignments;
 }
