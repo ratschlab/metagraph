@@ -238,13 +238,14 @@ class TraversalCache {
                     entry.edges[count] = { next, c };
                 ++count;
             });
-            if (count > entry.edges.size()) {
-                // High-degree protein nodes use the uncached graph interface.
-                call_raw(node, callback);
-                return;
-            }
             entry.count = count;
             entry.edges_known = true;
+        }
+        if (entry.count > entry.edges.size()) {
+            // Remember overflow so high-degree protein nodes are not probed
+            // again on every visit. Their edges use the uncached interface.
+            call_raw(node, callback);
+            return;
         }
         // A callback can visit another node mapping to the same cache slot.
         const auto edges = entry.edges;
