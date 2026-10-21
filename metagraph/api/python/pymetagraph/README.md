@@ -15,8 +15,12 @@ separate install step.
 python -m pip install ./metagraph/api/python/pymetagraph
 ```
 
-The package enables `BUILD_PYTHON_BINDINGS`, builds position-independent libraries,
-and uses shared Boost. Jemalloc is disabled in this configuration to avoid static
+The package enables `BUILD_PYTHON_BINDINGS` and builds position-independent libraries.
+Linux wheels bundle shared Boost libraries in `pymetagraph/.libs`; other platforms
+link Boost statically. The system C++ and compression-library runtimes are still
+required. Wheels built here target the build environment; use tools such as
+`auditwheel` when preparing portable Linux distributions.
+Jemalloc is disabled in this configuration to avoid static
 TLS failures when importing the extension. Other build directories keep their
 normal allocator configuration. Building the native library can take several minutes.
 

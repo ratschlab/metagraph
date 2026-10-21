@@ -336,7 +336,7 @@ if(APPLE)
 endif()
 
 # Distribution static Boost libraries may lack PIC.
-if(BUILD_PYTHON_BINDINGS)
+if(BUILD_PYTHON_BINDINGS AND UNIX AND NOT APPLE)
   set(Boost_USE_STATIC_LIBS OFF)
 else()
   set(Boost_USE_STATIC_LIBS ON)
@@ -628,6 +628,27 @@ if(BUILD_PYTHON_BINDINGS)
   target_link_libraries(_pymetagraph_core PRIVATE metagraph-cli metagraph-core)
   add_dependencies(_pymetagraph_core HTSLIB)
   install(TARGETS _pymetagraph_core DESTINATION pymetagraph COMPONENT _pymetagraph_core)
+  if(UNIX AND NOT APPLE)
+    # Use an inherited RPATH so Boost's own shared Boost dependencies also
+    # resolve from the wheel, without relying on a matching system Boost.
+    target_link_options(_pymetagraph_core PRIVATE "LINKER:--disable-new-dtags")
+    set_target_properties(_pymetagraph_core PROPERTIES INSTALL_RPATH "$ORIGIN/.libs")
+    install(CODE "
+      set(boost_library \"$<TARGET_FILE:Boost::iostreams>\")
+      file(GET_RUNTIME_DEPENDENCIES
+        LIBRARIES \"\${boost_library}\"
+        RESOLVED_DEPENDENCIES_VAR boost_dependencies
+        UNRESOLVED_DEPENDENCIES_VAR missing_boost_dependencies
+        PRE_INCLUDE_REGEXES \"^libboost_\"
+        PRE_EXCLUDE_REGEXES \".*\")
+      if(missing_boost_dependencies)
+        message(FATAL_ERROR \"Unresolved Boost runtime libraries: \${missing_boost_dependencies}\")
+      endif()
+      file(INSTALL \"\${boost_library}\" \${boost_dependencies}
+        DESTINATION \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/pymetagraph/.libs\"
+        TYPE SHARED_LIBRARY FOLLOW_SYMLINK_CHAIN)
+    " COMPONENT _pymetagraph_core)
+  endif()
 endif()
 
 
