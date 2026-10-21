@@ -826,6 +826,47 @@ class PagingPasses(unittest.TestCase):
                     self.assertIn(oid, pb, (sid, oid))   # every paging pass of a rich graphlet is measured
 
 
+class RowsPair(unittest.TestCase):
+    """VERIFY-D-R4 R4-1: a W3 compare with rows that pages: cut_lists.2 (a) against over_8mib.1 (b, run first and
+    without compares), every way, cmp-paged-w3 in walks mode at a's measured page; left out on a corpus that holds no
+    rehearsal of either."""
+
+    @unittest.skipUnless(have_cache(), "no record cache")
+    def test_the_committed_corpus_builds_the_pair(self):
+        import build_manifest as bm
+        recs = truth.load_with_sequences(fetch=False)
+        ctx = ml.Ctx(recs, bm.DEFAULT_SEED)
+        corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
+        out = [x for x in area_g.gen_G(ctx, v7_scenarios(), corpus, "a" * 40) if "graphlet" in x]
+        ids = [x["id"] for x in out]
+        ia, ib = ids.index(area_g.ROWS_PAIR["id_a"]), ids.index(area_g.ROWS_PAIR["id_b"])
+        self.assertLess(ib, ia)                                   # b's MCP job before the compares that name it
+        a, b = out[ia], out[ib]
+        self.assertEqual((a["graphlet"]["candidate"], b["graphlet"]["candidate"]), ("cut_lists.2", "over_8mib.1"))
+        for x in (a, b):
+            self.assertIn("W3", x["graphlet"]["ways"]["default"])
+            self.assertIn("pair-rows", x["tags"])
+            self.assertTrue(x["graphlet"]["preconditions"])
+        self.assertEqual(a["request"]["seeds"][0]["sequence"], b["request"]["seeds"][0]["sequence"])
+        self.assertFalse([o for o in b["graphlet"]["ops"] if o["tool"] == "graphlet_compare"])
+        ops = dict((o["id"], o) for o in a["graphlet"]["ops"])
+        page = ops["cmp-paged-w3"]
+        self.assertEqual((page["args"]["mode"], page["args"]["max_bytes"], page["args"]["b"], page["paging"]),
+                         ("walks", 131072, {"graphlet": b["id"]}, "all"))
+        self.assertEqual(page["args"]["max_bytes"],
+                         corpus["candidates"]["cut_lists.2"]["facts"]["page_bytes"]["cmp-paged-w3"])
+        self.assertIn("cmp-walks-all", ops)
+
+    def test_left_out_without_a_rehearsal(self):
+        cands = [{"cid": "cut_lists.2"}, {"cid": "over_8mib.1"}]
+        self.assertEqual(area_g.rows_pair(cands, {"candidates": {}}, None), [])
+        self.assertEqual(area_g.rows_pair(cands[:1], {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}},
+                                                                   "over_8mib.1": {"preconditions": {"a": 1}}}},
+                                          None), [])
+        self.assertEqual(area_g.rows_pair(cands, {"candidates": {"cut_lists.2": {"preconditions": {"a": 1}}}}, None),
+                         [])
+
+
 class Defaults(unittest.TestCase):
     """VERIFY-D VD13: areas.gen_G defaults to the direct-only slots as area_g.gen_G, choose and build do; the tables'
     service_commit states the commit their cases cite (the v7 table 22d034ba, area G's own f994e3e2)."""

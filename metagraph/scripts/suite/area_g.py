@@ -24,7 +24,8 @@ quoted per candidate: run 20261019T111815Z_refseq97-1009f77c, the MCP's cold eng
 or drawn here from the truth records. `build_manifest.py --rehearse G` runs every candidate on staging and writes the
 corpus file (rehearse_g.py): the candidate chosen per slot, its measured facts (preconditions), the MCP's strategy
 echo and the per-op timeouts. Without a corpus file the build is provisional: the first candidate of every slot the
-MCP can express, preconditions empty (to be frozen from the rehearsal).
+MCP can express, preconditions empty (to be frozen from the rehearsal). Beside the 5 pairs, the rows pair (ROWS_PAIR,
+VERIFY-D-R4 R4-1): two rehearsed candidates of one seed whose compare has rows, with a compare W3 pages.
 
 Pure stdlib; the builder never imports the traversal library (the op plans are checked against it in the tests).
 """
@@ -1112,6 +1113,12 @@ def add_extras(p: Plan, extras: dict) -> None:
         if cmp_page:
             p.add(_op("cmp-paged", "graphlet_compare", C(extras["compare_paged"], mode="walks", max_bytes=cmp_page),
                       paging="all"))
+    if extras.get("compare_paged_w3"):
+        # a compare with rows that W3 pages (the rows pair, VERIFY-D-R4 R4-1): the service's compare paging path
+        page = page_of(p.facts, "cmp-paged-w3", ROWS_PAIR_PAGE)
+        if page:
+            p.add(_op("cmp-paged-w3", "graphlet_compare", C(extras["compare_paged_w3"], mode="walks", max_bytes=page),
+                      paging="all"))
     if extras.get("probes"):
         for probe in ("wrong_token", "bad_handle"):
             p.add(_op("probe-%s" % probe.replace("_", "-"), "graphlet_summary",
@@ -1309,6 +1316,7 @@ def gen_G(ctx: Any, built: List[dict], corpus: Optional[dict] = None, library_co
                               pc, corpus, library_commit, ops, ["pair", "pair-" + ps["pair"]]))
     # partners first: a compare's b must have run (its MCP job) before the op that names it
     out = reorder_pairs(out, pair_specs)
+    out += rows_pair(cands, corpus, library_commit)
     if "long_walk" in present:
         # the long walk's warm-ups right before it (the owner, 2026-10-19)
         i = next(j for j, s in enumerate(out) if s["id"] == ids["long_walk"])
@@ -1329,6 +1337,36 @@ def _variant(c: dict, cid: str, overrides: Optional[dict] = None, seed: Optional
     v["source"] = source or v["source"]
     v["expected"] = dict((k, v2) for k, v2 in v["expected"].items() if k in ("arms", "labels", "failed"))
     return v
+
+
+# A compare with rows on W3 (VERIFY-D-R4 R4-1): no MCP-expressible pair of the corpus differs within its common
+# evidence (every compare of the shadow run counted 0 rows); of the rehearsed candidates on one seed, cut_lists.2 (a
+# column walk of T-labels-0003's eco seed at 50 bp, cap 8) and over_8mib.1 (a trie of the same seed at 500 bp) do: on
+# rehearsal 1's documents their walks compare counts 298 rows (claims 310, prefix_subset 300), all qualified, whole in
+# 177,051 bytes; cmp-paged-w3 pages it (2 whole pages at 131,072, and at W3's budget less 512). Both run every way;
+# b (the trie) first, without compares of its own.
+ROWS_PAIR = {"a": "cut_lists.2", "b": "over_8mib.1", "id_a": "G-pair-rows-0002", "id_b": "G-pair-rows-0001"}
+ROWS_PAIR_PAGE = 131072
+
+
+def rows_pair(cands: List[dict], corpus: dict, library_commit: Optional[str]) -> List[dict]:
+    """The rows pair's two scenarios (b, then a with its compares and cmp-paged-w3), [] when a candidate is missing
+    or the corpus holds no rehearsal of it (a provisional corpus)."""
+    by = dict((c["cid"], c) for c in cands)
+    entries = corpus.get("candidates") or {}
+    ca, cb = by.get(ROWS_PAIR["a"]), by.get(ROWS_PAIR["b"])
+    if ca is None or cb is None or not (entries.get(ca["cid"]) or {}).get("preconditions") or \
+            not (entries.get(cb["cid"]) or {}).get("preconditions"):
+        return []
+    ida, idb = ROWS_PAIR["id_a"], ROWS_PAIR["id_b"]
+    title = "area G pair rows: a column walk at a small cap and a trie of one seed (compare rows, W3 paging)"
+    fb = facts_of(cb, corpus)
+    fb.pop("over_8mib", None)   # a pair partner, not the v9 slot
+    ops_b = op_plan(idb, cb["slot"], fb, False, [(ida, False)], partner_of=ida, extras={"no_compare": True})
+    ops_a = op_plan(ida, ca["slot"], facts_of(ca, corpus), False, [(idb, False)], partner_of=idb,
+                    extras={"compare_paged_w3": idb})
+    return [g_scenario(idb, title + " (b: %s)" % cb["cid"], cb, corpus, library_commit, ops_b, ["pair", "pair-rows"]),
+            g_scenario(ida, title + " (a: %s)" % ca["cid"], ca, corpus, library_commit, ops_a, ["pair", "pair-rows"])]
 
 
 def pair_plan(present: Dict[str, dict], ids: Dict[str, str], corpus: dict) -> List[dict]:

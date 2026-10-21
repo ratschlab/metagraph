@@ -1460,6 +1460,9 @@
      "left": 2,
      "right": 1
     },
+    "page_bytes": {
+     "cmp-paged-w3": 131072
+    },
     "seed_bp": null,
     "segments": {
      "left": 19,
@@ -1476,6 +1479,7 @@
      "right": 18
     }
    },
+   "pair_note": "the rows pair's a (G-pair-rows-0002, R4-1): its walks compare against over_8mib.1 on rehearsal 1's documents counts differ 14, only_in_a 3, only_in_b 281, all qualified, 177,051 bytes whole; cmp-paged-w3's page 131,072 takes 2 whole pages there and at W3's budget less 512 (D-scratch/r7/measure_rows.py)",
    "passed": true,
    "plan_problems": [],
    "preconditions": {
@@ -4851,8 +4855,67 @@
      "right": 1036
     }
    },
+   "pair_note": "the rows pair's b (G-pair-rows-0001, VERIFY-D-R4 R4-1): passed every verdict but the slot's (its body, 305,290 bytes, is not over 8 MiB), so its preconditions, service facts, echo and reference are rehearsal 1's G-big-c1, written as choose_corpus writes a passing candidate's",
    "passed": false,
    "plan_problems": [],
+   "preconditions": {
+    "arms": [
+     "left",
+     "right"
+    ],
+    "bases": true,
+    "labels_present": [
+     "244319",
+     "562",
+     "28901"
+    ],
+    "segments_min": {
+     "left": 1152,
+     "right": 1923
+    },
+    "walk_bp_min": {
+     "left": 88,
+     "right": 78
+    },
+    "walks_min": {
+     "left": 620,
+     "right": 1036
+    }
+   },
+   "reference": {
+    "body_digest": "584ce77dd9ddcfb559238fed7c0eb378ccd780953b1fd53aef6252fdce90ee1a",
+    "engine_ms": {
+     "dl0": 739.567125,
+     "dl1": 680.3580179999999,
+     "dl2": 669.7516489999999,
+     "mcp": 5015.9677010000005
+    }
+   },
+   "service_facts": {
+    "body_over_8mib": false,
+    "cut_lists": false,
+    "max_labels_per_node": 873
+   },
+   "strategy": {
+    "bounds": {
+     "max_extension_bp": 500,
+     "max_live_paths": 1000,
+     "max_memory_mb": 512,
+     "max_work_units": 100000000,
+     "time_budget_ms": 30000
+    },
+    "direction": "both",
+    "exhaustive": true,
+    "labels": {
+     "max_labels_per_node": 10000,
+     "mode": "constrain",
+     "seed_label_kind": "column"
+    },
+    "output": {
+     "detail": "graphlet",
+     "timing": true
+    }
+   },
    "timeouts": {},
    "times_ms": {
     "dl0": 739.567125,
