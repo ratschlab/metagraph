@@ -7186,8 +7186,9 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 6.161416,
-    "extension_ms": 4.163209
+    "cpu_ms": 1.941416,
+    "elapsed_ms": 1.939583,
+    "extension_ms": 1.260209
    },
    "withheld": null,
    "work": {
@@ -7195,6 +7196,7 @@
     "extension_branches": 0,
     "extension_edges": 3243,
     "mask_scans": 0,
+    "memory_bytes": 673546,
     "ranges_visited": 2988,
     "steps": 6231
    }
@@ -10890,8 +10892,9 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 3.801125,
-    "extension_ms": 2.467792
+    "cpu_ms": 1.095417,
+    "elapsed_ms": 1.094208,
+    "extension_ms": 0.776458
    },
    "withheld": null,
    "work": {
@@ -10899,6 +10902,7 @@
     "extension_branches": 0,
     "extension_edges": 3243,
     "mask_scans": 0,
+    "memory_bytes": 1035206,
     "ranges_visited": 2988,
     "steps": 6231
    }
@@ -11121,8 +11125,9 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 8.004833,
-    "extension_ms": 7.344792
+    "cpu_ms": 0.469792,
+    "elapsed_ms": 0.469,
+    "extension_ms": 0.324917
    },
    "withheld": null,
    "work": {
@@ -11130,12 +11135,17 @@
     "extension_branches": 0,
     "extension_edges": 1449,
     "mask_scans": 0,
+    "memory_bytes": 1046368,
     "ranges_visited": 2988,
     "steps": 4437
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 18.008709
+  "cpu_ms": 3.540875,
+  "elapsed_ms": 3.518125
+ },
+ "work": {
+  "memory_bytes": 1046368
  }
 }

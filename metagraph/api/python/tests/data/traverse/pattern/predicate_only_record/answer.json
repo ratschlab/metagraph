@@ -2012,10 +2012,11 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.065834,
-    "label_discovery_ms": 0.0005,
-    "placement_ms": 0.167958,
-    "selection_ms": 0.351
+    "cpu_ms": 0.677209,
+    "elapsed_ms": 0.040417,
+    "label_discovery_ms": 0.000708,
+    "placement_ms": 0.162,
+    "selection_ms": 0.32375
    },
    "withheld": null,
    "work": {
@@ -2046,6 +2047,10 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 0.777834
+  "cpu_ms": 0.715333,
+  "elapsed_ms": 0.687375
+ },
+ "work": {
+  "memory_bytes": 73371
  }
 }

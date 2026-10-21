@@ -217,8 +217,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.62875,
-    "selection_ms": 0.082667
+    "cpu_ms": 0.79675,
+    "elapsed_ms": 0.696459,
+    "selection_ms": 0.079708
    },
    "withheld": {
     "reason": "predicate_budget"
@@ -373,8 +374,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.01825,
-    "selection_ms": 0.000208
+    "cpu_ms": 0.0245,
+    "elapsed_ms": 0.022625,
+    "selection_ms": 0.00025
    },
    "withheld": {
     "reason": "predicate_budget"
@@ -413,6 +415,10 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 0.764584
+  "cpu_ms": 0.870041,
+  "elapsed_ms": 0.84125
+ },
+ "work": {
+  "memory_bytes": 288220
  }
 }

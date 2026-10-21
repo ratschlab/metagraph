@@ -94,20 +94,26 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.04225,
-    "extension_ms": 0.021625
+    "cpu_ms": 0.02275,
+    "elapsed_ms": 0.021666,
+    "extension_ms": 0.009792
    },
    "work": {
     "extension_anchors": 2,
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 62,
     "steps": 80
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.052666
+  "cpu_ms": 0.035208,
+  "elapsed_ms": 0.028291
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

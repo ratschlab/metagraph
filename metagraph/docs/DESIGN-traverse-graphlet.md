@@ -819,7 +819,7 @@ and the CI job installs the Python package so T37 cannot silently skip):
   quorum, left-only, both arms, caps-tripped `max_steps`, `max_labels_per_node: 1`, 3-seed batch with a derivation
   failure: run `detail: full` and `detail: graphlet` on the same request; `Graphlet.from_response(r, out).to_json()`
   equals the full `results[i]` after normalisation (events sorted within equal `at_bp`, `needed_budgets` sorted,
-  `timing` removed); `parse(text).dump() == text`; `A` counts match; `graphlet_lines == Z`; `check_rules()` reports
+  `timing` and `work` removed — `work.memory_bytes`, SPEC §7.2.2, prices the output in the requested detail); `parse(text).dump() == text`; `A` counts match; `graphlet_lines == Z`; `check_rules()` reports
   no divergence; `#label_end events ≤ #runs`; every `Lw` run is the `prev_run` of at least one run entered by switch
   at its `to_bp` (§4; the switch events may sit on the anchor's children); `is_canonical(text)` holds for every
   writer output.
@@ -1142,6 +1142,13 @@ delivered, and state the limiting resource and the useful next action — the st
   dictionary, an index-wide header lookup, the dictionary's first table, and a failed response's `seed_id` echo. A
   failed result echoes index-supplied names cut to 256 bytes under a memory budget; the request's own `seed_id` is
   stated, not cut. There is no hard request-wide memory bound.
+- **The account is stated for every request** (the owner, 2026-10-21: "record timing.cpu_ms, work.page_faults,
+  work.memory_bytes, ideally specific for a task"). The walker keeps it whether or not a budget is set (a budget
+  only compares it), so every result and every response states its peak as `work.memory_bytes` — without a
+  memory budget's fixed cache allotments, so that a budget that does not bind changes nothing — beside the
+  request's CPU time and page faults in `timing` (`timing.cpu_ms`, `timing.page_faults`, per-thread clocks: a
+  request runs on one thread). `/resolve` and `/pattern` state theirs too. SPEC §7.2.1 and §7.2.2 define the
+  figures and what the model leaves out (RSS, the caches, a level's decoded rows, the index pages).
 - **The header index** (header → column, sequence) belongs to the `CoordToHeader` object and lives as long as it
   does; there is no address-keyed cache. The server builds it while the index loads (§17.4).
 

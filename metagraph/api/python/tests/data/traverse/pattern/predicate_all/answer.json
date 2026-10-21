@@ -2846,10 +2846,11 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.030042,
-    "label_discovery_ms": 0.156791,
-    "placement_ms": 0.113125,
-    "selection_ms": 0.2285
+    "cpu_ms": 0.663875,
+    "elapsed_ms": 0.036917,
+    "label_discovery_ms": 0.113834,
+    "placement_ms": 0.106541,
+    "selection_ms": 0.233834
    },
    "withheld": null,
    "work": {
@@ -2880,6 +2881,10 @@
   "vacuous": true
  },
  "timing": {
-  "elapsed_ms": 0.7125
+  "cpu_ms": 0.705375,
+  "elapsed_ms": 0.679084
+ },
+ "work": {
+  "memory_bytes": 101696
  }
 }

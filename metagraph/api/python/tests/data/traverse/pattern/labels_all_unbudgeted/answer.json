@@ -706,8 +706,9 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.116834,
-    "label_discovery_ms": 0.020334,
+    "cpu_ms": 0.139042,
+    "elapsed_ms": 0.074583,
+    "label_discovery_ms": 0.029375,
     "placement_ms": 0.0
    },
    "withheld": null,
@@ -723,6 +724,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.191292
+  "cpu_ms": 0.172583,
+  "elapsed_ms": 0.145875
+ },
+ "work": {
+  "memory_bytes": 27988
  }
 }

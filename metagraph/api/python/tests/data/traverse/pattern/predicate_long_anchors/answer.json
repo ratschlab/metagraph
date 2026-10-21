@@ -112,7 +112,8 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.028208,
+    "cpu_ms": 0.034584,
+    "elapsed_ms": 0.032416,
     "selection_ms": 0.0
    },
    "withheld": {
@@ -143,6 +144,10 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 0.039375
+  "cpu_ms": 0.056625,
+  "elapsed_ms": 0.044667
+ },
+ "work": {
+  "memory_bytes": 270
  }
 }

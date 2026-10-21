@@ -99,7 +99,8 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.014791,
+    "cpu_ms": 0.010708,
+    "elapsed_ms": 0.009792,
     "extension_ms": 0.0
    },
    "withheld": {
@@ -110,12 +111,17 @@
     "extension_branches": 0,
     "extension_edges": 0,
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 62,
     "steps": 62
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.022167
+  "cpu_ms": 0.022333,
+  "elapsed_ms": 0.015708
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

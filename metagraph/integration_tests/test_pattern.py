@@ -1257,6 +1257,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 for key in ('annotation_rows', 'annotation_units', 'row_cache_hits',
                             'row_cache_evictions', 'memory_bytes'):
                     x['patterns'][0]['work'].pop(key)
+                # the request's peak too (SPEC §8.1): the same account
+                x.pop('work')
                 return x
             self.assertEqual(same(base), same(small))
         finally:

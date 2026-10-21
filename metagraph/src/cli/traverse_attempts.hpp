@@ -388,6 +388,9 @@ class Attempt {
     void note_delivery_gap_ms(double ms);
     double max_delivery_gap_ms() const;
 
+    // the request's work.memory_bytes so far (SPEC §7.2.2): usage.work.memory_bytes states it
+    void note_memory_bytes(uint64_t bytes);
+
     // ---- statements
     // the response-level `usage` block, |reason| completed | cancelled | deadline | error
     Json::Value usage_json(const std::string &reason, bool per_seed = true) const;
@@ -464,6 +467,7 @@ class Attempt {
     size_t seeds_walked_ = 0;
     size_t seeds_abandoned_ = 0;                      // walks the client's departure cut
     double max_uninterruptible_ms_ = 0;               // note_max_uninterruptible_ms
+    std::optional<uint64_t> memory_bytes_;            // note_memory_bytes (none: no seed yet)
     double max_delivery_gap_ms_ = 0;                  // note_delivery_gap_ms
     // the delivery reserve's state (the handler's thread; written under |mutex_|)
     std::string detail_;

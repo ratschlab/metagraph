@@ -649,6 +649,11 @@ Json::Value Attempt::seeds_json() const {
     return seeds;
 }
 
+void Attempt::note_memory_bytes(uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    memory_bytes_ = bytes;
+}
+
 Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const {
     std::lock_guard<std::mutex> lock(mutex_);
     Json::Value u;
@@ -714,6 +719,11 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
         put_thread_usage(&timing, common::ThreadUsage::now().since(handler_start_));
         u["timing"] = std::move(timing);
     }
+    // the request's work.memory_bytes (SPEC §7.2.2): the modelled peak of its seeds and the
+    // results held, without a memory budget's cache allotments, as far as its seeds got (none
+    // before the first seed's result)
+    if (memory_bytes_)
+        u["work"]["memory_bytes"] = uint_json(*memory_bytes_);
     Json::Value memory;
     memory["peak_admitted_bytes"] = uint_json(peak);
     // the soft part is observed only under a memory budget, and per seed (each seed's excess

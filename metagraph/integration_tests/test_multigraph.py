@@ -449,7 +449,7 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(['ecoli', 'pseudo'], out['graphs'])
         self.assertEqual(1, out['pattern_contract_version'])
         self.assertEqual({'pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
-                          'timing'}, set(out))
+                          'timing', 'work'}, set(out))
         self.assertEqual((2, 0), (out['answered'], out['refused']))
         self.assertEqual(['ecoli', 'pseudo'], [a['graph'] for a in out['answers']])
         for answer in out['answers']:
@@ -710,7 +710,8 @@ class TestMultiGraphServer(TestingBase):
     def test_pattern_envelope_states_the_cpu_of_its_pairs(self):
         """The envelope's timing.cpu_ms (SPEC-pattern-search.md §24.1, §8.4): its own thread's
         part and every pair's work on its pool thread, so at least the answered pairs' own
-        cpu_ms together; page_faults on Linux only, likewise summed."""
+        cpu_ms together; page_faults on Linux only, likewise summed; work.memory_bytes the
+        answered pairs' together."""
         ecoli = self.records['ecoli'][0]
         out = self.post('pattern', {'patterns': [{'dna': ecoli[5000:5020]}], 'mode': 'count',
                                     'graphs': ['enterics', 'pseudo']})
@@ -722,6 +723,10 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(linux, 'page_faults' in t)
         self.assertGreaterEqual(out['timing']['cpu_ms'],
                                 sum(a['timing']['cpu_ms'] for a in answered))
+        # work.memory_bytes: the answered pairs' accounts together (each its own)
+        self.assertEqual(['memory_bytes'], list(out['work']))
+        self.assertEqual(out['work']['memory_bytes'],
+                         sum(a['work']['memory_bytes'] for a in answered))
         if linux:
             for k in ('minor', 'major'):
                 self.assertGreaterEqual(out['timing']['page_faults'][k],

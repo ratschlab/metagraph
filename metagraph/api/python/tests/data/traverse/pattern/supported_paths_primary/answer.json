@@ -266,9 +266,10 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.264042,
-    "extension_ms": 0.183291,
-    "support_ms": 0.04583300000000001
+    "cpu_ms": 0.0965,
+    "elapsed_ms": 0.075167,
+    "extension_ms": 0.056917,
+    "support_ms": 0.015336000000000002
    },
    "withheld": null,
    "work": {
@@ -288,6 +289,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.355917
+  "cpu_ms": 0.112292,
+  "elapsed_ms": 0.101
+ },
+ "work": {
+  "memory_bytes": 67117024
  }
 }

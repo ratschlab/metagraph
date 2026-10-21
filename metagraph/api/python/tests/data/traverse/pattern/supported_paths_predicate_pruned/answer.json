@@ -236,10 +236,11 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.260917,
-    "extension_ms": 0.2235,
-    "selection_ms": 0.001083,
-    "support_ms": 0.19112399999999996
+    "cpu_ms": 0.098916,
+    "elapsed_ms": 0.083167,
+    "extension_ms": 0.072917,
+    "selection_ms": 0.000292,
+    "support_ms": 0.06208200000000001
    },
    "withheld": null,
    "work": {
@@ -276,6 +277,10 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 0.32625
+  "cpu_ms": 0.119042,
+  "elapsed_ms": 0.105833
+ },
+ "work": {
+  "memory_bytes": 67121177
  }
 }

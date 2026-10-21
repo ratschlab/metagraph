@@ -977,8 +977,11 @@ class TestTraverseCLI(TestTraverseBase):
         del stripped['results'][0]['coordinates']
         for r in (stripped, plain):
             r.pop('timing', None)
+            # work.memory_bytes: the coordinates' account raises it (SPEC §7.2.2)
+            r.pop('work', None)
             for x in r['results']:
                 x.pop('timing', None)
+                x.pop('work', None)
         self.assertEqual(plain, stripped)
         # support kmer: null, with the reason; the cap is inert there
         kmer = copy.deepcopy(req)
@@ -1109,9 +1112,10 @@ class TestTraverseGraphlet(TestTraverseBase):
         for i, (rf, rg) in enumerate(zip(full['results'], out['results'])):
             msg = '%s, seed %d' % (case, i)
             if 'error' in rf:
-                # a failed derivation keeps its shape and carries no graphlet
+                # a failed derivation keeps its shape and carries no graphlet (its
+                # work.memory_bytes prices the result in each detail, SPEC §7.2.2)
                 self.assertNotIn('graphlet', rg, msg)
-                self.assertEqual(rf, rg, msg)
+                self.assertEqual(dict(rf, work=None), dict(rg, work=None), msg)
                 continue
             checked += 1
             text = rg['graphlet']
@@ -1646,7 +1650,8 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertEqual(('tiny', self.index_fp), (caps['index_ns'], caps['index_fp']))
         r = out['results'][0]
         self.assertEqual({'seed', 'label_mode', 'outcome', 'limitations', 'arms', 'annotation',
-                          'timing', 'graphlet', 'graphlet_bytes', 'graphlet_lines'}, set(r))
+                          'timing', 'work', 'graphlet', 'graphlet_bytes', 'graphlet_lines'}, set(r))
+        self.assertEqual(['memory_bytes'], list(r['work']))
         self.assertEqual({'seed_id', 'validated_seed_id', 'seed_id_mismatch', 'length_bp',
                           'num_kmers', 'labels_from_seed', 'labels_supporting_total',
                           'labels_dropped', 'labels_dropped_digest', 'num_labels',
@@ -1803,6 +1808,67 @@ class TestTraverseAPI(TestTraverseBase):
         kept = state.json()['usage']
         self._thread_figures(kept['timing'], 'GET usage')
         self.assertGreaterEqual(kept['timing']['cpu_ms'], out['usage']['timing']['cpu_ms'])
+
+    def test_api_memory_bytes(self):
+        """work.memory_bytes (SPEC §7.2.2, SPEC-pattern-search.md §8.1): on every /traverse
+        (per request and per seed, every detail), /resolve and /pattern answer, budgeted or
+        not; the same in every run, on the server and the CLI, and the same under budgets that
+        do not bind; an attempt's usage and GET /traverse/attempt state the request's."""
+        seeds = [{'sequence': self.element}, {'sequence': self.left1[20:80]}]
+
+        def traverse(detail, **bounds):
+            ret = self._post('traverse', {
+                'seeds': seeds, 'strategy': {'bounds': dict({'max_extension_bp': BLOCK}, **bounds),
+                                             'output': {'detail': detail, 'timing': False}}})
+            self.assertEqual(200, ret.status_code, ret.text)
+            return ret.json()
+
+        for detail in ('full', 'tree', 'summary', 'graphlet'):
+            out = traverse(detail)
+            self.assertEqual(['memory_bytes'], list(out['work']))
+            self.assertIsInstance(out['work']['memory_bytes'], int)
+            per_seed = [r['work']['memory_bytes'] for r in out['results']]
+            self.assertTrue(all(isinstance(m, int) and m > 0 for m in per_seed), per_seed)
+            self.assertGreaterEqual(out['work']['memory_bytes'], max(per_seed))
+            self.assertEqual(out, traverse(detail), detail)
+            for bounds in ({'max_memory_mb': 4096}, {'max_work_units': 10 ** 12}):
+                budgeted = traverse(detail, **bounds)
+                self.assertEqual(out['work'], budgeted['work'], (detail, bounds))
+                self.assertEqual([r['work'] for r in out['results']],
+                                 [r['work'] for r in budgeted['results']], (detail, bounds))
+            if detail == 'graphlet':
+                for r in out['results']:
+                    self.assertNotIn('memory_bytes', r['graphlet'])
+        # the CLI states the server's figures
+        full = traverse('full')
+        cli, code = self._traverse({'seeds': seeds, 'strategy': {
+            'bounds': {'max_extension_bp': BLOCK}, 'output': {'detail': 'full', 'timing': False}}})
+        self.assertEqual(0, code)
+        self.assertEqual(full['work'], cli['work'])
+        self.assertEqual([r['work'] for r in full['results']], [r['work'] for r in cli['results']])
+
+        resolve = {'sequence': self.records['acc1'][40:300], 'discover': {'max_labels': 10},
+                   'select': {'max_seeds': 2}}
+        first = self._post('resolve', resolve).json()
+        self.assertIsInstance(first['work']['memory_bytes'], int)
+        self.assertGreater(first['work']['memory_bytes'], 260)
+        self.assertEqual(first['work'], self._post('resolve', resolve).json()['work'])
+
+        pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]}],
+                                         'mode': 'partial'}).json()
+        self.assertIsInstance(pattern['work']['memory_bytes'], int)
+        for e in pattern['patterns']:
+            self.assertLessEqual(e['work']['memory_bytes'], pattern['work']['memory_bytes'])
+
+        ret = self._post('traverse', {'attempt_id': 'memory-api-1', 'seeds': seeds,
+                                      'strategy': {'bounds': {'max_extension_bp': BLOCK},
+                                                   'output': {'detail': 'full', 'timing': False}}})
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        self.assertEqual(full['work'], out['work'])
+        self.assertEqual(out['work'], out['usage']['work'])
+        kept = requests.get(f'http://{self.host}:{self.port}/traverse/attempt/memory-api-1')
+        self.assertEqual(out['work'], kept.json()['usage']['work'])
 
     def test_api_graphlet(self):
         """T37/T40 over HTTP: the graphlet body of a gzip-compressed response reproduces
@@ -2010,6 +2076,10 @@ class TestTraverseAPI(TestTraverseBase):
                                            'effective': t['max_time_ms']}]}, big.pop('limits'))
             big.pop('timing')
             plain.pop('timing')
+            # work.memory_bytes models the work as it ran: under a deadline the explicit
+            # labels' hits are fetched in pieces (SPEC §4.5, §7.2.2) -- the same answer
+            self.assertIsInstance(big.pop('work')['memory_bytes'], int)
+            plain.pop('work')
             self.assertEqual(plain, big, what)
         # at the reserve, or not a number: refused, naming the field
         for bad in (reserve, -1, '1000'):
@@ -2818,7 +2888,11 @@ class TestTraverseResolveRegression(TestTraverseBase):
     """The /resolve deadline is opt-in (SPEC §4.5): a /resolve without bounds.time_budget_ms is
     answered byte for byte as by a binary without the deadline ($METAGRAPH_BASE_BINARY),
     apart from timing.elapsed_ms: the resolve requests of this file and their refusals, on
-    the server (with and without gzip) and on the CLI."""
+    the server (with and without gzip) and on the CLI. The per-task figures (SPEC §7.2.1,
+    §7.2.2: timing.cpu_ms, timing.page_faults, work.memory_bytes) are additions that change
+    nothing else: removed where they stand, a /resolve and a /traverse — unbudgeted, under
+    budgets that do not bind and under one that stops the walk, in every detail — are the
+    base binary's answers byte for byte (with a base binary before them)."""
 
     @classmethod
     def setUpClass(cls):
@@ -2891,7 +2965,52 @@ class TestTraverseResolveRegression(TestTraverseBase):
 
     @staticmethod
     def _untimed(text):
+        # the per-task figures, where a binary with them writes them (compact JSON, sorted
+        # keys: cpu_ms first in its timing block, page_faults and work last in theirs)
+        text = re.sub(r'"cpu_ms":[-+0-9.eE]+,', '', text)
+        text = re.sub(r',"page_faults":\{"major":\d+,"minor":\d+\}', '', text)
+        text = re.sub(r',"work":\{"memory_bytes":\d+\}', '', text)
         return re.sub(r'"elapsed_ms":[-+0-9.eE]+', '"elapsed_ms":0', text)
+
+    def _traverse_requests(self):
+        e = self.element
+        seeds = [{'sequence': e}, {'sequence': self.left1[10:70], 'seed_id': 'left'},
+                 {'sequence': e[20:80], 'labels': ['acc1', 'acc3']}]
+        out = []
+        for detail in ('full', 'tree', 'summary', 'graphlet'):
+            for mode in ('constrain', 'annotate'):
+                for bounds in ({}, {'max_memory_mb': 4096}, {'max_work_units': 10 ** 12},
+                               {'max_memory_mb': 1}):
+                    strategy = {'labels': {'mode': mode},
+                                'bounds': dict({'max_extension_bp': BLOCK + 20}, **bounds),
+                                'output': {'detail': detail, 'timing': False}}
+                    out.append({'seeds': [s for s in seeds
+                                          if mode == 'constrain' or 'labels' not in s],
+                                'strategy': strategy})
+        # a seed one record carries, and refusals
+        untimed = {'output': {'timing': False}}
+        out.append({'seeds': [{'sequence': self.left2[60:] + e[:60]}], 'strategy': untimed})
+        out.append({'seeds': [{'sequence': e, 'labels': ['nope']}], 'strategy': untimed})
+        out.append({'seeds': [], 'strategy': untimed})
+        return out
+
+    def test_traverse_answers_as_before(self):
+        """/traverse: the base binary's answers byte for byte once the per-task figures are
+        removed (the walk, every charge, stop, echo and graphlet body unchanged)."""
+        compared = 0
+        for request in self._traverse_requests():
+            answers = []
+            for name in ('base', 'new'):
+                ret = requests.post(self.servers[name][1] + '/traverse',
+                                    data=json.dumps(request))
+                if name == 'new' and ret.status_code == 200:
+                    # (what is removed is there: the request's and every seed's)
+                    self.assertEqual(1 + len(ret.json()['results']),
+                                     ret.text.count('"work":{"memory_bytes":'))
+                answers.append((ret.status_code, self._untimed(ret.text)))
+            self.assertEqual(answers[0], answers[1], json.dumps(request)[:300])
+            compared += 1
+        self.assertEqual(35, compared)
 
     def test_server_answers_as_before(self):
         compared = 0

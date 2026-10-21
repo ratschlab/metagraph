@@ -1206,6 +1206,9 @@ struct Reader {
 // histogram, timing is not part of the result
 void normalise(Json::Value *result) {
     result->removeMember("timing");
+    // work.memory_bytes (SPEC §7.2.2) prices the output in the requested detail: JSON beside
+    // the body, never rebuilt from it, and another number in each detail
+    result->removeMember("work");
     for (const char *side : { "left", "right" }) {
         if (!(*result)["arms"].isMember(side))
             continue;
@@ -1298,9 +1301,14 @@ void check_request(const AnnotatedDBG &anno, Json::Value request, const std::str
         const Json::Value &summary = g["results"][i];
         const std::string at = what + " seed " + std::to_string(i);
         if (summary.isMember("error")) {
-            // a failed derivation keeps today's shape, no graphlet
+            // a failed derivation keeps today's shape, no graphlet (its work.memory_bytes, the
+            // result as priced in each detail, apart)
             EXPECT_FALSE(summary.isMember("graphlet")) << at;
-            EXPECT_EQ(compact(full["results"][i]), compact(summary)) << at;
+            Json::Value failed_full = full["results"][i], failed_graphlet = summary;
+            EXPECT_TRUE(failed_full["work"]["memory_bytes"].isUInt64()) << at;
+            failed_full.removeMember("work");
+            failed_graphlet.removeMember("work");
+            EXPECT_EQ(compact(failed_full), compact(failed_graphlet)) << at;
             continue;
         }
         ASSERT_TRUE(summary["graphlet"].isString()) << at;
@@ -1909,8 +1917,14 @@ TEST(Graphlet, NamesThatAreNotUtf8AreRefusedPerSeed) {
                 EXPECT_TRUE(valid_utf8(l["name"].asString())) << c.what;
             }
         }
-        // detail full and graphlet carry the same refusal
-        EXPECT_EQ(compact(outs[0]["results"][0]), compact(outs[1]["results"][0])) << c.what;
+        // detail full and graphlet carry the same refusal; its work.memory_bytes is the walk's
+        // peak, whose output is priced in each detail (SPEC §7.2.2)
+        Json::Value refusals[2] = { outs[0]["results"][0], outs[1]["results"][0] };
+        for (Json::Value &refusal : refusals) {
+            EXPECT_GT(refusal["work"]["memory_bytes"].asUInt64(), 0u) << c.what;
+            refusal.removeMember("work");
+        }
+        EXPECT_EQ(compact(refusals[0]), compact(refusals[1])) << c.what;
     }
     // the replaced name resolves to its own label and walks its own bases: S then U
     Json::Value request = request_for({ { seed, { replaced } } },
@@ -6243,7 +6257,18 @@ namespace {
 // (or null and reason), the `coordinates` limitation and, in a graphlet, the one K record of
 // kind coordinates (the Z count, graphlet_lines and graphlet_bytes adjusted). |k_records|
 // counts the K records removed
+// |out| without work.memory_bytes (SPEC §7.2.2), at the top level and per seed: the modelled
+// account's peak, which the recorded coordinates raise by their share
+Json::Value without_work(Json::Value out) {
+    out.removeMember("work");
+    for (Json::Value &r : out["results"]) {
+        r.removeMember("work");
+    }
+    return out;
+}
+
 Json::Value strip_coordinates(Json::Value out, size_t *k_records = nullptr) {
+    out = without_work(std::move(out));
     Json::Value &o = out["strategy"]["output"];
     o.removeMember("coordinates");
     o.removeMember("max_coordinate_occurrences");
@@ -6477,7 +6502,7 @@ TEST(GraphletCoordinates, KRecordOnlyWhenCutAndStrippedEqualsOptOut) {
                                              std::string(R"({"bounds": {"max_extension_bp": 30}})") }) {
             const Json::Value plain = request_of({ seed_of(ix.S, { "C", "D" }),
                                                    seed_of(ix.orphan()) }, strategy, detail);
-            const std::string off = compact_json(process_traverse_request(plain, *ix.anno, ""));
+            const std::string off = compact_json(without_work(process_traverse_request(plain, *ix.anno, "")));
             for (const Json::Value &cap : { Json::Value(1), Json::Value(16), Json::Value("unlimited") }) {
                 const Json::Value on = process_traverse_request(with_coordinates(plain, cap), *ix.anno, "");
                 size_t k_records = 0;
@@ -7103,6 +7128,10 @@ Json::Value resolve_untimed(Json::Value v) {
     v.removeMember("timing");
     v.removeMember("limits");
     v.removeMember("stop");
+    // work.memory_bytes (SPEC §4.4) models the work as it ran: under a deadline the explicit
+    // labels' hits are scattered in pieces and each key's first k-mer is kept, and a stop
+    // leaves the rest unread — the same answer, another work
+    v.removeMember("work");
     return v;
 }
 

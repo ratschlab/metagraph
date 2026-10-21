@@ -1823,6 +1823,9 @@ Json::Value process_pattern_request(
         std::optional<uint64_t> mismatch_cap;
         // the CPU time and page faults of the pattern's work phase (its entry's timing)
         common::ThreadUsage usage;
+        // the request's memory account at its peak when the pattern's work ended (its entry's
+        // work.memory_bytes, where no read stated it)
+        uint64_t memory_peak = 0;
     };
 
     /**
@@ -2545,6 +2548,7 @@ Json::Value process_pattern_request(
                 a.result = above_cap_result(*spec.pattern, k, req.request, cap);
                 a.mismatch_cap = cap;
                 a.usage = pattern_usage.elapsed();
+                a.memory_peak = account.peak();
                 answered.push_back(std::move(a));
                 continue;
             }
@@ -2589,6 +2593,7 @@ Json::Value process_pattern_request(
                 refuse_unrepresentable(a, *a.labels->unrepresentable);
         }
         a.usage = pattern_usage.elapsed();
+        a.memory_peak = account.peak();
         answered.push_back(std::move(a));
     }
     if (hooks && hooks->work_done_hook)
@@ -2700,6 +2705,14 @@ Json::Value process_pattern_request(
         // its finalisation is in the request's figure)
         if (entry.isMember("timing") && entry["timing"].isObject())
             put_thread_usage(&entry["timing"], a.usage);
+        // every answered entry states the request's memory account at its peak so far (SPEC
+        // §8.7): a labelled read, a selection or a supported-path search stated it already;
+        // otherwise the peak when the pattern's work ended (0 where nothing was charged: a
+        // count, a label-free list of anchors)
+        if (entry.isMember("work") && entry["work"].isObject()
+                && !entry["work"].isMember("memory_bytes")) {
+            entry["work"]["memory_bytes"] = uint_json(a.memory_peak);
+        }
         entries.append(std::move(entry));
     }
 
@@ -2821,6 +2834,9 @@ Json::Value process_pattern_request(
     l["clamped"] = std::move(req.clamped);
     out["limits"] = std::move(l);
 
+    // the request's memory account at its peak (SPEC §8.1): every pattern's charges, every
+    // mode, labels or not; deterministic unless a time stop cut the work
+    out["work"]["memory_bytes"] = uint_json(account.peak());
     Json::Value timing;
     timing["elapsed_ms"] = elapsed_ms;
     put_thread_usage(&timing, request_usage.elapsed());

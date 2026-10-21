@@ -2476,6 +2476,7 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
     account.coordinates = coord_account_;
+    account.allotted = allotted_;
     const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
                                     : result_.label_dict.size();
     throw SeedBudgetError(what, q, account,
@@ -6513,6 +6514,7 @@ SeedResult Walker::run() {
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
     account.coordinates = coord_account_;
+    account.allotted = allotted_;
     result_.coordinates_recorded = record_coords_;
     // before the arms' results move into the seed's
     write_meter();

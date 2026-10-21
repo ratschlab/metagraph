@@ -101,19 +101,25 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.019917
+    "cpu_ms": 0.007958,
+    "elapsed_ms": 0.007291
    },
    "withheld": {
     "reason": "discovery_budget"
    },
    "work": {
     "mask_scans": 1,
+    "memory_bytes": 0,
     "ranges_visited": 20,
     "steps": 20
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.03475
+  "cpu_ms": 0.018291,
+  "elapsed_ms": 0.012458
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

@@ -117,9 +117,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.181583,
-    "extension_ms": 0.1385,
-    "support_ms": 0.13575
+    "cpu_ms": 0.045291,
+    "elapsed_ms": 0.041959,
+    "extension_ms": 0.029292,
+    "support_ms": 0.028167
    },
    "withheld": {
     "reason": "annotation_budget"
@@ -141,6 +142,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.2505
+  "cpu_ms": 0.065416,
+  "elapsed_ms": 0.052375
+ },
+ "work": {
+  "memory_bytes": 67116600
  }
 }

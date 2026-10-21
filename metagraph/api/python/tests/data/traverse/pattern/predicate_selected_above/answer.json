@@ -212,8 +212,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.600167,
-    "selection_ms": 19.873417
+    "cpu_ms": 23.821209,
+    "elapsed_ms": 0.661542,
+    "selection_ms": 23.15875
    },
    "withheld": {
     "reason": "selected_above_threshold"
@@ -252,6 +253,10 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 20.506583
+  "cpu_ms": 23.865542,
+  "elapsed_ms": 23.865833
+ },
+ "work": {
+  "memory_bytes": 288924
  }
 }

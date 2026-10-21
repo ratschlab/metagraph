@@ -258,10 +258,11 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.128166,
-    "extension_ms": 0.075458,
-    "label_discovery_ms": 0.011375,
-    "label_intersection_ms": 0.002084,
+    "cpu_ms": 0.166833,
+    "elapsed_ms": 0.132541,
+    "extension_ms": 0.089834,
+    "label_discovery_ms": 0.017625,
+    "label_intersection_ms": 0.001125,
     "placement_ms": 0.0,
     "verification_ms": 0.000167
    },
@@ -282,6 +283,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.175
+  "cpu_ms": 0.184709,
+  "elapsed_ms": 0.172584
+ },
+ "work": {
+  "memory_bytes": 7976
  }
 }

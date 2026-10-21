@@ -140,10 +140,12 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 1.44875
+    "cpu_ms": 0.586708,
+    "elapsed_ms": 0.585333
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 6305,
     "steps": 6305,
     "steps_by_mismatches": {
@@ -155,6 +157,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 1.501209
+  "cpu_ms": 0.617417,
+  "elapsed_ms": 0.604709
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

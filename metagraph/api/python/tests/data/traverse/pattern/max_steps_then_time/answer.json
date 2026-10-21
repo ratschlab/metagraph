@@ -39527,6 +39527,7 @@
    "withheld": null,
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 3,
     "steps": 3
    }
@@ -39606,6 +39607,7 @@
    "withheld": null,
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 0,
     "steps": 0
    }
@@ -39613,5 +39615,8 @@
  ],
  "timing": {
   "elapsed_ms": 67.002958
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

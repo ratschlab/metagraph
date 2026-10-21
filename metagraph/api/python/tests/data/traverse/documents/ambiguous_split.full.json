@@ -749,6 +749,9 @@
     "seed_id": "ambiguous_split",
     "seed_id_mismatch": true,
     "validated_seed_id": "ca8b328e05ee1944"
+   },
+   "work": {
+    "memory_bytes": 808263
    }
   }
  ],
@@ -811,5 +814,8 @@
   "schema_version": 1,
   "support": "kmer"
  },
- "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as canonical (k+1)-mers, each use keeping its orientation), enters no seed node (of either strand), and may take hairpin steps (a self-reverse-complementary (k+1)-mer), which are flagged; after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules"
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as canonical (k+1)-mers, each use keeping its orientation), enters no seed node (of either strand), and may take hairpin steps (a self-reverse-complementary (k+1)-mer), which are flagged; after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
+ "work": {
+  "memory_bytes": 808263
+ }
 }

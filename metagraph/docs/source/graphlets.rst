@@ -1836,7 +1836,9 @@ JSON
 ``to_json()`` rebuilds the server's ``detail: "full"`` result for the seed (natural
 orientation, every derived field), which makes it the conformance oracle: compared after
 ``metagraph.traverse.export.normalize_result()`` (event order within one position,
-``needed_budgets`` order and ``timing`` are not information), it equals what the server
+``needed_budgets`` order and ``timing`` are not information; ``work.memory_bytes`` prices
+the output in the requested detail, so the graphlet's own differs from a ``detail: "full"``
+response's and is dropped too), it equals what the server
 returns for the same request with ``detail: "full"``. It needs the envelope.
 
 .. graphlet-example: json

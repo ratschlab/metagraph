@@ -856,9 +856,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.326042,
-    "extension_ms": 0.288666,
-    "support_ms": 0.24599999999999994
+    "cpu_ms": 0.26775,
+    "elapsed_ms": 0.212208,
+    "extension_ms": 0.17425,
+    "support_ms": 0.14516699999999993
    },
    "withheld": null,
    "work": {
@@ -878,6 +879,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.443792
+  "cpu_ms": 0.298084,
+  "elapsed_ms": 0.281834
+ },
+ "work": {
+  "memory_bytes": 67138790
  }
 }

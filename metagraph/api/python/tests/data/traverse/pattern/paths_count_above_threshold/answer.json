@@ -99,8 +99,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.040833,
-    "extension_ms": 0.020917
+    "cpu_ms": 0.029083,
+    "elapsed_ms": 0.027834,
+    "extension_ms": 0.013333
    },
    "withheld": {
     "reason": "count_above_threshold"
@@ -110,12 +111,17 @@
     "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
+    "memory_bytes": 248,
     "ranges_visited": 62,
     "steps": 80
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.050334
+  "cpu_ms": 0.047,
+  "elapsed_ms": 0.036209
+ },
+ "work": {
+  "memory_bytes": 248
  }
 }

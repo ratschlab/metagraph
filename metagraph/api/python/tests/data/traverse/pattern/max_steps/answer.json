@@ -148,13 +148,15 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.036
+    "cpu_ms": 0.010083,
+    "elapsed_ms": 0.009083
    },
    "withheld": {
     "reason": "discovery_budget"
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 50,
     "steps": 50
    }
@@ -282,19 +284,25 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.003333
+    "cpu_ms": 0.002959,
+    "elapsed_ms": 0.002167
    },
    "withheld": {
     "reason": "discovery_budget"
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 0,
     "steps": 0
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.062208
+  "cpu_ms": 0.033125,
+  "elapsed_ms": 0.018167
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

@@ -458,6 +458,11 @@ def _to_json(g, bud, done=None):
     out['annotation'] = g.seed_summary.get('annotation', {})
     if 'timing' in g.seed_summary:
         out['timing'] = g.seed_summary['timing']
+    if 'work' in g.seed_summary:
+        # JSON beside the body (SPEC §7.2.2): the seed's work.memory_bytes, its modelled
+        # account at its peak -- the graphlet detail's, whose output is priced in the detail
+        # requested, so another number than a detail: full response states
+        out['work'] = _json_copy(g.seed_summary['work'])
     if g.seed_summary.get('duplicate'):
         out['duplicate'] = True
     if 'coordinates' in g.seed_summary:
@@ -479,9 +484,11 @@ def _to_json(g, bud, done=None):
 def normalize_result(result):
     """The §2.5 normalisation for comparing a to_json() result with the server's
     detail: full result: events sorted within equal at_bp, needed_budgets sorted,
-    timing removed, growth label_ends null -> {}. Returns a normalised deep copy."""
+    timing and work removed (work.memory_bytes prices the output in the requested
+    detail, SPEC §7.2.2), growth label_ends null -> {}. Returns a normalised deep copy."""
     r = json.loads(json.dumps(result))
     r.pop('timing', None)
+    r.pop('work', None)
     for arm in (r.get('arms') or {}).values():
         for s in arm.get('segments', []):
             s['events'] = sorted(s.get('events', []),

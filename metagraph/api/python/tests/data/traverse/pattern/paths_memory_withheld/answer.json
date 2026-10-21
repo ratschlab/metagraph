@@ -7186,8 +7186,9 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 4.755958,
-    "extension_ms": 3.02225
+    "cpu_ms": 1.545375,
+    "elapsed_ms": 1.543792,
+    "extension_ms": 0.94425
    },
    "withheld": null,
    "work": {
@@ -7195,6 +7196,7 @@
     "extension_branches": 0,
     "extension_edges": 3243,
     "mask_scans": 0,
+    "memory_bytes": 673546,
     "ranges_visited": 2988,
     "steps": 6231
    }
@@ -7263,8 +7265,9 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 4.166416,
-    "extension_ms": 2.868334
+    "cpu_ms": 1.067666,
+    "elapsed_ms": 1.06675,
+    "extension_ms": 0.746833
    },
    "withheld": {
     "reason": "output_budget"
@@ -7274,6 +7277,7 @@
     "extension_branches": 0,
     "extension_edges": 3243,
     "mask_scans": 0,
+    "memory_bytes": 1035206,
     "ranges_visited": 2988,
     "steps": 6231
    }
@@ -7342,8 +7346,9 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 7.780916,
-    "extension_ms": 6.351
+    "cpu_ms": 0.894292,
+    "elapsed_ms": 0.893542,
+    "extension_ms": 0.614291
    },
    "withheld": {
     "reason": "output_budget"
@@ -7353,12 +7358,17 @@
     "extension_branches": 0,
     "extension_edges": 3243,
     "mask_scans": 0,
+    "memory_bytes": 1035206,
     "ranges_visited": 2988,
     "steps": 6231
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 16.748208
+  "cpu_ms": 3.627292,
+  "elapsed_ms": 3.518542
+ },
+ "work": {
+  "memory_bytes": 1035206
  }
 }

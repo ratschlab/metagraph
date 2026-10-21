@@ -232,6 +232,30 @@ std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
     return rows;
 }
 
+// The modelled bytes of an accumulator (SupportProfile::memory_peak): its fixed part, its runs
+// and trace breaks (the chain's live coordinates are a handful, in place)
+uint64_t support_bytes(const LabelSupport &s) {
+    return sizeof(LabelSupport) + s.runs.size() * sizeof(KmerInterval)
+         + s.trace_breaks.size() * sizeof(uint64_t);
+}
+
+uint64_t supports_bytes(const std::vector<LabelSupport> &supports) {
+    uint64_t bytes = 0;
+    for (const LabelSupport &s : supports) {
+        bytes += support_bytes(s);
+    }
+    return bytes;
+}
+
+template <class RowT>
+uint64_t rows_bytes(const std::vector<RowT> &rows) {
+    uint64_t bytes = 0;
+    for (const RowT &row : rows) {
+        bytes += annot::matrix::row_copy_bytes(row);
+    }
+    return bytes;
+}
+
 /**
  * Calls |use(j, row)| for every j of |keys| (the present k-mers' keys, in k-mer order) in
  * order, with the row of keys[j] decoded by |decode| (a vector of keys to their rows) in
@@ -241,11 +265,14 @@ std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
  * last occurrence; beyond that bound a repeated row is decoded again. |checkpoint| runs between
  * batches; true from it ends the pass there (a deadline). What the request holds is one batch
  * of rows and the rows kept. Returns how many of |keys| were used: all of them, or those before
- * the batch the pass ended at — a prefix, since the keys are used in order
+ * the batch the pass ended at — a prefix, since the keys are used in order. |rows_held_peak|,
+ * when given, is raised to the most row bytes held at once (a batch and the rows kept,
+ * row_copy_bytes each: SupportProfile::memory_peak)
  */
 template <class RowT, class Decode, class Use, class Checkpoint>
 size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint64_t kept_max,
-                    const Decode &decode, const Use &use, const Checkpoint &checkpoint) {
+                    const Decode &decode, const Use &use, const Checkpoint &checkpoint,
+                    uint64_t *rows_held_peak = nullptr) {
     constexpr size_t kNever = std::numeric_limits<size_t>::max();
     // the next occurrence of each k-mer's key (kNever: none)
     std::vector<size_t> next_use(keys.size(), kNever);
@@ -280,6 +307,9 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
         if (!batch_keys.empty()) {
             batch = decode(batch_keys);
             sizer.done(batch);   // before any row is moved to |kept|
+            // what the request holds now: this batch of rows and the rows kept
+            if (rows_held_peak)
+                *rows_held_peak = std::max(*rows_held_peak, kept_bytes + rows_bytes(batch));
         }
         for (size_t j = begin; j < end; ++j) {
             auto kit = kept.find(keys[j]);
@@ -375,6 +405,19 @@ SupportProfile resolve_support(LabelOracle &oracle,
     }
     profile.graph_runs = runs_of(in_graph);
     size_t num_present = present_keys.size();
+    // The modelled memory (SupportProfile::memory_peak): what the query holds throughout — its
+    // bases, every k-mer's key and presence, the present k-mers' keys and positions, the graph
+    // runs — and what each phase adds to it at its largest
+    const uint64_t query_held = query.size() + keys.size() * sizeof(node_index)
+                              + (in_graph.size() + 7) / 8
+                              + present_keys.size() * (sizeof(node_index) + sizeof(uint64_t))
+                              + profile.graph_runs.size() * sizeof(KmerInterval);
+    auto note_memory = [&](uint64_t bytes) {
+        profile.memory_peak = std::max(profile.memory_peak, query_held + bytes);
+    };
+    note_memory(0);
+    // the most the row passes held at once (a batch of rows and the rows kept)
+    uint64_t rows_held = 0;
     // The work ended at k-mer x (|phase|): the profile becomes that of the query's first x
     // k-mers — num_kmers, and the graph runs cut there (the runs of the labels hold no k-mer
     // past x: only those before it were read). Applied once, before the labels' profiles are
@@ -409,12 +452,12 @@ SupportProfile resolve_support(LabelOracle &oracle,
             return for_each_row<MultiIntMatrix::RowTuples>(present_keys, sizer, options.kept_bytes,
                 [&](const std::vector<node_index> &batch) {
                     return oracle.get_row_tuples(anno_rows(batch));
-                }, use_tuples, poll);
+                }, use_tuples, poll, &rows_held);
         } else {
             return for_each_row<BinaryMatrix::SetBitPositions>(present_keys, sizer, options.kept_bytes,
                 [&](const std::vector<node_index> &batch) {
                     return oracle.get_rows(anno_rows(batch));
-                }, use_rows, poll);
+                }, use_rows, poll, &rows_held);
         }
     };
 
@@ -523,6 +566,14 @@ SupportProfile resolve_support(LabelOracle &oracle,
                         of(c, previous).add_trace(i, local.data(), local.size(), scratch);
                 }
             });
+        // the pass at its largest: the next occurrence of every present k-mer, the rows held,
+        // and the accumulators (taken at their end, where they are largest) with the labels'
+        // slots or ids
+        note_memory(present_keys.size() * sizeof(size_t) + rows_held + supports_bytes(found)
+                    + found_ids.size() * sizeof(found_ids[0])
+                    + (by_column ? slot.size() * sizeof(uint32_t)
+                                 : index.size() * (sizeof(std::pair<Column, uint64_t>)
+                                                   + 2 * sizeof(uint64_t))));
         if (used < num_present) {
             // The deadline ended the pass: the rows of the first |used| present k-mers were
             // read, so the k-mers before the next present one are resolved (those between are
@@ -683,17 +734,25 @@ SupportProfile resolve_support(LabelOracle &oracle,
             }
             BatchSizer sizer(options.batch_rows, options.batch_bytes);
             std::vector<node_index> batch;
+            // the distinct keys (and under a deadline where each occurs first) beside the query
+            const uint64_t distinct_held = distinct.size() * sizeof(node_index)
+                                         + distinct_at.size() * sizeof(uint64_t);
             for (size_t begin = 0; begin < distinct.size(); begin += batch.size()) {
                 batch.assign(distinct.begin() + begin,
                              distinct.begin() + std::min(distinct.size(), begin + sizer.next));
+                // a batch of rows held while its hits are primed into the query
                 if (path == "tuples") {
                     const auto rows = oracle.get_row_tuples(anno_rows(batch));
                     query_labels.prime(batch, rows);
                     sizer.done(rows);
+                    note_memory(distinct_held + rows_bytes(rows) + query_labels.cache_bytes()
+                                + supports_bytes(support));
                 } else {
                     const auto rows = oracle.get_rows(anno_rows(batch));
                     query_labels.prime(batch, rows);
                     sizer.done(rows);
+                    note_memory(distinct_held + rows_bytes(rows) + query_labels.cache_bytes()
+                                + supports_bytes(support));
                 }
                 const size_t next = begin + batch.size();
                 if (options.time_up) {
@@ -717,6 +776,12 @@ SupportProfile resolve_support(LabelOracle &oracle,
         if (!options.time_up) {
             // no deadline: one fetch of every k-mer's hits
             auto hits = query_labels.fetch(keys);
+            // every k-mer's hits held at once beside the query's cache of them
+            uint64_t hits_held = hits.size() * sizeof(hits[0]);
+            for (const auto &h : hits) {
+                hits_held += LabelQuery::held_bytes(h);
+            }
+            note_memory(hits_held + query_labels.cache_bytes());
             checkpoint();
             for (uint64_t i = 0; i < hits.size(); ++i) {
                 // a client gone is seen within a few thousand k-mers of the pass, not after it
@@ -757,6 +822,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
             }
         }
         apply_stop();
+        // the accumulators at their end, beside the query's cache of hits
+        note_memory(supports_bytes(support) + query_labels.cache_bytes());
         for (LabelId l = 0; l < refs.size(); ++l) {
             finishing(l);
             LabelProfile &lp = profile.labels[l];
@@ -788,7 +855,41 @@ SupportProfile resolve_support(LabelOracle &oracle,
                       return a.labels.size() > b.labels.size();
                   return a.kmers.begin < b.kmers.begin;
               });
+    // the profile, complete, beside the query
+    note_memory(profile_bytes(profile));
     return profile;
+}
+
+uint64_t profile_bytes(const SupportProfile &p) {
+    uint64_t bytes = sizeof(SupportProfile) + p.graph_runs.size() * sizeof(KmerInterval);
+    for (const LabelProfile &lp : p.labels) {
+        bytes += sizeof(LabelProfile) + lp.label.name.size()
+               + lp.runs.size() * sizeof(KmerInterval) + lp.trace_breaks.size() * sizeof(uint64_t);
+    }
+    for (const SeedCandidate &c : p.candidates) {
+        bytes += sizeof(SeedCandidate) + c.labels.size() * sizeof(LabelId);
+    }
+    if (p.stop)
+        bytes += p.stop->query_graph_runs.size() * sizeof(KmerInterval);
+    return bytes;
+}
+
+uint64_t selection_bytes(const SeedSelection &selection) {
+    auto names = [](const std::vector<std::string> &list) {
+        uint64_t bytes = list.size() * sizeof(std::string);
+        for (const std::string &name : list) {
+            bytes += name.size();
+        }
+        return bytes;
+    };
+    uint64_t bytes = sizeof(SeedSelection);
+    for (const FrozenSeed &seed : selection.seeds) {
+        bytes += sizeof(FrozenSeed) + seed.seed_id.size() + seed.sequence.size()
+               + names(seed.labels) + names(seed.population.dropped)
+               + seed.population.dropped_digest.size()
+               + seed.overlaps_with.size() * sizeof(size_t) + names(seed.labels_not_covering);
+    }
+    return bytes;
 }
 
 

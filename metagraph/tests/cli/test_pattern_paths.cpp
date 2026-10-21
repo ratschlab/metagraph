@@ -1167,7 +1167,9 @@ TEST(PatternPaths, TheMemoryAccountStopsPathRetention) {
 // before it (cut max_memory), all_or_count withholds output_budget; the route's: the list ends
 // at the first object that does not fit (cut max_memory, stop {output, max_memory};
 // all_or_count output_budget). A request the account holds is answered as without one, and
-// work.memory_bytes stays absent without labels
+// work.memory_bytes (stated in every answered entry since 2026-10-21, SPEC §8.7) is the same
+// account's peak with and without it: the objects built stay to the request's end, the walks
+// are freed as they are handed over
 TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     std::mt19937 rng(17);
     std::vector<Record> records;
@@ -1189,7 +1191,9 @@ TEST(PatternPaths, TheMemoryAccountBoundsLabelFreePaths) {
     const uint64_t paths = f["returned"].asUInt64();
     ASSERT_GT(paths, 3u);
     ASSERT_TRUE(f["retrieval_complete"].asBool());
-    EXPECT_FALSE(f["work"].isMember("memory_bytes"));
+    EXPECT_GE(f["work"]["memory_bytes"].asUInt64(), paths * object);
+    EXPECT_LE(f["work"]["memory_bytes"].asUInt64(), paths * (walk + object));
+    EXPECT_EQ(f["work"]["memory_bytes"], full["work"]["memory_bytes"]);
 
     // the objects the route builds beside |held| walks within |max|: the j-th needs the walks
     // not yet handed over (held - j), the objects before it and itself

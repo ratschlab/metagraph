@@ -1716,8 +1716,13 @@ TEST_F(MiniRefSeq, CoordinateShareIsExact) {
                     const uint64_t coordinates = mtg::cli::coordinates_text_bytes(a);
                     EXPECT_GT(coordinates, 0u);
                     EXPECT_EQ(0u, mtg::cli::coordinates_text_bytes(b));
-                    EXPECT_EQ(mtg::cli::json_text(b, true).size(),
-                              mtg::cli::json_text(a, true).size() - coordinates)
+                    // without work.memory_bytes (SPEC §7.2.2), which the coordinates' account
+                    // raises: its digits are no coordinate text
+                    Json::Value a_work = a, b_work = b;
+                    a_work.removeMember("work");
+                    b_work.removeMember("work");
+                    EXPECT_EQ(mtg::cli::json_text(b_work, true).size(),
+                              mtg::cli::json_text(a_work, true).size() - coordinates)
                         << detail << " cap " << mtg::cli::json_text(cap, true) << " " << strategy;
                     const bool is_cut = a["coordinates"].isObject() && !a["coordinates"]["complete"].asBool();
                     cut += is_cut;

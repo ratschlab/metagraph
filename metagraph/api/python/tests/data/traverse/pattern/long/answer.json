@@ -85,13 +85,15 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.068584
+    "cpu_ms": 0.055916,
+    "elapsed_ms": 0.0535
    },
    "withheld": {
     "reason": "paths_later_increment"
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 62,
     "steps": 62
    }
@@ -156,17 +158,23 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.019166
+    "cpu_ms": 0.013125,
+    "elapsed_ms": 0.012375
    },
    "withheld": null,
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 23,
     "steps": 23
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.109667
+  "cpu_ms": 0.108459,
+  "elapsed_ms": 0.083875
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

@@ -162,8 +162,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.093667,
-    "label_discovery_ms": 0.012875,
+    "cpu_ms": 0.09625,
+    "elapsed_ms": 0.079583,
+    "label_discovery_ms": 0.010625,
     "placement_ms": 0.0
    },
    "withheld": {
@@ -309,8 +310,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.161625,
-    "label_discovery_ms": 0.000584,
+    "cpu_ms": 0.131667,
+    "elapsed_ms": 0.1275,
+    "label_discovery_ms": 0.000459,
     "placement_ms": 0.0
    },
    "withheld": {
@@ -328,6 +330,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.289416
+  "cpu_ms": 0.258875,
+  "elapsed_ms": 0.234917
+ },
+ "work": {
+  "memory_bytes": 28368
  }
 }

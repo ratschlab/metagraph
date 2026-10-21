@@ -590,6 +590,9 @@
     "seed_id": "caps",
     "seed_id_mismatch": true,
     "validated_seed_id": "b95d81a2d451ade7"
+   },
+   "work": {
+    "memory_bytes": 753859
    }
   }
  ],
@@ -662,5 +665,8 @@
   "schema_version": 1,
   "support": "kmer"
  },
- "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); it is followed while some permitted label supports every node of it under the strategy's label rules"
+ "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); it is followed while some permitted label supports every node of it under the strategy's label rules",
+ "work": {
+  "memory_bytes": 753859
+ }
 }

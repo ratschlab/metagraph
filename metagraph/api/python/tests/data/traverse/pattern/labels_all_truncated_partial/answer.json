@@ -1604,9 +1604,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.112083,
-    "label_discovery_ms": 0.338208,
-    "placement_ms": 0.257042
+    "cpu_ms": 0.555,
+    "elapsed_ms": 0.07875,
+    "label_discovery_ms": 0.22575,
+    "placement_ms": 0.163542
    },
    "withheld": null,
    "work": {
@@ -1621,6 +1622,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.815875
+  "cpu_ms": 0.586666,
+  "elapsed_ms": 0.562042
+ },
+ "work": {
+  "memory_bytes": 57635
  }
 }

@@ -6294,9 +6294,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.2365,
-    "label_discovery_ms": 0.425042,
-    "placement_ms": 0.263042
+    "cpu_ms": 1.175792,
+    "elapsed_ms": 0.307375,
+    "label_discovery_ms": 0.342625,
+    "placement_ms": 0.175583
    },
    "withheld": null,
    "work": {
@@ -6436,9 +6437,10 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.011375,
-    "label_discovery_ms": 4.1e-05,
-    "placement_ms": 4.2e-05
+    "cpu_ms": 0.033667,
+    "elapsed_ms": 0.01625,
+    "label_discovery_ms": 4.2e-05,
+    "placement_ms": 0.0
    },
    "withheld": null,
    "work": {
@@ -6453,6 +6455,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 1.4605
+  "cpu_ms": 1.571083,
+  "elapsed_ms": 1.536292
+ },
+ "work": {
+  "memory_bytes": 225828
  }
 }

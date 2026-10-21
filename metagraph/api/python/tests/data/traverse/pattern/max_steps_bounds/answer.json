@@ -96,16 +96,22 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.027625
+    "cpu_ms": 0.015916,
+    "elapsed_ms": 0.015084
    },
    "work": {
     "mask_scans": 1,
+    "memory_bytes": 0,
     "ranges_visited": 20,
     "steps": 20
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.041459
+  "cpu_ms": 0.027708,
+  "elapsed_ms": 0.021417
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

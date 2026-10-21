@@ -53,6 +53,26 @@ class TestDocuments(unittest.TestCase):
                 theirs = normalize_result(full)
                 self.assertEqual(theirs, mine, '\n'.join(T.json_diff(mine, theirs)[:20]))
 
+    def test_to_json_carries_the_work_beside_the_body(self):
+        """SPEC §7.2.2: a result's work.memory_bytes is JSON beside the body (the summary's),
+        copied by to_json() like timing; it prices the output in the requested detail, so
+        normalize_result() drops it with timing when a graphlet is compared with detail full."""
+        name = sorted(T.DOCUMENTS)[0]
+        resp = T.doc_json(name, 'graphlet')
+        resp['results'][0]['work'] = {'memory_bytes': 123456}
+        resp['results'][0]['timing'] = {'elapsed_ms': 1.5, 'cpu_ms': 1.25,
+                                        'page_faults': {'minor': 3, 'major': 0}}
+        g = from_response(resp['results'][0], resp)
+        out = g.to_json()
+        self.assertEqual({'memory_bytes': 123456}, out['work'])
+        self.assertEqual(1.25, out['timing']['cpu_ms'])
+        # a copy: an edit of the result never reaches the summary
+        out['work']['memory_bytes'] = 1
+        self.assertEqual({'memory_bytes': 123456}, g.seed_summary['work'])
+        full = dict(T.doc_json(name, 'full')['results'][0], work={'memory_bytes': 654321})
+        self.assertEqual(normalize_result(full), normalize_result(g.to_json()))
+        self.assertNotIn('work', normalize_result(full))
+
     def test_check_rules_finds_no_divergence(self):
         for name in T.DOCUMENTS:
             with self.subTest(name):

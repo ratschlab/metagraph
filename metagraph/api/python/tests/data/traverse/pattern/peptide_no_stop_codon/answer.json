@@ -96,10 +96,12 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.001083
+    "cpu_ms": 0.002,
+    "elapsed_ms": 0.001292
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 0,
     "steps": 0
    }
@@ -177,20 +179,26 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.044,
-    "extension_ms": 0.01025
+    "cpu_ms": 0.057542,
+    "elapsed_ms": 0.056625,
+    "extension_ms": 0.01275
    },
    "work": {
     "extension_anchors": 1,
     "extension_branches": 0,
     "extension_edges": 12,
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 124,
     "steps": 136
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.059625
+  "cpu_ms": 0.082125,
+  "elapsed_ms": 0.070833
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

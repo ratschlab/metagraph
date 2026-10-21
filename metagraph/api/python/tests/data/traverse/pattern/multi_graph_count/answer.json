@@ -148,17 +148,23 @@
       "-"
      ],
      "timing": {
-      "elapsed_ms": 0.378416
+      "cpu_ms": 0.102375,
+      "elapsed_ms": 0.097417
      },
      "work": {
       "mask_scans": 0,
+      "memory_bytes": 0,
       "ranges_visited": 122,
       "steps": 122
      }
     }
    ],
    "timing": {
-    "elapsed_ms": 0.464083
+    "cpu_ms": 0.141625,
+    "elapsed_ms": 0.128167
+   },
+   "work": {
+    "memory_bytes": 0
    }
   }
  ],
@@ -168,6 +174,10 @@
  "pattern_contract_version": 1,
  "refused": 0,
  "timing": {
-  "elapsed_ms": 0.910625
+  "cpu_ms": 0.189375,
+  "elapsed_ms": 0.228333
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

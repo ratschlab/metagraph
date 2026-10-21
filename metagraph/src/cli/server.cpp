@@ -1337,11 +1337,17 @@ int run_server(Config *config) {
         std::vector<Json::Value> entries;
         entries.reserve(slots.size());
         common::ThreadUsage pairs = common::ThreadUsage::zero();
+        // the answered pairs' accounts together (each pair's own work.memory_bytes): the pairs
+        // run at once on the pool, so at most what they held together
+        uint64_t memory_bytes = 0;
         for (Slot &slot : slots) {
             pairs.add(slot.usage);
+            if (slot.answered)
+                memory_bytes += slot.entry["work"]["memory_bytes"].asUInt64();
             entries.push_back(std::move(slot.entry));
         }
         Json::Value out = pattern_envelope(names, std::move(entries), timer.elapsed() * 1000);
+        out["work"]["memory_bytes"] = Json::Value(Json::UInt64(memory_bytes));
         put_thread_usage(&out["timing"], own_usage.elapsed().add(pairs));
         logger->info("[Server] Request {}: /pattern envelope: {} pair(s) answered, {} refused",
                      request_id, out["answered"].asUInt(), out["refused"].asUInt());

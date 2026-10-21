@@ -235,19 +235,25 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.024417
+    "cpu_ms": 0.065167,
+    "elapsed_ms": 0.062833
    },
    "withheld": {
     "reason": "count_above_threshold"
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 146,
     "steps": 146
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.031875
+  "cpu_ms": 0.10475,
+  "elapsed_ms": 0.079958
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

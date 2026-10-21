@@ -420,6 +420,15 @@ def entries(*per_entry):
     return run
 
 
+def peaks_so_far(answer):
+    """SPEC §8.1, §8.7: every answered entry states the request's memory account at its peak
+    so far, so the entries' never decrease, and the answer's work.memory_bytes is at least the
+    last of them."""
+    peaks = [e['work']['memory_bytes'] for e in answer['patterns'] if 'work' in e]
+    check(peaks == sorted(peaks), peaks)
+    check(not peaks or answer['work']['memory_bytes'] >= peaks[-1], (answer['work'], peaks))
+
+
 def selection(pass_, tested=None, selected=None, access='rows'):
     """SPEC §19.7: selection.pass, counts.tested and counts.selected (each a
     (relation, value) pair, or for selected bounds (lower, upper)), and the access."""
@@ -1291,7 +1300,8 @@ FIXTURES = [
          'half of what is left (stop {extension, max_memory}, the paths at_least, extension '
          'stopped, the one object that fits beside the 20 walks kept released, cut max_memory); '
          'max_memory_mb named alone acts on these entries (SPEC §8.10): no annotation_not_read, '
-         'no work.memory_bytes, not echoed',
+         'not echoed; work.memory_bytes the account\'s peak so far, as in every answered entry '
+         '(SPEC §8.7)',
          expect_all(
              lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
              entries(expect_all(paths_count('exact', GCG12_N88_PATHS, 'completed'), complete,
@@ -1303,8 +1313,9 @@ FIXTURES = [
                                 field('returned', 1),
                                 field('stop', {'phase': 'extension', 'reason': 'max_memory'}))),
              entries(*[expect_all(field('notes', []), field('determinism', 'full'),
-                                  lambda e: check('memory_bytes' not in e['work'], e['work']))]
-                     * 3))),
+                                  lambda e: check(e['work']['memory_bytes'] > 0, e['work']))]
+                     * 3),
+             peaks_so_far)),
     post('paths_memory_withheld', 'masked',
          {'patterns': [p(GCG12_N88, 'iupac', ident=f'GCG12-N88-{i}') for i in range(3)],
           'strands': 'forward', 'long_search': 'paths', 'max_memory_mb': 1,
@@ -1323,20 +1334,22 @@ FIXTURES = [
                                   field('stop', {'phase': 'output', 'reason': 'max_memory'}))]
                      * 2),
              entries(*[expect_all(field('notes', []), field('determinism', 'full'),
-                                  lambda e: check('memory_bytes' not in e['work'], e['work']))]
-                     * 3))),
+                                  lambda e: check(e['work']['memory_bytes'] > 0, e['work']))]
+                     * 3),
+             peaks_so_far)),
     post('paths_memory_named', 'masked',
          {'patterns': [p(NDM_40, ident='NDM-40'), p(NDM_F, ident='NDM-F')],
           'long_search': 'paths', 'max_memory_mb': 1, 'output': {'labels': 'none'}}, 200,
          'max_memory_mb named alone beside a pattern of at most k bases (SPEC §8.10): the account '
          'holds the paths of NDM-40, which are answered as without it (the entry of `paths`, '
-         'no note, no work.memory_bytes, max_memory_mb not echoed); NDM-F (L <= k), on which '
+         'no note, max_memory_mb not echoed, work.memory_bytes the account\'s peak as without '
+         'it); NDM-F (L <= k), on which '
          'the field does not act, says so: note annotation_not_read',
          expect_all(
              lambda a: check('max_memory_mb' not in a['limits'], a['limits']),
              entries(expect_all(paths_count('exact', 2, 'completed'), complete,
                                 field('returned', 2), field('notes', []),
-                                lambda e: check('memory_bytes' not in e['work'], e['work'])),
+                                lambda e: check(e['work']['memory_bytes'] > 0, e['work'])),
                      expect_all(exact(24), complete,
                                 field('notes', ['annotation_not_read']))))),
     post('paths_memory_count', 'masked',

@@ -249,7 +249,9 @@ SCHEMA = {
     'request_output': ['labels', 'occurrences', 'paths'],
     'refusal': ['error', 'code'],
     'answer': ['pattern_contract_version', 'mode', 'output', 'index', 'limits', 'timing',
-               'patterns', 'predicate'],
+               'work', 'patterns', 'predicate'],
+    # SPEC §8.1 (2026-10-21): the request's memory account at its peak
+    'answer_work': ['memory_bytes'],
     'index': ['index_ns', 'index_fp', 'release', 'k', 'graph_mode', 'alphabet',
               'strand_stated', 'counting', 'dummy_fraction'],
     # SPEC §8.2: the dummy fraction of a graph without its mask
@@ -382,7 +384,7 @@ SCHEMA = {
     # a multi-graph server (SPEC §24): its answer, the tags of each pair's answer, the block of
     # one pair (GET /pattern/capabilities?graph=), and GET /capabilities' graph_summary
     'answer_multi': ['pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
-                     'timing'],
+                     'timing', 'work'],
     'answer_pair': ['graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome', 'refusal'],
     # a refused entry's `refusal`: the body the pair alone would have been answered, with its
     # HTTP status (no code for an unexpected failure)
@@ -1434,7 +1436,12 @@ class Checker:
     # ------------------------------------------------------------- answers
 
     def answer(self, a, request, capabilities=None):
-        self.keys(a, [f for f in SCHEMA['answer'] if f != 'predicate' or 'predicate' in request],
+        # an answer of a build before the per-task figures (2026-10-21: the answer's work,
+        # memory_bytes in every answered entry) is checked by its own rule: the generated
+        # fixtures are all of this build, a stored body of another source may be older
+        self.per_task = 'work' in a
+        self.keys(a, [f for f in SCHEMA['answer'] if (f != 'predicate' or 'predicate' in request)
+                      and (f != 'work' or self.per_task)],
                   'answer')
         self.ok(a['pattern_contract_version'] == 1, 'pattern_contract_version')
         mode = request.get('mode', 'all_or_count')
@@ -1454,6 +1461,14 @@ class Checker:
             self.ok(a['output'] == {'labels': 'none'}, 'output', repr(a['output']))
         self.ok(('predicate' in a) is predicate, 'predicate',
                 'the predicate block exactly with a predicate request')
+        # SPEC §8.1: the request's memory account at its peak, at least every entry's
+        if self.per_task:
+            self.keys(a['work'], SCHEMA['answer_work'], 'work')
+            self.ok(is_int(a['work']['memory_bytes']) and a['work']['memory_bytes'] >= 0,
+                    'work.memory_bytes')
+            self.ok(all(a['work']['memory_bytes'] >= e['work'].get('memory_bytes', 0)
+                        for e in a['patterns'] if 'work' in e), 'work.memory_bytes',
+                    'at least every entry\'s memory_bytes (the peak so far)')
         self.normal_form = None
         self.capabilities = capabilities
         if predicate:
@@ -1625,6 +1640,11 @@ class Checker:
         self.ok(len(a['answers']) == pairs * len(a['graphs']), 'answers', 'one per pair')
         self.keys(a['timing'], ['elapsed_ms'] + self.thread_figures(a['timing'], 'timing'),
                   'timing')
+        # SPEC §24.1: the answered pairs' accounts together
+        self.keys(a['work'], ['memory_bytes'], 'work')
+        self.ok(a['work']['memory_bytes'] == sum(x['work']['memory_bytes'] for x in a['answers']
+                                                 if x.get('outcome') == 'answered'),
+                'work.memory_bytes', 'the answered pairs\' memory_bytes together')
         names = [x['graph'] for x in a['answers']]
         self.ok(names == sorted(names) and set(names) == set(a['graphs']), 'answers',
                 'in the order of the names')
@@ -2026,8 +2046,12 @@ class Checker:
 
         # work, stop, determinism, notes
         w = e['work']
+        # memory_bytes in every answered entry (SPEC §8.7, 2026-10-21; before, with labels, a
+        # predicate or the supported-path search only)
+        accounted = getattr(self, 'per_task', True) or labelled or supported or predicate
         self.keys(w, ['ranges_visited', 'mask_scans', 'steps']
-                  + (['annotation_rows', 'annotation_units', 'memory_bytes']
+                  + (['memory_bytes'] if accounted else [])
+                  + (['annotation_rows', 'annotation_units']
                      if labelled or supported else [])
                   + (['annotation_rows_distinct'] if labelled and not supported else [])
                   # the supported-path search (SPEC §20.6): its reads in every mode
@@ -2039,7 +2063,7 @@ class Checker:
                   + (['verification_steps'] if labelled and paths else [])
                   # a predicate: the selection's work, and the account (every mode)
                   + (['predicate_rows', 'predicate_units', 'predicate_lookups']
-                     + ([] if labelled or supported else ['memory_bytes']) if predicate else [])
+                     if predicate else [])
                   + (['motif_units'] if motif else [])
                   # bounded mismatches (SPEC §21.6): the steps per level
                   + (['steps_by_mismatches'] if m else []),
@@ -4288,6 +4312,45 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual({'unrepresentable_label_name', 'mismatches_above_cap'}, route_slots)
         self.assertEqual(set(SLOT_ERRORS), slots | {'information_below_floor',
                                                     'scope_unsupported'} | route_slots)
+
+    def test_per_task_figures(self):
+        """SPEC §8.1, §8.4, §8.7 (2026-10-21): every answer of this build states the request's
+        memory account at its peak (work.memory_bytes), every answered entry its account so
+        far, and the timing blocks may carry cpu_ms and page_faults {minor, major}; each rule
+        refuses an answer that breaks it."""
+        _, a = self.bodies['all_or_count']
+        self.assertIn('work', a)
+        self.assertTrue(all('memory_bytes' in e['work'] for e in a['patterns'] if 'work' in e))
+
+        def drop_entry_memory(answer):
+            del answer['patterns'][0]['work']['memory_bytes']
+
+        def below_an_entry(answer):
+            answer['patterns'][0]['work']['memory_bytes'] = 10
+            answer['work']['memory_bytes'] = 9
+
+        def faults_without_cpu(answer):
+            answer['timing'].pop('cpu_ms', None)
+            answer['timing']['page_faults'] = {'minor': 1, 'major': 0}
+
+        def bad_faults(answer):
+            answer['timing']['cpu_ms'] = 1.0
+            answer['timing']['page_faults'] = {'minor': 1}
+
+        def negative_cpu(answer):
+            answer['patterns'][0]['timing']['cpu_ms'] = -1.0
+
+        def extra_work(answer):
+            answer['work']['steps'] = 1
+
+        self.assertRefusesMutations([
+            ('all_or_count', drop_entry_memory, 'fields'),
+            ('all_or_count', below_an_entry, 'at least every entry'),
+            ('all_or_count', faults_without_cpu, 'page faults without cpu_ms'),
+            ('all_or_count', bad_faults, 'page_faults'),
+            ('all_or_count', negative_cpu, 'cpu_ms'),
+            ('all_or_count', extra_work, 'fields'),
+        ])
 
     def test_by_label_null_in_partial_is_valid(self):
         """SPEC §14.4: in partial, when the memory account cannot hold by_label, the answer has

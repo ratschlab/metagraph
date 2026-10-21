@@ -906,9 +906,15 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `output` | object \| null | `null` in mode `count`; in the retrieval modes the projection applied: `{"labels": "none"}`, or `{"labels": "all", "occurrences": <boolean>}` (increment 3), or `{"labels": "predicate_only", "occurrences": <boolean>}` (increment 5b) |
 | `index` | object (§8.2) | what was searched |
 | `limits` | object (§8.3) | the effective caps of this request |
-| `timing` | object (§8.4) | the request's elapsed time |
+| `timing` | object (§8.4) | the request's elapsed time, CPU time and page faults |
+| `work` | object (`answer_work` below) | 2026-10-21 (the owner's per-task figures): what the request cost besides its time |
 | `patterns` | list of entries (§8.5) | one per request pattern, in request order |
 | `predicate` | object (`predicate_block`, §19.10) | increment 5b, **exactly when the request names a predicate**: the predicate as bound to this index (its normal form, its names, the unknown ones, `vacuous`, the scope and strands of its claim) |
+
+<!-- schema: answer_work -->
+| field | type | meaning |
+|---|---|---|
+| `memory_bytes` | integer | the request's memory account at its peak: every pattern's charges (§14.4, §20.7, §20.9, §12.1's label-free paths and result objects), whatever the mode, labelled or not, whether or not the request named `max_memory_mb` (the account exists for every request; a budget that does not bind changes nothing in it); at least every entry's `work.memory_bytes`. A model of what the request held, not its process memory: the engine's ranges, the decoded rows of a read beyond what it charges, the answer's tree and text and the index pages it touched are not in it (`timing.page_faults` counts the pages read). 0 when nothing was charged (a count, a label-free list of anchors). Deterministic (the same request on the same index gives the same value) unless a time stop cut the work |
 
 ### 8.2 `index`
 
@@ -1115,7 +1121,7 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `steps` | integer | every step this pattern charged (k − 1 for each candidate the check of §7.4 tested) |
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps); increment 5s, L > k under `"supported_paths"` in every mode: every row its search read (§20.6) |
 | `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4, §20.7) |
-| `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4, §20.7 and §20.9; every copy of a label's name the answer holds counted at its length, the listed paths' `selection_labels` included) |
+| `memory_bytes` | integer | every answered entry (2026-10-21; until then the entries that read annotation only): the request's memory account at its peak so far — when the pattern's labels, selection or supported-path search were answered where it has them, otherwise when its work ended (0 where nothing was charged yet: a count, a label-free list of anchors) — the model of §14.4, §20.7 and §20.9; every copy of a label's name the answer holds counted at its length, the listed paths' `selection_labels` included. The request's own is the answer's `work.memory_bytes` (§8.1) |
 | `anchor_rows` | integer | increment 5s, L > k under `"supported_paths"`: of `annotation_rows`, the anchors' rows read whole for the permitted set (§20.3) |
 | `row_cache_hits` | integer | likewise: the search's steps whose row came from the pattern's row cache (§20.3) |
 | `row_cache_evictions` | integer | likewise: the times the row cache was emptied to make room (a row after it may be read again, counted again) |
@@ -1789,8 +1795,9 @@ all that the account has left (no reads to keep room for); the first that does n
 returns the objects built (`cut: max_memory`, `stop {output, max_memory}` unless the extension's stop is stated),
 `all_or_count` withholds `output_budget`. A memory stop ends only its own pattern: the next starts with what the
 account has left (the walks and, in `all_or_count`, the discarded objects of a stopped pattern are freed with
-it; the objects `partial` returned stay until the request ends, §19.9). Without labels `work.memory_bytes` is not
-stated and `max_memory_mb` is not echoed (§4.1): the answer of a request the account holds is the one of a request
+it; the objects `partial` returned stay until the request ends, §19.9). Without labels `max_memory_mb` is not
+echoed (§4.1), and `work.memory_bytes` (stated in every answered entry since 2026-10-21, §8.7) is the account's
+peak whether or not the request named it: the answer of a request the account holds is the one of a request
 without it, byte for byte. The work time is read before each annotation read and between its
 chunks, before each path's label list (`stop {output, time}`), before each path's verification (`stop {placement,
 time}`: the later paths' labels unverified) and before each path's labels are built (`stop {output, time}`); since
@@ -4253,6 +4260,7 @@ how the search service uses it; the route serves any number.
 | `answered` | integer | the entries with `outcome: "answered"` |
 | `refused` | integer | the entries with `outcome: "refused"`; `answered + refused` is the number of entries |
 | `answers` | list of objects | one per pair, in the order above: the answer of §8 on that pair with the fields of `answer_pair`, or, for a refused pair, the fields of `answer_pair` alone (`refusal` among them) |
+| `work` | object | `memory_bytes`: the answered pairs' `work.memory_bytes` together — each pair's account is its own and the pairs run at once on the graph pool, so at most what they held at the same time (2026-10-21) |
 | `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included; `cpu_ms` (and `page_faults` on Linux, §8.4): the request's own thread (the parse, the checks, the envelope) plus every pair's work on its pool thread, from its index lease to its entry — an answered pair's top-level `cpu_ms` and the work of a pair refused after its lease (the loads' own threads not counted). Varies between runs |
 
 <!-- schema: answer_pair -->
@@ -4790,7 +4798,9 @@ earlier ones left it; the verification of 2026-10-13 found them released when th
 bound per pattern of up to `max_patterns` × `max_memory_mb`). So a label-free `long_search: "paths"` entry can now
 carry `stop {extension | output, max_memory}`, `cut: max_memory` and `withheld: output_budget`, each with the name
 and placement of the labelled branch's; `work.memory_bytes` is not added to it and `max_memory_mb` is not echoed, so
-that the answer of a request the account holds is byte for byte the one before. The `output_budget` table of §7.5
+that the answer of a request the account holds is byte for byte the one before. (Since 2026-10-21 every answered
+entry and the answer state `work.memory_bytes`, §8.1, §8.7 — the same with and without a `max_memory_mb` that does
+not bind, so the identity holds.) The `output_budget` table of §7.5
 notes that an increment-4 entry withheld after a stop of the extension carries an `at_least` count. The occurrence
 list of a label in `all_or_count` is reserved at no more than the account could still admit (the review's L8: it was
 reserved at the row's full coordinate count before any charge). Tests: `PatternSearch.ExtensionMemoryAccount` (the

@@ -93,15 +93,17 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 1.625917
+    "cpu_ms": 1.102208,
+    "elapsed_ms": 1.101042
    },
    "withheld": {
     "reason": "deadline"
    },
    "work": {
     "mask_scans": 0,
-    "ranges_visited": 8191,
-    "steps": 8191
+    "memory_bytes": 0,
+    "ranges_visited": 12287,
+    "steps": 12287
    }
   },
   {
@@ -227,19 +229,25 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.008292
+    "cpu_ms": 0.003542,
+    "elapsed_ms": 0.002666
    },
    "withheld": {
     "reason": "deadline"
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 0,
     "steps": 0
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 1.654834
+  "cpu_ms": 1.12275,
+  "elapsed_ms": 1.110792
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

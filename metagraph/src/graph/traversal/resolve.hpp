@@ -138,6 +138,14 @@ struct SupportProfile {
     // set when the deadline ended the work: every field above is then exactly the resolve of
     // the query's first num_kmers k-mers (a run ending there may continue past it)
     std::optional<ResolveStop> stop;
+    // The modelled memory of the work at its largest (bytes; work.memory_bytes, SPEC §4.4 and
+    // §7.2.2): what the request's structures held at once — the query's k-mers and keys, the
+    // decoded rows of a batch with the rows kept for later occurrences, a discovery's or the
+    // explicit labels' accumulators, the explicit labels' primed hits and their fetch, and
+    // the profile — each priced from its sizes and element sizes (profile_bytes,
+    // selection_bytes), never from the allocator: it depends only on the index and the request
+    // (and under a deadline on where the work stopped)
+    uint64_t memory_peak = 0;
 
     // base interval of a k-mer interval
     std::pair<uint64_t, uint64_t> bp_interval(const KmerInterval &iv) const {
@@ -200,6 +208,12 @@ struct SeedSelection {
     size_t num_eligible = 0;
     std::vector<FrozenSeed> seeds;
 };
+
+// What a profile and a selection hold, as SupportProfile::memory_peak prices them: their
+// fixed parts, every label's name and runs, the candidates' label lists; a seed's id, sequence
+// and label names
+uint64_t profile_bytes(const SupportProfile &profile);
+uint64_t selection_bytes(const SeedSelection &selection);
 
 SeedSelection select_seeds(const SupportProfile &profile,
                            std::string_view query,

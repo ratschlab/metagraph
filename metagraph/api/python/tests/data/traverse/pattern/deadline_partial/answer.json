@@ -95,17 +95,23 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 1.492542
+    "cpu_ms": 1.251167,
+    "elapsed_ms": 1.254208
    },
    "withheld": null,
    "work": {
     "mask_scans": 0,
-    "ranges_visited": 8191,
-    "steps": 8191
+    "memory_bytes": 0,
+    "ranges_visited": 20479,
+    "steps": 20479
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 1.507708
+  "cpu_ms": 1.268541,
+  "elapsed_ms": 1.263708
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

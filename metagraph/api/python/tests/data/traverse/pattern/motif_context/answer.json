@@ -181,8 +181,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.046375,
-    "selection_ms": 0.398917
+    "cpu_ms": 0.2085,
+    "elapsed_ms": 0.025417,
+    "selection_ms": 0.178917
    },
    "work": {
     "mask_scans": 0,
@@ -220,6 +221,10 @@
   "vacuous": false
  },
  "timing": {
-  "elapsed_ms": 0.479167
+  "cpu_ms": 0.229542,
+  "elapsed_ms": 0.216542
+ },
+ "work": {
+  "memory_bytes": 2879
  }
 }

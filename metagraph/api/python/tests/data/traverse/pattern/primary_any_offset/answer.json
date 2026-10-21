@@ -340,17 +340,23 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 2.025583
+    "cpu_ms": 0.249959,
+    "elapsed_ms": 0.242875
    },
    "withheld": null,
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 73,
     "steps": 73
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 2.052667
+  "cpu_ms": 0.277833,
+  "elapsed_ms": 0.262167
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

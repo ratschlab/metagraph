@@ -851,12 +851,13 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.293083,
-    "extension_ms": 0.018542,
-    "label_discovery_ms": 0.302917,
-    "label_intersection_ms": 0.002417,
-    "placement_ms": 0.256625,
-    "verification_ms": 0.009833
+    "cpu_ms": 0.724125,
+    "elapsed_ms": 0.220292,
+    "extension_ms": 0.02075,
+    "label_discovery_ms": 0.257625,
+    "label_intersection_ms": 0.001917,
+    "placement_ms": 0.191292,
+    "verification_ms": 0.008
    },
    "withheld": null,
    "work": {
@@ -875,6 +876,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.92825
+  "cpu_ms": 0.75125,
+  "elapsed_ms": 0.735125
+ },
+ "work": {
+  "memory_bytes": 47026
  }
 }

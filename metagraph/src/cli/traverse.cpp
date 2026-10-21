@@ -4334,6 +4334,13 @@ static uint64_t failed_result_bytes(const Strategy &st, const Seed &seed) {
         + (d.name ? d.name(seed.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
 }
 
+// The walk's modelled account without a memory budget's fixed cache allotments (|bytes| is the
+// account's peak or final; ResourceAccount::allotted): the same with and without a budget that
+// does not bind, as work.memory_bytes states it (SPEC §7.2.2)
+static uint64_t without_allotments(uint64_t bytes, const ResourceAccount &account) {
+    return bytes > account.allotted ? bytes - account.allotted : 0;
+}
+
 // memory_bound_soft's observed excess (bytes) for a seed failed or refused without an
 // admitted result. Such a result is not admitted, and it echoes the request's seed_id,
 // which only the request's size bounds: a seed_id that the depth-0 admission refused still
@@ -5047,6 +5054,28 @@ Json::Value process_traverse_request(const Json::Value &json,
     // a seed never started reads its annotation as one started would have
     const bool decode_charged = (req.strategy.max_memory_bytes || req.strategy.max_work_units)
                               && oracle.decode_charged();
+    // work.memory_bytes (SPEC §7.2.2), whether or not a budget is set: each result states its
+    // seed's own peak (the walk's modelled account without the budget's cache allotments, and
+    // at least what the result holds), and the request its own: the seeds run one after
+    // another and every result is held until the response is written, so the request's peak
+    // is the largest of (the results before a seed + that seed's peak), and at least all the
+    // results together — the model of usage.memory.peak_admitted_bytes, budget-free
+    uint64_t results_held = 0;
+    uint64_t request_memory = 0;
+    auto put_memory = [&](Json::Value *rj, uint64_t peak, uint64_t holds) {
+        peak = std::max(peak, holds);
+        (*rj)["work"]["memory_bytes"] = uint_json(peak);
+        request_memory = std::max(request_memory, results_held + peak);
+        results_held += holds;
+        request_memory = std::max(request_memory, results_held);
+        if (attempt)
+            attempt->note_memory_bytes(request_memory);
+    };
+    // a result without a walk holds its fixed part and its echo of seed_id, as priced
+    auto put_failed_memory = [&](Json::Value *rj, const Seed &s) {
+        const uint64_t holds = failed_result_bytes(req.strategy, s);
+        put_memory(rj, holds, holds);
+    };
     for (size_t i = 0; i < req.seeds.size(); ++i) {
         const Seed &seed = req.seeds[i];
         if (attempt) {
@@ -5060,9 +5089,11 @@ Json::Value process_traverse_request(const Json::Value &json,
             }
             if (stop != ExternalStop::NONE) {
                 for (size_t j = i; j < req.seeds.size(); ++j) {
-                    append(not_started_seed_to_json(req.seeds[j], stop, attempt->bound_ms(),
-                                                    attempt->elapsed_ms(), req.strategy,
-                                                    decode_charged, no_coordinates), 0);
+                    Json::Value never = not_started_seed_to_json(
+                            req.seeds[j], stop, attempt->bound_ms(), attempt->elapsed_ms(),
+                            req.strategy, decode_charged, no_coordinates);
+                    put_failed_memory(&never, req.seeds[j]);
+                    append(std::move(never), 0);
                     // its usage is what its result states and holds
                     SeedUsage usage;
                     usage.meter.memory_final = failed_result_bytes(req.strategy, req.seeds[j]);
@@ -5169,6 +5200,9 @@ Json::Value process_traverse_request(const Json::Value &json,
                 walked("failed", r.resource_stop ? resource_name(r.resource_stop->resource) : "",
                        true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt);
                 const std::string outcome = refused["outcome"]["walks"].asString();
+                // the walk's peak; its result is the refusal
+                put_memory(&refused, without_allotments(r.account.memory_peak, r.account),
+                           failed_result_bytes(req.strategy, seed));
                 append(std::move(refused), 0);
                 delivered(outcome);
                 continue;
@@ -5193,6 +5227,9 @@ Json::Value process_traverse_request(const Json::Value &json,
                 rj["timing"]["serialize_ms"] = seconds * 1000;
                 put_thread_usage(&rj["timing"], seed_usage.elapsed());
             }
+            // after the graphlet's text: JSON beside its body, never in it
+            put_memory(&rj, without_allotments(r.account.memory_peak, r.account),
+                       without_allotments(r.account.memory_final, r.account));
             const std::string outcome = rj["outcome"]["walks"].asString();
             append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
             delivered(outcome);
@@ -5206,6 +5243,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value failed = failed_seed_to_json(seed, e, req.strategy, clamped,
                                                      oracle.decode_charged(), no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
+            // the seed phase holds no modelled account (its rows are observed, not charged)
+            put_failed_memory(&failed, seed);
             append(std::move(failed), 0);
             delivered(outcome);
             oracle.sync_path_cache_counters();
@@ -5218,6 +5257,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy, clamped,
                                                             no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
+            // what the account held when the budget failed the seed
+            put_memory(&failed, without_allotments(e.account().memory_peak, e.account()),
+                       failed_result_bytes(req.strategy, seed));
             append(std::move(failed), 0);
             delivered(outcome);
             oracle.sync_path_cache_counters();
@@ -5241,6 +5283,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value absent = not_in_graph_seed_to_json(seed, e, req.strategy,
                                                            oracle.decode_charged(),
                                                            no_coordinates);
+            put_failed_memory(&absent, seed);
             append(std::move(absent), 0);
             delivered("not_in_graph");
             oracle.sync_path_cache_counters();
@@ -5257,6 +5300,8 @@ Json::Value process_traverse_request(const Json::Value &json,
     } else {
         out["results"] = std::move(results);
     }
+    // the request's peak (SPEC §7.2.2): deterministic, so beside the work, not in timing
+    out["work"]["memory_bytes"] = uint_json(request_memory);
     if (attempt) {
         attempt->walk_ended();
         // every response to a ledger-managed request states what it consumed (DESIGN §14.1)
@@ -5504,6 +5549,13 @@ Json::Value process_resolve_request(
                                 deadline->finalize_reserve_ms(), not_made)
             : Json::Value();
     }
+    // the request's modelled memory at its largest (SPEC §4.4, §7.2.2): the work's peak, or
+    // the profile with the selection made from it, whichever is larger (the answer's tree and
+    // text are not counted); deterministic unless a deadline stopped the work
+    out["work"]["memory_bytes"] = uint_json(std::max(
+            profile.memory_peak,
+            graph::traversal::profile_bytes(profile)
+                + (selection ? graph::traversal::selection_bytes(*selection) : 0)));
     Json::Value t;
     t["elapsed_ms"] = timer.elapsed() * 1000;
     put_thread_usage(&t, request_usage.elapsed());

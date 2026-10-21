@@ -350,11 +350,13 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 8.488
+    "cpu_ms": 3.284916,
+    "elapsed_ms": 3.351583
    },
    "withheld": null,
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 36468,
     "steps": 36468,
     "steps_by_mismatches": {
@@ -365,6 +367,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 8.530208
+  "cpu_ms": 3.306083,
+  "elapsed_ms": 3.36325
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

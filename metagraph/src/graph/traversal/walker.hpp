@@ -992,6 +992,12 @@ struct ResourceAccount {
     // occurrences as charged at their creation); 0 without them. Their text per account byte
     // differs from the rest of the output's, which the server's delivery reserve tells apart
     uint64_t coordinates = 0;
+    // The fixed allotments of a memory budget for the label cache and the lookahead
+    // (memory_allotments(memory_limit), charged in the account with the depth-0 state and held
+    // to its end: part of memory_peak and memory_final; 0 without a memory budget, or when the
+    // seed failed before they were charged). Subtracted, the account is the same with and
+    // without a budget that does not bind: what work.memory_bytes states (SPEC §7.2.2)
+    uint64_t allotted = 0;
 };
 
 // A seed's deadline record (SPEC §6.8; timing only): its longest uninterruptible piece, and,

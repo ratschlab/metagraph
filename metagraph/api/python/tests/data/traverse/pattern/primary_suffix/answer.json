@@ -38,6 +38,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.015875
+  "cpu_ms": 0.015,
+  "elapsed_ms": 0.010209
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

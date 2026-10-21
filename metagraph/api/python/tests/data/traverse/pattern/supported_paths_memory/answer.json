@@ -3072,9 +3072,10 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 9.925917,
-    "extension_ms": 9.160625,
-    "support_ms": 7.8238790000000105
+    "cpu_ms": 4.543375,
+    "elapsed_ms": 4.138958,
+    "extension_ms": 3.797084,
+    "support_ms": 3.2156979999999806
    },
    "withheld": null,
    "work": {
@@ -6128,9 +6129,10 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 10.2555,
-    "extension_ms": 9.607417,
-    "support_ms": 8.215404000000008
+    "cpu_ms": 3.960334,
+    "elapsed_ms": 3.6625,
+    "extension_ms": 3.441834,
+    "support_ms": 2.996126999999982
    },
    "withheld": null,
    "work": {
@@ -9184,9 +9186,10 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 9.218542,
-    "extension_ms": 8.683167,
-    "support_ms": 7.4773900000000175
+    "cpu_ms": 3.355708,
+    "elapsed_ms": 3.042708,
+    "extension_ms": 2.866041,
+    "support_ms": 2.5252050000000015
    },
    "withheld": null,
    "work": {
@@ -12240,9 +12243,10 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 12.563583,
-    "extension_ms": 11.784042,
-    "support_ms": 10.04296800000001
+    "cpu_ms": 3.193333,
+    "elapsed_ms": 2.957,
+    "extension_ms": 2.79275,
+    "support_ms": 2.481921999999994
    },
    "withheld": null,
    "work": {
@@ -14489,9 +14493,10 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 11.471042,
-    "extension_ms": 10.84975,
-    "support_ms": 9.465746000000005
+    "cpu_ms": 2.933375,
+    "elapsed_ms": 2.770708,
+    "extension_ms": 2.631583,
+    "support_ms": 2.3817439999999994
    },
    "withheld": null,
    "work": {
@@ -15621,9 +15626,10 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 5.680375,
-    "extension_ms": 4.950625,
-    "support_ms": 4.597038
+    "cpu_ms": 1.586583,
+    "elapsed_ms": 1.511458,
+    "extension_ms": 1.375083,
+    "support_ms": 1.2874190000000016
    },
    "withheld": null,
    "work": {
@@ -15643,6 +15649,10 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 65.448125
+  "cpu_ms": 19.791625,
+  "elapsed_ms": 19.638208
+ },
+ "work": {
+  "memory_bytes": 1025400
  }
 }

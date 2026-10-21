@@ -148,19 +148,25 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.031125
+    "cpu_ms": 0.0105,
+    "elapsed_ms": 0.009541
    },
    "withheld": {
     "reason": "threshold_crossed"
    },
    "work": {
     "mask_scans": 0,
+    "memory_bytes": 0,
     "ranges_visited": 37,
     "steps": 37
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.04875
+  "cpu_ms": 0.028292,
+  "elapsed_ms": 0.018416
+ },
+ "work": {
+  "memory_bytes": 0
  }
 }

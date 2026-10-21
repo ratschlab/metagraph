@@ -175,8 +175,9 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.030833,
-    "selection_ms": 0.024833
+    "cpu_ms": 0.041917,
+    "elapsed_ms": 0.0205,
+    "selection_ms": 0.018583
    },
    "withheld": null,
    "work": {
@@ -204,6 +205,10 @@
   "vacuous": true
  },
  "timing": {
-  "elapsed_ms": 0.077583
+  "cpu_ms": 0.065958,
+  "elapsed_ms": 0.051417
+ },
+ "work": {
+  "memory_bytes": 3348
  }
 }
