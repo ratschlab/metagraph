@@ -1883,4 +1883,70 @@ TEST_F(MiniRefSeq, LookaheadKeepsItsRunsUnderAMemoryBudget) {
     }
 }
 
+// work.memory_bytes (SPEC §7.2.2) on the row-diff index, whose reads under a budget take the
+// budget-aware decode (decode_charged): per seed and per request the same without bounds as
+// under budgets that do not bind (a memory budget's cache allotments are left out), in detail
+// summary and graphlet (tree and full move with the merge display rule, SPEC §13 item 23), and
+// the same request twice gives the same value
+TEST_F(MiniRefSeq, MemoryBytesAreBudgetFreeAndDeterministic) {
+    ASSERT_TRUE(oracle_->decode_charged());
+    auto request = [&](const std::string &detail, const std::string &mode, int bounds) {
+        Json::Value r;
+        for (size_t at : { 100, 300, 600 }) {
+            Json::Value seed;
+            seed["sequence"] = query_.substr(at, 60);
+            r["seeds"].append(seed);
+        }
+        Json::Value &st = r["strategy"];
+        st["labels"]["mode"] = mode;
+        st["bounds"]["max_extension_bp"] = 1000;
+        if (bounds == 1)
+            st["bounds"]["max_memory_mb"] = 4096;
+        if (bounds == 2)
+            st["bounds"]["max_work_units"] = Json::UInt64(1'000'000'000'000);
+        st["output"]["detail"] = detail;
+        st["output"]["timing"] = false;
+        return r;
+    };
+    // the request's figure and every seed's
+    auto figures = [](const Json::Value &out) {
+        std::vector<uint64_t> f { out["work"]["memory_bytes"].asUInt64() };
+        for (const Json::Value &r : out["results"]) {
+            EXPECT_TRUE(r["work"]["memory_bytes"].isUInt64()) << r;
+            f.push_back(r["work"]["memory_bytes"].asUInt64());
+        }
+        return f;
+    };
+    auto text = [](const std::vector<uint64_t> &f) {
+        std::string s;
+        for (uint64_t x : f) s += " " + std::to_string(x);
+        return s;
+    };
+    for (const std::string detail : { "summary", "graphlet" }) {
+        for (const std::string mode : { "constrain", "annotate" }) {
+            std::vector<uint64_t> plain;
+            for (int bounds : { 0, 1, 2 }) {
+                const Json::Value out = mtg::cli::process_traverse_request(
+                        request(detail, mode, bounds), *anno_graph_, "");
+                ASSERT_EQ(3u, out["results"].size());
+                for (const Json::Value &r : out["results"]) {
+                    ASSERT_FALSE(r.isMember("error")) << r["error"];
+                }
+                const std::vector<uint64_t> f = figures(out);
+                EXPECT_GT(f[0], 0u);
+                // the same request twice
+                EXPECT_EQ(f, figures(mtg::cli::process_traverse_request(
+                        request(detail, mode, bounds), *anno_graph_, "")))
+                    << detail << " " << mode << " bounds " << bounds;
+                if (!bounds) {
+                    plain = f;
+                    continue;
+                }
+                EXPECT_EQ(plain, f) << detail << " " << mode << " bounds " << bounds
+                                    << ": without" << text(plain) << ", with" << text(f);
+            }
+        }
+    }
+}
+
 } // namespace
