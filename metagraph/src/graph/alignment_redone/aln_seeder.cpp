@@ -206,13 +206,15 @@ namespace {
 // Wavefront states revisit the same graph nodes at different query positions.
 // Cache only raw adjacency; labels and coordinates are still checked per state.
 // Fixed inline storage bounds the cache independently of the search size.
-class SuccinctTraversalCache {
+class TraversalCache {
   public:
     using node_index = DeBruijnGraph::node_index;
 
-    SuccinctTraversalCache(const DBGSuccinct &graph, bool backward)
+    TraversalCache(const DeBruijnGraph &graph, bool backward)
           : graph_(graph), backward_(backward),
-            first_cache_(graph.get_extension_threadsafe<NodeFirstCache>()) {}
+            is_succinct_(dynamic_cast<const DBGSuccinct*>(&graph)),
+            first_cache_(is_succinct_ ? graph.get_extension_threadsafe<NodeFirstCache>()
+                                      : nullptr) {}
 
     bool backward() const { return backward_; }
 
@@ -255,7 +257,7 @@ class SuccinctTraversalCache {
     void traverse(node_index node, std::string_view seq,
                   const Callback &callback, const Terminator &terminate) {
         for (size_t i = 0; i < seq.size() && !terminate(); ++i) {
-            if (!backward_ && node == 1) {
+            if (is_succinct_ && !backward_ && node == 1) {
                 // The BOSS root has outgoing dummy edges, but sequence
                 // traversal stops at its sentinel label.
                 graph_.traverse(node, seq.substr(i), callback, terminate);
@@ -304,8 +306,9 @@ class SuccinctTraversalCache {
             graph_.call_incoming_kmers(node, callback);
     }
 
-    const DBGSuccinct &graph_;
+    const DeBruijnGraph &graph_;
     bool backward_;
+    bool is_succinct_;
     const NodeFirstCache *first_cache_;
     std::array<Entry, 128> entries_{};
 };
@@ -320,7 +323,7 @@ class AlignmentGraph {
     AlignmentGraph(const DeBruijnGraph &graph,
                    AnnotationBuffer *anno_buffer = nullptr,
                    label_class_t target = Anchor::nannot,
-                   SuccinctTraversalCache *cache = nullptr)
+                   TraversalCache *cache = nullptr)
           : graph_(graph), anno_buffer_(anno_buffer), target_(target), cache_(cache) {
         assert((target == Anchor::nannot) == !anno_buffer_);
         // Use the succinct graph's existing cache for backward edge labels.
@@ -638,7 +641,7 @@ class AlignmentGraph {
     const DeBruijnGraph &graph_;
     AnnotationBuffer* const anno_buffer_;
     label_class_t target_;
-    SuccinctTraversalCache *cache_;
+    TraversalCache *cache_;
     const NodeFirstCache *first_cache_ = nullptr;
 
     label_class_t get_label_class(node_index node) const {
@@ -2293,9 +2296,10 @@ void align_bwd(const DeBruijnGraph &base_graph,
     const bool query_is_valid = query_window.find_first_not_of(base_graph.alphabet())
                                 == std::string_view::npos;
 
-    std::optional<SuccinctTraversalCache> cache;
-    if (const auto *succinct = dynamic_cast<const DBGSuccinct*>(&base_graph))
-        cache.emplace(*succinct, true);
+    std::optional<TraversalCache> cache;
+    if (dynamic_cast<const DBGSuccinct*>(&base_graph)
+            || dynamic_cast<const DBGSSHash*>(&base_graph))
+        cache.emplace(base_graph, true);
 
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
@@ -2421,9 +2425,10 @@ void align_fwd(const DeBruijnGraph &base_graph,
     const bool query_is_valid = query_window.find_first_not_of(base_graph.alphabet())
                                 == std::string_view::npos;
 
-    std::optional<SuccinctTraversalCache> cache;
-    if (const auto *succinct = dynamic_cast<const DBGSuccinct*>(&base_graph))
-        cache.emplace(*succinct, false);
+    std::optional<TraversalCache> cache;
+    if (dynamic_cast<const DBGSuccinct*>(&base_graph)
+            || dynamic_cast<const DBGSSHash*>(&base_graph))
+        cache.emplace(base_graph, false);
 
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
