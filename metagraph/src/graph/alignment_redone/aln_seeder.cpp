@@ -669,6 +669,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                             // auto [res, contig_end] = buckets.offset_to_id(offset, k);
                             auto res = buckets.offset_to_id(offset, k);
+                            // The stored offset is the minimizer position, not a k-mer start.
+                            // Include k-m preceding bases, stopping at the contig boundary.
+                            offset -= std::min<uint64_t>(res.kmer_id_in_contig, k - m);
+                            res = buckets.offset_to_id(offset, k);
                             assert(res.contig_id != sshash::constants::invalid_uint64);
                             assert(res.contig_size);
 
