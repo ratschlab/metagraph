@@ -124,6 +124,9 @@ ERROR_CODE_ONLY = ("no_graphlet",)
 RUNNER_ERRORS = gp.RUNNER_ERRORS
 # per tool, answer keys whose value depends on where the way ran, left out of the comparison
 ENV_KEYS = {"graphlet_export": ("path", "bytes"), "graphlet_save": ("path", "bytes")}
+# per-row environment keys: the store's bookkeeping times of graphlet_list's rows (when this way's process loaded and
+# last touched the graphlet), which differ between any two processes (the shadow run's drift lane, R4-5)
+ROW_ENV_KEYS = {"graphlet_list": ("accessed", "created")}
 # the tools that make a file (FORMAT v2 B3: the record's `file` {name, bytes, sha256, raw}, the text kept at
 # arms/<way dir>/raw/<raw>): their files are compared by content (file_view), not only their receipts
 FILE_TOOLS = ("graphlet_export", "graphlet_save")
@@ -239,10 +242,14 @@ def _canon(obj, roles, drop_local, top=False, tool=None):
 def canonical_answer(tool, answer, keep_local=False):
     """An answer as the ways compare it: handles to symbols (handle_roles, then <handle:N> in sorted-key order for
     any other handle-valued key; a raw handle inside a string too), cursors removed, the local block (and
-    evidence.limitations.local) removed unless |keep_local|, the tool's ENV_KEYS removed."""
+    evidence.limitations.local) removed unless |keep_local|, the tool's ENV_KEYS removed, and its rows' ROW_ENV_KEYS."""
     if not isinstance(answer, dict):
         return answer
-    return _canon(answer, handle_roles(tool, answer), not keep_local, top=True, tool=tool)
+    out = _canon(answer, handle_roles(tool, answer), not keep_local, top=True, tool=tool)
+    if tool in ROW_ENV_KEYS and isinstance(out.get("rows"), list):
+        out["rows"] = [dict((k, v) for k, v in r.items() if k not in ROW_ENV_KEYS[tool]) if isinstance(r, dict) else r
+                       for r in out["rows"]]
+    return out
 
 
 def canonical_error(error, keep_local=False):
