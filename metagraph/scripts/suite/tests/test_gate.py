@@ -254,7 +254,7 @@ class PinnedTable(unittest.TestCase):
         self.assertEqual([c["id"] for c in g],
                          ["graphlet.max_bytes_above_service_cap", "graphlet.body_over_in_service_ceiling",
                           "graphlet.body_over_in_service_ceiling.summary", "graphlet.export_mgt_is_the_stored_body",
-                          "graphlet.walks_arm_absent.two_arms",
+                          "graphlet.compare_export_line", "graphlet.walks_arm_absent.two_arms",
                           "graphlet.walks_arm_absent.one_arm"])
 
     def test_every_shipped_policy_pins_the_tables_sha(self):

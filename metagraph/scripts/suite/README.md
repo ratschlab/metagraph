@@ -5136,6 +5136,14 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   paging passes that page; the rehearsal's analysis shadow-runs the plans the build makes from its corpus; the
   chosen corpus is committed (truth/area_g/corpus.json) and `--freeze` refuses a provisional corpus or anything
   pending.
+- After the shadow run (round 7): async's three cases of it are in service_by_design_g.json: W3's export line of
+  graphlet_compare (graphlet.compare_export_line, linked on every answered compare W3 runs) and an arm sent null to
+  graphlet_walks / _walk / _sequence (graphlet.walks_arm_absent.two_arms / .one_arm, by the graphlet's arms). A case
+  whose service side pins a key of the library's own answer (export) excuses that key only: W3's value is read from
+  its answer and must be the pinned text, and W3-W4 must agree with the key left out of both. A failed seed carries
+  no budget_respected; graphlet_list's accessed / created are not compared (drift); compare_graphlets.py as a script
+  writes the by-design and service-check stages; the rows pair (G-pair-rows-0001 / -0002) gives W3 a compare with
+  rows that pages (cmp-paged-w3).
 
 ## Glossary
 

@@ -493,11 +493,12 @@ class CompareTest(unittest.TestCase):
         # explains the merged seed's missing result
         self.assertEqual(info["sha256"], "d4b8636c748438ddbed1073a22379bcf39ae148ad90e879575dbdac38cd64f44")
         # v8 (VERIFY-D VD1): area G's cases are a table of their own, the v1-v7 table above byte-identical (async's
-        # four of 2026-10-20 and the shadow run's arm-absent two of 2026-10-21)
+        # four of 2026-10-20 and the shadow run's three of 2026-10-21)
         self.assertFalse([cid for cid, c in cases.items() if "graphlet" in c])
         gcases, ginfo = cmp.load_by_design(cmp.DEFAULT_BY_DESIGN_G)
         self.assertEqual(sorted(gcases), ["graphlet.body_over_in_service_ceiling",
                                           "graphlet.body_over_in_service_ceiling.summary",
+                                          "graphlet.compare_export_line",
                                           "graphlet.export_mgt_is_the_stored_body",
                                           "graphlet.max_bytes_above_service_cap",
                                           "graphlet.walks_arm_absent.one_arm",

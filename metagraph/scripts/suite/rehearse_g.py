@@ -267,6 +267,7 @@ def _direct_local_only(scen: dict) -> None:
     for o in g["ops"]:
         o["ways"] = [w for w in o.get("ways") or area_g.DIRECT_ONLY_WAYS if w in area_g.DIRECT_ONLY_WAYS]
         o["not_exposed"] = {"W3": REHEARSAL2_DIRECT, "W4": REHEARSAL2_DIRECT}
+        o.pop("by_design", None)   # no W3: no case applies (area_g.op_plan's direct-only reading)
 
 
 def plan2(scenarios: List[dict], meta: Dict[str, dict]) -> dict:
