@@ -3,6 +3,8 @@ import json
 import os
 import shutil
 import subprocess
+import struct
+import sys
 
 import pytest
 import pymetagraph
@@ -16,6 +18,35 @@ OTHER = "TTGATAGCCTTGACCGATAGCTTCCA"
 def run(*args):
     return subprocess.run([METAGRAPH, *map(str, args)], check=True,
                           capture_output=True, text=True).stdout
+
+
+def test_sshash_version_error_keeps_python_alive(tmp_path):
+    fasta = tmp_path / "reference.fa"
+    fasta.write_text(f">reference\n{REFERENCE}\n")
+    run("build", "--graph", "sshash", "--disk-swap", tmp_path, "-k", 5,
+        "-o", tmp_path / "graph", fasta)
+    graph = tmp_path / "graph.sshashdbg"
+    data = bytearray(graph.read_bytes())
+    # The native-format wrapper stores two size_t values and the mode enum
+    # before the three SSHash version bytes.
+    data[2 * struct.calcsize('N') + struct.calcsize('i')] = 5
+    old_graph = tmp_path / "v5.sshashdbg"
+    old_graph.write_bytes(data)
+    code = """
+import pymetagraph, sys
+try:
+    pymetagraph.AnnotatedGraph(sys.argv[1])
+except RuntimeError as error:
+    assert 'rebuild' in str(error)
+else:
+    raise AssertionError('An incompatible SSHash graph loaded')
+assert pymetagraph.AnnotatedGraph(sys.argv[2]).k == 5
+print('interpreter alive')
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(old_graph), str(graph)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'interpreter alive' in result.stdout
 
 
 @pytest.fixture(scope="module", params=["succinct", "sshash"])

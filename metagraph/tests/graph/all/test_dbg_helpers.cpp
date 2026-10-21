@@ -176,16 +176,25 @@ build_graph<DBGSSHash>(uint64_t k,
 
     // In DNA5 builds SSHash still packs two bits per base and supports larger
     // k than DBGHashFast. Use string storage for those test fixtures.
-    auto string_graph = k <= max_test_k<DBGHashFast>()
-        ? build_graph<DBGHashFast>(k, sequences, mode)
-        : build_graph<DBGHashString>(k, sequences, mode);
+    std::shared_ptr<DeBruijnGraph> string_graph;
+    if (k <= max_test_k<DBGHashFast>()) {
+        string_graph = build_graph<DBGHashFast>(k, std::move(sequences), mode);
+    } else {
+        string_graph = build_graph<DBGHashString>(k, sequences, DeBruijnGraph::BASIC);
+        // String graphs store only the inserted orientation. Supply both
+        // strands before extracting one representative of each canonical k-mer.
+        if (mode != DeBruijnGraph::BASIC) {
+            for (auto &sequence : sequences) {
+                reverse_complement(sequence.begin(), sequence.end());
+                string_graph->add_sequence(sequence);
+            }
+        }
+    }
 
     std::vector<std::string> contigs;
-    size_t num_kmers = 0;
     size_t num_chars = 0;
-    string_graph->call_sequences([&](const std::string &contig, const auto &path) {
+    string_graph->call_sequences([&](const std::string &contig, const auto &) {
         contigs.push_back(contig);
-        num_kmers += path.size();
         num_chars += contig.size();
     }, 1, mode != DeBruijnGraph::BASIC);
 

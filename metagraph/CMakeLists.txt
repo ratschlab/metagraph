@@ -336,7 +336,7 @@ if(APPLE)
 endif()
 
 # Distribution static Boost libraries may lack PIC.
-if(BUILD_PYTHON_BINDINGS AND UNIX AND NOT APPLE)
+if(BUILD_PYTHON_BINDINGS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(Boost_USE_STATIC_LIBS OFF)
 else()
   set(Boost_USE_STATIC_LIBS ON)
@@ -628,7 +628,7 @@ if(BUILD_PYTHON_BINDINGS)
   target_link_libraries(_pymetagraph_core PRIVATE metagraph-cli metagraph-core)
   add_dependencies(_pymetagraph_core HTSLIB)
   install(TARGETS _pymetagraph_core DESTINATION pymetagraph COMPONENT _pymetagraph_core)
-  if(UNIX AND NOT APPLE)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Use an inherited RPATH so Boost's own shared Boost dependencies also
     # resolve from the wheel, without relying on a matching system Boost.
     target_link_options(_pymetagraph_core PRIVATE "LINKER:--disable-new-dtags")

@@ -812,6 +812,8 @@ bool DBGSSHash::load(std::istream& in) {
         return false;
 
     try {
+        // Stop on a short read before the loader uses an unread array length.
+        in.exceptions(in.badbit | in.failbit | in.eofbit);
         essentials::generic_loader loader(in);
         size_t num_nodes;
         size_t k;
@@ -825,23 +827,26 @@ bool DBGSSHash::load(std::istream& in) {
             throw std::runtime_error("Incompatible graph");
         }
 
-        *this = DBGSSHash(k, mode);
-        num_nodes_ = num_nodes;
+        DBGSSHash loaded(k, mode);
+        loaded.num_nodes_ = num_nodes;
 
-        if (num_nodes_) {
+        if (num_nodes) {
             // Enable zero-copy mmap if the stream is backed by an mmap'd file
             if (auto *mmap_stream = dynamic_cast<sdsl::mmap_ifstream*>(&in)) {
                 auto ctx = mmap_stream->get_mmap_context();
                 loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
             }
-            std::visit([&](auto& d) { d.visit(loader); }, dict_);
-            succ_is_next_.load(in);
-            pred_is_prev_.load(in);
+            std::visit([&](auto& d) { d.visit(loader); }, loaded.dict_);
+            loaded.succ_is_next_.load(in);
+            loaded.pred_is_prev_.load(in);
         }
 
-        return in.good();
+        if (!in.good())
+            return false;
+
+        *this = std::move(loaded);
+        return true;
     } catch (const std::exception &error) {
-        num_nodes_ = 0;
         common::logger->error("Failed to load SSHash graph: {}", error.what());
         return false;
     }

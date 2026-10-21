@@ -48,6 +48,49 @@ TEST(SSHashIterator, ReverseRefill64) { check_reverse_refill<uint64_t>(); }
 TEST(SSHashIterator, ReverseRefill128) { check_reverse_refill<__uint128_t>(); }
 TEST(SSHashIterator, ReverseRefill256) { check_reverse_refill<sdsl::uint256_t>(); }
 
+#if _DNA5_GRAPH
+TEST(SSHashFixtures, HighKPreservesStrandsAndBranches) {
+    using namespace mtg::graph;
+    constexpr size_t k = 87; // Beyond DBGHashFast's DNA5 packing limit.
+    std::mt19937 random(672);
+    std::string sequence(200, 'A');
+    for (char &c : sequence)
+        c = std::string_view("ACGT")[random() % 4];
+    auto branch = sequence;
+    branch[110] = branch[110] == 'A' ? 'C' : 'A';
+    auto overlapping_reverse = sequence.substr(20, 140);
+    reverse_complement(overlapping_reverse.begin(), overlapping_reverse.end());
+    const std::vector<std::string> sequences { sequence, branch, overlapping_reverse };
+    for (auto mode : { DBGSSHash::BASIC, DBGSSHash::CANONICAL, DBGSSHash::PRIMARY }) {
+        SCOPED_TRACE(mode);
+        std::set<std::string> expected;
+        for (const auto &input : sequences) {
+            for (size_t i = 0; i + k <= input.size(); ++i) {
+                auto kmer = input.substr(i, k);
+                expected.insert(kmer);
+                if (mode != DBGSSHash::BASIC) {
+                    reverse_complement(kmer.begin(), kmer.end());
+                    expected.insert(kmer);
+                }
+            }
+        }
+        auto graph = mtg::test::build_graph<DBGSSHash>(k, sequences, mode);
+        std::set<std::string> actual;
+        graph->call_nodes([&](auto node) { actual.insert(graph->get_node_sequence(node)); });
+        EXPECT_EQ(expected, actual);
+        EXPECT_EQ(expected.size(), graph->num_nodes());
+        for (const auto &kmer : expected) {
+            const auto node = graph->kmer_to_node(kmer);
+            ASSERT_NE(DeBruijnGraph::npos, node);
+            for (char c : std::string_view("ACGT")) {
+                const auto next = kmer.substr(1) + c;
+                EXPECT_EQ(expected.contains(next), graph->traverse(node, c) != DeBruijnGraph::npos);
+            }
+        }
+    }
+}
+#endif
+
 TEST(SSHashFormat, AcceptsSameMajorVersion) {
     using mtg::graph::DBGSSHash;
     auto graph = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
@@ -91,6 +134,30 @@ TEST(SSHashFormat, RejectsV5BeforeReadingPayload) {
     EXPECT_FALSE(loaded.load(file));
     sdsl::mmap_ifstream mapped(filename, std::ios::binary);
     EXPECT_FALSE(loaded.load(mapped));
+}
+
+TEST(SSHashFormat, FailedReloadPreservesGraph) {
+    using mtg::graph::DBGSSHash;
+    auto original = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
+    std::stringstream bytes;
+    static_cast<const DBGSSHash&>(*original).serialize(bytes);
+    const auto serialized = bytes.str();
+    DBGSSHash loaded(3);
+    ASSERT_TRUE(loaded.load(bytes));
+
+    const size_t header_size = 2 * sizeof(size_t) + sizeof(DBGSSHash::Mode);
+    auto old_version = serialized;
+    old_version[header_size] = 5;
+    for (const auto &bad : { std::string(), old_version,
+                            serialized.substr(0, header_size + 3 + sizeof(uint64_t)),
+                            serialized.substr(0, serialized.size() - 1) }) {
+        std::stringstream input(bad);
+        EXPECT_FALSE(loaded.load(input));
+        std::stringstream after;
+        loaded.serialize(after);
+        EXPECT_EQ(serialized, after.str());
+        EXPECT_TRUE(loaded.find("ACGT"));
+    }
 }
 
 TEST(SSHashLookup, ForwardOrientationsAndRoundTrip) {

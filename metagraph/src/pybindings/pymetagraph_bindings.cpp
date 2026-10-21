@@ -22,6 +22,7 @@
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/load/load_graph.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -89,7 +90,17 @@ class AnnotatedGraph {
                    unsigned int threads) {
         if (!threads)
             throw std::invalid_argument("threads must be at least 1");
-        graph_ = mtg::cli::load_critical_dbg(graph);
+        if (graph.ends_with(mtg::graph::DBGSSHash::kExtension)) {
+            // Incompatible SSHash versions are an expected migration error.
+            // Use the nonfatal loader so Python can handle it without exiting.
+            auto sshash = std::make_shared<mtg::graph::DBGSSHash>(2);
+            if (!sshash->load(graph))
+                throw std::runtime_error("Cannot load SSHash graph '" + graph
+                    + "'; check the file and rebuild incompatible indices with this MetaGraph version");
+            graph_ = std::move(sshash);
+        } else {
+            graph_ = mtg::cli::load_critical_dbg(graph);
+        }
         if (!annotation.empty()) {
             auto config = make_config(graph, annotation);
             anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config);
