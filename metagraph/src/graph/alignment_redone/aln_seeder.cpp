@@ -1190,7 +1190,11 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     size_t num_covered = std::max(sdsl::util::cnt_one_bits(coverage[false]),
                                   sdsl::util::cnt_one_bits(coverage[true]));
 
-    if (static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match)
+    // Sparse SSHash minimizers do not enumerate every exact sub-k match.
+    // Their seed coverage is not an upper bound on the completed alignment's
+    // matches. Enforce min_exact_match on the final CIGAR in emit_alignments.
+    if (!dynamic_cast<const DBGSSHash*>(&graph)
+            && static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match)
         anchors.clear();
 
     return anchors;
@@ -1227,7 +1231,8 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
     for (auto it = coverages.begin(); it != coverages.end(); ++it) {
         size_t num_covered = sdsl::util::cnt_one_bits(it->second);
 
-        if (static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match) {
+        if (!dynamic_cast<const DBGSSHash*>(&query_.get_graph())
+                && static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match) {
             // if the coverage is too low, clear out the vector
             it.value() = sdsl::bit_vector();
         } else {

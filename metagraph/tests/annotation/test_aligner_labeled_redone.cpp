@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <map>
+#include <random>
 
 #include "../graph/all/test_dbg_helpers.hpp"
 #include "../test_helpers.hpp"
@@ -26,6 +27,58 @@ using namespace mtg::graph;
 using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
+
+TEST(SSHashAlignment, MatchFractionUsesCompletedAlignment) {
+    std::mt19937 random(73);
+    std::string reference(73, 'A');
+    for (char &c : reference)
+        c = "ACGT"[random() % 4];
+    std::string sequence = reference;
+    for (size_t i : { 25, 35, 45, 55, 65 })
+        sequence[i] = sequence[i] == 'A' ? 'C' : 'A';
+
+    auto anno_graph = build_anno_graph<DBGSSHash, annot::ColumnCompressed<>>(
+        11, { reference }, { "reference" });
+    const auto &graph = anno_graph->get_graph();
+    Query query(graph, sequence);
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.min_seed_length = config.max_seed_length = 11;
+    config.forward_and_reverse_complement = false;
+
+    std::vector<bool> covered(sequence.size());
+    for (const auto &anchor : ExactSeeder(query, config).get_anchors())
+        std::fill(covered.begin() + anchor.get_clipping(),
+                  covered.begin() + anchor.get_clipping() + anchor.get_seed().size(), true);
+    ASSERT_LT(std::count(covered.begin(), covered.end(), true), 0.7 * sequence.size());
+
+    for (bool labeled : { false, true }) {
+        for (double fraction : { 0.7, 1.0 }) {
+            SCOPED_TRACE(labeled);
+            SCOPED_TRACE(fraction);
+            config.min_exact_match = fraction;
+            std::vector<Alignment> results;
+            auto collect = [&](Alignment&& aln) { results.push_back(std::move(aln)); };
+            AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+            if (labeled) {
+                LabeledSeeder seeder(buffer, query, config);
+                LabeledExtender extender(buffer, query, config);
+                align_query(query, seeder, extender, collect);
+            } else {
+                ExactSeeder seeder(query, config);
+                Extender extender(query, config);
+                align_query(query, seeder, extender, collect);
+            }
+            if (fraction == 1.0) {
+                EXPECT_TRUE(results.empty());
+            } else {
+                ASSERT_FALSE(results.empty());
+                EXPECT_EQ(reference, results.front().get_spelling());
+                EXPECT_EQ(reference.size() - 5, results.front().get_cigar().get_num_matches());
+            }
+        }
+    }
+}
 
 
 
