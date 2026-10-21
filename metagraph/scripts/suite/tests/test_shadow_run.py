@@ -105,6 +105,40 @@ class ShadowRun(unittest.TestCase):
         self.assertEqual(argv[argv.index("--mcp-cmd") + 1], "default")   # run_suite.sh's ASYNC_MCP_CMD
         self.assertEqual(env["SUITE_RUNS"], os.path.join(self.out, "runs"))
 
+    def test_resume_sets_earlier_records_aside(self):
+        # R4-3: --from local / --from oracle after a partial run: the earlier records move aside, logged
+        run = os.path.join(self.out, "runs", "r1")
+        for d in ("dl-lib", "drift-lib", "oracle", "mcp"):
+            os.makedirs(os.path.join(run, "arms", d))
+        rec = Recorder()
+        shadow_run.main(["--out", self.out, "--from", "local", "--to", "oracle", "--library-commit", PIN], runner=rec)
+        arms = sorted(os.listdir(os.path.join(run, "arms")))
+        self.assertIn("mcp", arms)                                   # what the run step wrote stays
+        for d in ("dl-lib", "drift-lib", "oracle"):
+            self.assertNotIn(d, arms)
+            self.assertTrue(any(x.startswith(d + ".prev-") for x in arms), arms)
+        with open(os.path.join(self.out, "shadow.log")) as fh:
+            log = fh.read()
+        self.assertIn("local: the earlier records set aside", log)
+        self.assertIn("oracle: the earlier records set aside", log)
+        self.assertRegex(log, r"local \(code [0-9a-f]{40}(\+dirty)?\)")   # R4-4: the code's commit per step
+
+    def test_the_library_is_reused_only_when_whole(self):
+        lib = os.path.join(self.out, "library-" + PIN[:12])
+        os.makedirs(os.path.join(lib, "metagraph", "api", "python"))
+        rec = Recorder()
+        shadow_run.main(["--out", self.out, "--from", "library", "--to", "library", "--library-commit", PIN],
+                        runner=rec)
+        self.assertEqual(len(rec.calls), 1)                          # no mark: extracted again
+        with open(os.path.join(lib, shadow_run.LIBRARY_MARK), "w") as fh:
+            fh.write(PIN + "\n")
+        rec = Recorder()
+        shadow_run.main(["--out", self.out, "--from", "library", "--to", "library", "--library-commit", PIN],
+                        runner=rec)
+        self.assertEqual(rec.calls, [])
+        with open(os.path.join(self.out, "shadow.log")) as fh:
+            self.assertIn("library: reused", fh.read())
+
     def test_derive_declared(self):
         m = {"manifest_version": 8, "scenarios": [{"id": "T-x-0001", "route": "POST /traverse"}], "relations": []}
         ident = sc.manifest_identity(m)

@@ -20,8 +20,10 @@ Steps, in order (each a subprocess; --dry-run prints them and the expected load,
            pairs (RUN/graphlet_compare.json, RUN/arms/precheck/)
   report   report.py RUN --no-pdf --reuse: the report with chapter G
   gate     gate.py RUN DIR/policy_v8_shadow.json [--expect-service-commit]: the v1-v8 judgement with area G
---from STEP resumes at a step (RUN from --run-dir, else the newest run under DIR/runs). Staging is touched by the
-run step only; the coordinator's GO comes first."""
+--from STEP resumes at a step (RUN from --run-dir, else the newest run under DIR/runs): local and oracle first set
+the records they wrote before aside (RUN/arms/<way dir>.prev-<UTC>, logged), the library is reused only when its
+extraction is whole (its mark, written last, names the commit; logged), and every step's log line names the code's
+commit (+dirty when the tree has edits). Staging is touched by the run step only; the coordinator's GO comes first."""
 
 import argparse
 import datetime
@@ -59,7 +61,8 @@ def corpus_pin() -> str:
 
 
 def paths(out: str, library_commit: str) -> dict:
-    return {"manifest": os.path.join(out, "suite_v8_shadow.json"), "smoke": os.path.join(out, "suite_smoke_v8_shadow.json"),
+    return {"manifest": os.path.join(out, "suite_v8_shadow.json"),
+            "smoke": os.path.join(out, "suite_smoke_v8_shadow.json"),
             "policy": os.path.join(out, "policy_v8_shadow.json"), "runs": os.path.join(out, "runs"),
             "declared": os.path.join(out, "declared_v8_shadow.json"),
             "library": os.path.join(out, "library-%s" % library_commit[:12])}
@@ -85,8 +88,11 @@ def steps(a: argparse.Namespace, run_dir: str) -> list:
         ("policy", [py, os.path.join(HERE, "gate_policy.py"), p["manifest"], "--routes", ",".join(POLICY_ROUTES),
                     "--arms", ",".join(POLICY_ARMS), "--declared", p["declared"], "--name", "v8-shadow-rtp-mcp",
                     "--out", p["policy"]], env),
-        ("library", ["sh", "-c", "mkdir -p %s && git -C %s archive %s metagraph/api/python | tar -x -C %s" % (
-            shlex.quote(p["library"]), shlex.quote(REPO), shlex.quote(a.library_commit), shlex.quote(p["library"]))],
+        ("library", ["sh", "-c", "rm -rf %s && mkdir -p %s && git -C %s archive %s metagraph/api/python | tar -x -C %s "
+                     "&& echo %s > %s" % (
+                         shlex.quote(p["library"]), shlex.quote(p["library"]), shlex.quote(REPO),
+                         shlex.quote(a.library_commit), shlex.quote(p["library"]), shlex.quote(a.library_commit),
+                         shlex.quote(os.path.join(p["library"], LIBRARY_MARK)))],
          {}),
         ("run", run_argv, run_env),
         ("local", [py, os.path.join(HERE, "run_graphlet_local.py"), "--run-dir", run_dir, "--manifest",
@@ -143,11 +149,53 @@ def newest_run(runs: str) -> str:
     return os.path.join(runs, dirs[-1]) if dirs else ""
 
 
-def run_step(name: str, argv: list, env: dict, log: str, runner=subprocess.call) -> int:
+def code_identity() -> str:
+    """The commit of the tree whose code the steps run (VERIFY-D-R4 R4-4), "+dirty" when it has edits."""
+    try:
+        head = subprocess.run(["git", "-C", HERE, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        dirty = subprocess.run(["git", "-C", HERE, "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True).stdout.strip()
+        return head + ("+dirty" if dirty else "")
+    except OSError:
+        return "unknown"
+
+
+def log_line(log: str, text: str) -> None:
     with open(log, "a") as fh:
-        fh.write("== %s %s: %s\n" % (datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                                     name, " ".join(shlex.quote(x) for x in argv)))
+        fh.write("== %s %s\n" % (datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), text))
+
+
+def run_step(name: str, argv: list, env: dict, log: str, runner=subprocess.call) -> int:
+    log_line(log, "%s (code %s): %s" % (name, code_identity(), " ".join(shlex.quote(x) for x in argv)))
     return runner(argv, env=dict(os.environ, **env), stdin=subprocess.DEVNULL)
+
+
+# the records a post-run step writes, set aside when the step runs again (--from): way dirs under RUN/arms
+STEP_OUTPUTS = {"local": ("dl-lib", "dr-lib", "mcp-lib", "drift-lib"), "oracle": ("oracle",)}
+LIBRARY_MARK = ".shadow-library-commit"
+
+
+def set_aside(run_dir: str, name: str, log: str) -> list:
+    """Moves the records |name| wrote before (STEP_OUTPUTS) to <dir>.prev-<UTC>, logged; -> the moves."""
+    moved = []
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for d in STEP_OUTPUTS.get(name, ()):
+        src = os.path.join(run_dir, "arms", d)
+        if os.path.isdir(src):
+            dst = "%s.prev-%s" % (src, stamp)
+            os.rename(src, dst)
+            moved.append((src, dst))
+            log_line(log, "%s: the earlier records set aside: %s -> %s" % (name, src, dst))
+    return moved
+
+
+def library_complete(path: str, commit: str) -> bool:
+    """Whether DIR/library-<commit> is a whole extraction of |commit| (its mark, written last, names it)."""
+    mark = os.path.join(path, LIBRARY_MARK)
+    if not os.path.isfile(mark) or not os.path.isdir(os.path.join(path, "metagraph", "api", "python")):
+        return False
+    with open(mark) as fh:
+        return fh.read().strip() == commit
 
 
 def main(argv=None, runner=subprocess.call) -> int:
@@ -192,8 +240,11 @@ def main(argv=None, runner=subprocess.call) -> int:
             if not run_dir:
                 print("shadow run: no run under %s for step %s" % (p["runs"], name), file=sys.stderr)
                 return 2
-        if name == "library" and os.path.isdir(os.path.join(p["library"], "metagraph", "api", "python")):
+        if name == "library" and library_complete(p["library"], a.library_commit):
+            log_line(log, "library: reused %s (complete: its mark names %s)" % (p["library"], a.library_commit))
             continue
+        if name in STEP_OUTPUTS:
+            set_aside(run_dir, name, log)
         _n, argv_, env = next(x for x in steps(a, run_dir) if x[0] == name)
         rc = run_step(name, argv_, env, log, runner)
         with open(log, "a") as fh:
