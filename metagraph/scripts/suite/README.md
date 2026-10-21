@@ -5152,7 +5152,10 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   gate/declared_v8_rt.json --name v8-rtp-mcp --out gate/policy_v8_rtp_mcp.json` (without POST /pattern and named
   v8-rt-mcp: the rt policy) regenerates them identically, generated_utc aside. The stop scenarios run on the MCP arm
   only (direct_not_run): no direct execution is required of them, and a require_agreement policy reads their missing
-  direct reference as a note (R2-6).
+  direct reference as a note (R2-6). `--freeze` refuses a build that is not the one these gate files pin
+  (content_sha256, relations_sha256, manifest_version, index_fp; VERIFY-D-R5 R5-3): it names every gate file that
+  differs and, when the build lacks the stop scenarios the policies require, `--stop-scenarios`, confirmed by building
+  again with the flag toggled. `--freeze` with `--out` / `--smoke-out` outside manifest/ is a dry freeze, checked alike.
 
 ## Glossary
 

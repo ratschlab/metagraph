@@ -918,21 +918,114 @@ class Defaults(unittest.TestCase):
 
 
 class Freeze(unittest.TestCase):
-    """VERIFY-D VD12: --freeze refuses a provisional corpus and anything still pending."""
+    """VERIFY-D VD12: --freeze refuses a provisional corpus and anything still pending; VERIFY-D-R5 R5-3: and a build
+    other than the one the committed gate files pin as manifest/suite_v8.json, naming --stop-scenarios when the build
+    without it is the cause."""
 
     def test_freeze_problems(self):
         import build_manifest as bm
         m = {"manifest_version": 8, "graphlets": {"corpus": {"file": None, "provisional": True},
                                                   "pending": ["G-x-0001: preconditions (the rehearsal freezes them)"]}}
-        probs = bm.freeze_problems(m)
-        self.assertTrue(any("corpus is provisional" in p for p in probs), probs)
-        self.assertIn("pending: G-x-0001: preconditions (the rehearsal freezes them)", probs)
-        m["graphlets"] = {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}
-        self.assertEqual(bm.freeze_problems(m), [])
+        with tempfile.TemporaryDirectory() as gate:   # no gate file pins it
+            probs = bm.freeze_problems(m, gate)
+            self.assertTrue(any("corpus is provisional" in p for p in probs), probs)
+            self.assertIn("pending: G-x-0001: preconditions (the rehearsal freezes them)", probs)
+            m["graphlets"] = {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}
+            self.assertEqual(bm.freeze_problems(m, gate), [])
         self.assertEqual(bm.freeze_problems({"manifest_version": 7}), [])
         self.assertTrue(os.path.exists(bm.DEFAULT_CORPUS))
         corpus = area_g.load_corpus(bm.DEFAULT_CORPUS)
         self.assertFalse(corpus.get("provisional"))
+
+    @staticmethod
+    def _built(content, stop):
+        m = {"manifest_version": 8, "content_sha256": content, "relations_sha256": "r" * 64,
+             "index": {"index_fp": "f" * 64}, "scenarios": [{"id": "G-x-0001"}], "skipped": [], "counts": {},
+             "graphlets": {"corpus": {"file": "truth/area_g/corpus.json", "provisional": False}, "pending": []}}
+        if stop:
+            m["graphlets"]["stop_scenarios"] = ["S-stop-0001", "S-stop-0002"]
+            m["scenarios"] += [{"id": x} for x in ("S-stop-0001", "S-stop-0002", "S-base-0001", "S-base-0002")]
+        return m
+
+    def _gate(self, d, content):
+        pin = {"file": "manifest/suite_v8.json", "content_sha256": content, "relations_sha256": "r" * 64,
+               "manifest_version": 8, "index_fp": "f" * 64}
+        sc.write_json_atomic(os.path.join(d, "declared_v8_rt.json"),
+                             {"manifest": {"file": pin["file"], "content_sha256": content}})
+        sc.write_json_atomic(os.path.join(d, "policy_v8_rt_mcp.json"), {"manifest": pin, "required": [
+            {"arm": "mcp", "repeats": [0], "scenario": "G-x-0001"},
+            {"arm": "mcp", "repeats": [0], "scenario": "S-stop-0001"},
+            {"arm": "direct-local", "repeats": [0, 1], "scenario": "S-base-0001"}]})
+        # a gate file of another manifest is no pin of v8's
+        sc.write_json_atomic(os.path.join(d, "policy_v7_rt_mcp.json"), {"manifest": dict(
+            pin, file="manifest/suite_v7.json", content_sha256="7" * 64)})
+
+    def test_the_committed_pins(self):
+        import build_manifest as bm
+        with tempfile.TemporaryDirectory() as gate:
+            self._gate(gate, "a" * 64)
+            self.assertEqual([f for f, _doc in bm.committed_pins(8, gate)],
+                             ["gate/declared_v8_rt.json", "gate/policy_v8_rt_mcp.json"])
+            # the pinned build: no problem
+            self.assertEqual(bm.freeze_problems(self._built("a" * 64, True), gate), [])
+            # the build without --stop-scenarios: refused, every pin named, the flag named
+            probs = bm.freeze_problems(self._built("b" * 64, False), gate)
+            self.assertEqual(len(probs), 3, probs)
+            self.assertTrue(probs[0].startswith("gate/declared_v8_rt.json pins manifest/suite_v8.json at "
+                                                "content_sha256 aaaaaaaaaaaaaaaa, not this build's content_sha256 "
+                                                "bbbbbbbbbbbbbbbb"), probs)
+            self.assertTrue(probs[1].startswith("gate/policy_v8_rt_mcp.json pins"), probs)
+            self.assertEqual(probs[2], "the build has no stop scenarios, and the pinned policies require S-base-0001, "
+                                       "S-stop-0001: build with --stop-scenarios")
+            # with the rebuild (--stop-scenarios toggled) the cause is confirmed, or ruled out
+            probs = bm.freeze_problems(self._built("b" * 64, False), gate, rebuild=lambda: self._built("a" * 64, True))
+            self.assertEqual(probs[-1], "the build with --stop-scenarios is the pinned one (content aaaaaaaaaaaaaaaa): "
+                                        "pass --stop-scenarios")
+            probs = bm.freeze_problems(self._built("b" * 64, False), gate, rebuild=lambda: self._built("c" * 64, True))
+            self.assertIn("the build with --stop-scenarios is not the pinned one either", probs[-1])
+            # another build with the stop scenarios: refused, no flag to name; the rebuild without them is not it
+            probs = bm.freeze_problems(self._built("d" * 64, True), gate, rebuild=lambda: self._built("e" * 64, False))
+            self.assertEqual(len(probs), 3, probs)
+            self.assertFalse(any("build with --stop-scenarios" in p for p in probs), probs)
+            self.assertIn("the build without --stop-scenarios is not the pinned one either", probs[-1])
+            # another pinned key (the relations) differs alone
+            m = self._built("a" * 64, True)
+            m["relations_sha256"] = "x" * 64
+            probs = bm.freeze_problems(m, gate)
+            self.assertEqual(len(probs), 1, probs)
+            self.assertIn("relations_sha256 rrrrrrrrrrrrrrrr, not this build's relations_sha256 xxxxxxxxxxxxxxxx",
+                          probs[0])
+
+    def test_main_refuses_a_dry_freeze_of_another_build(self):
+        # --freeze into files outside manifest/ (a dry freeze) is checked alike; the rebuild toggles --stop-scenarios
+        import build_manifest as bm
+        from unittest import mock
+        calls = []
+
+        def fake_build(*a, **kw):
+            calls.append(kw.get("stop_scenarios"))
+            return self._built("a" * 64 if kw.get("stop_scenarios") else "b" * 64, kw.get("stop_scenarios"))
+        with tempfile.TemporaryDirectory() as d:
+            gate = os.path.join(d, "gate")
+            os.makedirs(gate)
+            self._gate(gate, "a" * 64)
+            out, smoke = os.path.join(d, "suite_v8.json"), os.path.join(d, "suite_smoke_v8.json")
+            argv = ["--manifest-version", "8", "--no-fetch", "--freeze", "--out", out, "--smoke-out", smoke]
+            with mock.patch.object(bm, "build", side_effect=fake_build), mock.patch.object(bm, "GATE_DIR", gate), \
+                    mock.patch.object(bm, "write") as write, mock.patch.object(bm, "smoke_of", return_value={
+                        "content_sha256": "s" * 64, "counts": {}}):
+                with self.assertRaises(SystemExit) as cm:
+                    bm.main(argv)
+                self.assertEqual(calls, [False, True])
+                text = str(cm.exception.code)
+                self.assertTrue(text.startswith("v8 is not ready to freeze:"), text)
+                self.assertIn("pass --stop-scenarios", text)
+                write.assert_not_called()
+                del calls[:]
+                with mock.patch("sys.stdout"):
+                    self.assertEqual(bm.main(argv + ["--stop-scenarios"]), 0)
+                self.assertEqual(calls, [True])   # the pinned build: no rebuild
+                self.assertEqual(write.call_args_list[0][0][0], out)
 
 
 @unittest.skipUnless(have_cache(), "no record cache")
@@ -972,7 +1065,6 @@ class BuiltV8(unittest.TestCase):
         self.assertEqual(m["graphlets"]["library_commit"], "fdff625ef7322e919b28da4b81763acec65591af")   # R3-1: staging's library
         # the constrain / annotate pair's partner (VERIFY-D VD8) was rehearsed in REHEARSAL S2: nothing pending
         self.assertEqual(m["graphlets"]["pending"], [])
-        self.assertEqual(bm.freeze_problems(m), [])
         annot = next(s for s in m["scenarios"] if s["id"] == "G-annot-0001")
         paged = next(o for o in annot["graphlet"]["ops"] if o["id"] == "cmp-paged")
         self.assertEqual((paged["args"]["mode"], paged["args"]["max_bytes"]), ("walks", 6144))
@@ -991,6 +1083,16 @@ class BuiltV8(unittest.TestCase):
         for k, s in enumerate(stop["scenarios"]):
             if s["id"] in areas_mod().STOP_IDS:
                 self.assertEqual(sc.mcp_repeats(k, s, 10), [0], s["id"])
+        # the freeze (VERIFY-D-R5 R5-3): the committed gate files pin the build with the stop scenarios; the build
+        # without them is refused, the flag named (and confirmed by the rebuild)
+        self.assertEqual(bm.freeze_problems(stop), [])
+        probs = bm.freeze_problems(m, rebuild=lambda: stop)
+        self.assertEqual(len(probs), 5, probs)   # three gate files, the stop scenarios lacking, the rebuild
+        self.assertEqual([p.split(" ")[0] for p in probs[:3]], ["gate/declared_v8_rt.json", "gate/policy_v8_rt_mcp.json",
+                                                              "gate/policy_v8_rtp_mcp.json"])
+        self.assertTrue(probs[3].startswith("the build has no stop scenarios") and "--stop-scenarios" in probs[3])
+        self.assertTrue(probs[4].startswith("the build with --stop-scenarios is the pinned one") and
+                        probs[4].endswith("pass --stop-scenarios"), probs[4])
         # the freeze package (round 7 item 4): gate/declared_v8_rt.json and both v8 policies pin this build (with the
         # stop scenarios) as manifest/suite_v8.json, v7's declared entries unchanged, nothing of area G set aside,
         # both by-design tables pinned; the policies regenerate identical (generated_utc aside)
