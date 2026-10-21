@@ -167,5 +167,110 @@ class ShadowRun(unittest.TestCase):
         self.assertGreater(got["expected_hours"], 0)
 
 
+class Baseline(unittest.TestCase):
+    """Round 8 item 5: --baseline judges the run by the committed freeze package (gate/declared_v8_rt.json and both
+    v8 policies): the build a dry freeze, the gate files copied and checked against it, both policies judging with the
+    deployed service and library commits."""
+
+    SERVICE = "9abe8517"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="baseline-")
+        self.out = os.path.join(self.tmp, "out")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_dry_run_names_the_package(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = shadow_run.main(["--baseline", "--out", self.out, "--dry-run", "--library-commit", PIN,
+                                  "--expect-service-commit", self.SERVICE])
+        self.assertEqual(rc, 0)
+        text = buf.getvalue()
+        self.assertTrue(text.startswith("baseline run: %s" % self.out), text)
+        lines = dict((ln.split()[0], ln) for ln in text.splitlines()[1:] if ln.startswith("  "))
+        self.assertEqual(list(lines), list(shadow_run.STEPS))
+        self.assertIn("--stop-scenarios", lines["build"])
+        self.assertIn("--freeze", lines["build"])                                  # a dry freeze
+        self.assertIn(os.path.join(self.out, "suite_v8.json"), lines["build"])
+        self.assertIn("--copy-gate", lines["declared"])
+        self.assertIn("declared_v8_rt.json", lines["declared"])
+        self.assertIn("policy_v8_rtp_mcp.json policy_v8_rt_mcp.json", lines["policy"])
+        self.assertNotIn("gate_policy.py", lines["policy"])
+        self.assertIn("--judge", lines["gate"])
+        self.assertIn("--expect-service-commit %s" % self.SERVICE, lines["gate"])
+        self.assertIn("--expect-library-commit %s" % PIN, lines["gate"])   # the library pin by default
+        self.assertIn("--paired", lines["run"])
+        self.assertNotIn("--skip-remote", lines["run"])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_the_service_commit_is_required(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = shadow_run.main(["--baseline", "--out", self.out, "--dry-run", "--library-commit", PIN])
+        self.assertEqual(rc, 2)
+        self.assertIn("--expect-service-commit", err.getvalue())
+
+    def _manifest(self, content=None):
+        m = {"manifest_version": 8, "scenarios": [{"id": "T-x-0001"}], "relations": []}
+        ident = sc.manifest_identity(m)
+        m.update(content_sha256=content or ident["content_sha256"], relations_sha256=ident["relations_sha256"])
+        path = os.path.join(self.tmp, "suite_v8.json")
+        with open(path, "w") as fh:
+            json.dump(m, fh)
+        return path, ident
+
+    def test_copy_gate_checks_every_pin(self):
+        mpath, ident = self._manifest()
+        gate = os.path.join(self.tmp, "gate")
+        os.makedirs(gate)
+        sc.write_json_atomic(os.path.join(gate, "a.json"), {"manifest": {"file": "manifest/suite_v8.json",
+                                                                          "content_sha256": ident["content_sha256"]}})
+        sc.write_json_atomic(os.path.join(gate, "b.json"), {"manifest": dict(ident, file="manifest/suite_v8.json")})
+        sc.write_json_atomic(os.path.join(gate, "c.json"), {"manifest": dict(ident, content_sha256="0" * 64)})
+        dst = os.path.join(self.tmp, "pkg")
+        self.assertEqual(shadow_run.copy_gate(mpath, dst, ["a.json", "b.json"], gate), 0)
+        self.assertEqual(sorted(os.listdir(dst)), ["a.json", "b.json"])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(shadow_run.copy_gate(mpath, os.path.join(self.tmp, "pkg2"), ["a.json", "c.json"],
+                                                  gate), 1)
+        self.assertIn("gate/c.json pins content_sha256 0000000000000000", err.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "pkg2")))     # nothing copied
+
+    def test_the_committed_package_is_complete(self):
+        for name in (shadow_run.BASELINE_DECLARED,) + shadow_run.BASELINE_POLICIES:
+            with open(os.path.join(shadow_run.GATE_DIR, name)) as fh:
+                self.assertEqual(json.load(fh)["manifest"]["file"], "manifest/suite_v8.json", name)
+
+    def test_judge_all_runs_both_policies(self):
+        run = os.path.join(self.tmp, "run")
+        os.makedirs(run)
+        calls = []
+
+        def runner(argv, env=None, stdin=None):
+            calls.append(argv)
+            return 1 if os.path.basename(argv[3]) == "policy_v8_rt_mcp.json" else 0
+        pols = [os.path.join(self.out, x) for x in shadow_run.BASELINE_POLICIES]
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = shadow_run.judge_all(run, pols, ["--expect-service-commit", self.SERVICE], runner)
+        self.assertEqual(rc, 1)                                       # one policy failing fails the baseline
+        self.assertEqual([os.path.basename(a[1]) for a in calls], ["gate.py", "gate.py"])
+        self.assertEqual([a[a.index("--out") + 1] for a in calls],
+                         [os.path.join(run, "gate.json"), os.path.join(run, "gate_policy_v8_rt_mcp.json")])
+        for a in calls:
+            self.assertEqual(a[-2:], ["--expect-service-commit", self.SERVICE])
+        # the pipeline's gate step: shadow_run --judge with both copies
+        rec = Recorder()
+        shadow_run.main(["--baseline", "--out", self.out, "--from", "gate", "--run-dir", run, "--library-commit",
+                         PIN, "--expect-service-commit", self.SERVICE], runner=rec)
+        argv = rec.calls[0][0]
+        self.assertEqual(argv[2:5], ["--judge", run, pols[0]])
+        self.assertEqual(argv[5], pols[1])
+        with open(os.path.join(self.out, "baseline.log")) as fh:
+            self.assertIn("== gate exit 0", fh.read())
+
+
 if __name__ == "__main__":
     unittest.main()

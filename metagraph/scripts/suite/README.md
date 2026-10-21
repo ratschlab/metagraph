@@ -5154,6 +5154,12 @@ freezes v8 after the rehearsal on staging (phase P2); nothing here has run again
   (an arm sent null reaches the library: W3 answers bad_arm on two arms, the only arm on one): their 9 ops
   (walks-arm-none, walks-arm-only) link no case and expect the library's answer on every way; v8 is rebuilt and its
   declared file and policies regenerated (VERIFY-D-R5 R5-1).
+- The first v8 baseline: `shadow_run.py --baseline --expect-service-commit SHA [--out DIR]` runs the shadow pipeline
+  judged by the committed freeze package instead of a re-pin: the build step is a dry freeze into DIR/suite_v8.json
+  (refused unless gate/declared_v8_rt.json and both v8 policies pin it), the declared and policy steps copy those
+  three files into DIR (each checked against the build), and the gate step judges the run with both policies
+  (policy_v8_rtp_mcp.json into RUN/gate.json, policy_v8_rt_mcp.json into RUN/gate_policy_v8_rt_mcp.json), with
+  --expect-service-commit and --expect-library-commit (default the library pin); it logs to DIR/baseline.log.
 - The v8 freeze package: gate/declared_v8_rt.json (v7's entries re-pinned, nothing of area G set aside) and
   gate/policy_v8_rt_mcp.json / policy_v8_rtp_mcp.json (v7's parameters: arms direct-local and mcp, warm_every 10,
   require_agreement false) pin manifest/suite_v8.json as `build_manifest.py --manifest-version 8 --stop-scenarios

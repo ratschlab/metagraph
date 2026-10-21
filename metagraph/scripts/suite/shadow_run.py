@@ -23,7 +23,14 @@ Steps, in order (each a subprocess; --dry-run prints them and the expected load,
 --from STEP resumes at a step (RUN from --run-dir, else the newest run under DIR/runs): local and oracle first set
 the records they wrote before aside (RUN/arms/<way dir>.prev-<UTC>, logged), the library is reused only when its
 extraction is whole (its mark, written last, names the commit; logged), and every step's log line names the code's
-commit (+dirty when the tree has edits). Staging is touched by the run step only; the coordinator's GO comes first."""
+commit (+dirty when the tree has edits). Staging is touched by the run step only; the coordinator's GO comes first.
+
+--baseline (round 8): the first v8 BASELINE, judged by the committed freeze package instead of a re-pin: the build
+step is a dry freeze (build_manifest.py --freeze into DIR/suite_v8.json: refused unless the committed gate files pin
+this build), the declared and policy steps copy gate/declared_v8_rt.json and both v8 policies into DIR (each checked
+to pin the built manifest), and the gate step judges the run with both (gate.py: policy_v8_rtp_mcp.json into
+RUN/gate.json, policy_v8_rt_mcp.json into RUN/gate_policy_v8_rt_mcp.json), --expect-service-commit (required) and
+--expect-library-commit (default the library pin); steps log to DIR/baseline.log."""
 
 import argparse
 import datetime
@@ -46,12 +53,17 @@ ADMIN_KEY_FILE = "/Users/raetsch/tmp/mgss/secrets/staging_admin_key"
 V7_SECONDS_PER_EXECUTION = (3 * 3600 + 51 * 60) / 3015.0
 W3_SECONDS_PER_CALL = 1.5        # an area G MCP graphlet call (submit, wait, page; the rehearsals' MCP arm)
 LOCAL_SECONDS_PER_CALL = 0.05    # the local library's call, W1 / W2 / W4 / drift / W5
+GATE_DIR = os.path.join(HERE, "gate")
+# the baseline's committed freeze package (--baseline): the declared file and the policies, the first one's verdict
+# RUN/gate.json
+BASELINE_DECLARED = "declared_v8_rt.json"
+BASELINE_POLICIES = ("policy_v8_rtp_mcp.json", "policy_v8_rt_mcp.json")
 
 
-def default_out() -> str:
+def default_out(baseline: bool = False) -> str:
     now = datetime.datetime.now(datetime.timezone.utc)
     return os.path.expanduser(os.path.join("~", ".cache", "metagraph-traverse-plans", now.strftime("%Y-%m-%d"), "v8",
-                                           "shadow", now.strftime("%Y%m%dT%H%M%SZ")))
+                                           "baseline" if baseline else "shadow", now.strftime("%Y%m%dT%H%M%SZ")))
 
 
 def corpus_pin() -> str:
@@ -60,7 +72,13 @@ def corpus_pin() -> str:
         return json.load(fh).get("library_commit") or ""
 
 
-def paths(out: str, library_commit: str) -> dict:
+def paths(out: str, library_commit: str, baseline: bool = False) -> dict:
+    if baseline:
+        return {"manifest": os.path.join(out, "suite_v8.json"), "smoke": os.path.join(out, "suite_smoke_v8.json"),
+                "policy": os.path.join(out, BASELINE_POLICIES[0]),
+                "policies": [os.path.join(out, x) for x in BASELINE_POLICIES], "runs": os.path.join(out, "runs"),
+                "declared": os.path.join(out, BASELINE_DECLARED),
+                "library": os.path.join(out, "library-%s" % library_commit[:12])}
     return {"manifest": os.path.join(out, "suite_v8_shadow.json"),
             "smoke": os.path.join(out, "suite_smoke_v8_shadow.json"),
             "policy": os.path.join(out, "policy_v8_shadow.json"), "runs": os.path.join(out, "runs"),
@@ -70,7 +88,7 @@ def paths(out: str, library_commit: str) -> dict:
 
 def steps(a: argparse.Namespace, run_dir: str) -> list:
     """[(name, argv, env additions)] of the pipeline (module docstring)."""
-    p = paths(a.out, a.library_commit)
+    p = paths(a.out, a.library_commit, a.baseline)
     py = sys.executable
     env = {"SUITE_TRUTH_CACHE": TRUTH_CACHE}
     run_env = dict(env, SUITE_RUNS=p["runs"], METAGRAPH_ADMIN_KEY_FILE=ADMIN_KEY_FILE)
@@ -78,16 +96,30 @@ def steps(a: argparse.Namespace, run_dir: str) -> list:
     if a.skip_remote:
         run_argv.append("--skip-remote")
     run_argv += ["--mcp-cmd", a.mcp_cmd or "default"]   # default: run_suite.sh's ASYNC_MCP_CMD (async's runner)
-    gate_argv = [py, os.path.join(HERE, "gate.py"), run_dir, p["policy"]]
+    expect = []
     if a.expect_service_commit:
-        gate_argv += ["--expect-service-commit", a.expect_service_commit]
+        expect += ["--expect-service-commit", a.expect_service_commit]
+    if a.expect_library_commit:
+        expect += ["--expect-library-commit", a.expect_library_commit]
+    gate_argv = [py, os.path.join(HERE, "gate.py"), run_dir, p["policy"]] + expect
+    build_argv = [py, os.path.join(HERE, "build_manifest.py"), "--no-fetch", "--manifest-version", "8",
+                  "--stop-scenarios", "--out", p["manifest"], "--smoke-out", p["smoke"]]
+    if a.baseline:
+        # the committed freeze package: a dry freeze (refused unless the gate files pin the build), the gate files
+        # copied (each checked against the build), both policies judging the run
+        build_argv.append("--freeze")
+        declared = [py, os.path.abspath(__file__), "--copy-gate", p["manifest"], a.out, BASELINE_DECLARED]
+        policy = [py, os.path.abspath(__file__), "--copy-gate", p["manifest"], a.out] + list(BASELINE_POLICIES)
+        gate_argv = [py, os.path.abspath(__file__), "--judge", run_dir] + p["policies"] + expect
+    else:
+        declared = [py, os.path.abspath(__file__), "--derive-declared", p["manifest"], p["declared"]]
+        policy = [py, os.path.join(HERE, "gate_policy.py"), p["manifest"], "--routes", ",".join(POLICY_ROUTES),
+                  "--arms", ",".join(POLICY_ARMS), "--declared", p["declared"], "--name", "v8-shadow-rtp-mcp",
+                  "--out", p["policy"]]
     return [
-        ("build", [py, os.path.join(HERE, "build_manifest.py"), "--no-fetch", "--manifest-version", "8",
-                   "--stop-scenarios", "--out", p["manifest"], "--smoke-out", p["smoke"]], env),
-        ("declared", [py, os.path.abspath(__file__), "--derive-declared", p["manifest"], p["declared"]], env),
-        ("policy", [py, os.path.join(HERE, "gate_policy.py"), p["manifest"], "--routes", ",".join(POLICY_ROUTES),
-                    "--arms", ",".join(POLICY_ARMS), "--declared", p["declared"], "--name", "v8-shadow-rtp-mcp",
-                    "--out", p["policy"]], env),
+        ("build", build_argv, env),
+        ("declared", declared, env),
+        ("policy", policy, env),
         ("library", ["sh", "-c", "rm -rf %s && mkdir -p %s && git -C %s archive %s metagraph/api/python | tar -x -C %s "
                      "&& echo %s > %s" % (
                          shlex.quote(p["library"]), shlex.quote(p["library"]), shlex.quote(REPO),
@@ -121,6 +153,43 @@ def derive_declared(manifest_path: str, out_path: str, source: str = DECLARED) -
         json.dump(d, fh, indent=1, sort_keys=True)
         fh.write("\n")
     return d
+
+
+def copy_gate(manifest_path: str, out: str, names: list, gate_dir: str = GATE_DIR) -> int:
+    """--baseline: copies the committed gate files |names| into |out|, each checked to pin the manifest at
+    |manifest_path| (content_sha256, and relations_sha256 where it states one); 1 (nothing copied) when one does
+    not."""
+    import shutil
+    import suite_common as sc
+    ident = sc.manifest_identity(sc.read_json(manifest_path))
+    bad = []
+    for name in names:
+        pin = (sc.read_json(os.path.join(gate_dir, name)) or {}).get("manifest") or {}
+        for k in ("content_sha256", "relations_sha256"):
+            if (k in pin and pin[k] != ident[k]) or (k == "content_sha256" and k not in pin):
+                bad.append("gate/%s pins %s %s, the built manifest is %s" % (name, k, str(pin.get(k))[:16],
+                                                                             ident[k][:16]))
+    if bad:
+        print("shadow run: the committed gate files do not pin %s:\n  %s" % (manifest_path, "\n  ".join(bad)),
+              file=sys.stderr)
+        return 1
+    os.makedirs(out, exist_ok=True)
+    for name in names:
+        shutil.copyfile(os.path.join(gate_dir, name), os.path.join(out, name))
+    return 0
+
+
+def judge_all(run_dir: str, policies: list, expect: list, runner=subprocess.call) -> int:
+    """--baseline's gate step: gate.py on |run_dir| with each policy (the first into RUN/gate.json, the others into
+    RUN/gate_<policy file's stem>.json), |expect| the --expect-* flags; 0 only when every policy passes."""
+    rcs = []
+    for i, pol in enumerate(policies):
+        out = os.path.join(run_dir, "gate.json" if i == 0 else "gate_%s.json" % os.path.splitext(
+            os.path.basename(pol))[0])
+        rc = runner([sys.executable, os.path.join(HERE, "gate.py"), run_dir, pol, "--out", out] + expect)
+        print("shadow run: %s -> %s: exit %s" % (os.path.basename(pol), out, rc))
+        rcs.append(rc)
+    return 0 if all(rc == 0 for rc in rcs) else max(rcs)
 
 
 def load(manifest: dict) -> dict:
@@ -208,21 +277,42 @@ def main(argv=None, runner=subprocess.call) -> int:
     ap.add_argument("--mcp-cmd", default=None, help="the MCP runner template (default run_suite.sh's ASYNC_MCP_CMD)")
     ap.add_argument("--library-commit", default=None, help="the deployed library (default the corpus's pin)")
     ap.add_argument("--expect-service-commit", default=None, help="the deployed service commit, for gate.py")
+    ap.add_argument("--expect-library-commit", default=None,
+                    help="the deployed library commit, for gate.py (--baseline: default the library pin)")
+    ap.add_argument("--baseline", action="store_true",
+                    help="the v8 baseline: the committed freeze package (gate/declared_v8_rt.json, both v8 policies) "
+                         "instead of a re-pin, a dry freeze for the build, both policies judging (module docstring)")
     ap.add_argument("--skip-remote", action="store_true", help="leave the direct-remote arm out (not the shadow)")
     ap.add_argument("--derive-declared", nargs=2, metavar=("MANIFEST", "OUT"), help=argparse.SUPPRESS)
+    ap.add_argument("--copy-gate", nargs="+", metavar="ARG", help=argparse.SUPPRESS)
+    ap.add_argument("--judge", nargs="+", metavar="ARG", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     if a.derive_declared:
         derive_declared(*a.derive_declared)
         return 0
-    a.out = os.path.abspath(a.out or default_out())
+    if a.copy_gate:
+        return copy_gate(a.copy_gate[0], a.copy_gate[1], a.copy_gate[2:])
+    expect = []
+    for flag, value in (("--expect-service-commit", a.expect_service_commit),
+                        ("--expect-library-commit", a.expect_library_commit)):
+        if value:
+            expect += [flag, value]
+    if a.judge:
+        return judge_all(a.judge[0], a.judge[1:], expect, runner)
+    if a.baseline and not a.expect_service_commit:
+        print("shadow run: --baseline needs --expect-service-commit (the deployed service commit)", file=sys.stderr)
+        return 2
+    a.out = os.path.abspath(a.out or default_out(a.baseline))
     a.library_commit = a.library_commit or corpus_pin()
-    p = paths(a.out, a.library_commit)
+    if a.baseline and not a.expect_library_commit:
+        a.expect_library_commit = a.library_commit
+    p = paths(a.out, a.library_commit, a.baseline)
     run_dir = a.run_dir or newest_run(p["runs"]) or os.path.join(p["runs"], "<the run run_suite.sh makes>")
     todo = steps(a, run_dir)
     names = [n for n, _, _ in todo]
     chosen = todo[names.index(a.start):names.index(a.stop) + 1]
     if a.dry_run:
-        print("shadow run: %s (library %s)" % (a.out, a.library_commit))
+        print("%s run: %s (library %s)" % ("baseline" if a.baseline else "shadow", a.out, a.library_commit))
         for name, argv_, env in chosen:
             print("  %-8s %s%s" % (name, " ".join("%s=%s" % kv for kv in sorted(env.items()) if kv[0] != "SUITE_RUNS"
                                                     and kv[0] != "SUITE_TRUTH_CACHE") + (" " if env else ""),
@@ -232,7 +322,7 @@ def main(argv=None, runner=subprocess.call) -> int:
                 print(json.dumps({"expected_load": load(json.load(fh))}, indent=1))
         return 0
     os.makedirs(a.out, exist_ok=True)
-    log = os.path.join(a.out, "shadow.log")
+    log = os.path.join(a.out, "baseline.log" if a.baseline else "shadow.log")
     for name in [n for n, _, _ in chosen]:
         if name in ("local", "oracle", "compare", "report", "gate"):
             # the run step made the run directory: the post-run steps read it
