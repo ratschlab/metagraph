@@ -451,6 +451,21 @@ class TestReviewFindings(ToolsCase):
         mgt = self.tools.graphlet_export(sub, 'mgt', path='v.mgt')
         self.assertIn('"view"', T.read(mgt['path']).split('\n')[1])
 
+    def test_an_omitted_arm_on_a_one_arm_view_is_the_views_arm(self):
+        a = self.handle('fork')
+        both = self.tools.graphlet_subtrie(a, [{'ref': 'h:0:1'}])['handle']
+        right = self.tools.graphlet_subtrie(a, [{'ref': 'h:0:1'}], arm='right')['handle']
+        named = self.tools.graphlet_walks(right, 'right', max_bytes=8192)
+        omitted = self.tools.graphlet_walks(right, None, max_bytes=8192)
+        self.assertEqual(named['rows'], omitted['rows'])
+        self.assertEqual(self.tools.graphlet_walk(right, 'right', 0),
+                         self.tools.graphlet_walk(right, None, 0))
+        self.assertEqual(self.tools.graphlet_sequence(right, 'right', walk=0),
+                         self.tools.graphlet_sequence(right, None, walk=0))
+        self.assertEqual('not_in_view', self.tools.graphlet_walks(right, 'left')['error'])
+        # a view of both arms names one, as its backing graphlet does
+        self.assertEqual('bad_arm', self.tools.graphlet_walks(both, None)['error'])
+
     def test_evidence_states_outcome_and_limitations(self):
         h = self.handle('annotate')                     # lists cut at 2: a lower bound
         g = self.store.graphlet(h)

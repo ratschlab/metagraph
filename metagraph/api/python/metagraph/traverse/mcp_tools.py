@@ -913,6 +913,9 @@ class GraphletTools:
         # error, answered as one -- never a TypeError from using it as a key
         if arm is not None and not isinstance(arm, str):
             raise ToolError('bad_arm', 'arm is "left" or "right" ("l", "r"), not %r' % (arm,))
+        if arm is None and view is not None and view.arm_side is not None:
+            # a view of one arm (subtrie with arm=): omitted is that arm, as on a one-arm graphlet
+            arm = view.arm_side
         try:
             a = g.arm(arm)
         except (KeyError, ValueError) as e:
