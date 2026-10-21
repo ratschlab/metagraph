@@ -20,14 +20,15 @@ See :ref:`installation` for platform-specific troubleshooting.
 SSHash index versions
 =====================
 
-This version of MetaGraph reads SSHash major-version-5 indices. An index with
-another major version is rejected with an error showing the index and reader
-versions; changing the version bytes does not convert its contents.
+This version of MetaGraph uses SSHash v6. Existing v5 ``.sshashdbg`` graphs must
+be rebuilt from their source sequences. Loading an older graph reports the index
+and reader versions with a rebuild instruction; changing the version bytes does
+not convert its contents.
 
-Use the MetaGraph build that created the index, or rebuild the SSHash graph with
-the reader you intend to use. Rebuild dependent annotations too unless the graph's
-node IDs have been verified to match. The upstream SSHash v6 format uses a different
-minimizer layout and cannot be loaded by the v5 reader.
+Rebuild dependent annotations against the new graph as well, since annotations
+refer to graph node IDs. Keep the original graph and annotations together if you
+need to use them with the older MetaGraph build. This change does not affect other
+graph representations.
 
 Memory Issues
 =============

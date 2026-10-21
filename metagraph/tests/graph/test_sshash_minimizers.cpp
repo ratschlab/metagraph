@@ -14,6 +14,8 @@
 #include "graph/alignment_redone/aln_seeder.hpp"
 #include <include/builder/util.hpp>
 #include <kmer_iterator.hpp>
+#include <streaming_query.hpp>
+#include <sdsl/memory_management.hpp>
 
 namespace {
 
@@ -69,12 +71,63 @@ TEST(SSHashFormat, RejectsDifferentMajorVersion) {
     bytes.seekp(2 * sizeof(size_t) + sizeof(DBGSSHash::Mode));
     bytes.put(sshash::constants::current_version_number::x + 1);
     DBGSSHash loaded(3);
-    try {
-        loaded.load(bytes);
-        FAIL() << "An incompatible major version must not load";
-    } catch (const std::runtime_error &error) {
-        EXPECT_NE(std::string::npos, std::string(error.what()).find("rebuild"));
-    }
+    EXPECT_FALSE(loaded.load(bytes));
+    EXPECT_EQ(0u, loaded.num_nodes());
+}
+
+TEST(SSHashFormat, RejectsV5BeforeReadingPayload) {
+    using mtg::graph::DBGSSHash;
+    auto graph = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
+    std::stringstream bytes;
+    static_cast<const DBGSSHash&>(*graph).serialize(bytes);
+    bytes.seekp(2 * sizeof(size_t) + sizeof(DBGSSHash::Mode));
+    bytes.put(5);
+    // Only the header and version are needed to reject an obsolete index.
+    std::string header = bytes.str().substr(0, 2 * sizeof(size_t) + sizeof(DBGSSHash::Mode) + 3);
+    const auto filename = test_dump_dir() + "/sshash_v5_header.sshashdbg";
+    { std::ofstream out(filename, std::ios::binary); out.write(header.data(), header.size()); }
+    DBGSSHash loaded(3);
+    std::ifstream file(filename, std::ios::binary);
+    EXPECT_FALSE(loaded.load(file));
+    sdsl::mmap_ifstream mapped(filename, std::ios::binary);
+    EXPECT_FALSE(loaded.load(mapped));
+}
+
+TEST(SSHashLookup, ForwardOrientationsAndRoundTrip) {
+    using mtg::graph::DBGSSHash;
+#if _PROTEIN_GRAPH
+    const std::string sequence = "MKWVTFISRLDPQEAHNYCG";
+#else
+    const std::string sequence = "ACGT";
+#endif
+    auto graph = mtg::test::build_graph<DBGSSHash>(3, { sequence }, DBGSSHash::BASIC);
+    const auto filename = test_dump_dir() + "/sshash_v6_roundtrip.sshashdbg";
+    graph->serialize(filename);
+    auto check = [&](const DBGSSHash &candidate) {
+        std::visit([&](const auto &dict) {
+            for (size_t i = 0; i + 3 <= sequence.size(); ++i) {
+                auto hit = dict.lookup(sequence.data() + i, false);
+                ASSERT_NE(sshash::constants::invalid_uint64, hit.kmer_id);
+                EXPECT_EQ(sshash::constants::forward_orientation, hit.kmer_orientation);
+                EXPECT_EQ(sequence.substr(i, 3),
+                          candidate.get_node_sequence(DBGSSHash::sshash_to_graph_index(hit.kmer_id)));
+            }
+#if _PROTEIN_GRAPH
+            sshash::streaming_query<std::decay_t<decltype(dict)>> stream(&dict);
+            for (size_t i = 0; i + 3 <= sequence.size(); ++i)
+                EXPECT_TRUE(sshash::equal_lookup_result(dict.lookup(sequence.data() + i, false),
+                                                        stream.lookup(sequence.data() + i)));
+#endif
+        }, candidate.data());
+    };
+    check(static_cast<const DBGSSHash&>(*graph));
+    DBGSSHash loaded(3);
+    std::ifstream file(filename, std::ios::binary);
+    ASSERT_TRUE(loaded.load(file));
+    check(loaded);
+    sdsl::mmap_ifstream mapped(filename, std::ios::binary);
+    ASSERT_TRUE(loaded.load(mapped));
+    check(loaded);
 }
 
 TEST(SSHashMinimizers, EmptyAndFinalTupleBuckets) {
@@ -171,15 +224,30 @@ TEST(SSHashMinimizers, EnumeratesAllBucketSizes) {
         const std::string filename = test_dump_dir() + "/minimizer_positions.fa";
         {
             std::ofstream out(filename);
+            // Canonical minimizers put reverse-complement pairs in the same
+            // bucket. Retain one kmer of the least frequent bucket to cover a
+            // singleton even in BASIC mode; keep all other pairs for skew tests.
+            using Word = DBGSSHash::kmer_t<uint64_t>;
+            std::map<uint64_t, std::vector<std::string>> buckets;
             for (size_t value = 0; value < (1u << (2 * k)); ++value) {
                 std::string sequence(k, 'A');
                 for (size_t i = 0; i < k; ++i)
                     sequence[i] = "ACGT"[(value >> (2 * i)) & 3];
                 auto rc = sequence;
                 reverse_complement(rc.begin(), rc.end());
-                if (mode == DBGSSHash::BASIC || sequence <= rc)
-                    out << ">\n" << sequence << '\n';
+                if (mode == DBGSSHash::BASIC || sequence <= rc) {
+                    auto word = sshash::util::string_to_uint_kmer<Word>(sequence.data(), k);
+                    auto mini = sshash::util::compute_minimizer(word, k, 3,
+                                             sshash::hasher_type(sshash::constants::seed));
+                    buckets[mini.minimizer].push_back(sequence);
+                }
             }
+            auto smallest = std::min_element(buckets.begin(), buckets.end(),
+                [](const auto &a, const auto &b) { return a.second.size() < b.second.size(); });
+            smallest->second.resize(1);
+            for (const auto &[mini, sequences] : buckets)
+                for (const auto &sequence : sequences)
+                    out << ">\n" << sequence << '\n';
         }
         // Select m=3 while retaining enough distinct k-mers to exercise
         // singleton, ordinary and skew-index buckets.
@@ -190,16 +258,11 @@ TEST(SSHashMinimizers, EnumeratesAllBucketSizes) {
             std::map<uint64_t, std::set<uint64_t>> expected;
             for (uint64_t id = 0; id < dict.num_kmers(); ++id) {
                 auto sequence = graph.get_node_sequence(DBGSSHash::sshash_to_graph_index(id));
+                // Includes both orientations of every DNA k-mer in BASIC mode,
+                // exercising duplicate canonical keys in the heavy skew index.
+                EXPECT_EQ(id, dict.lookup(sequence.data(), false).kmer_id) << sequence;
                 auto word = sshash::util::string_to_uint_kmer<Kmer>(sequence.data(), k);
                 auto mini = sshash::util::compute_minimizer(word, k, dict.m(), dict.hasher());
-                if (mode == DBGSSHash::CANONICAL) {
-                    word.reverse_complement_inplace(k);
-                    auto rc = sshash::util::compute_minimizer(word, k, dict.m(), dict.hasher());
-                    if (rc.minimizer < mini.minimizer) {
-                        mini = rc;
-                        mini.pos_in_kmer = k - dict.m() - mini.pos_in_kmer;
-                    }
-                }
                 auto [string_id, offset] = dict.strings_offsets().id_to_offset(id, k);
                 std::ignore = string_id;
                 expected[mini.minimizer].insert(offset + mini.pos_in_kmer);

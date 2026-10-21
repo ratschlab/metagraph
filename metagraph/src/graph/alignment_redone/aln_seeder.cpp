@@ -946,7 +946,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     invalid_mmer.erase(invalid_mmer.begin(), invalid_mmer.begin() + m - 1);
 
                     std::vector<kmer_t> mmers(this_query.size() - m + 1);
-                    std::vector<kmer_t> mmers_rc(this_query.size() - m + 1);
 
                     bool flush_mmer = true;
                     kmer_t mmer;
@@ -973,31 +972,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         mmers[i] = mmer;
                     }
 
-                    if (sshash->get_mode() == DeBruijnGraph::CANONICAL) {
-                        flush_mmer = true;
-                        kmer_t mmer_rc;
-                        for (size_t i = 0; i + m <= rc_query.size(); ++i) {
-                            size_t j = rc_query.size() - m - i;
-                            if (invalid_mmer[j]) {
-                                flush_mmer = true;
-                                continue;
-                            }
-                            if (flush_mmer) {
-                                mmer_rc = sshash::util::string_to_uint_kmer<kmer_t>(
-                                    rc_query.data() + i,
-                                    m
-                                );
-                                flush_mmer = false;
-                            } else {
-                                mmer_rc.drop_char();
-                                mmer_rc.set(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
-                                // mmer_rc.kth_char_or(m - 1, kmer_t::char_to_uint(rc_query[i + m - 1]));
-                            }
-
-                            assert(j < mmers_rc.size());
-                            mmers_rc[j] = mmer_rc;
-                        }
-                    }
                     for (size_t i = 0; i + m <= this_query.size(); ++i) {
                         if (invalid_mmer[i])
                             continue;
@@ -1005,11 +979,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         // std::cerr << "start " << (orientation ? "rc" : "fw") << "\t" << i << "\tm=" << m << "\n";
 
                         kmer_t mmer = mmers[i];
-                        kmer_t mmer_rc = mmers_rc[i];
-
-                        uint64_t mmer_lookup = uint64_t(sshash->get_mode() == DeBruijnGraph::BASIC
-                            ? mmer : std::min(mmer, mmer_rc)
-                        );
+                        uint64_t mmer_lookup = sshash::util::canonical_mmer<kmer_t>(uint64_t(mmer), m);
 
                         dict.call_minimizer_positions(mmer_lookup, [&](uint64_t offset) {
 
@@ -1103,6 +1073,33 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                             size_t full_match_size = jt - spelling.begin();
                                             assert(full_match_size <= k);
                                             if (full_match_size >= config_.min_seed_length) {
+                                                // A sampled minimizer can expose only a suffix
+                                                // of an exact sub-k match. Also retain its maximal
+                                                // left extension within this stored contig; the
+                                                // original start is still needed by other chains.
+                                                size_t left = 0;
+                                                while (left < i_shift && left < i_in_contig
+                                                        && full_match_size + left < k
+                                                        && !invalid_char[i_shift - left - 1]) {
+                                                    auto previous = sshash::util::read_kmer_at<kmer_t>(
+                                                        dict.strings(), 1,
+                                                        kmer_t::bits_per_char * (offset + w - left - 1));
+                                                    if (uint64_t(previous) != kmer_t::char_to_uint(this_query[i_shift - left - 1]))
+                                                        break;
+                                                    ++left;
+                                                }
+                                                if (left) {
+                                                    auto [it, inserted] = add_seed(cur_max_seeds[i_shift - left], node - left);
+                                                    if (it != cur_max_seeds[i_shift - left].end()
+                                                            && full_match_size + left > it->second.get_seed().size()) {
+                                                        auto extended = graph.get_node_sequence(node - left);
+                                                        it.value() = Anchor(this_query,
+                                                            i_shift - left, i_shift + full_match_size,
+                                                            orientation, std::vector<Match::node_index>{ node - left },
+                                                            extended.substr(full_match_size + left));
+                                                        assert(it->second.is_spelling_valid(graph));
+                                                    }
+                                                }
                                                 auto [it, inserted] = add_seed(cur_max_seeds[i_shift], node);
                                                 if (it != cur_max_seeds[i_shift].end() && full_match_size > it->second.get_seed().size()) {
                                                     it.value() = Anchor(this_query,

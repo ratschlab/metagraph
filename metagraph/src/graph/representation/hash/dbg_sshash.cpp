@@ -12,7 +12,7 @@
 
 // sshash template implementations
 #include <src/dictionary.cpp>
-#include <src/build.cpp>
+#include <src/builder/build.cpp>
 #include <src/query.cpp>
 #include <src/info.cpp>
 
@@ -201,7 +201,7 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     // selects the system temporary directory, just like the default argument.
     build_config.tmp_dirname = swap_dir.empty() ? std::filesystem::temp_directory_path()
                                                : swap_dir;
-    build_config.canonical = mode != BASIC;
+    build_config.allow_reverse_complement_duplicates = mode == BASIC;
 
     std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
 
@@ -253,7 +253,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
     using kmer_t = typename Dict::kmer_type;
 
     if (with_rc) {
-        auto parser = sshash::streaming_query<Dict, true>(&dict);
+        auto parser = sshash::streaming_query<Dict>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             auto ret_val = parser.lookup(sequence.data() + i);
             // Direct dictionary lookup assumes a valid alphabet. Streaming
@@ -808,34 +808,43 @@ void DBGSSHash::serialize(const std::string& filename) const {
 }
 
 bool DBGSSHash::load(std::istream& in) {
-    essentials::generic_loader loader(in);
-    size_t num_nodes;
-    size_t k;
-    Mode mode;
-    loader.visit(num_nodes);
-    loader.visit(k);
-    loader.visit(mode);
+    if (!in.good())
+        return false;
 
-    if (mode == PRIMARY) {
-        common::logger->warn("Graph constructed with old version and is incompatible. Please rebuild only graph (not annotations).");
-        throw std::runtime_error("Incompatible graph");
-    }
+    try {
+        essentials::generic_loader loader(in);
+        size_t num_nodes;
+        size_t k;
+        Mode mode;
+        loader.visit(num_nodes);
+        loader.visit(k);
+        loader.visit(mode);
 
-    *this = DBGSSHash(k, mode);
-    num_nodes_ = num_nodes;
-
-    if (num_nodes_) {
-        // Enable zero-copy mmap if the stream is backed by an mmap'd file
-        if (auto *mmap_stream = dynamic_cast<sdsl::mmap_ifstream*>(&in)) {
-            auto ctx = mmap_stream->get_mmap_context();
-            loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
+        if (mode == PRIMARY) {
+            common::logger->warn("Graph constructed with old version and is incompatible. Please rebuild only graph (not annotations).");
+            throw std::runtime_error("Incompatible graph");
         }
-        std::visit([&](auto& d) { d.visit(loader); }, dict_);
-        succ_is_next_.load(in);
-        pred_is_prev_.load(in);
-    }
 
-    return true;
+        *this = DBGSSHash(k, mode);
+        num_nodes_ = num_nodes;
+
+        if (num_nodes_) {
+            // Enable zero-copy mmap if the stream is backed by an mmap'd file
+            if (auto *mmap_stream = dynamic_cast<sdsl::mmap_ifstream*>(&in)) {
+                auto ctx = mmap_stream->get_mmap_context();
+                loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
+            }
+            std::visit([&](auto& d) { d.visit(loader); }, dict_);
+            succ_is_next_.load(in);
+            pred_is_prev_.load(in);
+        }
+
+        return in.good();
+    } catch (const std::exception &error) {
+        num_nodes_ = 0;
+        common::logger->error("Failed to load SSHash graph: {}", error.what());
+        return false;
+    }
 }
 
 bool DBGSSHash::load(const std::string& filename) {
