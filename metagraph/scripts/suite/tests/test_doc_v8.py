@@ -373,6 +373,30 @@ class RealRunV8Test(unittest.TestCase):
     name area G's own by-design table and chapter G's inputs (none before v8); the units builder keys the mapping to
     the manifest it is given."""
 
+    def test_since_previous_added_not_changed(self):
+        import sections
+
+        def row(sid, arm, rep, outcome):
+            return {"scenario": sid, "arm": arm, "repeat": rep, "outcome": outcome}
+        prev_s = [{"id": "P-a-0001", "route": "POST /pattern", "area": "P"}]
+        cur_s = prev_s + [{"id": "G-x-0001", "route": "POST /traverse", "area": "G"}]
+        prev = _Stub(manifest={"manifest_version": 7, "scenarios": prev_s}, scenarios={"P-a-0001": prev_s[0]},
+                     rows=[row("P-a-0001", "mcp", 0, "pass")], reevaluated=False, run={"run_id": "R7"})
+        prev.run_id = lambda: "R7"
+        prev.lines = lambda: dict(((r["scenario"], r["arm"], r["repeat"]), r) for r in prev.rows)
+        cur = _Stub(manifest={"manifest_version": 8, "scenarios": cur_s}, order=[s["id"] for s in cur_s],
+                    scenarios=dict((s["id"], s) for s in cur_s),
+                    rows=[row("P-a-0001", "mcp", 0, "pass"), row("P-a-0001", "mcp", 1, "pass"),
+                          row("G-x-0001", "direct-local", 0, "pass"), row("G-x-0001", "mcp", 0, "pass")],
+                    previous=prev, service_identity={}, mcp_run={})
+        cur.scenario = cur.scenarios.get
+        text = sections.since_previous(_Stub(run=cur))
+        self.assertIn("1 added, 0 removed", text)
+        self.assertIn("added: G-x-0001 (chapter G)", text)
+        self.assertIn("1 execution changed outcome", text)
+        self.assertIn("no execution to pass (P-a-0001 mcp r1)", text)
+        self.assertNotIn("G-x-0001 direct-local r0", text)
+
     def test_one_execution_warm_after_interrupted(self):
         import facts
         tpl = [t for t in prose("closing")["observations"] if t["id"] == "load"][0]["template"]

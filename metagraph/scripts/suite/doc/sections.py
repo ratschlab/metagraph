@@ -2898,7 +2898,8 @@ def since_previous(ctx):
     for key in sorted(set(plines) | set(clines), key=lambda k: (str(k[0]), str(k[1]), str(k[2]))):
         a = (plines.get(key) or {}).get("outcome")
         b = (clines.get(key) or {}).get("outcome")
-        if a != b and key[0] in c_ids:
+        # a scenario the previous manifest lacks is counted under 'added' above, not as changed outcomes
+        if a != b and key[0] in c_ids and key[0] in p_ids:
             changes.setdefault((a, b), []).append(key)
     if changes:
         parts = []
