@@ -5,7 +5,6 @@
 #include <memory>
 #include <stdexcept>
 #include <map>
-#include <unordered_set>
 #include <array>
 #include <optional>
 
@@ -14,6 +13,7 @@
 #include "aln_chainer.hpp"
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
+#include "common/vector.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -219,28 +219,19 @@ class TraversalCache {
     bool backward() const { return backward_; }
 
     bool has_single(node_index node) {
-        auto &entry = get(node);
-        if (!entry.degree_known) {
-            entry.single = backward_ ? graph_.has_single_incoming(node)
-                                     : graph_.has_single_outgoing(node);
-            entry.degree_known = true;
-        }
-        return entry.single;
+        const auto &entry = get_edges(node);
+        // BOSS excludes its root self-loop and sink sentinel from single-edge
+        // checks. Other incoming dummy edges remain part of its topology.
+        const bool single = entry.count == 1 && (!is_succinct_
+            || (backward_ ? node != 1 : entry.edges[0].second != boss::BOSS::kSentinel));
+        assert(single == (backward_ ? graph_.has_single_incoming(node)
+                                    : graph_.has_single_outgoing(node)));
+        return single;
     }
 
     template <class Callback>
     void call_edges(node_index node, const Callback &callback) {
-        auto &entry = get(node);
-        if (!entry.edges_known) {
-            size_t count = 0;
-            call_raw(node, [&](node_index next, char c) {
-                if (count < entry.edges.size())
-                    entry.edges[count] = { next, c };
-                ++count;
-            });
-            entry.count = count;
-            entry.edges_known = true;
-        }
+        const auto &entry = get_edges(node);
         if (entry.count > entry.edges.size()) {
             // Remember overflow so high-degree protein nodes are not probed
             // again on every visit. Their edges use the uncached interface.
@@ -283,8 +274,6 @@ class TraversalCache {
         std::array<std::pair<node_index, char>, 4> edges{};
         size_t count = 0;
         bool edges_known = false;
-        bool degree_known = false;
-        bool single = false;
     };
 
     Entry &get(node_index node) {
@@ -293,6 +282,21 @@ class TraversalCache {
         if (entry.node != node) {
             entry = Entry{};
             entry.node = node;
+        }
+        return entry;
+    }
+
+    Entry &get_edges(node_index node) {
+        auto &entry = get(node);
+        if (!entry.edges_known) {
+            size_t count = 0;
+            call_raw(node, [&](node_index next, char c) {
+                if (count < entry.edges.size())
+                    entry.edges[count] = {next, c};
+                ++count;
+            });
+            entry.count = count;
+            entry.edges_known = true;
         }
         return entry;
     }
@@ -311,7 +315,7 @@ class TraversalCache {
     bool backward_;
     bool is_succinct_;
     const NodeFirstCache *first_cache_;
-    std::array<Entry, 128> entries_{};
+    std::array<Entry, 1024> entries_{};
 };
 
 } // namespace
@@ -1299,56 +1303,26 @@ struct WorkspaceAllocator {
 template <typename T>
 using WorkspaceVector = std::vector<T, WorkspaceAllocator<T>>;
 
-template <typename T>
-using WorkspaceMap = tsl::ordered_map<DeBruijnGraph::node_index, T,
-    std::hash<DeBruijnGraph::node_index>, std::equal_to<DeBruijnGraph::node_index>,
-    WorkspaceAllocator<std::pair<DeBruijnGraph::node_index, T>>,
-    WorkspaceVector<std::pair<DeBruijnGraph::node_index, T>>, uint64_t>;
-
-} // namespace
-
-template <typename T>
-class OffsetVector {
-  public:
-    OffsetVector() : offset_(0) {}
-
-    size_t size() const { return offset_ + data_.size(); }
-    size_t offset() const { return offset_; }
-
-    T& get(size_t i) {
-        if (data_.empty())
-            offset_ = i;
-        if (i < offset_) {
-            data_.insert(data_.begin(), offset_ - i, null_);
-            offset_ = i;
-        }
-
-        if (i - offset_ >= data_.size())
-            data_.resize(i - offset_ + 1);
-
-        return data_[i - offset_];
+using GraphPosition = std::pair<DeBruijnGraph::node_index, size_t>;
+struct PositionHash {
+    size_t operator()(const GraphPosition &position) const {
+        size_t node = std::hash<DeBruijnGraph::node_index>{}(position.first);
+        return node ^ (std::hash<size_t>{}(position.second)
+                       + 0x9e3779b9 + (node << 6) + (node >> 2));
     }
-
-    T& operator[](size_t i) {
-        assert(i >= offset_);
-        return data_[i - offset_];
-    }
-
-    const T& operator[](size_t i) const {
-        return i >= offset_ ? data_[i - offset_] : null_;
-    }
-
-  private:
-    size_t offset_;
-    const T null_;
-    WorkspaceVector<T> data_;
 };
 
-template <typename Tuple>
-using WaveFront = OffsetVector<WorkspaceMap<Tuple>>; // S(cost)
+// A single map per cost stores only occupied (node, query distance) states.
+// This avoids constructing and reallocating a map for every query position.
+template <typename T>
+using WaveFront = tsl::ordered_map<GraphPosition, T, PositionHash,
+    std::equal_to<GraphPosition>, WorkspaceAllocator<std::pair<GraphPosition, T>>,
+    WorkspaceVector<std::pair<GraphPosition, T>>, uint64_t>;
 
 template <typename Tuple>
 using ScoreTable = WorkspaceVector<WaveFront<Tuple>>;
+
+} // namespace
 
 DBGAlignerConfig::score_t cost_to_score(size_t cost,
                                         size_t query_size,
@@ -1367,11 +1341,8 @@ const Tuple* get_bucket(const ScoreTable<Tuple> &table,
     if (cost >= table.size())
         return nullptr;
 
-    if (query_dist >= table[cost].size() || query_dist < table[cost].offset())
-        return nullptr;
-
-    const auto &table_slot = table[cost][query_dist];
-    auto it = table_slot.find(node);
+    const auto &table_slot = table[cost];
+    auto it = table_slot.find({node, query_dist});
     if (it == table_slot.end())
         return nullptr;
 
@@ -1380,6 +1351,8 @@ const Tuple* get_bucket(const ScoreTable<Tuple> &table,
 
 // dist, num_ops, last_node, last_op, last_char_of_this_node, num_matches
 using SMap = std::tuple<size_t, size_t, DeBruijnGraph::node_index, Cigar::Operator, char, size_t, Anchor::label_class_t>;
+
+static_assert(std::is_nothrow_move_constructible_v<WaveFront<SMap>>);
 
 // dist, num_ops
 using EMap = std::tuple<size_t, size_t>;
@@ -1479,7 +1452,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             table.resize(cost + 1);
         }
 
-        auto &bucket = table[cost].get(query_dist)[node];
+        auto &bucket = table[cost][{node, query_dist}];
         using table_t = std::decay_t<decltype(bucket)>;
         static_assert(std::is_same_v<table_t, FMap>
                         || std::is_same_v<table_t, EMap>
@@ -1534,23 +1507,15 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
         return inserted;
     };
 
-    using GraphPosition = std::pair<node_index, size_t>;
-    struct PositionHash {
-        size_t operator()(const GraphPosition &position) const {
-            size_t node = std::hash<node_index>{}(position.first);
-            return node ^ (std::hash<size_t>{}(position.second)
-                           + 0x9e3779b9 + (node << 6) + (node >> 2));
-        }
-    };
-    std::unordered_set<GraphPosition, PositionHash, std::equal_to<GraphPosition>,
+    tsl::hopscotch_set<GraphPosition, PositionHash, std::equal_to<GraphPosition>,
                        WorkspaceAllocator<GraphPosition>> explored;
     size_t max_explored_dist = 0;
     auto visit_node = [&](node_index node, size_t distance) {
         // Different score/diagonal states revisit the same graph column,
         // especially with BLOSUM scores. Charge each (node, distance) once.
         const GraphPosition position(node, distance);
-        if (explored.count(position)) return;
-        if (explored.size() >= node_limit) throw SearchLimitReached{};
+        if (explored.size() >= node_limit && !explored.count(position))
+            throw SearchLimitReached{};
         explored.insert(position);
     };
     try {
@@ -1628,11 +1593,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
         bool done = false;
         using HeapEntry = std::tuple<size_t, size_t, DeBruijnGraph::node_index>;
         std::priority_queue<HeapEntry, WorkspaceVector<HeapEntry>> queue;
-        for (size_t query_dist = S[cost].offset(); query_dist < S[cost].size(); ++query_dist) {
-            for (const auto &[node, data] : S[cost][query_dist]) {
-                size_t best_dist = std::get<0>(data);
-                queue.emplace(best_dist, query_dist, node);
-            }
+        for (const auto &[position, data] : S[cost]) {
+            queue.emplace(std::get<0>(data), position.second, position.first);
         }
 
         size_t best_dist;
@@ -1643,8 +1605,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             queue.pop();
             assert(query_dist <= query_size);
 
-            auto it = S[cost][query_dist].find(node);
-            if (it != S[cost][query_dist].end()) {
+            auto it = S[cost].find({node, query_dist});
+            if (it != S[cost].end()) {
                 // outdated entry
                 if (std::get<0>(it->second) != best_dist)
                     continue;
@@ -1671,9 +1633,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                         assert(query_dist >= last_num_ops);
                         ssize_t next_ext_cost = cost + gap_ext;
                         if (!terminate_branch(next_ext_cost, SMap(last_dist, 0, node, Cigar::INSERTION, '\0', 0, Anchor::nannot), query_dist + 1, node)
-                                && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0, Anchor::nannot)
-                                && set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0, cur_target)) {
-                            // it = S[cost][query_dist].begin() + it_dist;
+                                && set_value(E, next_ext_cost, query_dist + 1, node, last_dist, node, last_num_ops + 1, Cigar::INSERTION, '\0', 0, Anchor::nannot)) {
+                            set_value(S, next_ext_cost, query_dist + 1, node, last_dist, node, 0, Cigar::INSERTION, '\0', 0, cur_target);
                         }
                     }
 
@@ -1681,15 +1642,14 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     if (last_op != Cigar::DELETION) {
                         ssize_t next_opn_cost = cost + gap_opn;
                         if (!terminate_branch(next_opn_cost, SMap(best_dist, 0, node, Cigar::INSERTION, '\0', 0, Anchor::nannot), query_dist + 1, node)
-                                && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0, Anchor::nannot)
-                                && set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0, cur_target)) {
-                            // it = S[cost][query_dist].begin() + it_dist;
+                                && set_value(E, next_opn_cost, query_dist + 1, node, best_dist, node, 1, Cigar::INSERTION, '\0', 0, Anchor::nannot)) {
+                            set_value(S, next_opn_cost, query_dist + 1, node, best_dist, node, 0, Cigar::INSERTION, '\0', 0, cur_target);
                         }
                     }
                 }
 
                 if (best_dist < max_dist) {
-                    std::vector<std::tuple<node_index, char, AlignmentGraph::label_class_t>> prevs;
+                    SmallVector<std::tuple<node_index, char, AlignmentGraph::label_class_t>, 4> prevs;
                     call_incoming_kmers(node, [&](auto prev, char c, AlignmentGraph::label_class_t prev_target) {
                         visit_node(prev, best_dist + 1);
                         if (c != boss::BOSS::kSentinel)
@@ -1710,7 +1670,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                             assert(last_dist >= last_num_ops);
                             if (last_dist < max_dist) {
                                 ssize_t next_ext_cost = cost + gap_ext;
-                                std::vector<std::tuple<DeBruijnGraph::node_index, char, AlignmentGraph::label_class_t>> last_prevs;
+                                SmallVector<std::tuple<DeBruijnGraph::node_index, char, AlignmentGraph::label_class_t>, 4> last_prevs;
                                 if (best_dist == last_dist) {
                                     last_prevs = prevs;
                                 } else {
@@ -1723,9 +1683,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
 
                                 for (const auto &[prev, c, prev_target] : last_prevs) {
                                     if (!terminate_branch(next_ext_cost, SMap(last_dist + 1, 0, node, Cigar::DELETION, c, 0, prev_target), query_dist, prev)
-                                            && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, c, 0, prev_target)
-                                            && set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, c, 0, prev_target)) {
-                                        // it = S[cost][query_dist].begin() + it_dist;
+                                            && set_value(F, next_ext_cost, query_dist, prev, last_dist + 1, node, last_num_ops + 1, Cigar::DELETION, c, 0, prev_target)) {
+                                        set_value(S, next_ext_cost, query_dist, prev, last_dist + 1, node, 0, Cigar::DELETION, c, 0, prev_target);
                                     }
                                 }
                             }
@@ -1736,9 +1695,8 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                             ssize_t next_opn_cost = cost + gap_opn;
                             for (const auto &[prev, c, prev_target] : prevs) {
                                 if (!terminate_branch(next_opn_cost, SMap(best_dist + 1, 0, node, Cigar::DELETION, c, 0, prev_target), query_dist, prev)
-                                        && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, c, 0, prev_target)
-                                        && set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, c, 0, prev_target)) {
-                                    // it = S[cost][query_dist].begin() + it_dist;
+                                        && set_value(F, next_opn_cost, query_dist, prev, best_dist + 1, node, 1, Cigar::DELETION, c, 0, prev_target)) {
+                                    set_value(S, next_opn_cost, query_dist, prev, best_dist + 1, node, 0, Cigar::DELETION, c, 0, prev_target);
                                 }
                             }
                         }
@@ -1787,7 +1745,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                                     if (cur_cost == cost) {
                                         queue.emplace(cur_best, cur_query_dist, prev);
                                     }
-                                    // it = S[cost][query_dist].begin() + it_dist;
                                 }
                             }
 
@@ -1825,7 +1782,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                                             if (cur_cost == cost) {
                                                 queue.emplace(cur_best, cur_query_dist, prev);
                                             }
-                                            // it = S[cost][query_dist].begin() + it_dist;
                                         }
                                     }
                                 },
@@ -1848,7 +1804,6 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                                 if (cur_cost == cost) {
                                     queue.emplace(cur_best, cur_query_dist, prev);
                                 }
-                                // it = S[cost][query_dist].begin() + it_dist;
                             }
                         }
                     }
@@ -1867,27 +1822,27 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     // Both early termination and a resource cap can leave valid states in
     // later wavefronts. Include them when selecting the best traceback start.
     for (size_t cost = 0; cost < S.size(); ++cost) {
-        for (size_t q = S[cost].offset(); q < S[cost].size(); ++q) {
-            for (const auto &[node, state] : S[cost][q]) {
-                if (std::get<3>(state) != Cigar::CLIPPED)
-                    terminate(cost, state, q, node);
-            }
+        for (const auto &[position, state] : S[cost]) {
+            if (std::get<3>(state) != Cigar::CLIPPED)
+                terminate(cost, state, position.second, position.first);
         }
     }
 
     // backtrack
     for (size_t start_cost = 0; start_cost < S.size(); ++start_cost) {
         std::vector<std::tuple<size_t, ssize_t, size_t, DeBruijnGraph::node_index>> starts;
-        for (size_t start_query_dist = S[start_cost].offset(); start_query_dist < S[start_cost].size(); ++start_query_dist) {
+        for (const auto &[position, data] : S[start_cost]) {
+            const auto [node, start_query_dist] = position;
             assert(start_query_dist <= query_size);
-            const auto &bucket = S[start_cost][start_query_dist];
-            for (const auto &[node, data] : bucket) {
-                const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches, cur_target] = data;
-                assert(last_op != Cigar::CLIPPED);
-                if (start_backtrack(start_cost, data, start_query_dist, node))
-                    starts.emplace_back(dist, static_cast<ssize_t>(dist) - start_query_dist, start_query_dist, node);
-            }
+            const auto &[dist, last_ext, last_node, last_op, mismatch_char, num_matches, cur_target] = data;
+            assert(last_op != Cigar::CLIPPED);
+            if (start_backtrack(start_cost, data, start_query_dist, node))
+                starts.emplace_back(dist, static_cast<ssize_t>(dist) - start_query_dist, start_query_dist, node);
         }
+        // Preserve traceback order: query distance first, then insertion order.
+        std::stable_sort(starts.begin(), starts.end(), [](const auto &a, const auto &b) {
+            return std::get<2>(a) < std::get<2>(b);
+        });
 
         auto traverse_back_char = [&traverse_back](DeBruijnGraph::node_index node, char c, size_t dist, Anchor::label_class_t cur_target) {
             std::string c_str(1, c);
