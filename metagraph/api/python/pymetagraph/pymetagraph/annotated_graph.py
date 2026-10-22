@@ -36,7 +36,7 @@ class AnnotatedGraph:
 
     def query(self, seqs: Union[str, Iterable[str]],
               num_top_labels: int = 1,
-              discovery_fraction: float = 0.0,
+              discovery_fraction: float = 0.7,
               presence_fraction: float = 0.0) -> Union[Hits, List[Hits]]:
         """Top labels of each sequence with their numbers of matching k-mers.
 

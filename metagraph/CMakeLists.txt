@@ -211,15 +211,6 @@ set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
 # BUILD_KMC controls the standalone executable; the KMC library is always built.
 option(BUILD_KMC "Build the standalone KMC executable" OFF)
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
-# Discard KMC configure artifacts when the parent generator has changed.
-if(EXISTS ${PROJECT_BINARY_DIR}/KMC/CMakeCache.txt)
-  file(STRINGS ${PROJECT_BINARY_DIR}/KMC/CMakeCache.txt _kmc_cached_generator
-       REGEX "^CMAKE_GENERATOR:INTERNAL=")
-  if(NOT _kmc_cached_generator STREQUAL "CMAKE_GENERATOR:INTERNAL=${CMAKE_GENERATOR}")
-    file(REMOVE ${PROJECT_BINARY_DIR}/KMC/CMakeCache.txt)
-    file(REMOVE_RECURSE ${PROJECT_BINARY_DIR}/KMC/CMakeFiles)
-  endif()
-endif()
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
   -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
   -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
@@ -420,6 +411,11 @@ set(HTSLIB_PIC_FLAG "")
 if(BUILD_PYTHON_BINDINGS)
   set(HTSLIB_PIC_FLAG "-fPIC ")
 endif()
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+  set(HTSLIB_MAKE "$(MAKE)")
+else()
+  find_program(HTSLIB_MAKE NAMES gmake make REQUIRED)
+endif()
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
@@ -430,7 +426,7 @@ ExternalProject_Add(HTSLIB
       "CFLAGS=${HTSLIB_PIC_FLAG}${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${PROJECT_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
-  BUILD_COMMAND make -j${N} lib-static
+  BUILD_COMMAND ${HTSLIB_MAKE} -j${N} lib-static
   #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
   # Install only static lib to avoid the dependency
   INSTALL_COMMAND
@@ -617,10 +613,12 @@ endif()
 # pymetagraph Python extension
 #-------------------
 if(BUILD_PYTHON_BINDINGS)
+  find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
   execute_process(
-    COMMAND python3 -m pybind11 --cmakedir
+    COMMAND ${Python_EXECUTABLE} -m pybind11 --cmakedir
     OUTPUT_VARIABLE pybind11_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
   )
   find_package(pybind11 CONFIG REQUIRED)
 

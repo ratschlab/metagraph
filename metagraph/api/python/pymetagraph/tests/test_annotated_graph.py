@@ -48,11 +48,12 @@ def graph(index):
     return pymetagraph.AnnotatedGraph(*index, threads=2)
 
 
-def cli_query(index, fasta, discovery_fraction):
+def cli_query(index, fasta, discovery_fraction=None):
     """{sequence index: [(label, kmer_count)]} as reported by `metagraph query`."""
     result = subprocess.run(
         [METAGRAPH, "query", "-i", str(index[0]), "-a", str(index[1]),
-         "--min-kmers-fraction-label", str(discovery_fraction), str(fasta)],
+         *([] if discovery_fraction is None else
+           ["--min-kmers-fraction-label", str(discovery_fraction)]), str(fasta)],
         check=True, capture_output=True, text=True)
     hits = {}
     for line in result.stdout.splitlines():
@@ -88,6 +89,16 @@ def test_counts_and_order(graph):
     counts = [count for _, count in hits]
     assert counts == sorted(counts, reverse=True)
     assert counts[0] == len(seq) - K + 1
+
+
+def test_default_discovery_fraction_matches_cli(graph, index, tmp_path):
+    seq = next(iter(read_fasta(DATA).values()))[:K + 10] + "N" * (2 * K)
+    fasta = tmp_path / "partial.fa"
+    fasta.write_text(f">partial\n{seq}\n")
+    assert graph.query(seq, discovery_fraction=0.0)
+    assert cli_query(index, fasta).get(0, []) == []
+    assert graph.query(seq) == []
+    assert graph._graph.query([seq]) == [[]]
 
 
 def test_single_sequence_and_edge_cases(graph):

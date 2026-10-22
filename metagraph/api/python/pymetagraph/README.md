@@ -27,7 +27,8 @@ normal allocator configuration. Building the native library can take several min
 For direct CMake development, use a Python environment with `pybind11` installed:
 
 ```sh
-cmake -S metagraph -B build-python -DBUILD_PYTHON_BINDINGS=ON -DMETAGRAPH_BUILD_EXECUTABLE=OFF
+python -m pip install pybind11
+cmake -S metagraph -B build-python -DBUILD_PYTHON_BINDINGS=ON -DMETAGRAPH_BUILD_EXECUTABLE=OFF -DPython_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')"
 cmake --build build-python --target _pymetagraph_core -j8
 cmake --install build-python --component _pymetagraph_core --prefix "$PWD/metagraph/api/python/pymetagraph"
 export PYTHONPATH="$PWD/metagraph/api/python/pymetagraph${PYTHONPATH:+:$PYTHONPATH}"

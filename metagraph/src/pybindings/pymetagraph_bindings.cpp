@@ -199,7 +199,7 @@ class AnnotatedGraph {
                     ar::score_match(path, config),
                     mtg::graph::align::Cigar(path.get_cigar().to_string()), 0, path.get_orientation());
                 const auto *encoder = anno_dbg_ ? &anno_dbg_->get_annotator().get_label_encoder() : nullptr;
-                if (annotations) {
+                if (annotations && !path.get_label_classes().empty()) {
                     const auto &cols = annotations->get_cached_column_set(path.get_label_classes()[0]);
                     displayed.label_columns.assign(cols.begin(), cols.end());
                     displayed.label_coordinates = path.get_coords();
@@ -241,7 +241,7 @@ PYBIND11_MODULE(_pymetagraph_core, m) {
         .def_property_readonly("labels", &AnnotatedGraph::labels)
         .def("query", &AnnotatedGraph::query,
              py::arg("seqs"), py::arg("num_top_labels") = 1,
-             py::arg("discovery_fraction") = 0.0, py::arg("presence_fraction") = 0.0,
+             py::arg("discovery_fraction") = 0.7, py::arg("presence_fraction") = 0.0,
              py::call_guard<py::gil_scoped_release>())
         .def("align", &AnnotatedGraph::align,
              py::arg("seqs"), py::arg("seed_length") = 0,
