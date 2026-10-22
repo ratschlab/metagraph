@@ -53,6 +53,10 @@ class TestAnnotate(TestingBase):
         for chunk in chunks:
             self.assertTrue(filecmp.cmp(chunk, root / "expected.column.annodbg", shallow=False),
                             str(chunk))
+            if coords:
+                self.assertTrue(filecmp.cmp(str(chunk) + ".coords",
+                                           root / "expected.column.annodbg.coords", shallow=False),
+                                str(chunk) + ".coords")
 
     @parameterized.expand([("file",), ("previous_chunks",)])
     def test_separate_header_rejects_existing_output(self, kind):
