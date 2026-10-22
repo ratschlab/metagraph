@@ -217,22 +217,3 @@ class Alignment : public Match {
 bool operator==(const Alignment &a, const Alignment &b);
 
 } // namespace mtg::graph::align
-
-namespace std {
-
-template<>
-struct hash<mtg::graph::align_redone::Match> {
-    std::size_t operator()(const mtg::graph::align_redone::Match &a) const;
-};
-
-template<>
-struct hash<mtg::graph::align_redone::Anchor> {
-    std::size_t operator()(const mtg::graph::align_redone::Anchor &a) const;
-};
-
-template<>
-struct hash<mtg::graph::align_redone::Alignment> {
-    std::size_t operator()(const mtg::graph::align_redone::Alignment &a) const;
-};
-
-} // namespace std;

@@ -49,25 +49,6 @@ using AnchorExtender = std::function<void(AnchorIt, // first ptr,
                                           const AlignmentCallback&)>;
 
 template <typename AnchorIt>
-struct ChainHash {
-    inline std::size_t operator()(const AnchorChain<AnchorIt> &chain) const {
-        uint64_t hash = 0;
-
-        auto update_hash = [&](auto val) {
-            hash ^= val + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        };
-
-        for (const auto &[anchor_it, dist] : chain) {
-            std::for_each(anchor_it->get_path().begin(), anchor_it->get_path().end(),
-                          update_hash);
-            update_hash(dist);
-            update_hash(anchor_it->get_coord());
-        }
-        return hash;
-    }
-};
-
-template <typename AnchorIt>
 struct ChainEqual {
     inline std::size_t operator()(const AnchorChain<AnchorIt> &a,
                                   const AnchorChain<AnchorIt> &b) const {

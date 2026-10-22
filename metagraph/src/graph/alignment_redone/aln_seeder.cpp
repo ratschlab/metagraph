@@ -1312,31 +1312,8 @@ class OffsetVector {
   public:
     OffsetVector() : offset_(0) {}
 
-    template <typename... Args>
-    OffsetVector(size_t offset, Args&&... args) : offset_(offset), null_(T()), data_(std::forward<Args>(args)...) {}
-
     size_t size() const { return offset_ + data_.size(); }
-    bool empty() const { return offset_ == 0 && data_.empty(); }
-
-    void resize(size_t new_size, const T &val = T()) {
-        if (new_size >= offset_) {
-            data_.resize(new_size - offset_, val);
-            return;
-        }
-
-        new_size -= data_.size();
-        data_.clear();
-        assert(new_size <= offset_);
-        offset_ -= new_size;
-    }
-
     size_t offset() const { return offset_; }
-
-    template <typename... Args>
-    T& set(size_t i, Args&&... args) {
-        get(i) = T(std::forward<Args>(args)...);
-        return data_[i - offset_];
-    }
 
     T& get(size_t i) {
         if (data_.empty())
@@ -1360,12 +1337,6 @@ class OffsetVector {
     const T& operator[](size_t i) const {
         return i >= offset_ ? data_[i - offset_] : null_;
     }
-
-    using const_iterator = typename WorkspaceVector<T>::const_iterator;
-    const_iterator begin() const { return data_.begin(); }
-    const_iterator end() const { return data_.end(); }
-    const_iterator cbegin() const { return data_.cbegin(); }
-    const_iterator cend() const { return data_.cend(); }
 
   private:
     size_t offset_;
@@ -2534,7 +2505,6 @@ void Extender::extend(const Alignment &aln,
             assert(it != end);
         }
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
-        size_t max_dist = 0;
         DBGAlignerConfig::score_t best_score = aln_score;
         size_t max_query_dist = 0;
         Anchor::label_class_t target = aln.get_label_classes().back();
@@ -2601,7 +2571,6 @@ void Extender::extend(const Alignment &aln,
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
-                max_dist = std::max(dist, max_dist);
                 auto score = get_score(cost, dist, query_dist);
                 if (score > best_score) {
                     best_score = score;
@@ -2659,7 +2628,6 @@ void Extender::extend(const Alignment &aln,
         size_t num_matches = it->first == Cigar::MATCH ? it->second : 0;
 
         bool found = false;
-        size_t max_dist = 0;
         size_t max_query_dist = 0;
         auto *anno_buffer = make_aln_graph(fwd_ext.get_label_classes()[0]).get_anno_buffer();
         align_bwd(
@@ -2718,7 +2686,6 @@ void Extender::extend(const Alignment &aln,
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                 // terminate
                 size_t dist = std::get<0>(data);
-                max_dist = std::max(dist, max_dist);
                 auto score = get_score(cost, dist, query_dist);
                 if (score > best_score) {
                     best_score = score;

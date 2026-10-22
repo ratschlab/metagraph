@@ -68,7 +68,6 @@ class AnnotationBuffer {
 
     const Annotator& get_annotator() const { return annotator_; }
 
-    size_t num_nodes_buffered() const { return node_to_cols_.size(); }
     size_t num_column_sets() const { return column_sets_.size(); }
 
     // This method lets the caller push additional column sets to dictionary

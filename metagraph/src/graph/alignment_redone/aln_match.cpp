@@ -196,19 +196,3 @@ void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
 }
 
 } // namespace mtg::graph::align
-
-namespace std {
-
-std::size_t hash<mtg::graph::align_redone::Match>::operator()(const mtg::graph::align_redone::Match &a) const {
-    return (a.get_path().size() ? a.get_path()[0] : 0) + a.get_clipping() + a.get_end_clipping();
-}
-
-std::size_t hash<mtg::graph::align_redone::Anchor>::operator()(const mtg::graph::align_redone::Anchor &a) const {
-    return std::hash<mtg::graph::align_redone::Match>()(a);
-}
-
-std::size_t hash<mtg::graph::align_redone::Alignment>::operator()(const mtg::graph::align_redone::Alignment &a) const {
-    return std::hash<std::string>()(a.get_cigar().to_string());
-}
-
-} // namespace std
