@@ -811,6 +811,18 @@ bool DBGSSHash::load(std::istream& in) {
     if (!in.good())
         return false;
 
+    struct RestoreExceptions {
+        std::istream &stream;
+        std::ios::iostate mask;
+        ~RestoreExceptions() {
+            try {
+                stream.exceptions(mask);
+            } catch (const std::ios_base::failure &) {
+                // The mask is restored even if the failed read still sets a flag.
+            }
+        }
+    } restore_exceptions { in, in.exceptions() };
+
     try {
         // Stop on a short read before the loader uses an unread array length.
         in.exceptions(in.badbit | in.failbit | in.eofbit);

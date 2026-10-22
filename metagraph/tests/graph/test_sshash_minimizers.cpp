@@ -163,6 +163,26 @@ TEST(SSHashFormat, FailedReloadPreservesGraph) {
     }
 }
 
+TEST(SSHashFormat, LoadPreservesStreamExceptionMask) {
+    using mtg::graph::DBGSSHash;
+    auto graph = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
+    std::stringstream bytes;
+    static_cast<const DBGSSHash&>(*graph).serialize(bytes);
+    for (auto mask : { std::ios::goodbit, std::ios::badbit, std::ios::failbit,
+                       std::ios::eofbit | std::ios::failbit | std::ios::badbit }) {
+        for (bool truncated : { false, true }) {
+            SCOPED_TRACE(mask);
+            SCOPED_TRACE(truncated);
+            std::stringstream input(truncated ? bytes.str().substr(0, 1) : bytes.str());
+            input.exceptions(mask);
+            DBGSSHash loaded(3);
+            EXPECT_EQ(!truncated, loaded.load(input));
+            EXPECT_EQ(mask, input.exceptions());
+            EXPECT_EQ(truncated, input.fail());
+        }
+    }
+}
+
 TEST(SSHashLookup, ForwardOrientationsAndRoundTrip) {
     using mtg::graph::DBGSSHash;
 #if _PROTEIN_GRAPH
