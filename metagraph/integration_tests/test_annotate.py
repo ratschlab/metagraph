@@ -27,6 +27,33 @@ class TestAnnotate(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
+    @parameterized.expand([(False,), (True,)])
+    def test_separate_header_tasks_across_files(self, coords):
+        from pathlib import Path
+        root = Path(self.tempdir.name)
+        files = [root / f"record{i}.fa" for i in range(64)]
+        for path in files:
+            path.write_text(">same\nAAAAAACCCCCGTGGGGGAT\n")
+
+        def run(*args):
+            result = subprocess.run([METAGRAPH, *map(str, args)],
+                                    stdout=PIPE, stderr=PIPE, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        run("build", "-k", "5", "-o", root / "graph", files[0])
+        options = ["--coordinates"] if coords else []
+        run("annotate", "-i", root / "graph.dbg", "--anno-header",
+            "-o", root / "expected", *options, files[0])
+        # Each file ends with a buffered batch, whose task may still be queued
+        # when the per-file callback is destroyed.
+        run("annotate", "-p", "4", "-i", root / "graph.dbg", "--separate-header",
+            "-o", root / "chunks", *options, *files)
+        chunks = list((root / "chunks").glob("*.column.annodbg"))
+        self.assertEqual(len(chunks), len(files))
+        for chunk in chunks:
+            self.assertTrue(filecmp.cmp(chunk, root / "expected.column.annodbg", shallow=False),
+                            str(chunk))
+
     @parameterized.expand([("file",), ("previous_chunks",)])
     def test_separate_header_rejects_existing_output(self, kind):
         from pathlib import Path

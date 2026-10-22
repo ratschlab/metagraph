@@ -2453,7 +2453,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
             path.resize(path.size() - std::min(path.size(), suffix.size()));
             assert(std::all_of(path.begin(), path.end(),
                                [&](auto node) {
-                                   return AlignmentGraph(base_graph, anno_buffer, final_target).has_labels(node, target);
+                                   return AlignmentGraph(base_graph, anno_buffer, target).has_labels(node, final_target);
                                 }));
             std::reverse(spelling.begin(), spelling.end());
             std::reverse(path.begin(), path.end());
@@ -2600,6 +2600,13 @@ void Extender::extend(const Alignment &aln,
 
     for (auto &fwd_ext : fwd_exts) {
         fwd_ext.trim_end();
+        // Backward extension can match at most one character per clipped base.
+        // Skip paths that cannot meet the final match-fraction filter even if
+        // every remaining base matches; this does not discard any valid result.
+        const size_t remaining = no_bwd ? 0 : fwd_ext.get_clipping();
+        if (fwd_ext.get_cigar().get_num_matches() + remaining
+                < config_.min_exact_match * fwd_ext.get_query().size())
+            continue;
         if (no_bwd || !fwd_ext.get_clipping()) {
             set_coords(fwd_ext);
             callback(std::move(fwd_ext));
