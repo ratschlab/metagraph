@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-13 cmake make ccache autoconf automake libtool libbz2-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev libssl-dev
+          sudo apt-get install -y g++-13 cmake make ccache autoconf automake libtool libbz2-dev libboost-iostreams-dev libboost-random-dev libdeflate-dev liblzma-dev libzstd-dev libssl-dev
           python -m pip install scikit-build-core pybind11 pytest
       - uses: actions/cache@v4
         with:
