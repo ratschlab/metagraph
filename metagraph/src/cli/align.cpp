@@ -23,7 +23,6 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-// using namespace mtg::graph::align;
 
 using mtg::seq_io::kseq_t;
 using mtg::common::logger;
@@ -440,8 +439,6 @@ int align_to_graph(Config *config) {
             uint64_t num_bytes_read = 0;
 
             using SeqBatch = std::vector<std::pair<std::string, std::string>>;
-            // // Read a batch to pass on to a thread
-            // typedef std::vector<IDBGAligner::Query> SeqBatch;
             SeqBatch seq_batch;
             num_bytes_read = 0;
             for ( ; it != end && num_bytes_read <= batch_size; ++it) {

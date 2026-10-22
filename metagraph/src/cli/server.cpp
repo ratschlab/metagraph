@@ -183,8 +183,6 @@ Json::Value process_align_request(const std::string &received_message,
     config.alignment_extend_chains = json.get("extend_chains", true).asBool();
     config.alignment_connect_anchors = json.get("connect_anchors", true).asBool();
 
-    // align::DBGAligner aligner(graph, initialize_align_config(config, graph));
-    // const align::DBGAlignerConfig &aligner_config = aligner.get_config();
     auto aligner_config = initialize_aligner_config(config, graph);
 
     // TODO: make parallel?
@@ -222,9 +220,6 @@ Json::Value process_align_request(const std::string &received_message,
             align_query(aln_query, seeder, aln_callback,
                         config.alignment_connect_anchors);
         }
-        // for (const auto &path : aligner.align(read_stream->seq.s)) {
-
-        // }
 
         align_entry[SeqSearchResult::ALIGNMENT_JSON_FIELD] = alignments;
 
