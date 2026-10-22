@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [master, align_refactor]
     paths:
-      - 'metagraph/api/python/pymetagraph/**'
-      - 'metagraph/src/pybindings/**'
+      - 'metagraph/**'
+      - '.gitmodules'
       - '.github/workflows/pymetagraph.yml'
   workflow_dispatch:
 
@@ -19,6 +19,10 @@ concurrency:
 jobs:
   wheel:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.13', '3.14']
     env:
       CMAKE_GENERATOR: Unix Makefiles
       CMAKE_BUILD_PARALLEL_LEVEL: 2
@@ -30,17 +34,19 @@ jobs:
           submodules: recursive
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-13 cmake make ccache autoconf automake libtool libbz2-dev libboost-iostreams-dev libboost-random-dev libdeflate-dev liblzma-dev libzstd-dev libssl-dev
+          sudo apt-get install -y g++-13 cmake make ccache autoconf automake libtool libbz2-dev libboost-iostreams-dev libdeflate-dev liblzma-dev libzstd-dev libssl-dev
           python -m pip install scikit-build-core pybind11 pytest
       - uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: pymetagraph-gcc13-${{ github.sha }}
-          restore-keys: pymetagraph-gcc13-
+          key: pymetagraph-gcc13-${{ matrix.python }}-${{ github.sha }}
+          restore-keys: |
+            pymetagraph-gcc13-${{ matrix.python }}-
+            pymetagraph-gcc13-
       - name: Build CLI and extension
         run: |
           cmake -S metagraph -B build-native -DCMAKE_BUILD_TYPE=Release -DBUILD_PYTHON_BINDINGS=ON -DMETAGRAPH_BUILD_EXECUTABLE=ON -DPython_EXECUTABLE="$(command -v python)" -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
