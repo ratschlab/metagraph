@@ -461,7 +461,8 @@ TEST(PatternPredicate, NestingAtMost64Deep) {
 // The shared corpus of SPEC §19.3's predicate forms (tests/data/pattern_predicate_forms.json):
 // every row's host verdict is Predicate::parse's — "ok", or the refusal's code. The suite's
 // manifest builder holds its own predictor of the service's by-design cases to the same rows
-// (scripts/suite/tests/test_manifest_lib.py), so the two readings cannot drift apart unseen
+// (the suite's tests/test_manifest_lib.py, in ratschlab/metagraph-suite since 2026-10-21), so the two readings
+// cannot drift apart unseen
 TEST(PatternPredicate, TheSharedCorpusIsTheHostsVerdict) {
     // run from the build directory, like every test reading ../tests/data
     const char corpus[] = "../tests/data/pattern_predicate_forms.json";

@@ -882,7 +882,8 @@ def time_bound(res):
     """Whether a time limit stopped the seed (SPEC core §6.8: such a result need not repeat): a limitation of
     bounds.time_budget_ms (a derivation, a walk cap), a time_budget cap trigger, a time or attempt_deadline
     resource stop; for older responses also a seed error naming the time budget. The suite's checks.time_limited
-    reads a seed alike (scripts/suite/tests/test_checks.py TimeLimitedSeeds holds the two together)."""
+    reads a seed alike (the suite's tests/test_checks.py TimeLimitedSeeds, in ratschlab/metagraph-suite since
+    2026-10-21, holds the two together)."""
     for l in res.get('limitations') or []:
         if isinstance(l, dict) and l.get('knob') == 'bounds.time_budget_ms':
             return True

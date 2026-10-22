@@ -1,5 +1,0 @@
-{"header": "NC_000932.1", "column": 6835, "label": "3702", "seq_id": 6, "length": 154478, "window": [1, 200], "num_kmers": 170, "in_graph": 170, "header_supported": 0, "column_supported": 0, "status": "header_none"}
-{"header": "NC_000908.2", "column": 38155, "label": "243273", "seq_id": 25, "length": 580076, "window": [1, 200], "num_kmers": 170, "in_graph": 170, "header_supported": 170, "column_supported": 170, "status": "ok"}
-{"header": "NC_002754.1", "column": 45067, "label": "273057", "seq_id": 2, "length": 2992245, "window": [1, 200], "num_kmers": 170, "in_graph": 170, "header_supported": 170, "column_supported": 170, "status": "ok"}
-{"header": "NC_002163.1", "column": 58775, "label": "192222", "seq_id": 1, "length": 1641481, "window": [1, 200], "num_kmers": 170, "in_graph": 170, "header_supported": 170, "column_supported": 170, "status": "ok"}
-{"header": "NC_002528.1", "column": 64614, "label": "107806", "seq_id": 2, "length": 640681, "window": [1, 200], "num_kmers": 170, "in_graph": 170, "header_supported": 170, "column_supported": 170, "status": "ok"}
