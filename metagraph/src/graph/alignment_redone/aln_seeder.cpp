@@ -196,7 +196,7 @@ bool align_fast(const Query &query, const Seeder &seeder,
             || query.get_query().size() < query.get_graph().get_k())
         return false;
 
-    if (!config.num_alternative_paths) return true;
+    if (!config.num_alternative_paths || !config.max_num_seeds_per_locus) return true;
     align::DBGAlignerConfig fast;
     fast.num_alternative_paths = config.num_alternative_paths;
     fast.min_seed_length = config.min_seed_length;
