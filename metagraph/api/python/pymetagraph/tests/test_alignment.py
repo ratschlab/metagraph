@@ -124,6 +124,19 @@ def test_chaining_options(graph):
             assert hits[0]["query_end"] > hits[0]["query_start"]
 
 
+def test_two_sided_search_is_independent_of_chaining(graph):
+    query = REFERENCE[:2] + "T" + REFERENCE[3:]
+    for chain in (False, True):
+        forward = graph.align(query, seed_length=5, min_exact_match=0,
+                              only_forwards=True, chain_alignments=chain)
+        sensitive = graph.align(query, seed_length=5, min_exact_match=0,
+                                only_forwards=True, chain_alignments=chain, two_sided=True)
+        assert forward and sensitive
+        assert forward[0]["query_start"] > 0
+        assert sensitive[0]["query_start"] == 0
+        assert sensitive[0]["annotation"]["cigar"] == "2=1X24="
+
+
 def test_search_limits(graph):
     query = REFERENCE[:8] + "C" + REFERENCE[9:]
     assert graph.align(REFERENCE, seed_length=5, max_num_seeds_per_locus=0) == []
