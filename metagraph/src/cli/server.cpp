@@ -628,7 +628,10 @@ int run_server(Config *config) {
 
     std::promise<void> listening;
     std::thread server_thread = start_server(server, *config, num_server_threads,
-                                            [&](unsigned short) { listening.set_value(); });
+                                            [&](unsigned short port) {
+        logger->info("[Server] Listening on port {}", port);
+        listening.set_value();
+    });
     listening.get_future().wait();
     shutdown_signals.async_wait([&](const asio::error_code &error, int) {
         if (!error) {
