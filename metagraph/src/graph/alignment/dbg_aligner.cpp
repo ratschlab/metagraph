@@ -313,8 +313,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         if (config_.chain_alignments) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
+            // Protein chaining ignores the reverse seeder, which is absent.
             auto [seeds, extensions, explored_nodes] =
-                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                align_both_directions(this_query, reverse, *seeder, *seeder,
                                       extender, extender_rc,
                                       add_alignment, get_min_path_score);
 
