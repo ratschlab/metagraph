@@ -762,6 +762,10 @@ class AlignmentGraph {
         assert(std::all_of(node_labels.begin(), node_labels.end(),
                            [&](auto c) { return c < anno_buffer_->get_annotator().get_label_encoder().size(); }));
 
+        if (target_labels.size() == 1)
+            return std::binary_search(node_labels.begin(), node_labels.end(), target_labels.front())
+                ? target_labels_id : 0;
+
         AnnotationBuffer::Columns columns;
         std::set_intersection(node_labels.begin(), node_labels.end(),
                               target_labels.begin(), target_labels.end(),
