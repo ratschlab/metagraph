@@ -79,7 +79,10 @@ native work runs and use the configured worker pool.
 Alignment options include `seed_length` (0 selects min(19, k)),
 `max_alternative_alignments`, `min_exact_match`, `xdrop`,
 `rel_score_cutoff`, `only_forwards`, `connect_anchors`,
-and `extend_chains`. Scoring defaults match the CLI.
+`extend_chains`, `chain_alignments`, and `two_sided`. Chaining and two-sided
+extension default to false. Enable both for the more sensitive search;
+`only_forwards` independently selects the query orientations. Scoring defaults
+match the CLI.
 With `connect_anchors=False`, a result containing an unresolved graph gap raises
 `ValueError`: raw chains cannot use the alignment JSON schema. Keep anchor
 connection enabled to obtain inexact alignments. Batch failures drain all workers

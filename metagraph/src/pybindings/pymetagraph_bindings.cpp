@@ -146,7 +146,8 @@ class AnnotatedGraph {
             size_t max_alternative_alignments, double min_exact_match,
             int32_t xdrop, double rel_score_cutoff, bool only_forwards,
             bool connect_anchors, bool extend_chains, size_t max_num_seeds_per_locus,
-            double max_num_nodes_per_seq_char, double max_ram_per_alignment) const {
+            double max_num_nodes_per_seq_char, double max_ram_per_alignment,
+            bool chain_alignments, bool two_sided) const {
         namespace ar = mtg::graph::align_redone;
         if (!max_alternative_alignments || xdrop < 0
                 || !std::isfinite(min_exact_match) || min_exact_match < 0 || min_exact_match > 1
@@ -163,6 +164,8 @@ class AnnotatedGraph {
         config.max_num_seeds_per_locus = max_num_seeds_per_locus;
         config.max_nodes_per_seq_char = max_num_nodes_per_seq_char;
         config.max_ram_per_alignment = max_ram_per_alignment;
+        config.chain_alignments = chain_alignments;
+        config.two_sided = two_sided;
         config.xdrop = xdrop;
         config.rel_score_cutoff = rel_score_cutoff;
         config.forward_and_reverse_complement = !only_forwards;
@@ -253,5 +256,6 @@ PYBIND11_MODULE(_pymetagraph_core, m) {
              py::arg("max_num_seeds_per_locus") = 1000,
              py::arg("max_num_nodes_per_seq_char") = 5.0,
              py::arg("max_ram_per_alignment") = 200.0,
+             py::arg("chain_alignments") = false, py::arg("two_sided") = false,
              py::call_guard<py::gil_scoped_release>());
 }

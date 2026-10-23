@@ -59,7 +59,8 @@ class AnnotatedGraph:
               rel_score_cutoff: float = 0.95,
               only_forwards: bool = False, connect_anchors: bool = True,
               extend_chains: bool = True, max_num_seeds_per_locus: int = 1000,
-              max_num_nodes_per_seq_char: float = 5.0, max_ram_per_alignment: float = 200.0):
+              max_num_nodes_per_seq_char: float = 5.0, max_ram_per_alignment: float = 200.0,
+              chain_alignments: bool = False, two_sided: bool = False):
         """Align sequences, optionally constrained by annotation labels.
 
         Return one list of result dictionaries per query, or just that list
@@ -68,11 +69,14 @@ class AnnotatedGraph:
         the original input. Label ``nt_coords`` are reference coordinates in
         the CLI's one-based inclusive format; they are not query positions.
         ``seed_length=0`` selects min(19, k). No match gives an empty list.
+        Chaining and two-sided extension are opt-in. ``only_forwards`` selects
+        query orientation independently of these search options.
         """
         single = isinstance(seqs, str)
         batches = self._graph.align(
             [seqs] if single else list(seqs), seed_length, max_alternative_alignments,
             min_exact_match, xdrop, rel_score_cutoff, only_forwards, connect_anchors, extend_chains,
-            max_num_seeds_per_locus, max_num_nodes_per_seq_char, max_ram_per_alignment)
+            max_num_seeds_per_locus, max_num_nodes_per_seq_char, max_ram_per_alignment,
+            chain_alignments, two_sided)
         results = [[json.loads(result) for result in batch] for batch in batches]
         return results[0] if single else results
