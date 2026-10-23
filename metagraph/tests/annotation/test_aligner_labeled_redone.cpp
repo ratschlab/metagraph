@@ -131,7 +131,12 @@ TEST(LabeledChaining, SharedSeedsKeepDistinctConnectingPaths) {
     EXPECT_EQ((std::set<std::string>{"0", "1", "2"}), found_labels);
 }
 
-TEST(SSHashAlignment, MatchFractionUsesCompletedAlignment) {
+template <class Graph>
+class MatchFractionAlignment : public ::testing::Test {};
+using MatchFractionGraphs = ::testing::Types<DBGSuccinct, DBGSSHash>;
+TYPED_TEST_SUITE(MatchFractionAlignment, MatchFractionGraphs);
+
+std::pair<std::string, std::string> sparse_seed_sequences() {
     std::mt19937 random(73);
     std::string reference(73, 'A');
     for (char &c : reference)
@@ -139,14 +144,20 @@ TEST(SSHashAlignment, MatchFractionUsesCompletedAlignment) {
     std::string sequence = reference;
     for (size_t i : { 25, 35, 45, 55, 65 })
         sequence[i] = sequence[i] == 'A' ? 'C' : 'A';
+    return {reference, sequence};
+}
 
-    auto anno_graph = build_anno_graph<DBGSSHash, annot::ColumnCompressed<>>(
+TYPED_TEST(MatchFractionAlignment, UsesCompletedAlignment) {
+    const auto [reference, sequence] = sparse_seed_sequences();
+    auto anno_graph = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
         11, { reference }, { "reference" });
     const auto &graph = anno_graph->get_graph();
     Query query(graph, sequence);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.min_seed_length = config.max_seed_length = 11;
+    config.min_seed_length = 10;
+    config.max_seed_length = 11;
+    config.two_sided = true;
     config.forward_and_reverse_complement = false;
 
     std::vector<bool> covered(sequence.size());
@@ -181,6 +192,34 @@ TEST(SSHashAlignment, MatchFractionUsesCompletedAlignment) {
             }
         }
     }
+}
+
+TYPED_TEST(MatchFractionAlignment, LowCoverageLabelSurvivesAnExactOtherLabel) {
+    const auto [reference, sequence] = sparse_seed_sequences();
+    auto anno_graph = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+        11, {reference, sequence}, {"reference", "exact"});
+    const auto &graph = anno_graph->get_graph();
+    const auto &encoder = anno_graph->get_annotator().get_label_encoder();
+    Query query(graph, sequence);
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.min_seed_length = 10;
+    config.max_seed_length = 11;
+    config.min_exact_match = 0.7;
+    config.forward_and_reverse_complement = false;
+    config.two_sided = true;
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+    LabeledSeeder seeder(buffer, query, config);
+    LabeledExtender extender(buffer, query, config);
+    std::set<std::string> found;
+    align_query(query, seeder, extender, [&](Alignment&& alignment) {
+        for (auto column : buffer.get_cached_column_set(alignment.get_label_classes()[0])) {
+            auto label = encoder.decode(column);
+            found.insert(label);
+            EXPECT_EQ(label == "reference" ? reference : sequence, alignment.get_spelling());
+        }
+    });
+    EXPECT_EQ((std::set<std::string>{"reference", "exact"}), found);
 }
 
 
