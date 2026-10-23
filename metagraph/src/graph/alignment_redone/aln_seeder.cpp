@@ -306,6 +306,23 @@ class TraversalCache {
 
     bool backward() const { return backward_; }
 
+    AnnotationBuffer::label_class_t get_labels_id(node_index node,
+                                                  const AnnotationBuffer &annotations) {
+        if (annotations_ != &annotations) {
+            labels_ = {};
+            annotations_ = &annotations;
+        }
+        auto &entry = labels_[node % labels_.size()];
+        if (entry.node == node)
+            return entry.labels;
+        const auto labels = annotations.get_labels_id(node);
+        // Fetched rows are immutable; missing rows must be retried after a
+        // fetch. Keep IDs only, since buffer insertions invalidate pointers.
+        if (labels != AnnotationBuffer::nannot)
+            entry = {node, labels};
+        return labels;
+    }
+
     bool has_single(node_index node) {
         const auto &entry = get_edges(node);
         // BOSS excludes its root self-loop and sink sentinel from single-edge
@@ -364,6 +381,11 @@ class TraversalCache {
         bool edges_known = false;
     };
 
+    struct LabelEntry {
+        node_index node = DeBruijnGraph::npos;
+        AnnotationBuffer::label_class_t labels = AnnotationBuffer::nannot;
+    };
+
     Entry &get(node_index node) {
         assert(node);
         auto &entry = entries_[node % entries_.size()];
@@ -404,6 +426,8 @@ class TraversalCache {
     bool is_succinct_;
     const NodeFirstCache *first_cache_;
     std::array<Entry, 1024> entries_{};
+    const AnnotationBuffer *annotations_ = nullptr;
+    std::array<LabelEntry, 1024> labels_{};
 };
 
 } // namespace
@@ -505,8 +529,7 @@ class AlignmentGraph {
         if (forward_nodes.size() < min_dist_before_check_anno)
             return;
 
-        anno_buffer_->queue_path(forward_nodes);
-        anno_buffer_->fetch_queued_annotations();
+        fetch_missing_annotations(forward_nodes);
 
         label_class_t cur_target = target_;
         for (node_index next : forward_nodes) {
@@ -567,9 +590,7 @@ class AlignmentGraph {
         if (backward_nodes.size() < min_dist_before_check_anno)
             return;
 
-        anno_buffer_->queue_path(std::vector<node_index>(backward_nodes.rbegin(),
-                                                         backward_nodes.rend()));
-        anno_buffer_->fetch_queued_annotations();
+        fetch_missing_annotations(backward_nodes, true);
 
         label_class_t cur_target = target_;
         for (node_index prev : backward_nodes) {
@@ -591,31 +612,7 @@ class AlignmentGraph {
             else
                 graph_.call_outgoing_kmers(node, call);
         };
-        if (target_ == Anchor::nannot) {
-            call_outgoing([&](node_index next, char c) { callback(next, c, target_); });
-        } else {
-            std::vector<node_index> forward_n;
-            std::vector<char> forward_c;
-            call_outgoing([&](node_index next, char c) {
-                if (c != boss::BOSS::kSentinel) {
-                    forward_n.emplace_back(next);
-                    forward_c.emplace_back(c);
-                    anno_buffer_->queue_path(std::vector<node_index>{ next });
-                }
-            });
-            anno_buffer_->fetch_queued_annotations();
-
-            for (size_t i = 0; i < forward_n.size(); ++i) {
-                node_index next = forward_n[i];
-                char c = forward_c[i];
-                label_class_t next_target = get_intersect_labels(next, target_);
-                assert(next_target != Anchor::nannot);
-                if (next_target) {
-                    assert(has_labels(next, next_target));
-                    callback(next, c, next_target);
-                }
-            }
-        }
+        call_labeled_edges(call_outgoing, callback);
     }
 
     void call_incoming_kmers(node_index node, const EdgeCallback &callback) const {
@@ -627,31 +624,7 @@ class AlignmentGraph {
             else
                 graph_.call_incoming_kmers(node, call);
         };
-        if (target_ == Anchor::nannot) {
-            call_incoming([&](node_index prev, char c) { callback(prev, c, target_); });
-        } else {
-            std::vector<node_index> backward_n;
-            std::vector<char> backward_c;
-            call_incoming([&](node_index prev, char c) {
-                if (c != boss::BOSS::kSentinel) {
-                    backward_n.emplace_back(prev);
-                    backward_c.emplace_back(c);
-                    anno_buffer_->queue_path(std::vector<node_index>{ prev });
-                }
-            });
-            anno_buffer_->fetch_queued_annotations();
-
-            for (size_t i = 0; i < backward_n.size(); ++i) {
-                node_index prev = backward_n[i];
-                char c = backward_c[i];
-                label_class_t prev_target = get_intersect_labels(prev, target_);
-                assert(prev_target != Anchor::nannot);
-                if (prev_target) {
-                    assert(has_labels(prev, prev_target));
-                    callback(prev, c, prev_target);
-                }
-            }
-        }
+        call_labeled_edges(call_incoming, callback);
     }
 
     bool has_single_outgoing(node_index node) const {
@@ -729,24 +702,79 @@ class AlignmentGraph {
     TraversalCache *cache_;
     const NodeFirstCache *first_cache_ = nullptr;
 
+    label_class_t get_cached_labels_id(node_index node) const {
+        return cache_ ? cache_->get_labels_id(node, *anno_buffer_)
+                      : anno_buffer_->get_labels_id(node);
+    }
+
+    void fetch_missing_annotations(const std::vector<node_index> &path,
+                                   bool backward = false) const {
+        // Most wavefront visits reuse immutable rows already in the buffer.
+        // Keep path-based batching for genuinely missing annotations.
+        if (std::none_of(path.begin(), path.end(), [&](node_index node) {
+                return get_cached_labels_id(node) == Anchor::nannot;
+            }))
+            return;
+        if (backward)
+            anno_buffer_->queue_path(std::vector<node_index>(path.rbegin(), path.rend()));
+        else
+            anno_buffer_->queue_path(path);
+        anno_buffer_->fetch_queued_annotations();
+    }
+
+    void call_labeled_edges(const auto &call_edges, const EdgeCallback &callback) const {
+        if (target_ == Anchor::nannot) {
+            call_edges([&](node_index next, char c) { callback(next, c, target_); });
+            return;
+        }
+
+        SmallVector<std::tuple<node_index, char, label_class_t>, 4> edges;
+        bool fetch = false;
+        call_edges([&](node_index next, char c) {
+            if (c == boss::BOSS::kSentinel)
+                return;
+            const auto labels = get_cached_labels_id(next);
+            edges.emplace_back(next, c, labels);
+            if (labels == Anchor::nannot) {
+                anno_buffer_->queue_path(std::vector<node_index>{ next });
+                fetch = true;
+            }
+        });
+        if (fetch)
+            anno_buffer_->fetch_queued_annotations();
+
+        for (auto [next, c, labels] : edges) {
+            if (labels == Anchor::nannot)
+                labels = get_label_class(next);
+            const auto next_target = intersect_labels(labels, target_);
+            if (next_target) {
+                assert(has_labels(next, next_target));
+                callback(next, c, next_target);
+            }
+        }
+    }
+
     label_class_t get_label_class(node_index node) const {
         assert(anno_buffer_);
 
-        label_class_t node_labels_id = anno_buffer_->get_labels_id(node);
+        label_class_t node_labels_id = get_cached_labels_id(node);
         if (node_labels_id == Anchor::nannot) {
             anno_buffer_->queue_path(std::vector<node_index>{ node });
             anno_buffer_->fetch_queued_annotations();
-            node_labels_id = anno_buffer_->get_labels_id(node);
+            node_labels_id = get_cached_labels_id(node);
         }
         assert(node_labels_id != Anchor::nannot);
         return node_labels_id;
     }
 
     label_class_t get_intersect_labels(node_index node, label_class_t target_labels_id) const {
+        return intersect_labels(get_label_class(node), target_labels_id);
+    }
+
+    label_class_t intersect_labels(label_class_t node_labels_id,
+                                  label_class_t target_labels_id) const {
         assert(anno_buffer_);
         assert(target_labels_id != Anchor::nannot);
-
-        label_class_t node_labels_id = get_label_class(node);
         assert(node_labels_id != Anchor::nannot);
 
         if (node_labels_id == target_labels_id)
