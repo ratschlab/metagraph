@@ -168,6 +168,20 @@ void run_alignment(const AnnotatedDBG &anno_graph,
         // These fixtures specify the best alignment for each label. Extending
         // isolated seeds can also produce lower-scoring paths for that label.
         for (auto *candidates : { &paths, &paths_no_extend, &paths_no_align }) {
+            // Check every result, including alternatives discarded below:
+            // a valid CIGAR alone cannot detect a traceback into another label.
+            for (const auto &path : *candidates) {
+                for (auto node : path.get_path()) {
+                    if (node == DeBruijnGraph::npos) continue; // unconnected anchor gap
+                    // Sequence lookup maps canonical aliases to annotation rows.
+                    const auto labels = anno_graph.get_labels(graph.get_node_sequence(node), 1.0);
+                    for (auto column : anno_buffer.get_cached_column_set(path.get_label_classes()[0])) {
+                        const auto &label = label_encoder.decode(column);
+                        EXPECT_NE(labels.end(), std::find(labels.begin(), labels.end(), label))
+                            << label << " at node " << node << " in " << path;
+                    }
+                }
+            }
             tsl::hopscotch_set<Anchor::label_class_t> labels;
             std::erase_if(*candidates, [&](const auto &path) {
                 return !labels.insert(path.get_label_classes()[0]).second;

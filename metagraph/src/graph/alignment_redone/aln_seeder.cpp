@@ -11,7 +11,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "aln_chainer.hpp"
-#include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector.hpp"
@@ -185,13 +185,14 @@ bool emit_optimal_exact(const Query &query, const Seeder &seeder,
 
 
 // The column aligner already avoids re-extending covered seeds and uses SIMD
-// scoring. Use it for unlabeled searches that do not request chaining or
+// scoring. Use it for searches that do not request chaining or
 // two-sided extension. Fall back to the wavefront path for partial-node results
 // and sub-k seeds unsupported by the column seeder.
 bool align_fast(const Query &query, const Seeder &seeder,
                 const DBGAlignerConfig &config,
                 const std::function<void(Alignment&&)> &callback) {
-    if (config.chain_alignments || config.two_sided || typeid(seeder) != typeid(ExactSeeder)
+    if (config.chain_alignments || config.two_sided
+            || (typeid(seeder) != typeid(ExactSeeder) && typeid(seeder) != typeid(LabeledSeeder))
             || query.get_query().size() < query.get_graph().get_k())
         return false;
 
@@ -224,14 +225,20 @@ bool align_fast(const Query &query, const Seeder &seeder,
     fast.score_matrix = config.score_matrix;
     fast.forward_and_reverse_complement = false;
     fast.two_sided = false;
-    align::DBGAligner<> aligner(query.get_graph(), fast);
+    auto *annotations = annotation_buffer(seeder);
+    std::unique_ptr<align::IDBGAligner> aligner;
+    if (annotations)
+        aligner = std::make_unique<align::LabeledAligner<>>(query.get_graph(), fast,
+                                                         annotations->get_annotator());
+    else
+        aligner = std::make_unique<align::DBGAligner<>>(query.get_graph(), fast);
     std::vector<Alignment> candidates;
     for (bool orientation : {false, true}) {
 #if _PROTEIN_GRAPH
         if (orientation) break;
 #endif
         if (orientation && !config.forward_and_reverse_complement) break;
-        auto results = aligner.align(query.get_query(orientation));
+        auto results = aligner->align(query.get_query(orientation));
         for (const auto &result : results) {
             // A match wholly inside a k-mer needs the wavefront representation
             // of partial seeds. Do not discard it or change its score.
@@ -239,13 +246,17 @@ bool align_fast(const Query &query, const Seeder &seeder,
                 return false;
             candidates.emplace_back(query.get_graph(), query.get_query(orientation),
                 orientation, std::vector(result.get_nodes()),
-                Cigar(result.get_cigar().to_string()), std::string(result.get_sequence()));
+                Cigar(result.get_cigar().to_string()), std::string(result.get_sequence()), 0,
+                annotations ? annotations->cache_column_set(
+                    AnnotationBuffer::Columns(result.label_columns.begin(), result.label_columns.end()))
+                            : Anchor::nannot,
+                AnnotationBuffer::CoordinateSet(result.label_coordinates));
         }
     }
     if (candidates.empty() && !dynamic_cast<const DBGSuccinct*>(&query.get_graph())
             && config.min_seed_length < query.get_graph().get_k())
         return false;
-    emit_alignments(query, config, nullptr, std::move(candidates), callback);
+    emit_alignments(query, config, annotations, std::move(candidates), callback);
     return true;
 }
 
@@ -1532,7 +1543,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     // An improved state can replace a predecessor after its successors have
     // been queued. Keep displaced records for traceback; the search itself
     // still expands only the best distance at each (cost, query, node).
-    using TraceKey = std::tuple<size_t, size_t, node_index, size_t, Anchor::label_class_t>;
+    using TraceKey = std::tuple<size_t, size_t, node_index, size_t>;
     std::map<TraceKey, SMap, std::less<TraceKey>,
              WorkspaceAllocator<std::pair<const TraceKey, SMap>>> old_s;
     std::map<TraceKey, EMap, std::less<TraceKey>,
@@ -1545,20 +1556,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
         else if constexpr (std::is_same_v<T, ScoreTable<EMap>>) return old_e;
         else return old_f;
     };
-    auto label = [](const auto &record) -> Anchor::label_class_t {
-        using T = std::decay_t<decltype(record)>;
-        if constexpr (std::is_same_v<T, SMap>) return std::get<6>(record);
-        else return 0;
-    };
     auto trace_bucket = [&](auto &table, size_t cost, size_t query_dist,
-                            node_index node, size_t dist, Anchor::label_class_t target) {
-        if constexpr (!std::is_same_v<std::decay_t<decltype(table)>, ScoreTable<SMap>>)
-            target = 0;
+                            node_index node, size_t dist) {
         auto record = get_bucket(table, cost, query_dist, node);
-        if (record && std::get<0>(*record) == dist && label(*record) == target)
+        if (record && std::get<0>(*record) == dist)
             return record;
         const auto &records = history(table);
-        auto it = records.find({cost, query_dist, node, dist, target});
+        auto it = records.find({cost, query_dist, node, dist});
         return it == records.end() ? nullptr : &it->second;
     };
 
@@ -1612,9 +1616,9 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 else
                     return std::get<2>(bucket) != DeBruijnGraph::npos;
             }();
-            if (valid && (std::get<0>(bucket) != dist || label(bucket) != (std::is_same_v<table_t, SMap> ? target : 0)))
+            if (valid && std::get<0>(bucket) != dist)
                 history(table).insert_or_assign(
-                    TraceKey(cost, query_dist, node, std::get<0>(bucket), label(bucket)), bucket);
+                    TraceKey(cost, query_dist, node, std::get<0>(bucket)), bucket);
             std::get<0>(bucket) = dist;
             std::get<1>(bucket) = num_ops;
 
@@ -2030,7 +2034,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 if (std::get<3>(*bt) == Cigar::INSERTION) {
                     assert(std::get<1>(*bt) == 0);
                     assert(cost > 0);
-                    const auto *et = trace_bucket(E, cost, query_dist, node, dist, cur_target);
+                    const auto *et = trace_bucket(E, cost, query_dist, node, dist);
                     assert(et);
 
                     auto [ins_dist, num_ins] = *et;
@@ -2042,7 +2046,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     assert(prev_cost < cost);
                     size_t prev_query_dist = query_dist - num_ins;
 
-                    const auto *check_bt = trace_bucket(S, prev_cost, prev_query_dist, node, dist, cur_target);
+                    const auto *check_bt = trace_bucket(S, prev_cost, prev_query_dist, node, dist);
                     assert(check_bt);
                     assert(std::get<0>(*check_bt) == dist);
                     assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
@@ -2055,7 +2059,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 } else if (std::get<3>(*bt) == Cigar::DELETION) {
                     assert(std::get<1>(*bt) == 0);
                     assert(cost > 0);
-                    const auto *ft = trace_bucket(F, cost, query_dist, node, dist, cur_target);
+                    const auto *ft = trace_bucket(F, cost, query_dist, node, dist);
                     assert(ft);
 
                     auto [del_dist, num_del, prev_node, del_char, del_target] = *ft;
@@ -2078,7 +2082,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                         node = prev_node;
                         --num_del;
 
-                        const auto *prev_ft = trace_bucket(F, prev_cost, query_dist, node, prev_dist, cur_target);
+                        const auto *prev_ft = trace_bucket(F, prev_cost, query_dist, node, prev_dist);
                         assert(prev_ft);
                         assert(std::get<0>(*prev_ft) == prev_dist);
                         assert(std::get<1>(*prev_ft) == num_del);
@@ -2096,7 +2100,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
 
                     assert(prev_cost < cost);
 
-                    const auto *check_bt = trace_bucket(S, prev_cost, query_dist, prev_node, prev_dist, cur_target);
+                    const auto *check_bt = trace_bucket(S, prev_cost, query_dist, prev_node, prev_dist);
                     assert(check_bt);
                     assert(std::get<0>(*check_bt) == prev_dist);
                     assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
@@ -2175,7 +2179,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     const auto *check_bt = bt;
                     check_bt = nullptr;
                     if (prev_cost || prev_query || prev_dist) {
-                        check_bt = trace_bucket(S, prev_cost, prev_query, last_node, prev_dist, cur_target);
+                        check_bt = trace_bucket(S, prev_cost, prev_query, last_node, prev_dist);
                         assert(check_bt);
                         assert(std::get<0>(*check_bt) == prev_dist);
                         assert(std::get<3>(*check_bt) != Cigar::CLIPPED);

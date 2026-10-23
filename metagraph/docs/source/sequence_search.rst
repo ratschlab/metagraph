@@ -61,10 +61,10 @@ If an annotator is provided with the :code:`-a` flag, the returned alignments wi
 Alignment search options
 ------------------------
 
-``metagraph align`` defaults to independent seed extension. Unlabeled searches
-use the column aligner and its covered-seed filtering, with a wavefront fallback
-for partial-node results and unsupported sub-k seeds. Label-constrained searches
-use the wavefront aligner.
+``metagraph align`` defaults to independent seed extension using the column
+aligner and its covered-seed filtering, including label-constrained searches.
+The wavefront aligner provides the fallback for partial-node results and
+unsupported sub-k seeds, and implements the opt-in search modes below.
 
 Use ``--align-chain`` to construct and connect seed chains, and
 ``--align-two-sided`` to extend both ends of each seed or chain. Both options are

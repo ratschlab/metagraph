@@ -14,9 +14,7 @@
 #include "graph/alignment_redone/aln_match.hpp"
 #include "graph/alignment_redone/aligner_config.hpp"
 #include "graph/alignment_redone/aln_seeder.hpp"
-#if _DNA5_GRAPH
 #include "graph/alignment/dbg_aligner.hpp"
-#endif
 
 
 namespace {
@@ -143,6 +141,26 @@ TEST(LegacyQueryDNA5, AmbiguousMatches) {
         EXPECT_EQ(15 * match_score, paths[0].get_score());
         EXPECT_TRUE(paths[0].get_cigar().is_valid(reference, reference));
     }
+}
+#endif
+
+#if ! _PROTEIN_GRAPH
+TEST(LegacyAlignment, ReverseOrientationWithoutTwoSidedExtension) {
+    const std::string reference = "GTAGTGCTAGCTTGTAGTCGTGCTGATGCA";
+    auto graph = build_graph_batch<DBGHashFast>(11, {reference});
+    std::string reverse = reference;
+    reverse_complement(reverse.begin(), reverse.end());
+    mtg::graph::align::DBGAlignerConfig config{};
+    config.min_seed_length = 11;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.two_sided = false;
+    config.seed_complexity_filter = false;
+    config.score_matrix = mtg::graph::align::DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    auto results = mtg::graph::align::DBGAligner<>(*graph, config).align(reverse);
+    ASSERT_EQ(1u, results.size());
+    EXPECT_TRUE(results[0].get_orientation());
+    EXPECT_EQ("30=", results[0].get_cigar().to_string());
+    EXPECT_TRUE(results[0].is_valid(*graph, &config));
 }
 #endif
 

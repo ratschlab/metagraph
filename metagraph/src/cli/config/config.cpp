@@ -1126,7 +1126,7 @@ if (advanced) {
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tsearch only the forward query orientation [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
             fprintf(stderr, "\t   --align-output-path \t\t\t\twith --json, also emit the VG-style path.mapping object [off]\n");
 }
@@ -1414,8 +1414,9 @@ if (advanced) {
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
+            fprintf(stderr, "\t   --align-two-sided \t\t\textend both ends of each seed or chain. [off]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tsearch only the forward query orientation [off]\n");
 }
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
