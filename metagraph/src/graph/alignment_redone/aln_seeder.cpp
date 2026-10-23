@@ -164,8 +164,16 @@ bool emit_optimal_exact(const Query &query, const Seeder &seeder,
         const auto &sequence = query.get_query(orientation);
         if (config.match_score(sequence) + config.left_end_bonus + config.right_end_bonus < ceiling)
             continue;
-        auto path = map_to_nodes_sequentially(graph, sequence);
-        if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) != path.end()) continue;
+        std::vector<DeBruijnGraph::node_index> path;
+        path.reserve(sequence.size() - graph.get_k() + 1);
+        bool missing = false;
+        graph.map_to_nodes_sequentially(sequence,
+            [&](auto node) {
+                missing |= node == DeBruijnGraph::npos;
+                path.push_back(node);
+            },
+            [&] { return missing; });
+        if (missing) continue;
         Alignment exact(Anchor(sequence, 0, sequence.size(), orientation, std::move(path)));
         if (score_match(exact, config) >= config.min_path_score)
             callback(std::move(exact));
@@ -689,6 +697,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 #if _PROTEIN_GRAPH
         if (orientation) break;
 #endif
+        // Canonical indexes also use reverse queries to recover forward short seeds.
+        if (orientation && !config_.forward_and_reverse_complement
+                && graph.get_mode() == DeBruijnGraph::BASIC)
+            break;
         std::string_view this_query = query_.get_query(orientation);
         auto &nodes = mapped_nodes[orientation];
         nodes = map_to_nodes_sequentially(graph, this_query);
@@ -713,6 +725,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 #if _PROTEIN_GRAPH
         if (orientation) break;
 #endif
+        if (orientation && !config_.forward_and_reverse_complement
+                && graph.get_mode() == DeBruijnGraph::BASIC)
+            break;
         std::string_view this_query = query_.get_query(orientation);
         std::string_view rc_query = query_.get_query(!orientation);
         auto &nodes = mapped_nodes[orientation];
