@@ -185,14 +185,14 @@ bool emit_optimal_exact(const Query &query, const Seeder &seeder,
 
 
 // The column aligner already avoids re-extending covered seeds and uses SIMD
-// scoring. Keep it for succinct graph searches that do not request chaining or
-// two-sided extension. SSHash short seeds and labeled searches use the wavefront
-// path below, which supports their additional seed/coordinate constraints.
+// scoring. Use it for unlabeled searches that do not request chaining or
+// two-sided extension. Fall back to the wavefront path for partial-node results
+// and sub-k seeds unsupported by the column seeder.
 bool align_fast(const Query &query, const Seeder &seeder,
                 const DBGAlignerConfig &config,
                 const std::function<void(Alignment&&)> &callback) {
     if (config.chain_alignments || config.two_sided || typeid(seeder) != typeid(ExactSeeder)
-            || !dynamic_cast<const DBGSuccinct*>(&query.get_graph()))
+            || query.get_query().size() < query.get_graph().get_k())
         return false;
 
     if (!config.num_alternative_paths) return true;
@@ -204,7 +204,8 @@ bool align_fast(const Query &query, const Seeder &seeder,
     fast.min_cell_score = config.min_cell_score;
     fast.min_path_score = config.min_path_score;
     fast.xdrop = config.xdrop;
-    fast.min_exact_match = config.min_exact_match;
+    // Apply the match fraction to the completed alignment below, not to seeds.
+    fast.min_exact_match = 0;
     fast.max_nodes_per_seq_char = config.max_nodes_per_seq_char;
     fast.max_ram_per_alignment = config.max_ram_per_alignment;
     fast.rel_score_cutoff = config.rel_score_cutoff;
@@ -241,6 +242,9 @@ bool align_fast(const Query &query, const Seeder &seeder,
                 Cigar(result.get_cigar().to_string()), std::string(result.get_sequence()));
         }
     }
+    if (candidates.empty() && !dynamic_cast<const DBGSuccinct*>(&query.get_graph())
+            && config.min_seed_length < query.get_graph().get_k())
+        return false;
     emit_alignments(query, config, nullptr, std::move(candidates), callback);
     return true;
 }
