@@ -3,6 +3,7 @@ import os
 import shlex
 import time
 import unittest
+from unittest.mock import patch
 import subprocess
 import socket
 import requests
@@ -17,6 +18,25 @@ from itertools import product
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
+
+
+class TestAlignmentClientOptions(unittest.TestCase):
+    def test_alignment_modes_reach_json_client(self):
+        single = GraphClient('localhost', 1)
+        multi = MultiGraphClient()
+        multi.add_graph('localhost', 1, 'graph')
+        for chain, two_sided in product((False, True), repeat=2):
+            for client, parallel in ((single, None), (multi, False), (multi, True)):
+                with self.subTest(chain=chain, two_sided=two_sided, parallel=parallel):
+                    with patch.object(GraphClientJson, '_json_seq_query', return_value=[]) as query:
+                        options = {} if parallel is None else {'parallel': parallel}
+                        result = client.align('AACGT', chain_alignments=chain,
+                                              two_sided=two_sided, **options)
+                        if parallel:
+                            result['graph'].result()
+                        query.assert_called_once()
+                        self.assertEqual(query.call_args.args[1]['chain_alignments'], chain)
+                        self.assertEqual(query.call_args.args[1]['two_sided'], two_sided)
 
 
 class TestAPIBase(TestingBase):

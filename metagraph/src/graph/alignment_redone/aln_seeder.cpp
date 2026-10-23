@@ -184,13 +184,16 @@ bool emit_optimal_exact(const Query &query, const Seeder &seeder,
 }
 
 
+} // namespace
+
 // The column aligner already avoids re-extending covered seeds and uses SIMD
 // scoring. Use it for searches that do not request chaining or
 // two-sided extension. Fall back to the wavefront path for partial-node results
 // and sub-k seeds unsupported by the column seeder.
-bool align_fast(const Query &query, const Seeder &seeder,
-                const DBGAlignerConfig &config,
-                const std::function<void(Alignment&&)> &callback) {
+bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const {
+    const auto &query = query_;
+    const auto &seeder = *this;
+    const auto &config = config_;
     if (config.chain_alignments || config.two_sided
             || (typeid(seeder) != typeid(ExactSeeder) && typeid(seeder) != typeid(LabeledSeeder))
             || query.get_query().size() < query.get_graph().get_k())
@@ -228,8 +231,7 @@ bool align_fast(const Query &query, const Seeder &seeder,
     auto *annotations = annotation_buffer(seeder);
     std::unique_ptr<align::IDBGAligner> aligner;
     if (annotations)
-        aligner = std::make_unique<align::LabeledAligner<>>(query.get_graph(), fast,
-                                                         annotations->get_annotator());
+        aligner = annotations->make_fast_aligner(fast);
     else
         aligner = std::make_unique<align::DBGAligner<>>(query.get_graph(), fast);
     std::vector<Alignment> candidates;
@@ -260,15 +262,13 @@ bool align_fast(const Query &query, const Seeder &seeder,
     return true;
 }
 
-} // namespace
-
 void align_query(const Query &query,
                  const Seeder &seeder,
                  const Extender &extender,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
     if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
-    if (align_fast(query, seeder, seeder.config_, callback)) return;
+    if (seeder.align_fast(callback)) return;
     std::vector<Alignment> candidates;
     for (const auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
         extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); },

@@ -26,6 +26,7 @@ class Seeder {
     const Query& get_query() const { return query_; }
 
   private:
+    bool align_fast(const std::function<void(Alignment&&)> &callback) const;
     friend void align_query(const Query&, const Seeder&, const Extender&,
                             const std::function<void(Alignment&&)>&, bool);
     friend void align_query(const Query&, const Seeder&,

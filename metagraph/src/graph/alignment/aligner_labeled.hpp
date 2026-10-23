@@ -8,6 +8,7 @@
 
 namespace mtg {
 namespace graph {
+namespace align_redone { class AnnotationBuffer; }
 namespace align {
 
 
@@ -137,7 +138,12 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
     }
 
   private:
-    mutable AnnotationBuffer annotation_buffer_;
+    friend class align_redone::AnnotationBuffer;
+    LabeledAligner(const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config,
+                   std::shared_ptr<AnnotationBuffer> buffer);
+    std::shared_ptr<AnnotationBuffer> annotation_buffer_owner_;
+    AnnotationBuffer &annotation_buffer_;
     size_t max_seed_length_;
 
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
