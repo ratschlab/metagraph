@@ -49,32 +49,6 @@ using AnchorExtender = std::function<void(AnchorIt, // first ptr,
                                           const AlignmentCallback&)>;
 
 template <typename AnchorIt>
-struct ChainEqual {
-    inline std::size_t operator()(const AnchorChain<AnchorIt> &a,
-                                  const AnchorChain<AnchorIt> &b) const {
-        if (a.size() != b.size())
-            return false;
-
-        for (size_t i = 0; i < a.size(); ++i) {
-            if (a[i].second != b[i].second)
-                return false;
-        }
-
-        for (size_t i = 0; i < a.size(); ++i) {
-            if (a[i].first->get_coord() != b[i].first->get_coord())
-                return false;
-
-            const Match &a_i = static_cast<const Match&>(*a[i].first);
-            const Match &b_i = static_cast<const Match&>(*b[i].first);
-            if (!(a_i == b_i))
-                return false;
-        }
-
-        return true;
-    }
-};
-
-template <typename AnchorIt>
 bool extend_chain(const AnchorChain<AnchorIt> &chain,
                   const AnchorExtender<AnchorIt> &anchor_extender,
                   const AlignmentCallback &callback,
@@ -128,8 +102,7 @@ AnchorIt chain_anchors(const Query &query,
                        const ExtensionStarter<AnchorIt> &extension_starter,
                        const AnchorExtender<AnchorIt> &anchor_extender,
                        const AlignmentCallback &callback = [](Alignment&&) {},
-                       const std::function<bool()> &terminate = []() { return false; },
-                       AnnotationBuffer *anno_buffer = nullptr) {
+                       const std::function<bool()> &terminate = []() { return false; }) {
     if (terminate() || begin == end)
         return end;
 
@@ -261,45 +234,6 @@ AnchorIt chain_anchors(const Query &query,
 
     sdsl::bit_vector used(chain_scores.size());
 
-    tsl::hopscotch_set<Anchor::label_class_t> label_classes;
-    AnchorChain<AnchorIt> last_chain;
-
-    auto flush_chains = [&]() {
-        if (last_chain.size()) {
-            if (label_classes.size() == 1) {
-                extend_chain<AnchorIt>(last_chain, anchor_extender, callback, terminate);
-            } else {
-                AnnotationBuffer::Columns merged_columns;
-                for (auto label_class : label_classes) {
-                    if (merged_columns.empty()) {
-                        merged_columns = anno_buffer->get_cached_column_set(label_class);
-                    } else {
-                        const auto &next_columns = anno_buffer->get_cached_column_set(label_class);
-                        AnnotationBuffer::Columns next_merged;
-                        std::set_union(merged_columns.begin(), merged_columns.end(),
-                                        next_columns.begin(), next_columns.end(),
-                                        std::back_inserter(next_merged));
-                        std::swap(next_merged, merged_columns);
-                    }
-                }
-                auto merged_label_class = anno_buffer->cache_column_set(std::move(merged_columns));
-                std::vector<Anchor> relabeled_anchors;
-                relabeled_anchors.reserve(last_chain.size());
-                for (const auto &[it, dist] : last_chain) {
-                    relabeled_anchors.emplace_back(*it).set_label_class(merged_label_class);
-                }
-                for (size_t i = 0; i < last_chain.size(); ++i) {
-                    static_assert(std::is_same_v<AnchorIt, std::vector<Anchor>::iterator>);
-                    last_chain[i].first = relabeled_anchors.begin() + i;
-                }
-                extend_chain<AnchorIt>(last_chain, anchor_extender, callback, terminate);
-            }
-        }
-
-        last_chain.clear();
-        label_classes.clear();
-    };
-
     for (auto [nscore, end_clipping, orientation, i] : best_chains) {
         if (terminate())
             return end;
@@ -331,22 +265,15 @@ AnchorIt chain_anchors(const Query &query,
         std::reverse(scores.begin(), scores.end());
 
         if (chain.size() && extension_starter(chain, scores)) {
-            if (!anno_buffer) {
-                extend_chain<AnchorIt>(chain, anchor_extender, callback, terminate);
-            } else {
-                if (label_classes.empty() || !ChainEqual<AnchorIt>()(last_chain, chain)) {
-                    flush_chains();
-                    last_chain = chain;
-                }
-                label_classes.emplace(chain[0].first->get_label_class());
-            }
+            // Shared seeds can have different connecting paths in each label.
+            // Keep their searches separate; merge identical completed alignments
+            // only after every edge has been checked against its label.
+            extend_chain<AnchorIt>(chain, anchor_extender, callback, terminate);
             for (const auto &[a_ptr, dist] : chain) {
                 used[a_ptr - begin] = true;
             }
         }
     }
-
-    flush_chains();
 
     return end;
 }
