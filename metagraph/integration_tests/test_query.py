@@ -281,18 +281,21 @@ class TestQuery(TestingBase):
 
         self._run_and_check_stdoutlen(query_command, 260215)
 
-    @parameterized.expand(['0', '100000000'])
-    def test_query_with_align(self, batch_size):
+    @parameterized.expand(itertools.product(['0', '100000000'], [False, True]))
+    def test_query_with_align(self, batch_size, two_sided):
+        # Preserve the old two-sided results and cover the new fast default.
+        search_flags = ' --align-two-sided' if two_sided else ''
+        labels_len = (12249 if two_sided else 12241) if DNA_MODE else 12244
+        matches_len = (12355 if two_sided else 12347) if DNA_MODE else 12350
         query_command = '{exe} query --batch-size {batch_size} --align --query-mode labels -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             batch_size=batch_size,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
+        ) + search_flags + MMAP_FLAG
 
-        expected_len = 12249 if DNA_MODE else 12244
-        self._run_and_check_stdoutlen(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, labels_len)
 
         query_command = '{exe} query --batch-size {batch_size} --align --query-mode matches -i {graph} -a {annotation} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -300,10 +303,9 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        ) + MMAP_FLAG
+        ) + search_flags + MMAP_FLAG
 
-        expected_len = 12355 if DNA_MODE else 12350
-        self._run_and_check_stdoutlen(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, matches_len)
 
         # align to graph (multi-threaded)
         query_command = '{exe} query --batch-size {batch_size} --align --query-mode labels -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
@@ -313,10 +315,9 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
-        ) + MMAP_FLAG
+        ) + search_flags + MMAP_FLAG
 
-        expected_len = 12249 if DNA_MODE else 12244
-        self._run_and_check_stdoutlen(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, labels_len)
 
         query_command = '{exe} query --batch-size {batch_size} --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -325,15 +326,15 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
-        ) + MMAP_FLAG
+        ) + search_flags + MMAP_FLAG
 
-        expected_len = 12355 if DNA_MODE else 12350
-        self._run_and_check_stdoutlen(query_command, expected_len)
+        self._run_and_check_stdoutlen(query_command, matches_len)
 
-    @parameterized.expand(['0', '100000000'])
+    @parameterized.expand(itertools.product(['0', '100000000'], [False, True]))
     @unittest.skipIf(PROTEIN_MODE, "Reverse sequences for Protein alphabets are not defined")
-    def test_query_with_align_both(self, batch_size):
+    def test_query_with_align_both(self, batch_size, two_sided):
         """align to graph (fwd and reverse multi-threaded)"""
+        search_flags = ' --align-two-sided' if two_sided else ''
         query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --align --query-mode labels -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             batch_size=batch_size,
@@ -341,9 +342,9 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
-        ) + MMAP_FLAG
+        ) + search_flags + MMAP_FLAG
 
-        self._run_and_check_stdoutlen(query_command, 24567)
+        self._run_and_check_stdoutlen(query_command, 24567 if two_sided else 24492)
 
         query_command = '{exe} query --batch-size {batch_size} --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --min-kmers-fraction-label 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -352,9 +353,9 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
-        ) + MMAP_FLAG
+        ) + search_flags + MMAP_FLAG
 
-        self._run_and_check_stdoutlen(query_command, 24779)
+        self._run_and_check_stdoutlen(query_command, 24779 if two_sided else 24704)
 
     @parameterized.expand(['0', '100000000'])
     def test_query_coordinates(self, batch_size):
