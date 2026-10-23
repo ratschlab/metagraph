@@ -130,6 +130,8 @@ void run_alignment(const AnnotatedDBG &anno_graph,
     const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
     AnnotationBuffer anno_buffer(graph, anno_graph.get_annotator());
 
+    config.chain_alignments = true;
+    config.two_sided = true;
     size_t k = graph.get_k();
     if (config.min_seed_length == 0)
         config.min_seed_length = k;

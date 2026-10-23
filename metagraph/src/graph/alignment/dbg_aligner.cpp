@@ -222,7 +222,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+        if ((graph_.get_mode() == DeBruijnGraph::CANONICAL && config_.two_sided)
                 || config_.forward_and_reverse_complement) {
             nodes_rc = nodes;
             std::string dummy(query);
@@ -287,7 +287,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         Extender extender(*this, this_query);
 
 #if ! _PROTEIN_GRAPH
-        if (seeder_rc) {
+        if (seeder_rc && config_.two_sided) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
 
