@@ -119,9 +119,13 @@ TEST(LabeledChaining, SharedSeedsKeepDistinctConnectingPaths) {
             const auto &label = encoder.decode(column);
             found_labels.insert(label);
             const auto &reference = references.at(std::stoul(label));
-            for (auto node : alignment.get_path())
+            // Column annotations constrain membership in a label's k-mer
+            // subgraph. Reference-order continuity needs coordinate annotations.
+            for (auto node : alignment.get_path()) {
+                ASSERT_NE(DeBruijnGraph::npos, node); // anchor connection is enabled
                 EXPECT_NE(std::string::npos, reference.find(graph.get_node_sequence(node)))
                     << "label " << label << " in " << alignment;
+            }
         }
     });
     EXPECT_EQ((std::set<std::string>{"0", "1", "2"}), found_labels);
