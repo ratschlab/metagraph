@@ -418,13 +418,20 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::LabeledAligner(const DeBruijnGraph &graph,
                  const DBGAlignerConfig &config,
                  const Annotator &annotator)
+      : LabeledAligner(graph, config, std::make_shared<AnnotationBuffer>(graph, annotator)) {}
+
+template <class Seeder, class Extender, class AlignmentCompare>
+LabeledAligner<Seeder, Extender, AlignmentCompare>
+::LabeledAligner(const DeBruijnGraph &graph,
+                 const DBGAlignerConfig &config,
+                 std::shared_ptr<AnnotationBuffer> buffer)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator) {
+        annotation_buffer_owner_(std::move(buffer)),
+        annotation_buffer_(*annotation_buffer_owner_) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {
-        logger->trace("Coordinates detected. Enabling seed chaining");
+        logger->trace("Coordinates detected. Using per-label cutoffs");
         this->config_.global_xdrop = false;
-        this->config_.chain_alignments = true;
     }
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);

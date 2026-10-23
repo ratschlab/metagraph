@@ -15,6 +15,7 @@ from metagraph import helpers
 DEFAULT_TOP_LABELS = 100
 DEFAULT_DISCOVERY_FRACTION = 0
 DEFAULT_NUM_NODES_PER_SEQ_CHAR = 10.0
+DEFAULT_SEED_LENGTH = 19
 
 JsonDict = Dict[str, Any]
 JsonStrList = List[str]
@@ -100,7 +101,12 @@ class GraphClientJson:
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Tuple[JsonDict, str]:
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              seed_length: int = DEFAULT_SEED_LENGTH,
+              connect_anchors: bool = True,
+              extend_chains: bool = True,
+              chain_alignments: bool = False,
+              two_sided: bool = False) -> Tuple[JsonDict, str]:
         if min_exact_match < 0.0 or min_exact_match > 1.0:
             raise ValueError(
                 f"min_exact_match should be between 0 and 1 inclusive. Got {min_exact_match}")
@@ -108,9 +114,17 @@ class GraphClientJson:
         if max_num_nodes_per_seq_char < 0:
             warnings.warn("max_num_nodes_per_seq_char < 0, treating as infinite", RuntimeWarning)
 
+        if seed_length < 0:
+            raise ValueError(f"seed_length must be nonnegative. Got {seed_length}")
+
         params = {'max_alternative_alignments': max_alternative_alignments,
                   'max_num_nodes_per_seq_char': max_num_nodes_per_seq_char,
-                  'min_exact_match': min_exact_match}
+                  'min_exact_match': min_exact_match,
+                  'seed_length': seed_length,
+                  'connect_anchors': connect_anchors,
+                  'extend_chains': extend_chains,
+                  'chain_alignments': chain_alignments,
+                  'two_sided': two_sided}
 
         return self._json_seq_query(sequence, params, "align")
 
@@ -220,25 +234,41 @@ class GraphClient:
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              seed_length: int = DEFAULT_SEED_LENGTH,
+              connect_anchors: bool = True,
+              extend_chains: bool = True,
+              chain_alignments: bool = False,
+              two_sided: bool = False) -> pd.DataFrame:
         """
         Align sequence(s) to the joint graph
 
         :param      sequence:                    The query sequence
         :type       sequence:                    Union[str, Iterable[str]]
-        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of nucleotides covered by seeds required to align the sequence [default: 0]
+        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of query bases matched in the completed alignment [default: 0]
         :type       min_exact_match:             float
         :param      max_alternative_alignments:  The number of different alignments to return [default: 1]
         :type       max_alternative_alignments:  int
         :param      max_num_nodes_per_seq_char:  The maximum number of nodes to consider per sequence character during extension [default: 10.0]
         :type       max_num_nodes_per_seq_char:  float
+        :param      seed_length:                 The minimum seed length
+        :type       seed_length:                 int
+        :param      connect_anchors:             If True, traverse the graph to align the query regions that fall between anchors
+        :type       connect_anchors:             bool
+        :param      extend_chains:               If True, perform ends-free extension from the first and last anchors in a chain
+        :type       extend_chains:               bool
+        :param      chain_alignments:           Construct seed chains before alignment (default False)
+        :param      two_sided:                  Extend both ends independently of query orientation (default False)
 
         :returns:   A data frame with alignments
         :rtype:     pandas.DataFrame
         """
         json_obj = self._json_client.align(sequence, min_exact_match,
                                            max_alternative_alignments,
-                                           max_num_nodes_per_seq_char)
+                                           max_num_nodes_per_seq_char,
+                                           seed_length,
+                                           connect_anchors, extend_chains,
+                                           chain_alignments=chain_alignments, two_sided=two_sided)
 
         return helpers.df_from_align_result(json_obj)
 
@@ -324,7 +354,12 @@ class MultiGraphClient:
               parallel=True,
               min_exact_match: float = DEFAULT_DISCOVERY_FRACTION,
               max_alternative_alignments: int = 1,
-              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
+              max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
+              seed_length: int = DEFAULT_SEED_LENGTH,
+              connect_anchors: bool = True,
+              extend_chains: bool = True,
+              chain_alignments: bool = False,
+              two_sided: bool = False) -> Dict[
         str, Union[pd.DataFrame, Future]]:
         """
         Make align requests with each graph client.
@@ -340,7 +375,11 @@ class MultiGraphClient:
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.align(sequence, min_exact_match,
                                                   max_alternative_alignments,
-                                                  max_num_nodes_per_seq_char)
+                                                  max_num_nodes_per_seq_char,
+                                                  seed_length,
+                                                  connect_anchors, extend_chains,
+                                                  chain_alignments=chain_alignments,
+                                                  two_sided=two_sided)
 
             return result
 
@@ -354,7 +393,10 @@ class MultiGraphClient:
         for name, graph_client in self.graphs.items():
             futures[name] = executor.submit(graph_client.align, sequence, min_exact_match,
                                             max_alternative_alignments,
-                                            max_num_nodes_per_seq_char)
+                                            max_num_nodes_per_seq_char,
+                                            seed_length,
+                                            connect_anchors, extend_chains,
+                                            chain_alignments=chain_alignments, two_sided=two_sided)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 

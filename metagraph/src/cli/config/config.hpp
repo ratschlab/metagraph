@@ -53,6 +53,7 @@ class Config {
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
+    bool separate_header = false;
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_only_forwards = false;
@@ -117,8 +118,11 @@ class Config {
     // Alignment options
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
+    bool alignment_two_sided = false;
     bool alignment_post_chain = false;
     bool alignment_seed_complexity_filter = true;
+    bool alignment_connect_anchors = true;
+    bool alignment_extend_chains = true;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;

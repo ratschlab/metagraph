@@ -17,6 +17,19 @@ See :ref:`installation` for platform-specific troubleshooting.
 - **Docker error:** pull the latest image: ``docker pull ghcr.io/ratschlab/metagraph:master``
 - **Compiler too old:** Need GCC 9+ or Clang 9+
 
+SSHash index versions
+=====================
+
+This version of MetaGraph uses SSHash v6. Existing v5 ``.sshashdbg`` graphs must
+be rebuilt from their source sequences. Loading an older graph reports the index
+and reader versions with a rebuild instruction; changing the version bytes does
+not convert its contents.
+
+Rebuild dependent annotations against the new graph as well, since annotations
+refer to graph node IDs. Keep the original graph and annotations together if you
+need to use them with the older MetaGraph build. This change does not affect other
+graph representations.
+
 Memory Issues
 =============
 

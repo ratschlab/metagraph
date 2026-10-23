@@ -3,6 +3,7 @@ import os
 import shlex
 import time
 import unittest
+from unittest.mock import patch
 import subprocess
 import socket
 import requests
@@ -17,6 +18,25 @@ from itertools import product
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
+
+
+class TestAlignmentClientOptions(unittest.TestCase):
+    def test_alignment_modes_reach_json_client(self):
+        single = GraphClient('localhost', 1)
+        multi = MultiGraphClient()
+        multi.add_graph('localhost', 1, 'graph')
+        for chain, two_sided in product((False, True), repeat=2):
+            for client, parallel in ((single, None), (multi, False), (multi, True)):
+                with self.subTest(chain=chain, two_sided=two_sided, parallel=parallel):
+                    with patch.object(GraphClientJson, '_json_seq_query', return_value=[]) as query:
+                        options = {} if parallel is None else {'parallel': parallel}
+                        result = client.align('AACGT', chain_alignments=chain,
+                                              two_sided=two_sided, **options)
+                        if parallel:
+                            result['graph'].result()
+                        query.assert_called_once()
+                        self.assertEqual(query.call_args.args[1]['chain_alignments'], chain)
+                        self.assertEqual(query.call_args.args[1]['two_sided'], two_sided)
 
 
 class TestAPIBase(TestingBase):
@@ -81,6 +101,25 @@ class TestAPIRaw(TestAPIBase):
 
         self.assertEqual(ret.status_code, 400)
         self.assertIn("Bad json received:", ret.json()['error'])
+
+    def test_api_raw_align_invalid_seed_length(self):
+        for seed_length in (-1, 1.5, "bad"):
+            ret = self.raw_post_request('align', json.dumps({
+                "FASTA": ">query\nTCGA", "seed_length": seed_length}))
+            self.assertEqual(ret.status_code, 400)
+            self.assertIn("seed_length", ret.json()['error'])
+
+    def test_api_raw_search_rejects_alignment_tuning(self):
+        for option in ("extend_chains", "connect_anchors", "chain_alignments", "two_sided"):
+            ret = self.raw_post_request('search', json.dumps({
+                "FASTA": ">query\nTCGA", "align": True, option: False}))
+            self.assertEqual(ret.status_code, 400)
+            self.assertIn("/align", ret.json()['error'])
+
+    def test_api_client_align_negative_seed_length(self):
+        client = GraphClientJson(self.host, self.port)
+        with self.assertRaisesRegex(ValueError, "seed_length"):
+            client.align("TCGA", seed_length=-1)
 
     def test_api_raw_invalid_params(self):
         payload = json.dumps({
@@ -332,9 +371,13 @@ class TestAPIClient(TestAPIBase):
         self.assertIn('cigar', align_res.columns)
         self.assertIn('max_score', align_res.columns)
         self.assertIn('orientation', align_res.columns)
-        # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
-        # but here it turns out to be the case
-        self.assertEqual(len(align_res), repetitions *  alignment_cnt)
+        # The alternative count is a ceiling; the default relative-score
+        # cutoff can discard weaker completed alignments.
+        groups = align_res.groupby('seq_description')
+        self.assertEqual(len(groups), repetitions)
+        for _, hits in groups:
+            self.assertTrue(1 <= len(hits) <= alignment_cnt)
+            self.assertGreaterEqual(hits['score'].min(), 0.95 * hits['score'].max())
 
     def test_api_align_df_too_divergent(self):
         repetitions = 4
@@ -545,8 +588,12 @@ class TestAPIJson(TestAPIBase):
             self.fail("Server takes too long to initialize")
 
     def test_api_align_json(self):
-        ret = self.graph_client.align("TCGATCGA")
-        self.assertEqual(len(ret), 1)
+        for chain in (False, True):
+            for two_sided in (False, True):
+                with self.subTest(chain=chain, two_sided=two_sided):
+                    ret = self.graph_client.align("TCGATCGA", chain_alignments=chain,
+                                                  two_sided=two_sided)
+                    self.assertEqual(len(ret), 1)
 
     # do various queries
     def test_api_simple_query(self):
@@ -792,7 +839,11 @@ class TestAPIClientParallel(TestAPIBase):
             self.assertIn('cigar', dfs[graph].columns)
             self.assertIn('max_score', dfs[graph].columns)
             self.assertIn('orientation', dfs[graph].columns)
-            self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
+            groups = dfs[graph].groupby('seq_description')
+            self.assertEqual(len(groups), repetitions)
+            for _, hits in groups:
+                self.assertTrue(1 <= len(hits) <= alignment_cnt)
+                self.assertGreaterEqual(hits['score'].min(), 0.95 * hits['score'].max())
 
     def test_api_parallel_query_error(self):
         futures = self.graph_client.search(self.sample_query, parallel=True,

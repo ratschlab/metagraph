@@ -31,12 +31,26 @@ def test_df_from_search_result(file_name, align, expected_shape):
 
 
 @pytest.mark.parametrize("file_name,expected_shape", [
-    ('align_response.json', (7, 4)),
-    ('empty_align_response.json', (0, 4))
+    ('align_response.json', (7, 6)),
+    ('empty_align_response.json', (0, 6))
 ])
 def test_df_from_align_result(file_name, expected_shape):
     json_obj = _load_json_data(file_name)
     df = helpers.df_from_align_result(json_obj)
 
     assert df.shape == expected_shape
-    assert list(df.columns) == ['cigar', 'score', 'sequence', 'seq_description']
+    assert list(df.columns) == ['cigar', 'score', 'max_score', 'sequence', 'orientation', 'seq_description']
+    # Older server responses omit these fields. Preserve the common schema
+    # without inventing a score bound or strand for those alignments.
+    assert df['max_score'].isna().all()
+    assert df['orientation'].isna().all()
+
+
+def test_df_from_align_result_preserves_metadata():
+    response = [{'seq_description': 'query', 'alignments': [{
+        'cigar': '4=', 'score': 8, 'max_score': 8, 'sequence': 'ACGT',
+        'orientation': False,
+    }]}]
+    row = helpers.df_from_align_result(response).iloc[0]
+    assert row['max_score'] == 8
+    assert row['orientation'] == False

@@ -57,3 +57,24 @@ The output of the query is in TSV format, with one line per query sequence, wher
 An important parameter is the seed length, which can be set with :code:`--align-min-seed-length` and can be shorter than the value of k used to construct the graph.
 
 If an annotator is provided with the :code:`-a` flag, the returned alignments will be label-consistent, meaning that there is at least one label that is shared by all nodes on the path.
+
+Alignment search options
+------------------------
+
+``metagraph align`` defaults to independent seed extension using the column
+aligner and its covered-seed filtering, including label-constrained searches.
+The wavefront aligner provides the fallback for partial-node results and
+unsupported sub-k seeds, and implements the opt-in search modes below.
+
+Use ``--align-chain`` to construct and connect seed chains, and
+``--align-two-sided`` to extend both ends of each seed or chain. Both options are
+off by default and can be enabled independently. They can improve sensitivity
+for long, error-prone reads at a higher runtime cost. ``--align-only-forwards``
+controls query orientation independently of the extension direction.
+
+For the sensitive pipeline with the standard X-drop threshold::
+
+    metagraph align --align-chain --align-two-sided --align-xdrop 27 -i graph.dbg reads.fa
+
+The alignment endpoint accepts the corresponding Boolean fields
+``chain_alignments`` and ``two_sided`` (both default to false).

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <variant>
+#include <filesystem>
 
 #include <dictionary.hpp>
 #include <offsets.hpp>
@@ -33,10 +34,12 @@ class DBGSSHash : public DeBruijnGraph {
                                 sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
+    // Construction uses scratch files; an empty swap_dir selects the system temp directory.
     DBGSSHash(const std::string& input_filename,
               size_t k,
               Mode mode = BASIC,
-              size_t num_chars = 0);
+              size_t num_chars = 0,
+              const std::filesystem::path &swap_dir = {});
 
     // SequenceGraph overrides
     void add_sequence(
@@ -60,6 +63,7 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<bool()>& terminate = []() { return false; }) const;
 
     uint64_t num_nodes() const override;
+    uint64_t max_index() const override;
 
     bool load(std::istream& in);
     bool load(const std::string& filename) override;
@@ -111,12 +115,15 @@ class DBGSSHash : public DeBruijnGraph {
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
 
+    std::vector<seq_index> get_sequence_ids(node_index node) const override;
+
 
     const std::string& alphabet() const override final { return alphabet_; }
 
     const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;
+    node_index get_base_node(node_index node) const;
 
     void adjacent_outgoing_nodes(node_index node,
                                  const std::function<void(node_index)>& callback) const override;
@@ -134,6 +141,15 @@ class DBGSSHash : public DeBruijnGraph {
     adjacent_incoming_nodes_with_rc(node_index node,
                                     const std::function<void(node_index, bool)>& callback) const;
 
+    sdsl::bit_vector get_invalid_char_mask(std::string_view sequence) const;
+
+    static constexpr node_index sshash_to_graph_index(uint64_t idx) {
+        return idx + 1;
+    }
+
+    static constexpr uint64_t graph_index_to_sshash(node_index idx) {
+        return idx - 1;
+    }
 
   private:
     static const std::string alphabet_;

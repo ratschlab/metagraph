@@ -18,7 +18,7 @@ OperatorTable initialize_opt_table() {
         const auto *alphabet = kmer::alphabets::kAlphabetDNA;
         const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #elif _DNA5_GRAPH
-        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA5;
         const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #elif _DNA_GRAPH
         const auto *alphabet = kmer::alphabets::kAlphabetDNA;
@@ -35,7 +35,11 @@ OperatorTable initialize_opt_table() {
     }
 
     for (uint8_t c : std::string(alphabet)) {
-        if (alphabet_encoding[c] == alphabet_encoding[0])
+        if (alphabet_encoding[c] == alphabet_encoding[0]
+#if _DNA5_GRAPH
+                && c != 'N'
+#endif
+                )
             continue;
 
         char upper = toupper(c);
