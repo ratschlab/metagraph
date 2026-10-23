@@ -1276,7 +1276,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         }
     }
 
-    std::vector<sdsl::bit_vector> coverage(2, sdsl::bit_vector(query_.get_query(false).size()));
     for (auto &cur_max_seeds : max_seeds) {
         for (auto &bucket : cur_max_seeds) {
             if (bucket.size() > config_.max_num_seeds_per_locus)
@@ -1284,10 +1283,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
             for (auto it = bucket.begin(); it != bucket.end(); ++it) {
                 if (it->second.get_orientation() && !config_.forward_and_reverse_complement)
                     continue;
-                auto &cov = coverage[it->second.get_orientation()];
-                std::fill(cov.begin() + it->second.get_clipping(),
-                          cov.begin() + it->second.get_clipping() + it->second.get_seed().size(),
-                          true);
                 anchors.emplace_back(std::move(it.value()));
                 assert(anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                 assert(anchors.back().get_path_spelling().size() == graph.get_k());
@@ -1299,16 +1294,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
             break;
     }
 
-    size_t num_covered = std::max(sdsl::util::cnt_one_bits(coverage[false]),
-                                  sdsl::util::cnt_one_bits(coverage[true]));
-
-    // Sparse SSHash minimizers do not enumerate every exact sub-k match.
-    // Their seed coverage is not an upper bound on the completed alignment's
-    // matches. Enforce min_exact_match on the final CIGAR in emit_alignments.
-    if (!dynamic_cast<const DBGSSHash*>(&graph)
-            && static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match)
-        anchors.clear();
-
+    // Matches in exact runs shorter than min_seed_length contribute to the
+    // final alignment but not seed coverage. Apply min_exact_match only to
+    // the completed CIGAR in emit_alignments, for every graph backend.
     return anchors;
 }
 
@@ -1318,40 +1306,12 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
     common::logger->trace("Annotating anchors");
 
     for (const auto &anchor : anchors) {
+        assert(anchor.get_path().size() == 1);
         assert(anchor.get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
         anno_buffer_.queue_path(anchor.get_path());
     }
 
     anno_buffer_.fetch_queued_annotations();
-
-    tsl::hopscotch_map<AnnotationBuffer::Column, sdsl::bit_vector> coverages;
-    for (auto &anchor : anchors) {
-        assert(anchor.get_path().size() == 1);
-        if (const auto *labels_it = anno_buffer_.get_labels(anchor.get_path()[0])) {
-            for (AnnotationBuffer::Column c : *labels_it) {
-                auto [it, inserted] = coverages.try_emplace(c, sdsl::bit_vector());
-                if (inserted)
-                    it.value() = sdsl::bit_vector(query_.get_query(false).size());
-
-                std::fill(it.value().begin() + anchor.get_clipping(),
-                          it.value().begin() + anchor.get_clipping() + anchor.get_seed().size(),
-                          true);
-            }
-        }
-    }
-
-    for (auto it = coverages.begin(); it != coverages.end(); ++it) {
-        size_t num_covered = sdsl::util::cnt_one_bits(it->second);
-
-        if (!dynamic_cast<const DBGSSHash*>(&query_.get_graph())
-                && static_cast<double>(num_covered) / query_.get_query(false).size() < config_.min_exact_match) {
-            // if the coverage is too low, clear out the vector
-            it.value() = sdsl::bit_vector();
-        } else {
-            // otherwise, we don't need the coverage anymore, so just make it tiny
-            it.value() = sdsl::bit_vector(1);
-        }
-    }
 
     std::vector<Anchor> labeled_anchors;
     labeled_anchors.reserve(anchors.size());
@@ -1363,19 +1323,16 @@ std::vector<Anchor> LabeledSeeder::get_anchors() const {
             // can reallocate it, which would invalidate labels_it mid-loop.
             auto labels = *labels_it;
             for (size_t i = 0; i < labels.size(); ++i) {
-                if (coverages[labels[i]].size()) {
-                    // only pick labels that have sufficient coverage
-                    anchor.set_label_class(anno_buffer_.cache_column(labels[i]));
-                    if (coord_it) {
-                        const auto &coords = (*coord_it)[i];
-                        for (auto coord : coords) {
-                            labeled_anchors.emplace_back(anchor).set_coord(coord);
-                            assert(labeled_anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
-                        }
-                    } else {
-                        labeled_anchors.emplace_back(anchor);
+                anchor.set_label_class(anno_buffer_.cache_column(labels[i]));
+                if (coord_it) {
+                    const auto &coords = (*coord_it)[i];
+                    for (auto coord : coords) {
+                        labeled_anchors.emplace_back(anchor).set_coord(coord);
                         assert(labeled_anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                     }
+                } else {
+                    labeled_anchors.emplace_back(anchor);
+                    assert(labeled_anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
                 }
             }
         }
