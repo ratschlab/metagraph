@@ -183,6 +183,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
     );
 
     DBGAlignerConfig config;
+    config.chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
@@ -246,6 +247,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
     );
 
     DBGAlignerConfig config;
+    config.chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
@@ -298,6 +300,7 @@ class LabeledAlignerCoordTest : public ::testing::Test {
     DBGAlignerConfig config;
 
     void SetUp() override {
+        config.chain_alignments = true;
         config.max_seed_length = std::numeric_limits<size_t>::max();
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     }
@@ -462,6 +465,7 @@ class LabeledAlignerProteinCoordTest : public ::testing::Test {
     DBGAlignerConfig config;
 
     void SetUp() override {
+        config.chain_alignments = true;
         config.max_seed_length = std::numeric_limits<size_t>::max();
         config.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
     }
@@ -625,6 +629,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     );
 
     DBGAlignerConfig config;
+    config.chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
