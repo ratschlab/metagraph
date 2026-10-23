@@ -90,7 +90,7 @@ class TestAPIRaw(TestAPIBase):
             self.assertIn("seed_length", ret.json()['error'])
 
     def test_api_raw_search_rejects_alignment_tuning(self):
-        for option in ("extend_chains", "connect_anchors"):
+        for option in ("extend_chains", "connect_anchors", "chain_alignments", "two_sided"):
             ret = self.raw_post_request('search', json.dumps({
                 "FASTA": ">query\nTCGA", "align": True, option: False}))
             self.assertEqual(ret.status_code, 400)
@@ -568,8 +568,12 @@ class TestAPIJson(TestAPIBase):
             self.fail("Server takes too long to initialize")
 
     def test_api_align_json(self):
-        ret = self.graph_client.align("TCGATCGA")
-        self.assertEqual(len(ret), 1)
+        for chain in (False, True):
+            for two_sided in (False, True):
+                with self.subTest(chain=chain, two_sided=two_sided):
+                    ret = self.graph_client.align("TCGATCGA", chain_alignments=chain,
+                                                  two_sided=two_sided)
+                    self.assertEqual(len(ret), 1)
 
     # do various queries
     def test_api_simple_query(self):

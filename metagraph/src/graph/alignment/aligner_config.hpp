@@ -47,6 +47,7 @@ struct DBGAlignerConfig {
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;
+    // Preserve direct legacy callers; CLI and the fast adapter set this explicitly.
     bool two_sided = true;
     bool post_chain_alignments = false;
     bool global_xdrop = true;

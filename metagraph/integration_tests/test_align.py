@@ -799,8 +799,9 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(rows[0][6], '10=')
         self.assertEqual(rows[0][8], 'seq1/12:3-12')
 
-    @parameterized.expand(COORD_ANNO_TYPES)
-    def test_align_cross_sequence_boundary(self, anno_repr):
+    @parameterized.expand([(anno, sensitive) for anno in COORD_ANNO_TYPES
+                           for sensitive in (False, True)])
+    def test_align_cross_sequence_boundary(self, anno_repr, sensitive):
         """Alignment path crosses from one indexed sequence into the next.
 
         When two sequences share the boundary k-1-mer, the graph connects
@@ -823,15 +824,21 @@ class TestAlignCoordToHeader(TestingBase):
         ])
 
         graph, anno = self._setup_graph(test_fa, anno_repr)
-        rows = self._run_align(graph, anno, query_fa)
+        # Fast forward extension keeps the 16-base suffix. Chaining and
+        # two-sided extension additionally recover the four-base prefix.
+        flags = '--align-min-exact-match 0'
+        if sensitive:
+            flags += ' --align-chain --align-two-sided --align-xdrop 27'
+        rows = self._run_align(graph, anno, query_fa, flags)
         self.assertEqual(len(rows), 1)
 
         self.assertEqual(rows[0][0], 'q_concat')
-        self.assertEqual(rows[0][6], '4=4I16=')
-        self.assertEqual(int(rows[0][4]), 38)
+        self.assertEqual(rows[0][6], '4=4I16=' if sensitive else '8S16=')
+        self.assertEqual(int(rows[0][4]), 38 if sensitive else 37)
         # Range 12 nt in seq1 (local 1-12) + 8 nt in seq2 (local 1-8).
         # seq1 -> 12 nt, seq2 -> 12 nt.
-        self.assertEqual(rows[0][8], 'seq1/12:1-12;seq2/12:1-8')
+        self.assertEqual(rows[0][8],
+                         f'seq1/12:{1 if sensitive else 5}-12;seq2/12:1-8')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_json_labels_array(self, anno_repr):
@@ -941,8 +948,9 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(by_sample['seq3']['nt_length'], 28)
         self.assertEqual(by_sample['seq3']['nt_coords'], '1-8')
 
-    @parameterized.expand(COORD_ANNO_TYPES)
-    def test_align_json_cross_sequence_boundary(self, anno_repr):
+    @parameterized.expand([(anno, sensitive) for anno in COORD_ANNO_TYPES
+                           for sensitive in (False, True)])
+    def test_align_json_cross_sequence_boundary(self, anno_repr, sensitive):
         """JSON twin of `test_align_cross_sequence_boundary`. When one
         alignment path spans two indexed sequences (sharing a boundary
         k-1-mer), `annotation.labels[]` must contain two entries with
@@ -957,20 +965,23 @@ class TestAlignCoordToHeader(TestingBase):
         ])
 
         graph, anno = self._setup_graph(test_fa, anno_repr)
+        flags = '--align-chain --align-two-sided --align-xdrop 27' if sensitive else ''
         align_cmd = (f'{METAGRAPH} align --align-only-forwards --json '
+                     f'--align-min-exact-match 0 {flags} '
                      f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
         res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
 
         records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]['annotation']['cigar'], '4=4I16=')
-        self.assertEqual(records[0]['score'], 38)
+        self.assertEqual(records[0]['annotation']['cigar'],
+                         '4=4I16=' if sensitive else '8S16=')
+        self.assertEqual(records[0]['score'], 38 if sensitive else 37)
         by_sample = {entry['sample']: entry for entry in records[0]['annotation']['labels']}
         self.assertEqual(set(by_sample), {'seq1', 'seq2'})
         # 12 nt in seq1 (local 1-12) + 8 nt in seq2 (local 1-8).
         self.assertEqual(by_sample['seq1']['nt_length'], 12)
-        self.assertEqual(by_sample['seq1']['nt_coords'], '1-12')
+        self.assertEqual(by_sample['seq1']['nt_coords'], '1-12' if sensitive else '5-12')
         self.assertEqual(by_sample['seq2']['nt_length'], 12)
         self.assertEqual(by_sample['seq2']['nt_coords'], '1-8')
 

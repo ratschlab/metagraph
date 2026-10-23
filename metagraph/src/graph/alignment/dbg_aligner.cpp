@@ -302,6 +302,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         } else {
             align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            if (seeder_rc) {
+                Extender extender_rc(*this, paths[i].get_query(true));
+                align_core(*seeder_rc, extender_rc, add_alignment, get_min_path_score, false);
+                num_extensions += extender_rc.num_extensions();
+                num_explored_nodes += extender_rc.num_explored_nodes();
+            }
         }
 #else
         if (config_.chain_alignments) {

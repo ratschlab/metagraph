@@ -104,7 +104,9 @@ class GraphClientJson:
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR,
               seed_length: int = DEFAULT_SEED_LENGTH,
               connect_anchors: bool = True,
-              extend_chains: bool = True) -> Tuple[JsonDict, str]:
+              extend_chains: bool = True,
+              chain_alignments: bool = False,
+              two_sided: bool = False) -> Tuple[JsonDict, str]:
         if min_exact_match < 0.0 or min_exact_match > 1.0:
             raise ValueError(
                 f"min_exact_match should be between 0 and 1 inclusive. Got {min_exact_match}")
@@ -120,7 +122,9 @@ class GraphClientJson:
                   'min_exact_match': min_exact_match,
                   'seed_length': seed_length,
                   'connect_anchors': connect_anchors,
-                  'extend_chains': extend_chains}
+                  'extend_chains': extend_chains,
+                  'chain_alignments': chain_alignments,
+                  'two_sided': two_sided}
 
         return self._json_seq_query(sequence, params, "align")
 
