@@ -1,6 +1,7 @@
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
+#include <csignal>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -203,7 +204,8 @@ Json::Value process_align_request(const std::string &received_message,
     return root;
 }
 
-std::thread start_server(HttpServer &server_startup, Config &config, size_t num_threads) {
+std::thread start_server(HttpServer &server_startup, Config &config, size_t num_threads,
+                         std::function<void(unsigned short)> on_start) {
     server_startup.config.thread_pool_size = num_threads;
 
     if (config.host_address != "") {
@@ -216,7 +218,7 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
     logger->info("[Server] Maximum connections: {}", num_threads);
-    return std::thread([&server_startup]() { server_startup.start(); });
+    return std::thread([&server_startup, on_start]() { server_startup.start(on_start); });
 }
 
 std::vector<std::string> filter_graphs_from_list(
@@ -253,10 +255,14 @@ std::vector<std::string> filter_graphs_from_list(
 
 int run_server(Config *config) {
     assert(config);
+    // Register before loading so termination also works when running as PID 1.
+    asio::io_service shutdown_service;
+    asio::signal_set shutdown_signals(shutdown_service, SIGINT, SIGTERM);
     std::atomic<size_t> num_requests = 0;
 
-    ThreadPool graph_loader(1, 1);
     std::shared_future<std::unique_ptr<AnnotatedDBG>> anno_graph;
+    // Destroy the loader before the future holding its result.
+    ThreadPool graph_loader(1, 1);
 
     tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
 
@@ -620,7 +626,17 @@ int run_server(Config *config) {
         }
     };
 
-    std::thread server_thread = start_server(server, *config, num_server_threads);
+    std::promise<void> listening;
+    std::thread server_thread = start_server(server, *config, num_server_threads,
+                                            [&](unsigned short) { listening.set_value(); });
+    listening.get_future().wait();
+    shutdown_signals.async_wait([&](const asio::error_code &error, int) {
+        if (!error) {
+            logger->info("[Server] Shutting down...");
+            server.stop();
+        }
+    });
+    shutdown_service.run();
     server_thread.join();
 
     return 0;
