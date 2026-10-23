@@ -429,8 +429,10 @@ class TestProteinAlign(TestingBase):
     def setUp(self):
         super().setUpClass()
 
-    @parameterized.expand(['succinct', 'hashfast', 'sshash'])
-    def test_blosum_exact_and_inexact(self, representation):
+    @parameterized.expand([(representation, annotation)
+                           for representation in ('succinct', 'hashfast', 'sshash')
+                           for annotation in (None, 'column', 'column_coord')])
+    def test_blosum_exact_and_inexact(self, representation, annotation):
         reference = 'MKWVTFISLLFLFSSAYS'
         fasta = self.tempdir.name + '/reference.fa'
         query = self.tempdir.name + '/query.fa'
@@ -445,9 +447,15 @@ class TestProteinAlign(TestingBase):
         res = subprocess.run(build, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         extension = '.sshashdbg' if representation == 'sshash' else graph_file_extension[representation]
+        options = []
+        if annotation:
+            anno_base = self.tempdir.name + '/annotation'
+            self._annotate_graph(fasta, graph_base + extension, anno_base,
+                                 annotation, anno_type='header')
+            options = ['-a', anno_base + '.' + annotation + '.annodbg']
         res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
                               '--align-min-seed-length', '5', '--align-min-exact-match', '0',
-                              '-i', graph_base + extension, query], stdout=PIPE, stderr=PIPE)
+                              '-i', graph_base + extension, *options, query], stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, res.stderr.decode())
         records = {r['name']: r for r in map(json.loads, res.stdout.decode().splitlines())}
         self.assertEqual(records['exact']['annotation']['cigar'], '18=')
@@ -455,6 +463,10 @@ class TestProteinAlign(TestingBase):
         self.assertEqual(records['changed']['annotation']['cigar'], '10=1X7=')
         self.assertEqual(records['changed']['score'], 98)
         self.assertEqual(records['changed']['annotation']['ref_sequence'], reference)
+        if annotation:
+            self.assertEqual(records['changed']['annotation']['labels'][0]['sample'], 'protein')
+        if annotation == 'column_coord':
+            self.assertEqual(records['changed']['annotation']['labels'][0]['nt_coords'], '1-18')
 
 
 @unittest.skipUnless('DNA5' in os.readlink(os.path.join(os.getcwd(), 'metagraph')),
