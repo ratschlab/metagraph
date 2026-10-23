@@ -118,6 +118,7 @@ class Config {
     // Alignment options
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
+    bool alignment_two_sided = false;
     bool alignment_post_chain = false;
     bool alignment_seed_complexity_filter = true;
     bool alignment_connect_anchors = true;

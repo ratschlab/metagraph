@@ -11,6 +11,7 @@
 #include <tsl/hopscotch_set.h>
 
 #include "aln_chainer.hpp"
+#include "graph/alignment/dbg_aligner.hpp"
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector.hpp"
@@ -182,6 +183,68 @@ bool emit_optimal_exact(const Query &query, const Seeder &seeder,
     return false;
 }
 
+
+// The column aligner already avoids re-extending covered seeds and uses SIMD
+// scoring. Keep it for succinct graph searches that do not request chaining or
+// two-sided extension. SSHash short seeds and labeled searches use the wavefront
+// path below, which supports their additional seed/coordinate constraints.
+bool align_fast(const Query &query, const Seeder &seeder,
+                const DBGAlignerConfig &config,
+                const std::function<void(Alignment&&)> &callback) {
+    if (config.chain_alignments || config.two_sided || typeid(seeder) != typeid(ExactSeeder)
+            || !dynamic_cast<const DBGSuccinct*>(&query.get_graph()))
+        return false;
+
+    if (!config.num_alternative_paths) return true;
+    align::DBGAlignerConfig fast;
+    fast.num_alternative_paths = config.num_alternative_paths;
+    fast.min_seed_length = config.min_seed_length;
+    fast.max_seed_length = config.max_seed_length;
+    fast.max_num_seeds_per_locus = config.max_num_seeds_per_locus;
+    fast.min_cell_score = config.min_cell_score;
+    fast.min_path_score = config.min_path_score;
+    fast.xdrop = config.xdrop;
+    fast.min_exact_match = config.min_exact_match;
+    fast.max_nodes_per_seq_char = config.max_nodes_per_seq_char;
+    fast.max_ram_per_alignment = config.max_ram_per_alignment;
+    fast.rel_score_cutoff = config.rel_score_cutoff;
+    fast.gap_opening_penalty = config.gap_opening_penalty;
+    fast.gap_extension_penalty = config.gap_extension_penalty;
+    fast.left_end_bonus = config.left_end_bonus;
+    fast.right_end_bonus = config.right_end_bonus;
+    fast.global_xdrop = config.global_xdrop;
+    fast.allow_left_trim = config.allow_left_trim;
+    fast.no_backtrack = config.no_backtrack;
+    fast.seed_complexity_filter = config.seed_complexity_filter;
+    fast.alignment_edit_distance = config.alignment_edit_distance;
+    fast.alignment_match_score = config.alignment_match_score;
+    fast.alignment_mm_transition_score = config.alignment_mm_transition_score;
+    fast.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
+    fast.score_matrix = config.score_matrix;
+    fast.forward_and_reverse_complement = false;
+    fast.two_sided = false;
+    align::DBGAligner<> aligner(query.get_graph(), fast);
+    std::vector<Alignment> candidates;
+    for (bool orientation : {false, true}) {
+#if _PROTEIN_GRAPH
+        if (orientation) break;
+#endif
+        if (orientation && !config.forward_and_reverse_complement) break;
+        auto results = aligner.align(query.get_query(orientation));
+        for (const auto &result : results) {
+            // A match wholly inside a k-mer needs the wavefront representation
+            // of partial seeds. Do not discard it or change its score.
+            if (result.get_offset())
+                return false;
+            candidates.emplace_back(query.get_graph(), query.get_query(orientation),
+                orientation, std::vector(result.get_nodes()),
+                Cigar(result.get_cigar().to_string()), std::string(result.get_sequence()));
+        }
+    }
+    emit_alignments(query, config, nullptr, std::move(candidates), callback);
+    return true;
+}
+
 } // namespace
 
 void align_query(const Query &query,
@@ -190,9 +253,11 @@ void align_query(const Query &query,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
     if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
+    if (align_fast(query, seeder, seeder.config_, callback)) return;
     std::vector<Alignment> candidates;
-    for (auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
-        extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); });
+    for (const auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
+        extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); },
+                        !seeder.config_.two_sided);
     emit_alignments(query, seeder.config_, annotation_buffer(seeder), std::move(candidates), callback);
 }
 
@@ -327,6 +392,22 @@ class TraversalCache {
 };
 
 } // namespace
+
+struct Extender::TraversalCaches {
+    explicit TraversalCaches(const DeBruijnGraph &graph)
+        : forward(graph, false), backward(graph, true) {}
+    TraversalCache forward;
+    TraversalCache backward;
+};
+
+Extender::Extender(const Query &query, const DBGAlignerConfig &config)
+    : query_(query), config_(config) {
+    if (dynamic_cast<const DBGSuccinct*>(&query.get_graph())
+            || dynamic_cast<const DBGSSHash*>(&query.get_graph()))
+        traversal_caches_ = std::make_unique<TraversalCaches>(query.get_graph());
+}
+
+Extender::~Extender() = default;
 
 class AlignmentGraph {
   public:
@@ -1444,6 +1525,39 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     ScoreTable<EMap> E; // best cost (last operation is insertion)
     ScoreTable<FMap> F; // best cost (last operation is deletion)
 
+    // An improved state can replace a predecessor after its successors have
+    // been queued. Keep displaced records for traceback; the search itself
+    // still expands only the best distance at each (cost, query, node).
+    using TraceKey = std::tuple<size_t, size_t, node_index, size_t, Anchor::label_class_t>;
+    std::map<TraceKey, SMap, std::less<TraceKey>,
+             WorkspaceAllocator<std::pair<const TraceKey, SMap>>> old_s;
+    std::map<TraceKey, EMap, std::less<TraceKey>,
+             WorkspaceAllocator<std::pair<const TraceKey, EMap>>> old_e;
+    std::map<TraceKey, FMap, std::less<TraceKey>,
+             WorkspaceAllocator<std::pair<const TraceKey, FMap>>> old_f;
+    auto history = [&](auto &table) -> auto& {
+        using T = std::decay_t<decltype(table)>;
+        if constexpr (std::is_same_v<T, ScoreTable<SMap>>) return old_s;
+        else if constexpr (std::is_same_v<T, ScoreTable<EMap>>) return old_e;
+        else return old_f;
+    };
+    auto label = [](const auto &record) -> Anchor::label_class_t {
+        using T = std::decay_t<decltype(record)>;
+        if constexpr (std::is_same_v<T, SMap>) return std::get<6>(record);
+        else return 0;
+    };
+    auto trace_bucket = [&](auto &table, size_t cost, size_t query_dist,
+                            node_index node, size_t dist, Anchor::label_class_t target) {
+        if constexpr (!std::is_same_v<std::decay_t<decltype(table)>, ScoreTable<SMap>>)
+            target = 0;
+        auto record = get_bucket(table, cost, query_dist, node);
+        if (record && std::get<0>(*record) == dist && label(*record) == target)
+            return record;
+        const auto &records = history(table);
+        auto it = records.find({cost, query_dist, node, dist, target});
+        return it == records.end() ? nullptr : &it->second;
+    };
+
     auto set_value = [&](
             auto &table,
             size_t cost,
@@ -1486,6 +1600,17 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
             inserted |= std::get<1>(bucket) == 0;
 
         if (inserted) {
+            const bool valid = [&] {
+                if constexpr (std::is_same_v<table_t, SMap>)
+                    return std::get<3>(bucket) != Cigar::CLIPPED;
+                else if constexpr (std::is_same_v<table_t, EMap>)
+                    return std::get<1>(bucket) != 0;
+                else
+                    return std::get<2>(bucket) != DeBruijnGraph::npos;
+            }();
+            if (valid && (std::get<0>(bucket) != dist || label(bucket) != (std::is_same_v<table_t, SMap> ? target : 0)))
+                history(table).insert_or_assign(
+                    TraceKey(cost, query_dist, node, std::get<0>(bucket), label(bucket)), bucket);
             std::get<0>(bucket) = dist;
             std::get<1>(bucket) = num_ops;
 
@@ -1901,7 +2026,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 if (std::get<3>(*bt) == Cigar::INSERTION) {
                     assert(std::get<1>(*bt) == 0);
                     assert(cost > 0);
-                    const auto *et = get_bucket(E, cost, query_dist, node);
+                    const auto *et = trace_bucket(E, cost, query_dist, node, dist, cur_target);
                     assert(et);
 
                     auto [ins_dist, num_ins] = *et;
@@ -1913,7 +2038,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     assert(prev_cost < cost);
                     size_t prev_query_dist = query_dist - num_ins;
 
-                    const auto *check_bt = get_bucket(S, prev_cost, prev_query_dist, node);
+                    const auto *check_bt = trace_bucket(S, prev_cost, prev_query_dist, node, dist, cur_target);
                     assert(check_bt);
                     assert(std::get<0>(*check_bt) == dist);
                     assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
@@ -1926,7 +2051,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 } else if (std::get<3>(*bt) == Cigar::DELETION) {
                     assert(std::get<1>(*bt) == 0);
                     assert(cost > 0);
-                    const auto *ft = get_bucket(F, cost, query_dist, node);
+                    const auto *ft = trace_bucket(F, cost, query_dist, node, dist, cur_target);
                     assert(ft);
 
                     auto [del_dist, num_del, prev_node, del_char, del_target] = *ft;
@@ -1949,7 +2074,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                         node = prev_node;
                         --num_del;
 
-                        const auto *prev_ft = get_bucket(F, prev_cost, query_dist, node);
+                        const auto *prev_ft = trace_bucket(F, prev_cost, query_dist, node, prev_dist, cur_target);
                         assert(prev_ft);
                         assert(std::get<0>(*prev_ft) == prev_dist);
                         assert(std::get<1>(*prev_ft) == num_del);
@@ -1967,7 +2092,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
 
                     assert(prev_cost < cost);
 
-                    const auto *check_bt = get_bucket(S, prev_cost, query_dist, prev_node);
+                    const auto *check_bt = trace_bucket(S, prev_cost, query_dist, prev_node, prev_dist, cur_target);
                     assert(check_bt);
                     assert(std::get<0>(*check_bt) == prev_dist);
                     assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
@@ -2046,7 +2171,7 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                     const auto *check_bt = bt;
                     check_bt = nullptr;
                     if (prev_cost || prev_query || prev_dist) {
-                        check_bt = get_bucket(S, prev_cost, prev_query, last_node);
+                        check_bt = trace_bucket(S, prev_cost, prev_query, last_node, prev_dist, cur_target);
                         assert(check_bt);
                         assert(std::get<0>(*check_bt) == prev_dist);
                         assert(std::get<3>(*check_bt) != Cigar::CLIPPED);
@@ -2166,7 +2291,8 @@ void align_bwd(const DeBruijnGraph &base_graph,
                const std::function<bool(size_t, const SMap&, size_t, DeBruijnGraph::node_index)> &terminate,
                AnnotationBuffer *anno_buffer = nullptr,
                Anchor::label_class_t target = Anchor::nannot,
-               const AnnotationBuffer::CoordinateSet &coords = {}) {
+               const AnnotationBuffer::CoordinateSet &coords = {},
+               TraversalCache *shared_cache = nullptr) {
     assert(!anno_buffer == (target == Anchor::nannot));
     assert(!anno_buffer || anno_buffer->node_has_labels(start_node, target));
     assert(!anno_buffer
@@ -2181,15 +2307,16 @@ void align_bwd(const DeBruijnGraph &base_graph,
                                 == std::string_view::npos;
 
     std::optional<TraversalCache> cache;
-    if (dynamic_cast<const DBGSuccinct*>(&base_graph)
-            || dynamic_cast<const DBGSSHash*>(&base_graph))
+    if (!shared_cache && (dynamic_cast<const DBGSuccinct*>(&base_graph)
+            || dynamic_cast<const DBGSSHash*>(&base_graph)))
         cache.emplace(base_graph, true);
+    auto *cache_ptr = shared_cache ? shared_cache : (cache ? &*cache : nullptr);
 
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             assert(cur_target);
             AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
-                                     cache ? &*cache : nullptr);
+                                     cache_ptr);
             if (coords.empty()) {
                 return aln_graph.has_single_incoming(node);
             } else {
@@ -2215,7 +2342,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
             assert(cur_target);
             if (begin != end) {
                 AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
-                                     cache ? &*cache : nullptr);
+                                     cache_ptr);
                 if (coords.empty()) {
                     aln_graph.traverse_back(
                         node,
@@ -2249,7 +2376,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
             assert(cur_target);
 
             AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
-                                     cache ? &*cache : nullptr);
+                                     cache_ptr);
             if (coords.empty()) {
                 aln_graph.call_incoming_kmers(node, callback);
             } else {
@@ -2297,7 +2424,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
                std::string_view suffix = "",
                AnnotationBuffer *anno_buffer = nullptr,
                Anchor::label_class_t target = Anchor::nannot,
-               const AnnotationBuffer::CoordinateSet &coords = {}) {
+               const AnnotationBuffer::CoordinateSet &coords = {},
+               TraversalCache *shared_cache = nullptr) {
     assert(!anno_buffer == (target == Anchor::nannot));
     assert(!anno_buffer || anno_buffer->node_has_labels(start_node, target));
     assert(!anno_buffer
@@ -2310,9 +2438,10 @@ void align_fwd(const DeBruijnGraph &base_graph,
                                 == std::string_view::npos;
 
     std::optional<TraversalCache> cache;
-    if (dynamic_cast<const DBGSuccinct*>(&base_graph)
-            || dynamic_cast<const DBGSSHash*>(&base_graph))
+    if (!shared_cache && (dynamic_cast<const DBGSuccinct*>(&base_graph)
+            || dynamic_cast<const DBGSSHash*>(&base_graph)))
         cache.emplace(base_graph, false);
+    auto *cache_ptr = shared_cache ? shared_cache : (cache ? &*cache : nullptr);
 
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
@@ -2322,7 +2451,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
                 return true;
 
             AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
-                                     cache ? &*cache : nullptr);
+                                     cache_ptr);
             if (coords.empty()) {
                 return aln_graph.has_single_outgoing(node);
             } else {
@@ -2362,7 +2491,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
 
             if (begin != end) {
                 AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
-                                     cache ? &*cache : nullptr);
+                                     cache_ptr);
                 if (coords.empty()) {
                     aln_graph.traverse(
                         node, std::string_view(&*begin, end - begin),
@@ -2397,7 +2526,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
                 callback(node, suffix[dist], cur_target);
             } else {
                 AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
-                                     cache ? &*cache : nullptr);
+                                     cache_ptr);
                 if (coords.empty()) {
                     aln_graph.call_outgoing_kmers(node, callback);
                 } else {
@@ -2561,7 +2690,8 @@ void Extender::extend(const Alignment &aln,
                     for (auto &coord : column)
                         coord += aln.get_path().size() - 1;
                 return coords;
-            }()
+            }(),
+            traversal_caches_ ? &traversal_caches_->forward : nullptr
         );
 
         if (fwd_exts.empty())
@@ -2676,7 +2806,8 @@ void Extender::extend(const Alignment &aln,
             fwd_ext.get_label_classes()[0],
             anno_buffer ? anno_buffer->get_label_path_coords(fwd_ext.get_path(),
                                                             fwd_ext.get_label_classes())
-                        : AnnotationBuffer::CoordinateSet()
+                        : AnnotationBuffer::CoordinateSet(),
+            traversal_caches_ ? &traversal_caches_->backward : nullptr
         );
 
         if (!found) {
@@ -2766,6 +2897,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
         }
         alignments.emplace_back(std::move(aln));
     };
+
+    if (!config_.chain_alignments) {
+        for (const auto &anchor : anchors)
+            save_alignment(Alignment(anchor));
+        return alignments;
+    }
 
     common::logger->trace("Chaining");
     chain_anchors<AnchorIt>(query_, config_, anchors.begin(), anchors.end(),

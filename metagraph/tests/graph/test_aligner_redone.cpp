@@ -198,6 +198,8 @@ void run_alignment(const DeBruijnGraph &graph,
                    size_t end_trim = 0,
                    bool needs_extension = false,
                    bool needs_extension_long_seed = false) {
+    config.chain_alignments = true;
+    config.two_sided = true;
     size_t k = graph.get_k();
     if (config.min_seed_length == 0)
         config.min_seed_length = k;
@@ -1293,6 +1295,78 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
 }
 
 #endif
+
+TEST(AlignmentTraceback, RetainsReplacedPredecessors) {
+    // Two branches with repeats replace a DP predecessor after a deletion
+    // successor has been queued. Traceback must use the displaced distance.
+    const std::string first =
+        "AGCCACCACGCCTGGTCCAAGAACCCAACTTTTAGATCTAGAGTGATGTCAGCATGACATTGATTTCCTGAGGCCCAGGGGTGAAGGAGC"
+        "TGAGGACAGCAGAGGGGTGAAGGAAGTCAGCTACAGACAGCAGCAGCTGATGCACAGGCCTCCCAGTGCCTGAAGTCACCCGGAATTGGG"
+        "AAGTGC";
+    const std::string second =
+        "GGCCTCCCAAAGTGCTGGGATTGCAGGCGTGAGACAC";
+    const std::string sequence =
+        "GGCCTCCCAAAGTGCTGGGATTCCACGTGGAGCCACCACGCCTGGTCCAAGAACCCAACTTTAAAATCAAGAGTGATGTCAGCATGACAT"
+        "TGATTTCCTGAGGCCCAGGGGTGAAGGAGCTGAGGACAGCAGAGGGGTGATAGGAAGTCAGTTACGACCAGAGCAGCTGCCCACAGGCCC"
+        "TCCCATGTGCCTGAAGTCACCCGGA";
+    auto graph = build_graph_batch<DBGSuccinctCached>(31, {first, second}, DeBruijnGraph::BASIC);
+    DBGAlignerConfig config;
+    config.min_seed_length = 19;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.two_sided = true;
+    config.xdrop = 27;
+    config.min_exact_match = 0.7;
+    config.gap_opening_penalty = -6;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    Query query(*graph, sequence);
+    ExactSeeder seeder(query, config);
+    Extender extender(query, config);
+    size_t count = 0;
+    align_query(query, seeder, extender, [&](Alignment&& a) {
+        ++count;
+        EXPECT_TRUE(a.is_spelling_valid(*graph));
+        EXPECT_TRUE(a.get_cigar().is_valid(a.get_spelling(), a.get_query()));
+        EXPECT_GE(score_match(a, config), 275);
+    });
+    EXPECT_EQ(1u, count);
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, ChainingAndTwoSidedSearchAreIndependentOptions) {
+    const std::string reference = "GTAGTGCTAGCTTGTAGTCGTGCTGATGCA";
+    const std::string sequence = "GTAGTGCTACCTTGTAGTCGTGGTGATGCA";
+    auto graph = build_graph_batch<TypeParam>(11, {reference}, DeBruijnGraph::BASIC);
+    DBGAlignerConfig config;
+    EXPECT_FALSE(config.chain_alignments);
+    EXPECT_FALSE(config.two_sided);
+    config.min_seed_length = config.max_seed_length = 11;
+    config.forward_and_reverse_complement = false;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.xdrop = 27;
+    for (bool chain : {false, true}) {
+        config.chain_alignments = chain;
+        for (bool two_sided : {false, true}) {
+            config.two_sided = two_sided;
+            Query query(*graph, sequence);
+            ExactSeeder seeder(query, config);
+            Extender extender(query, config);
+            std::vector<Alignment> results;
+            align_query(query, seeder, extender, [&](Alignment&& a) {
+                EXPECT_FALSE(a.get_orientation());
+                EXPECT_TRUE(a.is_spelling_valid(*graph));
+                EXPECT_TRUE(a.get_cigar().is_valid(a.get_spelling(), a.get_query()));
+                results.push_back(std::move(a));
+            });
+            ASSERT_EQ(1u, results.size()) << chain << " " << two_sided;
+            if (two_sided) {
+                EXPECT_EQ("9=1X12=1X7=", results[0].get_cigar().to_string());
+            } else {
+                EXPECT_GT(results[0].get_clipping(), 0u);
+            }
+        }
+    }
+}
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;

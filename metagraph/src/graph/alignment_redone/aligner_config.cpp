@@ -24,6 +24,7 @@ void DBGAlignerConfig::print_summary() const {
     logger->trace("\t X drop-off: {}", xdrop);
     logger->trace("\t Exact nucleotide match threshold: {}", min_exact_match);
     logger->trace("\t Chain alignments: {}", chain_alignments);
+    logger->trace("\t Two-sided extension: {}", two_sided);
 
     logger->trace("\t Scoring matrix: {}", alignment_edit_distance ? "unit costs" : "matrix");
     if (!alignment_edit_distance) {

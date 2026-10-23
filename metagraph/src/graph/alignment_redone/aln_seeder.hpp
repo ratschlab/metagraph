@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <tsl/hopscotch_map.h>
 
 #include "aln_match.hpp"
@@ -68,15 +69,19 @@ class LabeledSeeder : public ExactSeeder {
 
 class Extender {
   public:
-    Extender(const Query &query, const DBGAlignerConfig &config)
-          : query_(query), config_(config) {}
-
-    virtual ~Extender() {}
+    Extender(const Query &query, const DBGAlignerConfig &config);
+    virtual ~Extender();
 
     void extend(const Alignment &aln,
                 const std::function<void(Alignment&&)> &callback,
                 bool no_bwd = false,
                 bool no_fwd = false) const;
+
+  private:
+    struct TraversalCaches;
+    // Raw topology is immutable throughout a query. Reuse it between seed
+    // extensions; label/coordinate filtering remains per search state.
+    std::unique_ptr<TraversalCaches> traversal_caches_;
 
   protected:
     const Query &query_;

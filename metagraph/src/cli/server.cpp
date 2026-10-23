@@ -180,6 +180,8 @@ Json::Value process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
+    config.alignment_chain = json.get("chain_alignments", config.alignment_chain).asBool();
+    config.alignment_two_sided = json.get("two_sided", config.alignment_two_sided).asBool();
     config.alignment_extend_chains = json.get("extend_chains", true).asBool();
     config.alignment_connect_anchors = json.get("connect_anchors", true).asBool();
 

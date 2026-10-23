@@ -253,6 +253,8 @@ Config::Config(int argc, char *argv[]) {
             align_output_path = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
+        } else if (!strcmp(argv[i], "--align-two-sided")) {
+            alignment_two_sided = true;
         } else if (!strcmp(argv[i], "--align-chain")) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
@@ -1129,6 +1131,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-output-path \t\t\t\twith --json, also emit the VG-style path.mapping object [off]\n");
 }
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-two-sided \t\t\textend both ends of each seed or chain. [off]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t   --align-post-chain \t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
