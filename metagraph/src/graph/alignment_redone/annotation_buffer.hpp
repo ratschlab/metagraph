@@ -9,6 +9,11 @@
 namespace mtg::graph {
 
 class CanonicalDBG;
+namespace align {
+class AnnotationBuffer;
+class IDBGAligner;
+struct DBGAlignerConfig;
+}
 
 namespace align_redone {
 
@@ -96,6 +101,11 @@ class AnnotationBuffer {
     bool node_has_labels(node_index node, label_class_t target) const;
 
   private:
+    friend class Seeder;
+    std::unique_ptr<align::IDBGAligner> make_fast_aligner(const align::DBGAlignerConfig &config);
+    // Share immutable annotation rows across the queries in this buffer's batch.
+    // Search configuration and DP state remain local to each aligner.
+    std::shared_ptr<align::AnnotationBuffer> fast_buffer_;
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;

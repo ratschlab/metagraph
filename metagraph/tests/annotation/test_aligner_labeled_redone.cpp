@@ -15,6 +15,7 @@
 #include "graph/alignment_redone/aln_match.hpp"
 #include "graph/alignment_redone/aligner_config.hpp"
 #include "graph/alignment_redone/aln_seeder.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "kmer/alphabets.hpp"
@@ -27,6 +28,59 @@ using namespace mtg::graph;
 using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
+
+TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) {
+    const std::vector<std::string> references{
+        "AACGTTGCAATGCCGATTCAGGCTAAC", "TTGATAGCCTTGACCGATAGCTTCCA"
+    };
+    for (bool coordinates : {false, true}) {
+        auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            5, references, {"first", "second"}, DeBruijnGraph::BASIC, coordinates);
+        const auto &graph = annotated->get_graph();
+        AnnotationBuffer shared(graph, annotated->get_annotator());
+        for (size_t round = 0; round < 4; ++round) {
+            DBGAlignerConfig config;
+            config.min_seed_length = 5;
+            config.max_seed_length = std::numeric_limits<size_t>::max();
+            config.forward_and_reverse_complement = false;
+            config.seed_complexity_filter = false;
+            config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2 + round, -3, -3);
+            std::string sequence = references[round % 2];
+            sequence[18] = sequence[18] == 'A' ? 'C' : 'A';
+            Query query(graph, sequence);
+            using Result = std::tuple<int, std::string, std::string,
+                                      AnnotationBuffer::Columns, AnnotationBuffer::CoordinateSet>;
+            auto run = [&](AnnotationBuffer &buffer) {
+                std::vector<Result> results;
+                LabeledSeeder seeder(buffer, query, config);
+                LabeledExtender extender(buffer, query, config);
+                align_query(query, seeder, extender, [&](Alignment&& alignment) {
+                    results.emplace_back(score_match(alignment, config), alignment.get_spelling(),
+                        alignment.get_cigar().to_string(),
+                        buffer.get_cached_column_set(alignment.get_label_classes()[0]),
+                        alignment.get_coords());
+                });
+                return results;
+            };
+            AnnotationBuffer fresh(graph, annotated->get_annotator());
+            auto expected = run(fresh);
+            ASSERT_FALSE(expected.empty());
+            EXPECT_EQ(expected, run(shared)) << coordinates << " " << round;
+        }
+        mtg::graph::align::DBGAlignerConfig legacy{};
+        legacy.min_seed_length = legacy.max_seed_length = 5;
+        legacy.score_matrix = mtg::graph::align::DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        for (bool chain : {false, true}) {
+            for (bool two_sided : {false, true}) {
+                legacy.chain_alignments = chain;
+                legacy.two_sided = two_sided;
+                mtg::graph::align::LabeledAligner<> aligner(graph, legacy, annotated->get_annotator());
+                EXPECT_EQ(chain, aligner.get_config().chain_alignments);
+                EXPECT_EQ(two_sided, aligner.get_config().two_sided);
+            }
+        }
+    }
+}
 
 TEST(SSHashAlignment, MatchFractionUsesCompletedAlignment) {
     std::mt19937 random(73);

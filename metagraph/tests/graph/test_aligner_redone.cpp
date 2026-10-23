@@ -161,6 +161,12 @@ TEST(LegacyAlignment, ReverseOrientationWithoutTwoSidedExtension) {
     EXPECT_TRUE(results[0].get_orientation());
     EXPECT_EQ("30=", results[0].get_cigar().to_string());
     EXPECT_TRUE(results[0].is_valid(*graph, &config));
+    reverse[4] = reverse[4] == 'A' ? 'C' : 'A';
+    results = mtg::graph::align::DBGAligner<>(*graph, config).align(reverse);
+    ASSERT_EQ(1u, results.size());
+    EXPECT_TRUE(results[0].get_orientation());
+    EXPECT_EQ("25=1X4=", results[0].get_cigar().to_string());
+    EXPECT_TRUE(results[0].is_valid(*graph, &config));
 }
 #endif
 

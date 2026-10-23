@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "aln_match.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
@@ -18,6 +19,14 @@ using mtg::common::logger;
 
 typedef annot::matrix::BinaryMatrix::Row Row;
 typedef annot::matrix::BinaryMatrix::Column Column;
+
+std::unique_ptr<align::IDBGAligner>
+AnnotationBuffer::make_fast_aligner(const align::DBGAlignerConfig &config) {
+    if (!fast_buffer_)
+        fast_buffer_ = std::make_shared<align::AnnotationBuffer>(graph_, annotator_);
+    return std::unique_ptr<align::IDBGAligner>(
+        new align::LabeledAligner<>(graph_, config, fast_buffer_));
+}
 
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
