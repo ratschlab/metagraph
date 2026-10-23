@@ -91,6 +91,7 @@ class TestServerShutdown(TestingBase):
             with tempfile.TemporaryFile(mode='w+') as log:
                 process = subprocess.Popen(command, stdout=log, stderr=log)
                 writer = None
+                reader = None
                 try:
                     deadline = time.monotonic() + 30
                     while time.monotonic() < deadline:
@@ -105,6 +106,7 @@ class TestServerShutdown(TestingBase):
                     else:
                         self.fail('Server did not open the index list')
 
+                    reader = os.open(index_list, os.O_RDONLY | os.O_NONBLOCK)
                     index = f'test,{self.graph},{self.annotation}.column.annodbg\n'.encode()
                     self.assertEqual(os.write(writer, index), len(index))
                     # A signal can interrupt the FIFO open/read on macOS. Wait
@@ -113,7 +115,8 @@ class TestServerShutdown(TestingBase):
                     unread = array.array('i', [0])
                     while time.monotonic() < deadline:
                         self.assertIsNone(process.poll(), 'Server exited before reading index list')
-                        fcntl.ioctl(writer, termios.FIONREAD, unread)
+                        # macOS reports unread bytes only on the reading end.
+                        fcntl.ioctl(reader, termios.FIONREAD, unread)
                         if unread[0] == 0:
                             break
                         time.sleep(0.01)
@@ -132,6 +135,8 @@ class TestServerShutdown(TestingBase):
                 finally:
                     if writer is not None:
                         os.close(writer)
+                    if reader is not None:
+                        os.close(reader)
                     if process.poll() is None:
                         process.kill()
                     process.wait(timeout=10)
