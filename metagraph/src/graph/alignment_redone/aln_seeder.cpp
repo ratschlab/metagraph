@@ -1406,9 +1406,11 @@ using WorkspaceVector = std::vector<T, WorkspaceAllocator<T>>;
 using GraphPosition = std::pair<DeBruijnGraph::node_index, size_t>;
 struct PositionHash {
     size_t operator()(const GraphPosition &position) const {
-        size_t node = std::hash<DeBruijnGraph::node_index>{}(position.first);
-        return node ^ (std::hash<size_t>{}(position.second)
-                       + 0x9e3779b9 + (node << 6) + (node >> 2));
+        // Graph IDs and query distances are correlated along an alignment.
+        // Mix both into every bit before power-of-two bucket selection.
+        const auto product = static_cast<__uint128_t>(position.first ^ 0x9e3779b97f4a7c15ULL)
+                           * (position.second ^ 0xbf58476d1ce4e5b9ULL);
+        return static_cast<uint64_t>(product) ^ static_cast<uint64_t>(product >> 64);
     }
 };
 

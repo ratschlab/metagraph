@@ -469,24 +469,28 @@ TYPED_TEST(DBGAlignerRedoneTest, SearchLimitsRetainValidPartialAlignments) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = config.max_seed_length = 5;
     config.forward_and_reverse_complement = false;
-    for (double nodes : { 0.0, 0.1, 1.0, 1000.0 }) {
-        for (double ram : { 0.0, 0.0001, 0.001, 0.01, 1.0 }) {
-            SCOPED_TRACE(nodes);
-            SCOPED_TRACE(ram);
-            config.max_nodes_per_seq_char = nodes;
-            config.max_ram_per_alignment = ram;
-            ExactSeeder seeder(query, config);
-            Extender extender(query, config);
-            std::vector<Alignment> results;
-            align_query(query, seeder, extender, [&](Alignment&& aln) {
-                ASSERT_TRUE(aln.get_cigar().is_valid(aln.get_spelling(), aln.get_query()));
-                results.push_back(std::move(aln));
-            });
-            ASSERT_FALSE(results.empty());
-            if (nodes == 1000 && ram == 1) {
-                EXPECT_EQ("5=1X9=", results[0].get_cigar().to_string());
-            } else if (!nodes || !ram) {
-                EXPECT_LT(results[0].get_seed().size(), query.get_query().size());
+    for (bool two_sided : {false, true}) {
+        SCOPED_TRACE(two_sided);
+        config.two_sided = two_sided;
+        for (double nodes : { 0.0, 0.1, 1.0, 1000.0 }) {
+            for (double ram : { 0.0, 0.0001, 0.001, 0.01, 1.0 }) {
+                SCOPED_TRACE(nodes);
+                SCOPED_TRACE(ram);
+                config.max_nodes_per_seq_char = nodes;
+                config.max_ram_per_alignment = ram;
+                ExactSeeder seeder(query, config);
+                Extender extender(query, config);
+                std::vector<Alignment> results;
+                align_query(query, seeder, extender, [&](Alignment&& aln) {
+                    ASSERT_TRUE(aln.get_cigar().is_valid(aln.get_spelling(), aln.get_query()));
+                    results.push_back(std::move(aln));
+                });
+                ASSERT_FALSE(results.empty());
+                if (nodes == 1000 && ram == 1) {
+                    EXPECT_EQ("5=1X9=", results[0].get_cigar().to_string());
+                } else if (!nodes || !ram) {
+                    EXPECT_LT(results[0].get_seed().size(), query.get_query().size());
+                }
             }
         }
     }
