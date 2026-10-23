@@ -69,7 +69,9 @@ jobs:
 
       - &install-linux-deps
         name: Install build dependencies
+        timeout-minutes: 10
         run: |
+          ./.github/scripts/configure-apt-mirrors.sh
           sudo apt-get update
           if [[ "${{ inputs.compiler }}" != "clang" ]]; then
               sudo apt-get install -y ${{ inputs.compiler }}
