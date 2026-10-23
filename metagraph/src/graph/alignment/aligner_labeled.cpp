@@ -422,9 +422,10 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
         annotation_buffer_(graph, annotator) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {
-        logger->trace("Coordinates detected. Enabling seed chaining");
+        logger->trace("Coordinates detected. Using per-label cutoffs");
         this->config_.global_xdrop = false;
-        this->config_.chain_alignments = true;
+        // The fast adapter must not implicitly enable the chaining pipeline.
+        this->config_.chain_alignments |= this->config_.two_sided;
     }
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
