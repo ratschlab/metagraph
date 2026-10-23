@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <map>
 #include <random>
+#include <set>
 
 #include "../graph/all/test_dbg_helpers.hpp"
 #include "../test_helpers.hpp"
@@ -80,6 +81,50 @@ TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) 
             }
         }
     }
+}
+
+TEST(LabeledChaining, SharedSeedsKeepDistinctConnectingPaths) {
+    const std::vector<std::string> references{
+        "TCCCATTACATCCCCCCACTCATCCTCCATGTTCCCCCCACTCATAGACCCCAAC",
+        "TCCCATTACATCCCCCCTCTCATCCATCTACATGTTCCTCCCACTCATAGACCCCAAC",
+        "TCCCATTACATCCCCCCAGTCATCCTTGTTCCCACCACTCATAGACCCCAAC"
+    };
+    const std::string sequence = "TCCCATTACATCCCCCCACTAACCTCCTCCATTTTCCCCTCTCATAGAACCCAAC";
+    auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        3, references, {"0", "1", "2"});
+    const auto &graph = annotated->get_graph();
+    const auto &encoder = annotated->get_annotator().get_label_encoder();
+    AnnotationBuffer buffer(graph, annotated->get_annotator());
+    DBGAlignerConfig config;
+    config.min_seed_length = 3;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.chain_alignments = true;
+    config.two_sided = true;
+    config.forward_and_reverse_complement = false;
+    config.seed_complexity_filter = false;
+    config.min_exact_match = 0;
+    config.rel_score_cutoff = 0;
+    config.num_alternative_paths = 3;
+    config.xdrop = 27;
+    config.gap_opening_penalty = config.gap_extension_penalty = -2;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    Query query(graph, sequence);
+    LabeledSeeder seeder(buffer, query, config);
+    LabeledExtender extender(buffer, query, config);
+    std::set<std::string> found_labels;
+    align_query(query, seeder, extender, [&](Alignment&& alignment) {
+        EXPECT_TRUE(alignment.is_spelling_valid(graph));
+        EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), alignment.get_query()));
+        for (auto column : buffer.get_cached_column_set(alignment.get_label_classes()[0])) {
+            const auto &label = encoder.decode(column);
+            found_labels.insert(label);
+            const auto &reference = references.at(std::stoul(label));
+            for (auto node : alignment.get_path())
+                EXPECT_NE(std::string::npos, reference.find(graph.get_node_sequence(node)))
+                    << "label " << label << " in " << alignment;
+        }
+    });
+    EXPECT_EQ((std::set<std::string>{"0", "1", "2"}), found_labels);
 }
 
 TEST(SSHashAlignment, MatchFractionUsesCompletedAlignment) {

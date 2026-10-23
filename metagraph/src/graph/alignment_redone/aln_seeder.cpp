@@ -3438,8 +3438,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             }
         },
         save_alignment,
-        []() { return false; },
-        anno_buffer
+        []() { return false; }
     );
 
     return alignments;
