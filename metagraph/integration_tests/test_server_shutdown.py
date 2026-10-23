@@ -1,10 +1,13 @@
+import array
 import errno
+import fcntl
 import os
 import re
 import signal
 import socket
 import subprocess
 import tempfile
+import termios
 import time
 
 import requests
@@ -102,14 +105,28 @@ class TestServerShutdown(TestingBase):
                     else:
                         self.fail('Server did not open the index list')
 
-                    process.send_signal(shutdown_signal)
                     index = f'test,{self.graph},{self.annotation}.column.annodbg\n'.encode()
                     self.assertEqual(os.write(writer, index), len(index))
+                    # A signal can interrupt the FIFO open/read on macOS. Wait
+                    # until the entry is consumed, but keep the writer open so
+                    # startup is still waiting for EOF before loading graphs.
+                    unread = array.array('i', [0])
+                    while time.monotonic() < deadline:
+                        self.assertIsNone(process.poll(), 'Server exited before reading index list')
+                        fcntl.ioctl(writer, termios.FIONREAD, unread)
+                        if unread[0] == 0:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        self.fail('Server did not read the index list entry')
+
+                    process.send_signal(shutdown_signal)
                     os.close(writer)
                     writer = None
-                    self.assertEqual(process.wait(timeout=30), 0)
+                    returncode = process.wait(timeout=30)
                     log.seek(0)
                     output = log.read()
+                    self.assertEqual(returncode, 0, output)
                     self.assertIn('[Server] All graphs were loaded', output)
                     self.assertIn('[Server] Shutting down...', output)
                 finally:
