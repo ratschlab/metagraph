@@ -10,13 +10,11 @@
 #include <string>
 #include <unordered_map>
 
-#include <json/json.h>
-
 
 namespace mtg {
 namespace cli {
 
-class Config;
+struct SearchRequest;
 
 /**
  * Cache serialized /search responses and share in-flight computations.
@@ -179,18 +177,9 @@ class ServerQueryCache {
 };
 
 
-/**
- * Build the canonical cache key for a `/search` request given the parsed
- * JSON body, the server's startup Config, and the resolved graph identity.
- *
- * Per-request overrides (discovery_fraction, query_mode flags, top_labels,
- * etc.) are read from `json` directly, mirroring how `process_search_request`
- * resolves them. The key includes only inputs that affect the *semantic*
- * result; it deliberately excludes formatting flags like `verbose_output`
- * and `Accept-Encoding: deflate`.
- */
-std::string make_search_cache_key(const Json::Value &json,
-                                  const Config &server_config,
+// Key the same resolved options used to execute the search. Transport encoding
+// and graph-loading strategy do not change the result and are excluded.
+std::string make_search_cache_key(const SearchRequest &request,
                                   const std::string &graph_identity);
 
 } // namespace cli

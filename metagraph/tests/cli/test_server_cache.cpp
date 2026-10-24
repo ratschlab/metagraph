@@ -8,6 +8,7 @@
 #include "gtest/gtest.h"
 
 #include "cli/server_cache.hpp"
+#include "cli/server_request.hpp"
 #include "cli/config/config.hpp"
 
 
@@ -473,8 +474,8 @@ TEST(ServerQueryCache, CacheKeyPreservesFloatingPointParameters) {
         auto first = request, second = request;
         first[parameter] = 0.12345641;
         second[parameter] = std::nextafter(0.12345641, 1.0);
-        EXPECT_NE(make_search_cache_key(first, config, "graph"),
-                  make_search_cache_key(second, config, "graph"));
+        EXPECT_NE(make_search_cache_key(parse_search_request(first, config), "graph"),
+                  make_search_cache_key(parse_search_request(second, config), "graph"));
     }
 }
 
@@ -485,7 +486,7 @@ TEST(ServerQueryCache, CacheKeyDoesNotDependOnLocale) {
     Json::Value request;
     request["FASTA"] = ">query\nACGTACGT\n";
     request["discovery_fraction"] = 0.25;
-    auto key = make_search_cache_key(request, config, "graph");
+    auto key = make_search_cache_key(parse_search_request(request, config), "graph");
     struct CommaDecimal : std::numpunct<char> {
         char do_decimal_point() const override { return ','; }
     };
@@ -494,7 +495,109 @@ TEST(ServerQueryCache, CacheKeyDoesNotDependOnLocale) {
         ~RestoreLocale() { std::locale::global(previous); }
     } restore;
     std::locale::global(std::locale(std::locale::classic(), new CommaDecimal));
-    EXPECT_EQ(make_search_cache_key(request, config, "graph"), key);
+    EXPECT_EQ(make_search_cache_key(parse_search_request(request, config), "graph"), key);
+}
+
+TEST(ServerSearchRequest, ResolvesDefaultsAndOverridesWithoutChangingServerConfig) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    config.discovery_fraction = 0.25;
+    config.alignment_min_exact_match = 0.5;
+    config.alignment_max_nodes_per_seq_char = 3.0;
+    config.num_top_labels = 7;
+    config.query_mode = COORDS;  // HTTP mode defaults to MATCHES, independently of CLI mode.
+    config.tmp_dir = "/tmp/request-test";
+    Json::Value json;
+    json["FASTA"] = ">q\nACGT\n";
+    auto defaults = parse_search_request(json, config);
+    EXPECT_EQ(defaults.fasta, json["FASTA"].asString());
+    EXPECT_DOUBLE_EQ(defaults.config.discovery_fraction, 0.25);
+    EXPECT_DOUBLE_EQ(defaults.config.alignment_min_exact_match, 0.5);
+    EXPECT_DOUBLE_EQ(defaults.config.alignment_max_nodes_per_seq_char, 3.0);
+    EXPECT_EQ(defaults.config.num_top_labels, 7u);
+    EXPECT_EQ(defaults.config.query_mode, MATCHES);
+    EXPECT_EQ(defaults.config.tmp_dir, config.tmp_dir);
+    EXPECT_FALSE(defaults.align);
+
+    json["discovery_fraction"] = 0.75;
+    json["min_exact_match"] = 0.125;
+    json["max_num_nodes_per_seq_char"] = 9.0;
+    json["top_labels"] = 2;
+    json["align"] = true;
+    auto overrides = parse_search_request(json, config);
+    EXPECT_DOUBLE_EQ(overrides.config.discovery_fraction, 0.75);
+    EXPECT_DOUBLE_EQ(overrides.config.alignment_min_exact_match, 0.125);
+    EXPECT_DOUBLE_EQ(overrides.config.alignment_max_nodes_per_seq_char, 9.0);
+    EXPECT_EQ(overrides.config.num_top_labels, 2u);
+    EXPECT_TRUE(overrides.align);
+    EXPECT_DOUBLE_EQ(config.discovery_fraction, 0.25);
+    EXPECT_EQ(config.num_top_labels, 7u);
+    EXPECT_EQ(config.query_mode, COORDS);
+}
+
+TEST(ServerSearchRequest, ModePrecedenceAndIgnoredFlagsShareCacheIdentity) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    Json::Value json;
+    json["FASTA"] = ">q\nACGT\n";
+    const char *flags[] = {"query_coords", "query_counts", "with_signature", "abundance_sum"};
+    const QueryMode modes[] = {COORDS, COUNTS, SIGNATURE, COUNTS_SUM};
+    for (size_t i = 0; i < 4; ++i) {
+        auto one = json, several = json;
+        one[flags[i]] = true;
+        for (size_t j = i; j < 4; ++j)
+            several[flags[j]] = true;
+        auto request = parse_search_request(several, config);
+        EXPECT_EQ(request.config.query_mode, modes[i]);
+        EXPECT_EQ(make_search_cache_key(request, "graph"),
+                  make_search_cache_key(parse_search_request(one, config), "graph"));
+        EXPECT_NE(make_search_cache_key(request, "graph"),
+                  make_search_cache_key(parse_search_request(json, config), "graph"));
+    }
+}
+
+TEST(ServerSearchRequest, EffectiveDefaultsAndTransportFieldsShareCacheIdentity) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    Json::Value json;
+    json["FASTA"] = ">q\nACGT\n";
+    const auto key = make_search_cache_key(parse_search_request(json, config), "graph");
+    json["discovery_fraction"] = config.discovery_fraction;
+    json["min_exact_match"] = config.alignment_min_exact_match;
+    json["max_num_nodes_per_seq_char"] = config.alignment_max_nodes_per_seq_char;
+    json["top_labels"] = Json::UInt64(config.num_top_labels);
+    json["align"] = false;
+    json["in_ram"] = true;
+    EXPECT_EQ(make_search_cache_key(parse_search_request(json, config), "graph"), key);
+    json["align"] = true;
+    EXPECT_NE(make_search_cache_key(parse_search_request(json, config), "graph"), key);
+    json["align"] = false;
+    json["top_labels"] = 1;
+    EXPECT_NE(make_search_cache_key(parse_search_request(json, config), "graph"), key);
+}
+
+TEST(ServerSearchRequest, RejectsInvalidOptionsBeforeCacheLookup) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    Json::Value json;
+    EXPECT_THROW(parse_search_request(json, config), std::invalid_argument);
+    json["FASTA"] = ">q\nACGT\n";
+    for (const char *field : {"discovery_fraction", "min_exact_match"}) {
+        for (double value : {-0.1, 1.1}) {
+            auto invalid = json;
+            invalid[field] = value;
+            EXPECT_THROW(parse_search_request(invalid, config), std::invalid_argument);
+        }
+    }
+    for (const char *field : {"top_labels", "max_num_nodes_per_seq_char", "align"}) {
+        auto invalid = json;
+        invalid[field] = Json::Value(Json::arrayValue);
+        EXPECT_THROW(parse_search_request(invalid, config), std::exception);
+    }
 }
 
 
@@ -529,8 +632,8 @@ TEST(ServerQueryCache, DistinctFastaHeadersDoNotShareResults) {
     // Equal-length headers that collide under 64-bit libstdc++ std::hash.
     first["FASTA"] = ">aaaaaaabbbbbbbb\nACGTACGT\n";
     second["FASTA"] = ">y23O=^QD5fntS2F\nACGTACGT\n";
-    EXPECT_NE(make_search_cache_key(first, config, "graph"),
-              make_search_cache_key(second, config, "graph"));
+    EXPECT_NE(make_search_cache_key(parse_search_request(first, config), "graph"),
+              make_search_cache_key(parse_search_request(second, config), "graph"));
 }
 
 #ifndef _NO_DEATH_TEST

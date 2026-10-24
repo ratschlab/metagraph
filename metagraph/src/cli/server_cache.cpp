@@ -7,7 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "config/config.hpp"
+#include "server_request.hpp"
 
 
 namespace mtg {
@@ -269,55 +269,21 @@ bool ServerQueryCache::contains(const std::string &key) const {
 
 // --- key construction -------------------------------------------------------
 
-std::string make_search_cache_key(const Json::Value &json,
-                                  const Config &server_config,
+std::string make_search_cache_key(const SearchRequest &request,
                                   const std::string &graph_identity) {
-    // Build a stable string key out of every input that affects the
-    // semantic result. Keep the complete FASTA so a hash collision in
-    // the lookup table cannot return a different request's response.
-    //
-    // Per-request overrides are pulled directly from the JSON the same
-    // way process_search_request resolves them, so flags that select
-    // different query modes (e.g. abundance_sum vs query_coords) give
-    // different keys for the same FASTA.
-    //
-    // NOTE: keep this resolution logic in sync with the JSON-to-Config
-    // mapping in `process_search_request` (server.cpp).
-    const std::string &fasta = json["FASTA"].asString();
-
-    double discovery_fraction
-            = json.get("discovery_fraction", server_config.discovery_fraction).asDouble();
-    double min_exact_match
-            = json.get("min_exact_match", server_config.alignment_min_exact_match).asDouble();
-    double max_nodes_per_seq_char
-            = json.get("max_num_nodes_per_seq_char",
-                       server_config.alignment_max_nodes_per_seq_char).asDouble();
-    int top_labels
-            = json.get("top_labels", server_config.num_top_labels).asInt();
-
-    int query_mode;
-    if (json.get("query_coords", false).asBool()) {
-        query_mode = COORDS;
-    } else if (json.get("query_counts", false).asBool()) {
-        query_mode = COUNTS;
-    } else if (json.get("with_signature", false).asBool()) {
-        query_mode = SIGNATURE;
-    } else if (json.get("abundance_sum", false).asBool()) {
-        query_mode = COUNTS_SUM;
-    } else {
-        query_mode = MATCHES;
-    }
-
+    // Keep complete FASTA so hash collisions cannot return another request's result.
+    const auto &fasta = request.fasta;
+    const auto &config = request.config;
     std::ostringstream oss;
     oss.imbue(std::locale::classic());
     oss << std::setprecision(std::numeric_limits<double>::max_digits10);
     oss << "g:" << graph_identity.size() << ':' << graph_identity << '|'
-        << "m:" << query_mode << '|'
-        << "df:" << discovery_fraction << '|'
-        << "ame:" << min_exact_match << '|'
-        << "amn:" << max_nodes_per_seq_char << '|'
-        << "tl:" << top_labels << '|'
-        << "al:" << (json.get("align", false).asBool() ? '1' : '0') << '|'
+        << "m:" << config.query_mode << '|'
+        << "df:" << config.discovery_fraction << '|'
+        << "ame:" << config.alignment_min_exact_match << '|'
+        << "amn:" << config.alignment_max_nodes_per_seq_char << '|'
+        << "tl:" << config.num_top_labels << '|'
+        << "al:" << (request.align ? '1' : '0') << '|'
         << "f:" << fasta.size() << ':' << fasta;
     return oss.str();
 }

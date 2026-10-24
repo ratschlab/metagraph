@@ -19,6 +19,7 @@
 #include "align.hpp"
 #include "server_utils.hpp"
 #include "server_cache.hpp"
+#include "server_request.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -31,52 +32,9 @@ using namespace mtg::graph;
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
 
-Json::Value process_search_request(const Json::Value &json,
-                                   const graph::AnnotatedDBG &anno_graph,
-                                   const Config &config_orig) {
-    const auto &fasta = json["FASTA"];
-    if (fasta.isNull())
-        throw std::invalid_argument("No input sequences received from client");
-
-    Config config(config_orig);
-    // discovery_fraction a proxy of 1 - %similarity
-    config.discovery_fraction
-            = json.get("discovery_fraction", config.discovery_fraction).asDouble();
-
-    config.alignment_min_exact_match
-            = json.get("min_exact_match",
-                       config.alignment_min_exact_match).asDouble();
-
-    config.alignment_max_nodes_per_seq_char = json.get(
-        "max_num_nodes_per_seq_char",
-        config.alignment_max_nodes_per_seq_char).asDouble();
-
-    if (config.discovery_fraction < 0.0 || config.discovery_fraction > 1.0) {
-        throw std::invalid_argument(
-                "Discovery fraction should be within [0, 1.0]. Instead got "
-                + std::to_string(config.discovery_fraction));
-    }
-
-    if (config.alignment_min_exact_match < 0.0
-            || config.alignment_min_exact_match > 1.0) {
-        throw std::invalid_argument(
-                "Minimum exact match should be within [0, 1.0]. Instead got "
-                + std::to_string(config.alignment_min_exact_match));
-    }
-
-    config.num_top_labels = json.get("top_labels", config.num_top_labels).asInt();
-
-    if (json.get("query_coords", false).asBool()) {
-        config.query_mode = COORDS;
-    } else if (json.get("query_counts", false).asBool()) {
-        config.query_mode = COUNTS;
-    } else if (json.get("with_signature", false).asBool()) {
-        config.query_mode = SIGNATURE;
-    } else if (json.get("abundance_sum", false).asBool()) {
-        config.query_mode = COUNTS_SUM;
-    } else {
-        config.query_mode = MATCHES;
-    }
+Json::Value process_search_request(const SearchRequest &request,
+                                   const graph::AnnotatedDBG &anno_graph) {
+    const auto &config = request.config;
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
     if ((config.query_mode == COUNTS || config.query_mode == COUNTS_SUM)
@@ -92,7 +50,7 @@ Json::Value process_search_request(const Json::Value &json,
     }
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
-    if (json.get("align", false).asBool()) {
+    if (request.align) {
         aligner_config.reset(new align::DBGAlignerConfig(
             initialize_aligner_config(config, anno_graph.get_graph())
         ));
@@ -107,7 +65,7 @@ Json::Value process_search_request(const Json::Value &json,
     // work on strings seems non-trivial. An alternative would be to use
     // read_fasta_from_string.
     utils::TempFile tf(config.tmp_dir);
-    tf.ofstream() << fasta.asString();
+    tf.ofstream() << request.fasta;
     tf.ofstream().close();
 
     // Query sequences and callback by appending result to vector with mutex for thread safety
@@ -406,9 +364,8 @@ int run_server(Config *config) {
                 Json::Value content_json = parse_json_string(content);
                 logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
+                const auto search_request = parse_search_request(content_json, *config);
                 // Validate fields omitted from the key before returning a cached result.
-                if (content_json["FASTA"].isNull())
-                    throw std::invalid_argument("No input sequences received from client");
                 std::vector<std::string> graphs_to_query;
                 bool load_in_ram = false;
                 if (config->fnames.empty()) {
@@ -431,7 +388,7 @@ int run_server(Config *config) {
                         graph_identity = oss.str();
                     }
                     *handle_holder = search_cache.acquire(
-                        make_search_cache_key(content_json, *config, graph_identity));
+                        make_search_cache_key(search_request, graph_identity));
                     if (!handle_holder->is_miss()) {
                         auto cached = handle_holder->get();
                         logger->info("[Server] Request {}: cache HIT  {:.1f} KB  "
@@ -453,7 +410,7 @@ int run_server(Config *config) {
                         logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
                                       request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
                         try {
-                            result = process_search_request(content_json, *anno_graph.get(), *config);
+                            result = process_search_request(search_request, *anno_graph.get());
                         } catch (...) {
                             graphs_being_queried--;
                             throw;
@@ -526,7 +483,7 @@ int run_server(Config *config) {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                         }
 
-                                        auto json = process_search_request(content_json, *index, *config);
+                                        auto json = process_search_request(search_request, *index);
                                         logger->trace("Request {}: {} graph {} {} in {} sec",
                                                       request_id, in_ram ? "Loaded and searched" : "Searched",
                                                       graph_fname, anno_fname, timer.elapsed());
@@ -584,7 +541,7 @@ int run_server(Config *config) {
                 }
                 return serialized;
             },
-            [handle_holder, request_id, &search_cache](const SimpleWeb::error_code &ec) {
+            [handle_holder, request_id](const SimpleWeb::error_code &ec) {
                 if (!handle_holder || !*handle_holder)
                     return;  // never acquired (e.g. early throw before acquire)
                 if (ec) {
