@@ -342,11 +342,11 @@ TYPED_TEST(DBGAlignerRedoneTest, LongBranchingExtension) {
     }
     auto change = [](char c) { return c == 'A' ? 'C' : 'A'; };
     std::string branch = reference;
-    branch[100] = change(branch[100]);
+    branch.at(100) = change(branch.at(100));
     auto graph = build_graph_batch<TypeParam>(17, { reference, branch });
     std::string query = reference;
     for (size_t i : { 8, 199, 391 })
-        query[i] = change(query[i]);
+        query.at(i) = change(query.at(i));
     DBGAlignerConfig config{};
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.left_end_bonus = config.right_end_bonus = 5;
