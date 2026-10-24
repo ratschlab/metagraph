@@ -4,8 +4,8 @@
 # Each shard runs in its own CWD ($ROOT/shard$i) so that temp files written
 # to "." by third-party libs (sshash in particular dumps sshash.tmp.run_*
 # into tmp_dirname, which defaults to ".") don't collide across shards.
-# A shared $ROOT/tests symlink points at the real tests/ dir so the tests'
-# hardcoded "../tests/data" still resolves. Tests' own scratch output goes
+# Shared tests/ and api/ symlinks preserve the fixture paths used by the tests.
+# Tests' own scratch output goes
 # to a per-process temp dir via test_dump_dir().
 #
 # Usage:
@@ -107,6 +107,7 @@ safe_cleanup() {
     esac
 }
 ln -s "$TESTS_DIR" "$ROOT/tests"
+ln -s "$TESTS_DIR/../api" "$ROOT/api"
 for ((i = 0; i < WORKERS; i++)); do
     mkdir -p "$ROOT/shard$i"
 done
