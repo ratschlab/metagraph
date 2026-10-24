@@ -1,6 +1,8 @@
 #include "config.hpp"
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <iostream>
 #include <unordered_set>
 #include <filesystem>
@@ -410,7 +412,19 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
-            server_cache_size = std::stod(get_value(i++));
+            std::string value = get_value(i++);
+            size_t end = 0;
+            try {
+                server_cache_size = std::stod(value, &end);
+            } catch (const std::exception &) {
+                server_cache_size = -1;
+            }
+            double bytes = server_cache_size * 1e9;
+            if (end != value.size() || !std::isfinite(bytes) || bytes < 0
+                    || bytes >= static_cast<double>(std::numeric_limits<size_t>::max())) {
+                fprintf(stderr, "ERROR: --cache-size must be a finite, non-negative size representable in bytes\n");
+                exit(1);
+            }
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_welcome_message();
             print_usage(argv[0], identity);

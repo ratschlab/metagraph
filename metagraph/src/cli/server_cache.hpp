@@ -75,8 +75,8 @@ class Config;
  *   The serialized JSON response body, kept as a `std::string` (held
  *   via shared_ptr so concurrent waiters/readers can share it). Caching
  *   the serialized form rather than `Json::Value` (a) makes the byte
- *   budget reflect the entry's actual memory footprint instead of the
- *   much larger Json::Value tree, and (b) lets cache hits skip
+ *   budget cover string allocations and estimated entry overhead instead
+ *   of the much larger Json::Value tree, and (b) lets cache hits skip
  *   serialization entirely. The server's `verbose_output` flag is
  *   process-constant (set on startup), so the cached body is consistent
  *   across all hits within a process; only Accept-Encoding-driven
@@ -142,9 +142,8 @@ class ServerQueryCache {
         // fact.
         //
         // mark_protected() puts the entry under the priority-retention
-        // window (or extends it if already there). The window timer is
-        // also refreshed on each cache hit, since a hit is itself
-        // evidence the upstream is still retrying.
+        // window, measured from publication or the last cache hit.
+        // Cache hits refresh the timer; repeated delivery callbacks do not.
         void mark_delivered();
         void mark_protected();
 
@@ -201,9 +200,8 @@ class ServerQueryCache {
         // Used to compute "within protection_ttl" for eviction priority.
         std::chrono::steady_clock::time_point ready_at{};
         std::atomic<DeliveryState> delivery{DeliveryState::PENDING};
-        // Byte size of the published response — duplicated here so the
-        // eviction sweep can sum/subtract it without touching the
-        // shared_future. Set once in on_result_ready.
+        // Charged string allocations and estimated entry overhead.
+        // Set once in on_result_ready; used without touching shared_future.
         size_t                size_bytes = 0;
         // Iterator into ServerQueryCache::lru_; valid iff in_cache.
         std::list<std::shared_ptr<Entry>>::iterator lru_pos{};

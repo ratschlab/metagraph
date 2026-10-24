@@ -435,7 +435,7 @@ int run_server(Config *config) {
                     std::ostringstream oss;
                     for (const auto &name : graphs_to_query) {
                         for (const auto &[g, a] : indexes[name]) {
-                            oss << g << '|' << a << ';';
+                            oss << g.size() << ':' << g << a.size() << ':' << a;
                         }
                     }
                     graph_identity = oss.str();

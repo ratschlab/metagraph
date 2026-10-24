@@ -70,7 +70,7 @@ ServerQueryCache::ResultPtr ServerQueryCache::Handle::get() const {
 
 void ServerQueryCache::Handle::set_result(std::string response) {
     auto ptr = std::make_shared<const std::string>(std::move(response));
-    size_t bytes = ptr->size();
+    size_t bytes = ptr->capacity() + 1;
     producer_->set_value(ptr);
     producer_.reset();
     cache_->on_result_ready(entry_, bytes);
@@ -172,8 +172,12 @@ void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
     if (!entry->in_cache)
         return;  // Detached entry from the disabled-cache path.
     entry->ready_at = std::chrono::steady_clock::now();
-    entry->size_bytes = size;
-    total_size_bytes_ += size;
+    // Charge both stored keys, the response allocation and an estimate of
+    // entry/container bookkeeping, so even empty responses consume budget.
+    entry->size_bytes = size + 2 * (entry->key.capacity() + 1)
+                          + sizeof(Entry) + sizeof(decltype(map_)::value_type)
+                          + sizeof(std::string) + 8 * sizeof(void *);
+    total_size_bytes_ += entry->size_bytes;
     evict_under_pressure_locked();
 }
 
@@ -294,8 +298,8 @@ std::string make_search_cache_key(const Json::Value &json,
                                   const Config &server_config,
                                   const std::string &graph_identity) {
     // Build a stable string key out of every input that affects the
-    // semantic result. The FASTA body (the bulk of the request) is
-    // collapsed to a hash; flag-sized values are inlined verbatim.
+    // semantic result. Keep the complete FASTA so a hash collision in
+    // the lookup table cannot return a different request's response.
     //
     // Per-request overrides are pulled directly from the JSON the same
     // way process_search_request resolves them, so flags that select
@@ -305,7 +309,6 @@ std::string make_search_cache_key(const Json::Value &json,
     // NOTE: keep this resolution logic in sync with the JSON-to-Config
     // mapping in `process_search_request` (server.cpp).
     const std::string &fasta = json["FASTA"].asString();
-    size_t fasta_hash = std::hash<std::string>{}(fasta);
 
     double discovery_fraction
             = json.get("discovery_fraction", server_config.discovery_fraction).asDouble();
@@ -333,15 +336,14 @@ std::string make_search_cache_key(const Json::Value &json,
     std::ostringstream oss;
     oss.imbue(std::locale::classic());
     oss << std::setprecision(std::numeric_limits<double>::max_digits10);
-    oss << "g:" << graph_identity << '|'
+    oss << "g:" << graph_identity.size() << ':' << graph_identity << '|'
         << "m:" << query_mode << '|'
         << "df:" << discovery_fraction << '|'
         << "ame:" << min_exact_match << '|'
         << "amn:" << max_nodes_per_seq_char << '|'
         << "tl:" << top_labels << '|'
         << "al:" << (json.get("align", false).asBool() ? '1' : '0') << '|'
-        << "fl:" << fasta.size() << '|'
-        << "fh:" << fasta_hash;
+        << "f:" << fasta.size() << ':' << fasta;
     return oss.str();
 }
 
