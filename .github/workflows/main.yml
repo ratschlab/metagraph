@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - master
+      - gr/labeled-traversal
 
 env:
   REGISTRY: ghcr.io
