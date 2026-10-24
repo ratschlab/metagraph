@@ -376,6 +376,8 @@ struct Scratch {
     std::vector<LabelId> touched;
 
     void init(size_t n) {
+        if (n > trace_broken.max_size())
+            throw std::length_error("Traversal scratch size exceeds vector capacity");
         for (auto *v : { &trace_broken, &excluded, &seen, &has_cont, &stays, &only_hairpin,
                          &in_quorum_fail, &superseded, &blocked, &is_touched, &marked,
                          &budget_checked }) {
