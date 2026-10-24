@@ -377,7 +377,7 @@ TEST(bit_vector_dyn, InsertDelete) {
 
 
 TEST(bit_vector_dyn, Serialization) {
-    std::vector<std::initializer_list<bool>> init_lists = {
+    const std::vector<std::vector<bool>> init_lists = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
@@ -385,7 +385,7 @@ TEST(bit_vector_dyn, Serialization) {
         { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
-    for (auto init_list : init_lists) {
+    for (const auto &init_list : init_lists) {
         sdsl::bit_vector numbers(init_list.begin(), init_list.end());
         std::unique_ptr<bit_vector> vector { new bit_vector_dyn(numbers) };
         ASSERT_TRUE(vector);
@@ -470,7 +470,7 @@ TEST(select_support_mcl, PredictedMemoryFootprint) {
 }
 
 TYPED_TEST(BitVectorTest, Serialization) {
-    std::vector<std::initializer_list<bool>> init_lists = {
+    const std::vector<std::vector<bool>> init_lists = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
@@ -478,7 +478,7 @@ TYPED_TEST(BitVectorTest, Serialization) {
         { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
-    for (auto init_list : init_lists) {
+    for (const auto &init_list : init_lists) {
         sdsl::bit_vector numbers(init_list.begin(), init_list.end());
         std::unique_ptr<bit_vector> vector { new TypeParam(numbers) };
         ASSERT_TRUE(vector);
@@ -497,7 +497,7 @@ TYPED_TEST(BitVectorTest, Serialization) {
 
 /* TODO: re-enable this later
 TYPED_TEST(BitVectorTest, LoadWithMMAP) {
-    std::vector<std::initializer_list<bool>> init_lists = {
+    const std::vector<std::vector<bool>> init_lists = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
         { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
@@ -505,7 +505,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
         { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
-    for (auto init_list : init_lists) {
+    for (const auto &init_list : init_lists) {
         std::ofstream outstream(test_dump_basename, std::ios::binary);
         std::unique_ptr<bit_vector> vector { new TypeParam(sdsl::bit_vector(100, 0)) };
         vector->serialize(outstream);
@@ -527,7 +527,7 @@ TYPED_TEST(BitVectorTest, LoadWithMMAP) {
 */
 
 TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
-    std::vector<std::initializer_list<bool>> init_lists = {
+    const std::vector<std::vector<bool>> init_lists = {
         { },
         { 1, },
         { 0, },
@@ -536,7 +536,7 @@ TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
         { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
         { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
     };
-    for (auto init_list : init_lists) {
+    for (const auto &init_list : init_lists) {
         sdsl::bit_vector bv(init_list.begin(), init_list.end());
         {
             std::ofstream outstream(test_dump_basename, std::ios::binary);

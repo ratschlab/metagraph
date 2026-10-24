@@ -64,9 +64,14 @@ BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
 
 bool RowSparse::load(std::istream &f) {
     try {
-        f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
+        if (!f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t)))
+            return false;
         set_bits_.load(f);
+        if (!f.good())
+            return false;
         boundary_.load(f);
+        if (!f.good())
+            return false;
         num_rows_ = boundary_.num_set_bits();
     } catch (...) {
         return false;
