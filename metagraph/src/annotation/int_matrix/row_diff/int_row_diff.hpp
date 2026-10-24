@@ -50,13 +50,15 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
     IntRowDiff(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
-    std::vector<Row> get_column(Column j) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<Row> get_column(Column column) const override {
+        return get_column_from_rows(*this, column);
+    }
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const override;
     // no deduplication: see class comment on RowDiff::get_rows_dict (speed vs limited size win)
     std::vector<SetBitPositions>
     get_rows_dict(std::vector<Row> *rows, size_t num_threads) const override;
     // query integer values
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
                                           size_t num_threads = 1) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
@@ -80,30 +82,11 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
 
 
 template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
-    assert(graph_ && "graph must be loaded");
-    assert(diffs_.num_rows() == graph_->max_index());
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
-
-    // TODO: implement a more efficient algorithm
-    std::vector<Row> result;
-    graph_->call_nodes([&](auto node) {
-        auto i = graph::AnnotatedDBG::graph_to_anno_index(node);
-        SetBitPositions set_bits = get_rows({ i })[0];
-        if (std::binary_search(set_bits.begin(), set_bits.end(), j))
-            result.push_back(i);
-    });
-    return result;
-}
-
-template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
-IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+IntRowDiff<BaseMatrix>::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
     call_rows(row_ids,
-        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
@@ -118,7 +101,7 @@ std::vector<BinaryMatrix::SetBitPositions>
 IntRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,
-        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,
@@ -133,10 +116,10 @@ IntRowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads
 
 template <class BaseMatrix>
 std::vector<IntMatrix::RowValues>
-IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids, size_t num_threads) const {
+IntRowDiff<BaseMatrix>::get_row_values(std::span<const Row> row_ids, size_t num_threads) const {
     std::vector<RowValues> rows(row_ids.size());
     call_rows(row_ids,
-        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
             return diffs_.get_row_values(rd_ids, num_threads);
         },
         add_diff, decode_diffs,

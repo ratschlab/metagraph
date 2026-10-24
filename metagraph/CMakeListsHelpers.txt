@@ -8,16 +8,21 @@ function (findOpenMP)
 unset(OpenMP_C_FLAGS CACHE)
 unset(OpenMP_CXX_FLAGS CACHE)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-  execute_process(
-      COMMAND brew --prefix libomp
-      OUTPUT_VARIABLE BREW_OMP_PREFIX
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  set(OpenMP_C_FLAGS "-Xclang -fopenmp -I${BREW_OMP_PREFIX}/include")
-  set(OpenMP_CXX_FLAGS "-Xclang -fopenmp -I${BREW_OMP_PREFIX}/include")
+  if(NOT OpenMP_ROOT)
+    set(OpenMP_ROOT "$ENV{OpenMP_ROOT}")
+  endif()
+  if(NOT OpenMP_ROOT)
+    execute_process(
+        COMMAND brew --prefix libomp
+        OUTPUT_VARIABLE OpenMP_ROOT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+  endif()
+  set(OpenMP_C_FLAGS "-Xclang -fopenmp -I${OpenMP_ROOT}/include")
+  set(OpenMP_CXX_FLAGS "-Xclang -fopenmp -I${OpenMP_ROOT}/include")
   set(OpenMP_C_LIB_NAMES libomp)
   set(OpenMP_CXX_LIB_NAMES libomp)
-  set(OpenMP_libomp_LIBRARY ${BREW_OMP_PREFIX}/lib/libomp.dylib)
+  set(OpenMP_libomp_LIBRARY ${OpenMP_ROOT}/lib/libomp.dylib)
 endif()
 find_package(OpenMP REQUIRED)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}" PARENT_SCOPE)
@@ -79,43 +84,83 @@ if(NOT CPPNOFS)
 endif()
 endfunction()
 
-function (findFolly)
-unset(FOLLY_FOUND PARENT_SCOPE)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
-find_package(Jemalloc)
+function (buildLogging)
+  set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+  set(SPDLOG_FMT_EXTERNAL ON)
+  add_subdirectory(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/fmt fmt)
+  add_subdirectory(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/spdlog spdlog)
+endfunction()
 
-if(Jemalloc_FOUND)
-  if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
-    message(WARNING "jemalloc version less than 4.0")
-    unset(Jemalloc_FOUND)
+# Share dependency targets between the full build and standalone common-library builds.
+function (buildCommonDependencies)
+  if(TARGET metagraph-common-dependencies)
+    return()
   endif()
-endif()
-set(Jemalloc_FOUND ${Jemalloc_FOUND} PARENT_SCOPE)
+  set(EXTERNAL_LIB_DIR ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+  add_subdirectory(${EXTERNAL_LIB_DIR}/hopscotch-map hopscotch-map EXCLUDE_FROM_ALL)
+  add_subdirectory(${EXTERNAL_LIB_DIR}/ordered-map ordered-map EXCLUDE_FROM_ALL)
+  add_subdirectory(${EXTERNAL_LIB_DIR}/DYNAMIC DYNAMIC EXCLUDE_FROM_ALL)
+  add_subdirectory(${EXTERNAL_LIB_DIR}/sdsl-lite sdsl-lite EXCLUDE_FROM_ALL)
 
-message(STATUS "Configuring Folly")
-set(_folly_old_req_includes "${CMAKE_REQUIRED_INCLUDES}")
-if(JEMALLOC_INCLUDE_DIRS)
-  list(APPEND CMAKE_REQUIRED_INCLUDES ${JEMALLOC_INCLUDE_DIRS})
-endif()
-include(external-libraries/folly/CMake/FollyConfigChecks.cmake)
-set(CMAKE_REQUIRED_INCLUDES "${_folly_old_req_includes}")
-configure_file(
-  external-libraries/folly/CMake/folly-config.h.cmake
-  ${PROJECT_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
-)
-add_library(fbvector STATIC
-  external-libraries/folly/folly/ScopeGuard.cpp
-  external-libraries/folly/folly/memory/detail/MallocImpl.cpp
-)
-target_include_directories(fbvector SYSTEM PRIVATE
-  ${JEMALLOC_INCLUDE_DIRS}
-  ${Boost_INCLUDE_DIRS}
-  external-libraries/folly
-  ${PROJECT_BINARY_DIR}/external-libraries/folly/include
-  ${PROJECT_SOURCE_DIR}/src/common
-)
-target_link_libraries(fbvector PRIVATE ${JEMALLOC_LIBRARIES} ${Boost_LIBRARIES})
-set(FOLLY_FOUND TRUE PARENT_SCOPE)
+  # These dependencies do not provide CMake targets.
+  add_library(ips4o INTERFACE)
+  target_include_directories(ips4o INTERFACE ${EXTERNAL_LIB_DIR}/ips4o)
+  add_library(simde INTERFACE)
+  target_include_directories(simde SYSTEM INTERFACE ${EXTERNAL_LIB_DIR}/simde-no-tests)
+
+  add_library(metagraph-common-dependencies INTERFACE)
+  target_link_libraries(metagraph-common-dependencies INTERFACE
+    tsl::hopscotch_map tsl::ordered_map XXSDS_DYNAMIC sdsl-lite::sdsl-lite ips4o simde)
+endfunction()
+
+function (findFolly)
+  set(FOLLY_SOURCE_DIR ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/external-libraries/folly)
+  unset(FOLLY_FOUND PARENT_SCOPE)
+  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_FUNCTION_LIST_DIR})
+  find_package(Jemalloc)
+
+  if(Jemalloc_FOUND)
+    if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
+      message(WARNING "jemalloc version less than 4.0")
+      unset(Jemalloc_FOUND)
+    endif()
+  endif()
+  set(Jemalloc_FOUND ${Jemalloc_FOUND} PARENT_SCOPE)
+
+  message(STATUS "Configuring Folly")
+  set(_folly_old_req_includes "${CMAKE_REQUIRED_INCLUDES}")
+  if(JEMALLOC_INCLUDE_DIRS)
+    list(APPEND CMAKE_REQUIRED_INCLUDES ${JEMALLOC_INCLUDE_DIRS})
+  endif()
+  include(${FOLLY_SOURCE_DIR}/CMake/FollyConfigChecks.cmake)
+  set(CMAKE_REQUIRED_INCLUDES "${_folly_old_req_includes}")
+  configure_file(
+    ${FOLLY_SOURCE_DIR}/CMake/folly-config.h.cmake
+    ${PROJECT_BINARY_DIR}/external-libraries/folly/include/folly/folly-config.h
+  )
+  # Folly's component targets also pull in unrelated external libraries.
+  # Build only the implementation needed by fbvector and small_vector.
+  add_library(folly STATIC
+    ${FOLLY_SOURCE_DIR}/folly/lang/Exception.cpp
+    ${FOLLY_SOURCE_DIR}/folly/lang/SafeAssert.cpp
+    ${FOLLY_SOURCE_DIR}/folly/lang/ToAscii.cpp
+    ${FOLLY_SOURCE_DIR}/folly/ScopeGuard.cpp
+    ${FOLLY_SOURCE_DIR}/folly/memory/detail/MallocImpl.cpp
+    ${FOLLY_SOURCE_DIR}/folly/memory/Malloc.cpp
+  )
+  target_compile_features(folly PUBLIC cxx_std_20)
+  if(Jemalloc_FOUND)
+    target_compile_definitions(folly PRIVATE USE_JEMALLOC JEMALLOC_NO_DEMANGLE)
+  endif()
+  target_include_directories(folly SYSTEM
+    PRIVATE ${JEMALLOC_INCLUDE_DIRS}
+    PUBLIC
+      ${FOLLY_SOURCE_DIR}
+      ${PROJECT_BINARY_DIR}/external-libraries/folly/include
+  )
+  target_link_libraries(folly PUBLIC fmt::fmt PRIVATE Boost::headers ${JEMALLOC_LIBRARIES})
+  set(FOLLY_FOUND TRUE PARENT_SCOPE)
 endfunction()
 
 
@@ -127,17 +172,24 @@ endif()
 add_library(progress_bar STATIC
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar/progress_bar.cpp
 )
+target_include_directories(progress_bar PUBLIC ${EXTERNAL_LIB_DIR}/cpp_progress_bar)
 endfunction()
 
 
 function (buildMersenneTwister EXTERNAL_LIB_DIR libName)
-set(${libName} mersenne_twister PARENT_SCOPE)
-if(TARGET mersenne_twister)
-  return()
-endif()
-add_library(mersenne_twister STATIC
+  set(${libName} mersenne_twister PARENT_SCOPE)
+  if(TARGET mersenne_twister)
+    return()
+  endif()
+  add_library(mersenne_twister STATIC
     ${EXTERNAL_LIB_DIR}/rollinghashcpp/mersennetwister.cpp
-)
+  )
+  target_include_directories(mersenne_twister PUBLIC ${EXTERNAL_LIB_DIR}/rollinghashcpp)
+  # Legacy arithmetic between enum constants is valid but deprecated in C++20.
+  target_compile_options(mersenne_twister PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-Wno-error=deprecated-enum-enum-conversion>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-error=deprecated-anon-enum-enum-conversion>
+  )
 endfunction()
 
 
@@ -145,7 +197,6 @@ function (findGTest)
 if(TARGET gtest)
   return()
 endif()
-execute_process(COMMAND rm -rf ${EXTERNAL_LIB_DIR}/sdsl-lite/include/gtest)
 add_subdirectory(${EXTERNAL_LIB_DIR}/googletest googletest EXCLUDE_FROM_ALL)
 target_compile_options(gtest_main PRIVATE -w)
 target_compile_options(gtest PRIVATE -w)

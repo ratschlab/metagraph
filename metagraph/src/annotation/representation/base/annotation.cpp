@@ -141,7 +141,7 @@ typename MultiLabelAnnotation<LabelType>::VLabels
 MultiLabelAnnotation<LabelType>::get_labels(Index i) const {
     assert(i < this->num_objects());
 
-    auto label_codes = get_matrix().get_rows({ i })[0];
+    auto label_codes = get_matrix().get_rows({ &i, 1 })[0];
 
     VLabels labels(label_codes.size());
 

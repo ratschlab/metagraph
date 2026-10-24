@@ -1,12 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
@@ -52,6 +54,10 @@ class IRowDiff {
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
   protected:
+    template <std::derived_from<BinaryMatrix> Matrix>
+    std::vector<BinaryMatrix::Row>
+    get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column) const;
+
     // get row-diff paths starting at |row_ids|
     // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
     // groups[g] records indices of row_ids paths traced in group g.
@@ -61,10 +67,10 @@ class IRowDiff {
                std::vector<std::vector<size_t>>,
                std::vector<size_t>,
                std::vector<std::vector<size_t>>>
-    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads = 1) const;
+    get_rd_ids(std::span<const BinaryMatrix::Row> row_ids, size_t num_threads = 1) const;
 
     template <class F, class G, class H, class Callback>
-    void call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_rd_rows, G add_diff,
+    void call_rows(std::span<const BinaryMatrix::Row> row_ids, F call_rd_rows, G add_diff,
                    H decode_diffs, Callback call_row, size_t num_threads) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
@@ -112,9 +118,11 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     /**
      * Returns the given column.
      */
-    std::vector<Row> get_column(Column column) const override;
+    std::vector<Row> get_column(Column column) const override {
+        return get_column_from_rows(*this, column);
+    }
 
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> row_ids) const override;
 
     /**
      * Return rows (in arbitrary order) and update the row indexes in |rows|
@@ -143,29 +151,32 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 };
 
 
-/**
- * Returns the given column.
- */
-template <class BaseMatrix>
-std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
+template <std::derived_from<BinaryMatrix> Matrix>
+std::vector<BinaryMatrix::Row>
+IRowDiff::get_column_from_rows(const Matrix &matrix, BinaryMatrix::Column column) const {
     assert(graph_ && "graph must be loaded");
-    assert(diffs_.num_rows() == graph_->max_index());
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(matrix.num_rows() == graph_->max_index());
+    assert(anchor_.size() == matrix.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
 
-    std::vector<Row> result;
-    // TODO: implement a more efficient algorithm
+    std::vector<BinaryMatrix::Row> result;
+    // Reuse reconstruction paths across a small batch of rows.
+    BatchAccumulator<BinaryMatrix::Row> batch([&](const auto &row_ids) {
+        auto rows = matrix.get_rows(row_ids);
+        for (size_t i = 0; i < row_ids.size(); ++i) {
+            if (std::ranges::binary_search(rows[i], column))
+                result.push_back(row_ids[i]);
+        }
+    }, 32 /* rows per batch */);
     graph_->call_nodes([&](auto node) {
-        auto row = graph::AnnotatedDBG::graph_to_anno_index(node);
-        SetBitPositions set_bits = get_rows({ row })[0];
-        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
-            result.push_back(row);
+        batch.push(graph::AnnotatedDBG::graph_to_anno_index(node));
     });
+    batch.process_all_buffered();
     return result;
 }
 
 template <class F, class G, class H, class Callback>
-void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_rd_rows,
+void IRowDiff::call_rows(std::span<const BinaryMatrix::Row> row_ids, F call_rd_rows,
                          G add_diff, H decode_diffs, Callback call_row, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
@@ -250,10 +261,10 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
-RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+RowDiff<BaseMatrix>::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
     call_rows(row_ids,
-        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
             return diffs_.get_rows(rd_ids, num_threads);
         },
         add_diff, [](SetBitPositions *row) {},
@@ -268,7 +279,7 @@ std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     std::vector<SetBitPositions> rows_dict(rows->size());
     call_rows(*rows,
-        [this](const std::vector<Row> &rd_ids, size_t num_threads) {
+        [this](std::span<const Row> rd_ids, size_t num_threads) {
             return diffs_.get_rows(rd_ids, num_threads);
         },
         add_diff, [](SetBitPositions *row) {},

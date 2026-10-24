@@ -489,7 +489,7 @@ TEST(ThreadPool, HelpWhileWaitingStolenException) {
     // With the worker parked, help_while_waiting() is the only thing that can
     // drain the queue. It pops the throwing task, so the exception surfaces
     // here instead of killing the parked worker.
-    EXPECT_THROW(pool.help_while_waiting(future).get(), std::runtime_error);
+    EXPECT_THROW((void)pool.help_while_waiting(future).get(), std::runtime_error);
 
     // Release the worker and synchronously drain the pool *before* the locals
     // it captures by reference (unblock, worker_started) go out of scope.
@@ -952,7 +952,7 @@ TEST(ThreadPool, HelpWhileWaitingCrossStealNotification) {
                     std::this_thread::yield();
                 }
 
-                pool.help_while_waiting(f).get();
+                (void)pool.help_while_waiting(f).get();
                 finished_hww.fetch_add(1, std::memory_order_release);
 
                 // Spin here to prevent returning to the worker loop.
@@ -1003,7 +1003,7 @@ TEST(ThreadPool, HelpWhileWaitingMultipleHelpers) {
                 });
             }
             // Help execute tasks (own and others') while waiting.
-            pool.help_while_waiting(last_future).get();
+            (void)pool.help_while_waiting(last_future).get();
             helpers_done.fetch_add(1, std::memory_order_release);
         });
     }
@@ -1052,8 +1052,8 @@ TEST(ThreadPool, HelpWhileWaitingTwoExternalHelpers) {
     auto future_b = make_future();
 
     // Two external threads call help_while_waiting concurrently.
-    std::thread helper_a([&]() { pool.help_while_waiting(future_a).get(); });
-    std::thread helper_b([&]() { pool.help_while_waiting(future_b).get(); });
+    std::thread helper_a([&]() { (void)pool.help_while_waiting(future_a).get(); });
+    std::thread helper_b([&]() { (void)pool.help_while_waiting(future_b).get(); });
 
     helper_a.join();
     helper_b.join();
@@ -1149,7 +1149,7 @@ TEST(ThreadPool, HelpWhileWaitingLatencyBenchmark) {
         });
 
         auto t0 = std::chrono::steady_clock::now();
-        pool.help_while_waiting(future).get();
+        (void)pool.help_while_waiting(future).get();
         auto t1 = std::chrono::steady_clock::now();
 
         total_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
@@ -1206,37 +1206,23 @@ TEST(AsyncActivity, RunBoth) {
 
 TEST(AsyncActivity, RunBothParallel) {
     AsyncActivity async;
+    std::atomic<int> completed = 0;
 
-    std::string result;
-
-    std::thread t1([&](std::string *result) {
-                    async.run_async(
-                        [](std::string *result_) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                            result_->push_back('a');
-                            return true;
-                        }, result);
-                    }, &result);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    async.run_unique([](std::string *result_) { result_->push_back('b'); }, &result);
-    ASSERT_EQ(2u, result.size()) << result;
-    EXPECT_EQ('b', result.back()) << result;
-
-    std::thread t2([&](std::string *result) {
-                    async.run_async(
-                        [](std::string *result_) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                            result_->push_back('a');
-                            return true;
-                        }, result);
-                    }, &result);
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    async.run_unique([](std::string *result_) { result_->push_back('c'); }, &result);
-    ASSERT_EQ(4u, result.size()) << result;
-    EXPECT_EQ('c', result.back()) << result;
-
-    t1.join();
-    t2.join();
+    for (int i = 1; i <= 2; ++i) {
+        std::promise<void> started;
+        std::thread worker([&]() {
+            async.run_async([&]() {
+                started.set_value();
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                return ++completed;
+            });
+        });
+        // Wait until run_async has registered the job, regardless of scheduling.
+        started.get_future().wait();
+        int observed = async.run_unique([&]() { return completed.load(); });
+        worker.join();
+        EXPECT_EQ(i, observed);
+    }
 }
 
 TEST(Misc, SplitString) {
@@ -1328,6 +1314,32 @@ TEST(Misc, RemoveSuffix) {
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", ""));
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", ".cde"));
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", "Aacb.cde.efg"));
+}
+
+TEST(Misc, RemoveSuffixEmbeddedNull) {
+    const std::string name("reads\0.fasta.gz", 15);
+    EXPECT_EQ(std::string("reads\0.fasta", 12), utils::remove_suffix(name, ".gz"));
+    EXPECT_EQ("reads", utils::remove_suffix(name, std::string("\0.fasta.gz", 10)));
+    EXPECT_EQ(name, utils::remove_suffix(name, std::string(".gz\0", 4)));
+}
+
+TEST(Misc, RemoveSuffixSequence) {
+    EXPECT_EQ("reads", utils::remove_suffix("reads.fasta.gz", ".gz", ".fasta"));
+    EXPECT_EQ("reads.fasta", utils::remove_suffix("reads.fasta.gz", ".fasta", ".gz"));
+    EXPECT_EQ("reads", utils::remove_suffix("reads.fasta", ".gz", ".fasta"));
+}
+
+TEST(Misc, MakeSuffix) {
+    EXPECT_EQ("", utils::make_suffix("", ""));
+    EXPECT_EQ(".fasta", utils::make_suffix("", ".fasta"));
+    EXPECT_EQ("reads", utils::make_suffix("reads", ""));
+    EXPECT_EQ("reads.fasta", utils::make_suffix("reads", ".fasta"));
+    EXPECT_EQ("reads.fasta", utils::make_suffix("reads.fasta", ".fasta"));
+    EXPECT_EQ("reads.fasta.fasta", utils::make_suffix("reads.fasta.fasta", ".fasta"));
+    const std::string name("reads\0", 6);
+    const std::string suffix("\0.fasta", 7);
+    EXPECT_EQ(name + suffix, utils::make_suffix(name, suffix));
+    EXPECT_EQ(name + suffix, utils::make_suffix(name + suffix, suffix));
 }
 
 TEST(Misc, CountIntersectionEmpty) {

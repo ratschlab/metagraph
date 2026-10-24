@@ -62,6 +62,10 @@ class Config {
     bool coordinates = false;
     bool index_header_coords = false;
     bool no_coord_mapping = false;
+    // Opt-in: include the bulky VG-style `path.mapping[]` object in
+    // `metagraph align --json` output. Off by default since nothing in-tree
+    // consumes it and it dominates the JSON size for long alignments.
+    bool align_output_path = false;
     bool advanced = false;
 
     unsigned int k = 3;

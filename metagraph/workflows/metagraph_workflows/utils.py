@@ -1,12 +1,13 @@
 import itertools
 import logging
+import os
 import re
-import subprocess
+import shlex
 from pathlib import Path
 from typing import Union
 
 from metagraph_workflows import workflow_configs, utils
-from metagraph_workflows.workflow_configs import GNU_TIME_CMD, TMP_DIR, \
+from metagraph_workflows.workflow_configs import TMP_DIR, \
     RULE_CONFIGS_KEY, SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
 
 logger = logging.getLogger("metagraph_workflow")
@@ -24,10 +25,6 @@ def get_seqs_file_list_path(wdir, config):
 
     utils.create_transcript_path_list(seqs_dir_path, seqs_file_list_path)
     return seqs_file_list_path
-
-
-def take_value_or_default(key, default, config):
-    return config[key] if (key in config.keys() and config[key]) else default
 
 
 def create_transcript_path_list(path: Union[Path, str], transcript_path: Union[Path, str], suffix=''):
@@ -55,7 +52,7 @@ def derive_sample_dictionary(transcript_path_list_path: Union[Path, str]):
 
 def get_build_single_sample_input(config, orig_samples_path, seq_ids_dict):
     def _sample_input(wildcards):
-        sample_id = wildcards[0] # TODO:
+        sample_id = wildcards[0]
 
         if config[workflow_configs.SAMPLE_IDS_PATH]:
             return orig_samples_path / f"{{sample_id}}{config[workflow_configs.SAMPLE_STAGING_FILE_ENDING]}"
@@ -81,7 +78,12 @@ def get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path
     return _get_build_graph_input
 
 
-def generate_col_paths(annotation_cols_path, seqs_file_list_path, config):
+def generate_col_paths(annotation_cols_path, seqs_file_list_path, config,
+                       suffix=".column.annodbg"):
+    """Per-sample paths under ``annotation_cols_path`` (default: ``*.column.annodbg``).
+
+    Row-diff stage 2 binary mode emits ``*.row_diff.annodbg``; pass ``suffix='.row_diff.annodbg'``.
+    """
     sample_names = set()
 
     if workflow_configs.SAMPLE_IDS_PATH in config and config[workflow_configs.SAMPLE_IDS_PATH]:
@@ -104,30 +106,18 @@ def generate_col_paths(annotation_cols_path, seqs_file_list_path, config):
             else:
                 sample_names = set(column_names)
 
-    return [annotation_cols_path / f"{c}.column.annodbg" for c in
-            sample_names]
+    return [annotation_cols_path / f"{c}{suffix}" for c in sample_names]
 
 
 def get_wdir(config):
     return Path(config['output_directory'])
 
 
-def get_gnu_time_command(config):
-    EMTPY_CMD = ''
-    cmd = config.get(GNU_TIME_CMD, EMTPY_CMD)
-
-    if cmd:
-        test_cmd=[cmd, '--version']
-        proc = subprocess.run(test_cmd, capture_output=True)
-        if proc.returncode == 0:
-            return f"{cmd} --verbose"
-        else:
-            logger.warning(f"Command {' '.join(test_cmd)} for GNU time could not be executed successfully: {proc.stderr}."
-                           f" No timing information collected")
-    else:
-        logger.warning("No GNU Time command provided.")
-
-    return EMTPY_CMD
+def get_time_wrapper_command(config):
+    """Return a portable Python timing wrapper command."""
+    del config
+    module_call = [shlex.quote(os.environ.get("PYTHON", "python")), "-m", "metagraph_workflows.time_wrapper"]
+    return " ".join(module_call)
 
 
 def get_log_path(rule_name, config, wildcards=None):
@@ -141,7 +131,15 @@ def get_log_path(rule_name, config, wildcards=None):
 
 
 def temp_dir_config(config):
-    return f"--disk-swap {config[TMP_DIR]}" if TMP_DIR in config else '',
+    """Return the `--disk-swap` flag for a metagraph invocation.
+
+    Always emit the flag explicitly so transform_anno doesn't fall back
+    to its `[OUT_BASEDIR]` default (which would silently spill temp
+    files next to the output). `metagraph build` and `metagraph annotate`
+    both default to off and accept an empty string identically, so the
+    explicit `--disk-swap ""` form is safe for all callers.
+    """
+    return f'--disk-swap "{config[TMP_DIR]}"' if TMP_DIR in config else '--disk-swap ""'
 
 
 def get_rule_specific_config(rule, key, config):

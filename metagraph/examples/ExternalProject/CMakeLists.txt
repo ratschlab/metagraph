@@ -1,12 +1,13 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.19)
 
 project(ExternalProject_Add_example)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set MetaGraph version
 set(METAGRAPH_GIT_TAG "master" CACHE STRING "Git tag/branch/commit for MetaGraph")
+set(METAGRAPH_SOURCE_DIR "" CACHE PATH "Use an existing MetaGraph checkout instead of downloading it")
 
 # Set alphabet (DNA or Protein)
 if(NOT DEFINED CMAKE_DBG_ALPHABET)
@@ -25,21 +26,33 @@ set(METAGRAPH_CMAKE_ARGS
 )
 
 # Forward optional flags if they're defined
-if(DEFINED BUILD_STATIC)
-    list(APPEND METAGRAPH_CMAKE_ARGS -DBUILD_STATIC=${BUILD_STATIC})
-endif()
-if(DEFINED WITH_AVX)
-    list(APPEND METAGRAPH_CMAKE_ARGS -DWITH_AVX=${WITH_AVX})
-endif()
-if(DEFINED WITH_MSSE42)
-    list(APPEND METAGRAPH_CMAKE_ARGS -DWITH_MSSE42=${WITH_MSSE42})
+foreach(variable BUILD_STATIC WITH_AVX WITH_MSSE42
+                 CMAKE_PREFIX_PATH OpenMP_ROOT ICU_ROOT)
+    if(DEFINED ${variable})
+        string(REPLACE ";" "|" value "${${variable}}")
+        list(APPEND METAGRAPH_CMAKE_ARGS "-D${variable}=${value}")
+    endif()
+endforeach()
+
+if(METAGRAPH_SOURCE_DIR)
+    set(METAGRAPH_SOURCE_ARGS
+        SOURCE_DIR "${METAGRAPH_SOURCE_DIR}"
+        DOWNLOAD_COMMAND "" UPDATE_COMMAND ""
+    )
+else()
+    set(METAGRAPH_SOURCE_ARGS
+        GIT_REPOSITORY https://github.com/ratschlab/metagraph.git
+        GIT_TAG ${METAGRAPH_GIT_TAG}
+        # ExternalProject updates the selected revision's submodules explicitly.
+        GIT_CONFIG fetch.recurseSubmodules=false
+    )
 endif()
 
-# Download and build MetaGraph as an external project
+# Build MetaGraph as an external project
 ExternalProject_Add(metagraph-external
-    GIT_REPOSITORY https://github.com/ratschlab/metagraph.git
-    GIT_TAG ${METAGRAPH_GIT_TAG}
+    ${METAGRAPH_SOURCE_ARGS}
     SOURCE_SUBDIR metagraph
+    LIST_SEPARATOR |
     CMAKE_ARGS ${METAGRAPH_CMAKE_ARGS}
 )
 
@@ -50,47 +63,41 @@ set(METAGRAPH_INSTALL_DIR ${INSTALL_DIR})
 # Create our example executable
 add_executable(external_query ../src/basic_query.cpp)
 
-# On macOS, add Homebrew library paths and detect OpenMP (same as main MetaGraph)
-if(APPLE)
-    target_link_directories(external_query PRIVATE /usr/local/lib)
-    if(EXISTS /opt/homebrew/lib)
-        target_link_directories(external_query PRIVATE /opt/homebrew/lib)
-    endif()
-    target_include_directories(external_query SYSTEM PRIVATE
-        /usr/local/include
-        /opt/homebrew/include
-    )
-    if (NOT DEFINED OpenMP_ROOT)
-        execute_process(
-            COMMAND brew --prefix libomp
-            OUTPUT_VARIABLE HOMEBREW_LIBOMP_PREFIX
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-        if(HOMEBREW_LIBOMP_PREFIX)
-            set(OpenMP_ROOT "${HOMEBREW_LIBOMP_PREFIX}" CACHE PATH "Path to OpenMP")
-        endif()
-    endif()
-endif()
-
 # Find required system dependencies for MetaGraph
-find_package(OpenMP REQUIRED)
+# Keep this example usable outside the MetaGraph source tree.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    if(NOT OpenMP_ROOT)
+        set(OpenMP_ROOT "$ENV{OpenMP_ROOT}")
+    endif()
+    if(NOT OpenMP_ROOT)
+        execute_process(COMMAND brew --prefix libomp
+            OUTPUT_VARIABLE OpenMP_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
+    set(OpenMP_CXX_FLAGS "-Xclang -fopenmp -I${OpenMP_ROOT}/include")
+    set(OpenMP_CXX_LIB_NAMES libomp)
+    set(OpenMP_libomp_LIBRARY "${OpenMP_ROOT}/lib/libomp.dylib")
+endif()
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Boost REQUIRED COMPONENTS iostreams)
+find_library(JEMALLOC_LIBRARY NAMES jemalloc HINTS ENV LIBRARY_PATH
+             PATHS /opt/homebrew/lib REQUIRED)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate HINTS ENV LIBRARY_PATH
+             PATHS /opt/homebrew/lib REQUIRED)
 
 # Use the installed includes and libraries
 target_include_directories(external_query PRIVATE ${METAGRAPH_INSTALL_DIR}/include)
 target_link_directories(external_query PRIVATE ${METAGRAPH_INSTALL_DIR}/lib)
 
 # Link MetaGraph and external system dependencies
-# metagraph-core.a now bundles all internal dependencies (zlib, sdsl, hts, spdlog, folly, etc.)
+# metagraph-core.a now bundles all internal dependencies (zlib, hts, spdlog, folly, etc.)
 # We only need to link against external system dependencies
 set(EXTERNAL_LIBS
     metagraph-cli
     metagraph-core
     Boost::iostreams
     OpenMP::OpenMP_CXX
-    jemalloc
-    deflate
+    ${JEMALLOC_LIBRARY}
+    ${LIBDEFLATE_LIBRARY}
 )
 
 # Add atomic library only for GNU compilers or non-macOS systems

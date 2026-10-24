@@ -378,5 +378,48 @@ class TestAnnotate(TestingBase):
                                     f'{self.tempdir.name}/annotation_ram.column.annodbg.coords'))
 
 
+    def test_annotate_coordinates_hints_index_header_coords(self):
+        """`metagraph annotate --coordinates --anno-filename` (without
+        `--index-header-coords`) must point users at the second pass that
+        builds the CoordToHeader (.seqs) mapping. This is the brand-new
+        hint at the end of annotate_graph().
+
+        The hint is emitted via `logger->info()`; the split_sink in
+        common/logger.cpp routes info-level messages to stdout (warn+
+        goes to stderr), so we look in stdout.
+        """
+        construct_command = (f'{METAGRAPH} build --mask-dummy --in-ram '
+                             f'-p {NUM_THREADS} --graph succinct -k 11 '
+                             f'-o {self.tempdir.name}/graph '
+                             f'{TEST_DATA_DIR}/transcripts_100.fa')
+        res = subprocess.run([construct_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        annotate_cmd = (f'{METAGRAPH} annotate --anno-filename --coordinates '
+                        f'-p {NUM_THREADS} '
+                        f'-i {self.tempdir.name}/graph.dbg '
+                        f'-o {self.tempdir.name}/annotation '
+                        f'{TEST_DATA_DIR}/transcripts_100.fa')
+        res = subprocess.run([annotate_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        stdout = res.stdout.decode()
+        self.assertIn('To enable per-sequence coordinate reporting', stdout)
+        self.assertIn('--index-header-coords', stdout)
+        self.assertIn(f'-i {self.tempdir.name}/graph.dbg', stdout)
+        self.assertIn(f'-o {self.tempdir.name}/annotation', stdout)
+
+        # When --index-header-coords is passed, the hint must not appear
+        # (the user is already doing what the hint suggests).
+        index_cmd = (f'{METAGRAPH} annotate --anno-filename '
+                     f'--index-header-coords -p {NUM_THREADS} '
+                     f'-i {self.tempdir.name}/graph.dbg '
+                     f'-o {self.tempdir.name}/annotation '
+                     f'{TEST_DATA_DIR}/transcripts_100.fa')
+        res = subprocess.run([index_cmd], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertNotIn('To enable per-sequence coordinate reporting',
+                         res.stdout.decode())
+
+
 if __name__ == '__main__':
     unittest.main()

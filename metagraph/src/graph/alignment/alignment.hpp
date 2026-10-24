@@ -5,10 +5,11 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <span>
 #include <vector>
 
 #include <json/json.h>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
@@ -73,11 +74,7 @@ class Seed {
 
     // Add more nodes to the Seed. This assumes that the original query has |next|
     // extra characters and that the updated path still spells the query view.
-    void expand(const std::vector<node_index> &next) {
-        query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
-        end_clipping_ -= next.size();
-        nodes_.insert(nodes_.end(), next.begin(), next.end());
-    }
+    void expand(std::span<const node_index> next);
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
 
@@ -270,10 +267,29 @@ class Alignment {
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
+    // `encoder` and `cth` are optional. When `encoder` is supplied, the
+    // returned object includes an `annotation.labels` array; the shape of
+    // each entry depends on what coord information is available:
+    //   - no `label_coordinates` (label-only annotator): `{sample}` only.
+    //   - `label_coordinates` + `cth` set: `{sample, nt_length, nt_coords}`
+    //     per target sequence (`.seqs` maps global column coords to
+    //     per-sequence local positions).
+    //   - `label_coordinates` set, `cth` null: `{sample, nt_coords}`
+    //     per annotation column; `nt_length` is omitted because the column
+    //     does not correspond to a single indexed sequence.
+    //
+    // `include_path_mapping` controls whether the bulky VG-style
+    // `path.mapping[]` object is emitted. Off by default: the path lists
+    // every visited node with redundant `edit` blocks (already in `cigar`)
+    // and dominates the JSON size for long alignments; no in-tree consumer
+    // currently reads it.
     Json::Value to_json(size_t node_size,
                         bool is_secondary = false,
                         const std::string &name = {},
-                        const std::string &label = {}) const;
+                        const std::string &label = {},
+                        const annot::LabelEncoder<> *encoder = nullptr,
+                        const annot::CoordToHeader *cth = nullptr,
+                        bool include_path_mapping = false) const;
 
     // writes to |query_str| the string which will be referenced in this object
     void load_from_json(const Json::Value &alignment,
@@ -329,10 +345,6 @@ class Alignment {
     score_t score_;
     Cigar cigar_;
 };
-
-inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
-    return out << fmt::format("{}", a);
-}
 
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
@@ -424,7 +436,7 @@ template <> struct formatter<mtg::graph::align::Alignment> {
 
     template <typename FormatContext>
     auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) const -> decltype(ctx.out()) {
-        return format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
+        return fmt::format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
                          a.get_orientation() ? "-" : "+",
                          a.get_sequence(),
                          a.get_score(),
@@ -434,5 +446,11 @@ template <> struct formatter<mtg::graph::align::Alignment> {
     }
 };
 } // namespace fmt
+
+namespace mtg::graph::align {
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
+    return out << fmt::format("{}", a);
+}
+} // namespace mtg::graph::align
 
 #endif  // __ALIGNER_ALIGNMENT_HPP__

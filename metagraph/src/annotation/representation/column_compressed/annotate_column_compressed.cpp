@@ -31,6 +31,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
                                           uint8_t count_width,
+                                          bool index_coordinates,
                                           size_t max_chunks_open)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
@@ -44,6 +45,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                         }),
         count_width_(count_width),
         max_count_(sdsl::bits::lo_set[count_width]),
+        index_coordinates_(index_coordinates),
         max_chunks_open_(max_chunks_open) {}
 
 template <typename Label>
@@ -53,9 +55,11 @@ ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
                                           uint8_t count_width,
+                                          bool index_coordinates,
                                           size_t max_chunks_open)
       : ColumnCompressed(column.size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
+                         num_columns_cached, swap_dir, buffer_size_bytes,
+                         count_width, index_coordinates, max_chunks_open) {
     label_encoder_.insert_and_encode(column_label);
     bitmatrix_.resize(1);
     cached_columns_.Put(0, new bitmap_vector(std::move(column)));
@@ -69,9 +73,11 @@ ColumnCompressed<Label>::ColumnCompressed(std::vector<std::unique_ptr<bit_vector
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
                                           uint8_t count_width,
+                                          bool index_coordinates,
                                           size_t max_chunks_open)
       : ColumnCompressed(columns.at(0)->size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
+                         num_columns_cached, swap_dir, buffer_size_bytes,
+                         count_width, index_coordinates, max_chunks_open) {
     bitmatrix_ = std::move(columns);
     label_encoder_ = label_encoder;
     flushed_ = true;
@@ -197,10 +203,12 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     out.close();
 
-    if (coords_.size())
+    // Emit .coords when coordinate mode is on, even if empty (no coords added).
+    if (index_coordinates_)
         serialize_coordinates(filename);
 
-    if (relation_counts_.size())
+    // Emit .counts when count_width > 0, even if empty (no counts added).
+    if (count_width_)
         serialize_counts(filename);
 }
 
@@ -437,6 +445,9 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
+    coords_.clear();
+    max_coord_.clear();
+    relation_counts_.clear();
 
     label_encoder_.clear();
 
@@ -494,6 +505,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
+    coords_.clear();
+    max_coord_.clear();
+    relation_counts_.clear();
 
     label_encoder_.clear();
 

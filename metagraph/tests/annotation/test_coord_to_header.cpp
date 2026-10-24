@@ -243,7 +243,7 @@ TEST(AlignmentFormatCoords, WithCoordToHeader) {
         { 12 },  // column 0, coord 12 -> accession_B, local 2 -> "3-6"
     };
 
-    EXPECT_EQ(aln.format_coords(cth, 5), "accession_A:4-7;accession_B:3-6");
+    EXPECT_EQ(aln.format_coords(cth, 5), "accession_A/14:4-7;accession_B/24:3-6");
 }
 
 TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
@@ -267,7 +267,7 @@ TEST(AlignmentFormatCoords, CoordToHeaderGroupsByHeader) {
         { 2, 7 },  // coord 2 -> seqA local 2, coord 7 -> seqB local 2
     };
 
-    EXPECT_EQ(aln.format_coords(cth, 5), "seqA:3-5;seqB:3-5");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/9:3-5;seqB/9:3-5");
 }
 
 TEST(AlignmentFormatCoords, CoordToHeaderSameHeaderMultipleCoords) {
@@ -291,7 +291,7 @@ TEST(AlignmentFormatCoords, CoordToHeaderSameHeaderMultipleCoords) {
     };
 
     // Same header gets both ranges appended
-    EXPECT_EQ(aln.format_coords(cth, 5), "ref:4-5:11-12");
+    EXPECT_EQ(aln.format_coords(cth, 5), "ref/24:4-5:11-12");
 }
 
 TEST(AlignmentFormatCoords, EmptyCoordinates) {
@@ -345,7 +345,7 @@ TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 7 } };  // seqA local 7; 7 nt fit + 1 spills
 
-    EXPECT_EQ(aln.format_coords(cth, 5), "seqA:8-14;seqB:1-1");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/14:8-14;seqB/14:1-1");
 }
 
 TEST(AlignmentFormatCoords, CrossThreeSequences) {
@@ -365,7 +365,7 @@ TEST(AlignmentFormatCoords, CrossThreeSequences) {
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 3 } };
 
-    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:4-7;seqB:1-7;seqC:1-5");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA/7:4-7;seqB/7:1-7;seqC/7:1-5");
 }
 
 TEST(AlignmentFormatCoords, TwoCoordsBothCrossIntoSameNextSequence) {
@@ -391,7 +391,7 @@ TEST(AlignmentFormatCoords, TwoCoordsBothCrossIntoSameNextSequence) {
     //   coord 7 -> seqA local 7, avail=5, spills 3 nt into seqB
     aln.label_coordinates = { { 6, 7 } };
 
-    EXPECT_EQ(aln.format_coords(cth, 5), "seqA:7-12:8-12;seqB:1-2:1-3");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/12:7-12:8-12;seqB/12:1-2:1-3");
 }
 
 TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
@@ -412,7 +412,7 @@ TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 0 } };
 
-    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:1-7;seqB:1-7");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA/7:1-7;seqB/7:1-7");
 }
 
 TEST(AlignmentFormatCoords, ExactlyFillsStartingHeader) {
@@ -432,7 +432,7 @@ TEST(AlignmentFormatCoords, ExactlyFillsStartingHeader) {
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 2 } };
 
-    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:3-7");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA/7:3-7");
 }
 
 TEST(AlignmentFormatCoords, SpansEntireColumn) {
@@ -453,7 +453,7 @@ TEST(AlignmentFormatCoords, SpansEntireColumn) {
     aln.label_columns = { 0 };
     aln.label_coordinates = { { 0 } };
 
-    EXPECT_EQ(aln.format_coords(cth, 3), "seqA:1-5;seqB:1-6;seqC:1-4");
+    EXPECT_EQ(aln.format_coords(cth, 3), "seqA/5:1-5;seqB/6:1-6;seqC/4:1-4");
 }
 
 } // namespace

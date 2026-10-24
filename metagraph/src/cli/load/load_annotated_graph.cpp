@@ -50,13 +50,19 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
                           "All queries will be performed against individual sequences.",
                           cth_fname);
         } else {
-            logger->warn("CoordToHeader mapping file not found at {}. Querying will be done "
-                         "against original labels indexed in annotation {}. Results will show "
-                         "file-based coordinates (e.g., '<file_37.fa>:0-1086-1090') instead of "
-                         "sequence-based coordinates (e.g., '<seq_9>:0-1-5'). For sequence-"
-                         "based queries, create a mapping with '--index-header-coords' during "
-                         "annotation, or pass '--no-coord-mapping' to suppress this warning.",
-                         cth_fname, config.infbase_annotators.at(0));
+            const auto anno_basename = utils::remove_suffix(config.infbase_annotators.at(0),
+                                                            annotation.file_extension());
+            logger->warn("No CoordToHeader mapping found at '{}'. Coords output will use "
+                         "file-level positions (e.g., '<file_37.fa>:0-1086-1090') instead of "
+                         "per-sequence positions (e.g., '<seq_9>:0-1-5'), and the per-target "
+                         "sequence length needed to compute the fraction of the target covered "
+                         "('kmers_in_target' for query, 'nt_length' for align) will be omitted. "
+                         "To enable per-sequence reporting, run once against the final annotation "
+                         "with all input FASTAs:\n"
+                         "    metagraph annotate --anno-filename --index-header-coords "
+                         "-i {} -o {} <input_fastas>\n"
+                         "Pass '--no-coord-mapping' to suppress this warning.",
+                         cth_fname, config.infbase, anno_basename);
         }
     }
 

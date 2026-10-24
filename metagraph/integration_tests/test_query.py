@@ -2,6 +2,7 @@ import unittest
 from parameterized import parameterized, parameterized_class
 import subprocess
 import itertools
+import json
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
@@ -1161,8 +1162,11 @@ class TestCoordToHeader(TestingBase):
 
         res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0)
+        # `/N` after each header is the target sequence's k-mer count (k=5,
+        # so len(seq) - 4): seq1 GTATCGATCG -> 6, seq2 GCTAGCTAGCTAGCTA -> 12,
+        # seq3 ATCG...TTTTT (28bp) -> 24.
         self.assertEqual(res.stdout.decode(),
-                         '0\tquery1\t<seq1>:0-1-5\t<seq3>:1-4:1-0-3\n1\tquery2\t<seq2>:0-0-3:0-4-7:0-8-11\n')
+                         '0\tquery1\t<seq1>/6:0-1-5\t<seq3>/24:1-4:1-0-3\n1\tquery2\t<seq2>/12:0-0-3:0-4-7:0-8-11\n')
 
         # Query in the basic mode, without mapping to headers
         res = subprocess.run([query_command + ' --no-coord-mapping'], shell=True, stdout=PIPE, stderr=PIPE)
@@ -1172,6 +1176,67 @@ class TestCoordToHeader(TestingBase):
             f'1\tquery2\t<{self.tempdir.name}/test_sequences.fa>:0-7-10:0-11-14:0-15-18\n'
         )
         self.assertEqual(res.stdout.decode(), expected_output)
+
+    def test_query_coords_json_kmers_in_target(self):
+        """JSON output should expose `kmers_in_target` so callers can compute the fraction of the target covered."""
+        graph_base = self.tempdir.name + '/graph'
+        graph = self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr]
+        anno_base = self.tempdir.name + '/annotation'
+        anno = anno_base + anno_file_extension[self.anno_repr]
+        self._build_graph(self.test_fa, graph_base, k=5, repr=self.graph_repr, mode='basic')
+        self._annotate_graph(self.test_fa, graph, anno_base, self.anno_repr, anno_type='filename')
+        self.index_headers(graph, anno_base, self.test_fa)
+
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --json \
+                         -i {graph} -a {anno} --min-kmers-fraction-label 0.0 \
+                         {self.query_fa}' + MMAP_FLAG
+        res = subprocess.run([query_command], shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+
+        # k=5; seq1 GTATCGATCG -> 6, seq2 GCTAGCTAGCTAGCTA -> 12, seq3 (28bp) -> 24.
+        expected_lengths = {'seq1': 6, 'seq2': 12, 'seq3': 24}
+
+        # The JSON writer pretty-prints with newlines, so parse the stream of objects.
+        decoder = json.JSONDecoder()
+        def parse_records(text):
+            records = []
+            idx = 0
+            while idx < len(text):
+                while idx < len(text) and text[idx].isspace():
+                    idx += 1
+                if idx >= len(text):
+                    break
+                record, end = decoder.raw_decode(text, idx)
+                records.append(record)
+                idx = end
+            return records
+
+        records = parse_records(res.stdout.decode())
+        self.assertEqual(len(records), 2)
+        # Pin the multi-target case explicitly: query1 hits seq1 and seq3
+        # (shared ATCGATCG), query2 hits seq2 only. Mirrors the TSV
+        # expectation in test_query_coords.
+        by_name = {record['seq_description']: record for record in records}
+        self.assertEqual(set(by_name), {'query1', 'query2'})
+        self.assertEqual({r['sample'] for r in by_name['query1']['results']},
+                         {'seq1', 'seq3'})
+        self.assertEqual({r['sample'] for r in by_name['query2']['results']},
+                         {'seq2'})
+        for record in records:
+            for result in record['results']:
+                self.assertIn('kmers_in_target', result,
+                              f"Expected kmers_in_target field in {result}")
+                self.assertEqual(result['kmers_in_target'], expected_lengths[result['sample']])
+
+        # With --no-coord-mapping, the label refers to a whole annotation column
+        # rather than a single indexed sequence, so the field is omitted.
+        res = subprocess.run([query_command + ' --no-coord-mapping'],
+                             shell=True, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        for record in parse_records(res.stdout.decode()):
+            for result in record['results']:
+                self.assertNotIn('kmers_in_target', result,
+                                 "kmers_in_target must only appear when CoordToHeader is loaded")
 
     @parameterized.expand(['', '-p 4', '--separately', '-p 4 --separately'])
     def test_multiple_files(self, extra_flags):
@@ -1263,9 +1328,11 @@ class TestCoordToHeader(TestingBase):
         self.assertEqual(len(output), 3, "Output should contain two query results")
         self.assertEqual(output[-1], "", "Output should contain two query results")
         self.assertEqual(output[0].split('\t')[:2], ["0", "query1"])
-        self.assertEqual(set(output[0].split('\t')[2:]), {"<seq1>:0-1-5", "<seq3>:1-4:1-0-3", "<seq4>:0-0-4:1-5-8:1-9-12"})
+        # `/N` after each header is the target sequence's k-mer count (k=5):
+        # seq1 (10 nt)->6, seq3 (34 nt)->30, seq4 (17 nt)->13, seq2 (16 nt)->12.
+        self.assertEqual(set(output[0].split('\t')[2:]), {"<seq1>/6:0-1-5", "<seq3>/30:1-4:1-0-3", "<seq4>/13:0-0-4:1-5-8:1-9-12"})
         self.assertEqual(output[1].split('\t')[:2], ["1", "query2"])
-        self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>:0-0-3:0-4-7:0-8-11", "<seq3>:0-28-29"})
+        self.assertEqual(set(output[1].split('\t')[2:]), {"<seq2>/12:0-0-3:0-4-7:0-8-11", "<seq3>/30:0-28-29"})
 
     def test_multiple_files_bad(self):
         # Check that query fails when Annotation and CoordToHeaders are incompatible
@@ -1347,21 +1414,23 @@ class TestCoordToHeader(TestingBase):
                     out = sum((part.split(extra_split_by) for part in out), [])
                 self.assertEqual(set(out), expected_output)
 
+        # `/N` after each header is the target sequence's k-mer count (k=5):
+        # seq1 TATCGATC (8 nt)->4, seq2 GTATCGATCGATCGATCG (18 nt)->14, seq3 ATCGATCG (8 nt)->4.
         test_stdout('--num-top-labels 1',
-            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+            '0\tquery1\t<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
         test_stdout('--num-top-labels 2',
-            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>:1-0-3:5-0-3:9-0-3')
+            '0\tquery1\t<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13\t<seq3>/4:1-0-3:5-0-3:9-0-3')
         # Without filtering by --num-top-labels, the matches are not sorted
         test_stdout('--min-kmers-fraction-label 0.5',
-            {'0', 'query1', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3', '<seq1>:0-0-3:5-1-3:9-1-3'})
+            {'0', 'query1', '<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>/4:1-0-3:5-0-3:9-0-3', '<seq1>/4:0-0-3:5-1-3:9-1-3'})
         test_stdout('--min-kmers-fraction-label 1.0',
-            '0\tquery1\t<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
+            '0\tquery1\t<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13')
         test_stdout('--min-kmers-fraction-graph 1.0',
-            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+            {'0', 'query1', '<seq1>/4:0-0-3:5-1-3:9-1-3', '<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>/4:1-0-3:5-0-3:9-0-3'})
         test_stdout('--min-kmers-fraction-label 0.0',
-            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+            {'0', 'query1', '<seq1>/4:0-0-3:5-1-3:9-1-3', '<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>/4:1-0-3:5-0-3:9-0-3'})
         test_stdout('',
-            {'0', 'query1', '<seq1>:0-0-3:5-1-3:9-1-3', '<seq2>:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>:1-0-3:5-0-3:9-0-3'})
+            {'0', 'query1', '<seq1>/4:0-0-3:5-1-3:9-1-3', '<seq2>/14:1-10-13:1-6-13:9-2-5:5-2-9:0-1-13', '<seq3>/4:1-0-3:5-0-3:9-0-3'})
 
         # --num-top-labels is not used in the labels mode
         test_stdout('--num-top-labels 1', {'0', 'query1', 'seq2', 'seq3', 'seq1'}, mode='labels', extra_split_by=':')
@@ -1480,6 +1549,14 @@ class TestCoordToHeader(TestingBase):
                     for i, (header, _) in enumerate(sequences, 1):
                         output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
 
+                    if query_mode == 'coords':
+                        # The with-mapping path emits the per-sequence k-mer
+                        # count after the header (e.g., `<seq1>/14:0-0-3`).
+                        # Without mapping the label is per-file and has no
+                        # per-sequence length, so strip the `/N` suffix before
+                        # comparing.
+                        output_with = re.sub(r'(<[^>]+>)/\d+', r'\1', output_with)
+
                     if query_mode == 'labels':
                         output_with = output_with.split('\t')[-1].split(':')
                         output_without = output_without.split('\t')[-1].split(':')
@@ -1545,6 +1622,13 @@ class TestCoordToHeader(TestingBase):
                 # Replace the file labels with the corresponding headers
                 for i, (header, _) in enumerate(sequences, 1):
                     output_without = output_without.replace(self.tempdir.name + f'/file_{i}.fa', header)
+
+                if query_mode == 'coords':
+                    # The with-mapping path emits the per-sequence k-mer count
+                    # after the header (e.g., `<seq1>/14:0-0-3`). Strip it for
+                    # comparison since the without-mapping path has no
+                    # per-sequence length.
+                    output_with = re.sub(r'(<[^>]+>)/\d+', r'\1', output_with)
 
                 # Should have same results
                 self.assertEqual(output_with, output_without)

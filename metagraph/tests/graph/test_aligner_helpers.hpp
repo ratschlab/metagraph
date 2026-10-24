@@ -35,7 +35,13 @@ void check_json_dump_load(const DeBruijnGraph &graph,
 
     Alignment load_alignment;
     std::string load_sequence;
-    load_alignment.load_from_json(alignment.to_json(graph.get_k()), graph, &load_sequence);
+    // load_from_json reads `path.mapping[]`, which to_json now omits by
+    // default; opt back in for the round-trip check.
+    load_alignment.load_from_json(
+            alignment.to_json(graph.get_k(), /*is_secondary=*/false, /*name=*/{},
+                              /*label=*/{}, /*encoder=*/nullptr, /*cth=*/nullptr,
+                              /*include_path_mapping=*/true),
+            graph, &load_sequence);
 
     EXPECT_EQ(path_query, load_sequence);
 

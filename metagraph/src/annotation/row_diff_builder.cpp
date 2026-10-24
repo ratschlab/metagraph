@@ -1,5 +1,6 @@
 #include "row_diff_builder.hpp"
 
+#include <atomic>
 #include <omp.h>
 #include <progress_bar.hpp>
 
@@ -35,6 +36,9 @@ using rd_succ_bv_type = RowDiff<ColumnMajor>::fork_succ_bv_type;
 template <typename T>
 using Encoder = mtg::elias_fano::EliasFanoEncoderBuffered<T>;
 
+static_assert(std::atomic_ref<uint32_t>::required_alignment <= alignof(uint32_t));
+static_assert(std::atomic_ref<int32_t>::required_alignment <= alignof(int32_t));
+
 
 std::vector<annot::ColumnCompressed<>>
 load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
@@ -49,14 +53,12 @@ load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
             std::exit(1);
         }
 
-        if (!sources[i].num_labels())
-            continue;
-
+        const uint64_t n = sources[i].num_objects();
         #pragma omp critical
         {
             if (!*num_rows) {
-                *num_rows = sources[i].num_objects();
-            } else if (*num_rows != sources[i].num_objects()) {
+                *num_rows = n;
+            } else if (*num_rows != n) {
                 logger->error("Annotations have different number of rows");
                 std::exit(1);
             }
@@ -182,15 +184,17 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
                         uint64_t rk = source_col.rank1(i);
                         uint32_t num_coords = delims[l_idx][j].select1(rk + 1)
                                                 - delims[l_idx][j].select1(rk);
-                        __atomic_add_fetch(&row_count_block[i - block_begin], num_coords, __ATOMIC_RELAXED);
+                        std::atomic_ref(row_count_block[i - block_begin])
+                            .fetch_add(num_coords, std::memory_order_relaxed);
                     } else {
-                        __atomic_add_fetch(&row_count_block[i - block_begin], 1, __ATOMIC_RELAXED);
+                        std::atomic_ref(row_count_block[i - block_begin])
+                            .fetch_add(1, std::memory_order_relaxed);
                     }
                 }
             );
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         async_writer.join();
         row_count_block_other.swap(row_count_block);
@@ -229,7 +233,7 @@ void sum_and_call_counts(const fs::path &dir,
     std::vector<sdsl::int_vector_buffer<>> vectors;
     for (const auto &p : fs::directory_iterator(dir)) {
         auto path = p.path();
-        if (utils::ends_with(path, file_extension)) {
+        if (path.native().ends_with(file_extension)) {
             logger->trace("Found count vector {}", path);
             vectors.emplace_back(path, std::ios::in, BUFFER_SIZE);
 
@@ -262,11 +266,12 @@ void sum_and_call_counts(const fs::path &dir,
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t j = 0; j < vectors.size(); ++j) {
             for (uint64_t t = 0; t < buf.size(); ++t) {
-                __atomic_add_fetch(&buf[t], (int32_t)vectors[j][i + t], __ATOMIC_RELAXED);
+                std::atomic_ref(buf[t])
+                    .fetch_add((int32_t)vectors[j][i + t], std::memory_order_relaxed);
             }
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         std::for_each(buf.begin(), buf.end(), callback);
 
@@ -281,7 +286,7 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
     } else {
         sdsl::bit_vector last_bv(graph.max_index() + 1);
 
-        __atomic_thread_fence(__ATOMIC_RELEASE);
+        std::atomic_thread_fence(std::memory_order_release);
         graph.call_nodes([&](node_index v) {
             std::pair<char, node_index> last = { '\0', graph::DeBruijnGraph::npos };
             graph.call_outgoing_kmers(v, [&](node_index u, char c) {
@@ -289,9 +294,9 @@ std::shared_ptr<const bit_vector> get_last(const graph::DeBruijnGraph &graph) {
             });
 
             if (last.second != graph::DeBruijnGraph::npos)
-                set_bit(last_bv.data(), last.second, true, __ATOMIC_RELAXED);
+                set_bit(last_bv.data(), last.second, true, std::memory_order_relaxed);
         }, []() { return false; }, get_num_threads());
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
         return std::make_shared<bit_vector_stat>(std::move(last_bv));
     }
 }
@@ -306,7 +311,7 @@ std::shared_ptr<const bit_vector> route_at_forks(const graph::DeBruijnGraph &gra
 
     bool optimize_forks = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
-        if (utils::ends_with(p.path(), row_count_extension))
+        if (p.path().native().ends_with(row_count_extension))
             optimize_forks = true;
     }
 
@@ -570,7 +575,7 @@ void assign_anchors(const graph::DeBruijnGraph &graph,
 
     bool optimize_anchors = false;
     for (const auto &p : fs::directory_iterator(count_vectors_dir)) {
-        if (utils::ends_with(p.path(), row_reduction_extension))
+        if (p.path().native().ends_with(row_reduction_extension))
             optimize_anchors = true;
     }
 
@@ -1045,7 +1050,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 if (compute_row_reduction) {
                     if (succ && curr_value == get_value(source_col, source_idx, j, *succ)) {
                         // reduction (zero diff)
-                        __atomic_add_fetch(&row_nbits_block[chunk_idx], 1, __ATOMIC_RELAXED);
+                        std::atomic_ref(row_nbits_block[chunk_idx])
+                            .fetch_add(1, std::memory_order_relaxed);
                     }
                 } else if (succ || anchor[row_idx]) {
                     bool is_anchor = anchor[row_idx];
@@ -1079,7 +1085,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 if (!compute_row_reduction)
                     return;
 
-                __atomic_thread_fence(__ATOMIC_ACQUIRE);
+                std::atomic_thread_fence(std::memory_order_acquire);
 
                 async_writer.join();
                 row_nbits_block_other.swap(row_nbits_block);
@@ -1157,13 +1163,15 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             diff_columns[l_idx] = std::move(columns);
 
         } else {
-            if (!columns.size())
-                continue;
-
             auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
             if constexpr(with_values) {
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kExtension);
-                ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+                if (columns.size()) {
+                    ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+                } else {
+                    // serialize an empty annotation with counts
+                    ColumnCompressed<>(num_rows, 1, "", buf_size_bytes, 1).serialize(fpath);
+                }
                 logger->trace("Serialized {}", fpath);
 
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kCountExtension);
@@ -1177,7 +1185,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             } else {
                 fpath.replace_extension().replace_extension(RowDiffColumnAnnotator::kExtension);
                 RowDiffColumnAnnotator(
-                        std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
+                        std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns), num_rows)),
                         std::move(label_encoders[l_idx])).serialize(fpath);
                 logger->trace("Serialized {}", fpath);
             }
@@ -1203,12 +1211,13 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             auto [l_idx, j] = col_indexes[c];
             diff_columns[l_idx][j]->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
                 [&](uint64_t i) {
-                    __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
+                    std::atomic_ref(row_nbits_block[i - chunk])
+                        .fetch_add(1, std::memory_order_relaxed);
                 }
             );
         }
 
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         async_writer.join();
         row_nbits_block_other.swap(row_nbits_block);
@@ -1345,12 +1354,11 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     const auto curr_value = get_value(source_col, s, j, row_idx);
                     const auto diff = get_diff(curr_value, get_value(source_col, s, j, *succ));
                     // reduction (zero diff)
-                    __atomic_add_fetch(&row_nbits_block[chunk_idx],
-                                       curr_value.size() - diff.size(),
-                                       __ATOMIC_RELAXED);
+                    std::atomic_ref(row_nbits_block[chunk_idx])
+                        .fetch_add(curr_value.size() - diff.size(), std::memory_order_relaxed);
                 },
                 [&](uint64_t block_begin) {
-                    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+                    std::atomic_thread_fence(std::memory_order_acquire);
 
                     async_writer.join();
                     row_nbits_block_other.swap(row_nbits_block);
@@ -1524,9 +1532,6 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
     logger->trace("Generating row_diff columns...");
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint32_t l_idx = 0; l_idx < label_encoders.size(); ++l_idx) {
-        if (!label_encoders[l_idx].size())
-            continue;
-
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         auto fpath_coord = col_out_dir/fs::path(source_files[l_idx]).filename();
@@ -1567,7 +1572,12 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
         logger->trace("Serialized {}", fpath_coord);
         auto fpath = col_out_dir/fs::path(source_files[l_idx]).filename();
         fpath.replace_extension().replace_extension(ColumnCompressed<>::kExtension);
-        ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+        if (columns.size()) {
+            ColumnCompressed<>(std::move(columns), label_encoders[l_idx]).serialize(fpath);
+        } else {
+            // serialize an empty annotation with coords
+            ColumnCompressed<>(num_rows, 1, "", buf_size_bytes, 0, true).serialize(fpath);
+        }
         logger->trace("Serialized {}", fpath);
     }
 
