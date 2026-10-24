@@ -708,7 +708,8 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      size_t request_id,
                      const std::function<Json::Value(const std::string &)> &process,
                      bool compact,
-                     const ResponseControl *control) {
+                     const ResponseControl *control,
+                     std::function<void(const SimpleWeb::error_code &)> on_sent) {
     logger->info("[Server] {} request {} from {}", request->path, request_id,
                  request->remote_endpoint().address().to_string());
     Timer timer;
@@ -737,9 +738,27 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     response->write(status, ret, header);
     if (control && control->on_written)
         control->on_written(static_cast<int>(status), ret.size());
+    if (on_sent)
+        response->send(std::move(on_sent));
     logger->info("[Server] Request {} processing time: {:.3f} sec, response size: {:.1f} KB, "
                  "finished in {:.3f} sec",
                  request_id, processing_time, (double)ret.size() / 1000, timer.elapsed());
+}
+
+void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,
+                                const std::shared_ptr<HttpServer::Request> &request,
+                                size_t request_id,
+                                const std::function<std::string(const std::string &)> &process,
+                                std::function<void(const SimpleWeb::error_code &)> on_sent) {
+    std::string body;
+    ResponseControl control;
+    control.write = [&](const Json::Value &, const std::function<void()> &) {
+        return std::move(body);
+    };
+    process_request(response, request, request_id, [&](const std::string &content) {
+        body = process(content);
+        return Json::Value();
+    }, false, &control, std::move(on_sent));
 }
 
 // ---------------------------------------------------------------- multi-graph servers
