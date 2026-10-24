@@ -9,6 +9,9 @@ on:
       alphabet:
         required: true
         type: string
+      platform:
+        default: macos-latest
+        type: string
 
 defaults:
   run:
@@ -17,12 +20,12 @@ defaults:
 jobs:
     
   build:
-    runs-on: macos-latest
+    runs-on: ${{ inputs.platform }}
 
     env: &macos-build-env
       CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
       DESCRIPTOR: >-
-        ${{ inputs.build_type }}-macos-arm64-${{ inputs.alphabet }}
+        ${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}
       CMAKE_ARGS: >-
         -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
         -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
@@ -106,7 +109,7 @@ jobs:
   unit-tests:
     needs: [build]
 
-    runs-on: macos-latest
+    runs-on: ${{ inputs.platform }}
 
     name: Unit Tests
 
@@ -131,7 +134,7 @@ jobs:
   integration-tests:
     needs: [build]
 
-    runs-on: macos-latest
+    runs-on: ${{ inputs.platform }}
 
     env: *macos-build-env
 
@@ -174,7 +177,7 @@ jobs:
   examples:
     if: ${{ inputs.build_type == 'Debug' }}
 
-    runs-on: macos-latest
+    runs-on: ${{ inputs.platform }}
 
     env: *macos-build-env
 

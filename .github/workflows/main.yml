@@ -86,12 +86,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build_type: [Debug, Release]
-    name: MacOS (DNA, ${{ matrix.build_type }}, arm64)
+        include:
+          - build_type: Debug
+            platform: macos-latest
+          - build_type: Release
+            platform: macos-latest
+          - build_type: Release
+            platform: macos-15-intel
+    name: MacOS (DNA, ${{ matrix.build_type }}, ${{ matrix.platform }})
     uses: ./.github/workflows/macos.yml
     with:
       build_type: ${{ matrix.build_type }}
       alphabet: DNA
+      platform: ${{ matrix.platform }}
   # ========================================================================
   # Workflow tests
   # ========================================================================
