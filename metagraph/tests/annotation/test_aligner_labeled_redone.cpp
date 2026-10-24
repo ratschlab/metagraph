@@ -47,7 +47,7 @@ TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) 
             config.seed_complexity_filter = false;
             config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2 + round, -3, -3);
             std::string sequence = references[round % 2];
-            sequence[18] = sequence[18] == 'A' ? 'C' : 'A';
+            sequence.at(18) = sequence.at(18) == 'A' ? 'C' : 'A';
             Query query(graph, sequence);
             using Result = std::tuple<int, std::string, std::string,
                                       AnnotationBuffer::Columns, AnnotationBuffer::CoordinateSet>;
