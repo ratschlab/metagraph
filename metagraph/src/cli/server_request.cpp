@@ -10,6 +10,10 @@ SearchRequest parse_search_request(const Json::Value &json, const Config &server
     if (json["FASTA"].isNull())
         throw std::invalid_argument("No input sequences received from client");
 
+    if (json.isMember("extend_chains") || json.isMember("connect_anchors")
+            || json.isMember("chain_alignments") || json.isMember("two_sided"))
+        throw std::invalid_argument("Use /align for alignment search options");
+
     SearchRequest request{json["FASTA"].asString(), server_config,
                           json.get("align", false).asBool()};
     auto &config = request.config;

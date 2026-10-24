@@ -57,10 +57,6 @@ Json::Value process_search_request(const SearchRequest &request,
         ));
     }
 
-    if (json.isMember("extend_chains") || json.isMember("connect_anchors")
-            || json.isMember("chain_alignments") || json.isMember("two_sided"))
-        throw std::invalid_argument("Use /align for alignment search options");
-
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
     std::mutex result_mutex;
