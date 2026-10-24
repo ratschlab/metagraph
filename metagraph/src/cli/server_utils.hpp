@@ -9,10 +9,17 @@ namespace cli {
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
+/**
+ * Run a handler returning serialized JSON, then write the response.
+ * on_sent receives the socket write's error code; success does not confirm
+ * receipt by the client application. /search uses failures to prioritize
+ * retaining results for retries.
+ */
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
                      size_t request_id,
-                     const std::function<Json::Value(const std::string &)> &process);
+                     const std::function<std::string(const std::string &)> &process,
+                     std::function<void(const SimpleWeb::error_code &)> on_sent = nullptr);
 
 class CurrentlyInitializingError : public std::runtime_error {
   public:
