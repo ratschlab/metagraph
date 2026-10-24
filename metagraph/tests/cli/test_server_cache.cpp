@@ -250,20 +250,53 @@ TEST(ServerQueryCache, ProtectedWithinWindowIsKept) {
 TEST(ServerQueryCache, DeliveredIsSinkStateAgainstLaterFailure) {
     ServerQueryCache cache(/* max */ 104 * 1024, /* protection_ttl */ 1h);
     {
+        auto h = cache.acquire("protected");
+        h.set_result(response_of_kib(40));
+        h.mark_protected();
+    }
+    {
         auto h = cache.acquire("delivered");
-        h.set_result(response_of_kib(60));
+        h.set_result(response_of_kib(40));
         h.mark_delivered();
         h.mark_protected();  // must not downgrade DELIVERED
     }
     {
         auto h = cache.acquire("other");
-        h.set_result(response_of_kib(60));
+        h.set_result(response_of_kib(40));
         h.mark_delivered();
     }
-    // If the first entry had become PROTECTED, the second would be evicted.
+    // A downgrade would make pass 2 evict the older protected entry instead.
+    EXPECT_TRUE(cache.contains("protected"));
     EXPECT_FALSE(cache.contains("delivered"));
     EXPECT_TRUE(cache.contains("other"));
 }
+
+TEST(ServerQueryCache, EvictsMultipleEntriesPastPinnedAndProtectedEntries) {
+    ServerQueryCache cache(/* max */ 104 * 1024, /* protection_ttl */ 1h);
+    auto pinned = cache.acquire("pinned");
+    pinned.set_result(response_of_kib(16));
+    {
+        auto h = cache.acquire("protected");
+        h.set_result(response_of_kib(20));
+        h.mark_protected();
+    }
+    for (const char *key : {"a", "b", "c"}) {
+        auto h = cache.acquire(key);
+        h.set_result(response_of_kib(20));
+        h.mark_delivered();
+    }
+    {
+        auto h = cache.acquire("large");
+        h.set_result(response_of_kib(60));
+    }
+    EXPECT_TRUE(cache.contains("pinned"));
+    EXPECT_TRUE(cache.contains("protected"));
+    EXPECT_TRUE(cache.contains("large"));
+    for (const char *key : {"a", "b", "c"})
+        EXPECT_FALSE(cache.contains(key));
+    EXPECT_LE(cache.size_bytes(), 104 * 1024u);
+}
+
 
 TEST(ServerQueryCache, DeliveredEntryStaysUntilSizePressure) {
     ServerQueryCache cache(/* max */ 1ull << 20, /* protection_ttl */ 1ms);

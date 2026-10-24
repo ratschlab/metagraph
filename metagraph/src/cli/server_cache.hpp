@@ -19,68 +19,18 @@ namespace cli {
 class Config;
 
 /**
- * A bounded result cache for the `/search` server endpoint.
+ * Cache serialized /search responses and share in-flight computations.
+ * The producer publishes a result or exception; failed entries leave lookup
+ * immediately so later requests can retry. Handles pin entries until delivery.
  *
- * Goals
- * -----
- *   1. Dedup concurrent identical requests so they share one computation.
- *   2. Survive connection drops: an upstream retry after a TCP failure
- *      hits the cached result instead of recomputing a multi-minute query.
- *   3. Bound memory while still favoring entries that look like they're
- *      being retried by a disconnected upstream.
+ * Under memory pressure, evict unpinned entries in LRU order. Failed deliveries
+ * get preference for protection_ttl after publication or their last cache hit,
+ * but are still evicted if necessary. A successful delivery ends that preference
+ * permanently, even if another delivery fails later.
  *
- * Per-request lifecycle
- * ---------------------
- *   1. The handler calls `acquire(key)` and gets a `Handle`. waiters++.
- *   2. On a miss the handler computes the result and calls
- *      `Handle::set_result(...)` (or `set_exception(...)` on a thrown
- *      compute). The `shared_future` underneath unblocks any concurrent
- *      duplicate caller that arrived during the computation.
- *      Failed computations are removed from lookup so later requests retry;
- *      existing waiters still receive the original exception.
- *      On a hit the handler simply reads the cached value via
- *      `Handle::get()`.
- *   3. The response is written to the wire. The async-write completion
- *      callback (`on_sent(error_code)`) calls
- *        ec == 0  → `Handle::mark_delivered()`
- *        ec != 0  → `Handle::mark_protected()`
- *   4. `~Handle()` decrements waiters; the last drop allows the entry
- *      to be considered for eviction.
- *
- * Entry states
- * ------------
- *   PENDING    Computation in flight. waiters ≥ 1. Never evicted.
- *   DELIVERED  At least one delivery succeeded. Sink state — a later
- *              `mark_protected()` is a no-op. Evicted only by LRU under
- *              size pressure.
- *   PROTECTED  No delivery has succeeded yet. The entry has elevated
- *              retention priority for `protection_ttl` (default 2 h).
- *              Every cache hit refreshes the window (sliding TTL — the
- *              hit itself is direct evidence the upstream is still
- *              retrying). After 2 h of no hits the entry graduates to
- *              the main cache: state stays PROTECTED but it loses
- *              priority and ages out via normal LRU.
- *
- * Eviction policy (size-pressure sweep, two passes)
- * -------------------------------------------------
- *   Pass 1: walk LRU back→front, evict the oldest waiterless entry that
- *           is NOT PROTECTED-within-window.
- *   Pass 2: still over budget? Walk again, evict any waiterless entry
- *           (PROTECTED-within-window included). Keeps the cache bounded
- *           when PROTECTED entries dominate.
- *   Entries with waiters > 0 are never evicted.
- *
- * Cache value
- * -----------
- *   The serialized JSON response body, kept as a `std::string` (held
- *   via shared_ptr so concurrent waiters/readers can share it). Caching
- *   the serialized form rather than `Json::Value` (a) makes the byte
- *   budget cover string allocations and estimated entry overhead instead
- *   of the much larger Json::Value tree, and (b) lets cache hits skip
- *   serialization entirely. The server's `verbose_output` flag is
- *   process-constant (set on startup), so the cached body is consistent
- *   across all hits within a process; only Accept-Encoding-driven
- *   compression is reapplied per request.
+ * The budget estimates string allocations and entry overhead. Pinned entries
+ * can temporarily exceed it. A zero budget disables retention and deduplication.
+ * Compression is applied per response, after reading the cached JSON body.
  */
 class ServerQueryCache {
   public:
@@ -133,17 +83,8 @@ class ServerQueryCache {
         void set_result(std::string response);
         void set_exception(std::exception_ptr eptr);
 
-        // Record the eventual delivery outcome of the response.
-        //
-        // mark_delivered() is a sink: once any delivery has succeeded
-        // the entry stays DELIVERED, and a later mark_protected() on
-        // the same entry (e.g. from a duplicate request whose delivery
-        // dropped) is a no-op — a successful delivery is a permanent
-        // fact.
-        //
-        // mark_protected() puts the entry under the priority-retention
-        // window, measured from publication or the last cache hit.
-        // Cache hits refresh the timer; repeated delivery callbacks do not.
+        // Record delivery success or failure. Success is permanent; failures
+        // get retention preference without extending the window on their own.
         void mark_delivered();
         void mark_protected();
 

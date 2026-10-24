@@ -1,6 +1,5 @@
 #include "server_cache.hpp"
 
-#include <algorithm>
 #include <exception>
 #include <iomanip>
 #include <limits>
@@ -193,36 +192,13 @@ void ServerQueryCache::discard(const std::shared_ptr<Entry> &entry) {
 
 void ServerQueryCache::on_delivery(const std::shared_ptr<Entry> &entry,
                                    DeliveryState state) {
-    // Called from the on_sent async-write callback exactly once per
-    // delivery attempt. The caller passes either DELIVERED (write
-    // succeeded) or PROTECTED (write failed → keep the response cached
-    // with priority for the configured retry window).
     if (state == DeliveryState::DELIVERED) {
-        // Sink: once any delivery has succeeded, the entry is DELIVERED
-        // forever. A later mark_protected() (e.g. from a duplicate
-        // request whose delivery dropped) is a no-op below.
         entry->delivery.store(DeliveryState::DELIVERED, std::memory_order_release);
-        return;
-    }
-    // state == PROTECTED. CAS-loop the transition so we don't downgrade
-    // a DELIVERED entry to PROTECTED.
-    DeliveryState current = entry->delivery.load(std::memory_order_acquire);
-    bool transitioned_to_protected = false;
-    while (current != DeliveryState::DELIVERED) {
-        if (entry->delivery.compare_exchange_weak(current, DeliveryState::PROTECTED,
-                                                  std::memory_order_acq_rel)) {
-            transitioned_to_protected = true;
-            break;
-        }
-    }
-    if (transitioned_to_protected) {
-        // ready_at is normally already set by on_result_ready. Failed
-        // computations are detached, so their timestamp is immaterial.
-        // Subsequent PROTECTED→PROTECTED transitions are no-ops here —
-        // the sliding window is refreshed on each cache hit in acquire().
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (entry->ready_at.time_since_epoch().count() == 0)
-            entry->ready_at = std::chrono::steady_clock::now();
+    } else {
+        // A failed delivery cannot undo an earlier success, even concurrently.
+        auto expected = DeliveryState::PENDING;
+        entry->delivery.compare_exchange_strong(expected, DeliveryState::PROTECTED,
+                                                 std::memory_order_acq_rel);
     }
 }
 
@@ -245,35 +221,23 @@ void ServerQueryCache::evict_under_pressure_locked() {
                && now - e.ready_at <= protection_ttl_;
     };
 
-    // Walk LRU back→front (oldest first), evict the first waiterless
-    // entry that satisfies `pred`. Returns whether anything was evicted.
-    auto evict_one = [&](auto pred) {
-        auto rit = std::find_if(lru_.rbegin(), lru_.rend(),
-            [&](const std::shared_ptr<Entry> &e) {
-                return e->waiters.load(std::memory_order_relaxed) == 0 && pred(*e);
-            });
-        if (rit == lru_.rend())
-            return false;
-        auto &entry = *rit;
-        total_size_bytes_ -= entry->size_bytes;
-        map_.erase(entry->key);
-        entry->in_cache = false;
-        lru_.erase(std::next(rit).base());
-        return true;
+    // Each pass walks oldest first, skipping entries still in use.
+    auto evict = [&](bool keep_protected) {
+        for (auto it = lru_.end(); total_size_bytes_ > max_size_bytes_ && it != lru_.begin();) {
+            --it;
+            auto &entry = *it;
+            if (entry->waiters.load(std::memory_order_relaxed) != 0
+                    || (keep_protected && is_within_protection_window(*entry)))
+                continue;
+            total_size_bytes_ -= entry->size_bytes;
+            map_.erase(entry->key);
+            entry->in_cache = false;
+            it = lru_.erase(it);
+        }
     };
-
-    // Pass 1: sacrifice DELIVERED and out-of-window PROTECTED entries
-    // first; in-window PROTECTED entries are held back.
-    while (total_size_bytes_ > max_size_bytes_
-            && evict_one([&](const Entry &e) { return !is_within_protection_window(e); })) {
-    }
-    // Pass 2: only triggered when in-window PROTECTED entries are the
-    // only waiterless candidates left (e.g. cache flooded with retries
-    // for many distinct failed requests). Sacrifice them in LRU order
-    // so the cache stays bounded.
-    while (total_size_bytes_ > max_size_bytes_
-            && evict_one([](const Entry &) { return true; })) {
-    }
+    // Prefer keeping failed deliveries, but evict them too if needed to fit.
+    evict(true);
+    evict(false);
 }
 
 size_t ServerQueryCache::size_bytes() const {

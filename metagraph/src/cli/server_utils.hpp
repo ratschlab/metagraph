@@ -10,21 +10,10 @@ namespace cli {
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
 /**
- * Run the request handler `process` and write its response to the client.
- *
- * `process` returns the response body as an already-serialized JSON
- * string. Handlers that build `Json::Value` should serialize it inline
- * (e.g. via `Json::writeString(StreamWriterBuilder(), value)`); /search
- * uses this form so cache hits can return the serialized body directly
- * without re-serializing the JSON tree on every hit.
- *
- * If `on_sent` is non-null it is invoked with the asio error_code
- * returned by the async network write:
- *   ec == 0  → bytes left this host without a socket-level error
- *   ec != 0  → the connection failed before/during delivery
- * Used by /search to drive the result cache: a non-zero ec marks the
- * cached entry PROTECTED so an upstream's retry hits cache instead of
- * recomputing.
+ * Run a handler returning serialized JSON, then write the response.
+ * on_sent receives the socket write's error code; success does not confirm
+ * receipt by the client application. /search uses failures to prioritize
+ * retaining results for retries.
  */
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,

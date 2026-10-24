@@ -392,30 +392,12 @@ int run_server(Config *config) {
 
     HttpServer server;
 
-    // ---------- /search ----------
-    //
-    // Request lifecycle:
-    //   1. process_request invokes the compute lambda below.
-    //   2. The compute lambda derives a cache key and `acquire()`s a
-    //      handle. On a hit it returns the cached serialized response
-    //      directly (no JSON re-serialization). On a miss it runs the
-    //      (potentially multi-minute) query, serializes the JSON once,
-    //      publishes the serialized string via Handle::set_result(),
-    //      and returns the same string.
-    //   3. process_request writes the body to the wire (compressing on
-    //      the fly if Accept-Encoding requests it).
-    //   4. The on_sent callback runs after the async write completes:
-    //        ec == 0  → mark_delivered() (DELIVERED sink)
-    //        ec != 0  → mark_protected() (entry kept with priority for
-    //                  the configured retry window)
-    //
-    // The handle has to span both lambdas so the on_sent callback can
-    // call mark_delivered/mark_protected on the same entry. We pass it
-    // through a shared_ptr captured by both lambdas.
+    // Keep the cache handle alive until the asynchronous response write completes.
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                               shared_ptr<HttpServer::Request> request) {
         size_t request_id = num_requests++;
-        auto handle_holder = std::make_shared<ServerQueryCache::Handle>();
+        auto handle_holder = cache_size_bytes
+                ? std::make_shared<ServerQueryCache::Handle>() : nullptr;
         process_request(response, request, request_id,
             [&, handle_holder](const std::string &content) -> std::string {
                 if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
@@ -424,38 +406,42 @@ int run_server(Config *config) {
                 Json::Value content_json = parse_json_string(content);
                 logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
-                // Build graph identity for the cache key: the single graph
-                // path in the simple case, or a sorted concatenation of
-                // (graph, annotator) pairs for the multi-graph server.
-                std::string graph_identity;
-                if (!config->fnames.size()) {
-                    graph_identity = config->infbase;
+                // Validate fields omitted from the key before returning a cached result.
+                if (content_json["FASTA"].isNull())
+                    throw std::invalid_argument("No input sequences received from client");
+                std::vector<std::string> graphs_to_query;
+                bool load_in_ram = false;
+                if (config->fnames.empty()) {
+                    if (content_json.isMember("graphs"))
+                        throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
                 } else {
-                    auto graphs_to_query = filter_graphs_from_list(indexes, content_json, request_id);
-                    std::ostringstream oss;
-                    for (const auto &name : graphs_to_query) {
-                        for (const auto &[g, a] : indexes[name]) {
-                            oss << g.size() << ':' << g << a.size() << ':' << a;
-                        }
-                    }
-                    graph_identity = oss.str();
+                    graphs_to_query = filter_graphs_from_list(indexes, content_json, request_id);
+                    load_in_ram = content_json.get("in_ram", false).asBool() && loaded_with_mmap;
                 }
-                std::string cache_key = make_search_cache_key(content_json, *config, graph_identity);
 
-                // Cache handshake: hit returns the cached body directly,
-                // miss falls through to compute + serialize + publish.
-                *handle_holder = search_cache.acquire(cache_key);
-                if (!handle_holder->is_miss()) {
-                    auto cached = handle_holder->get();
-                    if (cache_size_bytes) {
+                if (handle_holder) {
+                    std::string graph_identity = config->infbase;
+                    if (!config->fnames.empty()) {
+                        std::ostringstream oss;
+                        for (const auto &name : graphs_to_query) {
+                            for (const auto &[g, a] : indexes[name]) {
+                                oss << g.size() << ':' << g << a.size() << ':' << a;
+                            }
+                        }
+                        graph_identity = oss.str();
+                    }
+                    *handle_holder = search_cache.acquire(
+                        make_search_cache_key(content_json, *config, graph_identity));
+                    if (!handle_holder->is_miss()) {
+                        auto cached = handle_holder->get();
                         logger->info("[Server] Request {}: cache HIT  {:.1f} KB  "
                                      "(occupancy {:.1f}/{:.0f} MB, {} entries)",
                                      request_id, cached->size() / 1e3,
                                      search_cache.size_bytes() / 1e6,
                                      cache_size_bytes / 1e6,
                                      search_cache.entry_count());
+                        return *cached;
                     }
-                    return *cached;
                 }
 
                 // Cache miss: run the search, publish the result. If the
@@ -464,8 +450,6 @@ int run_server(Config *config) {
                 Json::Value result;
                 try {
                     if (!config->fnames.size()) {
-                        if (content_json.isMember("graphs"))
-                            throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
                         logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
                                       request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
                         try {
@@ -476,8 +460,6 @@ int run_server(Config *config) {
                         }
                         graphs_being_queried--;
                     } else {
-                        std::vector<std::string> graphs_to_query
-                                = filter_graphs_from_list(indexes, content_json, request_id);
                         std::mutex mu;
                         std::vector<std::shared_future<std::exception_ptr>> futures;
                         for (const auto &name : graphs_to_query) {
@@ -499,9 +481,7 @@ int run_server(Config *config) {
                                     try {
                                         std::unique_ptr<AnnotatedDBG> index_loaded;
                                         const AnnotatedDBG *index;
-                                        bool in_ram = content_json.isMember("in_ram") && content_json["in_ram"].asBool();
-                                        if (in_ram && !loaded_with_mmap)
-                                            in_ram = false;  // already in RAM, no need to re-load
+                                        bool in_ram = load_in_ram;
                                         size_t index_size = in_ram ? std::filesystem::file_size(graph_fname)
                                                                         + std::filesystem::file_size(anno_fname)
                                                                    : -1;
@@ -572,29 +552,25 @@ int run_server(Config *config) {
                         }
                     }
                 } catch (...) {
-                    handle_holder->set_exception(std::current_exception());
+                    if (handle_holder)
+                        handle_holder->set_exception(std::current_exception());
                     throw;
                 }
 
                 // Serialize once: the cached form *is* the response
                 // body. Cache hits then skip serialization entirely.
                 std::string serialized = Json::writeString(Json::StreamWriterBuilder(), result);
-                size_t entry_size = serialized.size();
-                handle_holder->set_result(serialized);
-                if (cache_size_bytes) {
+                if (handle_holder) {
+                    handle_holder->set_result(serialized);
                     logger->info("[Server] Request {}: cache STORE {:.1f} KB  "
                                  "(occupancy {:.1f}/{:.0f} MB, {} entries)",
-                                 request_id, entry_size / 1e3,
+                                 request_id, serialized.size() / 1e3,
                                  search_cache.size_bytes() / 1e6,
                                  cache_size_bytes / 1e6,
                                  search_cache.entry_count());
                 }
                 return serialized;
             },
-            // on_sent: fires after the async response write completes.
-            // Reports the delivery outcome to the cache so subsequent
-            // identical requests hit a DELIVERED entry (LRU normal) or
-            // a PROTECTED entry (priority retention for retries).
             [handle_holder, request_id, &search_cache](const SimpleWeb::error_code &ec) {
                 if (!handle_holder || !*handle_holder)
                     return;  // never acquired (e.g. early throw before acquire)
