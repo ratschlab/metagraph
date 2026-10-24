@@ -1,3 +1,4 @@
+#include <functional>
 #include <sstream>
 #include <vector>
 #include <string>
@@ -133,6 +134,30 @@ TEST(LabelEncoderBackwardCompatibility, LoadNewFormat) {
 
     ASSERT_TRUE(encoder.load(stream));
     ASSERT_EQ(std::vector<std::string>({"label1", "label2", "label3"}), encoder.get_labels());
+}
+
+TEST(LabelEncoderBackwardCompatibility, LoadNewFormatWithDifferentHash) {
+    struct DifferentHash {
+        size_t operator()(const std::string &label) const {
+            return ~std::hash<std::string>{}(label);
+        }
+    };
+    const std::vector<std::string> labels = {"573", "562", "1296536"};
+    VectorSet<std::string, DifferentHash> original(labels.begin(), labels.end());
+    std::stringstream stream;
+    stream.write("LE-v2.0", 7);
+    Serializer serializer(stream);
+    original.serialize(serializer);
+
+    LabelEncoder<std::string> encoder;
+    ASSERT_TRUE(encoder.load(stream));
+    EXPECT_EQ(labels, encoder.get_labels());
+    for (size_t i = 0; i < labels.size(); ++i) {
+        EXPECT_TRUE(encoder.label_exists(labels[i]));
+        EXPECT_EQ(i, encoder.encode(labels[i]));
+        EXPECT_EQ(labels[i], encoder.decode(i));
+    }
+    EXPECT_FALSE(encoder.label_exists("missing"));
 }
 
 } // namespace
