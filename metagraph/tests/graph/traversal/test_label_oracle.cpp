@@ -43,7 +43,9 @@ std::vector<std::string> make_sequences(size_t n, size_t len, uint32_t seed) {
     return seqs;
 }
 
+#if ! _PROTEIN_GRAPH
 std::string rc(std::string s) { ::reverse_complement(s); return s; }
+#endif
 
 std::vector<DeBruijnGraph::Mode> all_modes() {
     return {
