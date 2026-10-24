@@ -11,6 +11,23 @@
 #include "cli/config/config.hpp"
 
 
+namespace mtg {
+namespace cli {
+
+// Set up expired windows without sleeps or a clock hook in the production path.
+class ServerQueryCacheTestAccess {
+  public:
+    static void expire(ServerQueryCache &cache, const std::string &key) {
+        std::lock_guard<std::mutex> lock(cache.mutex_);
+        cache.map_.at(key)->ready_at = std::chrono::steady_clock::now()
+                                      - cache.protection_ttl_ - std::chrono::hours(1);
+    }
+};
+
+} // namespace cli
+} // namespace mtg
+
+
 namespace {
 
 using namespace mtg::cli;
@@ -161,73 +178,55 @@ TEST(ServerQueryCache, ProtectedEntriesEvictedUnderHeavyPressure) {
 
 
 TEST(ServerQueryCache, ProtectedPastWindowGraduatesToMainCache) {
-    // After `protection_ttl` of no retry hits, a PROTECTED entry stays
-    // in the cache but loses its priority — it's evictable like a
-    // DELIVERED entry, only under size pressure (no proactive removal).
-    ServerQueryCache cache(/* max */ 104 * 1024, /* protection_ttl */ 50ms);
-
+    ServerQueryCache cache(104 * 1024, 1h);
     {
         auto h = cache.acquire("aged");
-        h.set_result(response_of_kib(60));
+        h.set_result(response_of_kib(40));
         h.mark_protected();
     }
-    std::this_thread::sleep_for(120ms);
-    // Past the window — entry stays in cache.
-    EXPECT_TRUE(cache.contains("aged"));
-
-    // Insert a DELIVERED entry that triggers size pressure. The aged
-    // PROTECTED entry is no longer prioritized → evictable in pass 1
-    // at normal LRU priority.
     {
-        auto h = cache.acquire("new");
-        h.set_result(response_of_kib(60));   // two results exceed the budget
+        auto h = cache.acquire("delivered");
+        h.set_result(response_of_kib(40));
         h.mark_delivered();
     }
+    ServerQueryCacheTestAccess::expire(cache, "aged");
+    EXPECT_TRUE(cache.contains("aged"));
+    {
+        auto h = cache.acquire("new");
+        h.set_result(response_of_kib(40));
+    }
+    // Without expiration, the newer delivered entry would be evicted instead.
     EXPECT_FALSE(cache.contains("aged"));
+    EXPECT_TRUE(cache.contains("delivered"));
     EXPECT_TRUE(cache.contains("new"));
 }
 
-
 TEST(ServerQueryCache, ProtectedHitRefreshesPriorityWindow) {
-    // A cache hit on a PROTECTED entry refreshes its retention TTL —
-    // the window is sliding, tracking the upstream's retry pattern.
-    ServerQueryCache cache(/* max */ 104 * 1024, /* protection_ttl */ 100ms);
-
+    ServerQueryCache cache(104 * 1024, 1h);
     {
         auto h = cache.acquire("retried");
-        h.set_result(response_of_kib(60));
+        h.set_result(response_of_kib(40));
         h.mark_protected();
     }
-    // Sacrificial DELIVERED entry: filling cache to capacity so a later
-    // insert triggers pressure with a waiterless eviction candidate
-    // available (otherwise pass 1 would have nothing to evict and pass 2
-    // would falsely sacrifice the PROTECTED entry we're trying to test).
     {
         auto h = cache.acquire("filler");
-        h.set_result(response_of_kib(40));   // both results fit, including metadata
+        h.set_result(response_of_kib(40));
         h.mark_delivered();
     }
-
-    std::this_thread::sleep_for(60ms);
-    // Mid-window retry: cache hit refreshes ready_at on "retried".
+    ServerQueryCacheTestAccess::expire(cache, "retried");
     {
         auto h = cache.acquire("retried");
         ASSERT_FALSE(h.is_miss());
         h.get();
     }
-    std::this_thread::sleep_for(60ms);
-    // Elapsed = 120ms (past the original 100ms TTL). With the sliding
-    // window refresh we're only 60ms into the new window — still protected.
-
-    // Insert an intruder that triggers pressure. Pass 1 should sacrifice
-    // "filler" (DELIVERED, waiterless) and leave "retried" alone.
+    // Make retried the LRU entry again, so recency alone cannot save it.
+    { auto h = cache.acquire("filler"); }
     {
         auto h = cache.acquire("intruder");
-        h.set_result(response_of_kib(40));   // a third result exceeds the budget
-        h.mark_delivered();
+        h.set_result(response_of_kib(40));
     }
-    EXPECT_TRUE(cache.contains("retried"));    // protected by refreshed window
-    EXPECT_FALSE(cache.contains("filler"));    // sacrificed in pass 1
+    EXPECT_TRUE(cache.contains("retried"));
+    EXPECT_FALSE(cache.contains("filler"));
     EXPECT_TRUE(cache.contains("intruder"));
 }
 
@@ -295,6 +294,27 @@ TEST(ServerQueryCache, EvictsMultipleEntriesPastPinnedAndProtectedEntries) {
     for (const char *key : {"a", "b", "c"})
         EXPECT_FALSE(cache.contains(key));
     EXPECT_LE(cache.size_bytes(), 104 * 1024u);
+}
+
+
+TEST(ServerQueryCache, OversizedResponsePreservesCachedResultsAndWaiters) {
+    ServerQueryCache cache(64 * 1024);
+    {
+        auto h = cache.acquire("small");
+        ASSERT_TRUE(h.set_result(response_of_kib(20)));
+    }
+    auto producer = cache.acquire("large");
+    auto waiter = cache.acquire("large");
+    ASSERT_FALSE(waiter.is_miss());
+    EXPECT_FALSE(producer.set_result(response_of_kib(128)));
+    EXPECT_EQ(producer.get(), waiter.get());
+    EXPECT_EQ(waiter.get()->size(), 128 * 1024u);
+    EXPECT_FALSE(cache.contains("large"));
+    EXPECT_TRUE(cache.contains("small"));
+    EXPECT_LE(cache.size_bytes(), 64 * 1024u);
+    producer = ServerQueryCache::Handle();
+    waiter = ServerQueryCache::Handle();
+    EXPECT_TRUE(cache.contains("small"));
 }
 
 
@@ -494,7 +514,8 @@ TEST(ServerQueryCache, LargeKeysConsumeBudget) {
     {
         auto h = cache.acquire(std::string(4096, 'A'));
         h.set_result("small");
-        EXPECT_GT(cache.size_bytes(), 4096u);  // pinned until the handle drops
+        EXPECT_EQ(cache.size_bytes(), 0u);  // too large to retain
+        EXPECT_EQ(*h.get(), "small");
     }
     EXPECT_EQ(cache.entry_count(), 0u);
     EXPECT_EQ(cache.size_bytes(), 0u);

@@ -67,12 +67,12 @@ ServerQueryCache::ResultPtr ServerQueryCache::Handle::get() const {
     return entry_->future.get();
 }
 
-void ServerQueryCache::Handle::set_result(std::string response) {
+bool ServerQueryCache::Handle::set_result(std::string response) {
     auto ptr = std::make_shared<const std::string>(std::move(response));
     size_t bytes = ptr->capacity() + 1;
     producer_->set_value(ptr);
     producer_.reset();
-    cache_->on_result_ready(entry_, bytes);
+    return cache_->on_result_ready(entry_, bytes);
 }
 
 void ServerQueryCache::Handle::set_exception(std::exception_ptr eptr) {
@@ -160,7 +160,7 @@ void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
     evict_under_pressure_locked();
 }
 
-void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
+bool ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
                                        size_t size) {
     // Called by the producer after publishing the value. Records when it became
     // available, registers its size in the byte budget, and runs the
@@ -169,19 +169,30 @@ void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
     // alive (waiters ≥ 1).
     std::lock_guard<std::mutex> lock(mutex_);
     if (!entry->in_cache)
-        return;  // Detached entry from the disabled-cache path.
+        return false;  // Detached entry from the disabled-cache path.
     entry->ready_at = std::chrono::steady_clock::now();
     // Charge both stored keys, the response allocation and an estimate of
     // entry/container bookkeeping, so even empty responses consume budget.
-    entry->size_bytes = size + 2 * (entry->key.capacity() + 1)
+    size_t charged_size = size + 2 * (entry->key.capacity() + 1)
                           + sizeof(Entry) + sizeof(decltype(map_)::value_type)
                           + sizeof(std::string) + 8 * sizeof(void *);
+    // An entry that cannot fit would evict useful results, then itself.
+    if (charged_size > max_size_bytes_) {
+        discard_locked(entry);
+        return false;
+    }
+    entry->size_bytes = charged_size;
     total_size_bytes_ += entry->size_bytes;
     evict_under_pressure_locked();
+    return true;
 }
 
 void ServerQueryCache::discard(const std::shared_ptr<Entry> &entry) {
     std::lock_guard<std::mutex> lock(mutex_);
+    discard_locked(entry);
+}
+
+void ServerQueryCache::discard_locked(const std::shared_ptr<Entry> &entry) {
     if (!entry->in_cache)
         return;
     total_size_bytes_ -= entry->size_bytes;

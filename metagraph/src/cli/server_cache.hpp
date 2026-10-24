@@ -29,7 +29,8 @@ class Config;
  * permanently, even if another delivery fails later.
  *
  * The budget estimates string allocations and entry overhead. Pinned entries
- * can temporarily exceed it. A zero budget disables retention and deduplication.
+ * can temporarily exceed it. Oversized results are shared with existing waiters
+ * but not retained. A zero budget disables retention and deduplication.
  * Compression is applied per response, after reading the cached JSON body.
  */
 class ServerQueryCache {
@@ -80,7 +81,8 @@ class ServerQueryCache {
 
         // Producer-only: publish the result (or thrown exception) to
         // all current and future waiters of this entry's shared_future.
-        void set_result(std::string response);
+        // Returns whether the result fits the retention budget.
+        bool set_result(std::string response);
         void set_exception(std::exception_ptr eptr);
 
         // Record delivery success or failure. Success is permanent; failures
@@ -124,9 +126,10 @@ class ServerQueryCache {
     size_t size_bytes() const;
     size_t entry_count() const;
     bool contains(const std::string &key) const;
-    std::chrono::nanoseconds protection_ttl() const { return protection_ttl_; }
 
   private:
+    friend class ServerQueryCacheTestAccess;
+
     struct Entry {
         std::string key;
         // Hinge of the dedup mechanism: producer publishes via promise,
@@ -158,8 +161,9 @@ class ServerQueryCache {
         make_pending_entry(const std::string &key);
 
     void release_waiter(const std::shared_ptr<Entry> &entry);
-    void on_result_ready(const std::shared_ptr<Entry> &entry, size_t size);
+    bool on_result_ready(const std::shared_ptr<Entry> &entry, size_t size);
     void discard(const std::shared_ptr<Entry> &entry);
+    void discard_locked(const std::shared_ptr<Entry> &entry);
     void on_delivery(const std::shared_ptr<Entry> &entry, DeliveryState state);
     void evict_under_pressure_locked();
     void touch_lru_locked(const std::shared_ptr<Entry> &entry);

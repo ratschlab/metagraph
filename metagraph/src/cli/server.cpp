@@ -461,7 +461,20 @@ int run_server(Config *config) {
                         graphs_being_queried--;
                     } else {
                         std::mutex mu;
-                        std::vector<std::shared_future<std::exception_ptr>> futures;
+                        struct PendingQueries {
+                            std::vector<std::shared_future<std::exception_ptr>> futures;
+                            ~PendingQueries() {
+                                // Tasks capture request-local state, including mu and result.
+                                for (auto &future : futures)
+                                    future.wait();
+                            }
+                        } pending;
+                        auto &futures = pending.futures;
+                        size_t num_queries = 0;
+                        for (const auto &name : graphs_to_query)
+                            num_queries += indexes.at(name).size();
+                        // Once a task is launched, recording its future must not allocate.
+                        futures.reserve(num_queries);
                         for (const auto &name : graphs_to_query) {
                             for (const auto &[graph_fname, anno_fname] : indexes[name]) {
                                 futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
@@ -561,10 +574,10 @@ int run_server(Config *config) {
                 // body. Cache hits then skip serialization entirely.
                 std::string serialized = Json::writeString(Json::StreamWriterBuilder(), result);
                 if (handle_holder) {
-                    handle_holder->set_result(serialized);
-                    logger->info("[Server] Request {}: cache STORE {:.1f} KB  "
+                    bool retained = handle_holder->set_result(serialized);
+                    logger->info("[Server] Request {}: cache {} {:.1f} KB  "
                                  "(occupancy {:.1f}/{:.0f} MB, {} entries)",
-                                 request_id, serialized.size() / 1e3,
+                                 request_id, retained ? "STORE" : "BYPASS", serialized.size() / 1e3,
                                  search_cache.size_bytes() / 1e6,
                                  cache_size_bytes / 1e6,
                                  search_cache.entry_count());
@@ -575,11 +588,7 @@ int run_server(Config *config) {
                 if (!handle_holder || !*handle_holder)
                     return;  // never acquired (e.g. early throw before acquire)
                 if (ec) {
-                    auto ttl_min = std::chrono::duration_cast<std::chrono::minutes>(
-                                       search_cache.protection_ttl()).count();
-                    logger->info("[Server] Request {}: delivery FAILED ({}); "
-                                 "cache entry protected for {} min retry window",
-                                 request_id, ec.message(), ttl_min);
+                    logger->info("[Server] Request {}: delivery FAILED ({})", request_id, ec.message());
                     handle_holder->mark_protected();
                 } else {
                     handle_holder->mark_delivered();
