@@ -36,6 +36,8 @@ class Config;
  *      `Handle::set_result(...)` (or `set_exception(...)` on a thrown
  *      compute). The `shared_future` underneath unblocks any concurrent
  *      duplicate caller that arrived during the computation.
+ *      Failed computations are removed from lookup so later requests retry;
+ *      existing waiters still receive the original exception.
  *      On a hit the handler simply reads the cached value via
  *      `Handle::get()`.
  *   3. The response is written to the wire. The async-write completion
@@ -153,6 +155,8 @@ class ServerQueryCache {
                std::shared_ptr<Entry> entry,
                std::shared_ptr<std::promise<ResultPtr>> producer);
 
+        void release();
+
         ServerQueryCache *cache_ = nullptr;
         std::shared_ptr<Entry> entry_;
         std::shared_ptr<std::promise<ResultPtr>> producer_;  // non-null on miss only
@@ -191,8 +195,8 @@ class ServerQueryCache {
         // RAII-managed by Handle: producer + each reader contributes 1.
         // An entry with waiters > 0 is never evicted.
         std::atomic<int>      waiters{0};
-        // Set when the producer publishes (set_result / set_exception
-        // → on_result_ready), and refreshed on every cache hit while
+        // Set when the producer publishes a result (on_result_ready),
+        // and refreshed on every cache hit while
         // the entry is in PROTECTED state (sliding retention window).
         // Used to compute "within protection_ttl" for eviction priority.
         std::chrono::steady_clock::time_point ready_at{};
@@ -216,6 +220,7 @@ class ServerQueryCache {
 
     void release_waiter(const std::shared_ptr<Entry> &entry);
     void on_result_ready(const std::shared_ptr<Entry> &entry, size_t size);
+    void discard(const std::shared_ptr<Entry> &entry);
     void on_delivery(const std::shared_ptr<Entry> &entry, DeliveryState state);
     void evict_under_pressure_locked();
     void touch_lru_locked(const std::shared_ptr<Entry> &entry);

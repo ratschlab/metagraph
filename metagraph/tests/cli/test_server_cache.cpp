@@ -1,11 +1,14 @@
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <future>
+#include <locale>
 #include <thread>
 
 #include "gtest/gtest.h"
 
 #include "cli/server_cache.hpp"
+#include "cli/config/config.hpp"
 
 
 namespace {
@@ -310,17 +313,19 @@ TEST(ServerQueryCache, ProducerExceptionPropagatesToWaiters) {
     ServerQueryCache cache(1ull << 20);
 
     std::promise<void> waiter_ready;
+    std::promise<void> waiter_attached;
     auto producer = std::thread([&]() {
         auto h = cache.acquire("boom");
         ASSERT_TRUE(h.is_miss());
         waiter_ready.set_value();
-        std::this_thread::sleep_for(50ms);
+        waiter_attached.get_future().wait();
         h.set_exception(std::make_exception_ptr(std::runtime_error("kaboom")));
     });
 
     waiter_ready.get_future().wait();
     auto h = cache.acquire("boom");
     EXPECT_FALSE(h.is_miss());
+    waiter_attached.set_value();
     EXPECT_THROW(h.get(), std::runtime_error);
     producer.join();
 }
@@ -330,11 +335,12 @@ TEST(ServerQueryCache, AbandonedProducerUnblocksWaiters) {
     ServerQueryCache cache(1ull << 20);
 
     std::promise<void> waiter_ready;
+    std::promise<void> waiter_attached;
     auto producer = std::thread([&]() {
         auto h = cache.acquire("orphan");
         ASSERT_TRUE(h.is_miss());
         waiter_ready.set_value();
-        std::this_thread::sleep_for(20ms);
+        waiter_attached.get_future().wait();
         // Drop the handle without ever calling set_result — destructor must
         // satisfy the promise with an exception so waiters don't hang.
     });
@@ -342,8 +348,113 @@ TEST(ServerQueryCache, AbandonedProducerUnblocksWaiters) {
     waiter_ready.get_future().wait();
     auto h = cache.acquire("orphan");
     EXPECT_FALSE(h.is_miss());
+    waiter_attached.set_value();
     EXPECT_THROW(h.get(), std::runtime_error);
     producer.join();
+}
+
+TEST(ServerQueryCache, FailedComputationCanBeRetriedWhileWaitersRemain) {
+    ServerQueryCache cache(1024);
+    auto producer = cache.acquire("retry");
+    auto waiter = cache.acquire("retry");
+    producer.set_exception(std::make_exception_ptr(std::runtime_error("temporary")));
+
+    EXPECT_THROW(producer.get(), std::runtime_error);
+    EXPECT_THROW(waiter.get(), std::runtime_error);
+    EXPECT_FALSE(cache.contains("retry"));
+
+    auto retry = cache.acquire("retry");
+    ASSERT_TRUE(retry.is_miss());
+    retry.set_result("success");
+    // Late callbacks and destruction from the failed attempt must not affect
+    // the new entry with the same key.
+    waiter.mark_protected();
+    producer.mark_delivered();
+    waiter = ServerQueryCache::Handle();
+    producer = ServerQueryCache::Handle();
+    auto hit = cache.acquire("retry");
+    EXPECT_FALSE(hit.is_miss());
+    EXPECT_EQ(*hit.get(), "success");
+    EXPECT_EQ(cache.entry_count(), 1u);
+    EXPECT_EQ(cache.size_bytes(), 7u);
+}
+
+TEST(ServerQueryCache, AbandonedProducerCanBeRetried) {
+    ServerQueryCache cache(1024);
+    ServerQueryCache::Handle waiter;
+    {
+        auto producer = cache.acquire("orphan");
+        waiter = cache.acquire("orphan");
+    }
+    EXPECT_THROW(waiter.get(), std::runtime_error);
+    auto retry = cache.acquire("orphan");
+    ASSERT_TRUE(retry.is_miss());
+    retry.set_result("success");
+    EXPECT_EQ(*retry.get(), "success");
+}
+
+TEST(ServerQueryCache, MoveAssignmentAbandonsPreviousComputation) {
+    ServerQueryCache cache(1024);
+    auto producer = cache.acquire("old");
+    auto waiter = cache.acquire("old");
+    auto replacement = cache.acquire("new");
+    replacement.set_result("new result");
+
+    producer = std::move(replacement);
+    EXPECT_THROW(waiter.get(), std::runtime_error);
+    EXPECT_EQ(*producer.get(), "new result");
+    auto retry = cache.acquire("old");
+    ASSERT_TRUE(retry.is_miss());
+    retry.set_result("retried");
+    EXPECT_EQ(cache.entry_count(), 2u);
+}
+
+TEST(ServerQueryCache, FailedComputationsDoNotAccumulate) {
+    for (size_t budget : {0u, 1024u}) {
+        ServerQueryCache cache(budget);
+        for (size_t i = 0; i < 100; ++i) {
+            auto h = cache.acquire(std::to_string(i));
+            h.set_exception(std::make_exception_ptr(std::runtime_error("temporary")));
+            EXPECT_EQ(cache.entry_count(), 0u);
+            EXPECT_EQ(cache.size_bytes(), 0u);
+        }
+    }
+}
+
+TEST(ServerQueryCache, CacheKeyPreservesFloatingPointParameters) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    Json::Value request;
+    request["FASTA"] = ">query\nACGTACGT\n";
+    for (const char *parameter : {"discovery_fraction", "min_exact_match",
+                                  "max_num_nodes_per_seq_char"}) {
+        SCOPED_TRACE(parameter);
+        auto first = request, second = request;
+        first[parameter] = 0.12345641;
+        second[parameter] = std::nextafter(0.12345641, 1.0);
+        EXPECT_NE(make_search_cache_key(first, config, "graph"),
+                  make_search_cache_key(second, config, "graph"));
+    }
+}
+
+TEST(ServerQueryCache, CacheKeyDoesNotDependOnLocale) {
+    char program[] = "metagraph", command[] = "server_query", input[] = "fixture.csv";
+    char *argv[] = {program, command, input};
+    Config config(3, argv);
+    Json::Value request;
+    request["FASTA"] = ">query\nACGTACGT\n";
+    request["discovery_fraction"] = 0.25;
+    auto key = make_search_cache_key(request, config, "graph");
+    struct CommaDecimal : std::numpunct<char> {
+        char do_decimal_point() const override { return ','; }
+    };
+    struct RestoreLocale {
+        std::locale previous = std::locale();
+        ~RestoreLocale() { std::locale::global(previous); }
+    } restore;
+    std::locale::global(std::locale(std::locale::classic(), new CommaDecimal));
+    EXPECT_EQ(make_search_cache_key(request, config, "graph"), key);
 }
 
 

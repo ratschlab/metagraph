@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <exception>
+#include <iomanip>
+#include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 
@@ -31,9 +34,7 @@ ServerQueryCache::Handle::Handle(Handle &&other) noexcept
 ServerQueryCache::Handle &
 ServerQueryCache::Handle::operator=(Handle &&other) noexcept {
     if (this != &other) {
-        // Release any current entry first.
-        if (entry_)
-            cache_->release_waiter(entry_);
+        release();
         cache_ = other.cache_;
         entry_ = std::move(other.entry_);
         producer_ = std::move(other.producer_);
@@ -43,6 +44,10 @@ ServerQueryCache::Handle::operator=(Handle &&other) noexcept {
 }
 
 ServerQueryCache::Handle::~Handle() {
+    release();
+}
+
+void ServerQueryCache::Handle::release() {
     if (!entry_)
         return;
     // Producer abandoned without publishing (e.g. throw-before-set_result
@@ -50,7 +55,7 @@ ServerQueryCache::Handle::~Handle() {
     // duplicate waiters don't block forever on the shared_future.
     if (producer_) {
         try {
-            producer_->set_exception(std::make_exception_ptr(
+            set_exception(std::make_exception_ptr(
                 std::runtime_error("Cache producer abandoned the request")));
         } catch (const std::future_error &) {
             // Already satisfied — fine.
@@ -72,13 +77,11 @@ void ServerQueryCache::Handle::set_result(std::string response) {
 }
 
 void ServerQueryCache::Handle::set_exception(std::exception_ptr eptr) {
+    // Existing waiters own this entry. Remove it from lookup before waking
+    // them so retries can start a new computation, even while they unwind.
+    cache_->discard(entry_);
     producer_->set_exception(eptr);
     producer_.reset();
-    // Don't remove the entry — concurrent waiters will receive the
-    // exception via future.get(). The entry becomes evictable once
-    // every waiter drops; subsequent identical requests will hit it,
-    // re-throw the same error, and behave consistently.
-    cache_->on_result_ready(entry_, /* size = */ 0);
 }
 
 void ServerQueryCache::Handle::mark_delivered() {
@@ -160,8 +163,7 @@ void ServerQueryCache::release_waiter(const std::shared_ptr<Entry> &entry) {
 
 void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
                                        size_t size) {
-    // Called by the producer after publishing the value (set_result) or
-    // exception (set_exception). Records the moment the result became
+    // Called by the producer after publishing the value. Records when it became
     // available, registers its size in the byte budget, and runs the
     // size-pressure sweep — the just-inserted entry itself is protected
     // from eviction in this pass because its producer's Handle is still
@@ -173,6 +175,16 @@ void ServerQueryCache::on_result_ready(const std::shared_ptr<Entry> &entry,
     entry->size_bytes = size;
     total_size_bytes_ += size;
     evict_under_pressure_locked();
+}
+
+void ServerQueryCache::discard(const std::shared_ptr<Entry> &entry) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!entry->in_cache)
+        return;
+    total_size_bytes_ -= entry->size_bytes;
+    map_.erase(entry->key);
+    lru_.erase(entry->lru_pos);
+    entry->in_cache = false;
 }
 
 void ServerQueryCache::on_delivery(const std::shared_ptr<Entry> &entry,
@@ -200,10 +212,8 @@ void ServerQueryCache::on_delivery(const std::shared_ptr<Entry> &entry,
         }
     }
     if (transitioned_to_protected) {
-        // ready_at is normally already set by on_result_ready (called
-        // from set_result/set_exception); this is just a defensive
-        // arm for the producer-abandoned path, where ~Handle satisfies
-        // the promise without going through on_result_ready.
+        // ready_at is normally already set by on_result_ready. Failed
+        // computations are detached, so their timestamp is immaterial.
         // Subsequent PROTECTED→PROTECTED transitions are no-ops here —
         // the sliding window is refreshed on each cache hit in acquire().
         std::lock_guard<std::mutex> lock(mutex_);
@@ -321,6 +331,8 @@ std::string make_search_cache_key(const Json::Value &json,
     }
 
     std::ostringstream oss;
+    oss.imbue(std::locale::classic());
+    oss << std::setprecision(std::numeric_limits<double>::max_digits10);
     oss << "g:" << graph_identity << '|'
         << "m:" << query_mode << '|'
         << "df:" << discovery_fraction << '|'
