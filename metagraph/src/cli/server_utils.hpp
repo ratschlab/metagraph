@@ -40,7 +40,16 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                      size_t request_id,
                      const std::function<Json::Value(const std::string &)> &process,
                      bool compact = false,
-                     const ResponseControl *control = nullptr);
+                     const ResponseControl *control = nullptr,
+                     std::function<void(const SimpleWeb::error_code &)> on_sent = nullptr);
+
+// Send an already serialized JSON body through the same compression and error handling.
+void process_serialized_request(std::shared_ptr<HttpServer::Response> &response,
+                                const std::shared_ptr<HttpServer::Request> &request,
+                                size_t request_id,
+                                const std::function<std::string(const std::string &)> &process,
+                                std::function<void(const SimpleWeb::error_code &)> on_sent);
+
 
 Json::Value parse_json_string(const std::string &msg);
 
