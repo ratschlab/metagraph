@@ -2022,6 +2022,7 @@ TEST(AlignmentExtension, KeepsBetterPathsAfterACompleteQuery) {
     const std::string deletion = "ACGTTAGCCCGACCTATGCGATTCAGACT";
     constexpr size_t k = 7;
     DBGAlignerConfig config{};
+    config.min_exact_match = 1;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.xdrop = 100;
     config.min_seed_length = config.max_seed_length = k;
