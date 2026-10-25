@@ -53,7 +53,6 @@ class Config {
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
-    bool separate_header = false;
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_only_forwards = false;
@@ -95,6 +94,7 @@ class Config {
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned long long RA_ivbuffer_size = 16'384; // in B
+    double server_cache_size = 1.0; // server query cache, in GB (default 1 GB; 0 disables)
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;

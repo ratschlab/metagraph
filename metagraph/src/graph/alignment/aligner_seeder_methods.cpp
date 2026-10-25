@@ -1,6 +1,6 @@
 #include "aligner_seeder_methods.hpp"
 
-#include <sdust.h>
+#include "seed_complexity.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -17,22 +17,6 @@ using mtg::common::logger;
 
 typedef Alignment::score_t score_t;
 
-
-#if ! _PROTEIN_GRAPH
-inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
-    int n;
-    std::unique_ptr<uint64_t, decltype(std::free)*> r {
-        sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
-        std::free
-    };
-    return n > 0;
-}
-#else
-inline bool is_low_complexity(std::string_view, int = 20, int = 64) {
-    // TODO: implement a checker here
-    return false;
-}
-#endif
 
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,

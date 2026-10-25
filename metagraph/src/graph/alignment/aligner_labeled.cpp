@@ -440,11 +440,12 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
 
 template <class Seeder, class Extender, class AlignmentCompare>
 LabeledAligner<Seeder, Extender, AlignmentCompare>::~LabeledAligner() {
-    logger->trace("Buffered {}/{} nodes and {} label combinations. Mem usage {} MB",
-                  annotation_buffer_.num_nodes_buffered(),
-                  this->graph_.num_nodes(),
-                  annotation_buffer_.num_column_sets(),
-                  get_curr_RSS() / 1e6);
+    if (logger->should_log(spdlog::level::trace))
+        logger->trace("Buffered {}/{} nodes and {} label combinations. Mem usage {} MB",
+                      annotation_buffer_.num_nodes_buffered(),
+                      this->graph_.num_nodes(),
+                      annotation_buffer_.num_column_sets(),
+                      get_curr_RSS() / 1e6);
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
@@ -455,7 +456,8 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
         = DBGAligner<Seeder, Extender, AlignmentCompare>::build_seeders(seq_batch, wrapped_seqs);
 
     // now we're going to filter the seeds
-    logger->trace("Filtering seeds by label. Cur mem usage {} MB", get_curr_RSS() / 1e6);
+    if (logger->should_log(spdlog::level::trace))
+        logger->trace("Filtering seeds by label. Cur mem usage {} MB", get_curr_RSS() / 1e6);
     std::vector<std::pair<std::vector<Seed>, size_t>> counted_seeds;
     std::vector<std::pair<std::vector<Seed>, size_t>> counted_seeds_rc;
 
@@ -492,10 +494,12 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
     }
 
-    logger->trace("Prefetching labels for {} seeds. Cur mem usage {} MB",
-                  num_seeds + num_seeds_rc, get_curr_RSS() / 1e6);
+    if (logger->should_log(spdlog::level::trace))
+        logger->trace("Prefetching labels for {} seeds. Cur mem usage {} MB",
+                      num_seeds + num_seeds_rc, get_curr_RSS() / 1e6);
     annotation_buffer_.fetch_queued_annotations();
-    logger->trace("Done prefetching. Cur mem usage {} MB", get_curr_RSS() / 1e6);
+    if (logger->should_log(spdlog::level::trace))
+        logger->trace("Done prefetching. Cur mem usage {} MB", get_curr_RSS() / 1e6);
 
     size_t num_seeds_left = 0;
     size_t num_seeds_rc_left = 0;

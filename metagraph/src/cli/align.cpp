@@ -35,11 +35,14 @@ const size_t SEPARATE_CACHES_SWITCHOVER_THREADS = 8;
 align_redone::DBGAlignerConfig initialize_aligner_config(const Config &config,
                                            const DeBruijnGraph &graph) {
     assert(config.alignment_num_alternative_paths);
+    if (config.alignment_post_chain
+            && (config.alignment_chain || config.alignment_two_sided || !config.alignment_extend_chains))
+        throw std::invalid_argument("Post-chaining cannot be combined with seed chaining, two-sided extension, or disabled chain extension");
 
     align_redone::DBGAlignerConfig c = {
         .num_alternative_paths = config.alignment_num_alternative_paths,
-        .min_seed_length = std::min(config.alignment_min_seed_length,
-                                    graph.get_k()),
+        .min_seed_length = config.alignment_min_seed_length
+            ? std::min(config.alignment_min_seed_length, graph.get_k()) : graph.get_k(),
         .max_seed_length = config.alignment_max_seed_length,
         .max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus,
         .min_path_score = config.alignment_min_path_score,
@@ -435,6 +438,7 @@ int align_to_graph(Config *config) {
         auto end = fasta_parser.end();
 
         size_t num_bp = 0;
+        std::exception_ptr task_error;
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
@@ -453,7 +457,7 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
+            auto run_batch = [&,graph,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
@@ -500,12 +504,23 @@ int align_to_graph(Config *config) {
                                                   config->alignment_connect_anchors);
                     }
 
-                    auto output = format_alignment(header, query, paths, *aln_graph,
+                    auto output = format_alignment(header, aln_query.get_query(), paths, *aln_graph,
                                                    *config, aligner_config,
                                                    anno_buffer ? &*anno_buffer : nullptr,
                                                    anno_dbg ? anno_dbg->get_coord_to_header() : nullptr);
                     std::lock_guard<std::mutex> lock(print_mutex);
                     *out << output;
+                }
+            };
+            // ThreadPool rethrows task exceptions on the worker. Preserve the
+            // first one so the caller can report a regular command failure.
+            thread_pool.enqueue([&,run_batch=std::move(run_batch)]() {
+                try {
+                    run_batch();
+                } catch (...) {
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    if (!task_error)
+                        task_error = std::current_exception();
                 }
             });
 
@@ -513,6 +528,16 @@ int align_to_graph(Config *config) {
         };
 
         thread_pool.join();
+        if (task_error) {
+            try {
+                std::rethrow_exception(task_error);
+            } catch (const std::exception &e) {
+                logger->error("Alignment failed: {}", e.what());
+            } catch (...) {
+                logger->error("Alignment failed with an unknown error");
+            }
+            return 1;
+        }
 
         auto time = data_reading_timer.elapsed();
         logger->trace("File {} with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s, "

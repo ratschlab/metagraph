@@ -95,6 +95,20 @@ class TestAPIRaw(TestAPIBase):
                                     url=f'http://{self.host}:{self.port}/{cmd}',
                                     data=payload)
 
+    def test_api_cache_does_not_bypass_missing_fasta(self):
+        warm = self.raw_post_request('search', json.dumps({'FASTA': ''}))
+        self.assertEqual(warm.status_code, 200)
+        response = self.raw_post_request('search', '{}')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No input sequences', response.json()['error'])
+
+    def test_api_cache_does_not_bypass_graph_filter_validation(self):
+        warm = self.raw_post_request('search', json.dumps({'FASTA': ''}))
+        self.assertEqual(warm.status_code, 200)
+        response = self.raw_post_request('search', json.dumps({'FASTA': '', 'graphs': []}))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('no support for filtering graphs', response.json()['error'])
+
     def test_api_raw_incomplete_json(self):
         ret = self.raw_post_request('search',
             '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
@@ -108,6 +122,38 @@ class TestAPIRaw(TestAPIBase):
                 "FASTA": ">query\nTCGA", "seed_length": seed_length}))
             self.assertEqual(ret.status_code, 400)
             self.assertIn("seed_length", ret.json()['error'])
+
+    def test_api_raw_align_negative_node_limit_in_all_modes(self):
+        with open(TEST_DATA_DIR + '/transcripts_100.fa') as source:
+            next(source)  # first record header
+            sequence = ''
+            for line in source:
+                if line.startswith('>'):
+                    break
+                sequence += line.strip()
+        sequence = sequence[:64]
+        middle = len(sequence) // 2
+        query = sequence[:middle] + ('C' if sequence[middle] == 'A' else 'A') + sequence[middle + 1:]
+        for chain, two_sided in product((False, True), repeat=2):
+            with self.subTest(chain=chain, two_sided=two_sided):
+                payload = {
+                    'FASTA': '>query\n' + query, 'seed_length': 6, 'min_exact_match': 0,
+                    'max_num_nodes_per_seq_char': -1,
+                    'chain_alignments': chain, 'two_sided': two_sided}
+                response = self.raw_post_request('align', json.dumps(payload))
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertTrue(response.json()[0]['alignments'])
+                # Normalization must also preserve CIGAR, score, and max_score.
+                payload['FASTA'] = '>query\n' + query.lower()
+                lowercase = self.raw_post_request('align', json.dumps(payload))
+                self.assertEqual(lowercase.status_code, 200, lowercase.text)
+                self.assertEqual(response.json(), lowercase.json())
+                # Zero selects the graph's k, which is six in this fixture.
+                payload['FASTA'] = '>query\n' + query
+                payload['seed_length'] = 0
+                automatic_seed = self.raw_post_request('align', json.dumps(payload))
+                self.assertEqual(automatic_seed.status_code, 200, automatic_seed.text)
+                self.assertEqual(response.json(), automatic_seed.json())
 
     def test_api_raw_search_rejects_alignment_tuning(self):
         for option in ("extend_chains", "connect_anchors", "chain_alignments", "two_sided"):
@@ -491,6 +537,13 @@ class TestAPIClientMultiple(TestingBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
+
+    def test_api_cache_does_not_bypass_in_ram_validation(self):
+        url = f'http://{self.host}:{self.port}/search'
+        payload = {'FASTA': '', 'graphs': ['G1']}
+        self.assertEqual(requests.post(url, json=payload, timeout=30).status_code, 200)
+        payload['in_ram'] = []
+        self.assertEqual(requests.post(url, json=payload, timeout=30).status_code, 400)
 
     def test_api_query_df_multiple_1(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,

@@ -12,6 +12,7 @@
 
 #include "aln_chainer.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/seed_complexity.hpp"
 #include "common/logger.hpp"
 #include "common/vector_map.hpp"
 #include "common/vector.hpp"
@@ -194,6 +195,8 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     const auto &query = query_;
     const auto &seeder = *this;
     const auto &config = config_;
+    if (query.get_query().size() < config.min_seed_length)
+        return true;
     if (config.chain_alignments || config.two_sided
             || (typeid(seeder) != typeid(ExactSeeder) && typeid(seeder) != typeid(LabeledSeeder))
             || query.get_query().size() < query.get_graph().get_k())
@@ -205,7 +208,6 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.min_seed_length = config.min_seed_length;
     fast.max_seed_length = config.max_seed_length;
     fast.max_num_seeds_per_locus = config.max_num_seeds_per_locus;
-    fast.min_cell_score = config.min_cell_score;
     fast.min_path_score = config.min_path_score;
     fast.xdrop = config.xdrop;
     // Apply the match fraction to the completed alignment below, not to seeds.
@@ -213,13 +215,11 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.max_nodes_per_seq_char = config.max_nodes_per_seq_char;
     fast.max_ram_per_alignment = config.max_ram_per_alignment;
     fast.rel_score_cutoff = config.rel_score_cutoff;
+    fast.post_chain_alignments = config.post_chain_alignments;
     fast.gap_opening_penalty = config.gap_opening_penalty;
     fast.gap_extension_penalty = config.gap_extension_penalty;
     fast.left_end_bonus = config.left_end_bonus;
     fast.right_end_bonus = config.right_end_bonus;
-    fast.global_xdrop = config.global_xdrop;
-    fast.allow_left_trim = config.allow_left_trim;
-    fast.no_backtrack = config.no_backtrack;
     fast.seed_complexity_filter = config.seed_complexity_filter;
     fast.alignment_edit_distance = config.alignment_edit_distance;
     fast.alignment_match_score = config.alignment_match_score;
@@ -241,13 +241,29 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
 #endif
         if (orientation && !config.forward_and_reverse_complement) break;
         auto results = aligner->align(query.get_query(orientation));
-        for (const auto &result : results) {
+        for (auto &result : results) {
             // A match wholly inside a k-mer needs the wavefront representation
             // of partial seeds. Do not discard it or change its score.
             if (result.get_offset())
                 return false;
-            candidates.emplace_back(query.get_graph(), query.get_query(orientation),
-                orientation, std::vector(result.get_nodes()),
+            bool result_orientation = orientation;
+            if (orientation && config.num_alternative_paths > 1
+                    && query.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
+                auto normalized = result;
+                normalized.reverse_complement(query.get_graph(), query.get_query(false));
+                // Canonical mirror paths describe the same placement. Retain
+                // distinct orientations when asymmetric scoring distinguishes them.
+                if (!normalized.empty() && !normalized.get_offset()
+                        && config.score_cigar(normalized.get_sequence(), query.get_query(false),
+                                              Cigar(normalized.get_cigar().to_string()))
+                           == config.score_cigar(result.get_sequence(), query.get_query(true),
+                                                 Cigar(result.get_cigar().to_string()))) {
+                    result = std::move(normalized);
+                    result_orientation = false;
+                }
+            }
+            candidates.emplace_back(query.get_graph(), query.get_query(result_orientation),
+                result_orientation, std::vector(result.get_nodes()),
                 Cigar(result.get_cigar().to_string()), std::string(result.get_sequence()), 0,
                 annotations ? annotations->cache_column_set(
                     AnnotationBuffer::Columns(result.label_columns.begin(), result.label_columns.end()))
@@ -255,8 +271,9 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
                 AnnotationBuffer::CoordinateSet(result.label_coordinates));
         }
     }
-    if (candidates.empty() && !dynamic_cast<const DBGSuccinct*>(&query.get_graph())
-            && config.min_seed_length < query.get_graph().get_k())
+    if (!config.post_chain_alignments && candidates.empty()
+            && !dynamic_cast<const DBGSuccinct*>(&query.get_graph())
+            && config.min_seed_length && config.min_seed_length < query.get_graph().get_k())
         return false;
     emit_alignments(query, config, annotations, std::move(candidates), callback);
     return true;
@@ -267,8 +284,13 @@ void align_query(const Query &query,
                  const Extender &extender,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
+    if (seeder.config_.post_chain_alignments
+            && (seeder.config_.chain_alignments || seeder.config_.two_sided))
+        throw std::invalid_argument("Post-chaining cannot be combined with seed chaining or two-sided extension");
     if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
     if (seeder.align_fast(callback)) return;
+    if (seeder.config_.post_chain_alignments)
+        throw std::invalid_argument("Post-chaining is not supported for partial-node or sub-k alignments requiring wavefront search");
     std::vector<Alignment> candidates;
     for (const auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
         extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); },
@@ -280,6 +302,8 @@ void align_query(const Query &query,
                  const Seeder &seeder,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
+    if (seeder.config_.post_chain_alignments)
+        throw std::invalid_argument("Post-chaining requires extension; do not disable chain extension");
     if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
     emit_alignments(query, seeder.config_, annotation_buffer(seeder),
                     seeder.get_inexact_anchors(connect_anchors_in_chain), callback);
@@ -440,11 +464,7 @@ struct Extender::TraversalCaches {
 };
 
 Extender::Extender(const Query &query, const DBGAlignerConfig &config)
-    : query_(query), config_(config) {
-    if (dynamic_cast<const DBGSuccinct*>(&query.get_graph())
-            || dynamic_cast<const DBGSSHash*>(&query.get_graph()))
-        traversal_caches_ = std::make_unique<TraversalCaches>(query.get_graph());
-}
+    : query_(query), config_(config) {}
 
 Extender::~Extender() = default;
 
@@ -466,23 +486,6 @@ class AlignmentGraph {
     }
 
     AnnotationBuffer* get_anno_buffer() const { return anno_buffer_; }
-
-    std::pair<node_index, label_class_t> traverse(node_index node, char c) const {
-        assert(c != boss::BOSS::kSentinel);
-        node_index next = graph_.traverse(node, c);
-        if (target_ == Anchor::nannot)
-            return std::make_pair(next, target_);
-
-        if (!next)
-            return std::make_pair(next, 0);
-
-        label_class_t next_labels = get_intersect_labels(next, target_);
-        assert(next_labels != Anchor::nannot);
-        if (!next_labels)
-            next = DeBruijnGraph::npos;
-
-        return std::make_pair(next, next_labels);
-    }
 
     std::pair<node_index, label_class_t> traverse_back(node_index node, char c) const {
         assert(c != boss::BOSS::kSentinel);
@@ -805,13 +808,15 @@ class AlignmentGraph {
 
 std::vector<Anchor> ExactSeeder::get_anchors() const {
     const DeBruijnGraph &graph = query_.get_graph();
+    const size_t min_seed_length = config_.min_seed_length ? config_.min_seed_length : graph.get_k();
     std::vector<Anchor> anchors;
 
-    if (query_.get_query().size() < config_.min_seed_length)
+    if (query_.get_query().size() < min_seed_length)
         return anchors;
 
     std::vector<std::vector<DeBruijnGraph::node_index>> mapped_nodes(2);
     std::vector<std::vector<tsl::hopscotch_map<DeBruijnGraph::node_index, Anchor>>> max_seeds(2);
+    std::array<std::vector<bool>, 2> low_complexity;
 
     auto add_seed = [&](auto &bucket, DeBruijnGraph::node_index node) {
         auto it = bucket.find(node);
@@ -834,11 +839,23 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         nodes = map_to_nodes_sequentially(graph, this_query);
 
         auto &cur_max_seeds = max_seeds[orientation];
-        cur_max_seeds.resize(this_query.size() - config_.min_seed_length + 1);
+        cur_max_seeds.resize(this_query.size() - min_seed_length + 1);
+        if (config_.seed_complexity_filter && min_seed_length < graph.get_k()) {
+            auto &filtered = low_complexity[orientation];
+            filtered.resize(cur_max_seeds.size());
+            for (size_t i = 0; i < filtered.size(); ++i)
+                filtered[i] = align::is_low_complexity(this_query.substr(i, min_seed_length));
+        }
 
         for (size_t begin = 0; begin < nodes.size(); ++begin) {
             Match::node_index node = nodes[begin];
             if (node != DeBruijnGraph::npos) {
+                // As in the column seeder, filter fixed k-mer seeds but keep
+                // full MEMs available when longer seeds are enabled.
+                if (config_.seed_complexity_filter
+                        && (!config_.max_seed_length || config_.max_seed_length == graph.get_k())
+                        && align::is_low_complexity(this_query.substr(begin, graph.get_k())))
+                    continue;
                 cur_max_seeds[begin][node] = Anchor(
                     this_query,
                     begin, begin + graph.get_k(),
@@ -861,7 +878,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
         auto &nodes = mapped_nodes[orientation];
         auto &cur_max_seeds = max_seeds[orientation];
 
-        if (config_.min_seed_length < graph.get_k()) {
+        if (min_seed_length < graph.get_k()) {
             const DBGSuccinct *dbg_succ = nullptr;
             const DBGSSHash *sshash = nullptr;
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
@@ -873,14 +890,17 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 sshash = dynamic_cast<const DBGSSHash*>(&graph);
             }
 
-            if (dbg_succ && (!orientation || canonical)) {
+            if (dbg_succ && (!orientation || canonical || graph.get_mode() == DeBruijnGraph::BASIC)) {
                 const auto &boss = dbg_succ->get_boss();
                 auto encoded = boss.encode(this_query);
 
                 size_t k = graph.get_k();
-                for (size_t i = 0; i + config_.min_seed_length <= this_query.size(); ++i) {
-                    if (std::find(encoded.begin() + i, encoded.begin() + i + config_.min_seed_length,
-                                boss.alph_size) != encoded.begin() + i + config_.min_seed_length) {
+                for (size_t i = 0; i + min_seed_length <= this_query.size(); ++i) {
+                    if ((!orientation || !canonical) && !low_complexity[orientation].empty()
+                            && low_complexity[orientation][i])
+                        continue;
+                    if (std::find(encoded.begin() + i, encoded.begin() + i + min_seed_length,
+                                boss.alph_size) != encoded.begin() + i + min_seed_length) {
                         continue;
                     }
 
@@ -890,19 +910,27 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     auto it = encoded.begin();
                     std::tie(first, last, it) = boss.index_range(
                         encoded.begin() + i,
-                        encoded.begin() + i + config_.min_seed_length
+                        encoded.begin() + i + min_seed_length
                     );
 
                     size_t match_size = it - (encoded.begin() + i);
-                    if (match_size < config_.min_seed_length)
+                    if (match_size < min_seed_length)
                         continue;
 
                     first = first == boss.select_last(1) ? 1 : boss.pred_last(first - 1) + 1;
 
-                    if (canonical && orientation) {
-                        if (dbg_succ->in_graph(last)) {
-                            size_t i_rc = this_query.size() - (i + match_size);
-                            dbg_succ->adjacent_incoming_nodes(last, [&](DeBruijnGraph::node_index node) {
+                    const size_t i_rc = this_query.size() - (i + match_size);
+                    if (canonical && orientation
+                            && (low_complexity[!orientation].empty()
+                                || !low_complexity[!orientation][i_rc])) {
+                        // The range can contain several BOSS nodes. Visit their
+                        // incoming k-mers even when their outgoing edge is a dummy.
+                        for (edge_index edge = first; edge <= last;
+                                edge = boss.succ_last(edge) + 1) {
+                            boss.call_incoming_to_target(boss.bwd(edge),
+                                boss.get_node_last_value(edge), [&](DeBruijnGraph::node_index node) {
+                                if (!dbg_succ->in_graph(node))
+                                    return;
                                 node = canonical->reverse_complement(node);
                                 if (max_seeds[!orientation][i_rc].size() > config_.max_num_seeds_per_locus)
                                     return;
@@ -945,7 +973,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         size_t cur_match_size = match_size + suffix.size();
 
                         assert(cur_match_size < k);
-                        if (!orientation && cur_match_size == k - 1) {
+                        if ((!orientation || graph.get_mode() == DeBruijnGraph::BASIC)
+                                && cur_match_size == k - 1) {
                             assert(first == last || !boss.get_last(first));
                             assert(boss.succ_last(first) == last);
                             for (edge_index node = first; node <= last; ++node) {
@@ -996,6 +1025,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                 if (canonical && orientation && next_is_exact_match) {
                                     size_t next_match_size = cur_match_size + 1;
                                     size_t i_rc = this_query.size() - (i + next_match_size);
+                                    if (!low_complexity[!orientation].empty()
+                                            && low_complexity[!orientation][i_rc])
+                                        return;
 
                                     std::vector<edge_index> succs;
                                     for (edge_index e = boss.succ_W(first, s); e <= last; e = e + 1 < boss.num_edges() ? boss.succ_W(e + 1, s) : boss.num_edges() + 1) {
@@ -1045,6 +1077,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 }
             } else if (sshash) {
                 assert(!canonical);
+                const auto &filtered = low_complexity[
+                    graph.get_mode() == DeBruijnGraph::BASIC ? orientation : false];
+                if (!filtered.empty() && std::all_of(filtered.begin(), filtered.end(), [](bool x) { return x; }))
+                    continue;
                 auto invalid_char = sshash->get_invalid_char_mask(this_query);
 
                 std::visit([&](const auto &dict) {
@@ -1059,7 +1095,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     size_t m = dict.m();
                     common::logger->trace("Mininizer size: {}", m);
                     size_t k = dict.k();
-                    size_t min_match_length = std::max(m, config_.min_seed_length);
+                    size_t min_match_length = std::max(m, min_seed_length);
                     if (!m || m > this_query.size())
                         return;
 
@@ -1132,9 +1168,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             assert(offset + m <= contig_end);
                             uint64_t window_size = std::min<uint64_t>({
                                 k,
-                                contig_end - offset - m
+                                contig_end - offset - m + 1
                             });
-                            assert(offset + window_size + m <= contig_end);
+                            assert(offset + window_size - 1 + m <= contig_end);
                             for (uint64_t j = 0; j < window_size; ++j) {
                                 kmer_t start_read_kmer = start_bv_it.get();
                                 start_bv_it.next();
@@ -1171,7 +1207,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     size_t i_in_contig = res.kmer_id_in_string + w;
 
-                                    if (!orientation && i_in_contig < (res.string_end - res.string_begin - k + 1) && i_shift + min_match_length <= this_query.size()) {
+                                    if ((!orientation || sshash->get_mode() == DeBruijnGraph::BASIC)
+                                            && i_in_contig < (res.string_end - res.string_begin - k + 1)
+                                            && i_shift + min_match_length <= this_query.size()) {
                                         // forward
                                         assert(res.kmer_id_in_string + w + k <= contig_length);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w);
@@ -1184,7 +1222,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                                     this_query.begin() + i_shift + m, this_query.begin() + this_end).first;
                                             size_t full_match_size = jt - spelling.begin();
                                             assert(full_match_size <= k);
-                                            if (full_match_size >= config_.min_seed_length) {
+                                            if (full_match_size >= min_seed_length) {
                                                 // A sampled minimizer can expose only a suffix
                                                 // of an exact sub-k match. Also retain its maximal
                                                 // left extension within this stored contig; the
@@ -1200,7 +1238,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                         break;
                                                     ++left;
                                                 }
-                                                if (left) {
+                                                if (left && (low_complexity[orientation].empty()
+                                                        || !low_complexity[orientation][i_shift - left])) {
                                                     auto [it, inserted] = add_seed(cur_max_seeds[i_shift - left], node - left);
                                                     if (it != cur_max_seeds[i_shift - left].end()
                                                             && full_match_size + left > it->second.get_seed().size()) {
@@ -1212,6 +1251,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                                         assert(it->second.is_spelling_valid(graph));
                                                     }
                                                 }
+                                                if (!low_complexity[orientation].empty()
+                                                        && low_complexity[orientation][i_shift])
+                                                    continue;
                                                 auto [it, inserted] = add_seed(cur_max_seeds[i_shift], node);
                                                 if (it != cur_max_seeds[i_shift].end() && full_match_size > it->second.get_seed().size()) {
                                                     it.value() = Anchor(this_query,
@@ -1227,13 +1269,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
 
-                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation && res.kmer_id_in_string + w + m >= k && i_shift + m >= k) {
+                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation
+                                            && res.kmer_id_in_string + w + m >= k) {
                                         // rev comp
                                         assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
                                         assert(res.kmer_id + w + m >= k);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w + m - k);
                                         std::string spelling = graph.get_node_sequence(node);
-                                        size_t i_back_shift = i_shift + m - k;
+                                        size_t i_back_shift = i_shift - std::min(i_shift, k - m);
                                         assert(std::equal(this_query.begin() + i_shift, this_query.begin() + i_shift + m,
                                                           spelling.end() - m, spelling.end()));
                                         auto jt = std::mismatch(spelling.rbegin() + m, spelling.rend(),
@@ -1242,10 +1285,13 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         size_t full_match_size = jt - spelling.rbegin();
                                         assert(full_match_size <= k);
                                         assert(full_match_size >= m);
-                                        i_back_shift += k - full_match_size;
-                                        if (full_match_size >= config_.min_seed_length) {
+                                        i_back_shift = i_shift + m - full_match_size;
+                                        if (full_match_size >= min_seed_length) {
                                             assert(this_query.size() + k >= i_shift + m + full_match_size);
                                             size_t i_rc = this_query.size() - (i_back_shift + full_match_size);
+                                            if (!low_complexity[!orientation].empty()
+                                                    && low_complexity[!orientation][i_rc])
+                                                continue;
                                             node = canonical ? canonical->reverse_complement(node)
                                                              : sshash->reverse_complement(node);
                                             auto [it, inserted] = add_seed(max_seeds[!orientation][i_rc], node);
@@ -1267,7 +1313,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
                                 }
-                                break;
                             }
                         });
                     }
@@ -1282,6 +1327,10 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 continue;
             for (auto it = bucket.begin(); it != bucket.end(); ++it) {
                 if (it->second.get_orientation() && !config_.forward_and_reverse_complement)
+                    continue;
+                const auto &filtered = low_complexity[it->second.get_orientation()];
+                if (it->second.get_end_trim() && !filtered.empty()
+                        && filtered[it->second.get_clipping()])
                     continue;
                 anchors.emplace_back(std::move(it.value()));
                 assert(anchors.back().get_path_spelling().find(boss::BOSS::kSentinel) == std::string::npos);
@@ -2568,7 +2617,28 @@ void align_fwd(const DeBruijnGraph &base_graph,
 void Extender::extend(const Alignment &aln,
                       const std::function<void(Alignment&&)> &callback,
                       bool no_bwd, bool no_fwd) const {
+    // The exact and column-aligner shortcuts never use wavefront traversal.
+    if (!traversal_caches_
+            && (dynamic_cast<const DBGSuccinct*>(&query_.get_graph())
+                || dynamic_cast<const DBGSSHash*>(&query_.get_graph())))
+        traversal_caches_ = std::make_unique<TraversalCaches>(query_.get_graph());
     DBGAlignerConfig::score_t match_score = maximum_match_score(config_);
+
+    // Reaching the query end does not maximize alignment score: a longer
+    // reference path may have both a higher wavefront cost and a higher score.
+    // At cost C, excess reference characters require deletion cost M + 2*g,
+    // so the score is at most seed_score + M*N - C*g/(M + 2*g).
+    auto score_bound_exhausted = [&](size_t cost, size_t query_size,
+                                     DBGAlignerConfig::score_t seed_score,
+                                     DBGAlignerConfig::score_t best_score,
+                                     DBGAlignerConfig::score_t end_bonus) {
+        const size_t gap = -int(config_.gap_extension_penalty);
+        const int64_t maximum = int64_t(seed_score) + int64_t(match_score) * int64_t(query_size)
+                              + std::max(end_bonus, 0);
+        // Divide first to avoid overflow and conservatively retain tied scores.
+        const size_t loss = cost / (match_score + 2 * gap) * gap;
+        return maximum < best_score || loss > uint64_t(maximum - best_score);
+    };
 
     auto set_coords = [&](Alignment &aln) {
         assert(aln.get_label_classes().size());
@@ -2676,7 +2746,8 @@ void Extender::extend(const Alignment &aln,
                 } else if (score == best_score) {
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
-                return query_dist == query_window.size();
+                return score_bound_exhausted(cost, query_window.size(), aln_score,
+                                             best_score, config_.right_end_bonus);
             },
             aln.get_trim_spelling(),
             anno_buffer,
@@ -2799,7 +2870,8 @@ void Extender::extend(const Alignment &aln,
                 } else if (score == best_score) {
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
-                return query_dist == query_window.size();
+                return score_bound_exhausted(cost, query_window.size(), fwd_ext_score,
+                                             best_score, config_.left_end_bonus);
             },
             anno_buffer,
             fwd_ext.get_label_classes()[0],
@@ -3038,7 +3110,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         size_t traversed = a_j_pos - a_i_pos;
                         size_t gap = std::abs(static_cast<ssize_t>(traversed) - static_cast<ssize_t>(dist));
                         if (gap) {
-                            score -= (0.01 * config_.min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
+                            const size_t min_seed_length = config_.min_seed_length ? config_.min_seed_length : k;
+                            score -= (0.01 * min_seed_length * gap + log2l(static_cast<double>(gap)) / 2) * match_score;
                         }
 
                         if (score > score_j)
@@ -3208,17 +3281,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 try_chain(rit.base() - 1, chain_scores);
             }
         },
-        [](const AnchorChain<AnchorIt>&, const std::vector<DBGAlignerConfig::score_t>&) {
-            // A seed-chain score is not an upper bound on its completed
-            // alignment. Apply the relative cutoff after extension, per label.
-            return true;
-        },
         [this,align,anno_buffer,&save_alignment,match_score=maximum_match_score(config_)](
                 AnchorIt last,
                 AnchorIt next,
                 Alignment&& aln,
                 size_t next_to_last_dist,
-                DBGAlignerConfig::score_t score_up_to_now,
                 const AlignmentCallback &callback) {
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
             const auto &graph = query_.get_graph();
@@ -3326,6 +3393,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         assert(next->get_seed().size() + (end - next_trim_spelling.begin()) <= spelling.size());
                         std::copy(next_trim_spelling.begin(), end,
                                   spelling.begin() + next->get_seed().size());
+                        // Known suffix characters can match inside the otherwise
+                        // unknown gap; reflect them in its CIGAR as well.
+                        if (cigar.data().back().first == Cigar::MISMATCH) {
+                            const size_t length = cigar.data().back().second;
+                            cigar.data().pop_back();
+                            const auto ref_gap = std::string_view(spelling).substr(spelling.size() - length);
+                            const auto query_gap = aln.get_query().substr(last->get_clipping() - length, length);
+                            for (size_t i = 0; i < length; ++i)
+                                cigar.append(ref_gap[i] == query_gap[i] ? Cigar::MATCH : Cigar::MISMATCH);
+                        }
                     }
                 }
 
@@ -3357,6 +3434,14 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             );
 
             bool aln_found = false;
+            // Coordinate annotations can admit different occurrences of the
+            // target node, so traversal_dist bounds reference length rather
+            // than fixing it. Compare scores, not just wavefront costs.
+            int64_t best_connection_score = std::numeric_limits<int64_t>::min();
+            auto twice_connection_score = [&](size_t cost, size_t dist) {
+                return int64_t(match_score) * (int64_t(query_window.size()) + int64_t(dist))
+                       - int64_t(cost);
+            };
             align_bwd(
                 query_.get_graph(),
                 config_,
@@ -3395,7 +3480,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     if (aln_found || dist == 0 || query_dist == 0)
                         return false;
 
-                    bool ret_val = query_dist == query_window.size() && node == target_node;
+                    bool ret_val = query_dist == query_window.size() && node == target_node
+                                   && twice_connection_score(cost, dist) == best_connection_score;
                     if (ret_val)
                         common::logger->trace("Final cost: {}", cost);
 
@@ -3409,10 +3495,12 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 },
                 [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
                     // terminate
-                    std::ignore = cost;
-                    std::ignore = data;
-                    std::ignore = query_dist;
-                    return aln_found || (query_dist == query_window.size() && node == target_node);
+                    if (query_dist == query_window.size() && node == target_node)
+                        best_connection_score = std::max(best_connection_score,
+                            twice_connection_score(cost, std::get<0>(data)));
+                    // Future costs cannot improve this bound, even at the
+                    // greatest permitted reference length. Keep tied scores.
+                    return twice_connection_score(cost, traversal_dist) < best_connection_score;
                 },
                 anno_buffer,
                 last->get_label_class(),
@@ -3422,14 +3510,13 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
             );
             if (!aln_found) {
                 // Resource exhaustion can stop the connection before reaching
-                // its target. Preserve the connected suffix and the preceding
-                // seed; restarting every seed would repeat the whole search.
+                // its target. Save the connected suffix and continue chaining
+                // from the preceding seed so earlier anchors are not lost.
                 save_alignment(std::move(aln));
-                save_alignment(Alignment(*next));
+                callback(Alignment(*next));
             }
         },
-        save_alignment,
-        []() { return false; }
+        save_alignment
     );
 
     return alignments;

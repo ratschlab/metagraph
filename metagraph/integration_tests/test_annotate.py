@@ -28,77 +28,14 @@ class TestAnnotate(TestingBase):
         self.tempdir = TemporaryDirectory()
 
     @parameterized.expand([(False,), (True,)])
-    def test_separate_header_tasks_across_files(self, coords):
+    def test_annotation_tasks_across_files(self, coords):
         from pathlib import Path
         root = Path(self.tempdir.name)
         files = [root / f"record{i}.fa" for i in range(64)]
-        for path in files:
-            path.write_text(">same\nAAAAAACCCCCGTGGGGGAT\n")
-
-        def run(*args):
-            result = subprocess.run([METAGRAPH, *map(str, args)],
-                                    stdout=PIPE, stderr=PIPE, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-
-        run("build", "-k", "5", "-o", root / "graph", files[0])
-        options = ["--coordinates"] if coords else []
-        run("annotate", "-i", root / "graph.dbg", "--anno-header",
-            "-o", root / "expected", *options, files[0])
-        # Each file ends with a buffered batch, whose task may still be queued
-        # when the per-file callback is destroyed.
-        run("annotate", "-p", "4", "-i", root / "graph.dbg", "--separate-header",
-            "-o", root / "chunks", *options, *files)
-        chunks = list((root / "chunks").glob("*.column.annodbg"))
-        self.assertEqual(len(chunks), len(files))
-        for chunk in chunks:
-            self.assertTrue(filecmp.cmp(chunk, root / "expected.column.annodbg", shallow=False),
-                            str(chunk))
-            if coords:
-                self.assertTrue(filecmp.cmp(str(chunk) + ".coords",
-                                           root / "expected.column.annodbg.coords", shallow=False),
-                                str(chunk) + ".coords")
-
-    @parameterized.expand([("file",), ("previous_chunks",)])
-    def test_separate_header_rejects_existing_output(self, kind):
-        from pathlib import Path
-        root = Path(self.tempdir.name)
-        fasta = root / "input.fa"
-        fasta.write_text(">one\nAACGTACGT\n")
-        graph = root / "graph"
-        built = subprocess.run([METAGRAPH, "build", "-k", "5", "-o", str(graph), str(fasta)],
-                               stdout=PIPE, stderr=PIPE, text=True)
-        self.assertEqual(built.returncode, 0, built.stderr)
-        output = root / "output"
-        if kind == "file":
-            output.write_bytes(b"existing file\n")
-            previous = {output: output.read_bytes()}
-        else:
-            output.mkdir()
-            previous = {output / f"annotation.{i}.column.annodbg": f"old chunk {i}\n".encode()
-                        for i in range(2)}
-            for path, contents in previous.items():
-                path.write_bytes(contents)
-        result = subprocess.run([METAGRAPH, "annotate", "-i", str(graph) + ".dbg",
-                                 "--separate-header", "-o", str(output), str(fasta)],
-                                stdout=PIPE, stderr=PIPE, text=True)
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("not a directory" if kind == "file" else "already contains", result.stderr)
-        self.assertEqual(previous, {path: path.read_bytes() for path in previous})
-        if kind != "file":
-            self.assertEqual(set(previous), set(output.iterdir()))
-
-    @parameterized.expand([(coords, reverse, existing)
-                           for coords in (False, True)
-                           for reverse in ((False,) if PROTEIN_MODE else (False, True))
-                           for existing in (False, True)])
-    def test_separate_header_records(self, coords, reverse, existing):
-        from pathlib import Path
-        root = Path(self.tempdir.name)
-        sequences = ["AAAAAAC", "CCCCCGT", "GGGGGAT"]
-        first, second, all_records = [root / name for name in ("first.fa", "second.fa", "all.fa")]
-        first.write_text("".join(f">same\n{seq}\n" for seq in sequences[:2]))
-        second.write_text(f">same\n{sequences[2]}\n")
-        all_records.write_text(first.read_text() + second.read_text())
+        for i, path in enumerate(files):
+            path.write_text(f">record{i}\nAAAAAACCCCCGTGGGGGAT\n")
+        combined = root / "combined.fa"
+        combined.write_text(''.join(path.read_text() for path in files))
 
         def run(*args):
             result = subprocess.run([METAGRAPH, *map(str, args)],
@@ -106,35 +43,26 @@ class TestAnnotate(TestingBase):
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout
 
-        graph = root / "graph"
-        run("build", "-k", "5", "-o", graph, all_records)
-        graph = graph.with_suffix(".dbg")
-        directory = root / "chunks"
-        if existing:
-            directory.mkdir()
-        options = (["--coordinates"] if coords else []) + (["--fwd-and-reverse"] if reverse else [])
-        # Header extraction is implied; repeated headers are separate records.
-        run("annotate", "-p", "2", "-i", graph, "--separate-header", "-o", directory,
-            *options, first, second)
-        chunks = sorted(directory.glob("*.column.annodbg"))
-        self.assertEqual(len(chunks), 3)
-        self.assertFalse(list(root.glob("chunks.*")))
-        query_options = ["--query-mode", "coords"] if coords else []
-        for i, chunk in enumerate(chunks):
-            record = root / f"record{i}.fa"
-            record.write_text(f">same\n{sequences[i]}\n")
-            expected = root / f"expected{i}"
-            run("annotate", "-i", graph, "--anno-header", "-o", expected, *options, record)
-            expected = Path(str(expected) + ".column.annodbg")
+        run("build", "-k", "5", "-o", root / "graph", files[0])
+        options = ["--coordinates"] if coords else []
+        run("annotate", "-p", "1", "-i", root / "graph.dbg", "--anno-header",
+            "-o", root / "expected", *options, combined)
+        # Each per-file callback can expire while its last task is still queued.
+        run("annotate", "-p", "4", "-i", root / "graph.dbg", "--anno-header",
+            "-o", root / "actual", *options, *files)
+        results = []
+        for name in ('actual', 'expected'):
+            annotation = root / (name + '.column.annodbg')
             if coords:
-                actual_coords, expected_coords = root / f"actual-coords{i}", root / f"expected-coords{i}"
-                run("transform_anno", "--anno-type", "column_coord", "-o", actual_coords, chunk)
-                run("transform_anno", "--anno-type", "column_coord", "-o", expected_coords, expected)
-                chunk = Path(str(actual_coords) + ".column_coord.annodbg")
-                expected = Path(str(expected_coords) + ".column_coord.annodbg")
-            actual_result = run("query", "-i", graph, "-a", chunk, *query_options, all_records)
-            expected_result = run("query", "-i", graph, "-a", expected, *query_options, all_records)
-            self.assertEqual(actual_result, expected_result)
+                run('transform_anno', '--anno-type', 'column_coord',
+                    '-o', root / (name + '-coords'), annotation)
+                annotation = root / (name + '-coords.column_coord.annodbg')
+            result = run('query', '-i', root / 'graph.dbg', '-a', annotation,
+                         '--query-mode', 'coords' if coords else 'matches', files[0])
+            # Parallel annotation may assign different numeric label IDs.
+            results.append(sorted(result.strip().split('\t')))
+            self.assertEqual(len(results[-1]), len(files) + 2)
+        self.assertEqual(results[0], results[1])
 
     @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, graph_repr):

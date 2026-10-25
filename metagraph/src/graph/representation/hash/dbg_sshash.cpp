@@ -87,7 +87,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
 
 #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
                 for (DBGSSHash::node_index begin = 0; begin <= num_nodes; begin += BS) {
-                    DBGSSHash::node_index end = std::min(begin + BS, num_nodes);
+                    DBGSSHash::node_index end = std::min(begin + BS, num_nodes + 1);
 
                     bool last_single_outdeg = false;
                     kmer_t kmer;
@@ -121,7 +121,9 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             }
                         }
 
-                        if (next == node + 1) {
+                        // The next index after the last stored node may denote
+                        // a reverse-complement node, not the next stored k-mer.
+                        if (node < num_nodes && next == node + 1) {
                             assert(found_fw);
                             succ_is_next[node] = true;
                             last_single_outdeg = true;
@@ -849,8 +851,27 @@ bool DBGSSHash::load(std::istream& in) {
                 loader.set_mmap(ctx->data(), ctx->file_size_bytes(), ctx);
             }
             std::visit([&](auto& d) { d.visit(loader); }, loaded.dict_);
-            loaded.succ_is_next_.load(in);
-            loaded.pred_is_prev_.load(in);
+            if (!loaded.succ_is_next_.load(in) || !loaded.pred_is_prev_.load(in)
+                    || loaded.dict_size() != num_nodes
+                    || loaded.succ_is_next_.size() != num_nodes + 1
+                    || loaded.pred_is_prev_.size() != num_nodes + 1)
+                return false;
+
+            // Earlier v6 graphs omitted the final predecessor cache bit.
+            // Repair that bit without repeating the graph-wide neighbor scan.
+            if (num_nodes > 1 && !loaded.pred_is_prev_[num_nodes]) {
+                node_index predecessor = npos;
+                size_t num_predecessors = 0;
+                loaded.adjacent_incoming_nodes(num_nodes, [&](node_index node) {
+                    predecessor = node;
+                    ++num_predecessors;
+                });
+                if (num_predecessors == 1 && predecessor == num_nodes - 1) {
+                    auto predecessors = loaded.pred_is_prev_.to_vector();
+                    predecessors[num_nodes] = true;
+                    loaded.pred_is_prev_ = bit_vector_smart(std::move(predecessors));
+                }
+            }
         }
 
         if (!in.good())

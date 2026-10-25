@@ -27,16 +27,14 @@ struct DBGAlignerConfig {
     size_t max_dist_between_seeds = 400;
     size_t gap_shrinking_factor = 4;
     double chaining_algorithm_switch_cutoff = 1.0;
-    double chains_per_char = 0;
     size_t chaining_bandwidth = 65;
 
     // Lowest possible score. 100 is added to prevent underflow during operations.
-    // For this to work, all penalties should be less than 100.
+    // For this to work, penalty magnitudes must not exceed 100.
     // This is checked whenever an aligner is initialized.
     constexpr static score_t ninf = std::numeric_limits<score_t>::min() + 100;
 
     // thresholds for scores
-    score_t min_cell_score = ninf;
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
@@ -59,9 +57,6 @@ struct DBGAlignerConfig {
     bool chain_alignments = false;
     bool two_sided = false;
     bool post_chain_alignments = false;
-    bool global_xdrop = true;
-    bool allow_left_trim = true;
-    bool no_backtrack = false;
     bool seed_complexity_filter = true;
 
     bool alignment_edit_distance = false;

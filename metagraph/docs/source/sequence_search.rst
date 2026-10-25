@@ -72,6 +72,16 @@ off by default and can be enabled independently. They can improve sensitivity
 for long, error-prone reads at a higher runtime cost. ``--align-only-forwards``
 controls query orientation independently of the extension direction.
 
+``--align-post-chain`` joins completed local alignments and can insert graph
+jumps (``G`` in the CIGAR). It uses the column aligner and cannot be combined
+with seed chaining, two-sided extension, or disabled extension. Queries needing
+the wavefront fallback and coordinate-annotated post-chaining are unsupported.
+The CLI's JSON format supports only paths without graph jumps. If post-chaining
+or disabled anchor connection produces a jump, use TSV output.
+
+Alignment queries must contain ASCII characters. Case-insensitive DNA and
+protein builds normalize lowercase letters before alignment.
+
 For the sensitive pipeline with the standard X-drop threshold::
 
     metagraph align --align-chain --align-two-sided --align-xdrop 27 -i graph.dbg reads.fa

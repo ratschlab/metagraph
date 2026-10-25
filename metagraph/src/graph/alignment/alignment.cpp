@@ -1346,7 +1346,10 @@ std::string spell_path(const DeBruijnGraph &graph,
     size_t num_dummy = 0;
     size_t num_unknown = 0;
     if (path.front()) {
-        seq += graph.get_node_sequence(path.front()).substr(offset);
+        std::string first_seq = graph.get_node_sequence(path.front());
+        if (offset)
+            first_seq.erase(0, offset);
+        seq += first_seq;
     } else {
         num_unknown = graph.get_k() - offset;
         seq += std::string(num_unknown, '$');
