@@ -30,6 +30,41 @@ using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
+TEST(LabeledFastAlignment, RelativeCutoffUsesEachLabelsBestScore) {
+    const std::string sequence = "AACGTTGCAATGCCGATTCAGGCTAACGTCTAGCGTACGA";
+    std::vector<std::string> references{sequence, sequence};
+    references[0][20] = references[1][20] = 'A';
+    references[1][31] = 'C';
+    for (bool coordinates : {false, true}) {
+        auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            7, references, {"first", "second"}, DeBruijnGraph::BASIC, coordinates);
+        const auto &graph = annotated->get_graph();
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        DBGAlignerConfig config;
+        config.min_seed_length = 7;
+        config.max_seed_length = std::numeric_limits<size_t>::max();
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        config.rel_score_cutoff = 0.95;
+        config.xdrop = 10000;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        Query query(graph, sequence);
+        LabeledSeeder seeder(buffer, query, config);
+        LabeledExtender extender(buffer, query, config);
+        std::map<std::string, int> scores;
+        align_query(query, seeder, extender, [&](Alignment&& alignment) {
+            EXPECT_TRUE(alignment.is_spelling_valid(graph));
+            for (auto column : buffer.get_cached_column_set(alignment.get_label_classes()[0])) {
+                const auto &label = annotated->get_annotator().get_label_encoder().decode(column);
+                scores[label] = score_match(alignment, config);
+                EXPECT_EQ(references[label == "first" ? 0 : 1], alignment.get_spelling());
+            }
+        });
+        EXPECT_EQ((std::map<std::string, int>{{"first", 75}, {"second", 70}}), scores)
+            << coordinates;
+    }
+}
+
 TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) {
     const std::vector<std::string> references{
         "AACGTTGCAATGCCGATTCAGGCTAAC", "TTGATAGCCTTGACCGATAGCTTCCA"
@@ -84,6 +119,54 @@ TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) 
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(LabeledFastAlignment, XdropDoesNotPruneOtherLabels) {
+    const std::vector<std::string> references{
+        "AGCCCCTACACTACACTACAATTATGTGTGGCAACGCATGTGTCGGCATTATGGCTGACACATGGGGAAT"
+        "TGGCTTTCTCCATTCGGTGAGCCAATTGGCGTTTGCCGTGCACTTACTCTTCTGT",
+        "AGCCCCTACACTACACTACAATTATGTGTGGCAACGCATGTGTCGGCATTATGGCTGTCACATGGGGAAT"
+        "AGGCTTTCTCCATTCGGTGAGCCAGTTGGCGTTTGCCATGCACTTACTCTTCTGT"
+    };
+    const std::string sequence =
+        "AGCCCCTACACTACACTACAATTATGTGTGGTAACGCATGAGTCGGCATTATGGCTGTCACATGGGGAAT"
+        "AGGGCTTTCTCCATTCGGTGAGCCAGTTGGCGTTTGCCATGCACTTACTCTTCTGT";
+    for (bool coordinates : {false, true}) {
+        auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            15, references, {"first", "second"}, DeBruijnGraph::BASIC, coordinates);
+        const auto &graph = annotated->get_graph();
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        DBGAlignerConfig config;
+        config.min_seed_length = 15;
+        config.max_seed_length = std::numeric_limits<size_t>::max();
+        config.forward_and_reverse_complement = false;
+        config.min_exact_match = 0.7;
+        config.rel_score_cutoff = 0;
+        config.xdrop = 27;
+        config.gap_opening_penalty = -6;
+        config.left_end_bonus = config.right_end_bonus = 5;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        for (auto [nodes, ram] : {std::pair{5.0, 200.0}, {0.1, 200.0}, {5.0, 0.001}}) {
+            SCOPED_TRACE(::testing::Message() << coordinates << " " << nodes << " " << ram);
+            config.max_nodes_per_seq_char = nodes;
+            config.max_ram_per_alignment = ram;
+            Query query(graph, sequence);
+            LabeledSeeder seeder(buffer, query, config);
+            LabeledExtender extender(buffer, query, config);
+            std::map<std::string, int> scores;
+            align_query(query, seeder, extender, [&](Alignment&& alignment) {
+                EXPECT_TRUE(alignment.is_spelling_valid(graph));
+                EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), sequence));
+                for (auto column : buffer.get_cached_column_set(alignment.get_label_classes()[0])) {
+                    const auto &label = annotated->get_annotator().get_label_encoder().decode(column);
+                    EXPECT_TRUE(scores.emplace(label, score_match(alignment, config)).second);
+                }
+            });
+            if (nodes == 5.0 && ram == 200.0) {
+                EXPECT_EQ((std::map<std::string, int>{{"first", 224}, {"second", 244}}), scores);
+            }
+        }
+    }
+}
+
 TEST(LabeledAlignment, PartialNodeSuffixKeepsCoordinates) {
     const std::string reference = "CGCCACCGGCCGACCGACCGCGGCTGCCCCAGTTGATG";
     auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(

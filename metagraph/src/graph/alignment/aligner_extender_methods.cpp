@@ -518,20 +518,15 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim,
                              xdrop_cutoff_i, score] = table[i];
 
-                double node_counter = config_.global_xdrop
-                    ? table.size()
-                    : next_offset - seed_offset;
-
                 // if we are currently not on the optimal path, check early cutoff criteria
                 if (S[max_pos - trim] < best_score) {
                     // if too many nodes have been explored, give up
-                    if (node_counter / window.size() >= config_.max_nodes_per_seq_char) {
-                        DEBUG_LOG("Position {}: Alignment node limit reached, stopping this branch",
+                    if (static_cast<double>(table.size()) / window.size()
+                            >= config_.max_nodes_per_seq_char) {
+                        DEBUG_LOG("Position {}: Alignment node limit reached, stopping extension",
                                   next_offset - seed_->get_offset());
-                        if (config_.global_xdrop) {
-                            queue = std::priority_queue<TableIt>();
-                            next_nodes.clear();
-                        }
+                        queue = std::priority_queue<TableIt>();
+                        next_nodes.clear();
 
                         continue;
                     }

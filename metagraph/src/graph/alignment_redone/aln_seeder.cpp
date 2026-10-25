@@ -218,7 +218,6 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.min_exact_match = 0;
     fast.max_nodes_per_seq_char = config.max_nodes_per_seq_char;
     fast.max_ram_per_alignment = config.max_ram_per_alignment;
-    fast.rel_score_cutoff = config.rel_score_cutoff;
     fast.post_chain_alignments = config.post_chain_alignments;
     fast.gap_opening_penalty = config.gap_opening_penalty;
     fast.gap_extension_penalty = config.gap_extension_penalty;
@@ -233,6 +232,11 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.forward_and_reverse_complement = false;
     fast.two_sided = false;
     auto *annotations = annotation_buffer(seeder);
+    // The column aggregator uses a global relative cutoff. Labeled results
+    // need the per-label cutoff applied by emit_alignments instead.
+    fast.rel_score_cutoff = annotations ? 0 : config.rel_score_cutoff;
+    // A stronger branch must not raise another label's X-drop threshold.
+    fast.global_xdrop = !annotations;
     std::unique_ptr<align::IDBGAligner> aligner;
     if (annotations)
         aligner = annotations->make_fast_aligner(fast);
