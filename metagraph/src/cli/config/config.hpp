@@ -53,7 +53,6 @@ class Config {
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
-    bool separate_header = false;
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_only_forwards = false;
