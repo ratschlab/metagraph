@@ -148,6 +148,7 @@ size_t Alignment::trim_end() {
         assert(path_spelling_.size());
         path_spelling_.pop_back();
         path_.pop_back();
+        label_classes_.pop_back();
         --end_trim_;
         ++num_trimmed;
         assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());

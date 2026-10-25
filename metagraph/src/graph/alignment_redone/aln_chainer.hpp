@@ -123,6 +123,13 @@ AnchorIt chain_anchors(const Query &query,
         query_size
     );
 
+    // Bound the score by the alphabet's best match, not just A. Keep the
+    // distance estimate defined when matches have zero or negative scores.
+    DBGAlignerConfig::score_t match_score = 1;
+    for (size_t c = 0; c < config.score_matrix.size(); ++c)
+        match_score = std::max(match_score,
+                              static_cast<DBGAlignerConfig::score_t>(config.score_matrix[c][c]));
+
     auto forward_pass = [&](AnchorIt begin,
                             AnchorIt end,
                             typename ChainScores<AnchorIt>::iterator chain_scores) {
@@ -159,7 +166,6 @@ AnchorIt chain_anchors(const Query &query,
             size_t traversed = std::get<3>(chain_scores[0]);
             size_t queried = begin->get_seed().size();
             ssize_t best_cost = std::numeric_limits<ssize_t>::max();
-            DBGAlignerConfig::score_t match_score = config.match_score("A");
             do {
                 AnchorIt j = begin;
                 for (AnchorIt i = begin; i != end; ++i) {

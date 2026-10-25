@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <fstream>
 #include <set>
 
 #include "all/test_dbg_helpers.hpp"
@@ -45,7 +46,61 @@ TEST(AlignmentQuery, ForwardAndReverseComplement) {
     Query long_query(graph, std::string(1000, 'A'));
     EXPECT_EQ(std::string(1000, 'A'), long_query.get_query());
     EXPECT_EQ(std::string(1000, 'T'), long_query.get_query(true));
+
+    Query mixed_case(graph, "AaCg");
+#if _DNA_CASE_SENSITIVE_GRAPH
+    EXPECT_EQ("AaCg", mixed_case.get_query());
+    EXPECT_EQ("cGtT", mixed_case.get_query(true));
+#else
+    EXPECT_EQ("AACG", mixed_case.get_query());
+    EXPECT_EQ("CGTT", mixed_case.get_query(true));
+#endif
 }
+
+#if ! _DNA_CASE_SENSITIVE_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, LowercaseQueriesMatchUppercaseInAllModes) {
+#if _PROTEIN_GRAPH
+    const std::string reference = "MKWVTFISLLFLFSSAYS";
+    const std::string sequence = "MKWVTFISLLYLFSSAYS";
+#else
+    const std::string reference = "AACGTCAGTACCTGATGCATGCA";
+    const std::string sequence = "AACGTCAGTACCTGATTCATGCA";
+#endif
+    auto graph = build_graph_batch<TypeParam>(5, { reference });
+    std::string lowercase = sequence;
+    std::transform(lowercase.begin(), lowercase.end(), lowercase.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    DBGAlignerConfig config{};
+    config.set_scoring_matrix();
+    config.min_seed_length = 5;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.xdrop = 27;
+    using Result = std::tuple<int32_t, std::string, std::string, bool>;
+    auto run = [&](const std::string &input) {
+        Query query(*graph, input);
+        EXPECT_EQ(sequence, query.get_query());
+        ExactSeeder seeder(query, config);
+        Extender extender(query, config);
+        std::vector<Result> results;
+        align_query(query, seeder, extender, [&](Alignment&& alignment) {
+            EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), query.get_query()));
+            results.emplace_back(score_match(alignment, config), alignment.get_spelling(),
+                                 alignment.get_cigar().to_string(), alignment.get_orientation());
+        });
+        return results;
+    };
+    for (bool chain : { false, true }) {
+        for (bool two_sided : { false, true }) {
+            config.chain_alignments = chain;
+            config.two_sided = two_sided;
+            const auto expected = run(sequence);
+            ASSERT_FALSE(expected.empty());
+            EXPECT_EQ(expected, run(lowercase)) << chain << "," << two_sided;
+        }
+    }
+}
+#endif
 
 
 TEST(AlignmentCigarRedone, EmptyAndMalformedLengths) {
@@ -87,6 +142,13 @@ TEST(AlignmentCigarRedone, CountersUseSizeType) {
     EXPECT_EQ(size_t{2147483648}, cigar.get_num_matches());
     EXPECT_EQ(size_t{2147483650}, cigar.get_num_query());
     EXPECT_EQ(size_t{2147483651}, cigar.get_num_ref());
+}
+
+TEST(AlignmentCigar, GraphJumpsRoundTrip) {
+    for (const auto *text : { "10=1G13=", "2G3=1G4X", "3=2G" }) {
+        EXPECT_EQ(text, Cigar(text).to_string());
+        EXPECT_EQ(text, mtg::graph::align::Cigar(text).to_string());
+    }
 }
 
 TEST(AlignmentScoringRedone, DefaultsAndInvalidBytes) {
@@ -250,6 +312,12 @@ void run_alignment(const DeBruijnGraph &graph,
             return std::make_pair(score_match(a, config), b.get_orientation())
                  > std::make_pair(score_match(b, config), a.get_orientation());
         };
+
+        for (const auto *candidates : { &paths_no_extend, &paths_no_align, &paths }) {
+            for (const auto &path : *candidates)
+                ASSERT_TRUE(path.get_cigar().is_valid(path.get_spelling(), path.get_query()))
+                    << path;
+        }
 
         std::sort(paths_no_extend.begin(), paths_no_extend.end(), aln_sort);
         std::sort(paths_no_align.begin(), paths_no_align.end(), aln_sort);
@@ -1361,6 +1429,128 @@ TEST(AlignmentTraceback, RetainsReplacedPredecessors) {
     EXPECT_EQ(1u, count);
 }
 
+#if ! _PROTEIN_GRAPH
+TEST(SSHashSubKSeeds, RepeatedMinimizerUsesEveryMatchingOccurrence) {
+    // The sampled m-mer at position 10 also occurs at position 4. Aligning
+    // only to that first occurrence misses the exact query beginning at 7.
+    const std::string reference = "CTAAAATCTAAATCTCCA";
+    const std::string sequence = "CTAAATCTC";
+    const auto filename = test_dump_dir() + "/repeated_minimizer_seed.fa";
+    {
+        std::ofstream out(filename);
+        out << ">reference\n" << reference << '\n';
+    }
+    DBGSSHash graph(filename, 11, DeBruijnGraph::BASIC, 0, test_dump_dir());
+    DBGAlignerConfig config;
+    config.min_seed_length = 9;
+    config.max_seed_length = 11;
+    config.min_exact_match = 1;
+    config.forward_and_reverse_complement = false;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    Query query(graph, sequence);
+    ExactSeeder seeder(query, config);
+    Extender extender(query, config);
+    std::vector<Alignment> results;
+    align_query(query, seeder, extender, [&](Alignment&& a) {
+        results.push_back(std::move(a));
+    });
+    ASSERT_EQ(1u, results.size());
+    EXPECT_FALSE(results[0].get_orientation());
+    EXPECT_EQ(sequence, results[0].get_spelling());
+    EXPECT_EQ("9=", results[0].get_cigar().to_string());
+}
+
+TEST(SSHashSubKSeeds, CanonicalReverseSeedIncludesContigEndpoint) {
+    // The sampled five-base minimizer is the final m-mer of this k-mer.
+    const std::string reference = "GAGCCATGGGC";
+    const std::string sequence = "GCCCATGGCT";
+    const auto filename = test_dump_dir() + "/reverse_endpoint_seed.fa";
+    {
+        std::ofstream out(filename);
+        out << ">reference\n" << reference << '\n';
+    }
+    DBGSSHash graph(filename, 11, DeBruijnGraph::CANONICAL, 0, test_dump_dir());
+    DBGAlignerConfig config;
+    config.min_seed_length = 9;
+    config.max_seed_length = 11;
+    config.min_exact_match = 1;
+    config.forward_and_reverse_complement = false;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    Query query(graph, sequence);
+    ExactSeeder seeder(query, config);
+    Extender extender(query, config);
+    std::vector<Alignment> results;
+    align_query(query, seeder, extender, [&](Alignment&& a) {
+        results.push_back(std::move(a));
+    });
+    ASSERT_EQ(1u, results.size());
+    EXPECT_FALSE(results[0].get_orientation());
+    EXPECT_EQ(sequence, results[0].get_spelling());
+    EXPECT_EQ("10=", results[0].get_cigar().to_string());
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, BasicSubKSeedsSearchBothQueryOrientations) {
+    if constexpr (std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+        const std::string reference =
+            "AAAGGATTCTAGCGTTCCAGCCAGACTATTCAAGTCACACCTGCGTTAGAAGACAGCCTTGGATGTAAAT";
+        const std::string forward = "AAGGATTCT";
+        auto reverse = forward;
+        reverse_complement(reverse.begin(), reverse.end());
+        auto graph = build_graph_batch<TypeParam>(11, {reference}, DeBruijnGraph::BASIC);
+        DBGAlignerConfig config;
+        config.min_seed_length = 9;
+        config.max_seed_length = 11;
+        config.min_exact_match = 1;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        for (bool reverse_query : {false, true}) {
+            for (bool both_orientations : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << "reverse query=" << reverse_query
+                                                  << " both orientations=" << both_orientations);
+                config.forward_and_reverse_complement = both_orientations;
+                Query query(*graph, reverse_query ? reverse : forward);
+                ExactSeeder seeder(query, config);
+                Extender extender(query, config);
+                std::vector<Alignment> results;
+                align_query(query, seeder, extender, [&](Alignment&& a) {
+                    results.push_back(std::move(a));
+                });
+                if (reverse_query && !both_orientations) {
+                    EXPECT_TRUE(results.empty());
+                    continue;
+                }
+                ASSERT_EQ(1u, results.size());
+                EXPECT_EQ(reverse_query, results[0].get_orientation());
+                EXPECT_EQ(forward, results[0].get_spelling());
+                EXPECT_EQ("9=", results[0].get_cigar().to_string());
+            }
+        }
+    }
+}
+#endif
+
+TYPED_TEST(DBGAlignerRedoneTest, ChainingWithZeroMatchScore) {
+    const std::string reference =
+        "AAAGGATTCTAGCGTTCCAGCCAGACTATTCAAGTCACACCTGCGTTAGAAGACAGCCTTGGATGTAAAT";
+    auto sequence = reference;
+    sequence.at(20) = 'A';
+    auto graph = build_graph_batch<TypeParam>(11, {reference}, DeBruijnGraph::BASIC);
+    DBGAlignerConfig config;
+    config.min_seed_length = 11;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.chain_alignments = true;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(0, -3, -3);
+    Query query(*graph, sequence);
+    ExactSeeder seeder(query, config);
+    auto anchors = seeder.get_inexact_anchors();
+    ASSERT_FALSE(anchors.empty());
+    for (const auto &anchor : anchors) {
+        EXPECT_TRUE(anchor.is_spelling_valid(*graph));
+        EXPECT_TRUE(anchor.get_cigar().is_valid(anchor.get_spelling(), anchor.get_query()));
+    }
+}
+
 TYPED_TEST(DBGAlignerRedoneTest, ChainingAndTwoSidedSearchAreIndependentOptions) {
     const std::string reference = "GTAGTGCTAGCTTGTAGTCGTGCTGATGCA";
     const std::string sequence = "GTAGTGCTACCTTGTAGTCGTGGTGATGCA";
@@ -1577,5 +1767,104 @@ TYPED_TEST(DBGAlignerRedoneTest, align_suffix_seed_no_full_seeds) {
     }
 }
 #endif
+
+TEST(AlignmentCigar, BothImplementationsCheckEveryMismatch) {
+    struct Case {
+        const char *cigar;
+        const char *reference;
+        const char *query;
+        bool valid;
+    };
+    for (const auto &[cigar, reference, query, valid] : {
+            Case{"2X", "AA", "AT", false},
+            Case{"2X", "AA", "TA", false},
+            Case{"2X", "AA", "AA", false},
+            Case{"2X", "AA", "TC", true},
+            Case{"2=", "AA", "AT", false},
+            Case{"2=", "AA", "AA", true},
+            Case{"1S2X", "AA", "CTC", true},
+            Case{"1S2X", "AA", "CAT", false},
+            Case{"2X", "AAA", "TC", false},
+            Case{"2X", "AA", "TCC", false}}) {
+        SCOPED_TRACE(std::string(cigar) + " " + reference + " " + query);
+        EXPECT_EQ(valid, Cigar(cigar).is_valid(reference, query));
+        const mtg::graph::align::Cigar legacy(cigar);
+        // The legacy API receives only the aligned query interval.
+        auto legacy_query = std::string_view(query);
+        legacy_query.remove_prefix(legacy.get_clipping());
+        legacy_query.remove_suffix(legacy.get_end_clipping());
+        EXPECT_EQ(valid, legacy.is_valid(reference, legacy_query));
+    }
+}
+
+TEST(AlignmentTrimming, KeepsLabelClassesWithTrimmedPath) {
+    const std::string reference = "AACGTT";
+    auto graph = build_graph_batch<DBGHashFast>(4, { reference });
+    for (size_t length : {3, 4, 5}) {
+        const std::string query = reference.substr(0, length);
+        Alignment alignment(*graph, query, false, map_to_nodes_sequentially(*graph, reference),
+                            Cigar(Cigar::MATCH, length), std::string(reference),
+                            reference.size() - length, 1, {{17}});
+        const auto cigar = alignment.get_cigar();
+        const auto coords = alignment.get_coords();
+        const auto removed = std::min(reference.size() - length, alignment.size() - 1);
+        EXPECT_EQ(removed, alignment.trim_end());
+        EXPECT_EQ(alignment.size(), alignment.get_label_classes().size());
+        EXPECT_EQ(std::vector<Anchor::label_class_t>(alignment.size(), 1),
+                  alignment.get_label_classes());
+        EXPECT_EQ(reference.size() - length - removed, alignment.get_end_trim());
+        EXPECT_EQ(query, alignment.get_spelling());
+        EXPECT_EQ(cigar, alignment.get_cigar());
+        EXPECT_EQ(coords, alignment.get_coords());
+        EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+        EXPECT_EQ(0u, alignment.trim_end());
+    }
+}
+
+TEST(AlignmentExtension, KeepsBetterPathsAfterACompleteQuery) {
+    const std::string query = "ACGTTAGGACCTATGCGATTCAGACT";
+    const std::string mismatches = "ACGTTAGTACATATGCGATTCAGACT";
+    const std::string deletion = "ACGTTAGCCCGACCTATGCGATTCAGACT";
+    constexpr size_t k = 7;
+    DBGAlignerConfig config{};
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.xdrop = 100;
+    config.min_seed_length = config.max_seed_length = k;
+    config.forward_and_reverse_complement = false;
+
+    for (bool backward : {false, true}) {
+        for (bool add_alternative : {false, true}) {
+            SCOPED_TRACE(backward);
+            SCOPED_TRACE(add_alternative);
+            auto sequence = query;
+            auto reference = deletion;
+            auto alternative = mismatches;
+            if (backward) {
+                std::reverse(sequence.begin(), sequence.end());
+                std::reverse(reference.begin(), reference.end());
+                std::reverse(alternative.begin(), alternative.end());
+            }
+            auto graph = build_graph_batch<DBGHashFast>(k,
+                add_alternative ? std::vector<std::string>{reference, alternative}
+                                : std::vector<std::string>{reference});
+            Query aln_query(*graph, sequence);
+            const size_t begin = backward ? sequence.size() - k : 0;
+            Anchor seed(sequence, begin, begin + k, false,
+                        {graph->kmer_to_node(sequence.substr(begin, k))});
+            Extender extender(aln_query, config);
+            size_t found = 0;
+            extender.extend(Alignment(seed), [&](Alignment&& alignment) {
+                ++found;
+                EXPECT_EQ(43, score_match(alignment, config));
+                EXPECT_EQ(backward ? "19=3D7=" : "7=3D19=",
+                          alignment.get_cigar().to_string());
+                EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+                EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(),
+                                                         alignment.get_query()));
+            }, !backward, backward);
+            EXPECT_GT(found, 0u);
+        }
+    }
+}
 
 } // namespace

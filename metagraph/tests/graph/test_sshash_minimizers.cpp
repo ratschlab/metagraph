@@ -288,7 +288,83 @@ TEST(SSHashSeeds, AmbiguousShortQueries) {
     }
 }
 
+TEST(SSHashPath, FinalNodeKeepsItsUnitigId) {
+    using namespace mtg::graph;
+    const std::string filename = test_dump_dir() + "/final_unitig_node.fa";
+    { std::ofstream out(filename); out << ">reference\nACGTA\n"; }
+    DBGSSHash graph(filename, 3, DBGSSHash::BASIC, 5, test_dump_dir());
+    const auto path = map_to_nodes_sequentially(graph, "ACGTA");
+    ASSERT_EQ(3u, path.size());
+    ASSERT_EQ(graph.num_nodes(), path.back());
+    for (auto node : path)
+        EXPECT_EQ(graph.get_sequence_ids(path.front()), graph.get_sequence_ids(node));
+}
+
+TEST(SSHashPath, LoadRepairsLegacyFinalPredecessor) {
+    using namespace mtg::graph;
+    const std::string filename = test_dump_dir() + "/legacy_final_unitig_node.fa";
+    { std::ofstream out(filename); out << ">reference\nACGTA\n"; }
+    DBGSSHash graph(filename, 3, DBGSSHash::BASIC, 5, test_dump_dir());
+    ASSERT_EQ(3u, graph.num_nodes());
+    ASSERT_EQ("ACG", graph.get_node_sequence(1));
+    ASSERT_EQ("CGT", graph.get_node_sequence(2));
+    ASSERT_EQ("GTA", graph.get_node_sequence(3));
+
+    std::stringstream bytes;
+    essentials::generic_saver saver(bytes);
+    saver.visit(graph.num_nodes());
+    saver.visit(graph.get_k());
+    saver.visit(graph.get_mode());
+    std::visit([&](const auto &dict) { saver.visit(dict); }, graph.data());
+    const auto cache_offset = bytes.tellp();
+    bit_vector_smart({ false, true, true, false }).serialize(bytes);
+    // Older graphs left the last predecessor bit unset even on a linear path.
+    bit_vector_smart({ false, false, true, false }).serialize(bytes);
+
+    DBGSSHash loaded(3);
+    ASSERT_TRUE(loaded.load(bytes));
+    for (auto node : map_to_nodes_sequentially(loaded, "ACGTA"))
+        EXPECT_EQ(loaded.get_sequence_ids(1), loaded.get_sequence_ids(node));
+    EXPECT_EQ(2u, loaded.traverse_back(3, 'C'));
+    std::stringstream repaired;
+    loaded.serialize(repaired);
+    repaired.seekg(cache_offset);
+    bit_vector_smart successors, predecessors;
+    ASSERT_TRUE(successors.load(repaired));
+    ASSERT_TRUE(predecessors.load(repaired));
+    ASSERT_EQ(4u, successors.size());
+    ASSERT_EQ(4u, predecessors.size());
+    // Check persisted bits, excluding unused padding in the last storage word.
+    EXPECT_EQ(0b0110u, successors.get_int(0, 4));
+    EXPECT_EQ(0b1100u, predecessors.get_int(0, 4));
+    repaired.seekg(0);
+    DBGSSHash roundtrip(3);
+    ASSERT_TRUE(roundtrip.load(repaired));
+    for (auto node : map_to_nodes_sequentially(roundtrip, "ACGTA")) {
+        EXPECT_EQ(graph.get_node_sequence(node), roundtrip.get_node_sequence(node));
+        EXPECT_EQ(graph.get_sequence_ids(node), roundtrip.get_sequence_ids(node));
+    }
+}
+
 #if ! _PROTEIN_GRAPH
+TEST(SSHashPath, FinalNodeCanLeadToTheReverseStrand) {
+    using namespace mtg::graph;
+    const std::string filename = test_dump_dir() + "/final_unitig_reverse.fa";
+    { std::ofstream out(filename); out << ">reference\nAAT\n"; }
+    DBGSSHash graph(filename, 3, DBGSSHash::CANONICAL, 3, test_dump_dir());
+    const auto forward = graph.kmer_to_node("AAT");
+    const auto reverse = graph.kmer_to_node("ATT");
+    ASSERT_EQ(1u, forward);
+    ASSERT_EQ(2u, reverse);
+    EXPECT_EQ(reverse, graph.traverse(forward, 'T'));
+    std::vector<DeBruijnGraph::node_index> outgoing;
+    graph.call_outgoing_kmers(forward, [&](auto node, char c) {
+        EXPECT_EQ('T', c);
+        outgoing.push_back(node);
+    });
+    EXPECT_EQ(std::vector<DeBruijnGraph::node_index>{ reverse }, outgoing);
+}
+
 TEST(SSHashPath, ReverseComplementPreservesNodeSpellings) {
     using namespace mtg::graph;
     for (auto mode : { DBGSSHash::BASIC, DBGSSHash::CANONICAL }) {

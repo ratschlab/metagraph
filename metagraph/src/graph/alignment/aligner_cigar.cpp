@@ -80,6 +80,7 @@ Cigar::Cigar(std::string_view cigar_str) {
                 break;
             case 'G':
                 cigar_.emplace_back(Cigar::NODE_INSERTION, std::stol(op_count));
+                op_count.clear();
                 break;
             default:
                 op_count += c;
@@ -166,9 +167,10 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     return false;
                 }
 
-                if (std::equal(ref_it, ref_it + op.second, alt_it)
-                        == (op.first != Cigar::MATCH)) {
-                    std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
+                if (!std::equal(ref_it, ref_it + op.second, alt_it, [&](char ref, char alt) {
+                        return (ref == alt) == (op.first == Cigar::MATCH);
+                    })) {
+                    std::cerr << "Character disagrees with CIGAR operation" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

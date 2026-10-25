@@ -711,6 +711,13 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
+    if (identity == ALIGN && alignment_post_chain
+            && (alignment_chain || alignment_two_sided || !alignment_extend_chains)) {
+        std::cerr << "Error: --align-post-chain cannot be combined with --align-chain, "
+                     "--align-two-sided, or --align-no-extend-chains" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
         std::cerr << "Error: bloom-fpp must be > 0.0 and < 1.0" << std::endl;
         print_usage_and_exit = true;

@@ -2,6 +2,7 @@
 #include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
 #include <csignal>
+#include <limits>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -136,6 +137,9 @@ Json::Value process_align_request(const std::string &received_message,
     config.alignment_max_nodes_per_seq_char = json.get(
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
+    // The HTTP/Python API uses a negative node limit to request no limit.
+    if (config.alignment_max_nodes_per_seq_char < 0)
+        config.alignment_max_nodes_per_seq_char = std::numeric_limits<double>::max();
 
     config.alignment_chain = json.get("chain_alignments", config.alignment_chain).asBool();
     config.alignment_two_sided = json.get("two_sided", config.alignment_two_sided).asBool();
@@ -160,7 +164,7 @@ Json::Value process_align_request(const std::string &received_message,
             a[SeqSearchResult::SCORE_JSON_FIELD] = aligner_config.score_cigar(path.get_spelling(),
                                                                               aln_query.get_query(path.get_orientation()),
                                                                               path.get_cigar());
-            a[SeqSearchResult::MAX_SCORE_JSON_FIELD] = aligner_config.match_score(read_stream->seq.s)
+            a[SeqSearchResult::MAX_SCORE_JSON_FIELD] = aligner_config.match_score(aln_query.get_query())
                 + aligner_config.left_end_bonus + aligner_config.right_end_bonus;
             a[SeqSearchResult::SEQUENCE_JSON_FIELD] = std::string(path.get_spelling());
             a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();

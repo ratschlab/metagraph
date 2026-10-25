@@ -11,6 +11,7 @@
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
+#include "common/serialization.hpp"
 
 
 namespace {
@@ -31,6 +32,20 @@ typedef ::testing::Types<BRWT,
                          Rainbow<BRWT>,
                          Rainbowfish> BinMatTypes;
 TYPED_TEST_SUITE(BinaryMatrixTest, BinMatTypes);
+
+
+TEST(RowSparse, RejectInvalidBoundaryRepresentation) {
+    std::stringstream serialized;
+    const uint64_t num_columns = 1;
+    serialized.write(reinterpret_cast<const char*>(&num_columns), sizeof(num_columns));
+    sdsl::vlc_vector<>().serialize(serialized);
+    // A readable but unsupported boundary tag does not set the stream's failbit.
+    serialize_number(serialized, 999);
+
+    RowSparse matrix;
+    EXPECT_FALSE(matrix.load(serialized));
+    EXPECT_TRUE(serialized.good());
+}
 
 
 TYPED_TEST(BinaryMatrixTest, DefaultConstructor) {

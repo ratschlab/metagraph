@@ -111,10 +111,11 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     return false;
                 }
 
-                if (std::equal(reference.begin() + ref_pos, reference.begin() + ref_pos + op.second,
-                               query.begin() + alt_pos)
-                        == (op.first != Cigar::MATCH)) {
-                    std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
+                if (!std::equal(reference.begin() + ref_pos, reference.begin() + ref_pos + op.second,
+                                query.begin() + alt_pos, [&](char ref, char alt) {
+                                    return (ref == alt) == (op.first == Cigar::MATCH);
+                                })) {
+                    std::cerr << "Character disagrees with CIGAR operation" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

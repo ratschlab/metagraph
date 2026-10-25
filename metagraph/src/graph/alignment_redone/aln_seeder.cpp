@@ -213,6 +213,7 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.max_nodes_per_seq_char = config.max_nodes_per_seq_char;
     fast.max_ram_per_alignment = config.max_ram_per_alignment;
     fast.rel_score_cutoff = config.rel_score_cutoff;
+    fast.post_chain_alignments = config.post_chain_alignments;
     fast.gap_opening_penalty = config.gap_opening_penalty;
     fast.gap_extension_penalty = config.gap_extension_penalty;
     fast.left_end_bonus = config.left_end_bonus;
@@ -267,8 +268,13 @@ void align_query(const Query &query,
                  const Extender &extender,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
+    if (seeder.config_.post_chain_alignments
+            && (seeder.config_.chain_alignments || seeder.config_.two_sided))
+        throw std::invalid_argument("Post-chaining cannot be combined with seed chaining or two-sided extension");
     if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
     if (seeder.align_fast(callback)) return;
+    if (seeder.config_.post_chain_alignments)
+        throw std::invalid_argument("Post-chaining is not supported for partial-node or sub-k alignments requiring wavefront search");
     std::vector<Alignment> candidates;
     for (const auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain))
         extender.extend(base, [&](Alignment&& aln) { candidates.push_back(std::move(aln)); },
@@ -280,6 +286,8 @@ void align_query(const Query &query,
                  const Seeder &seeder,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
+    if (seeder.config_.post_chain_alignments)
+        throw std::invalid_argument("Post-chaining requires extension; do not disable chain extension");
     if (emit_optimal_exact(query, seeder, seeder.config_, callback)) return;
     emit_alignments(query, seeder.config_, annotation_buffer(seeder),
                     seeder.get_inexact_anchors(connect_anchors_in_chain), callback);
@@ -873,7 +881,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 sshash = dynamic_cast<const DBGSSHash*>(&graph);
             }
 
-            if (dbg_succ && (!orientation || canonical)) {
+            if (dbg_succ && (!orientation || canonical || graph.get_mode() == DeBruijnGraph::BASIC)) {
                 const auto &boss = dbg_succ->get_boss();
                 auto encoded = boss.encode(this_query);
 
@@ -945,7 +953,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         size_t cur_match_size = match_size + suffix.size();
 
                         assert(cur_match_size < k);
-                        if (!orientation && cur_match_size == k - 1) {
+                        if ((!orientation || graph.get_mode() == DeBruijnGraph::BASIC)
+                                && cur_match_size == k - 1) {
                             assert(first == last || !boss.get_last(first));
                             assert(boss.succ_last(first) == last);
                             for (edge_index node = first; node <= last; ++node) {
@@ -1132,9 +1141,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             assert(offset + m <= contig_end);
                             uint64_t window_size = std::min<uint64_t>({
                                 k,
-                                contig_end - offset - m
+                                contig_end - offset - m + 1
                             });
-                            assert(offset + window_size + m <= contig_end);
+                            assert(offset + window_size - 1 + m <= contig_end);
                             for (uint64_t j = 0; j < window_size; ++j) {
                                 kmer_t start_read_kmer = start_bv_it.get();
                                 start_bv_it.next();
@@ -1171,7 +1180,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     size_t i_in_contig = res.kmer_id_in_string + w;
 
-                                    if (!orientation && i_in_contig < (res.string_end - res.string_begin - k + 1) && i_shift + min_match_length <= this_query.size()) {
+                                    if ((!orientation || sshash->get_mode() == DeBruijnGraph::BASIC)
+                                            && i_in_contig < (res.string_end - res.string_begin - k + 1)
+                                            && i_shift + min_match_length <= this_query.size()) {
                                         // forward
                                         assert(res.kmer_id_in_string + w + k <= contig_length);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w);
@@ -1227,13 +1238,14 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
 
-                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation && res.kmer_id_in_string + w + m >= k && i_shift + m >= k) {
+                                    if (sshash->get_mode() != DeBruijnGraph::BASIC && orientation
+                                            && res.kmer_id_in_string + w + m >= k) {
                                         // rev comp
                                         assert(sshash->get_mode() == DeBruijnGraph::CANONICAL);
                                         assert(res.kmer_id + w + m >= k);
                                         DeBruijnGraph::node_index node = DBGSSHash::sshash_to_graph_index(res.kmer_id + w + m - k);
                                         std::string spelling = graph.get_node_sequence(node);
-                                        size_t i_back_shift = i_shift + m - k;
+                                        size_t i_back_shift = i_shift - std::min(i_shift, k - m);
                                         assert(std::equal(this_query.begin() + i_shift, this_query.begin() + i_shift + m,
                                                           spelling.end() - m, spelling.end()));
                                         auto jt = std::mismatch(spelling.rbegin() + m, spelling.rend(),
@@ -1242,7 +1254,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         size_t full_match_size = jt - spelling.rbegin();
                                         assert(full_match_size <= k);
                                         assert(full_match_size >= m);
-                                        i_back_shift += k - full_match_size;
+                                        i_back_shift = i_shift + m - full_match_size;
                                         if (full_match_size >= config_.min_seed_length) {
                                             assert(this_query.size() + k >= i_shift + m + full_match_size);
                                             size_t i_rc = this_query.size() - (i_back_shift + full_match_size);
@@ -1267,7 +1279,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                         }
                                     }
                                 }
-                                break;
                             }
                         });
                     }
@@ -2570,6 +2581,22 @@ void Extender::extend(const Alignment &aln,
                       bool no_bwd, bool no_fwd) const {
     DBGAlignerConfig::score_t match_score = maximum_match_score(config_);
 
+    // Reaching the query end does not maximize alignment score: a longer
+    // reference path may have both a higher wavefront cost and a higher score.
+    // At cost C, excess reference characters require deletion cost M + 2*g,
+    // so the score is at most seed_score + M*N - C*g/(M + 2*g).
+    auto score_bound_exhausted = [&](size_t cost, size_t query_size,
+                                     DBGAlignerConfig::score_t seed_score,
+                                     DBGAlignerConfig::score_t best_score,
+                                     DBGAlignerConfig::score_t end_bonus) {
+        const size_t gap = -int(config_.gap_extension_penalty);
+        const int64_t maximum = int64_t(seed_score) + int64_t(match_score) * int64_t(query_size)
+                              + std::max(end_bonus, 0);
+        // Divide first to avoid overflow and conservatively retain tied scores.
+        const size_t loss = cost / (match_score + 2 * gap) * gap;
+        return maximum < best_score || loss > uint64_t(maximum - best_score);
+    };
+
     auto set_coords = [&](Alignment &aln) {
         assert(aln.get_label_classes().size());
         if (auto anno_buffer = make_aln_graph(aln.get_label_classes()[0]).get_anno_buffer()) {
@@ -2676,7 +2703,8 @@ void Extender::extend(const Alignment &aln,
                 } else if (score == best_score) {
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
-                return query_dist == query_window.size();
+                return score_bound_exhausted(cost, query_window.size(), aln_score,
+                                             best_score, config_.right_end_bonus);
             },
             aln.get_trim_spelling(),
             anno_buffer,
@@ -2799,7 +2827,8 @@ void Extender::extend(const Alignment &aln,
                 } else if (score == best_score) {
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
-                return query_dist == query_window.size();
+                return score_bound_exhausted(cost, query_window.size(), fwd_ext_score,
+                                             best_score, config_.left_end_bonus);
             },
             anno_buffer,
             fwd_ext.get_label_classes()[0],
@@ -3326,6 +3355,16 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                         assert(next->get_seed().size() + (end - next_trim_spelling.begin()) <= spelling.size());
                         std::copy(next_trim_spelling.begin(), end,
                                   spelling.begin() + next->get_seed().size());
+                        // Known suffix characters can match inside the otherwise
+                        // unknown gap; reflect them in its CIGAR as well.
+                        if (cigar.data().back().first == Cigar::MISMATCH) {
+                            const size_t length = cigar.data().back().second;
+                            cigar.data().pop_back();
+                            const auto ref_gap = std::string_view(spelling).substr(spelling.size() - length);
+                            const auto query_gap = aln.get_query().substr(last->get_clipping() - length, length);
+                            for (size_t i = 0; i < length; ++i)
+                                cigar.append(ref_gap[i] == query_gap[i] ? Cigar::MATCH : Cigar::MISMATCH);
+                        }
                     }
                 }
 

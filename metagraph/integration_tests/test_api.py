@@ -123,6 +123,32 @@ class TestAPIRaw(TestAPIBase):
             self.assertEqual(ret.status_code, 400)
             self.assertIn("seed_length", ret.json()['error'])
 
+    def test_api_raw_align_negative_node_limit_in_all_modes(self):
+        with open(TEST_DATA_DIR + '/transcripts_100.fa') as source:
+            next(source)  # first record header
+            sequence = ''
+            for line in source:
+                if line.startswith('>'):
+                    break
+                sequence += line.strip()
+        sequence = sequence[:64]
+        middle = len(sequence) // 2
+        query = sequence[:middle] + ('C' if sequence[middle] == 'A' else 'A') + sequence[middle + 1:]
+        for chain, two_sided in product((False, True), repeat=2):
+            with self.subTest(chain=chain, two_sided=two_sided):
+                payload = {
+                    'FASTA': '>query\n' + query, 'seed_length': 6, 'min_exact_match': 0,
+                    'max_num_nodes_per_seq_char': -1,
+                    'chain_alignments': chain, 'two_sided': two_sided}
+                response = self.raw_post_request('align', json.dumps(payload))
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertTrue(response.json()[0]['alignments'])
+                # Normalization must also preserve CIGAR, score, and max_score.
+                payload['FASTA'] = '>query\n' + query.lower()
+                lowercase = self.raw_post_request('align', json.dumps(payload))
+                self.assertEqual(lowercase.status_code, 200, lowercase.text)
+                self.assertEqual(response.json(), lowercase.json())
+
     def test_api_raw_search_rejects_alignment_tuning(self):
         for option in ("extend_chains", "connect_anchors", "chain_alignments", "two_sided"):
             ret = self.raw_post_request('search', json.dumps({
