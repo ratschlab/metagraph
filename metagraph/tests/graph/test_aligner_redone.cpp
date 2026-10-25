@@ -149,9 +149,15 @@ TEST(AlignmentCigarRedone, PostChainGraphJumpsAllowInternalClipping) {
     EXPECT_TRUE(Cigar("1=1S1D1=").is_valid("A$C", "ATC"));
     EXPECT_TRUE(Cigar("1=1D1G1S1=").is_valid("G$T", "GAT"));
     EXPECT_TRUE(Cigar("1=1D1S1=").is_valid("G$T", "GAT"));
+    EXPECT_TRUE(Cigar("1=1S3D1=").is_valid("AC$GT", "ATT"));
+    EXPECT_TRUE(Cigar("1=3D1S1=").is_valid("AC$GT", "AAT"));
     EXPECT_FALSE(Cigar("1=1S1=").is_valid("AC", "ATC"));
     EXPECT_FALSE(Cigar("1=1S1D1=").is_valid("AGC", "ATC"));
     EXPECT_FALSE(Cigar("1=1D1S1=").is_valid("GGT", "GAT"));
+    EXPECT_FALSE(Cigar("1=1S3D1=").is_valid("ACCGT", "ATT"));
+    EXPECT_FALSE(Cigar("1=3D1S1=").is_valid("ACCGT", "AAT"));
+    EXPECT_FALSE(Cigar("1=1S9D1=").is_valid("AC$GT", "ATT"));
+    EXPECT_FALSE(Cigar("1=9D1S1=").is_valid("AC$GT", "AAT"));
     EXPECT_FALSE(Cigar("1=9S1G1D1=").is_valid("A$C", "ATC"));
     EXPECT_FALSE(Cigar("1=1D1G9S1=").is_valid("G$T", "GAT"));
 }
