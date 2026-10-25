@@ -83,6 +83,61 @@ TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) 
     }
 }
 
+#if ! _PROTEIN_GRAPH
+TEST(LabeledAlignment, PartialNodeSuffixKeepsCoordinates) {
+    const std::string reference = "CGCCACCGGCCGACCGACCGCGGCTGCCCCAGTTGATG";
+    auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        31, {reference}, {"reference"}, DeBruijnGraph::BASIC, true);
+    const auto &graph = annotated->get_graph();
+    AnnotationBuffer buffer(graph, annotated->get_annotator());
+    const auto path = map_to_nodes_sequentially(graph, reference);
+    buffer.queue_path(path);
+    buffer.fetch_queued_annotations();
+    DBGAlignerConfig config;
+    config.min_seed_length = 19;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.min_exact_match = 0.7;
+    config.xdrop = 27;
+    config.gap_opening_penalty = -6;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    auto check = [&](const Alignment &alignment, const char *cigar, int score) {
+        EXPECT_EQ(reference, alignment.get_spelling());
+        EXPECT_EQ(cigar, alignment.get_cigar().to_string());
+        EXPECT_EQ(score, score_match(alignment, config));
+        EXPECT_TRUE(alignment.is_spelling_valid(graph));
+        const auto &columns = buffer.get_cached_column_set(alignment.get_label_classes()[0]);
+        ASSERT_EQ(1u, columns.size());
+        EXPECT_EQ("reference", annotated->get_annotator().get_label_encoder().decode(columns[0]));
+        ASSERT_EQ(1u, alignment.get_coords().size());
+        EXPECT_EQ(AnnotationBuffer::Tuple({0}), alignment.get_coords()[0]);
+    };
+    Query exact(graph, reference);
+    Anchor seed(exact.get_query(), 0, 19, false, {path.front()}, reference.substr(19, 12));
+    seed.set_label_class(buffer.get_labels_id(path.front()));
+    seed.set_coord(0);
+    size_t count = 0;
+    // Consume the remaining first-node suffix before advancing reference coordinates.
+    LabeledExtender(buffer, exact, config).extend(Alignment(seed), [&](Alignment&& alignment) {
+        ++count;
+        check(alignment, "38=", 86);
+    }, true);
+    EXPECT_EQ(1u, count);
+
+    Query query(graph, "CGCCACCGGCCGACCGACCGCGCGCTGCCACCAGTTGATG");
+    LabeledSeeder seeder(buffer, query, config);
+    LabeledExtender extender(buffer, query, config);
+    count = 0;
+    // The default route must retry partial-node seeds when the column search misses.
+    align_query(query, seeder, extender, [&](Alignment&& alignment) {
+        ++count;
+        check(alignment, "22=1I6=1I10=", 74);
+    });
+    EXPECT_EQ(1u, count);
+}
+#endif
+
 TEST(LabeledChaining, SharedSeedsKeepDistinctConnectingPaths) {
     const std::vector<std::string> references{
         "TCCCATTACATCCCCCCACTCATCCTCCATGTTCCCCCCACTCATAGACCCCAAC",

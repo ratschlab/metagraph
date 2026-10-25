@@ -119,12 +119,16 @@ TEST(AlignmentCigarRedone, EmptyAndMalformedLengths) {
 
 TEST(AlignmentCigarRedone, StrictParsingAndClipping) {
     EXPECT_TRUE(Cigar("").empty());
+    EXPECT_TRUE(mtg::graph::align::Cigar("").empty());
     for (const auto &text : { "3", "2=1", "1Q", "1a=", "1=xyz", "=1",
                               "-1=", "+1=", "1 =", "0=", "1=0I" }) {
         EXPECT_THROW(Cigar{ text }, std::invalid_argument) << text;
+        EXPECT_THROW(mtg::graph::align::Cigar{ text }, std::invalid_argument) << text;
     }
-    EXPECT_THROW(Cigar{ "4294967296=" }, std::out_of_range);
-    EXPECT_THROW(Cigar{ "999999999999999999999999=" }, std::out_of_range);
+    for (const auto *text : { "4294967296=", "999999999999999999999999=" }) {
+        EXPECT_THROW(Cigar{ text }, std::out_of_range) << text;
+        EXPECT_THROW(mtg::graph::align::Cigar{ text }, std::out_of_range) << text;
+    }
 
     Cigar empty;
     empty.extend_clipping(0);
@@ -138,10 +142,34 @@ TEST(AlignmentCigarRedone, StrictParsingAndClipping) {
 }
 
 TEST(AlignmentCigarRedone, CountersUseSizeType) {
-    const Cigar cigar("2147483648=1I2D1X");
-    EXPECT_EQ(size_t{2147483648}, cigar.get_num_matches());
-    EXPECT_EQ(size_t{2147483650}, cigar.get_num_query());
-    EXPECT_EQ(size_t{2147483651}, cigar.get_num_ref());
+    const char *text = "2147483648=1I2147483648=2D1X";
+    const Cigar cigar(text);
+    EXPECT_EQ(size_t{4294967296}, cigar.get_num_matches());
+    EXPECT_EQ(size_t{4294967296}, mtg::graph::align::Cigar(text).get_num_matches());
+    EXPECT_EQ(size_t{4294967298}, cigar.get_num_query());
+    EXPECT_EQ(size_t{4294967299}, cigar.get_num_ref());
+}
+
+TEST(AlignmentCigar, ConversionPreservesStoredOperations) {
+    // Conversion must not parse or normalize the stored representation.
+    const std::vector<Cigar::value_type> operations{
+        {Cigar::CLIPPED, 1}, {Cigar::MATCH, 2}, {Cigar::MATCH, 3},
+        {Cigar::INSERTION, 0}, {Cigar::NODE_INSERTION, 2},
+        {Cigar::DELETION, 1}, {Cigar::CLIPPED, 2}
+    };
+    const mtg::graph::align::Cigar legacy(operations);
+    const Cigar converted(legacy.data());
+    EXPECT_EQ(operations, converted.data());
+    EXPECT_EQ(operations, mtg::graph::align::Cigar(converted.data()).data());
+}
+
+TEST(AlignmentCigar, ValidatorsKeepTheirQueryViewContracts) {
+    const Cigar full_query("1S2=1S");
+    const mtg::graph::align::Cigar aligned_slice(full_query.data());
+    EXPECT_TRUE(full_query.is_valid("AC", "TACG"));
+    EXPECT_TRUE(aligned_slice.is_valid("AC", "AC"));
+    EXPECT_FALSE(full_query.is_valid("AC", "AC"));
+    EXPECT_FALSE(aligned_slice.is_valid("AC", "TACG"));
 }
 
 TEST(AlignmentCigarRedone, PostChainGraphJumpsAllowInternalClipping) {
@@ -1475,7 +1503,128 @@ TEST(AlignmentTraceback, RetainsReplacedPredecessors) {
     EXPECT_EQ(1u, count);
 }
 
+#if _DNA_GRAPH
+TEST(AlignmentFallback, RetriesSubkSeedsAfterFinalFiltering) {
+    const std::string reference =
+        "CCCAGGCGACTACGTCCCCAAGGAGCACATCCTGCAGGTCCTGGGCATCTCTGCGGAGGTCTGTGCCAGCGACCCGCCTCAGTGTGAC"
+        "AGAGAGGTGTGAGGGAGGCGAAGGCCCTGGCCTCCGAGGATCTGGGTGGCGTCTGCTGCCCTAGGTGTGCTGGAAGTCCACTTGGAAG"
+        "AACTGTTCC";
+    const std::string sequence =
+        "TACAACAGTCCTGAGCATCCTCCCAGGAGCTCTGGGGGAAGCCCGTGCGTGATATGGCTGCCAAGTCCCAGGCGACTACGTCCCCAAG"
+        "GAGCACCATCCTGCAGGTCCTGGACATCTCTGCGGAGGTCTGTGCCAAGCGACCCGCCTCAGTGTGACAGAGAGGTGGAGGGAGGCGA"
+        "AGGCCTGGCCTCCGAGGATCTGGGTGGCGTCTGCTGCCCTAGGTGTGCTGGAAGTCCACTTGGAAGAACTGTTCC";
+    auto graph = build_graph_batch<DBGSSHash>(31, {reference});
+    DBGAlignerConfig config;
+    config.min_seed_length = 19;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.min_exact_match = 0.7;
+    config.xdrop = 27;
+    config.max_nodes_per_seq_char = 5;
+    config.max_ram_per_alignment = 200;
+    config.gap_opening_penalty = -6;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    Query query(*graph, sequence);
+    ExactSeeder seeder(query, config);
+    Extender extender(query, config);
+    size_t count = 0;
+    align_query(query, seeder, extender, [&](Alignment&& alignment) {
+        ++count;
+        EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+        EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), alignment.get_query()));
+        EXPECT_GE(alignment.get_cigar().get_num_matches(), config.min_exact_match * sequence.size());
+        EXPECT_GE(score_match(alignment, config), 342);
+    });
+    // The full-k fast candidate is only 179S72=. Rejecting it must still allow
+    // shorter seeds to recover the longer placement rather than report a miss.
+    EXPECT_EQ(count, 1u);
+}
+#endif
+
 #if ! _PROTEIN_GRAPH
+TEST(AlignmentWavefront, PartialNodePositionsKeepDistinctStates) {
+    const std::string reference = "CGCCACCGGCCGACCGACCGCGGCTGCCCCAGTTGATG";
+    constexpr size_t k = 31;
+    auto graph = build_graph_batch<DBGSuccinct>(k, {reference});
+    const auto node = graph->kmer_to_node(reference.substr(0, k));
+    ASSERT_NE(DeBruijnGraph::npos, node);
+    DBGAlignerConfig config;
+    config.min_seed_length = 19;
+    config.max_seed_length = k;
+    config.gap_opening_penalty = -6;
+    config.gap_extension_penalty = -2;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    auto check = [&](const std::string &sequence, size_t seed_size,
+                     const char *expected_cigar, int expected_score,
+                     std::string_view expected_spelling) {
+        for (bool orientation : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "seed=" << seed_size
+                                              << " reverse=" << orientation
+                                              << " nodes=" << config.max_nodes_per_seq_char
+                                              << " RAM=" << config.max_ram_per_alignment);
+            auto input = sequence;
+            if (orientation)
+                reverse_complement(input.begin(), input.end());
+            Query query(*graph, input);
+            Anchor seed(query.get_query(orientation), 0, seed_size, orientation, {node},
+                        reference.substr(seed_size, k - seed_size));
+            Extender extender(query, config);
+            std::vector<Alignment> results;
+            // Bypass the SIMD shortcut and exercise the partial-node state directly.
+            extender.extend(Alignment(seed), [&](Alignment&& alignment) {
+                EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(),
+                                                          alignment.get_query()));
+                EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+                EXPECT_EQ(orientation, alignment.get_orientation());
+                results.push_back(std::move(alignment));
+            }, true);
+            ASSERT_FALSE(results.empty());
+            const auto best = std::max_element(results.begin(), results.end(),
+                [&](const auto &a, const auto &b) {
+                    return score_match(a, config) < score_match(b, config);
+                });
+            EXPECT_EQ(expected_score, score_match(*best, config));
+            EXPECT_EQ(expected_spelling, best->get_spelling());
+            EXPECT_EQ(expected_cigar, best->get_cigar().to_string());
+        }
+    };
+    const std::string sequence = "CGCCACCGGCCGACCGACCGCGCGCTGCCACCAGTTGATG";
+    check(sequence, 22, "22=1I6=1I10=", 74, reference);
+    check(reference.substr(0, k) + "A" + reference.substr(k), k, "31=1I7=", 80, reference);
+    config.max_nodes_per_seq_char = config.max_ram_per_alignment = 1000;
+    check(sequence, 22, "22=1I6=1I10=", 74, reference);
+    for (bool limit_ram : {false, true}) {
+        config.max_nodes_per_seq_char = limit_ram ? 1000 : 0;
+        config.max_ram_per_alignment = limit_ram ? 0 : 1000;
+        check(sequence, 22, "22=18S", 49, reference.substr(0, 22));
+    }
+}
+
+TEST(AlignmentWavefront, PartialNodeXdropStopsBeforeUncachedTraversal) {
+    const std::string reference = "AAAACCCCGGGGTTTT";
+    auto graph = build_graph_batch<DBGHashFast>(11, {reference});
+    Query query(*graph, "AAAATCCCGGGGTTTT");
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.xdrop = 0;
+    const auto node = graph->kmer_to_node(reference.substr(0, 11));
+    Anchor seed(query.get_query(), 0, 4, false, {node}, reference.substr(4, 7));
+    Extender extender(query, config);
+    size_t count = 0;
+    // The first suffix mismatch exhausts X-drop while still inside the node.
+    // Hash graphs have no traversal cache to mask an invalid virtual node ID.
+    extender.extend(Alignment(seed), [&](Alignment&& alignment) {
+        ++count;
+        EXPECT_EQ("AAAA", alignment.get_spelling());
+        EXPECT_EQ("4=12S", alignment.get_cigar().to_string());
+        EXPECT_EQ(8, score_match(alignment, config));
+        EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+    }, true);
+    EXPECT_EQ(1u, count);
+}
+
 TEST(SSHashSubKSeeds, RepeatedMinimizerUsesEveryMatchingOccurrence) {
     // The sampled m-mer at position 10 also occurs at position 4. Aligning
     // only to that first occurrence misses the exact query beginning at 7.
