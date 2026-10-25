@@ -2639,6 +2639,13 @@ void align_fwd(const DeBruijnGraph &base_graph,
 void Extender::extend(const Alignment &aln,
                       const std::function<void(Alignment&&)> &callback,
                       bool no_bwd, bool no_fwd) const {
+    // Extension can add at most one exact match per remaining query character.
+    const size_t remaining = (no_bwd ? 0 : aln.get_clipping())
+                           + (no_fwd ? 0 : aln.get_end_clipping());
+    if (aln.get_cigar().get_num_matches() + remaining
+            < config_.min_exact_match * aln.get_query().size())
+        return;
+
     // The exact and column-aligner shortcuts never use wavefront traversal.
     if (!traversal_caches_
             && (dynamic_cast<const DBGSuccinct*>(&query_.get_graph())
