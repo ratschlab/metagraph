@@ -119,12 +119,16 @@ TEST(AlignmentCigarRedone, EmptyAndMalformedLengths) {
 
 TEST(AlignmentCigarRedone, StrictParsingAndClipping) {
     EXPECT_TRUE(Cigar("").empty());
+    EXPECT_TRUE(mtg::graph::align::Cigar("").empty());
     for (const auto &text : { "3", "2=1", "1Q", "1a=", "1=xyz", "=1",
                               "-1=", "+1=", "1 =", "0=", "1=0I" }) {
         EXPECT_THROW(Cigar{ text }, std::invalid_argument) << text;
+        EXPECT_THROW(mtg::graph::align::Cigar{ text }, std::invalid_argument) << text;
     }
-    EXPECT_THROW(Cigar{ "4294967296=" }, std::out_of_range);
-    EXPECT_THROW(Cigar{ "999999999999999999999999=" }, std::out_of_range);
+    for (const auto *text : { "4294967296=", "999999999999999999999999=" }) {
+        EXPECT_THROW(Cigar{ text }, std::out_of_range) << text;
+        EXPECT_THROW(mtg::graph::align::Cigar{ text }, std::out_of_range) << text;
+    }
 
     Cigar empty;
     empty.extend_clipping(0);
@@ -138,10 +142,34 @@ TEST(AlignmentCigarRedone, StrictParsingAndClipping) {
 }
 
 TEST(AlignmentCigarRedone, CountersUseSizeType) {
-    const Cigar cigar("2147483648=1I2D1X");
-    EXPECT_EQ(size_t{2147483648}, cigar.get_num_matches());
-    EXPECT_EQ(size_t{2147483650}, cigar.get_num_query());
-    EXPECT_EQ(size_t{2147483651}, cigar.get_num_ref());
+    const char *text = "2147483648=1I2147483648=2D1X";
+    const Cigar cigar(text);
+    EXPECT_EQ(size_t{4294967296}, cigar.get_num_matches());
+    EXPECT_EQ(size_t{4294967296}, mtg::graph::align::Cigar(text).get_num_matches());
+    EXPECT_EQ(size_t{4294967298}, cigar.get_num_query());
+    EXPECT_EQ(size_t{4294967299}, cigar.get_num_ref());
+}
+
+TEST(AlignmentCigar, ConversionPreservesStoredOperations) {
+    // Conversion must not parse or normalize the stored representation.
+    const std::vector<Cigar::value_type> operations{
+        {Cigar::CLIPPED, 1}, {Cigar::MATCH, 2}, {Cigar::MATCH, 3},
+        {Cigar::INSERTION, 0}, {Cigar::NODE_INSERTION, 2},
+        {Cigar::DELETION, 1}, {Cigar::CLIPPED, 2}
+    };
+    const mtg::graph::align::Cigar legacy(operations);
+    const Cigar converted(legacy.data());
+    EXPECT_EQ(operations, converted.data());
+    EXPECT_EQ(operations, mtg::graph::align::Cigar(converted.data()).data());
+}
+
+TEST(AlignmentCigar, ValidatorsKeepTheirQueryViewContracts) {
+    const Cigar full_query("1S2=1S");
+    const mtg::graph::align::Cigar aligned_slice(full_query.data());
+    EXPECT_TRUE(full_query.is_valid("AC", "TACG"));
+    EXPECT_TRUE(aligned_slice.is_valid("AC", "AC"));
+    EXPECT_FALSE(full_query.is_valid("AC", "AC"));
+    EXPECT_FALSE(aligned_slice.is_valid("AC", "TACG"));
 }
 
 TEST(AlignmentCigarRedone, PostChainGraphJumpsAllowInternalClipping) {

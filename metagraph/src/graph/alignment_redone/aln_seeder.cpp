@@ -255,16 +255,16 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
                 // distinct orientations when asymmetric scoring distinguishes them.
                 if (!normalized.empty() && !normalized.get_offset()
                         && config.score_cigar(normalized.get_sequence(), query.get_query(false),
-                                              Cigar(normalized.get_cigar().to_string()))
+                                              Cigar(normalized.get_cigar().data()))
                            == config.score_cigar(result.get_sequence(), query.get_query(true),
-                                                 Cigar(result.get_cigar().to_string()))) {
+                                                 Cigar(result.get_cigar().data()))) {
                     result = std::move(normalized);
                     result_orientation = false;
                 }
             }
             candidates.emplace_back(query.get_graph(), query.get_query(result_orientation),
                 result_orientation, std::vector(result.get_nodes()),
-                Cigar(result.get_cigar().to_string()), std::string(result.get_sequence()), 0,
+                Cigar(result.get_cigar().data()), std::string(result.get_sequence()), 0,
                 annotations ? annotations->cache_column_set(
                     AnnotationBuffer::Columns(result.label_columns.begin(), result.label_columns.end()))
                             : Anchor::nannot,

@@ -1,64 +1,9 @@
 #include "aln_cigar.hpp"
 
-#include <limits>
-#include <stdexcept>
-
 #include "graph/representation/succinct/boss.hpp"
 
 namespace mtg::graph::align_redone {
 
-
-Cigar::Cigar(std::string_view cigar_str) {
-    LengthType count = 0;
-    bool have_count = false;
-    for (char c : cigar_str) {
-        if (c >= '0' && c <= '9') {
-            const auto digit = static_cast<LengthType>(c - '0');
-            if (count > (std::numeric_limits<LengthType>::max() - digit) / 10)
-                throw std::out_of_range("CIGAR operation length is too large");
-            count = count * 10 + digit;
-            have_count = true;
-            continue;
-        }
-        const auto op = std::string_view(op_str_).find(c);
-        if (op == std::string_view::npos || !have_count || !count)
-            throw std::invalid_argument("Invalid CIGAR operation");
-        cigar_.emplace_back(static_cast<Operator>(op), count);
-        count = 0;
-        have_count = false;
-    }
-    if (have_count)
-        throw std::invalid_argument("CIGAR length has no operation");
-}
-
-std::string Cigar::to_string() const {
-    std::string cigar_string;
-
-    for (const auto &pair : cigar_) {
-        cigar_string += std::to_string(pair.second) + opt_to_char(pair.first);
-    }
-
-    return cigar_string;
-}
-
-void Cigar::append(Operator op, LengthType num) {
-    if (!num)
-        return;
-
-    if (cigar_.empty() || cigar_.back().first != op) {
-        cigar_.emplace_back(op, num);
-    } else {
-        cigar_.back().second += num;
-    }
-}
-
-void Cigar::append(Cigar&& other) {
-    if (other.empty())
-        return;
-
-    append(other.cigar_.front().first, other.cigar_.front().second);
-    cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
-}
 
 bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     size_t ref_pos = 0;
@@ -204,4 +149,4 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     return true;
 }
 
-} // namespace mtg::graph::align
+} // namespace mtg::graph::align_redone
