@@ -138,7 +138,6 @@ TEST(LabeledFastAlignment, XdropDoesNotPruneOtherLabels) {
         config.min_seed_length = 15;
         config.max_seed_length = std::numeric_limits<size_t>::max();
         config.forward_and_reverse_complement = false;
-        config.min_exact_match = 0.7;
         config.rel_score_cutoff = 0;
         config.xdrop = 27;
         config.gap_opening_penalty = -6;
@@ -146,8 +145,11 @@ TEST(LabeledFastAlignment, XdropDoesNotPruneOtherLabels) {
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
         for (auto [nodes, ram] : {std::pair{5.0, 200.0}, {0.1, 200.0}, {5.0, 0.001}}) {
             SCOPED_TRACE(::testing::Message() << coordinates << " " << nodes << " " << ram);
+            const bool full_search = nodes == 5.0 && ram == 200.0;
             config.max_nodes_per_seq_char = nodes;
             config.max_ram_per_alignment = ram;
+            // Let capped searches report the exact seeds they retain.
+            config.min_exact_match = full_search ? 0.7 : 0;
             Query query(graph, sequence);
             LabeledSeeder seeder(buffer, query, config);
             LabeledExtender extender(buffer, query, config);
@@ -160,8 +162,10 @@ TEST(LabeledFastAlignment, XdropDoesNotPruneOtherLabels) {
                     EXPECT_TRUE(scores.emplace(label, score_match(alignment, config)).second);
                 }
             });
-            if (nodes == 5.0 && ram == 200.0) {
+            if (full_search) {
                 EXPECT_EQ((std::map<std::string, int>{{"first", 224}, {"second", 244}}), scores);
+            } else {
+                EXPECT_EQ((std::map<std::string, int>{{"first", 67}, {"second", 113}}), scores);
             }
         }
     }
