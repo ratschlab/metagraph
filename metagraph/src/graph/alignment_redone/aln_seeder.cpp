@@ -34,7 +34,7 @@ DBGAlignerConfig::score_t maximum_match_score(const DBGAlignerConfig &config) {
     return result;
 }
 
-void emit_alignments(const Query &query, const DBGAlignerConfig &config,
+bool emit_alignments(const Query &query, const DBGAlignerConfig &config,
                      AnnotationBuffer *annotations, std::vector<Alignment>&& candidates,
                      const std::function<void(Alignment&&)> &callback) {
     using Columns = AnnotationBuffer::Columns;
@@ -97,11 +97,13 @@ void emit_alignments(const Query &query, const DBGAlignerConfig &config,
     std::map<AnnotationBuffer::Column, DBGAlignerConfig::score_t> best_scores;
     const auto best_score = unique.empty() ? 0 : score_match(unique.front(), config);
     size_t unlabeled_count = 0;
+    bool emitted = false;
     for (auto &aln : unique) {
         if (!annotations) {
             if (score_match(aln, config) < best_score * config.rel_score_cutoff)
                 break;
             if (unlabeled_count++ == config.num_alternative_paths) break;
+            emitted = true;
             callback(std::move(aln));
             continue;
         }
@@ -119,8 +121,10 @@ void emit_alignments(const Query &query, const DBGAlignerConfig &config,
         if (columns.empty()) continue;
         if (columns.size() != all_columns.size())
             aln = relabel(aln, std::move(columns), std::move(coords));
+        emitted = true;
         callback(std::move(aln));
     }
+    return emitted;
 }
 
 AnnotationBuffer* annotation_buffer(const Seeder &seeder) {
@@ -271,12 +275,12 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
                 AnnotationBuffer::CoordinateSet(result.label_coordinates));
         }
     }
-    if (!config.post_chain_alignments && candidates.empty()
-            && !dynamic_cast<const DBGSuccinct*>(&query.get_graph())
-            && config.min_seed_length && config.min_seed_length < query.get_graph().get_k())
-        return false;
-    emit_alignments(query, config, annotations, std::move(candidates), callback);
-    return true;
+    if (emit_alignments(query, config, annotations, std::move(candidates), callback))
+        return true;
+    // A full-k candidate rejected by the final filters must not suppress
+    // shorter seeds. Some labeled sub-k searches also need the fallback.
+    return config.post_chain_alignments || !config.min_seed_length
+        || config.min_seed_length >= query.get_graph().get_k();
 }
 
 void align_query(const Query &query,
@@ -2491,10 +2495,20 @@ void align_fwd(const DeBruijnGraph &base_graph,
         cache.emplace(base_graph, false);
     auto *cache_ptr = shared_cache ? shared_cache : (cache ? &*cache : nullptr);
 
+    // A partial seed leaves several reference positions inside start_node.
+    // They need distinct wavefront keys until traversal reaches the node end.
+    const auto max_node = suffix.empty() ? 0 : base_graph.max_index();
+    if (suffix.size() > std::numeric_limits<DeBruijnGraph::node_index>::max() - max_node)
+        throw std::length_error("Graph is too large for partial-node alignment states");
+    const auto virtual_begin = max_node + 1;
+    auto suffix_node = [&](size_t dist) {
+        return dist < suffix.size() ? virtual_begin + dist : start_node;
+    };
+
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             assert(cur_target);
-            assert(dist > suffix.size() || node == start_node);
+            assert(dist > suffix.size() || node == suffix_node(dist));
             if (dist < suffix.size())
                 return true;
 
@@ -2523,19 +2537,23 @@ void align_fwd(const DeBruijnGraph &base_graph,
             const auto &callback, const auto &terminate) {
 
             assert(cur_target);
-            assert(dist > suffix.size() || node == start_node);
+            assert(dist > suffix.size() || node == suffix_node(dist));
 
             auto begin = rend.base();
             auto end = rbegin.base();
             assert(begin <= end);
 
-            for (size_t i = dist; !terminate() && i < suffix.size() && begin != end; ++i, ++begin) {
-                if (*begin == suffix[i]) {
+            for (; !terminate() && dist < suffix.size() && begin != end; ++dist, ++begin) {
+                if (*begin == suffix[dist]) {
+                    node = suffix_node(dist + 1);
                     callback(node, cur_target);
                 } else {
                     return;
                 }
             }
+
+            if (dist < suffix.size() || terminate())
+                return;
 
             if (begin != end) {
                 AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
@@ -2570,8 +2588,8 @@ void align_fwd(const DeBruijnGraph &base_graph,
 
             assert(cur_target);
             if (dist < suffix.size()) {
-                assert(node == start_node);
-                callback(node, suffix[dist], cur_target);
+                assert(node == suffix_node(dist));
+                callback(suffix_node(dist + 1), suffix[dist], cur_target);
             } else {
                 AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
                                      cache_ptr);
@@ -2591,7 +2609,7 @@ void align_fwd(const DeBruijnGraph &base_graph,
             }
         },
         config,
-        start_node,
+        suffix_node(0),
         num_matches,
         query_window.rbegin(), query_window.rend(),
         max_dist,
