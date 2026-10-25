@@ -82,7 +82,7 @@ class Extender {
     struct TraversalCaches;
     // Raw topology is immutable throughout a query. Reuse it between seed
     // extensions; label/coordinate filtering remains per search state.
-    std::unique_ptr<TraversalCaches> traversal_caches_;
+    mutable std::unique_ptr<TraversalCaches> traversal_caches_;
 
   protected:
     const Query &query_;

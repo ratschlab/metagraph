@@ -143,8 +143,8 @@ Json::Value process_align_request(const std::string &received_message,
 
     config.alignment_chain = json.get("chain_alignments", config.alignment_chain).asBool();
     config.alignment_two_sided = json.get("two_sided", config.alignment_two_sided).asBool();
-    config.alignment_extend_chains = json.get("extend_chains", true).asBool();
-    config.alignment_connect_anchors = json.get("connect_anchors", true).asBool();
+    config.alignment_extend_chains = json.get("extend_chains", config.alignment_extend_chains).asBool();
+    config.alignment_connect_anchors = json.get("connect_anchors", config.alignment_connect_anchors).asBool();
 
     auto aligner_config = initialize_aligner_config(config, graph);
 

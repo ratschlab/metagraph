@@ -274,6 +274,103 @@ TEST(CanonicalBounds, InvalidNodesAreAbsent) {
     ASSERT_NE(DeBruijnGraph::npos, node);
     EXPECT_TRUE(graph.in_graph(node));
 }
+
+TEST(CanonicalSubKSeeds, IncludesEveryMatchingSuffixRangeNode) {
+    for (bool mask_dummy : { false, true }) {
+        SCOPED_TRACE(mask_dummy);
+        auto base = std::make_shared<DBGSuccinct>(5, DeBruijnGraph::PRIMARY);
+        base->add_sequence("AACGT");
+        base->add_sequence("CCCGT");
+        if (mask_dummy)
+            base->mask_dummy_kmers(1, false);
+        CanonicalDBG graph(base);
+        Query query(graph, "ACG");
+        DBGAlignerConfig config;
+        config.min_seed_length = 3;
+        config.max_seed_length = 5;
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        std::set<std::string> spellings;
+        for (const auto &anchor : ExactSeeder(query, config).get_anchors()) {
+            EXPECT_FALSE(anchor.get_orientation());
+            EXPECT_EQ("ACG", anchor.get_seed());
+            EXPECT_TRUE(anchor.is_spelling_valid(graph));
+            spellings.insert(anchor.get_path_spelling());
+        }
+        EXPECT_EQ((std::set<std::string>{ "ACGGG", "ACGTT" }), spellings);
+    }
+}
+
+TEST(CanonicalAlternatives, MirrorsDoNotDisplaceDistinctPaths) {
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        SCOPED_TRACE(mode);
+        DBGSuccinct graph(5, mode);
+        for (const auto *sequence : { "AACGTAC", "AACGTTC", "GTACGTT", "GAACGTT" })
+            graph.add_sequence(sequence);
+        graph.mask_dummy_kmers(1, false);
+        DBGAlignerConfig config;
+        config.set_scoring_matrix();
+        config.min_seed_length = config.max_seed_length = 5;
+        config.num_alternative_paths = 2;
+        config.rel_score_cutoff = 0;
+        config.seed_complexity_filter = false;
+        Query query(graph, "AACGTAC");
+        ExactSeeder seeder(query, config);
+        Extender extender(query, config);
+        using Result = std::pair<bool, std::string>;
+        std::set<Result> results;
+        align_query(query, seeder, extender, [&](Alignment&& alignment) {
+            results.emplace(alignment.get_orientation(), alignment.get_spelling());
+        });
+        const std::set<Result> expected = mode == DeBruijnGraph::BASIC
+            ? std::set<Result>{ { false, "AACGTAC" }, { true, "GTACGTT" } }
+            : std::set<Result>{ { false, "AACGTAC" }, { false, "AACGTTC" } };
+        EXPECT_EQ(expected, results);
+    }
+}
+
+TEST(CanonicalAlternatives, AsymmetricScoresKeepTheirOrientation) {
+    for (bool end_bonuses : { false, true }) {
+        SCOPED_TRACE(end_bonuses);
+        DBGAlignerConfig config;
+        config.set_scoring_matrix();
+        config.min_seed_length = config.max_seed_length = 5;
+        config.num_alternative_paths = 2;
+        config.rel_score_cutoff = 0;
+        config.seed_complexity_filter = false;
+        if (end_bonuses) {
+            config.left_end_bonus = 10;
+            config.right_end_bonus = 0;
+        } else {
+            config.score_matrix['T']['T'] = 9;
+        }
+        using Result = std::tuple<bool, int32_t, std::string, std::string>;
+        auto run = [&](DeBruijnGraph::Mode mode) {
+            DBGSuccinct graph(5, mode);
+            // The BASIC control stores both strands explicitly, with no mirror
+            // normalization; its scoring and available paths are otherwise equal.
+            graph.add_sequence("AACGTAC");
+            graph.add_sequence("GTACGTT");
+            graph.mask_dummy_kmers(1, false);
+            Query query(graph, end_bonuses ? "AACGTACNNNNNNNNNNNNNNNNNNNN" : "AACGTAC");
+            ExactSeeder seeder(query, config);
+            Extender extender(query, config);
+            std::set<Result> results;
+            align_query(query, seeder, extender, [&](Alignment&& alignment) {
+                results.emplace(alignment.get_orientation(), score_match(alignment, config),
+                                alignment.get_cigar().to_string(), alignment.get_spelling());
+            });
+            return results;
+        };
+        const auto expected = run(DeBruijnGraph::BASIC);
+        ASSERT_EQ(2u, expected.size());
+        if (!end_bonuses) {
+            ASSERT_TRUE(std::any_of(expected.begin(), expected.end(),
+                                   [](const auto &result) { return std::get<0>(result); }));
+        }
+        EXPECT_EQ(expected, run(DeBruijnGraph::CANONICAL));
+    }
+}
 #endif
 
 void run_alignment(const DeBruijnGraph &graph,
@@ -563,6 +660,61 @@ TYPED_TEST(DBGAlignerRedoneTest, SearchLimitsRetainValidPartialAlignments) {
         }
     }
 }
+
+TYPED_TEST(DBGAlignerRedoneTest, ZeroSeedLengthUsesGraphK) {
+    const std::string reference = "CGTACGATGGCATTCAGGCTAACGATCGATCG";
+    auto graph = build_graph_batch<TypeParam>(11, {reference}, DeBruijnGraph::BASIC);
+    DBGAlignerConfig config;
+    config.min_seed_length = 0;
+    config.max_seed_length = 11;
+    config.seed_complexity_filter = false;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    Query short_query(*graph, reference.substr(0, 10));
+    EXPECT_TRUE(ExactSeeder(short_query, config).get_anchors().empty());
+    Query query(*graph, reference.substr(0, 15) + "A" + reference.substr(16));
+    auto defaults = ExactSeeder(query, config).get_anchors();
+    config.min_seed_length = graph->get_k();
+    auto explicit_k = ExactSeeder(query, config).get_anchors();
+    EXPECT_EQ(explicit_k, defaults);
+    ASSERT_FALSE(defaults.empty());
+    for (const auto &anchor : defaults) {
+        EXPECT_EQ(graph->get_k(), anchor.get_seed().size());
+        EXPECT_FALSE(anchor.empty());
+    }
+}
+
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, SubKSeedsHonorComplexityFilter) {
+    if constexpr (std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+        for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL}) {
+            SCOPED_TRACE(mode);
+            auto graph = build_graph_batch<TypeParam>(11, {std::string(31, 'A')}, mode);
+            Query query(*graph, std::string(9, 'A'));
+            DBGAlignerConfig config;
+            config.min_seed_length = 9;
+            config.max_seed_length = std::numeric_limits<size_t>::max();
+            config.forward_and_reverse_complement = false;
+            EXPECT_TRUE(ExactSeeder(query, config).get_anchors().empty());
+            config.seed_complexity_filter = false;
+            EXPECT_FALSE(ExactSeeder(query, config).get_anchors().empty());
+
+            // The column seeder keeps full MEMs, even when their individual
+            // k-mers have low complexity. Preserve that behavior here too.
+            Query full_query(*graph, std::string(20, 'A'));
+            config.seed_complexity_filter = true;
+            EXPECT_FALSE(ExactSeeder(full_query, config).get_anchors().empty());
+            for (size_t max_seed_length : {size_t(0), graph->get_k()}) {
+                SCOPED_TRACE(max_seed_length);
+                config.max_seed_length = max_seed_length;
+                config.seed_complexity_filter = true;
+                EXPECT_TRUE(ExactSeeder(full_query, config).get_anchors().empty());
+                config.seed_complexity_filter = false;
+                EXPECT_FALSE(ExactSeeder(full_query, config).get_anchors().empty());
+            }
+        }
+    }
+}
+#endif
 
 TYPED_TEST(DBGAlignerRedoneTest, SeedLimitRejectsAmbiguousLoci) {
     if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
@@ -1863,6 +2015,41 @@ TEST(AlignmentExtension, KeepsBetterPathsAfterACompleteQuery) {
                                                          alignment.get_query()));
             }, !backward, backward);
             EXPECT_GT(found, 0u);
+        }
+    }
+}
+
+TEST(AlignmentChaining, RetainsEarlierSeedsAfterConnectionLimit) {
+    const std::string reference =
+        "CGGCGCGAACTACCGCTTGATTCTTTAATCCATAAGATATAACTCGATACTCAGACCCAT";
+    std::string sequence = reference;
+    sequence.at(17) = 'A';
+    sequence.at(38) = 'C';
+    auto graph = build_graph_batch<DBGSSHash>(7, {reference});
+    Query query(*graph, sequence);
+    DBGAlignerConfig config{};
+    config.min_seed_length = 7;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.seed_complexity_filter = false;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    const auto seeds = ExactSeeder(query, config).get_inexact_anchors();
+    ASSERT_EQ(3u, seeds.size());
+
+    config.chain_alignments = true;
+    for (bool limit_ram : {false, true}) {
+        SCOPED_TRACE(limit_ram);
+        config.max_ram_per_alignment = limit_ram ? 0 : 100;
+        config.max_nodes_per_seq_char = limit_ram ? 10000 : 0;
+        auto results = ExactSeeder(query, config).get_inexact_anchors();
+        ASSERT_EQ(seeds.size(), results.size());
+        std::sort(results.begin(), results.end(), [](const auto &a, const auto &b) {
+            return a.get_clipping() < b.get_clipping();
+        });
+        for (size_t i = 0; i < seeds.size(); ++i) {
+            EXPECT_EQ(seeds[i].get_cigar(), results[i].get_cigar());
+            EXPECT_EQ(seeds[i].get_spelling(), results[i].get_spelling());
+            EXPECT_TRUE(results[i].is_spelling_valid(*graph));
         }
     }
 }

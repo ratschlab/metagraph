@@ -878,4 +878,38 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsCycle) {
     }
 }
 
+TEST(LabeledChaining, ConnectionUsesBestScoreAcrossReferenceLengths) {
+    const std::string sequence = "ACGTTAGGACTTTCAGAC";
+    const std::string longer = "ACGTTAGTATTTTCAGAC";
+    const std::string shorter = "ACGTTAGGTTTCAGAC";
+    auto annotated = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+        7, {longer, shorter}, {"sample", "sample"}, DeBruijnGraph::BASIC, true, {0, 100});
+    const auto &graph = annotated->get_graph();
+    AnnotationBuffer buffer(graph, annotated->get_annotator());
+    Query query(graph, sequence);
+    DBGAlignerConfig config{};
+    config.min_seed_length = 7;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = false;
+    config.seed_complexity_filter = false;
+    config.chain_alignments = true;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+
+    const auto results = LabeledSeeder(buffer, query, config).get_inexact_anchors();
+    ASSERT_FALSE(results.empty());
+    const auto best = std::max_element(results.begin(), results.end(), [&](const auto &a, const auto &b) {
+        return score_match(a, config) < score_match(b, config);
+    });
+    // The shorter path reaches the target first (cost 18, score 25), but two
+    // mismatches on the longer path score 26 despite their greater cost 20.
+    EXPECT_EQ(26, score_match(*best, config));
+    EXPECT_EQ("7=1X1=1X8=", best->get_cigar().to_string());
+    EXPECT_EQ(longer, best->get_spelling());
+    EXPECT_EQ(AnnotationBuffer::CoordinateSet({{0}}), best->get_coords());
+    for (const auto &alignment : results) {
+        EXPECT_TRUE(alignment.is_spelling_valid(graph));
+        EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), alignment.get_query()));
+    }
+}
+
 } // namespace

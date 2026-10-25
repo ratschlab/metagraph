@@ -41,8 +41,8 @@ align_redone::DBGAlignerConfig initialize_aligner_config(const Config &config,
 
     align_redone::DBGAlignerConfig c = {
         .num_alternative_paths = config.alignment_num_alternative_paths,
-        .min_seed_length = std::min(config.alignment_min_seed_length,
-                                    graph.get_k()),
+        .min_seed_length = config.alignment_min_seed_length
+            ? std::min(config.alignment_min_seed_length, graph.get_k()) : graph.get_k(),
         .max_seed_length = config.alignment_max_seed_length,
         .max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus,
         .min_path_score = config.alignment_min_path_score,

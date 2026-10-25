@@ -148,6 +148,12 @@ class TestAPIRaw(TestAPIBase):
                 lowercase = self.raw_post_request('align', json.dumps(payload))
                 self.assertEqual(lowercase.status_code, 200, lowercase.text)
                 self.assertEqual(response.json(), lowercase.json())
+                # Zero selects the graph's k, which is six in this fixture.
+                payload['FASTA'] = '>query\n' + query
+                payload['seed_length'] = 0
+                automatic_seed = self.raw_post_request('align', json.dumps(payload))
+                self.assertEqual(automatic_seed.status_code, 200, automatic_seed.text)
+                self.assertEqual(response.json(), automatic_seed.json())
 
     def test_api_raw_search_rejects_alignment_tuning(self):
         for option in ("extend_chains", "connect_anchors", "chain_alignments", "two_sided"):

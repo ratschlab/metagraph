@@ -82,6 +82,43 @@ class TestDNAAlign(TestingBase):
         self.assertIn('Post-chaining alignments with coordinates not supported',
                       result.stderr.decode())
 
+        result = subprocess.run(command + ['--align-post-chain', '--json'],
+                                stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('JSON output for chains not supported', result.stderr.decode())
+
+        exact_query = self.tempdir.name + '/exact.fa'
+        with open(exact_query, 'w') as out:
+            out.write('>exact\nTGAGGATCAG\n')
+        result = subprocess.run(command[:-1] + [exact_query, '--align-chain',
+                                                '--align-no-connect-anchors', '--json'],
+                                stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        record = json.loads(result.stdout)
+        self.assertEqual(record['annotation']['cigar'], '10=')
+        self.assertEqual(record['score'], 20)
+
+    @parameterized.expand([('hashfast', '.hashfastdbg'), ('sshash', '.sshashdbg')])
+    def test_post_chain_keeps_unmapped_reads(self, representation, extension):
+        reference = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        with open(reference, 'w') as out:
+            out.write('>reference\nAACGTCAGTACCTGATGCATGCA\n')
+        with open(query, 'w') as out:
+            out.write('>miss\n' + 'N' * 23 + '\n>short\nAA\n')
+        graph_base = self.tempdir.name + '/graph'
+        result = subprocess.run([METAGRAPH, 'build', '--graph', representation, '-k', '7',
+                                 '-o', graph_base, reference], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        result = subprocess.run([METAGRAPH, 'align', '--align-post-chain',
+                                 '--align-min-seed-length', '5', '--align-only-forwards',
+                                 '--align-min-exact-match', '0', '-i', graph_base + extension,
+                                 query], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        rows = [line.split('\t') for line in result.stdout.decode().splitlines()]
+        self.assertEqual([row[0] for row in rows], ['miss', 'short'])
+        self.assertTrue(all(row[2:4] == ['*', '*'] for row in rows))
+
     def test_relative_cutoff_preserves_exact_transcript(self):
         # Its exact path has fragmented seeds, while overlapping transcripts
         # have longer individual seeds. A cutoff before extension loses it.
