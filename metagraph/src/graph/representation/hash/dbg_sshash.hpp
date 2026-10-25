@@ -2,6 +2,8 @@
 #define __DBG_SSHASH_HPP__
 
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <variant>
 #include <filesystem>
 
@@ -143,6 +145,18 @@ class DBGSSHash : public DeBruijnGraph {
 
     sdsl::bit_vector get_invalid_char_mask(std::string_view sequence) const;
 
+    // Call each node whose prefix matches at least minimum query characters,
+    // reporting its longest matching prefix. Invalid characters end a match.
+    // Return the total number of matching nodes, even when it exceeds maximum
+    // and suppresses all callbacks. The prefix index is lazy
+    // and is not serialized. Canonical DNA includes both orientations; protein
+    // requires BASIC mode. A zero minimum is treated as one.
+    size_t call_nodes_with_prefix_matching(
+            std::string_view query,
+            size_t minimum,
+            const std::function<void(node_index, size_t)>& callback,
+            size_t maximum = std::numeric_limits<size_t>::max()) const;
+
     static constexpr node_index sshash_to_graph_index(uint64_t idx) {
         return idx + 1;
     }
@@ -152,6 +166,10 @@ class DBGSSHash : public DeBruijnGraph {
     }
 
   private:
+    struct SeedIndexCache;
+    // Copies share only immutable node ordering; a successful load replaces it.
+    std::shared_ptr<SeedIndexCache> seed_index_cache_;
+
     static const std::string alphabet_;
     dict_t dict_;
     size_t k_;
