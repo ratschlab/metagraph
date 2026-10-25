@@ -278,6 +278,56 @@ class MatchFractionAlignment : public ::testing::Test {};
 using MatchFractionGraphs = ::testing::Types<DBGSuccinct, DBGSSHash>;
 TYPED_TEST_SUITE(MatchFractionAlignment, MatchFractionGraphs);
 
+#if _DNA_GRAPH
+TYPED_TEST(MatchFractionAlignment, DefaultSubkSearchKeepsLabelsAndCoordinates) {
+    const std::string reference =
+        "ATGTTAACTTGGCGGAGTTCGCTGTGGCTGCAGGGGACCAGATGCTTTACAGGAGTGAGGACATCCAGCTAGATTACAAA";
+    std::string changed = reference;
+    changed[23] = 'A';
+    DBGAlignerConfig config;
+    config.min_seed_length = 19;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.forward_and_reverse_complement = config.chain_alignments = config.two_sided = false;
+    config.min_exact_match = 0.7;
+    config.rel_score_cutoff = 0.95;
+    config.xdrop = 27;
+    config.max_nodes_per_seq_char = 5;
+    config.max_ram_per_alignment = 200;
+    config.gap_opening_penalty = -6;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    for (bool coordinates : {false, true}) {
+        auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+            31, {reference}, {"reference"}, DeBruijnGraph::BASIC, coordinates);
+        const auto &graph = annotated->get_graph();
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        for (bool short_query : {true, false}) {
+            SCOPED_TRACE(::testing::Message() << coordinates << ", short=" << short_query);
+            const auto sequence = short_query ? reference.substr(0, 23) : changed;
+            Query query(graph, sequence);
+            LabeledSeeder seeder(buffer, query, config);
+            LabeledExtender extender(buffer, query, config);
+            std::vector<Alignment> results;
+            align_query(query, seeder, extender, [&](Alignment&& a) { results.push_back(std::move(a)); });
+            ASSERT_EQ(1u, results.size());
+            EXPECT_EQ(short_query ? 56 : 165, score_match(results[0], config));
+            EXPECT_EQ(short_query ? "23=" : "23=1X56=", results[0].get_cigar().to_string());
+            EXPECT_EQ(short_query ? sequence : reference, results[0].get_spelling());
+            ASSERT_FALSE(results[0].get_label_classes().empty());
+            const auto &columns = buffer.get_cached_column_set(results[0].get_label_classes()[0]);
+            ASSERT_EQ(1u, columns.size());
+            for (auto label_class : results[0].get_label_classes())
+                EXPECT_EQ(columns, buffer.get_cached_column_set(label_class));
+            EXPECT_EQ("reference", annotated->get_annotator().get_label_encoder().decode(columns[0]));
+            if (coordinates) {
+                ASSERT_EQ(1u, results[0].get_coords().size());
+                EXPECT_EQ(AnnotationBuffer::Tuple({0}), results[0].get_coords()[0]);
+            }
+        }
+    }
+}
+#endif
+
 std::pair<std::string, std::string> sparse_seed_sequences() {
     std::mt19937 random(73);
     std::string reference(73, 'A');

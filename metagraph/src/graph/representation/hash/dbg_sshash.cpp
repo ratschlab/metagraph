@@ -1,8 +1,11 @@
 #include "dbg_sshash.hpp"
 
-#include <memory>
+#include <algorithm>
+#include <bit>
+#include <mutex>
 #include <type_traits>
 
+#include <sdsl/int_vector.hpp>
 #include <sdsl/memory_management.hpp>
 
 #include <streaming_query.hpp>
@@ -43,11 +46,133 @@ const std::string DBGSSHash::alphabet_ = kmer::alphabets::kAlphabetProtein;
 const std::string DBGSSHash::alphabet_ = kmer::alphabets::kAlphabetDNA;
 #endif
 
+// Only node IDs survive construction, so copies may share the order without
+// retaining references to any particular graph or dictionary.
+struct DBGSSHash::SeedIndexCache {
+    std::once_flag initialized;
+    sdsl::int_vector<> prefix_order;
+
+    template <class Dictionary>
+    void build(const DBGSSHash& graph, const Dictionary& dictionary) {
+        using Kmer = typename Dictionary::kmer_type;
+        using Word = decltype(Kmer{}.bits);
+        const size_t k = graph.get_k();
+        const bool canonical = graph.get_mode() == CANONICAL;
+        if (graph.get_mode() != BASIC && !canonical)
+            throw std::invalid_argument("Prefix lookup requires BASIC or CANONICAL SSHash");
+        if constexpr (!Kmer::has_reverse_complement) {
+            if (canonical)
+                throw std::invalid_argument("Canonical prefix lookup requires reverse complements");
+        }
+
+        std::vector<std::pair<Word, node_index>> entries;
+        entries.reserve(graph.num_nodes());
+        for (auto it = dictionary.begin(); it.has_next();) {
+            auto [id, word] = it.next();
+            entries.emplace_back(word.bits, sshash_to_graph_index(id));
+            if (canonical) {
+                const auto reverse_node = graph.reverse_complement(sshash_to_graph_index(id));
+                if (reverse_node != sshash_to_graph_index(id)) {
+                    word.reverse_complement_inplace(k);
+                    entries.emplace_back(word.bits, reverse_node);
+                }
+            }
+        }
+        // Characters occupy low bits first. Reverse them so numeric order is
+        // lexicographic in the encoded alphabet, with node ID breaking ties.
+        for (auto& [bits, node] : entries) {
+            Kmer word;
+            word.bits = bits;
+            Kmer reversed;
+            for (size_t i = 0; i < k; ++i)
+                reversed.set(k - i - 1, word.at(i));
+            bits = reversed.bits;
+        }
+        // Pair's C++20 comparison can narrow uint256_t through its uint64_t conversion.
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            return a.first == b.first ? a.second < b.second : a.first < b.first;
+        });
+        const auto width = std::max<unsigned>(1, std::bit_width(graph.max_index()));
+        prefix_order = sdsl::int_vector<>(entries.size(), 0, width);
+        for (size_t i = 0; i < entries.size(); ++i)
+            prefix_order[i] = entries[i].second;
+    }
+
+    template <class Dictionary>
+    size_t call(const DBGSSHash& graph, const Dictionary& dictionary,
+              std::string_view query, size_t minimum,
+              const std::function<void(node_index, size_t)>& callback, size_t maximum) {
+        using Kmer = typename Dictionary::kmer_type;
+        const auto valid_end = std::find_if(query.begin(), query.end(),
+                                           [](char c) { return !Kmer::is_valid(c); });
+        query = query.substr(0, valid_end - query.begin());
+        if (query.size() < minimum || !dictionary.num_kmers())
+            return 0;
+        std::call_once(initialized, [&] { build(graph, dictionary); });
+
+        Kmer wanted;
+        for (size_t i = 0; i < query.size(); ++i)
+            wanted.set(i, Kmer::char_to_uint(query[i]));
+        const size_t base_nodes = dictionary.num_kmers();
+        auto word_at = [&](node_index node) {
+            const bool reverse = node > base_nodes;
+            const auto id = graph_index_to_sshash(node) - (reverse ? base_nodes : 0);
+            auto word = dictionary.at_kmer_id(id).next().second;
+            if (reverse) word.reverse_complement_inplace(graph.get_k());
+            return word;
+        };
+        auto compare = [&](node_index node) {
+            const Kmer candidate = word_at(node);
+            for (size_t i = 0; i < minimum; ++i) {
+                if (candidate.at(i) < wanted.at(i)) return -1;
+                if (candidate.at(i) > wanted.at(i)) return 1;
+            }
+            return 0;
+        };
+        auto bound = [&](bool upper) {
+            size_t first = 0, last = prefix_order.size();
+            while (first < last) {
+                const auto middle = first + (last - first) / 2;
+                const int comparison = compare(prefix_order[middle]);
+                if (comparison < 0 || (upper && comparison == 0)) first = middle + 1;
+                else last = middle;
+            }
+            return first;
+        };
+        const auto first = bound(false), last = bound(true);
+        if (last - first > maximum)
+            return last - first;
+        for (size_t i = first; i < last; ++i) {
+            const node_index node = prefix_order[i];
+            const Kmer candidate = word_at(node);
+            size_t length = minimum;
+            while (length < query.size() && candidate.at(length) == wanted.at(length))
+                ++length;
+            callback(node, length);
+        }
+        return last - first;
+    }
+};
+
+size_t DBGSSHash::call_nodes_with_prefix_matching(
+        std::string_view query, size_t minimum,
+        const std::function<void(node_index, size_t)>& callback, size_t maximum) const {
+    query = query.substr(0, k_);
+    minimum = std::max(size_t(1), minimum);
+    if (query.size() < minimum)
+        return 0;
+    return std::visit([&](const auto& dictionary) {
+        return seed_index_cache_->call(*this, dictionary, query, minimum, callback, maximum);
+    }, dict_);
+}
+
 size_t DBGSSHash::dict_size() const {
     return std::visit([](const auto& d) { return d.num_kmers(); }, dict_);
 }
 
-DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
+DBGSSHash::DBGSSHash(size_t k, Mode mode)
+      : seed_index_cache_(std::make_shared<SeedIndexCache>()),
+        k_(k), num_nodes_(0), mode_(mode) {
     if (mode == PRIMARY)
         mode_ = CANONICAL;
 

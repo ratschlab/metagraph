@@ -1,4 +1,5 @@
 #include <fstream>
+#include <future>
 #include <map>
 #include <set>
 #include <sstream>
@@ -94,6 +95,119 @@ TEST(SSHashFixtures, HighKPreservesStrandsAndBranches) {
 }
 #endif
 
+using PrefixMatches = std::vector<std::pair<mtg::graph::DeBruijnGraph::node_index, size_t>>;
+
+PrefixMatches prefix_matches(const mtg::graph::DBGSSHash &graph, std::string_view query,
+                             size_t minimum, size_t maximum = SIZE_MAX) {
+    PrefixMatches result;
+    graph.call_nodes_with_prefix_matching(query, minimum,
+        [&](auto node, size_t length) { result.emplace_back(node, length); }, maximum);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+PrefixMatches expected_prefix_matches(const mtg::graph::DBGSSHash &graph,
+                                      std::string_view query, size_t minimum) {
+    PrefixMatches result;
+    graph.call_nodes([&](auto node) {
+        const auto sequence = graph.get_node_sequence(node);
+        size_t length = 0;
+        while (length < query.size() && length < sequence.size()
+                && query[length] == sequence[length]) ++length;
+        if (length >= minimum) result.emplace_back(node, length);
+    });
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+TEST(SSHashPrefix, MatchesRealNodesAcrossWordWidths) {
+    using mtg::graph::DBGSSHash;
+    using Kmer = DBGSSHash::kmer_t<uint64_t>;
+    std::mt19937 random(672);
+    std::string sequence(150, 'A');
+    for (char &c : sequence) c = Kmer::alphabet[random() % Kmer::alphabet_size];
+    std::vector<DBGSSHash::Mode> modes { DBGSSHash::BASIC };
+#if ! _PROTEIN_GRAPH
+    modes.push_back(DBGSSHash::CANONICAL);
+#endif
+    for (auto mode : modes) {
+        size_t word_bits = 64;
+        for (size_t k : { size_t(7), size_t(64 / Kmer::bits_per_char + 1),
+                         size_t(128 / Kmer::bits_per_char + 1) }) {
+            SCOPED_TRACE(::testing::Message() << "k=" << k << " mode=" << mode);
+            auto owner = mtg::test::build_graph<DBGSSHash>(k, { sequence }, mode);
+            const auto &graph = static_cast<const DBGSSHash&>(*owner);
+            ASSERT_GT(graph.num_nodes(), 0u);
+            std::visit([&](const auto &dict) {
+                using StoredKmer = typename std::decay_t<decltype(dict)>::kmer_type;
+                EXPECT_EQ(word_bits, StoredKmer::uint_kmer_bits);
+            }, graph.data());
+            graph.call_nodes([&](auto node) {
+                const auto query = graph.get_node_sequence(node);
+                for (size_t minimum : { size_t(3), k - 1, k })
+                    EXPECT_EQ(expected_prefix_matches(graph, query, minimum),
+                              prefix_matches(graph, query, minimum)) << query;
+            });
+            word_bits *= 2;
+        }
+    }
+}
+
+TEST(SSHashPrefix, CapsInvalidInputAndConcurrentInitialization) {
+    using mtg::graph::DBGSSHash;
+    auto owner = mtg::test::build_graph<DBGSSHash>(3, { "ACGT", "ACCT" }, DBGSSHash::BASIC);
+    const auto &graph = static_cast<const DBGSSHash&>(*owner);
+    const auto expected = expected_prefix_matches(graph, "ACG", 2);
+    ASSERT_EQ(2u, expected.size());
+    // Make the first prefix lookups race to initialize the shared cache.
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<PrefixMatches>> workers;
+    for (size_t i = 0; i < 4; ++i)
+        workers.push_back(std::async(std::launch::async, [&] {
+            ready.wait();
+            return prefix_matches(graph, "ACG", 2);
+        }));
+    start.set_value();
+    for (auto &worker : workers) EXPECT_EQ(expected, worker.get());
+    for (size_t maximum : { size_t(0), size_t(1), size_t(2) }) {
+        size_t callbacks = 0;
+        EXPECT_EQ(2u, graph.call_nodes_with_prefix_matching("ACG", 2,
+            [&](auto, size_t) { ++callbacks; }, maximum));
+        EXPECT_EQ(maximum < 2 ? 0u : 2u, callbacks);
+    }
+    EXPECT_EQ(expected, prefix_matches(graph, "ACG", 2, 2));
+    EXPECT_EQ(prefix_matches(graph, "AC", 2), prefix_matches(graph, "AC#G", 2));
+    EXPECT_EQ(prefix_matches(graph, "ACG", 1), prefix_matches(graph, "ACG", 0));
+    EXPECT_TRUE(prefix_matches(graph, "A#CG", 2).empty());
+    EXPECT_TRUE(prefix_matches(graph, "A", 2).empty());
+    EXPECT_TRUE(prefix_matches(graph, "", 0).empty());
+    EXPECT_TRUE(prefix_matches(DBGSSHash(3), "ACG", 2).empty());
+    const auto no_match = [](auto, size_t) { ADD_FAILURE() << "Unexpected prefix match"; };
+    EXPECT_EQ(0u, graph.call_nodes_with_prefix_matching("", 0, no_match));
+    EXPECT_EQ(0u, graph.call_nodes_with_prefix_matching("A#CG", 2, no_match));
+    EXPECT_EQ(0u, DBGSSHash(3).call_nodes_with_prefix_matching("ACG", 2, no_match));
+}
+
+TEST(SSHashPrefix, SuccessfulReloadReplacesCachedOrder) {
+    using mtg::graph::DBGSSHash;
+    DBGSSHash loaded(3);
+    for (const auto &[k, sequence] : { std::pair<size_t, std::string>{3, "ACGT"},
+                                     {5, "GACTGAC"} }) {
+        auto owner = mtg::test::build_graph<DBGSSHash>(k, { sequence }, DBGSSHash::BASIC);
+        const auto &graph = static_cast<const DBGSSHash&>(*owner);
+        std::stringstream bytes;
+        graph.serialize(bytes);
+        ASSERT_TRUE(loaded.load(bytes));
+        EXPECT_EQ(k, loaded.get_k());
+        for (const auto &query : { std::string("ACGT"), std::string("GACTGAC") })
+            EXPECT_EQ(expected_prefix_matches(graph, query, 2), prefix_matches(loaded, query, 2));
+        std::stringstream after;
+        loaded.serialize(after);
+        EXPECT_EQ(bytes.str(), after.str());
+    }
+}
+
 TEST(SSHashFormat, AcceptsSameMajorVersion) {
     using mtg::graph::DBGSSHash;
     auto graph = mtg::test::build_graph<DBGSSHash>(3, { "ACGT" }, DBGSSHash::BASIC);
@@ -147,6 +261,8 @@ TEST(SSHashFormat, FailedReloadPreservesGraph) {
     const auto serialized = bytes.str();
     DBGSSHash loaded(3);
     ASSERT_TRUE(loaded.load(bytes));
+    const auto prefixes = prefix_matches(loaded, "ACG", 2);
+    ASSERT_FALSE(prefixes.empty());
 
     const size_t header_size = 2 * sizeof(size_t) + sizeof(DBGSSHash::Mode);
     auto old_version = serialized;
@@ -160,6 +276,7 @@ TEST(SSHashFormat, FailedReloadPreservesGraph) {
         loaded.serialize(after);
         EXPECT_EQ(serialized, after.str());
         EXPECT_TRUE(loaded.find("ACGT"));
+        EXPECT_EQ(prefixes, prefix_matches(loaded, "ACG", 2));
     }
 }
 

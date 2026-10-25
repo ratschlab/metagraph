@@ -27,6 +27,7 @@ class Seeder {
 
   private:
     bool align_fast(const std::function<void(Alignment&&)> &callback) const;
+    std::unique_ptr<align::IDBGAligner> make_column_aligner() const;
     friend void align_query(const Query&, const Seeder&, const Extender&,
                             const std::function<void(Alignment&&)>&, bool);
     friend void align_query(const Query&, const Seeder&,
@@ -76,7 +77,8 @@ class Extender {
     void extend(const Alignment &aln,
                 const std::function<void(Alignment&&)> &callback,
                 bool no_bwd = false,
-                bool no_fwd = false) const;
+                bool no_fwd = false,
+                DBGAlignerConfig::score_t score_floor = std::numeric_limits<DBGAlignerConfig::score_t>::min()) const;
 
   private:
     struct TraversalCaches;
