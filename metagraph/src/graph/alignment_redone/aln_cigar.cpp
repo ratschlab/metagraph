@@ -79,13 +79,15 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 if (i && i + 1 != cigar_.size()) {
                     // Post-chaining skips unaligned query bases beside a
                     // graph jump, represented by G or a deleted sentinel.
-                    const auto previous = cigar_[i - 1].first;
-                    const auto next = cigar_[i + 1].first;
+                    const auto [previous, previous_length] = cigar_[i - 1];
+                    const auto [next, next_length] = cigar_[i + 1];
                     const bool graph_jump = previous == NODE_INSERTION || next == NODE_INSERTION
-                        || (previous == DELETION && ref_pos
-                            && reference[ref_pos - 1] == boss::BOSS::kSentinel)
-                        || (next == DELETION && ref_pos < reference.size()
-                            && reference[ref_pos] == boss::BOSS::kSentinel);
+                        || (previous == DELETION && previous_length <= ref_pos
+                            && reference.substr(ref_pos - previous_length, previous_length)
+                                .find(boss::BOSS::kSentinel) != std::string_view::npos)
+                        || (next == DELETION && next_length <= reference.size() - ref_pos
+                            && reference.substr(ref_pos, next_length)
+                                .find(boss::BOSS::kSentinel) != std::string_view::npos);
                     if (!graph_jump) {
                         std::cerr << "Internal clipping without a graph jump in CIGAR" << std::endl;
                         return false;
