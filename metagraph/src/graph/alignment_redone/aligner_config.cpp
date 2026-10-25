@@ -1,5 +1,7 @@
 #include "aligner_config.hpp"
 
+#include "graph/alignment/blosum62.hpp"
+
 #include "aln_cigar.hpp"
 #include "kmer/alphabets.hpp"
 #include "common/logger.hpp"
@@ -57,10 +59,10 @@ bool DBGAlignerConfig::check_config_scores() const {
 
     assert(min_penalty_score < 0 && "min scores must be negative");
 
-    if (min_cell_score >= std::numeric_limits<score_t>::min() - min_penalty_score)
+    if (ninf >= std::numeric_limits<score_t>::min() - min_penalty_score)
         return true;
 
-    std::cerr << "min_cell_score is too small: " << min_cell_score << std::endl;
+    logger->error("Alignment penalty {} leaves insufficient score range", min_penalty_score);
     return false;
 }
 
@@ -221,54 +223,7 @@ DBGAlignerConfig::ScoreMatrix DBGAlignerConfig
     return score_matrix;
 }
 
-DBGAlignerConfig::ScoreMatrix blosum62_scoring_matrix() {
-    std::string alphabet = "ARNDCQEGHILKMFPSTWYVBZX";
-
-    std::vector<std::vector<int8_t>> scores = {
-        {  4, -1, -2, -2,  0, -1, -1,  0, -2, -1, -1, -1, -1, -2, -1,  1,  0, -3, -2,  0, -2, -1,  0 },
-        { -1,  5,  0, -2, -3,  1,  0, -2,  0, -3, -2,  2, -1, -3, -2, -1, -1, -3, -2, -3, -1,  0, -1 },
-        { -2,  0,  6,  1, -3,  0,  0,  0,  1, -3, -3,  0, -2, -3, -2,  1,  0, -4, -2, -3,  3,  0, -1 },
-        { -2, -2,  1,  6, -3,  0,  2, -1, -1, -3, -4, -1, -3, -3, -1,  0, -1, -4, -3, -3,  4,  1, -1 },
-        {  0, -3, -3, -3,  9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1, -3, -3, -2 },
-        { -1,  1,  0,  0, -3,  5,  2, -2,  0, -3, -2,  1,  0, -3, -1,  0, -1, -2, -1, -2,  0,  3, -1 },
-        { -1,  0,  0,  2, -4,  2,  5, -2,  0, -3, -3,  1, -2, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1 },
-        {  0, -2,  0, -1, -3, -2, -2,  6, -2, -4, -4, -2, -3, -3, -2,  0, -2, -2, -3, -3, -1, -2, -1 },
-        { -2,  0,  1, -1, -3,  0,  0, -2,  8, -3, -3, -1, -2, -1, -2, -1, -2, -2,  2, -3,  0,  0, -1 },
-        { -1, -3, -3, -3, -1, -3, -3, -4, -3,  4,  2, -3,  1,  0, -3, -2, -1, -3, -1,  3, -3, -3, -1 },
-        { -1, -2, -3, -4, -1, -2, -3, -4, -3,  2,  4, -2,  2,  0, -3, -2, -1, -2, -1,  1, -4, -3, -1 },
-        { -1,  2,  0, -1, -3,  1,  1, -2, -1, -3, -2,  5, -1, -3, -1,  0, -1, -3, -2, -2,  0,  1, -1 },
-        { -1, -1, -2, -3, -1,  0, -2, -3, -2,  1,  2, -1,  5,  0, -2, -1, -1, -1, -1,  1, -3, -1, -1 },
-        { -2, -3, -3, -3, -2, -3, -3, -3, -1,  0,  0, -3,  0,  6, -4, -2, -2,  1,  3, -1, -3, -3, -1 },
-        { -1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4,  7, -1, -1, -4, -3, -2, -2, -1, -2 },
-        {  1, -1,  1,  0, -1,  0,  0,  0, -1, -2, -2,  0, -1, -2, -1,  4,  1, -3, -2, -2,  0,  0,  0 },
-        {  0, -1,  0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1,  1,  5, -2, -2,  0, -1, -1,  0 },
-        { -3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1,  1, -4, -3, -2, 11,  2, -3, -4, -3, -2 },
-        { -2, -2, -2, -3, -2, -1, -2, -3,  2, -1, -1, -2, -1,  3, -3, -2, -2,  2,  7, -1, -3, -2, -1 },
-        {  0, -3, -3, -3, -1, -2, -2, -3, -3,  3,  1, -2,  1, -1, -2, -2,  0, -3, -1,  4, -3, -2, -1 },
-        { -2, -1,  3,  4, -3,  0,  1, -1,  0, -3, -4,  0, -3, -3, -2,  0, -1, -4, -3, -3,  4,  1, -1 },
-        { -1,  0,  0,  1, -3,  3,  4, -2,  0, -3, -3,  1, -1, -3, -1,  0, -1, -3, -2, -2,  1,  4, -1 },
-        {  0, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2,  0,  0, -2, -1, -1, -1, -1, -1 }
-    };
-
-    DBGAlignerConfig::ScoreMatrix score_matrix;
-
-    for (size_t i = 0; i < score_matrix.size(); ++i) {
-        score_matrix[i].fill(-4);
-
-        // meant to handle the letters J, O, U
-        score_matrix[i][i] = 1;
-    }
-
-    for (size_t i = 0; i < alphabet.size(); ++i) {
-        for (size_t j = 0; j < alphabet.size(); ++j) {
-            score_matrix[alphabet[i]][alphabet[j]] = scores[i][j];
-        }
-    }
-
-    return score_matrix;
-}
-
 const DBGAlignerConfig::ScoreMatrix DBGAlignerConfig::score_matrix_blosum62
-    = blosum62_scoring_matrix();
+    = detail::blosum62_scoring_matrix();
 
 } // namespace mtg::graph::align

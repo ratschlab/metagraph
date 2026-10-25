@@ -208,7 +208,6 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.min_seed_length = config.min_seed_length;
     fast.max_seed_length = config.max_seed_length;
     fast.max_num_seeds_per_locus = config.max_num_seeds_per_locus;
-    fast.min_cell_score = config.min_cell_score;
     fast.min_path_score = config.min_path_score;
     fast.xdrop = config.xdrop;
     // Apply the match fraction to the completed alignment below, not to seeds.
@@ -221,9 +220,6 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
     fast.gap_extension_penalty = config.gap_extension_penalty;
     fast.left_end_bonus = config.left_end_bonus;
     fast.right_end_bonus = config.right_end_bonus;
-    fast.global_xdrop = config.global_xdrop;
-    fast.allow_left_trim = config.allow_left_trim;
-    fast.no_backtrack = config.no_backtrack;
     fast.seed_complexity_filter = config.seed_complexity_filter;
     fast.alignment_edit_distance = config.alignment_edit_distance;
     fast.alignment_match_score = config.alignment_match_score;
@@ -490,23 +486,6 @@ class AlignmentGraph {
     }
 
     AnnotationBuffer* get_anno_buffer() const { return anno_buffer_; }
-
-    std::pair<node_index, label_class_t> traverse(node_index node, char c) const {
-        assert(c != boss::BOSS::kSentinel);
-        node_index next = graph_.traverse(node, c);
-        if (target_ == Anchor::nannot)
-            return std::make_pair(next, target_);
-
-        if (!next)
-            return std::make_pair(next, 0);
-
-        label_class_t next_labels = get_intersect_labels(next, target_);
-        assert(next_labels != Anchor::nannot);
-        if (!next_labels)
-            next = DeBruijnGraph::npos;
-
-        return std::make_pair(next, next_labels);
-    }
 
     std::pair<node_index, label_class_t> traverse_back(node_index node, char c) const {
         assert(c != boss::BOSS::kSentinel);
@@ -3302,17 +3281,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 try_chain(rit.base() - 1, chain_scores);
             }
         },
-        [](const AnchorChain<AnchorIt>&, const std::vector<DBGAlignerConfig::score_t>&) {
-            // A seed-chain score is not an upper bound on its completed
-            // alignment. Apply the relative cutoff after extension, per label.
-            return true;
-        },
         [this,align,anno_buffer,&save_alignment,match_score=maximum_match_score(config_)](
                 AnchorIt last,
                 AnchorIt next,
                 Alignment&& aln,
                 size_t next_to_last_dist,
-                DBGAlignerConfig::score_t score_up_to_now,
                 const AlignmentCallback &callback) {
             size_t traversal_dist = next_to_last_dist - last->get_seed().size() + next->get_seed().size();
             const auto &graph = query_.get_graph();
@@ -3543,8 +3516,7 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                 callback(Alignment(*next));
             }
         },
-        save_alignment,
-        []() { return false; }
+        save_alignment
     );
 
     return alignments;

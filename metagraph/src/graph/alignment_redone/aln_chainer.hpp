@@ -15,19 +15,13 @@ template <typename AnchorIt>
 using ChainScores = std::vector<std::tuple<DBGAlignerConfig::score_t, AnchorIt, size_t, size_t, size_t>>;
 
 template <typename AnchorIt>
-using ScoreUpdater = std::function<bool(DBGAlignerConfig::score_t,       // connect score
+using ScoreUpdater = std::function<void(DBGAlignerConfig::score_t,       // connect score
                                         AnchorIt, // last
                                         size_t         // distance
                                        )>;
 
 template <typename AnchorIt>
 using AnchorChain = std::vector<std::pair<AnchorIt, size_t>>;
-
-template <typename AnchorIt>
-using ExtensionStarter = std::function<bool(const AnchorChain<AnchorIt>&, // chain
-                                            const std::vector<DBGAlignerConfig::score_t>& // score traceback
-                                           )>;
-
 
 template <typename AnchorIt>
 using AnchorConnector = std::function<void(const Anchor&, // start anchor
@@ -45,14 +39,12 @@ using AnchorExtender = std::function<void(AnchorIt, // first ptr,
                                           AnchorIt, // prev ptr
                                           Alignment&&,   // target,
                                           size_t,        // distance,
-                                          DBGAlignerConfig::score_t,       // chain score up to this point
                                           const AlignmentCallback&)>;
 
 template <typename AnchorIt>
-bool extend_chain(const AnchorChain<AnchorIt> &chain,
+void extend_chain(const AnchorChain<AnchorIt> &chain,
                   const AnchorExtender<AnchorIt> &anchor_extender,
-                  const AlignmentCallback &callback,
-                  const std::function<bool()> &terminate = []() { return false; }) {
+                  const AlignmentCallback &callback) {
     assert(chain.size());
 
     std::vector<Alignment> alns;
@@ -64,7 +56,7 @@ bool extend_chain(const AnchorChain<AnchorIt> &chain,
             assert(it->first->get_clipping() == aln.get_clipping());
 
             size_t dist = it->second;
-            anchor_extender(it->first, (it + 1)->first, std::move(aln), dist, 0,
+            anchor_extender(it->first, (it + 1)->first, std::move(aln), dist,
                 [&](Alignment&& next_aln) { next_alns.emplace_back(std::move(next_aln)); }
             );
         }
@@ -72,17 +64,8 @@ bool extend_chain(const AnchorChain<AnchorIt> &chain,
         std::swap(next_alns, alns);
     }
 
-    size_t num_alns = 0;
-
-    for (auto&& aln : alns) {
-        if (terminate())
-            return num_alns;
-
+    for (auto&& aln : alns)
         callback(std::move(aln));
-        ++num_alns;
-    }
-
-    return num_alns;
 }
 
 template <typename Anchor>
@@ -94,17 +77,15 @@ struct AnchorLess {
 };
 
 template <typename AnchorIt>
-AnchorIt chain_anchors(const Query &query,
-                       const DBGAlignerConfig &config,
-                       AnchorIt begin,
-                       AnchorIt end,
-                       const AnchorConnector<AnchorIt> &anchor_connector,
-                       const ExtensionStarter<AnchorIt> &extension_starter,
-                       const AnchorExtender<AnchorIt> &anchor_extender,
-                       const AlignmentCallback &callback = [](Alignment&&) {},
-                       const std::function<bool()> &terminate = []() { return false; }) {
-    if (terminate() || begin == end)
-        return end;
+void chain_anchors(const Query &query,
+                   const DBGAlignerConfig &config,
+                   AnchorIt begin,
+                   AnchorIt end,
+                   const AnchorConnector<AnchorIt> &anchor_connector,
+                   const AnchorExtender<AnchorIt> &anchor_extender,
+                   const AlignmentCallback &callback) {
+    if (begin == end)
+        return;
 
     ssize_t query_size = query.get_query().size();
 
@@ -150,9 +131,6 @@ AnchorIt chain_anchors(const Query &query,
                     max_score = score;
                     best_last = last;
                     best_dist = dist;
-                    return true;
-                } else {
-                    return false;
                 }
             };
         };
@@ -241,47 +219,39 @@ AnchorIt chain_anchors(const Query &query,
     sdsl::bit_vector used(chain_scores.size());
 
     for (auto [nscore, end_clipping, orientation, i] : best_chains) {
-        if (terminate())
-            return end;
-
         if (used[i])
             continue;
 
         AnchorChain<AnchorIt> chain;
-        std::vector<DBGAlignerConfig::score_t> scores;
         AnchorIt last_anchor = begin + i;
         auto [score, last, dist, traversed, queried] = chain_scores[i];
         chain.emplace_back(last_anchor, dist);
         assert(score == -nscore);
-        scores.emplace_back(score);
         while (last != end) {
             last_anchor = last;
             std::tie(score, last, dist, traversed, queried) = chain_scores[last - begin];
             assert(last_anchor != end);
             chain.emplace_back(last_anchor, dist);
-            scores.emplace_back(score);
             if (used[last_anchor - begin]) {
                 chain.clear();
-                scores.clear();
                 break;
             }
         }
 
         std::reverse(chain.begin(), chain.end());
-        std::reverse(scores.begin(), scores.end());
 
-        if (chain.size() && extension_starter(chain, scores)) {
+        if (chain.size()) {
+            // A seed-chain score is not an upper bound on its completed
+            // alignment. Apply the relative cutoff after extension, per label.
             // Shared seeds can have different connecting paths in each label.
             // Keep their searches separate; merge identical completed alignments
             // only after every edge has been checked against its label.
-            extend_chain<AnchorIt>(chain, anchor_extender, callback, terminate);
+            extend_chain<AnchorIt>(chain, anchor_extender, callback);
             for (const auto &[a_ptr, dist] : chain) {
                 used[a_ptr - begin] = true;
             }
         }
     }
-
-    return end;
 }
 
 } // namespace mtg::graph::align

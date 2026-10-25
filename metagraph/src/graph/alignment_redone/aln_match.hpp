@@ -46,7 +46,6 @@ class Match {
     bool get_orientation() const { return orientation_; }
 
     virtual size_t get_end_trim() const = 0;
-    virtual size_t trim_end() = 0;
 
     bool empty() const { return path_.empty(); }
 
@@ -115,7 +114,6 @@ class Anchor : public Match {
     }
 
     size_t get_end_trim() const override final { return suffix_.size(); }
-    size_t trim_end() override final;
 
     void append(const Anchor &other,
                 const DeBruijnGraph *graph = nullptr);
@@ -189,7 +187,7 @@ class Alignment : public Match {
     Cigar generate_cigar() const override final { return cigar_; }
 
     size_t get_end_trim() const override final { return end_trim_; }
-    size_t trim_end() override final;
+    size_t trim_end();
 
     std::string_view get_spelling() const override final {
         return std::string_view(path_spelling_.c_str(), path_spelling_.size() - end_trim_);

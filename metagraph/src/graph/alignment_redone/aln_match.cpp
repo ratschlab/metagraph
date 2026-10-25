@@ -1,82 +1,15 @@
 #include "aln_match.hpp"
 
-namespace mtg::graph::align_redone {
+#include "graph/alignment/alignment.hpp"
 
-using mtg::common::logger;
+namespace mtg::graph::align_redone {
 
 std::string spell_path(const DeBruijnGraph &graph,
                        const std::vector<DeBruijnGraph::node_index> &path) {
-    std::string seq;
-
     if (path.empty())
-        return seq;
+        return {};
 
-    seq.reserve(path.size() + graph.get_k() - 1);
-
-    size_t num_dummy = 0;
-    size_t num_unknown = 0;
-    if (path.front()) {
-        seq += graph.get_node_sequence(path.front());
-    } else {
-        num_unknown = graph.get_k();
-        seq += std::string(num_unknown, '$');
-        num_dummy = 1;
-    }
-
-    for (size_t i = 1; i < path.size(); ++i) {
-        if (path[i]) {
-            if (num_dummy) {
-                seq += '$';
-                ++num_unknown;
-                std::string next_seq = graph.get_node_sequence(path[i]);
-                auto it = seq.end() - next_seq.size();
-                for (char c : next_seq) {
-                    if (*it == '$' && c != '$') {
-                        --num_unknown;
-                        *it = c;
-                    }
-
-                    ++it;
-                }
-                num_dummy = 0;
-            } else {
-                char next = '\0';
-                graph.call_outgoing_kmers(path[i - 1], [&](auto next_node, char c) {
-                    if (next_node == path[i])
-                        next = c;
-                });
-
-                if (!next) {
-                    logger->error("Invalid edge {} {}\t{} {}",
-                                  path[i - 1], path[i],
-                                  graph.get_node_sequence(path[i - 1]),
-                                  graph.get_node_sequence(path[i]));
-                    throw std::runtime_error("");
-                }
-
-                seq += next;
-                if (num_unknown) {
-                    std::string next_seq = graph.get_node_sequence(path[i]);
-                    auto it = seq.end() - next_seq.size();
-                    for (char c : next_seq) {
-                        if (*it == '$' && c != '$') {
-                            --num_unknown;
-                            *it = c;
-                        }
-
-                        ++it;
-                    }
-                }
-            }
-        } else {
-            seq += '$';
-            ++num_dummy;
-            ++num_unknown;
-        }
-    }
-
-    assert(seq.size() == path.size() + graph.get_k() - 1);
-    return seq;
+    return align::spell_path(graph, path, 0);
 }
 
 bool operator==(const Match &a, const Match &b) {
@@ -108,30 +41,6 @@ std::ostream& operator<<(std::ostream &out, const Match &a) {
                        cigar.to_string(),
                        a.get_end_trim());
     return out;
-}
-
-size_t Anchor::trim_end() {
-    assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
-    if (suffix_.empty())
-        return 0;
-
-    size_t num_trimmed = 0;
-
-#ifndef NDEBUG
-    std::string old_spelling(get_spelling());
-#endif
-
-    while (suffix_.size() && path_.size() > 1) {
-        suffix_.pop_back();
-        path_.pop_back();
-        ++num_trimmed;
-        assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
-        assert(get_spelling() == old_spelling);
-    }
-
-    assert(get_spelling() == old_spelling);
-
-    return num_trimmed;
 }
 
 size_t Alignment::trim_end() {
