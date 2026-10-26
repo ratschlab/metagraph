@@ -72,8 +72,8 @@ Use ``--align-chain`` to construct and connect seed chains, and
 off by default and can be enabled independently. They can improve sensitivity
 for long, error-prone reads at a higher runtime cost. ``--align-only-forwards``
 controls query orientation independently of the extension direction.
-Backward extension currently requires a seed starting at a node boundary;
-suffix seeds that start inside a node retain forward-only extension.
+Two-sided extension also consumes unaligned characters inside the first and
+last nodes before traversing graph edges.
 
 ``--align-post-chain`` joins completed local alignments and can insert graph
 jumps (``G`` in the CIGAR). It uses the column aligner and cannot be combined

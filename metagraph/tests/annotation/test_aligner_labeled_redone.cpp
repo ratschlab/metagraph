@@ -141,7 +141,12 @@ TYPED_TEST(SuffixOffsetAlignment, KeepsLeadingOffsetAndLabelCoordinates) {
             EXPECT_EQ(std::to_string(query.get_query().size()) + "=", result.get_cigar().to_string());
             EXPECT_FALSE(result.get_orientation());
             EXPECT_TRUE(result.is_spelling_valid(graph));
-            EXPECT_THROW(extender.extend(result, [](Alignment&&) {}), std::invalid_argument);
+            size_t repeated = 0;
+            extender.extend(result, [&](Alignment&& same) {
+                ++repeated;
+                EXPECT_EQ(result, same);
+            });
+            EXPECT_EQ(1u, repeated);
             const auto &columns = buffer.get_cached_column_set(result.get_label_classes().front());
             ASSERT_EQ(2u, columns.size());
             ASSERT_EQ(columns.size(), result.get_coords().size());
@@ -255,7 +260,156 @@ TYPED_TEST(SuffixOffsetAlignment, DummyPrefixesDoNotConsumeSuffixBudget) {
     }
 }
 
+TYPED_TEST(SuffixOffsetAlignment, BackwardExtensionKeepsSharedLabelsAndCoordinates) {
+    const std::string node = "ACGTCAGTACGATCGTACCTGAGCTTAGGCA";
+    const std::string reference = "GGCT" + node;
+    auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+        31, {reference, reference, node}, {"first", "second", "terminal"},
+        DeBruijnGraph::BASIC, true, {10, 100, 1000});
+    const auto &graph = annotated->get_graph();
+    for (bool cross_boundary : {false, true}) {
+        auto sequence = cross_boundary ? reference.substr(1) : node.substr(4);
+        if (!cross_boundary) sequence[4] = 'T';
+        Query query(graph, sequence);
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        const auto first = graph.kmer_to_node(node);
+        buffer.queue_path({first});
+        buffer.fetch_queued_annotations();
+        const auto [labels, coordinates] = buffer.get_labels_id_and_coords(first);
+        ASSERT_NE(nullptr, coordinates);
+        auto seed_coords = *coordinates;
+        for (auto &positions : seed_coords)
+            for (auto &position : positions) position += 9;
+        Cigar cigar(Cigar::CLIPPED, sequence.size() - 22);
+        cigar.append(Cigar::MATCH, 22);
+        Alignment seed(graph, query.get_query(), false, {first}, std::move(cigar),
+                       std::string(node), 0, labels, std::move(seed_coords), 9);
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        config.min_exact_match = 0.9;
+        config.min_path_score = cross_boundary ? 68 : 49;
+        LabeledExtender extender(buffer, query, config);
+        size_t complete = 0;
+        std::set<std::tuple<std::string, std::vector<Match::node_index>, size_t, std::string>> placements;
+        extender.extend(seed, [&](Alignment&& result) {
+            EXPECT_TRUE(result.is_spelling_valid(graph));
+            EXPECT_TRUE(result.get_cigar().is_valid(result.get_spelling(), result.get_query()));
+            const auto &columns = buffer.get_cached_column_set(result.get_label_classes().front());
+            ASSERT_EQ(columns.size(), result.get_coords().size());
+            std::set<std::string> names;
+            for (size_t i = 0; i < columns.size(); ++i) {
+                const auto &name = annotated->get_annotator().get_label_encoder().decode(columns[i]);
+                names.insert(name);
+                const auto &source = name == "terminal" ? node : reference;
+                const auto position = source.find(result.get_spelling());
+                ASSERT_NE(std::string::npos, position);
+                const int64_t start = name == "first" ? 10 : name == "second" ? 100 : 1000;
+                EXPECT_EQ(AnnotationBuffer::Tuple({start + int64_t(position)}), result.get_coords()[i]);
+                EXPECT_TRUE(placements.emplace(name, result.get_path(), result.get_offset(),
+                                               result.get_cigar().to_string()).second);
+            }
+            if (result.get_clipping() || result.get_end_clipping()) return;
+            ++complete;
+            EXPECT_EQ(cross_boundary ? "34=" : "4=1X22=", result.get_cigar().to_string());
+            EXPECT_EQ(cross_boundary ? 0u : 4u, result.get_offset());
+            EXPECT_EQ(config.min_path_score, score_match(result, config));
+            auto expected = std::set<std::string>{"first", "second"};
+            if (!cross_boundary) expected.insert("terminal");
+            EXPECT_EQ(expected, names);
+        });
+        EXPECT_EQ(1u, complete) << cross_boundary;
+    }
+}
+
+TYPED_TEST(SuffixOffsetAlignment, CoordinateFailureStopsTheEntireExactRun) {
+    for (bool backward : {false, true}) {
+        std::vector<std::string> references{"ACGTCAG", "ACGGCAT"};
+        std::string sequence = "ACGTCAT";
+        if (!backward) {
+            for (auto &reference : references) std::reverse(reference.begin(), reference.end());
+            std::reverse(sequence.begin(), sequence.end());
+        }
+        auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+            3, references, {"reference", "reference"}, DeBruijnGraph::BASIC, true, {0, 100});
+        const auto &graph = annotated->get_graph();
+        Query query(graph, sequence);
+        const size_t begin = backward ? 4 : 0;
+        const auto node = graph.kmer_to_node(sequence.substr(begin, 3));
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        buffer.queue_path({node});
+        buffer.fetch_queued_annotations();
+        Anchor seed(query.get_query(), begin, begin + 3, false, {node});
+        seed.set_label_class(buffer.get_labels_id(node));
+        seed.set_coord(100 + begin);
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        config.xdrop = 0;
+        LabeledExtender extender(buffer, query, config);
+        std::vector<Alignment> results;
+        // The graph walk exists, but its first three steps belong to another
+        // occurrence. A later coordinate match must not restart that run.
+        extender.extend(Alignment(seed), [&](Alignment&& result) {
+            results.push_back(std::move(result));
+        }, !backward, backward);
+        ASSERT_EQ(1u, results.size()) << backward;
+        const auto &result = results.front();
+        EXPECT_EQ(backward ? "4S3=" : "3=4S", result.get_cigar().to_string());
+        EXPECT_EQ(sequence.substr(begin, 3), result.get_spelling());
+        EXPECT_EQ(6, score_match(result, config));
+        EXPECT_TRUE(result.is_spelling_valid(graph));
+        ASSERT_EQ(1u, result.get_coords().size());
+        EXPECT_EQ(AnnotationBuffer::Tuple({int64_t(100 + begin)}), result.get_coords().front());
+    }
+}
+
 #if ! _PROTEIN_GRAPH
+TYPED_TEST(SuffixOffsetAlignment, BetterKnownLabelDoesNotPruneNewSuffixLabels) {
+    const std::string reference = "ACGTCAGTACGATCGTACCTGAGCTTAGGCA";
+    const std::string sequence = "CAGTTCGATCGTACCTGAGCTTAGGCA";
+    const auto exact = reference.substr(0, 4) + sequence;
+    for (bool coordinates : {false, true}) {
+        auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+            31, {exact, reference, reference, reference, reference},
+            {"known", "known", "late", "late", "tie"},
+            DeBruijnGraph::BASIC, coordinates, {0, 62, 0, 62, 0});
+        const auto &graph = annotated->get_graph();
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        Query query(graph, sequence);
+        DBGAlignerConfig config;
+        config.min_seed_length = 10;
+        config.max_seed_length = 31;
+        config.min_exact_match = 0.9;
+        config.min_path_score = 49;
+        config.two_sided = true;
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        LabeledSeeder seeder(buffer, query, config);
+        LabeledExtender extender(buffer, query, config);
+        std::map<std::string, int> scores;
+        align_query(query, seeder, extender, [&](Alignment&& result) {
+            EXPECT_TRUE(result.is_spelling_valid(graph));
+            EXPECT_TRUE(result.get_cigar().is_valid(result.get_spelling(), result.get_query()));
+            const auto &columns = buffer.get_cached_column_set(result.get_label_classes().front());
+            if (coordinates) {
+                ASSERT_EQ(columns.size(), result.get_coords().size());
+            }
+            for (size_t i = 0; i < columns.size(); ++i) {
+                const auto &name = annotated->get_annotator().get_label_encoder().decode(columns[i]);
+                EXPECT_TRUE(scores.emplace(name, score_match(result, config)).second);
+                EXPECT_EQ(name == "known" ? "27=" : "4=1X22=", result.get_cigar().to_string());
+                EXPECT_EQ(4u, result.get_offset());
+                if (coordinates) {
+                    auto expected = name == "late" ? AnnotationBuffer::Tuple{4, 66}
+                                                   : AnnotationBuffer::Tuple{4};
+                    EXPECT_EQ(expected, result.get_coords()[i]);
+                }
+            }
+        });
+        EXPECT_EQ((std::map<std::string, int>{{"known", 54}, {"late", 49}, {"tie", 49}}), scores);
+    }
+}
+
 TEST(LabeledCanonicalAlternatives, DistinctOffsetsSurviveCommonEmission) {
     for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL}) {
         auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(

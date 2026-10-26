@@ -273,10 +273,11 @@ std::vector<Alignment> Seeder::get_suffix_alignments(bool extend) const {
     const size_t k = graph.get_k();
     // After the column engine trims its leading offset, a residual offset
     // implies a one-node result shorter than k. Longer required matches are
-    // already represented by the ordinary prefix/full-k seed search.
+    // already represented by the ordinary prefix/full-k seed search. Two-sided
+    // extension can recover the prefix inside that node and continue beyond it.
     if ((typeid(*this) != typeid(ExactSeeder) && typeid(*this) != typeid(LabeledSeeder))
             || !config_.min_seed_length || config_.min_seed_length >= k
-            || config_.min_exact_match * query_.get_query().size() >= k
+            || (!config_.two_sided && config_.min_exact_match * query_.get_query().size() >= k)
             || !config_.num_alternative_paths || !config_.max_num_seeds_per_locus
             || query_.get_query().size() < config_.min_seed_length)
         return {};
@@ -377,7 +378,7 @@ std::vector<Alignment> Seeder::get_suffix_alignments(bool extend) const {
 
     if (seeds.empty()) return {};
     auto *annotations = annotation_buffer(*this);
-    auto aligner = make_column_aligner();
+    auto aligner = extend ? make_column_aligner() : nullptr;
     if (annotations) {
         for (const auto &seed : seeds)
             annotations->queue_path(seed.get_nodes());
@@ -388,12 +389,17 @@ std::vector<Alignment> Seeder::get_suffix_alignments(bool extend) const {
         ? &dynamic_cast<align::ILabeledAligner&>(*aligner).get_annotation_buffer() : nullptr;
     std::vector<Alignment> results;
     for (auto &seed : seeds) {
+        auto label_class = Anchor::nannot;
         if (annotations) {
-            const auto [labels, coords] = annotations->get_labels_and_coords(seed.get_nodes().front());
-            assert(labels);
-            if (labels->empty()) continue;
-            seed.label_columns.assign(labels->begin(), labels->end());
-            seed.label_encoder = &annotations->get_annotator().get_label_encoder();
+            const auto [labels, coords] = annotations->get_labels_id_and_coords(seed.get_nodes().front());
+            assert(labels != Anchor::nannot);
+            if (!labels) continue;
+            label_class = labels;
+            if (extend) {
+                const auto &columns = annotations->get_cached_column_set(labels);
+                seed.label_columns.assign(columns.begin(), columns.end());
+                seed.label_encoder = &annotations->get_annotator().get_label_encoder();
+            }
             if (coords) {
                 seed.label_coordinates = *coords;
                 for (auto &positions : seed.label_coordinates)
@@ -401,13 +407,18 @@ std::vector<Alignment> Seeder::get_suffix_alignments(bool extend) const {
             }
         }
         const bool orientation = seed.get_orientation();
-        // This constructor also preserves query clipping and the end bonuses.
-        const auto &column_config = aligner->get_config();
-        align::Alignment exact(seed, column_config);
         if (!extend) {
-            results.push_back(from_column_alignment(query_, annotations, std::move(exact), orientation));
+            Cigar cigar(Cigar::CLIPPED, seed.get_clipping());
+            cigar.append(Cigar::MATCH, seed.get_query_view().size());
+            cigar.append(Cigar::CLIPPED, seed.get_end_clipping());
+            results.emplace_back(graph, query_.get_query(orientation), orientation,
+                std::vector(seed.get_nodes()), std::move(cigar),
+                graph.get_node_sequence(seed.get_nodes().front()), 0, label_class,
+                std::move(seed.label_coordinates), seed.get_offset());
             continue;
         }
+        const auto &column_config = aligner->get_config();
+        align::Alignment exact(seed, column_config);
         if (!extenders[orientation]) {
             if (column_annotations)
                 extenders[orientation] = std::make_unique<align::LabeledExtender>(
@@ -515,21 +526,25 @@ void align_query(const Query &query,
         record_score(aln);
         candidates.push_back(std::move(aln));
     };
-    for (const auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain)) {
+    auto candidate_floor = [&](const Alignment &aln) {
         Score floor = config.min_path_score;
-        if (complete_short_seeds && nonpositive_gaps && config.num_alternative_paths == 1) {
+        if (nonpositive_gaps && config.num_alternative_paths == 1) {
             if (!annotations) {
                 if (auto it = known_scores.find(AnnotationBuffer::ncolumn); it != known_scores.end())
                     floor = std::max(floor, it->second);
             } else {
                 Score common = std::numeric_limits<Score>::max();
-                for (auto column : annotations->get_cached_column_set(base.get_label_classes().front())) {
+                for (auto column : annotations->get_cached_column_set(aln.get_label_classes().front())) {
                     auto it = known_scores.find(column);
                     common = std::min(common, it == known_scores.end() ? config.min_path_score : it->second);
                 }
                 floor = std::max(floor, common);
             }
         }
+        return floor;
+    };
+    for (const auto &base : seeder.get_inexact_anchors(connect_anchors_in_chain)) {
+        const Score floor = complete_short_seeds ? candidate_floor(base) : config.min_path_score;
         if (!column_supplements) {
             extender.extend(base, save, !config.two_sided, false,
                             wavefront_score_floor ? floor : config.min_path_score);
@@ -608,8 +623,13 @@ void align_query(const Query &query,
             extender.extend(base, save, true, false,
                             wavefront_score_floor ? floor : config.min_path_score);
     }
-    for (auto &&suffix : seeder.get_suffix_alignments(true))
-        candidates.push_back(std::move(suffix));
+    for (auto &&suffix : seeder.get_suffix_alignments(!config.two_sided)) {
+        if (config.two_sided)
+            extender.extend(suffix, save, false, false,
+                wavefront_score_floor ? candidate_floor(suffix) : config.min_path_score);
+        else
+            candidates.push_back(std::move(suffix));
+    }
     emit_alignments(query, config, annotations, std::move(candidates), callback);
 }
 
@@ -853,6 +873,8 @@ class AlignmentGraph {
 
         label_class_t cur_target = target_;
         for (node_index next : forward_nodes) {
+            if (terminate())
+                return;
             cur_target = get_intersect_labels(next, cur_target);
             assert(cur_target != Anchor::nannot);
             if (cur_target) {
@@ -914,6 +936,8 @@ class AlignmentGraph {
 
         label_class_t cur_target = target_;
         for (node_index prev : backward_nodes) {
+            if (terminate())
+                return;
             cur_target = get_intersect_labels(prev, cur_target);
             assert(cur_target != Anchor::nannot);
             if (cur_target) {
@@ -2433,7 +2457,8 @@ void align_bwd(const DeBruijnGraph &base_graph,
                AnnotationBuffer *anno_buffer = nullptr,
                Anchor::label_class_t target = Anchor::nannot,
                const AnnotationBuffer::CoordinateSet &coords = {},
-               TraversalCache *shared_cache = nullptr) {
+               TraversalCache *shared_cache = nullptr,
+               std::string_view prefix = {}) {
     assert(!anno_buffer == (target == Anchor::nannot));
     assert(!anno_buffer || anno_buffer->node_has_labels(start_node, target));
     assert(!anno_buffer
@@ -2453,9 +2478,22 @@ void align_bwd(const DeBruijnGraph &base_graph,
         cache.emplace(base_graph, true);
     auto *cache_ptr = shared_cache ? shared_cache : (cache ? &*cache : nullptr);
 
+    // Distinguish positions inside the first node until its prefix is consumed.
+    const auto max_node = prefix.empty() ? 0 : base_graph.max_index();
+    if (prefix.size() > std::numeric_limits<DeBruijnGraph::node_index>::max() - max_node)
+        throw std::length_error("Graph is too large for partial-node alignment states");
+    const auto virtual_begin = max_node + 1;
+    auto prefix_node = [&](size_t dist) {
+        return dist < prefix.size() ? virtual_begin + dist : start_node;
+    };
+
     align_impl<StrItr>(
         [&](DeBruijnGraph::node_index node, size_t dist, Anchor::label_class_t cur_target) {
             assert(cur_target);
+            assert(dist > prefix.size() || node == prefix_node(dist));
+            if (dist < prefix.size())
+                return true;
+
             AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
                                      cache_ptr);
             if (coords.empty()) {
@@ -2463,7 +2501,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
             } else {
                 assert(anno_buffer);
                 size_t indegree = 0;
-                size_t next_dist = dist + 1;
+                size_t next_dist = dist - prefix.size() + 1;
                 aln_graph.call_incoming_kmers(
                     node,
                     [&](DeBruijnGraph::node_index prev, char, Anchor::label_class_t prev_target) {
@@ -2481,6 +2519,18 @@ void align_bwd(const DeBruijnGraph &base_graph,
             const auto &callback, const auto &terminate) {
 
             assert(cur_target);
+            assert(dist > prefix.size() || node == prefix_node(dist));
+            if (dist < prefix.size()) {
+                for (; dist < prefix.size() && begin != end && !terminate(); ++dist, --end) {
+                    if (*(end - 1) != prefix[prefix.size() - dist - 1])
+                        return;
+                    node = prefix_node(dist + 1);
+                    callback(node, cur_target);
+                }
+                if (dist < prefix.size() || terminate())
+                    return;
+            }
+
             if (begin != end) {
                 AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
                                      cache_ptr);
@@ -2493,7 +2543,7 @@ void align_bwd(const DeBruijnGraph &base_graph,
                 } else {
                     assert(anno_buffer);
                     bool stop_early = false;
-                    size_t next_dist = dist + 1;
+                    size_t next_dist = dist - prefix.size() + 1;
                     aln_graph.traverse_back(
                         node,
                         std::string_view(&*begin, end - begin),
@@ -2515,13 +2565,18 @@ void align_bwd(const DeBruijnGraph &base_graph,
             size_t dist, Anchor::label_class_t cur_target) {
 
             assert(cur_target);
+            assert(dist > prefix.size() || node == prefix_node(dist));
+            if (dist < prefix.size()) {
+                callback(prefix_node(dist + 1), prefix[prefix.size() - dist - 1], cur_target);
+                return;
+            }
 
             AlignmentGraph aln_graph(base_graph, anno_buffer, cur_target,
                                      cache_ptr);
             if (coords.empty()) {
                 aln_graph.call_incoming_kmers(node, callback);
             } else {
-                size_t next_dist = dist + 1;
+                size_t next_dist = dist - prefix.size() + 1;
                 aln_graph.call_incoming_kmers(
                     node,
                     [&](DeBruijnGraph::node_index prev, char c, Anchor::label_class_t prev_target) {
@@ -2533,12 +2588,13 @@ void align_bwd(const DeBruijnGraph &base_graph,
             }
         },
         config,
-        start_node,
+        prefix_node(0),
         num_matches,
         query_window.begin(), query_window.end(),
         max_dist,
         [&](auto&& spelling, auto&& path, auto&& cigar, size_t cost, Anchor::label_class_t final_target) {
             assert(final_target);
+            path.resize(path.size() - std::min(path.size(), prefix.size()));
             assert(std::all_of(path.begin(), path.end(),
                                [&](auto node) {
                                    return AlignmentGraph(base_graph, anno_buffer, target).has_labels(node, final_target);
@@ -2724,9 +2780,6 @@ void align_fwd(const DeBruijnGraph &base_graph,
 void Extender::extend(const Alignment &aln,
                       const std::function<void(Alignment&&)> &callback,
                       bool no_bwd, bool no_fwd, DBGAlignerConfig::score_t score_floor) const {
-    if (aln.get_offset())
-        throw std::invalid_argument("Wavefront extension requires a seed with zero leading offset");
-
     // Extension can add at most one exact match per remaining query character.
     const size_t remaining = (no_bwd ? 0 : aln.get_clipping())
                            + (no_fwd ? 0 : aln.get_end_clipping());
@@ -2768,6 +2821,11 @@ void Extender::extend(const Alignment &aln,
             if (anno_buffer->has_coordinates()) {
                 auto coords = anno_buffer->get_label_path_coords(aln.get_path(), aln.get_label_classes());
                 assert(coords.size());
+                if (const auto offset = aln.get_offset()) {
+                    for (auto &column : coords)
+                        for (auto &coord : column)
+                            coord += offset;
+                }
                 aln.set_coords(std::move(coords));
             }
         }
@@ -2808,9 +2866,8 @@ void Extender::extend(const Alignment &aln,
 
                 assert(path.empty() == (spelling.size() <= aln.get_end_trim()));
 
-                std::string new_spelling = spelling.size() > aln.get_end_trim()
-                    ? std::string(aln.get_spelling()) + spelling
-                    : aln.get_path_spelling();
+                std::string new_spelling = aln.get_path_spelling();
+                new_spelling.append(spelling, std::min(aln.get_end_trim(), spelling.size()));
 
                 auto ext_path = aln.get_path();
                 ext_path.insert(ext_path.end(), path.begin(), path.end());
@@ -2831,7 +2888,7 @@ void Extender::extend(const Alignment &aln,
                     std::move(ext_cigar),
                     std::move(new_spelling),
                     new_end_trim,
-                    final_target
+                    final_target, Alignment::CoordinateSet{}, aln.get_offset()
                 );
 
                 set_coords(fwd_exts.back());
@@ -2909,6 +2966,9 @@ void Extender::extend(const Alignment &aln,
         query_window.remove_suffix(fwd_ext.get_end_clipping() + fwd_ext.get_seed().size());
 
         DBGAlignerConfig::score_t fwd_ext_score = score_match(fwd_ext, config_);
+        if (score_bound_exhausted(0, query_window.size(), fwd_ext_score,
+                                 score_floor, config_.left_end_bonus))
+            continue;
         auto get_score = [&](size_t cost, size_t dist, size_t query_dist) {
             return fwd_ext_score + cost_to_score(cost, query_dist, dist, match_score)
                     + (query_dist == query_window.size() ? config_.left_end_bonus : 0);
@@ -2934,6 +2994,9 @@ void Extender::extend(const Alignment &aln,
             config_, fwd_ext.get_path()[0], num_matches,
             query_window, std::numeric_limits<size_t>::max(),
             [&](auto&& spelling, auto&& path, auto&& cigar, size_t, Anchor::label_class_t final_target) {
+                const size_t prefix_overlap = std::min(fwd_ext.get_offset(), spelling.size());
+                const size_t new_offset = fwd_ext.get_offset() - prefix_overlap;
+                spelling.resize(spelling.size() - prefix_overlap);
                 path.insert(path.end(), fwd_ext.get_path().begin(), fwd_ext.get_path().end());
                 size_t query_dist = cigar.get_num_query();
                 assert(query_dist <= query_window.size());
@@ -2951,7 +3014,7 @@ void Extender::extend(const Alignment &aln,
                     std::move(ext_cigar),
                     spelling + fwd_ext.get_path_spelling(),
                     fwd_ext.get_end_trim(),
-                    final_target
+                    final_target, {}, new_offset
                 );
                 next_aln.trim_end();
 
@@ -2993,14 +3056,15 @@ void Extender::extend(const Alignment &aln,
                     max_query_dist = std::max(max_query_dist, query_dist);
                 }
                 return score_bound_exhausted(cost, query_window.size(), fwd_ext_score,
-                                             best_score, config_.left_end_bonus);
+                                             std::max(best_score, score_floor), config_.left_end_bonus);
             },
             anno_buffer,
             fwd_ext.get_label_classes()[0],
             anno_buffer ? anno_buffer->get_label_path_coords(fwd_ext.get_path(),
                                                             fwd_ext.get_label_classes())
                         : AnnotationBuffer::CoordinateSet(),
-            traversal_caches_ ? &traversal_caches_->backward : nullptr
+            traversal_caches_ ? &traversal_caches_->backward : nullptr,
+            std::string_view(fwd_ext.get_spelling().data() - fwd_ext.get_offset(), fwd_ext.get_offset())
         );
 
         if (!found) {
