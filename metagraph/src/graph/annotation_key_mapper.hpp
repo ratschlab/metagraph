@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-#include "representation/base/debruijn_graph.hpp"
+#include "representation/base/sequence_graph.hpp"
 
 namespace mtg::graph {
 
