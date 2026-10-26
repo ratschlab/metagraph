@@ -429,19 +429,23 @@ TEST(AnnotationBufferRedone, PendingReverseComplementAliases) {
     const auto &graph = dynamic_cast<const DBGSSHash&>(anno_graph->get_graph());
     // Queue every base node before its reverse complement, in both insertion
     // orders and with a fetch either between orientations or after both.
-    for (bool column_first : {false, true}) {
+    for (bool with_column_cache : {false, true}) {
         for (bool reverse_first : { false, true }) {
             for (bool fetch_between : { false, true }) {
                 AnnotationBuffer buffer(graph, anno_graph->get_annotator());
-                if (column_first) {
+                if (with_column_cache) {
                     DBGAlignerConfig config;
                     config.min_seed_length = config.max_seed_length = 3;
                     config.forward_and_reverse_complement = false;
                     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+                    // Construct the column cache without warming annotation rows.
                     Query absent(graph, "TTTTT");
                     LabeledSeeder seeder(buffer, absent, config);
                     LabeledExtender extender(buffer, absent, config);
-                    align_query(absent, seeder, extender, [](Alignment&&) {});
+                    align_query(absent, seeder, extender, [](Alignment&&) {
+                        ADD_FAILURE() << "The absent query must not produce an alignment";
+                    });
+                    ASSERT_EQ(1u, buffer.num_column_sets());
                 }
                 std::vector<DeBruijnGraph::node_index> nodes;
                 graph.call_nodes([&](auto node) {
