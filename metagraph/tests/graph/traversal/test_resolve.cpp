@@ -789,4 +789,29 @@ TEST(Resolve, ExplicitSelectionEnforcesLengthAndDropsUnsupportedSeeds) {
 }
 
 
+TEST(Resolve, EligibleCountsFollowTheSelectionPolicy) {
+    SupportProfile profile;
+    profile.k = 3;
+    profile.num_kmers = 10;
+    profile.graph_runs = iv({{0, 10}});
+    profile.labels = {{{LabelKind::COLUMN, 0, 0, "A"}, 10, iv({{0, 10}}), {}},
+                      {{LabelKind::COLUMN, 1, 0, "B"}, 5, iv({{0, 5}}), {}}};
+    profile.candidates = {{{0, 10}, {0}}, {{0, 5}, {1}}};
+    SelectionPolicy policy;
+    policy.max_seeds = 1;
+    policy.policy = SelectionPolicy::LONGEST_FIRST;
+    const std::string query(12, 'A');
+    auto selection = select_seeds(profile, query, policy, false);
+    EXPECT_EQ(selection.num_candidates, 2u);
+    EXPECT_EQ(selection.num_eligible, 2u);
+    ASSERT_EQ(selection.seeds.size(), 1u);
+    policy.min_block_bp = 8;
+    EXPECT_EQ(select_seeds(profile, query, policy, false).num_eligible, 1u);
+    policy = SelectionPolicy();
+    policy.max_seeds = 1;
+    EXPECT_EQ(select_seeds(profile, query, policy, false).num_eligible, 1u);
+    policy.max_seeds = 2;
+    EXPECT_EQ(select_seeds(profile, query, policy, false).num_eligible, 2u);
+}
+
 } // namespace

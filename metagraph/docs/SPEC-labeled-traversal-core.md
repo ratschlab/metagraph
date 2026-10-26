@@ -188,8 +188,8 @@ Deterministic, recorded in the output.
   that is empty or ends past the query's k-mers is a 400 `Explicit seed interval out of range`, an end above
   2⁶³ − 1 included (before, such an end was a 400 with the JSON library's own text and no field, and aborted the
   CLI).
-- `merge_overlapping: true` (default): candidates whose intervals overlap are merged onto their common interval
-  with the union of labels; `overlaps_with` lists seeds that still share k-mers.
+- `merge_overlapping: true` (default): for automatic policies, candidates whose intervals overlap are merged onto their common interval
+  with the union of labels; `overlaps_with` lists seeds that still share k-mers. Explicit seeds retain their requested intervals.
 - `max_labels_per_seed`: if a candidate has more labels, keep that many in `label_order`: `hash` (default; FNV-1a of
   label + `sample_seed`, unbiased w.r.t. column order), `column_id`, or `kmers_supported`. Dropped labels are
   reported as `labels_dropped: {count, digest, labels (if ≤ 1000)}` so the complementary subset can be run.
@@ -198,8 +198,7 @@ Output: a **frozen seed list** `[{seed_id, sequence, labels, label_population}]`
 substring, `label_population = {supporting_total, included, order, sample_seed}`, and
 `seed_id = hex FNV-1a-64( release_id ∥ "\t" ∥ canon(sequence) ∥ "\t" ∥ join(len(ℓ) ":" ℓ for ℓ in bytewise-sorted labels) )`
 with `canon(sequence)` = min(sequence, rc(sequence)) in primary/canonical regimes and the sequence itself in basic.
-Plus counts `{candidates, eligible, selected}` and the normalized policy. The list is directly usable as
-`/traverse` input.
+Plus counts `{candidates, eligible, selected}` and the normalized policy. `candidates` counts maximal-run groups and `selected` counts returned seeds. `eligible` retains the prototype's policy-specific diagnostic before overlap merging: all candidates meeting the length floor for `longest_first`, completed greedy rounds (at most `max_seeds`) for `max_support`, and validated requested intervals for `explicit`, including those omitted because no requested label covers them. The list is directly usable as `/traverse` input.
 
 ### 4.4 Response (abridged)
 
