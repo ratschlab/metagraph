@@ -69,9 +69,12 @@ Optional `select` retains the prototype's three policies:
 - `max_support` (default): choose intervals supported by the most labels, with
   longer intervals then earlier starts breaking ties; later rounds exclude
   already chosen intervals.
-- `longest_first`: choose from the ranked maximal-run candidates.
+- `longest_first`: choose from the ranked maximal-run candidates, including all
+  profiled labels covering each chosen interval, also those with larger runs.
 - `explicit`: use `seeds` containing `kmer_interval` and `labels`; report supplied
-  labels that do not cover an interval separately.
+  labels that do not cover an interval separately on retained seeds. As in the
+  prototype, omit a seed if none of its requested labels cover it; an empty
+  supporting-label set is not a traversal seed. `seeds` requires this policy.
 
 Selection returns the sequence, interval, supporting labels, deterministic seed
 ID, label-population truncation and overlaps for each seed. Its defaults are
@@ -79,6 +82,17 @@ ID, label-population truncation and overlaps for each seed. Its defaults are
 `label_order: "hash"`, `sample_seed: 0`, and `merge_overlapping: true`.
 `label_order` also accepts `column_id` and `kmers_supported`. Overlapping picks
 may be reduced to their common interval, following the prototype's policy.
+`min_block_bp` applies to every policy; explicit intervals below it are rejected.
+`max_seeds` limits the two automatic policies; explicit selection processes all
+requested intervals.
+
+`selection.counts.candidates` is the number of maximal-run candidates;
+`selected` counts returned seeds after merging. `eligible` preserves the
+prototype's policy-specific diagnostic: for `longest_first`, all candidates
+meeting the length floor before `max_seeds`; for `max_support`, completed greedy
+rounds (at most `max_seeds`); for `explicit`, validated requested intervals,
+including those omitted for having no covering requested label. It is not an
+exhaustive count of possible intervals for `max_support`.
 
 `min_block_kmers` (default 1) filters candidates. `run_format` accepts `intervals`
 (default) or the existing `x<n>o<n>` RLE notation. `bounds.max_query_bp` defaults
@@ -88,7 +102,9 @@ are rejected. These are input/result limits, **not** hard memory or execution-ti
 budgets: discovering top labels still reads all relevant rows and accumulates
 support for the columns encountered.
 
-The selection algorithm, seed IDs and response fields come from the prototype.
+The selection algorithm, seed IDs and response fields come from the prototype,
+with two corrections: longest-first seeds include containing support runs, and
+explicit seeds enforce the requested length floor.
 The annotation adapter uses the current matrix API and the prototype's adaptive
 row batches and bounded reuse of repeated rows. It starts with 64 distinct rows,
 grows to at most 4096 while targeting 64 MiB of decoded rows, and retains up to

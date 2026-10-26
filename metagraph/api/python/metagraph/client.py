@@ -190,9 +190,13 @@ class GraphClient:
         self._json_client = GraphClientJson(host, port, name, api_path=api_path)
         self.name = self._json_client.name
 
-    def resolve(self, sequence: str, **options):
+    def resolve(self, sequence: str, *, labels=None, discover=None, select=None,
+                support="kmer", min_block_kmers=1, run_format="intervals", bounds=None):
         """Return the resolve/select JSON profile; see GraphClientJson.resolve."""
-        return self._json_client.resolve(sequence, **options)
+        return self._json_client.resolve(sequence, labels=labels, discover=discover,
+                                         select=select, support=support,
+                                         min_block_kmers=min_block_kmers,
+                                         run_format=run_format, bounds=bounds)
 
     def search(self, sequence: Union[str, Iterable[str]],
                top_labels: int = DEFAULT_TOP_LABELS,

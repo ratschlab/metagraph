@@ -341,7 +341,7 @@ SeedSelection select_seeds(const SupportProfile &profile,
                     continue;
                 selection.num_eligible++;
                 if (picked.size() < policy.max_seeds)
-                    picked.push_back({ cand.kmers, cand.labels, {} });
+                    picked.push_back({ cand.kmers, covering_labels(profile, cand.kmers), {} });
             }
             break;
         }
@@ -468,6 +468,8 @@ SeedSelection select_seeds(const SupportProfile &profile,
             for (const auto &ex : policy.explicit_seeds) {
                 if (ex.kmers.end > profile.num_kmers || ex.kmers.begin >= ex.kmers.end)
                     throw std::invalid_argument("Explicit seed interval out of range");
+                if (ex.kmers.size() < min_kmers)
+                    throw std::invalid_argument("Explicit seed is shorter than min_block_bp");
                 bool in_one_run = false;
                 for (const auto &run : profile.graph_runs) {
                     if (run.begin <= ex.kmers.begin && run.end >= ex.kmers.end)

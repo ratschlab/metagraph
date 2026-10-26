@@ -6,6 +6,7 @@ import random
 import socket
 import subprocess
 import time
+from unittest.mock import patch
 import requests
 
 from parameterized import parameterized_class
@@ -13,6 +14,41 @@ from metagraph.client import GraphClientJson, GraphClient
 from base import TestingBase, METAGRAPH, PROTEIN_MODE
 
 MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
+
+
+def unused_port():
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def start_server(graph, annotation, log_path):
+    for attempt in range(3):
+        port = unused_port()
+        with log_path.with_suffix(f'.{attempt}.log').open('w+') as log:
+            server = subprocess.Popen([METAGRAPH, 'server_query', '-i', graph,
+                                       '-a', annotation, '--mmap', '--address', '127.0.0.1',
+                                       '--port', str(port), '-p', '1'],
+                                      stdout=log, stderr=subprocess.STDOUT)
+            client = GraphClientJson('127.0.0.1', port)
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and server.poll() is None:
+                try:
+                    client.stats(timeout=1)
+                    if server.poll() is None:
+                        return server, port
+                except (RuntimeError, requests.RequestException):
+                    pass
+                time.sleep(0.05)
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=10)
+                raise AssertionError('Local test server did not become ready')
+            log.seek(0)
+            error = log.read()
+            # Another test can bind after unused_port releases its socket.
+            if 'bind: Address already in use' not in error or attempt == 2:
+                raise AssertionError(error)
 
 
 def runs(mask):
@@ -50,34 +86,14 @@ class TestResolve(TestingBase):
                                   'merge_overlapping': False}}
         cls.request_path = Path(cls.tempdir.name, 'request.json')
         cls.request_path.write_text(json.dumps(cls.request))
-        with socket.socket() as s:
-            s.bind(('127.0.0.1', 0))
-            cls.port = s.getsockname()[1]
-        cls.server_log = open(Path(cls.tempdir.name, 'server.log'), 'w')
-        cls.server = subprocess.Popen([METAGRAPH, 'server_query', '-i', cls.graph,
-                                      '-a', cls.annotation, '--mmap', '--address', '127.0.0.1',
-                                      '--port', str(cls.port), '-p', '1'],
-                                     stdout=cls.server_log, stderr=subprocess.STDOUT)
+        cls.server, cls.port = start_server(cls.graph, cls.annotation,
+                                           Path(cls.tempdir.name, 'server.log'))
         cls.client = GraphClientJson('127.0.0.1', cls.port)
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if cls.server.poll() is not None:
-                raise AssertionError(Path(cls.tempdir.name, 'server.log').read_text())
-            try:
-                cls.client.stats(timeout=1)
-                return
-            except (RuntimeError, requests.RequestException):
-                pass
-            time.sleep(0.05)
-        cls.server.terminate()
-        cls.server.wait(timeout=10)
-        raise AssertionError('Local test server did not become ready')
 
     @classmethod
     def tearDownClass(cls):
         cls.server.terminate()
         cls.server.wait(timeout=10)
-        cls.server_log.close()
         super().tearDownClass()
 
     def cli(self, mmap=True, paths=None):
@@ -132,3 +148,56 @@ class TestResolve(TestingBase):
         results = [json.loads(line) for line in proc.stdout.splitlines()]
         self.assertIn('error', results[0])
         self.assertIn('selection', results[1])
+
+    def test_explicit_selection_validation(self):
+        seed = {'kmer_interval': [0, 3], 'labels': ['A']}
+        for policy in [None, 'max_support', 'longest_first']:
+            for seeds in [[], [seed]]:
+                select = {'seeds': seeds}
+                if policy is not None:
+                    select['policy'] = policy
+                request = dict(self.request, select=select)
+                with self.assertRaisesRegex(RuntimeError, 'seeds requires explicit'):
+                    self.client.resolve(**request)
+                path = Path(self.tempdir.name, 'invalid-select.json')
+                path.write_text(json.dumps(request))
+                result = self.cli(paths=[path])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('seeds requires explicit', json.loads(result.stdout)['error'])
+        select = {'policy': 'explicit', 'seeds': [seed], 'min_block_bp': self.k + 3}
+        with self.assertRaisesRegex(RuntimeError, 'shorter than min_block_bp'):
+            self.client.resolve(self.query, labels=['A'], select=select)
+        select['min_block_bp'] -= 1
+        result = GraphClient('127.0.0.1', self.port).resolve(
+            self.query, labels=['A'], select=select, support='kmer',
+            min_block_kmers=2, run_format='rle', bounds={'max_query_bp': len(self.query)})
+        self.assertEqual(result['selection']['seeds'][0]['sequence'], self.query[:self.k + 2])
+        self.assertIsInstance(result['labels'][0]['runs'], str)
+
+    def test_missing_resolve_exits_without_reading_stdin(self):
+        command = [METAGRAPH, 'traverse', '-i', self.graph, '-a', self.annotation]
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True) as process:
+            try:
+                self.assertNotEqual(process.wait(timeout=5), 0)
+                self.assertIn('traverse requires --resolve', process.stderr.read())
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=10)
+
+    def test_server_start_retries_a_bind_collision(self):
+        with socket.socket() as occupied:
+            occupied.bind(('127.0.0.1', 0))
+            occupied.listen()
+            ports = [occupied.getsockname()[1], unused_port()]
+            with patch(__name__ + '.unused_port', side_effect=ports) as allocate:
+                server, port = start_server(self.graph, self.annotation,
+                                            Path(self.tempdir.name, 'collision.log'))
+                try:
+                    self.assertEqual(allocate.call_count, 2)
+                    self.assertEqual(port, ports[1])
+                    self.assertIn('graph', GraphClientJson('127.0.0.1', port).stats())
+                finally:
+                    server.terminate()
+                    server.wait(timeout=10)

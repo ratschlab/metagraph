@@ -105,6 +105,10 @@ struct FrozenSeed {
 struct SeedSelection {
     SelectionPolicy policy;
     size_t num_candidates = 0;
+    // Prototype diagnostic, before overlap merging: LONGEST_FIRST counts all
+    // candidates meeting the length floor; MAX_SUPPORT counts completed greedy
+    // rounds (at most max_seeds); EXPLICIT counts validated requested intervals,
+    // including those omitted because no requested label covers them.
     size_t num_eligible = 0;
     std::vector<FrozenSeed> seeds;
 };

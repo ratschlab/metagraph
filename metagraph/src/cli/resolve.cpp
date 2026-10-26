@@ -207,6 +207,8 @@ Json::Value process_resolve_request(const Json::Value &request, const graph::Ann
             policy.merge_overlapping = p["merge_overlapping"].asBool();
         }
         if (p.isMember("seeds")) {
+            if (policy.policy != SelectionPolicy::EXPLICIT)
+                throw std::invalid_argument("seeds requires explicit selection");
             if (!p["seeds"].isArray()) throw std::invalid_argument("Expected array: seeds");
             for (const auto &value : p["seeds"]) {
                 members(value, {"kmer_interval", "labels"});
@@ -231,10 +233,6 @@ Json::Value process_resolve_request(const Json::Value &request, const graph::Ann
 }
 
 int resolve_graph(Config *config) {
-    if (!config->traverse_resolve) {
-        std::cerr << "This increment supports metagraph traverse --resolve only\n";
-        return 1;
-    }
     auto graph = initialize_annotated_dbg(*config);
     Json::StreamWriterBuilder writer; writer["indentation"] = "";
     int status = 0;

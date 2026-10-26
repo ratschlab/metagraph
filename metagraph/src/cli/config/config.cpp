@@ -451,6 +451,11 @@ Config::Config(int argc, char *argv[]) {
             fnames.erase(it--);
     }
 
+    if (identity == TRAVERSE && !traverse_resolve) {
+        std::cerr << "Error: traverse requires --resolve" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (!print_usage_and_exit && !fnames.size()
                       && identity != STATS
                       && identity != SERVER_QUERY

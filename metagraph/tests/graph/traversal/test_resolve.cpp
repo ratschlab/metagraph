@@ -223,5 +223,77 @@ TEST(Resolve, RequestRejectsUnsupportedSemantics) {
     request["discover"].removeMember("kind");request["bounds"]["time_budget_ms"]=1;
     EXPECT_THROW(mtg::cli::process_resolve_request(request,*graph),std::invalid_argument);
 }
+
+TEST(Resolve, LongestFirstIncludesContainingRunsBeforeLabelTruncation) {
+    SupportProfile profile;
+    profile.k = 3;
+    profile.num_kmers = 10;
+    profile.graph_runs = iv({{0, 10}});
+    profile.labels = {{{0, "A"}, 10, iv({{0, 10}})},
+                      {{1, "B"}, 5, iv({{0, 5}})}};
+    profile.candidates = {{{0, 10}, {0}}, {{0, 5}, {1}}};
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::LONGEST_FIRST;
+    policy.merge_overlapping = false;
+    const std::string query(12, 'A');
+    auto selection = select_seeds(profile, query, policy, false);
+    ASSERT_EQ(selection.seeds.size(), 2u);
+    EXPECT_EQ(selection.seeds[1].labels, (std::vector<std::string>{"A", "B"}));
+    EXPECT_EQ(selection.seeds[1].population.supporting_total, 2u);
+
+    policy.max_labels_per_seed = 1;
+    policy.label_order = SelectionPolicy::COLUMN_ID;
+    selection = select_seeds(profile, query, policy, false);
+    ASSERT_EQ(selection.seeds.size(), 2u);
+    EXPECT_EQ(selection.seeds[1].labels, (std::vector<std::string>{"A"}));
+    EXPECT_EQ(selection.seeds[1].population.supporting_total, 2u);
+    EXPECT_EQ(selection.seeds[1].population.dropped, (std::vector<std::string>{"B"}));
+}
+
+TEST(Resolve, ExplicitSelectionEnforcesLengthAndDropsUnsupportedSeeds) {
+    SupportProfile profile;
+    profile.k = 3;
+    profile.num_kmers = 10;
+    profile.graph_runs = iv({{0, 10}});
+    profile.labels = {{{0, "A"}, 10, iv({{0, 10}})}, {{1, "B"}, 0, {}}};
+    SelectionPolicy policy;
+    policy.policy = SelectionPolicy::EXPLICIT;
+    policy.min_block_bp = 7;
+    policy.explicit_seeds = {{{0, 4}, {"A"}}};
+    const std::string query(12, 'A');
+    EXPECT_THROW(select_seeds(profile, query, policy, false), std::invalid_argument);
+    policy.explicit_seeds = {{{0, 5}, {"A", "B"}}, {{0, 5}, {"B"}}, {{0, 5}, {}}};
+    const auto selection = select_seeds(profile, query, policy, false);
+    EXPECT_EQ(selection.num_eligible, 3u);
+    ASSERT_EQ(selection.seeds.size(), 1u);
+    EXPECT_EQ(selection.seeds[0].sequence.size(), 7u);
+    EXPECT_EQ(selection.seeds[0].labels, (std::vector<std::string>{"A"}));
+    EXPECT_EQ(selection.seeds[0].labels_not_covering, (std::vector<std::string>{"B"}));
+}
+
+TEST(Resolve, EligibleCountsFollowTheSelectionPolicy) {
+    SupportProfile profile;
+    profile.k = 3;
+    profile.num_kmers = 10;
+    profile.graph_runs = iv({{0, 10}});
+    profile.labels = {{{0, "A"}, 10, iv({{0, 10}})},
+                      {{1, "B"}, 5, iv({{0, 5}})}};
+    profile.candidates = {{{0, 10}, {0}}, {{0, 5}, {1}}};
+    SelectionPolicy policy;
+    policy.max_seeds = 1;
+    policy.policy = SelectionPolicy::LONGEST_FIRST;
+    const std::string query(12, 'A');
+    auto selection = select_seeds(profile, query, policy, false);
+    EXPECT_EQ(selection.num_candidates, 2u);
+    EXPECT_EQ(selection.num_eligible, 2u);
+    ASSERT_EQ(selection.seeds.size(), 1u);
+    policy.min_block_bp = 8;
+    EXPECT_EQ(select_seeds(profile, query, policy, false).num_eligible, 1u);
+    policy = SelectionPolicy();
+    policy.max_seeds = 1;
+    EXPECT_EQ(select_seeds(profile, query, policy, false).num_eligible, 1u);
+    policy.max_seeds = 2;
+    EXPECT_EQ(select_seeds(profile, query, policy, false).num_eligible, 2u);
+}
 } // namespace
 #endif
