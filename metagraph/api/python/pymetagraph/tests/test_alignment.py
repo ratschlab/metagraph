@@ -118,6 +118,43 @@ def test_sub_k_suffix_starts_inside_node(tmp_path, backend):
     assert (actual[0]["query_start"], actual[0]["query_end"]) == (0, 23)
 
 
+@pytest.mark.parametrize("backend", ["succinct", "sshash"])
+def test_two_sided_suffix_recovers_prefix_inside_node(tmp_path, backend):
+    reference = "ACGTCAGTACGATCGTACCTGAGCTTAGGCA"
+    query = reference[4:8] + "T" + reference[9:]
+    fasta = tmp_path / "reference.fa"
+    fasta.write_text(f">reference\n{reference}\n")
+    run("build", "--graph", backend, "--disk-swap", tmp_path, "-k", 31,
+        "-o", tmp_path / "graph", fasta)
+    extension = ".dbg" if backend == "succinct" else ".sshashdbg"
+    graph_path = tmp_path / ("graph" + extension)
+    graph = pymetagraph.AnnotatedGraph(graph_path)
+    reads = tmp_path / "query.fa"
+    reads.write_text(f">query\n{query}\n")
+    for two_sided in (False, True):
+        expected = [record for line in run(
+            "align", "--json", "--align-output-path", "--align-only-forwards",
+            "--align-min-seed-length", 10, "--align-min-exact-match", 0.9,
+            *(["--align-two-sided"] if two_sided else []),
+            "-i", graph_path, reads).splitlines()
+            if (record := json.loads(line)).get("read_mapped")]
+        actual = graph.align(query, seed_length=10, min_exact_match=0.9,
+                             only_forwards=True, two_sided=two_sided)
+        if not two_sided:
+            assert actual == expected == []
+            continue
+        assert len(actual) == len(expected) == 1
+        assert expected[0]["path"]["mapping"][0]["position"]["offset"] == 4
+        assert len(expected[0]["path"]["mapping"]) == 1
+        assert actual[0]["score"] == expected[0]["score"] == 59
+        assert actual[0]["annotation"] == expected[0]["annotation"]
+        assert actual[0]["annotation"]["cigar"] == "4=1X22="
+        assert actual[0]["annotation"]["ref_sequence"] == reference[4:]
+        assert actual[0]["sequence"] == query
+        assert actual[0]["strand"] == "+"
+        assert (actual[0]["query_start"], actual[0]["query_end"]) == (0, len(query))
+
+
 def test_batches_and_empty_inputs(graph):
     queries = [REFERENCE, OTHER, "", "NNNNNNNN"]
     result = graph.align(queries, seed_length=5, only_forwards=True)
