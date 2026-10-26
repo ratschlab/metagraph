@@ -80,14 +80,17 @@ Selection returns the sequence, interval, supporting labels, deterministic seed
 ID, label-population truncation and overlaps for each seed. Its defaults are
 `max_seeds: 10`, `min_block_bp: 0` (at least k), `max_labels_per_seed: 1000`,
 `label_order: "hash"`, `sample_seed: 0`, and `merge_overlapping: true`.
-`label_order` also accepts `column_id` and `kmers_supported`. Overlapping picks
-may be reduced to their common interval, following the prototype's policy.
+`label_order` also accepts `column_id` and `kmers_supported`. In the automatic
+policies, overlapping picks may be reduced to their common interval, following
+the prototype's policy. Explicit selection ignores `merge_overlapping` and
+retains each supported requested interval.
 `min_block_bp` applies to every policy; explicit intervals below it are rejected.
 `max_seeds` limits the two automatic policies; explicit selection processes all
 requested intervals.
 
 `selection.counts.candidates` is the number of maximal-run candidates;
-`selected` counts returned seeds after merging. `eligible` preserves the
+`selected` counts returned seeds, after merging in the automatic policies.
+`eligible` preserves the
 prototype's policy-specific diagnostic: for `longest_first`, all candidates
 meeting the length floor before `max_seeds`; for `max_support`, completed greedy
 rounds (at most `max_seeds`); for `explicit`, validated requested intervals,
