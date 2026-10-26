@@ -304,6 +304,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
                 if ((*columns[j])[indices[i]])
                     expected.push_back(j);
             }
+            std::sort(rows[i].begin(), rows[i].end());
             EXPECT_EQ(expected, rows[i]);
         }
     }

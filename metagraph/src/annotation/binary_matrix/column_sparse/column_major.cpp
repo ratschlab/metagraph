@@ -30,6 +30,8 @@ bool ColumnMajor::get(Row row, Column column) const {
 std::vector<ColumnMajor::SetBitPositions>
 ColumnMajor::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
+    if (columns_.empty())
+        return rows;
 #ifndef NDEBUG
     for (auto row : row_ids)
         assert(row < num_rows());
