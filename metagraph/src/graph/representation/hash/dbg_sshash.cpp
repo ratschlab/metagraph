@@ -110,8 +110,8 @@ struct DBGSSHash::SeedIndexCache {
 
     template <class Compare>
     static auto equal_range(const sdsl::int_vector<>& order, const Compare& compare) {
-        auto bound = [&](bool upper) {
-            size_t first = 0, last = order.size();
+        auto bound = [&](size_t first, bool upper) {
+            size_t last = order.size();
             while (first < last) {
                 const auto middle = first + (last - first) / 2;
                 const int comparison = compare(order[middle]);
@@ -120,7 +120,10 @@ struct DBGSSHash::SeedIndexCache {
             }
             return first;
         };
-        return std::pair { bound(false), bound(true) };
+        const size_t first = bound(0, false);
+        if (first == order.size() || compare(order[first]) != 0)
+            return std::pair { first, first };
+        return std::pair { first, bound(first + 1, true) };
     }
 
     template <class Dictionary>
