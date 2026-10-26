@@ -563,7 +563,8 @@ int run_server(Config *config) {
                 throw std::invalid_argument("Resolve currently requires a single-index server");
             if (anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
-            return process_resolve_request(parse_json_string(content), *anno_graph.get());
+            return Json::writeString(Json::StreamWriterBuilder(),
+                process_resolve_request(parse_json_string(content), *anno_graph.get()));
         });
     };
 
