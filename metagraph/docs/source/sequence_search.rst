@@ -61,16 +61,18 @@ If an annotator is provided with the :code:`-a` flag, the returned alignments wi
 Alignment search options
 ------------------------
 
-``metagraph align`` defaults to independent seed extension using the column
-aligner and its covered-seed filtering, including label-constrained searches.
-The wavefront aligner provides the fallback for partial-node results and
-unsupported sub-k seeds, and implements the opt-in search modes below.
+``metagraph align`` defaults to independent seed extension. Full-k searches use
+the column aligner and its covered-seed filtering, including label-constrained
+searches. Shorter seeds also use wavefront extension and suffix lookup to retain
+partial-node matches. The wavefront aligner implements the opt-in modes below.
 
 Use ``--align-chain`` to construct and connect seed chains, and
 ``--align-two-sided`` to extend both ends of each seed or chain. Both options are
 off by default and can be enabled independently. They can improve sensitivity
 for long, error-prone reads at a higher runtime cost. ``--align-only-forwards``
 controls query orientation independently of the extension direction.
+Backward extension currently requires a seed starting at a node boundary;
+suffix seeds that start inside a node retain forward-only extension.
 
 ``--align-post-chain`` joins completed local alignments and can insert graph
 jumps (``G`` in the CIGAR). It uses the column aligner and cannot be combined
