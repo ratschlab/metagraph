@@ -378,13 +378,17 @@ TEST(CanonicalSubKSeeds, RequestedQueryOrientationsAtSequenceBoundary) {
                     EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), alignment.get_query()));
                     results.push_back(std::move(alignment));
                 });
-                if (reverse_query && !both_orientations) {
+                if (graph->get_mode() == DeBruijnGraph::BASIC
+                        && reverse_query && !both_orientations) {
                     EXPECT_TRUE(results.empty());
                     continue;
                 }
                 ASSERT_EQ(1u, results.size());
-                EXPECT_EQ(reverse_query, results[0].get_orientation());
-                EXPECT_EQ(forward, results[0].get_spelling());
+                if (!both_orientations) {
+                    EXPECT_FALSE(results[0].get_orientation());
+                }
+                EXPECT_EQ(query.get_query(results[0].get_orientation()), results[0].get_spelling());
+                EXPECT_EQ(results[0].get_spelling() == forward ? 0u : 8u, results[0].get_offset());
                 EXPECT_EQ("23=", results[0].get_cigar().to_string());
                 EXPECT_EQ(56, score_match(results[0], config));
             }
@@ -401,28 +405,47 @@ TEST(CanonicalAlternatives, PartialPositionsSurviveMirrorNormalization) {
     config.seed_complexity_filter = false;
     auto check = [&](const auto &graph, const std::string &partial, const std::string &complete) {
         for (const auto &sequence : {partial, complete}) {
-            SCOPED_TRACE(::testing::Message() << "mode=" << graph->get_mode() << " query=" << sequence);
-            Query query(*graph, sequence);
-            ExactSeeder seeder(query, config);
-            Extender extender(query, config);
-            std::vector<Alignment> results;
-            align_query(query, seeder, extender, [&](Alignment&& alignment) {
-                EXPECT_TRUE(alignment.is_spelling_valid(*graph));
-                EXPECT_EQ(alignment.get_query(), alignment.get_spelling());
-                EXPECT_EQ(graph->get_k() - sequence.size(), alignment.get_end_trim());
-                results.push_back(std::move(alignment));
-            });
-            const bool distinct_positions = sequence.size() < graph->get_k();
-            const size_t expected = distinct_positions || graph->get_mode() == DeBruijnGraph::BASIC ? 2 : 1;
-            ASSERT_EQ(expected, results.size());
-            EXPECT_FALSE(results[0].get_orientation());
-            if (expected == 2) {
-                EXPECT_TRUE(results[1].get_orientation());
+            using Position = std::tuple<bool, std::vector<DeBruijnGraph::node_index>, size_t>;
+            std::set<Position> forward_positions;
+            for (bool both_orientations : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << "mode=" << graph->get_mode()
+                    << " query=" << sequence << " both=" << both_orientations);
+                config.forward_and_reverse_complement = both_orientations;
+                Query query(*graph, sequence);
+                ExactSeeder seeder(query, config);
+                Extender extender(query, config);
+                std::set<Position> positions;
+                std::set<size_t> offsets;
+                size_t num_results = 0;
+                align_query(query, seeder, extender, [&](Alignment&& alignment) {
+                    EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+                    EXPECT_EQ(alignment.get_query(), alignment.get_spelling());
+                    EXPECT_EQ(graph->get_k() - sequence.size(),
+                              alignment.get_offset() + alignment.get_end_trim());
+                    if (!both_orientations || graph->get_mode() != DeBruijnGraph::BASIC) {
+                        EXPECT_FALSE(alignment.get_orientation());
+                    }
+                    positions.emplace(alignment.get_orientation(), alignment.get_path(),
+                                      alignment.get_offset());
+                    offsets.insert(alignment.get_offset());
+                    ++num_results;
+                });
+                const bool distinct_positions = sequence.size() < graph->get_k();
+                const size_t expected = distinct_positions
+                    || (both_orientations && graph->get_mode() == DeBruijnGraph::BASIC) ? 2 : 1;
+                ASSERT_EQ(expected, num_results);
+                EXPECT_EQ(num_results, positions.size());
+                if (!both_orientations) {
+                    EXPECT_EQ((std::set<size_t>{0, graph->get_k() - sequence.size()}), offsets);
+                    forward_positions = positions;
+                } else if (graph->get_mode() != DeBruijnGraph::BASIC) {
+                    EXPECT_EQ(forward_positions, positions);
+                }
             }
         }
     };
-    // ATAT is its own reverse complement. Its forward prefix and reverse
-    // prefix occupy different halves, even though node and CIGAR are equal.
+    // ATAT is its own reverse complement. Its forward prefix and suffix
+    // occupy different halves, even though node and CIGAR are equal.
     for (const auto &graph : {
             build_graph_batch<DBGSuccinct>(4, {"ATAT"}, DeBruijnGraph::BASIC),
             build_graph_batch<DBGSuccinct>(4, {"ATAT"}, DeBruijnGraph::CANONICAL),
@@ -503,6 +526,37 @@ TEST(CanonicalAlternatives, AsymmetricScoresKeepTheirOrientation) {
         }
         EXPECT_EQ(expected, run(DeBruijnGraph::CANONICAL));
     }
+}
+
+TEST(CanonicalAlternatives, CoordinateCandidatesKeepTheirOrientation) {
+    class CoordinateSeeder : public ExactSeeder {
+      public:
+        using ExactSeeder::ExactSeeder;
+        std::vector<Alignment> get_inexact_anchors(bool = true) const override {
+            const auto &sequence = query_.get_query(true);
+            const auto &graph = query_.get_graph();
+            return { Alignment(graph, sequence, true, {graph.kmer_to_node(sequence)},
+                               Cigar(Cigar::MATCH, sequence.size()), std::string(sequence),
+                               0, 1, {{7, 11}}) };
+        }
+    };
+    auto graph = build_graph_batch<DBGSuccinct>(5, {"AACGT"}, DeBruijnGraph::CANONICAL);
+    Query query(*graph, "ACGTT");
+    DBGAlignerConfig config;
+    config.set_scoring_matrix();
+    config.min_seed_length = config.max_seed_length = 5;
+    config.num_alternative_paths = 2;
+    CoordinateSeeder seeder(query, config);
+    Extender extender(query, config);
+    std::vector<Alignment> results;
+    align_query(query, seeder, extender, [&](Alignment&& alignment) {
+        results.push_back(std::move(alignment));
+    });
+    ASSERT_EQ(1u, results.size());
+    EXPECT_TRUE(results[0].get_orientation());
+    EXPECT_EQ("AACGT", results[0].get_query());
+    EXPECT_EQ("AACGT", results[0].get_spelling());
+    EXPECT_EQ((Alignment::CoordinateSet{{7, 11}}), results[0].get_coords());
 }
 #endif
 
@@ -2173,25 +2227,65 @@ TEST(AlignmentCigar, BothImplementationsCheckEveryMismatch) {
 TEST(AlignmentTrimming, KeepsLabelClassesWithTrimmedPath) {
     const std::string reference = "AACGTT";
     auto graph = build_graph_batch<DBGHashFast>(4, { reference });
-    for (size_t length : {3, 4, 5}) {
-        const std::string query = reference.substr(0, length);
+    for (const auto &[offset, length] : {
+            std::pair<size_t, size_t>{0, 3}, {0, 4}, {0, 5}, {1, 3}, {2, 3}}) {
+        SCOPED_TRACE(::testing::Message() << "offset=" << offset << " length=" << length);
+        const std::string query = reference.substr(offset, length);
+        const size_t end_trim = reference.size() - offset - length;
         Alignment alignment(*graph, query, false, map_to_nodes_sequentially(*graph, reference),
                             Cigar(Cigar::MATCH, length), std::string(reference),
-                            reference.size() - length, 1, {{17}});
+                            end_trim, 1, {{17}}, offset);
         const auto cigar = alignment.get_cigar();
         const auto coords = alignment.get_coords();
-        const auto removed = std::min(reference.size() - length, alignment.size() - 1);
+        const auto removed = std::min(end_trim, alignment.size() - 1);
         EXPECT_EQ(removed, alignment.trim_end());
         EXPECT_EQ(alignment.size(), alignment.get_label_classes().size());
         EXPECT_EQ(std::vector<Anchor::label_class_t>(alignment.size(), 1),
                   alignment.get_label_classes());
-        EXPECT_EQ(reference.size() - length - removed, alignment.get_end_trim());
+        EXPECT_EQ(offset, alignment.get_offset());
+        EXPECT_EQ(end_trim - removed, alignment.get_end_trim());
         EXPECT_EQ(query, alignment.get_spelling());
         EXPECT_EQ(cigar, alignment.get_cigar());
         EXPECT_EQ(coords, alignment.get_coords());
         EXPECT_TRUE(alignment.is_spelling_valid(*graph));
         EXPECT_EQ(0u, alignment.trim_end());
     }
+}
+
+TEST(AlignmentOffset, KeepsTheCompleteNodeSpelling) {
+    const std::string reference = "ACGTCGATACCGTTAACGATGCTAGCTACGA";
+    ASSERT_EQ(31u, reference.size());
+    const std::string query = reference.substr(8);
+    auto graph = build_graph_batch<DBGHashFast>(reference.size(), {reference});
+    Alignment alignment(*graph, query, false, {graph->kmer_to_node(reference)},
+                        Cigar(Cigar::MATCH, query.size()), std::string(reference),
+                        0, Anchor::nannot, {}, 8);
+    const Match &match = alignment;
+    EXPECT_EQ(8u, match.get_offset());
+    EXPECT_EQ(query, match.get_spelling());
+    EXPECT_EQ(reference, match.get_path_spelling());
+    EXPECT_TRUE(match.is_spelling_valid(*graph));
+    EXPECT_TRUE(alignment.get_cigar().is_valid(match.get_spelling(), query));
+    EXPECT_EQ(0u, alignment.trim_end());
+}
+
+TEST(AlignmentOffset, DistinguishesPositionsWithinOneNode) {
+    const std::string reference = "AAAA";
+    const std::string query = "AA";
+    auto graph = build_graph_batch<DBGHashFast>(4, {reference});
+    const auto node = graph->kmer_to_node(reference);
+    Alignment prefix(*graph, query, false, {node}, Cigar("2="), std::string(reference), 2);
+    Alignment suffix(*graph, query, false, {node}, Cigar("2="), std::string(reference),
+                     0, Anchor::nannot, {}, 2);
+    EXPECT_EQ(prefix.get_path(), suffix.get_path());
+    EXPECT_EQ(prefix.get_cigar(), suffix.get_cigar());
+    EXPECT_EQ(prefix.get_spelling(), suffix.get_spelling());
+    EXPECT_FALSE(prefix == suffix);
+    EXPECT_EQ(0u, prefix.get_offset());
+    EXPECT_EQ(2u, suffix.get_offset());
+    Anchor anchor(query, 0, query.size(), false, {node}, "AA");
+    EXPECT_EQ(0u, anchor.get_offset());
+    EXPECT_EQ(prefix, Alignment(anchor));
 }
 
 TEST(AlignmentExtension, KeepsBetterPathsAfterACompleteQuery) {

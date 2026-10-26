@@ -143,7 +143,8 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
         }
     }
 
-    assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+    // Selective extension can produce seeds without materializing annotation rows.
+    assert(single_label_column_ || std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
                     [&](node_index n) {
                         return n == DeBruijnGraph::npos || annotation_buffer_.get_labels(n);
                     }));

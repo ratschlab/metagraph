@@ -6,6 +6,7 @@
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "aligner_labeled.hpp"
 
 namespace mtg {
@@ -37,7 +38,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
 
-    if (config_.min_seed_length < graph.get_k() && !get_dbg_succ(graph))
+    if (config_.min_seed_length < graph.get_k() && !get_dbg_succ(graph)
+            && !dynamic_cast<const DBGSSHash*>(&graph))
         config_.min_seed_length = graph.get_k();
 
     if (!config_.max_seed_length)

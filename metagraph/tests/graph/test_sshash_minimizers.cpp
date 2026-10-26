@@ -95,20 +95,20 @@ TEST(SSHashFixtures, HighKPreservesStrandsAndBranches) {
 }
 #endif
 
-using PrefixMatches = std::vector<std::pair<mtg::graph::DeBruijnGraph::node_index, size_t>>;
+using SeedMatches = std::vector<std::pair<mtg::graph::DeBruijnGraph::node_index, size_t>>;
 
-PrefixMatches prefix_matches(const mtg::graph::DBGSSHash &graph, std::string_view query,
+SeedMatches prefix_matches(const mtg::graph::DBGSSHash &graph, std::string_view query,
                              size_t minimum, size_t maximum = SIZE_MAX) {
-    PrefixMatches result;
+    SeedMatches result;
     graph.call_nodes_with_prefix_matching(query, minimum,
         [&](auto node, size_t length) { result.emplace_back(node, length); }, maximum);
     std::sort(result.begin(), result.end());
     return result;
 }
 
-PrefixMatches expected_prefix_matches(const mtg::graph::DBGSSHash &graph,
+SeedMatches expected_prefix_matches(const mtg::graph::DBGSSHash &graph,
                                       std::string_view query, size_t minimum) {
-    PrefixMatches result;
+    SeedMatches result;
     graph.call_nodes([&](auto node) {
         const auto sequence = graph.get_node_sequence(node);
         size_t length = 0;
@@ -118,6 +118,120 @@ PrefixMatches expected_prefix_matches(const mtg::graph::DBGSSHash &graph,
     });
     std::sort(result.begin(), result.end());
     return result;
+}
+
+SeedMatches suffix_matches(const mtg::graph::DBGSSHash &graph, std::string_view query,
+                           size_t minimum, size_t maximum = SIZE_MAX) {
+    SeedMatches result;
+    graph.call_nodes_with_suffix_matching_longest_prefix(query,
+        [&](auto node, size_t length) { result.emplace_back(node, length); }, minimum, maximum);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+SeedMatches expected_suffix_matches(const mtg::graph::DBGSSHash &graph,
+                                    std::string_view query, size_t minimum) {
+    SeedMatches result;
+    size_t longest = minimum;
+    graph.call_nodes([&](auto node) {
+        const auto sequence = graph.get_node_sequence(node);
+        for (size_t length = std::min(query.size(), sequence.size()); length >= minimum; --length) {
+            if (!std::string_view(sequence).ends_with(query.substr(0, length)))
+                continue;
+            if (length > longest) {
+                longest = length;
+                result.clear();
+            }
+            if (length == longest)
+                result.emplace_back(node, length);
+            break;
+        }
+    });
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+TEST(SSHashSuffix, MatchesRealNodesAcrossWordWidths) {
+    using mtg::graph::DBGSSHash;
+    using Kmer = DBGSSHash::kmer_t<uint64_t>;
+    std::mt19937 random(673);
+    std::string sequence(150, 'A');
+    for (char &c : sequence) c = Kmer::alphabet[random() % Kmer::alphabet_size];
+    std::vector<DBGSSHash::Mode> modes { DBGSSHash::BASIC };
+#if ! _PROTEIN_GRAPH
+    modes.push_back(DBGSSHash::CANONICAL);
+#endif
+    for (auto mode : modes) {
+        size_t word_bits = 64;
+        for (size_t k : { size_t(7), size_t(64 / Kmer::bits_per_char + 1),
+                         size_t(128 / Kmer::bits_per_char + 1) }) {
+            SCOPED_TRACE(::testing::Message() << "k=" << k << " mode=" << mode);
+            auto owner = mtg::test::build_graph<DBGSSHash>(k, { sequence }, mode);
+            const auto &graph = static_cast<const DBGSSHash&>(*owner);
+            std::visit([&](const auto &dictionary) {
+                using StoredKmer = typename std::decay_t<decltype(dictionary)>::kmer_type;
+                EXPECT_EQ(word_bits, StoredKmer::uint_kmer_bits);
+            }, graph.data());
+            graph.call_nodes([&](auto node) {
+                const auto word = graph.get_node_sequence(node);
+                for (size_t length : { size_t(3), k - 1, k }) {
+                    const auto query = word.substr(k - length);
+                    EXPECT_EQ(expected_suffix_matches(graph, query, 2),
+                              suffix_matches(graph, query, 2)) << query;
+                    if (length < k) {
+                        const auto longer_query = query + 'A';
+                        EXPECT_EQ(expected_suffix_matches(graph, longer_query, 2),
+                                  suffix_matches(graph, longer_query, 2)) << longer_query;
+                    }
+                }
+            });
+            word_bits *= 2;
+        }
+    }
+}
+
+TEST(SSHashSuffix, CapsInvalidInputAndConcurrentInitialization) {
+    using mtg::graph::DBGSSHash;
+    auto owner = mtg::test::build_graph<DBGSSHash>(5, { "AATGA", "CATGA", "AAAAT" }, DBGSSHash::BASIC);
+    const auto &graph = static_cast<const DBGSSHash&>(*owner);
+    const auto expected = expected_suffix_matches(graph, "TGAC", 1);
+    ASSERT_EQ(2u, expected.size());
+    ASSERT_EQ(3u, expected.front().second);
+    const auto prefix = expected_prefix_matches(graph, "AAT", 2);
+    // The two independent lazy orders can initialize concurrently.
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    std::vector<std::future<SeedMatches>> workers;
+    for (size_t i = 0; i < 8; ++i) {
+        workers.push_back(std::async(std::launch::async, [&, i] {
+            ready.wait();
+            return i % 2 ? prefix_matches(graph, "AAT", 2) : suffix_matches(graph, "TGAC", 1);
+        }));
+    }
+    start.set_value();
+    for (size_t i = 0; i < workers.size(); ++i)
+        EXPECT_EQ(i % 2 ? prefix : expected, workers[i].get());
+
+    for (size_t maximum : { size_t(0), size_t(1), size_t(2), SIZE_MAX }) {
+        SeedMatches actual;
+        const size_t count = graph.call_nodes_with_suffix_matching_longest_prefix("TGAC",
+            [&](auto node, size_t length) { actual.emplace_back(node, length); }, 1, maximum);
+        EXPECT_EQ(maximum < 2 ? maximum + 1 : 2, count);
+        std::sort(actual.begin(), actual.end());
+        EXPECT_EQ(maximum < 2 ? SeedMatches{} : expected, actual);
+    }
+    // A longer ambiguous match must not fall back to the unique one-base suffix.
+    EXPECT_TRUE(suffix_matches(graph, "TGAC", 1, 1).empty());
+    EXPECT_EQ(expected, suffix_matches(graph, "tgac", 1));
+    EXPECT_EQ(expected, suffix_matches(graph, "TGAC", 0));
+    EXPECT_TRUE(suffix_matches(graph, "TGA#", 1).empty());
+    EXPECT_TRUE(suffix_matches(graph, "#TGA", 1).empty());
+    EXPECT_TRUE(suffix_matches(graph, "TGAC", 4).empty());
+    EXPECT_TRUE(suffix_matches(graph, "", 0).empty());
+    EXPECT_TRUE(suffix_matches(DBGSSHash(5), "TGAC", 1).empty());
+    const auto exact = suffix_matches(graph, "AATGA", 1, 1);
+    ASSERT_EQ(1u, exact.size());
+    EXPECT_EQ(5u, exact.front().second);
 }
 
 TEST(SSHashPrefix, MatchesRealNodesAcrossWordWidths) {
@@ -162,7 +276,7 @@ TEST(SSHashPrefix, CapsInvalidInputAndConcurrentInitialization) {
     // Make the first prefix lookups race to initialize the shared cache.
     std::promise<void> start;
     const auto ready = start.get_future().share();
-    std::vector<std::future<PrefixMatches>> workers;
+    std::vector<std::future<SeedMatches>> workers;
     for (size_t i = 0; i < 4; ++i)
         workers.push_back(std::async(std::launch::async, [&] {
             ready.wait();
@@ -200,8 +314,12 @@ TEST(SSHashPrefix, SuccessfulReloadReplacesCachedOrder) {
         graph.serialize(bytes);
         ASSERT_TRUE(loaded.load(bytes));
         EXPECT_EQ(k, loaded.get_k());
-        for (const auto &query : { std::string("ACGT"), std::string("GACTGAC") })
+        for (const auto &query : { std::string("ACGT"), std::string("GACTGAC") }) {
             EXPECT_EQ(expected_prefix_matches(graph, query, 2), prefix_matches(loaded, query, 2));
+            const auto suffix_query = std::string_view(query).substr(0, k);
+            EXPECT_EQ(expected_suffix_matches(graph, suffix_query, 2),
+                      suffix_matches(loaded, suffix_query, 2));
+        }
         std::stringstream after;
         loaded.serialize(after);
         EXPECT_EQ(bytes.str(), after.str());

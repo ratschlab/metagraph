@@ -157,6 +157,16 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<void(node_index, size_t)>& callback,
             size_t maximum = std::numeric_limits<size_t>::max()) const;
 
+    // Call nodes whose suffix matches the longest prefix of query (at most k
+    // characters). Reject invalid input and suppress the entire longest-match
+    // bucket if it exceeds maximum. Return its size, capped at maximum + 1.
+    // The suffix order is lazy and is not serialized. A zero minimum is one.
+    size_t call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view query,
+            std::function<void(node_index, uint64_t)> callback,
+            size_t minimum = 1,
+            size_t maximum = std::numeric_limits<size_t>::max()) const;
+
     static constexpr node_index sshash_to_graph_index(uint64_t idx) {
         return idx + 1;
     }
