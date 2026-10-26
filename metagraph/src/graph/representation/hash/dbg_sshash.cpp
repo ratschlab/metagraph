@@ -69,24 +69,18 @@ struct DBGSSHash::SeedIndexCache {
         entries.reserve(graph.num_nodes());
         for (auto it = dictionary.begin(); it.has_next();) {
             auto [id, word] = it.next();
-            entries.emplace_back(word.bits, sshash_to_graph_index(id));
-            if (canonical) {
-                const auto reverse_node = graph.reverse_complement(sshash_to_graph_index(id));
-                if (reverse_node != sshash_to_graph_index(id)) {
-                    word.reverse_complement_inplace(k);
-                    entries.emplace_back(word.bits, reverse_node);
-                }
-            }
-        }
-        // Characters occupy low bits first. Reverse them so numeric order is
-        // lexicographic in the encoded alphabet, with node ID breaking ties.
-        for (auto& [bits, node] : entries) {
-            Kmer word;
-            word.bits = bits;
+            // Reverse characters so numeric order is lexicographic.
             Kmer reversed;
             for (size_t i = 0; i < k; ++i)
                 reversed.set(k - i - 1, word.at(i));
-            bits = reversed.bits;
+            entries.emplace_back(reversed.bits, sshash_to_graph_index(id));
+            if (canonical) {
+                const auto reverse_node = graph.reverse_complement(sshash_to_graph_index(id));
+                if (reverse_node != sshash_to_graph_index(id)) {
+                    reversed.reverse_complement_inplace(k);
+                    entries.emplace_back(reversed.bits, reverse_node);
+                }
+            }
         }
         // Pair's C++20 comparison can narrow uint256_t through its uint64_t conversion.
         std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {

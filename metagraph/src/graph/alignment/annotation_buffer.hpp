@@ -36,7 +36,8 @@ class AnnotationBuffer {
     bool has_coordinates() const { return multi_int_; }
 
     // Get the annotations and coordinates of a node if they have been fetched.
-    // The returned pointers are valid until next fetch_queued_annotations().
+    // Label pointers may be invalidated by cache_column_set() or
+    // fetch_queued_annotations(); coordinate pointers by fetch_queued_annotations().
     std::pair<const Columns*, const CoordinateSet*>
     get_labels_and_coords(node_index node) const;
 
@@ -60,6 +61,7 @@ class AnnotationBuffer {
     }
 
     // Fetch a label set given its index returned by `cache_column_set()`
+    // The index stays valid; the reference may be invalidated by either cache update.
     inline const Columns& get_cached_column_set(size_t i) const {
         assert(i < column_sets_.size());
         return column_sets_.data()[i];

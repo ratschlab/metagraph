@@ -53,6 +53,24 @@ bool emit_alignments(const Query &query, const DBGAlignerConfig &config,
                 || aln.get_cigar().get_num_matches()
                      < config.min_exact_match * query.get_query().size())
             continue;
+        if (aln.get_orientation() && !aln.get_end_trim() && config.num_alternative_paths > 1
+                && query.get_graph().get_mode() == DeBruijnGraph::CANONICAL
+                && std::find(aln.get_path().begin(), aln.get_path().end(), DeBruijnGraph::npos)
+                     == aln.get_path().end()) {
+            assert(aln.get_coords().empty());
+            auto path = aln.get_path();
+            auto spelling = aln.get_path_spelling();
+            auto cigar = aln.get_cigar();
+            reverse_complement_seq_path(query.get_graph(), spelling, path);
+            std::reverse(cigar.data().begin(), cigar.data().end());
+            // Normalize complete mirror paths only when their score is unchanged.
+            // Reversing a trimmed prefix would instead start inside its first node.
+            if (config.score_cigar(spelling, query.get_query(false), cigar) == score_match(aln, config)) {
+                aln = Alignment(query.get_graph(), query.get_query(false), false,
+                    std::move(path), std::move(cigar), std::move(spelling), 0,
+                    aln.get_label_classes().front(), Coordinates(aln.get_coords()));
+            }
+        }
         auto [it, inserted] = positions.emplace(
             Key(aln.get_orientation(), aln.get_path(), aln.get_cigar().to_string()), unique.size());
         if (inserted) {
@@ -189,28 +207,11 @@ bool emit_optimal_exact(const Query &query, const Seeder &seeder,
 }
 
 
-Alignment from_column_alignment(const Query &query, const DBGAlignerConfig &config,
-                                AnnotationBuffer *annotations,
+Alignment from_column_alignment(const Query &query, AnnotationBuffer *annotations,
                                 align::Alignment&& result, bool orientation) {
     assert(!result.get_offset());
-    bool result_orientation = orientation;
-    if (orientation && config.num_alternative_paths > 1
-            && query.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
-        auto normalized = result;
-        normalized.reverse_complement(query.get_graph(), query.get_query(false));
-        // Canonical mirror paths describe the same placement. Retain
-        // distinct orientations when asymmetric scoring distinguishes them.
-        if (!normalized.empty() && !normalized.get_offset()
-                && config.score_cigar(normalized.get_sequence(), query.get_query(false),
-                                      Cigar(normalized.get_cigar().data()))
-                   == config.score_cigar(result.get_sequence(), query.get_query(true),
-                                         Cigar(result.get_cigar().data()))) {
-            result = std::move(normalized);
-            result_orientation = false;
-        }
-    }
-    return Alignment(query.get_graph(), query.get_query(result_orientation),
-        result_orientation, std::vector(result.get_nodes()),
+    return Alignment(query.get_graph(), query.get_query(orientation),
+        orientation, std::vector(result.get_nodes()),
         Cigar(result.get_cigar().data()), std::string(result.get_sequence()), 0,
         annotations ? annotations->cache_column_set(
             AnnotationBuffer::Columns(result.label_columns.begin(), result.label_columns.end()))
@@ -288,7 +289,7 @@ bool Seeder::align_fast(const std::function<void(Alignment&&)> &callback) const 
             // of partial seeds. Do not discard it or change its score.
             if (result.get_offset())
                 return false;
-            candidates.push_back(from_column_alignment(query, config, annotations,
+            candidates.push_back(from_column_alignment(query, annotations,
                                                         std::move(result), orientation));
         }
     }
@@ -443,7 +444,7 @@ void align_query(const Query &query,
                     || result.get_cigar().get_num_matches()
                          < config.min_exact_match * query.get_query().size())
                 continue;
-            save(from_column_alignment(query, config, annotations, std::move(result), orientation));
+            save(from_column_alignment(query, annotations, std::move(result), orientation));
         }
         if (needs_wavefront)
             extender.extend(base, save, true, false,
@@ -1044,7 +1045,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                 sshash = dynamic_cast<const DBGSSHash*>(&graph);
             }
 
-            if (dbg_succ && (!orientation || canonical || graph.get_mode() == DeBruijnGraph::BASIC)) {
+            if (dbg_succ && (!orientation || canonical || config_.forward_and_reverse_complement)) {
                 const auto &boss = dbg_succ->get_boss();
                 auto encoded = boss.encode(this_query);
 
@@ -1074,13 +1075,15 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                     first = first == boss.select_last(1) ? 1 : boss.pred_last(first - 1) + 1;
 
                     const size_t i_rc = this_query.size() - (i + match_size);
-                    if (canonical && orientation
+                    if (canonical && (orientation || config_.forward_and_reverse_complement)
                             && (low_complexity[!orientation].empty()
                                 || !low_complexity[!orientation][i_rc])) {
                         // The range can contain several BOSS nodes. Visit their
                         // incoming k-mers even when their outgoing edge is a dummy.
                         for (edge_index edge = first; edge <= last;
                                 edge = boss.succ_last(edge) + 1) {
+                            if (max_seeds[!orientation][i_rc].size() > config_.max_num_seeds_per_locus)
+                                break;
                             boss.call_incoming_to_target(boss.bwd(edge),
                                 boss.get_node_last_value(edge), [&](DeBruijnGraph::node_index node) {
                                 if (!dbg_succ->in_graph(node))
@@ -1127,7 +1130,7 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                         size_t cur_match_size = match_size + suffix.size();
 
                         assert(cur_match_size < k);
-                        if ((!orientation || graph.get_mode() == DeBruijnGraph::BASIC)
+                        if ((!orientation || config_.forward_and_reverse_complement)
                                 && cur_match_size == k - 1) {
                             assert(first == last || !boss.get_last(first));
                             assert(boss.succ_last(first) == last);
@@ -1176,7 +1179,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                                     traverse.emplace_back(next_first, next_last, suffix + c,
                                                         next_is_exact_match);
                                 }
-                                if (canonical && orientation && next_is_exact_match) {
+                                if (canonical && (orientation || config_.forward_and_reverse_complement)
+                                        && next_is_exact_match) {
                                     size_t next_match_size = cur_match_size + 1;
                                     size_t i_rc = this_query.size() - (i + next_match_size);
                                     if (!low_complexity[!orientation].empty()
@@ -1268,8 +1272,6 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
             }
         }
 
-        if (graph.get_mode() != DeBruijnGraph::BASIC)
-            break;
     }
 
     // Matches in exact runs shorter than min_seed_length contribute to the

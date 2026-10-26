@@ -347,6 +347,93 @@ TEST(CanonicalSubKSeeds, IncludesEveryMatchingSuffixRangeNode) {
     }
 }
 
+TEST(CanonicalSubKSeeds, RequestedQueryOrientationsAtSequenceBoundary) {
+    const std::string reference =
+        "ATGTTAACTTGGCGGAGTTCGCTGTGGCTGCAGGGGACCAGATGCTTTACAGGAGTGAGGACATCCAGCTAGATTACAAA";
+    const auto forward = reference.substr(0, 23);
+    auto reverse = forward;
+    reverse_complement(reverse.begin(), reverse.end());
+    DBGAlignerConfig config;
+    config.min_seed_length = 19;
+    config.min_exact_match = 0.7;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    for (const auto &graph : {
+            build_graph_batch<DBGSuccinct>(31, {reference}, DeBruijnGraph::BASIC),
+            build_graph_batch<DBGSSHash>(31, {reference}, DeBruijnGraph::BASIC),
+            build_graph_batch<DBGSuccinct>(31, {reference}, DeBruijnGraph::CANONICAL),
+            build_graph_batch<DBGSSHash>(31, {reference}, DeBruijnGraph::CANONICAL),
+            build_graph_batch<DBGSuccinct>(31, {reference}, DeBruijnGraph::PRIMARY) }) {
+        for (bool reverse_query : {false, true}) {
+            for (bool both_orientations : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << "mode=" << graph->get_mode()
+                    << " reverse=" << reverse_query << " both=" << both_orientations);
+                config.forward_and_reverse_complement = both_orientations;
+                Query query(*graph, reverse_query ? reverse : forward);
+                ExactSeeder seeder(query, config);
+                Extender extender(query, config);
+                std::vector<Alignment> results;
+                align_query(query, seeder, extender, [&](Alignment&& alignment) {
+                    EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+                    EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), alignment.get_query()));
+                    results.push_back(std::move(alignment));
+                });
+                if (reverse_query && !both_orientations) {
+                    EXPECT_TRUE(results.empty());
+                    continue;
+                }
+                ASSERT_EQ(1u, results.size());
+                EXPECT_EQ(reverse_query, results[0].get_orientation());
+                EXPECT_EQ(forward, results[0].get_spelling());
+                EXPECT_EQ("23=", results[0].get_cigar().to_string());
+                EXPECT_EQ(56, score_match(results[0], config));
+            }
+        }
+    }
+}
+
+TEST(CanonicalAlternatives, PartialPositionsSurviveMirrorNormalization) {
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.min_seed_length = 2;
+    config.min_exact_match = 1;
+    config.num_alternative_paths = 2;
+    config.seed_complexity_filter = false;
+    auto check = [&](const auto &graph, const std::string &partial, const std::string &complete) {
+        for (const auto &sequence : {partial, complete}) {
+            SCOPED_TRACE(::testing::Message() << "mode=" << graph->get_mode() << " query=" << sequence);
+            Query query(*graph, sequence);
+            ExactSeeder seeder(query, config);
+            Extender extender(query, config);
+            std::vector<Alignment> results;
+            align_query(query, seeder, extender, [&](Alignment&& alignment) {
+                EXPECT_TRUE(alignment.is_spelling_valid(*graph));
+                EXPECT_EQ(alignment.get_query(), alignment.get_spelling());
+                EXPECT_EQ(graph->get_k() - sequence.size(), alignment.get_end_trim());
+                results.push_back(std::move(alignment));
+            });
+            const bool distinct_positions = sequence.size() < graph->get_k();
+            const size_t expected = distinct_positions || graph->get_mode() == DeBruijnGraph::BASIC ? 2 : 1;
+            ASSERT_EQ(expected, results.size());
+            EXPECT_FALSE(results[0].get_orientation());
+            if (expected == 2) {
+                EXPECT_TRUE(results[1].get_orientation());
+            }
+        }
+    };
+    // ATAT is its own reverse complement. Its forward prefix and reverse
+    // prefix occupy different halves, even though node and CIGAR are equal.
+    for (const auto &graph : {
+            build_graph_batch<DBGSuccinct>(4, {"ATAT"}, DeBruijnGraph::BASIC),
+            build_graph_batch<DBGSuccinct>(4, {"ATAT"}, DeBruijnGraph::CANONICAL),
+            build_graph_batch<DBGSuccinct>(4, {"ATAT"}, DeBruijnGraph::PRIMARY) }) {
+        check(graph, "AT", "ATAT");
+    }
+    // SSHash canonical graphs require odd k, excluding these palindromes.
+    check(build_graph_batch<DBGSSHash>(11, {"AACGTTTAACG"}, DeBruijnGraph::CANONICAL),
+          "AACG", "AACGTTTAACG");
+}
+
 TEST(CanonicalAlternatives, MirrorsDoNotDisplaceDistinctPaths) {
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
         SCOPED_TRACE(mode);

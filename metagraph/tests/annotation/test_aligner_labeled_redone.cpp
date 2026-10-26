@@ -30,6 +30,41 @@ using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
+#if ! _PROTEIN_GRAPH
+TEST(LabeledCanonicalAlternatives, MirrorDoesNotConsumeAlternativeSlot) {
+    auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        5, {"AACGTAC"}, {"reference"}, DeBruijnGraph::CANONICAL);
+    const auto &graph = annotated->get_graph();
+    AnnotationBuffer buffer(graph, annotated->get_annotator());
+    DBGAlignerConfig config;
+    config.min_seed_length = 3;
+    config.min_exact_match = 0.5;
+    config.num_alternative_paths = 2;
+    config.seed_complexity_filter = false;
+    config.left_end_bonus = config.right_end_bonus = 5;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    // The match threshold is below k, so these candidates use wavefront
+    // extension rather than the column adapter's former mirror normalization.
+    Query query(graph, "AACGTAC");
+    LabeledSeeder seeder(buffer, query, config);
+    LabeledExtender extender(buffer, query, config);
+    std::vector<Alignment> results;
+    align_query(query, seeder, extender, [&](Alignment&& alignment) {
+        EXPECT_TRUE(alignment.is_spelling_valid(graph));
+        EXPECT_TRUE(alignment.get_cigar().is_valid(alignment.get_spelling(), alignment.get_query()));
+        const auto &columns = buffer.get_cached_column_set(alignment.get_label_classes().front());
+        ASSERT_EQ(1u, columns.size());
+        EXPECT_EQ("reference", annotated->get_annotator().get_label_encoder().decode(columns.front()));
+        results.push_back(std::move(alignment));
+    });
+    ASSERT_EQ(2u, results.size());
+    EXPECT_FALSE(results[0].get_orientation());
+    EXPECT_EQ("7=", results[0].get_cigar().to_string());
+    EXPECT_EQ(24, score_match(results[0], config));
+    EXPECT_LT(score_match(results[1], config), score_match(results[0], config));
+}
+#endif
+
 TEST(LabeledFastAlignment, RelativeCutoffUsesEachLabelsBestScore) {
     const std::string sequence = "AACGTTGCAATGCCGATTCAGGCTAACGTCTAGCGTACGA";
     std::vector<std::string> references{sequence, sequence};

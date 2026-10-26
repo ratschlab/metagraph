@@ -1,5 +1,8 @@
 #include "column_major.hpp"
 
+#include <numeric>
+
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
 #include "common/serialization.hpp"
 
@@ -27,16 +30,52 @@ bool ColumnMajor::get(Row row, Column column) const {
 std::vector<ColumnMajor::SetBitPositions>
 ColumnMajor::get_rows(std::span<const Row> row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
+#ifndef NDEBUG
+    for (auto row : row_ids)
+        assert(row < num_rows());
+#endif
+
+    // Group nearby requests, retaining their original positions in the result.
+    std::vector<size_t> order(row_ids.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return row_ids[a] > row_ids[b];
+    });
+
+    std::vector<size_t> group_ends;
+    for (size_t begin = 0; begin < order.size();) {
+        const auto base = row_ids[order[begin]] & ~uint64_t(63);
+        size_t end = begin + 1;
+        while (end < order.size() && row_ids[order[end]] >= base)
+            ++end;
+        group_ends.push_back(end);
+        begin = end;
+    }
 
     for (size_t j = 0; j < columns_.size(); ++j) {
         assert(columns_[j]);
-        const bit_vector &col = *columns_[j];
+        const bit_vector *column = columns_[j].get();
+        if (const auto *adaptive = dynamic_cast<const bit_vector_adaptive*>(column))
+            column = &adaptive->data();
+        const bit_vector &col = *column;
 
-        for (size_t i = 0; i < row_ids.size(); ++i) {
-            assert(row_ids[i] < num_rows());
-
-            if (col[row_ids[i]])
-                rows[i].push_back(j);
+        size_t begin = 0;
+        for (size_t end : group_ends) {
+            if (end == begin + 1) {
+                const auto i = order[begin];
+                if (col[row_ids[i]])
+                    rows[i].push_back(j);
+            } else {
+                const auto first_row = row_ids[order[end - 1]];
+                const auto width = row_ids[order[begin]] - first_row + 1;
+                const auto bits = col.get_int(first_row, width);
+                for (size_t pos = begin; pos < end; ++pos) {
+                    const auto i = order[pos];
+                    if ((bits >> (row_ids[i] - first_row)) & 1)
+                        rows[i].push_back(j);
+                }
+            }
+            begin = end;
         }
     }
 
