@@ -20,6 +20,16 @@ JsonDict = Dict[str, Any]
 JsonStrList = List[str]
 
 
+class GraphApiError(RuntimeError):
+    """HTTP failure retaining the server's structured error and usage information."""
+
+    def __init__(self, status_code, response):
+        self.status_code = status_code
+        self.response = response
+        message = response.get('error', str(response)) if isinstance(response, dict) else str(response)
+        super().__init__(f"Error while calling the server API. {status_code}: {message}")
+
+
 class GraphClientJson:
     """
     Relatively low level version of the client API. Client returning results
@@ -133,7 +143,7 @@ class GraphClientJson:
         if post_req:
             ret = requests.post(url=url, json=payload, timeout=timeout)
         else:
-            ret = requests.get(url=url, timeout=timeout)
+            ret = requests.get(url=url, params=payload, timeout=timeout)
 
         try:
             json_obj = ret.json()
@@ -142,11 +152,49 @@ class GraphClientJson:
                 f"Error while calling the server API. {str(ret.status_code)}: {ret.text}")
 
         if not ret.ok:
-            error_msg = json_obj['error'] if 'error' in json_obj.keys() else str(json_obj)
-            raise RuntimeError(
-                f"Error while calling the server API. {str(ret.status_code)}: {error_msg}")
+            raise GraphApiError(ret.status_code, json_obj)
 
         return json_obj
+
+    def resolve(self, sequence: str, *, labels=None, discover=None, select=None,
+                timeout=None, **options) -> JsonDict:
+        """Resolve annotation support and optionally select traversal seeds.
+
+        Supply labels or discover. Options follow the POST /resolve JSON contract;
+        bounds.time_budget_ms controls server work, while timeout controls HTTP.
+        """
+        payload = dict(options, sequence=sequence)
+        if labels is not None:
+            payload["labels"] = list(labels)
+        if discover is not None:
+            payload["discover"] = discover
+        if select is not None:
+            payload["select"] = select
+        return self._do_request("resolve", payload, timeout=timeout)
+
+    def traverse(self, request: JsonDict, timeout=None) -> JsonDict:
+        """Extend seeds using the POST /traverse request and response format."""
+        return self._do_request("traverse", request, timeout=timeout)
+
+    def traversal_capabilities(self, graph=None, graph_path=None, timeout=None) -> JsonDict:
+        """Inspect support modes, resource limits and cancellation capabilities."""
+        params = {}
+        if graph is not None:
+            params["graph"] = graph
+        if graph_path is not None:
+            params["graph_path"] = graph_path
+        return self._do_request("traverse/capabilities", params, post_req=False, timeout=timeout)
+
+    def cancel_traversal(self, attempt_id, *, wait_ms=0, not_after_ms=None, timeout=None) -> JsonDict:
+        payload = {"attempt_id": attempt_id, "wait_ms": wait_ms}
+        if not_after_ms is not None:
+            payload["not_after_ms"] = not_after_ms
+        return self._do_request("traverse/cancel", payload, timeout=timeout)
+
+    def traversal_attempt(self, attempt_id, timeout=None) -> JsonDict:
+        from urllib.parse import quote
+        return self._do_request("traverse/attempt/" + quote(attempt_id, safe=""), {},
+                                post_req=False, timeout=timeout)
 
     # noinspection PyTypeChecker
     def column_labels(self) -> Tuple[JsonStrList, str]:
@@ -241,6 +289,21 @@ class GraphClient:
                                            max_num_nodes_per_seq_char)
 
         return helpers.df_from_align_result(json_obj)
+
+    def resolve(self, sequence: str, **options) -> JsonDict:
+        return self._json_client.resolve(sequence, **options)
+
+    def traverse(self, request: JsonDict, timeout=None) -> JsonDict:
+        return self._json_client.traverse(request, timeout=timeout)
+
+    def traversal_capabilities(self, **options) -> JsonDict:
+        return self._json_client.traversal_capabilities(**options)
+
+    def cancel_traversal(self, attempt_id, **options) -> JsonDict:
+        return self._json_client.cancel_traversal(attempt_id, **options)
+
+    def traversal_attempt(self, attempt_id, timeout=None) -> JsonDict:
+        return self._json_client.traversal_attempt(attempt_id, timeout=timeout)
 
     def column_labels(self) -> List[str]:
         return self._json_client.column_labels()

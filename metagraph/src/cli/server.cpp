@@ -2,6 +2,7 @@
 #include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
 #include <csignal>
+#include <map>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -20,6 +21,8 @@
 #include "server_utils.hpp"
 #include "server_cache.hpp"
 #include "server_request.hpp"
+#include "traverse_server.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -218,6 +221,10 @@ int run_server(Config *config) {
     asio::io_service shutdown_service;
     asio::signal_set shutdown_signals(shutdown_service, SIGINT, SIGTERM);
     std::atomic<size_t> num_requests = 0;
+    std::atomic<bool> stopping = false;
+    IndexIdentity single_identity;
+    std::map<GraphPair, IndexIdentity> traversal_identities;
+    std::mutex traversal_identity_mutex;
 
     std::shared_future<std::unique_ptr<AnnotatedDBG>> anno_graph;
     // Destroy the loader before the future holding its result.
@@ -239,6 +246,9 @@ int run_server(Config *config) {
         anno_graph = graph_loader.enqueue([&]() {
             logger->info("[Server] Loading graph and annotation in parallel...");
             auto anno_graph = initialize_annotated_dbg(*config);
+            single_identity.name = config->index_name;
+            if (!config->index_manifest.empty())
+                single_identity = index_identity(*config, *anno_graph);
             logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
             return anno_graph;
         });
@@ -253,28 +263,27 @@ int run_server(Config *config) {
         }
 
         size_t num_indexes = 0;
+        size_t line_number = 0;
+        std::vector<GraphListEntry> graph_entries;
         std::string line;
         while (std::getline(file, line)) {
+            ++line_number;
             if (line.empty())
-                continue; // skip empty lines
-
-            std::stringstream ss(line);
-
-            std::string name;
-            std::string graph_path;
-            std::string annotation_path;
-
-            std::getline(ss, name, ',');
-            std::getline(ss, graph_path, ',');
-            if (ss.eof()) {
-                logger->error("[Server] Invalid line in the csv file: `{}`", line);
-                std::exit(1);
-            }
-            std::getline(ss, annotation_path, ',');
-
-            indexes[name].emplace_back(std::move(graph_path), std::move(annotation_path));
-            num_indexes++;
+                continue;
+            const auto entry = parse_graph_list_line(line, line_number);
+            indexes[entry.name].emplace_back(entry.graph_path, entry.annotation_path);
+            graph_entries.push_back(entry);
+            ++num_indexes;
         }
+        const auto inventory = [&](const GraphListEntry &entry) {
+            return index_bundle_files(entry.graph_path, entry.annotation_path,
+                                      !config->no_coord_mapping);
+        };
+        const auto identities = graph_list_identities(graph_entries, [&](const GraphListEntry &entry) {
+            return index_manifest_fingerprint(entry.manifest_path, inventory(entry), nullptr,
+                    index_unloaded_optional_files(entry.graph_path, entry.annotation_path,
+                                                   !config->no_coord_mapping));
+        }, inventory);
         std::vector<std::string> names;
         for (const auto &[name, _] : indexes) {
             names.push_back(name);
@@ -327,6 +336,11 @@ int run_server(Config *config) {
             it.value() = initialize_annotated_dbg(loaded_graphs[graph_path_to_idx.at(graph_fname)],
                                                   config_copy);
         }
+        for (const auto &[pair, index] : graphs_cache) {
+            IndexIdentity identity;
+            std::tie(identity.name, identity.fp) = identities.at(pair);
+            traversal_identities.emplace(pair, std::move(identity));
+        }
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
         // Dynamic per-request loads (in_ram path) should always be in RAM.
@@ -349,6 +363,54 @@ int run_server(Config *config) {
     }
 
     HttpServer server;
+
+    add_traversal_routes(server, *config, [&](const Json::Value &json) -> TraversalIndex {
+        Timer preparing;
+        auto prepare = [&](const AnnotatedDBG &index, IndexIdentity &identity) -> TraversalIndex {
+            {
+                std::lock_guard lock(traversal_identity_mutex);
+                if (identity.meta_fp.empty()) {
+                    if (!identity.name.empty() && !valid_index_name(identity.name))
+                        throw InvalidRequest("Invalid --index-name; expected [A-Za-z0-9._-]+");
+                    identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(index));
+                }
+            }
+            // Ordinary searches and capability probes need no reverse header dictionary.
+            // Build it only for traversal requests, before their per-seed work budgets.
+            if (json.isMember("sequence") || json.isMember("seeds")) {
+                if (const auto *headers = index.get_coord_to_header())
+                    headers->build_header_index();
+            }
+            return { index, identity, preparing.elapsed() * 1000 };
+        };
+        const auto selection = traverse_graph_selection(json, !config->fnames.empty());
+        if (config->fnames.empty()) {
+            if (anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();
+            return prepare(*anno_graph.get(), single_identity);
+        }
+        const auto it = indexes.find(selection.name);
+        if (it == indexes.end())
+            throw InvalidRequest("Unknown graph '" + selection.name + "'");
+        const auto &pair = select_traverse_pair(selection.name, selection.graph_path, it->second);
+        return prepare(*graphs_cache.at(pair), traversal_identities.at(pair));
+    }, [&]() {
+        Json::Value catalog;
+        const bool multi = !config->fnames.empty();
+        catalog["mode"] = multi ? "multi" : "single";
+        catalog["ready"] = multi || anno_graph.wait_for(0s) == std::future_status::ready;
+        catalog["graphs"] = Json::Value();
+        if (multi) {
+            std::vector<std::string> names;
+            for (const auto &[name, _] : indexes)
+                names.push_back(name);
+            std::sort(names.begin(), names.end());
+            catalog["graphs"] = Json::arrayValue;
+            for (const auto &name : names)
+                catalog["graphs"].append(name);
+        }
+        return catalog;
+    }, num_requests, stopping);
 
     // Keep the cache handle alive until the asynchronous response write completes.
     server.resource["^/search"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
@@ -683,6 +745,7 @@ int run_server(Config *config) {
     listening.get_future().wait();
     shutdown_signals.async_wait([&](const asio::error_code &error, int) {
         if (!error) {
+            stopping = true;
             logger->info("[Server] Shutting down...");
             server.stop();
         }

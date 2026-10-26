@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <cmath>
+#include <charconv>
 #include <cstring>
 #include <limits>
 #include <iostream>
@@ -62,6 +63,8 @@ Config::Config(int argc, char *argv[]) {
         identity = ANNOTATE;
     } else if (!strcmp(argv[1], "merge_anno")) {
         identity = MERGE_ANNOTATIONS;
+    } else if (!strcmp(argv[1], "traverse")) {
+        identity = TRAVERSE;
     } else if (!strcmp(argv[1], "query")) {
         identity = QUERY;
     } else if (!strcmp(argv[1], "server_query")) {
@@ -114,6 +117,32 @@ Config::Config(int argc, char *argv[]) {
         return argv[i + 1];
     };
 
+    const auto traversal_uint = [&](const char *flag, const char *value,
+                                    uint64_t min = 0, uint64_t max = 9007199254740991ULL) {
+        uint64_t number = 0;
+        const char *end = value + std::strlen(value);
+        const auto parsed = std::from_chars(value, end, number);
+        if (parsed.ec != std::errc{} || parsed.ptr != end || number < min || number > max) {
+            std::cerr << "Error: " << flag << " must be an integer in [" << min << ", "
+                      << max << "]" << std::endl;
+            print_usage(argv[0], identity);
+            exit(-1);
+        }
+        return number;
+    };
+    const auto traversal_number = [&](const char *flag, const char *value, bool positive = false) {
+        char *end = nullptr;
+        const double number = std::strtod(value, &end);
+        if (end == value || *end || !std::isfinite(number) || number < 0
+                || (positive && number == 0)) {
+            std::cerr << "Error: " << flag << " requires a finite "
+                      << (positive ? "positive" : "non-negative") << " number" << std::endl;
+            print_usage(argv[0], identity);
+            exit(-1);
+        }
+        return number;
+    };
+
     bool print_usage_and_exit = false;
     bool xdrop_override = false;
 
@@ -158,6 +187,70 @@ Config::Config(int argc, char *argv[]) {
             forward_and_reverse = true;
         } else if (!strcmp(argv[i], "--mode")) {
             graph_mode = string_to_graphmode(get_value(i++));
+        } else if (!strcmp(argv[i], "--index-release")) {
+            index_release = get_value(i++);
+        } else if (!strcmp(argv[i], "--index-name")) {
+            index_name = get_value(i++);
+        } else if (!strcmp(argv[i], "--index-manifest")) {
+            index_manifest = get_value(i++);
+        } else if (!strcmp(argv[i], "--index-inventory")) {
+            traverse_index_inventory = true;
+        } else if (!strcmp(argv[i], "--traverse-chunk-target-ms")) {
+            traverse_chunk_target_ms = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-path-cache-mb")) {
+            traverse_path_cache_mb = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
+            traverse_max_time_ms = traversal_number(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
+            traverse_max_seeds = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-max-seed-bp")) {
+            traverse_max_seed_bp = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-max-seed-labels")) {
+            traverse_max_seed_labels = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
+            traverse_max_memory_mb = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-max-work-units")) {
+            traverse_max_work_units = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
+            resolve_max_query_bp = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-attempt-allowance-ms")) {
+            traverse_attempt_allowance_ms = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-attempt-retention-s")) {
+            traverse_attempt_retention_s = traversal_uint(argv[i], get_value(i), 0, 31'536'000);
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-attempt-retention")) {
+            traverse_attempt_retention = traversal_uint(argv[i], get_value(i), 0, 10'000'000);
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-max-s")) {
+            traverse_attempt_tombstone_max_s = traversal_uint(argv[i], get_value(i), 0, 31'536'000);
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-clock-skew-ms")) {
+            traverse_clock_skew_ms = traversal_uint(argv[i], get_value(i));
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-observed-window-s")) {
+            traverse_observed_window_s = traversal_uint(argv[i], get_value(i), 1, 31'536'000);
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-compression-level")) {
+            traverse_compression_level = traversal_uint(argv[i], get_value(i), 1, 9);
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-delivery-compress-mbps")) {
+            traverse_delivery_compress_mbps = traversal_number(argv[i], get_value(i), true);
+            ++i;
+        } else if (!strcmp(argv[i], "--traverse-delivery-build-mbps")) {
+            traverse_delivery_build_mbps = traversal_number(argv[i], get_value(i), true);
+            ++i;
+        } else if (!strcmp(argv[i], "--resolve")) {
+            traverse_resolve = true;
         } else if (!strcmp(argv[i], "--query-mode")) {
             query_mode = string_to_querymode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
@@ -461,9 +554,12 @@ Config::Config(int argc, char *argv[]) {
             fnames.erase(it--);
     }
 
+
+
     if (!print_usage_and_exit && !fnames.size()
                       && identity != STATS
                       && identity != SERVER_QUERY
+            && !(identity == TRAVERSE && traverse_index_inventory)
                       && !(identity == BUILD && complete)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
@@ -532,6 +628,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity != CONCATENATE
             && identity != STATS
             && identity != SERVER_QUERY
+            && !(identity == TRAVERSE && traverse_index_inventory)
             && !(identity == TRANSFORM_ANNOTATION && anno_type == Config::RowDiff)
             && !(identity == BUILD && complete)
             && !fnames.size()) {
@@ -572,7 +669,7 @@ Config::Config(int argc, char *argv[]) {
     if (count_kmers || query_presence)
         map_sequences = true;
 
-    if (identity == QUERY && infbase.empty())
+    if ((identity == QUERY || identity == TRAVERSE) && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
@@ -604,7 +701,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == QUERY && infbase_annotators.size() != 1)
+    if ((identity == QUERY || identity == TRAVERSE) && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
     if (identity == SERVER_QUERY
@@ -672,6 +769,16 @@ Config::Config(int argc, char *argv[]) {
                     infbase);
             infbase.clear();
         }
+    }
+
+    if (traverse_path_cache_mb > 1'048'576 || traverse_max_memory_mb > 1'048'576) {
+        std::cerr << "Error: traversal memory limits must be at most 1048576 MiB" << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (identity == SERVER_QUERY && !fnames.empty()
+            && (!index_name.empty() || !index_manifest.empty())) {
+        std::cerr << "Error: --index-name and --index-manifest require a single index" << std::endl;
+        print_usage_and_exit = true;
     }
 
     if (identity == MERGE && fnames.size() < 2)
@@ -996,6 +1103,8 @@ if (advanced) {
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
+
+            fprintf(stderr, "\ttraverse\t\tresolve support and traverse annotated graph paths\n\n");
 
             fprintf(stderr, "General options:\n");
             fprintf(stderr, "\t--advanced \tshow other advanced and legacy options [off]\n");
@@ -1341,6 +1450,11 @@ if (advanced) {
             fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
+        case TRAVERSE: {
+            fprintf(stderr, "Usage: %s traverse [--resolve] -i GRAPH -a ANNOTATION [--mmap] REQUEST.json ...\n", prog_name.c_str());
+            fprintf(stderr, "Resolve support or traverse from labeled seeds; see docs/traverse.md.\n");
+            break;
+        }
         case QUERY: {
             fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA or FASTQ format.\n"
@@ -1457,6 +1571,39 @@ if (advanced) {
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
         } break;
+    }
+
+    if (identity == TRAVERSE || identity == SERVER_QUERY) {
+        fprintf(stderr, "\nTraversal options (docs/traverse.md):\n");
+        fprintf(stderr, "\t   --index-release [STR]\tindex release echoed in traversal responses []\n");
+        fprintf(stderr, "\t   --index-name [STR]\tindex namespace, [A-Za-z0-9._-]+ []\n");
+        fprintf(stderr, "\t   --index-manifest [FILE]\toptional index bundle manifest []\n");
+        fprintf(stderr, "\t   --traverse-path-cache-mb [INT]\trequest row-diff cache bound, 0 disables [128]\n");
+        fprintf(stderr, "\t   --traverse-chunk-target-ms [INT]\tannotation decode chunk target [50]\n");
+        if (identity == TRAVERSE) {
+            fprintf(stderr, "\t   --resolve\tresolve support and select seeds instead of extending them\n");
+            fprintf(stderr, "\t   --json\tcompact JSON output\n");
+            fprintf(stderr, "\t   --index-inventory\tlist bundle files without loading the index\n");
+        } else {
+            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT]\tper-seed time cap, 0 disables [30000]\n");
+            fprintf(stderr, "\t   --traverse-max-seeds [INT]\tseeds per request, 0 disables [64]\n");
+            fprintf(stderr, "\t   --traverse-max-seed-bp [INT]\tseed length cap, 0 disables [100000]\n");
+            fprintf(stderr, "\t   --traverse-max-seed-labels [INT]\tderived label cap, 0 disables [10000]\n");
+            fprintf(stderr, "\t   --traverse-max-memory-mb [INT]\tsoft per-seed memory cap, 0 disables [0]\n");
+            fprintf(stderr, "\t   --traverse-max-work-units [INT]\tper-seed work cap, 0 disables [0]\n");
+            fprintf(stderr, "\t   --resolve-max-query-bp [INT]\tresolve query length cap, 0 disables [0]\n");
+            if (advanced) {
+                fprintf(stderr, "\t   --traverse-compression-level [INT]\tzlib level, 1-9 [1]\n");
+                fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT]\tattempt serialization allowance [10000]\n");
+                fprintf(stderr, "\t   --traverse-attempt-retention-s [INT]\tcompleted attempt retention [3600]\n");
+                fprintf(stderr, "\t   --traverse-attempt-retention [INT]\tcompleted attempt count [10000]\n");
+                fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT]\tid suppression cap [86400]\n");
+                fprintf(stderr, "\t   --traverse-clock-skew-ms [INT]\tclient admission clock allowance [2000]\n");
+                fprintf(stderr, "\t   --traverse-observed-window-s [INT]\tdeadline observation window [3600]\n");
+                fprintf(stderr, "\t   --traverse-delivery-compress-mbps [FLOAT]\tinitial compression estimate [50]\n");
+                fprintf(stderr, "\t   --traverse-delivery-build-mbps [FLOAT]\tinitial JSON build estimate [10]\n");
+            }
+        }
     }
 
     fprintf(stderr, "\nGeneral options:\n");

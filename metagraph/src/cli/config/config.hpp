@@ -193,8 +193,32 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TRAVERSE,
     };
     IdentityType identity = NO_IDENTITY;
+    bool traverse_resolve = false;
+    bool traverse_index_inventory = false;
+    std::string index_release;
+    std::string index_name;
+    std::string index_manifest;
+    uint64_t traverse_chunk_target_ms = 50;
+    uint64_t traverse_path_cache_mb = 128;
+    double traverse_max_time_ms = 30'000;
+    size_t traverse_max_seeds = 64;
+    uint64_t traverse_max_seed_bp = 100'000;
+    size_t traverse_max_seed_labels = 10'000;
+    uint64_t traverse_max_memory_mb = 0;
+    uint64_t traverse_max_work_units = 0;
+    uint64_t resolve_max_query_bp = 0;
+    double traverse_attempt_allowance_ms = 10'000;
+    uint64_t traverse_attempt_retention_s = 3600;
+    size_t traverse_attempt_retention = 10'000;
+    uint64_t traverse_attempt_tombstone_max_s = 86'400;
+    uint64_t traverse_clock_skew_ms = 2000;
+    uint64_t traverse_observed_window_s = 3600;
+    int traverse_compression_level = 1;
+    double traverse_delivery_compress_mbps = 50;
+    double traverse_delivery_build_mbps = 10;
 
     graph::boss::BOSS::State state = graph::boss::BOSS::State::STAT;
 
