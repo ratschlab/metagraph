@@ -713,11 +713,14 @@ int run_server(Config *config) {
     shutdown_signals.async_wait([&](const asio::error_code &error, int) {
         if (!error) {
             logger->info("[Server] Shutting down...");
-            server.stop();
+            // Stop dispatching before closing sockets: HTTP workers may still be
+            // initiating accept/read operations on them.
+            server.io_service->stop();
         }
     });
     shutdown_service.run();
     server_thread.join();
+    server.stop();
 
     return 0;
 }
