@@ -1198,9 +1198,9 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
 
                                     for (edge_index e : succs) {
                                         assert(e);
-                                        auto node = canonical->reverse_complement(e);
-                                        if (!graph.in_graph(node))
+                                        if (!dbg_succ->in_graph(e))
                                             continue;
+                                        auto node = canonical->reverse_complement(e);
 
                                         bool inserted = true;
                                         if (max_seeds[!orientation][i_rc].size() > config_.max_num_seeds_per_locus)
