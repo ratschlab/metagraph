@@ -2906,7 +2906,7 @@ TEST(WalkerDerive, IntersectionStartsFromTheCheapestRowOfTheFirstBatch) {
     for (size_t i = 0; i < labels.size(); ++i) {
         Column c = static_cast<Column>(encoder.encode(labels[i]));
         headers[c] = { "h_" + labels[i] };
-        num_kmers[c] = { seqs[i].size() - kK + 1 };
+        num_kmers[c].push_back(seqs[i].size() - kK + 1);
     }
     annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
 
