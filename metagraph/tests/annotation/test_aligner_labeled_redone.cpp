@@ -74,9 +74,14 @@ TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) 
             5, references, {"first", "second"}, DeBruijnGraph::BASIC, coordinates);
         const auto &graph = annotated->get_graph();
         AnnotationBuffer shared(graph, annotated->get_annotator());
-        for (size_t round = 0; round < 4; ++round) {
+        for (size_t round = 0; round < 10; ++round) {
             DBGAlignerConfig config;
             config.min_seed_length = 5;
+            if (round < 6) {
+                config.min_seed_length = round % 3 == 2 ? 5 : 3;
+                config.min_exact_match = 0.7;
+                config.chain_alignments = round % 3 == 0;
+            }
             config.max_seed_length = std::numeric_limits<size_t>::max();
             config.forward_and_reverse_complement = false;
             config.seed_complexity_filter = false;
@@ -424,29 +429,41 @@ TEST(AnnotationBufferRedone, PendingReverseComplementAliases) {
     const auto &graph = dynamic_cast<const DBGSSHash&>(anno_graph->get_graph());
     // Queue every base node before its reverse complement, in both insertion
     // orders and with a fetch either between orientations or after both.
-    for (bool reverse_first : { false, true }) {
-        for (bool fetch_between : { false, true }) {
-            AnnotationBuffer buffer(graph, anno_graph->get_annotator());
-            std::vector<DeBruijnGraph::node_index> nodes;
-            graph.call_nodes([&](auto node) {
-                if (graph.get_base_node(node) == node)
-                    nodes.push_back(node);
-            });
-            ASSERT_FALSE(nodes.empty());
-            for (auto node : nodes)
-                buffer.queue_path({ reverse_first ? graph.reverse_complement(node) : node });
-            if (fetch_between)
+    for (bool column_first : {false, true}) {
+        for (bool reverse_first : { false, true }) {
+            for (bool fetch_between : { false, true }) {
+                AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+                if (column_first) {
+                    DBGAlignerConfig config;
+                    config.min_seed_length = config.max_seed_length = 3;
+                    config.forward_and_reverse_complement = false;
+                    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+                    Query absent(graph, "TTTTT");
+                    LabeledSeeder seeder(buffer, absent, config);
+                    LabeledExtender extender(buffer, absent, config);
+                    align_query(absent, seeder, extender, [](Alignment&&) {});
+                }
+                std::vector<DeBruijnGraph::node_index> nodes;
+                graph.call_nodes([&](auto node) {
+                    if (graph.get_base_node(node) == node)
+                        nodes.push_back(node);
+                });
+                ASSERT_FALSE(nodes.empty());
+                for (auto node : nodes)
+                    buffer.queue_path({ reverse_first ? graph.reverse_complement(node) : node });
+                if (fetch_between)
+                    buffer.fetch_queued_annotations();
+                for (auto node : nodes)
+                    buffer.queue_path({ reverse_first ? node : graph.reverse_complement(node) });
                 buffer.fetch_queued_annotations();
-            for (auto node : nodes)
-                buffer.queue_path({ reverse_first ? node : graph.reverse_complement(node) });
-            buffer.fetch_queued_annotations();
-            for (auto node : nodes) {
-                const auto *forward = buffer.get_labels(node);
-                const auto *reverse = buffer.get_labels(graph.reverse_complement(node));
-                ASSERT_NE(nullptr, forward);
-                ASSERT_NE(nullptr, reverse);
-                ASSERT_FALSE(forward->empty());
-                EXPECT_EQ(*forward, *reverse);
+                for (auto node : nodes) {
+                    const auto *forward = buffer.get_labels(node);
+                    const auto *reverse = buffer.get_labels(graph.reverse_complement(node));
+                    ASSERT_NE(nullptr, forward);
+                    ASSERT_NE(nullptr, reverse);
+                    ASSERT_FALSE(forward->empty());
+                    EXPECT_EQ(*forward, *reverse);
+                }
             }
         }
     }

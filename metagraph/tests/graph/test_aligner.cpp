@@ -77,6 +77,46 @@ TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
 }
 
 
+TEST(DBGAlignerTest, ExtensionScoreFloorKeepsBonusesAndTargets) {
+    const auto graph = build_graph_batch<DBGSuccinct>(3, { "ACGAT" });
+    struct Case {
+        std::string query, cigar;
+        int minimum, bonus, score;
+        size_t trim;
+        bool asymmetric, target;
+    };
+    for (const auto &c : { Case{"ACGAT", "5=", 15, 5, 15, 0, false, false},
+                          Case{"ACGAT", "", 16, 5, -1, 0, false, false},
+                          Case{"ACGAC", "4=1X", 14, 0, 14, 0, true, false},
+                          Case{"ACGATGG", "5=2S", 10, 5, 10, 2, false, false},
+                          Case{"ACGAT", "5=", 1000, 0, 10, 0, false, true} }) {
+        SCOPED_TRACE(::testing::Message() << c.query << " minimum=" << c.minimum);
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        if (c.asymmetric) config.score_matrix['T']['C'] = 6;
+        config.gap_opening_penalty = -6;
+        config.gap_extension_penalty = -2;
+        config.left_end_bonus = 0;
+        config.right_end_bonus = c.bonus;
+        config.rel_score_cutoff = 0;
+        config.xdrop = 27;
+        Seed seed(std::string_view(c.query).substr(0, 3), {graph->kmer_to_node("ACG")},
+                  false, 0, 0, c.query.size() - 3);
+        DefaultColumnExtender extender(*graph, config, c.query);
+        const auto results = extender.get_extensions(Alignment(seed, config), c.minimum,
+            false, c.target ? 5 : 0, c.target ? graph->kmer_to_node("GAT") : 0, true, c.trim);
+        if (c.score < 0) {
+            EXPECT_TRUE(results.empty());
+        } else {
+            ASSERT_EQ(1u, results.size());
+            EXPECT_EQ(c.score, results[0].get_score());
+            EXPECT_EQ(c.cigar, results[0].get_cigar().to_string());
+            EXPECT_TRUE(results[0].is_valid(*graph, &config));
+        }
+    }
+}
+
+
 template <typename Graph>
 class DBGAlignerTest : public DeBruijnGraphTest<Graph> {};
 

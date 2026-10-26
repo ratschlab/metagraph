@@ -45,6 +45,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
 
+    if (fast_buffer_) {
+        for (const auto &path : queued_paths_)
+            fast_buffer_->queue_path(std::vector(path));
+        fast_buffer_->fetch_queued_annotations();
+    }
+
     std::vector<node_index> queued_nodes;
     std::vector<Row> queued_rows;
     std::vector<std::pair<node_index, node_index>> pending_aliases;
@@ -110,7 +116,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
     if (queued_nodes.empty())
         return;
 
-    auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels, CoordinateSet *coords) {
+    auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels, const CoordinateSet *coords) {
         assert(node_it != queued_nodes.end());
         assert(row_it != queued_rows.end());
         node_index node = *node_it;
@@ -135,14 +141,21 @@ void AnnotationBuffer::fetch_queued_annotations() {
             jt.value() = label_i;
             if (has_coordinates()) {
                 assert(coords);
-                label_coords_[jt - node_to_cols_.begin()] = std::move(*coords);
+                label_coords_[jt - node_to_cols_.begin()] = *coords;
             }
         }
     };
 
     auto node_it = queued_nodes.begin();
     auto row_it = queued_rows.begin();
-    if (has_coordinates()) {
+    if (fast_buffer_) {
+        // Reuse fetched rows, but retain this buffer's independent label IDs.
+        for (; node_it != queued_nodes.end(); ++node_it, ++row_it) {
+            const auto [labels, coords] = fast_buffer_->get_labels_and_coords(*node_it);
+            assert(labels);
+            push_node_labels(node_it, row_it, Columns(labels->begin(), labels->end()), coords);
+        }
+    } else if (has_coordinates()) {
         assert(multi_int_);
         // extract both labels and coordinates, then store them separately
         for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {

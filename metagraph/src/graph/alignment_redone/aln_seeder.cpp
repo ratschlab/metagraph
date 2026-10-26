@@ -347,9 +347,11 @@ void align_query(const Query &query,
                                && config.gap_extension_penalty <= 0;
     const bool wavefront_score_floor = nonpositive_gaps
                                    && maximum_match <= maximum_match_score(config);
-    std::unique_ptr<align::IDBGAligner> column_aligner;
+    auto column_aligner = column_supplements ? seeder.make_column_aligner() : nullptr;
     std::array<std::unique_ptr<align::DefaultColumnExtender>, 2> column_extenders;
-    align::AnnotationBuffer *column_annotations = nullptr;
+    auto *column_annotations = column_aligner && annotations
+        ? &dynamic_cast<align::ILabeledAligner&>(*column_aligner).get_annotation_buffer()
+        : nullptr;
     auto save = [&](Alignment&& aln) {
         record_score(aln);
         candidates.push_back(std::move(aln));
@@ -393,12 +395,6 @@ void align_query(const Query &query,
         if (nonpositive_gaps && maximum < floor)
             continue;
 
-        if (!column_aligner) {
-            column_aligner = seeder.make_column_aligner();
-            if (annotations)
-                column_annotations = &dynamic_cast<align::ILabeledAligner&>(
-                    *column_aligner).get_annotation_buffer();
-        }
         const auto &column_config = column_aligner->get_config();
         const bool orientation = base.get_orientation();
         if (!column_extenders[orientation]) {
@@ -422,6 +418,8 @@ void align_query(const Query &query,
                           + static_cast<Score>(end_trim - 1) * config.gap_extension_penalty;
         }
         cigar.append(align::Cigar::CLIPPED, end_clipping);
+        // The column alignment stores only the aligned query slice; its CIGAR
+        // accounts separately for clipping on the original query.
         align::Alignment column_seed(base.get_seed(), std::vector(base.get_path()),
             base.get_path_spelling(), padded_score, std::move(cigar), 0, orientation, 0);
         if (annotations) {

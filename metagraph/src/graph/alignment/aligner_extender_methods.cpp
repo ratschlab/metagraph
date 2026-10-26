@@ -23,15 +23,21 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)
       : SeedFilteringExtender(&graph, config, query), query_(query) {
-    // compute exact-match scores for all suffixes of the query
+    // Upper bounds for the scores of all query suffixes. A query character
+    // may be clipped or matched to a better-scoring different character.
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
     std::transform(query_.begin(), query_.end(), partial_sums_.begin(),
-                   [&](char c) { return config_.score_matrix[c][c]; });
+                   [&](unsigned char q) {
+        score_t best = std::max<score_t>(0, config_.score_matrix[q][q]);
+        for (unsigned char c : graph.alphabet())
+            best = std::max<score_t>(best, config_.score_matrix[c][q]);
+        return best;
+    });
 
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
-    assert(query_.empty() || config_.match_score(query_) == partial_sums_.front());
-    assert(query_.empty() || config_.score_matrix[query_.back()][query_.back()] == partial_sums_.back());
+    assert(query_.empty() || config_.match_score(query_) <= partial_sums_.front());
+    assert(query_.empty() || config_.score_matrix[query_.back()][query_.back()] <= partial_sums_.back());
 
     partial_sums_.push_back(0);
 
@@ -447,7 +453,14 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                             query_.data() + query_.size()
                                 - this->seed_->get_query_view().data() - trim_query_suffix);
     score_t partial_sum_offset = partial_sums_.at(start + window.size());
-    assert(partial_sums_.at(start) - partial_sum_offset == config_.match_score(window));
+    assert(partial_sums_.at(start) - partial_sum_offset >= config_.match_score(window));
+
+    // A target-node search ignores min_path_score during backtracking.
+    const int64_t minimum_extension_score = !target_node
+            && config_.gap_opening_penalty <= 0 && config_.gap_extension_penalty <= 0
+        ? int64_t(min_path_score) + partial_sum_offset
+            - (trim_query_suffix ? 0 : std::max<int>(config_.right_end_bonus, 0))
+        : std::numeric_limits<int64_t>::min();
 
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
@@ -623,8 +636,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 ssize_t diag_i = offset - seed_offset;
                 bool has_extension = in_seed;
                 const score_t *partial_sums = &partial_sums_[start + trim];
-                score_t extension_cutoff
-                    = best_score * config_.rel_score_cutoff + partial_sum_offset;
+                const int64_t extension_cutoff = std::max<int64_t>(
+                    static_cast<score_t>(best_score * config_.rel_score_cutoff + partial_sum_offset),
+                    minimum_extension_score);
                 score_t max_diff = ninf;
 
                 size_t scores_reached_sizediff = 0;
@@ -651,9 +665,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
                     // check if this node can be extended to get a better alignment
                     assert(partial_sums[j] - partial_sum_offset
-                            == config_.match_score(window.substr(j + trim)));
+                            >= config_.match_score(window.substr(j + trim)));
                     if (!has_extension && scores_reached_cutoff
-                            && S[j] + partial_sums[j] >= extension_cutoff) {
+                            && int64_t(S[j]) + partial_sums[j] >= extension_cutoff) {
                         has_extension = true;
                     }
 
