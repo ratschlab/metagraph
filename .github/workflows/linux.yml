@@ -69,12 +69,14 @@ jobs:
 
       - &install-linux-deps
         name: Install build dependencies
+        timeout-minutes: 10
         run: |
+          ./.github/scripts/configure-apt-mirrors.sh
           sudo apt-get update
           if [[ "${{ inputs.compiler }}" != "clang" ]]; then
               sudo apt-get install -y ${{ inputs.compiler }}
           fi
-          sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
+          sudo apt-get install -y cmake make libbz2-dev libjemalloc-dev libboost-iostreams-dev libboost-context-dev libboost-filesystem-dev libboost-program-options-dev libboost-regex-dev libdeflate-dev liblzma-dev libzstd-dev
           if [ "${{ inputs.build_static }}" = "ON" ]; then
             sudo apt-get install -y libcurl4-openssl-dev
           fi

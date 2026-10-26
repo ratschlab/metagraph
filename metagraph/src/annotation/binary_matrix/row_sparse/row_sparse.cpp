@@ -69,8 +69,7 @@ bool RowSparse::load(std::istream &f) {
         set_bits_.load(f);
         if (!f.good())
             return false;
-        boundary_.load(f);
-        if (!f.good())
+        if (!boundary_.load(f) || !f.good())
             return false;
         num_rows_ = boundary_.num_set_bits();
     } catch (...) {

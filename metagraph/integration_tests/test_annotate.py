@@ -27,6 +27,43 @@ class TestAnnotate(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
+    @parameterized.expand([(False,), (True,)])
+    def test_annotation_tasks_across_files(self, coords):
+        from pathlib import Path
+        root = Path(self.tempdir.name)
+        files = [root / f"record{i}.fa" for i in range(64)]
+        for i, path in enumerate(files):
+            path.write_text(f">record{i}\nAAAAAACCCCCGTGGGGGAT\n")
+        combined = root / "combined.fa"
+        combined.write_text(''.join(path.read_text() for path in files))
+
+        def run(*args):
+            result = subprocess.run([METAGRAPH, *map(str, args)],
+                                    stdout=PIPE, stderr=PIPE, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        run("build", "-k", "5", "-o", root / "graph", files[0])
+        options = ["--coordinates"] if coords else []
+        run("annotate", "-p", "1", "-i", root / "graph.dbg", "--anno-header",
+            "-o", root / "expected", *options, combined)
+        # Each per-file callback can expire while its last task is still queued.
+        run("annotate", "-p", "4", "-i", root / "graph.dbg", "--anno-header",
+            "-o", root / "actual", *options, *files)
+        results = []
+        for name in ('actual', 'expected'):
+            annotation = root / (name + '.column.annodbg')
+            if coords:
+                run('transform_anno', '--anno-type', 'column_coord',
+                    '-o', root / (name + '-coords'), annotation)
+                annotation = root / (name + '-coords.column_coord.annodbg')
+            result = run('query', '-i', root / 'graph.dbg', '-a', annotation,
+                         '--query-mode', 'coords' if coords else 'matches', files[0])
+            # Parallel annotation may assign different numeric label IDs.
+            results.append(sorted(result.strip().split('\t')))
+            self.assertEqual(len(results[-1]), len(files) + 2)
+        self.assertEqual(results[0], results[1])
+
     @parameterized.expand([repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, graph_repr):
 

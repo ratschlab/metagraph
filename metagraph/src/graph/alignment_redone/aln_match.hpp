@@ -1,0 +1,227 @@
+#pragma once
+
+#include <string_view>
+#include <ostream>
+
+#include "aln_cigar.hpp"
+#include "aligner_config.hpp"
+#include "annotation_buffer.hpp"
+
+#include "graph/annotated_dbg.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/logger.hpp"
+
+namespace mtg::graph::align_redone {
+
+// Return the string spelled by the path. This path may have disconnects (if it came)
+// from a chain alignment), so this method handles that case. If there is an invalid
+// edge, or if there is too long of a stretch of npos nodes, this throws a runtime error.
+std::string spell_path(const DeBruijnGraph &graph,
+                       const std::vector<DeBruijnGraph::node_index> &path);
+
+class Match {
+  public:
+    using node_index = SequenceGraph::node_index;
+    using score_t = DBGAlignerConfig::score_t;
+
+    static constexpr score_t ninf = DBGAlignerConfig::ninf;
+
+    Match() : orientation_(false) {}
+
+    virtual ~Match() {}
+
+    std::string_view get_query() const { return query_; }
+    std::string_view get_seed() const { return seed_; }
+
+    size_t size() const { return path_.size(); }
+
+    const std::vector<node_index>& get_path() const { return path_; }
+
+    virtual std::string_view get_spelling() const = 0;
+    virtual std::string get_path_spelling() const = 0;
+    virtual std::string_view get_trim_spelling() const = 0;
+
+    virtual Cigar generate_cigar() const = 0;
+
+    bool get_orientation() const { return orientation_; }
+
+    // Unaligned bases at the beginning of the first node.
+    virtual size_t get_offset() const { return 0; }
+    virtual size_t get_end_trim() const = 0;
+
+    bool empty() const { return path_.empty(); }
+
+    size_t get_clipping() const { return query_.empty() ? 0 : seed_.data() - query_.data(); }
+    size_t get_end_clipping() const {
+        return query_.empty() ? 0 : query_.size() - get_clipping() - seed_.size();
+    }
+
+    bool is_spelling_valid(const DeBruijnGraph &graph) const {
+        return get_path_spelling() == spell_path(graph, path_);
+    }
+
+  protected:
+    Match(std::string_view query,
+          size_t begin,
+          size_t end,
+          bool orientation,
+          std::vector<node_index>&& path)
+          : query_(query), orientation_(orientation), seed_(query_.substr(begin, end - begin)),
+            path_(std::move(path)) {}
+
+    std::string_view query_;
+    bool orientation_;
+    std::string_view seed_;
+    std::vector<node_index> path_;
+};
+
+inline Match::score_t score_match(const Match &match, const DBGAlignerConfig &config) {
+    return config.score_cigar(match.get_spelling(), match.get_query(), match.generate_cigar());
+}
+
+bool operator==(const Match &a, const Match &b);
+
+std::ostream& operator<<(std::ostream &out, const Match &a);
+
+class Anchor : public Match {
+  public:
+    using label_class_t = AnnotationBuffer::label_class_t;
+    using coord_t = AnnotationBuffer::coord_t;
+    static constexpr label_class_t nannot = AnnotationBuffer::nannot;
+    static constexpr coord_t ncoord = AnnotationBuffer::ncoord;
+
+    Anchor() : Match(), label_class_(nannot), coord_(ncoord) {}
+
+    Anchor(std::string_view query,
+           size_t begin,
+           size_t end,
+           bool orientation,
+           std::vector<node_index>&& path,
+           std::string&& suffix = "")
+          : Match(query, begin, end, orientation, std::move(path)),
+            label_class_(nannot), coord_(ncoord), suffix_(std::move(suffix)) {
+        assert(get_spelling() == get_seed());
+    }
+
+    std::string_view get_spelling() const override final { return seed_; }
+    std::string get_path_spelling() const override final { return std::string(seed_) + suffix_; }
+    std::string_view get_trim_spelling() const override final { return suffix_; }
+
+    Cigar generate_cigar() const override final {
+        Cigar cigar;
+        cigar.append(Cigar::CLIPPED, get_clipping());
+        cigar.append(Cigar::MATCH, seed_.size());
+        cigar.append(Cigar::CLIPPED, get_end_clipping());
+        return cigar;
+    }
+
+    size_t get_end_trim() const override final { return suffix_.size(); }
+
+    void append(const Anchor &other,
+                const DeBruijnGraph *graph = nullptr);
+
+    label_class_t get_label_class() const { return label_class_; }
+    int64_t get_coord() const { return coord_; }
+
+    void set_label_class(label_class_t label_class) {
+        assert(label_class);
+        label_class_ = label_class;
+    }
+
+    void set_coord(int64_t coord) { coord_ = coord; }
+
+  private:
+    label_class_t label_class_;
+    int64_t coord_;
+    std::string suffix_;
+};
+
+bool operator==(const Anchor &a, const Anchor &b);
+
+class Alignment : public Match {
+  public:
+    using label_class_t = Anchor::label_class_t;
+    using coord_t = Anchor::coord_t;
+    using CoordinateSet = AnnotationBuffer::CoordinateSet;
+
+    Alignment() : Alignment(Anchor()) {}
+
+    Alignment(const DeBruijnGraph &graph,
+              std::string_view query,
+              bool orientation,
+              std::vector<node_index>&& path,
+              Cigar&& cigar,
+              std::string&& path_spelling,
+              size_t end_trim = 0,
+              label_class_t label_class = Anchor::nannot,
+              CoordinateSet&& coords = {},
+              size_t offset = 0)
+          : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
+                  orientation, std::move(path)),
+            offset_(offset),
+            end_trim_(end_trim),
+            path_spelling_(std::move(path_spelling)),
+            cigar_(std::move(cigar)),
+            label_classes_(path_.size(), label_class),
+            coords_(std::move(coords)) {
+        assert(path_spelling_ == spell_path(graph, path_));
+        assert(offset_ < graph.get_k() || path_.empty());
+        assert(get_offset() + get_spelling().size() + get_end_trim() == path_spelling_.size());
+        assert(cigar_.get_clipping() == get_clipping());
+        assert(cigar_.get_end_clipping() == get_end_clipping());
+        assert(label_class);
+        assert(label_class != Anchor::nannot || coords_.empty());
+    }
+
+    Alignment(const Anchor &anchor)
+          : Match(anchor.get_query(),
+                  anchor.get_clipping(),
+                  anchor.get_clipping() + anchor.get_seed().size(),
+                  anchor.get_orientation(),
+                  std::vector<node_index>(anchor.get_path())),
+            end_trim_(anchor.get_end_trim()),
+            path_spelling_(anchor.get_path_spelling()),
+            cigar_(anchor.generate_cigar()),
+            label_classes_(path_.size(), anchor.get_label_class()) {
+        assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
+        if (anchor.get_coord() != Anchor::ncoord)
+            coords_.emplace_back(AnnotationBuffer::Tuple(1, anchor.get_coord()));
+    }
+
+    const Cigar& get_cigar() const { return cigar_; }
+    Cigar generate_cigar() const override final { return cigar_; }
+
+    size_t get_offset() const override final { return offset_; }
+    size_t get_end_trim() const override final { return end_trim_; }
+    size_t trim_end();
+
+    std::string_view get_spelling() const override final {
+        assert(offset_ <= path_spelling_.size());
+        assert(end_trim_ <= path_spelling_.size() - offset_);
+        return std::string_view(path_spelling_.data() + offset_,
+                                path_spelling_.size() - offset_ - end_trim_);
+    }
+
+    std::string get_path_spelling() const override final { return path_spelling_; }
+    std::string_view get_trim_spelling() const override final {
+        return std::string_view(path_spelling_.c_str() + path_spelling_.size() - end_trim_,
+                                end_trim_);
+    }
+
+    const std::vector<label_class_t>& get_label_classes() const { return label_classes_; }
+    const CoordinateSet& get_coords() const { return coords_; }
+
+    void set_coords(CoordinateSet&& coords) { coords_ = std::move(coords); }
+
+  private:
+    size_t offset_ = 0;
+    size_t end_trim_;
+    std::string path_spelling_;
+    Cigar cigar_;
+    std::vector<label_class_t> label_classes_;
+    CoordinateSet coords_;
+};
+
+bool operator==(const Alignment &a, const Alignment &b);
+
+} // namespace mtg::graph::align

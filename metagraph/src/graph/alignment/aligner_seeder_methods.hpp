@@ -3,11 +3,18 @@
 
 #include "alignment.hpp"
 #include "common/vectors/bitmap.hpp"
+#include <tuple>
 
 
 namespace mtg {
 namespace graph {
+class DBGSuccinct;
 namespace align {
+
+// Enumerate valid prefix nodes from a BOSS suffix range. Stop when callback returns false.
+void suffix_to_prefix(const DBGSuccinct &graph,
+                      const std::tuple<uint64_t, uint64_t, size_t> &range,
+                      const std::function<bool(DeBruijnGraph::node_index)> &callback);
 
 class ISeeder {
   public:

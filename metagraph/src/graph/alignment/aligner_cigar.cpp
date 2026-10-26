@@ -1,9 +1,69 @@
 #include "aligner_cigar.hpp"
 
+#include <iterator>
+#include <limits>
+#include <stdexcept>
+
 #include "kmer/alphabets.hpp"
 
 namespace mtg {
 namespace graph {
+namespace detail {
+
+CigarCore::CigarCore(std::string_view cigar_str) {
+    LengthType count = 0;
+    bool have_count = false;
+    for (char c : cigar_str) {
+        if (c >= '0' && c <= '9') {
+            const auto digit = static_cast<LengthType>(c - '0');
+            if (count > (std::numeric_limits<LengthType>::max() - digit) / 10)
+                throw std::out_of_range("CIGAR operation length is too large");
+            count = count * 10 + digit;
+            have_count = true;
+            continue;
+        }
+        const auto op = std::string_view(op_str_).find(c);
+        if (op == std::string_view::npos || !have_count || !count)
+            throw std::invalid_argument("Invalid CIGAR operation");
+        cigar_.emplace_back(static_cast<Operator>(op), count);
+        count = 0;
+        have_count = false;
+    }
+    if (have_count)
+        throw std::invalid_argument("CIGAR length has no operation");
+}
+
+std::string CigarCore::to_string() const {
+    std::string cigar_string;
+
+    for (const auto &pair : cigar_) {
+        cigar_string += std::to_string(pair.second) + opt_to_char(pair.first);
+    }
+
+    return cigar_string;
+}
+
+void CigarCore::append(Operator op, LengthType num) {
+    if (!num)
+        return;
+
+    if (cigar_.empty() || cigar_.back().first != op) {
+        cigar_.emplace_back(op, num);
+    } else {
+        cigar_.back().second += num;
+    }
+}
+
+void CigarCore::append_cigar(CigarCore&& other) {
+    if (other.empty())
+        return;
+
+    append(other.cigar_.front().first, other.cigar_.front().second);
+    cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
+}
+
+} // namespace detail
+
 namespace align {
 
 
@@ -18,7 +78,7 @@ OperatorTable initialize_opt_table() {
         const auto *alphabet = kmer::alphabets::kAlphabetDNA;
         const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #elif _DNA5_GRAPH
-        const auto *alphabet = kmer::alphabets::kAlphabetDNA;
+        const auto *alphabet = kmer::alphabets::kAlphabetDNA5;
         const auto *alphabet_encoding = kmer::alphabets::kCharToDNA;
     #elif _DNA_GRAPH
         const auto *alphabet = kmer::alphabets::kAlphabetDNA;
@@ -35,7 +95,11 @@ OperatorTable initialize_opt_table() {
     }
 
     for (uint8_t c : std::string(alphabet)) {
-        if (alphabet_encoding[c] == alphabet_encoding[0])
+        if (alphabet_encoding[c] == alphabet_encoding[0]
+#if _DNA5_GRAPH
+                && c != 'N'
+#endif
+                )
             continue;
 
         char upper = toupper(c);
@@ -48,68 +112,6 @@ OperatorTable initialize_opt_table() {
     }
 
     return char_to_op;
-}
-
-Cigar::Cigar(std::string_view cigar_str) {
-    std::string op_count;
-    for (char c : cigar_str) {
-        switch (c) {
-            case '=':
-                cigar_.emplace_back(Cigar::MATCH, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'X':
-                cigar_.emplace_back(Cigar::MISMATCH, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'I':
-                cigar_.emplace_back(Cigar::INSERTION, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'D':
-                cigar_.emplace_back(Cigar::DELETION, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'S':
-                cigar_.emplace_back(Cigar::CLIPPED, std::stol(op_count));
-                op_count.clear();
-                break;
-            case 'G':
-                cigar_.emplace_back(Cigar::NODE_INSERTION, std::stol(op_count));
-                break;
-            default:
-                op_count += c;
-        }
-    }
-}
-
-std::string Cigar::to_string() const {
-    std::string cigar_string;
-
-    for (const auto &pair : cigar_) {
-        cigar_string += std::to_string(pair.second) + opt_to_char(pair.first);
-    }
-
-    return cigar_string;
-}
-
-void Cigar::append(Operator op, LengthType num) {
-    if (!num)
-        return;
-
-    if (cigar_.empty() || cigar_.back().first != op) {
-        cigar_.emplace_back(op, num);
-    } else {
-        cigar_.back().second += num;
-    }
-}
-
-void Cigar::append(Cigar&& other) {
-    if (other.empty())
-        return;
-
-    append(other.cigar_.front().first, other.cigar_.front().second);
-    cigar_.insert(cigar_.end(), std::next(other.cigar_.begin()), other.cigar_.end());
 }
 
 bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
@@ -162,9 +164,10 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                     return false;
                 }
 
-                if (std::equal(ref_it, ref_it + op.second, alt_it)
-                        == (op.first != Cigar::MATCH)) {
-                    std::cerr << "Mismatch despite MATCH in CIGAR" << std::endl
+                if (!std::equal(ref_it, ref_it + op.second, alt_it, [&](char ref, char alt) {
+                        return (ref == alt) == (op.first == Cigar::MATCH);
+                    })) {
+                    std::cerr << "Character disagrees with CIGAR operation" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

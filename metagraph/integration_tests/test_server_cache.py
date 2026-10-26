@@ -80,6 +80,20 @@ class TestServerCache(TestingBase):
                 self.assertEqual(response.json(), first.json())
             self.assertNotRegex(log.read_text(), r'cache (HIT|STORE|BYPASS)')
 
+    def test_cached_search_rejects_alignment_options(self):
+        graph, annotation = self.tiny_index()
+        payload = {'FASTA': '>q\nACGTACGTACGT\n', 'top_labels': 1}
+        with self.running_server('-i', graph, '-a', annotation) as (client, url, log):
+            response = client.post(url, json=payload, timeout=30)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn('cache STORE', log.read_text())
+            for option in ('extend_chains', 'connect_anchors', 'chain_alignments', 'two_sided'):
+                with self.subTest(option=option):
+                    response = client.post(url, json=dict(payload, **{option: False}), timeout=30)
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertIn('/align', response.json()['error'])
+            self.assertNotIn('cache HIT', log.read_text())
+
     def test_identical_concurrent_requests_share_one_result(self):
         graph, annotation = self.tiny_index()
         payload = {'FASTA': ''.join(f'>q{i}\nACGTACGTACGT\n' for i in range(200)), 'top_labels': 1}

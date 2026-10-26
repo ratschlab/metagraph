@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <map>
 #include <unordered_set>
 
 #include "../graph/all/test_dbg_helpers.hpp"
@@ -11,6 +12,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -60,6 +62,117 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
+
+TEST(LabeledExtender, ForkIntersectionsPreserveParentLabels) {
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -6;
+    config.gap_extension_penalty = -2;
+    config.left_end_bonus = config.right_end_bonus = 0;
+    config.rel_score_cutoff = 0;
+    config.global_xdrop = false;
+    config.xdrop = 27;
+    // Intersecting each fork creates a new cached label set. The second branch
+    // must reacquire its parent set if the first insertion reallocates storage.
+    const std::string query = "AAAC";
+    for (bool coordinates : {false, true}) {
+        SCOPED_TRACE(coordinates);
+        auto annotated = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+            3, {"AAAC", "AAAG", "AAA", "AAC", "AAG"}, {"A", "B", "C", "X", "Y"},
+            DeBruijnGraph::BASIC, coordinates);
+        const auto &graph = annotated->get_graph();
+        auto node = graph.kmer_to_node("AAA");
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        buffer.queue_path({node});
+        buffer.fetch_queued_annotations();
+        Seed seed(std::string_view(query).substr(0, 3), {node}, false, 0, 0, 1);
+        auto [columns, positions] = buffer.get_labels_and_coords(node);
+        seed.label_columns = *columns;
+        if (coordinates)
+            seed.label_coordinates = *positions;
+        LabeledExtender extender(graph, config, buffer, query);
+        std::map<std::string, int> scores;
+        for (const auto &alignment : extender.get_extensions(Alignment(seed, config), 0, false)) {
+            ASSERT_TRUE(alignment.is_valid(graph, &config));
+            for (auto label : alignment.label_columns) {
+                auto name = annotated->get_annotator().get_label_encoder().decode(label);
+                scores[name] = std::max(scores[name], alignment.get_score());
+            }
+        }
+        EXPECT_EQ((std::map<std::string, int>{{"A", 8}, {"B", 6}, {"C", 6}}), scores);
+    }
+}
+
+TEST(LabeledExtender, KeepsIndependentLabelScoresAndCoordinates) {
+    const size_t k = 5;
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -6;
+    config.gap_extension_penalty = -2;
+    config.left_end_bonus = config.right_end_bonus = 0;
+    config.rel_score_cutoff = 0;
+    config.global_xdrop = false;
+    config.xdrop = 27;
+    config.num_alternative_paths = 1;
+    for (size_t scenario = 0; scenario < 4; ++scenario) {
+        const std::string query = scenario == 3
+            ? "ATGTTAACTTGGCGGAGTTCGCTGTGGCTGCAGGGGACCAGATGCTTTACAGG"
+            : "ACGTACCTGAGT";
+        std::vector<std::string> sequences {query}, labels {"A"};
+        if (scenario != 2) {
+            sequences.push_back(scenario == 1 ? "ACGTAT" : query.substr(0, 6));
+            labels.push_back("B");
+        } else {
+            // Every k-mer has B, but no B occurrence spans more than one node.
+            for (size_t i = 0; i + k <= query.size(); ++i) {
+                sequences.push_back(query.substr(i, k));
+                labels.push_back("B");
+            }
+        }
+        for (bool coordinates : {false, true}) {
+            auto annotated = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+                k, sequences, labels, DeBruijnGraph::BASIC, coordinates);
+            const auto &graph = annotated->get_graph();
+            const auto node = graph.kmer_to_node(query.substr(0, k));
+            for (bool fixed_seed : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << scenario << ", coordinates="
+                                                  << coordinates << ", fixed=" << fixed_seed);
+                AnnotationBuffer buffer(graph, annotated->get_annotator());
+                buffer.queue_path({node});
+                buffer.fetch_queued_annotations();
+                Seed seed(std::string_view(query).substr(0, k), {node}, false, 0, 0,
+                          query.size() - k);
+                auto [columns, positions] = buffer.get_labels_and_coords(node);
+                ASSERT_TRUE(columns);
+                seed.label_columns = *columns;
+                if (coordinates) {
+                    ASSERT_TRUE(positions);
+                    seed.label_coordinates = *positions;
+                }
+                LabeledExtender extender(graph, config, buffer, query);
+                std::map<std::string, std::pair<int, std::string>> observed;
+                for (const auto &alignment : extender.get_extensions(Alignment(seed, config), 0, fixed_seed)) {
+                    ASSERT_TRUE(alignment.is_valid(graph, &config));
+                    if (coordinates) { ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size()); }
+                    for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
+                        const auto label = annotated->get_annotator().get_label_encoder()
+                                              .decode(alignment.label_columns[i]);
+                        EXPECT_TRUE(observed.emplace(label, std::make_pair(alignment.get_score(),
+                                                       alignment.get_cigar().to_string())).second);
+                        if (coordinates) { EXPECT_EQ(Alignment::Tuple({0}), alignment.label_coordinates[i]); }
+                    }
+                }
+                EXPECT_EQ(2u, observed.size());
+                EXPECT_EQ(std::make_pair(int(2 * query.size()), std::to_string(query.size()) + "="), observed["A"]);
+                const auto expected = scenario == 0 || scenario == 3
+                    ? std::make_pair(12, "6=" + std::to_string(query.size() - 6) + "S")
+                    : scenario == 2 && !coordinates ? std::make_pair(24, std::string("12="))
+                                                   : std::make_pair(10, std::string("5=7S"));
+                EXPECT_EQ(expected, observed["B"]);
+            }
+        }
+    }
+}
 
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;
@@ -183,6 +296,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
     );
 
     DBGAlignerConfig config;
+    config.chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
@@ -246,6 +360,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
     );
 
     DBGAlignerConfig config;
+    config.chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
@@ -298,6 +413,7 @@ class LabeledAlignerCoordTest : public ::testing::Test {
     DBGAlignerConfig config;
 
     void SetUp() override {
+        config.chain_alignments = true;
         config.max_seed_length = std::numeric_limits<size_t>::max();
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     }
@@ -334,13 +450,13 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundary) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-12", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequences) {
     // Three sequences chained by shared boundary 4-mers (ACGT, AGCT).
     // Query spells the 24 nt cross-boundary path from seq1 k-mer 4
-    // through all of seq2 into the first 4 nt of seq3.
+    // through all of seq2 and seq3; their boundary 4-mers overlap.
     build({
         "GCGCTTCGACGT",   // ends 'ACGT'
         "ACGTATGCAGCT",   // starts 'ACGT', ends 'AGCT'
@@ -356,7 +472,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequences) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-12;seq3/12:1-4", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-12;seq3/12:1-12", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequencesWithIndels) {
@@ -382,7 +498,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryThreeSequencesWithIndels) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2", "seq3" } }, { { 8, 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-12;seq3/12:1-4", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-12;seq3/12:1-12", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, ThreeSequencesPartialCoverage) {
@@ -426,7 +542,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryReverseComplement) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-12", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
@@ -447,7 +563,7 @@ TEST_F(LabeledAlignerCoordTest, CrossBoundaryWithIndel) {
     EXPECT_EQ(0u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:1-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:1-12;seq2/12:1-12", alignments[0].format_coords(cth, k));
 }
 #endif  // ! _PROTEIN_GRAPH
 
@@ -462,6 +578,7 @@ class LabeledAlignerProteinCoordTest : public ::testing::Test {
     DBGAlignerConfig config;
 
     void SetUp() override {
+        config.chain_alignments = true;
         config.max_seed_length = std::numeric_limits<size_t>::max();
         config.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
     }
@@ -495,7 +612,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundary) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-4", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, SharedKmerMultipleLabels) {
@@ -534,7 +651,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithMismatch) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-4", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, SoftClipPrefix) {
@@ -553,7 +670,7 @@ TEST_F(LabeledAlignerProteinCoordTest, SoftClipPrefix) {
     EXPECT_EQ(4u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:5-12;seq2/12:1-4", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:5-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithInsertion) {
@@ -575,7 +692,7 @@ TEST_F(LabeledAlignerProteinCoordTest, CrossBoundaryWithInsertion) {
     EXPECT_EQ(0u, aln.label_coordinates[0][0]);
 
     annot::CoordToHeader cth({ { "seq1", "seq2" } }, { { 8, 8 } });
-    EXPECT_EQ("seq1/12:1-12;seq2/12:1-8", alignments[0].format_coords(cth, k));
+    EXPECT_EQ("seq1/12:1-12;seq2/12:1-12", alignments[0].format_coords(cth, k));
 }
 
 TEST_F(LabeledAlignerProteinCoordTest, ThreeSequencesPartialCoverage) {
@@ -625,6 +742,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     );
 
     DBGAlignerConfig config;
+    config.chain_alignments = true;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
@@ -716,6 +834,30 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(AnnotationBuffer, PendingReverseComplementAliases) {
+    auto annotated = build_anno_graph<DBGSSHash, annot::ColumnCompressed<>>(
+        3, {"AACGT"}, {"reference"}, DeBruijnGraph::CANONICAL);
+    const auto &graph = dynamic_cast<const DBGSSHash&>(annotated->get_graph());
+    graph.call_nodes([&](auto node) {
+        if (graph.get_base_node(node) != node)
+            return;
+        for (bool fetch_between : {false, true}) {
+            AnnotationBuffer buffer(graph, annotated->get_annotator());
+            buffer.queue_path({node});
+            if (fetch_between)
+                buffer.fetch_queued_annotations();
+            const auto reverse = graph.reverse_complement(node);
+            buffer.queue_path({reverse});
+            buffer.fetch_queued_annotations();
+            for (auto orientation : {node, reverse}) {
+                const auto *labels = buffer.get_labels(orientation);
+                ASSERT_NE(nullptr, labels);
+                EXPECT_EQ((AnnotationBuffer::Columns{0}), *labels);
+            }
+        }
+    });
+}
+
 TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     size_t k = 5;
     /*   B     B                AB    AB

@@ -6,6 +6,7 @@
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "aligner_labeled.hpp"
 
 namespace mtg {
@@ -37,7 +38,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
 
-    if (config_.min_seed_length < graph.get_k() && !get_dbg_succ(graph))
+    if (config_.min_seed_length < graph.get_k() && !get_dbg_succ(graph)
+            && !dynamic_cast<const DBGSSHash*>(&graph))
         config_.min_seed_length = graph.get_k();
 
     if (!config_.max_seed_length)
@@ -222,7 +224,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+        if ((graph_.get_mode() == DeBruijnGraph::CANONICAL && config_.two_sided)
                 || config_.forward_and_reverse_complement) {
             nodes_rc = nodes;
             std::string dummy(query);
@@ -287,7 +289,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         Extender extender(*this, this_query);
 
 #if ! _PROTEIN_GRAPH
-        if (seeder_rc) {
+        if (seeder_rc && config_.two_sided) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
 
@@ -302,13 +304,20 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         } else {
             align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            if (seeder_rc) {
+                Extender extender_rc(*this, paths[i].get_query(true));
+                align_core(*seeder_rc, extender_rc, add_alignment, get_min_path_score, false);
+                num_extensions += extender_rc.num_extensions();
+                num_explored_nodes += extender_rc.num_explored_nodes();
+            }
         }
 #else
         if (config_.chain_alignments) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
+            // Protein chaining ignores the reverse seeder, which is absent.
             auto [seeds, extensions, explored_nodes] =
-                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                align_both_directions(this_query, reverse, *seeder, *seeder,
                                       extender, extender_rc,
                                       add_alignment, get_min_path_score);
 

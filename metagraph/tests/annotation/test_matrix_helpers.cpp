@@ -292,6 +292,23 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
+    // Batched reads preserve request order, including duplicate row IDs.
+    if (matrix.num_rows()) {
+        std::vector<uint64_t> indices { matrix.num_rows() - 1, 0,
+                                       matrix.num_rows() / 2, 0 };
+        auto rows = matrix.get_rows(indices);
+        ASSERT_EQ(indices.size(), rows.size());
+        for (size_t i = 0; i < indices.size(); ++i) {
+            BinaryMatrix::SetBitPositions expected;
+            for (size_t j = 0; j < columns.size(); ++j) {
+                if ((*columns[j])[indices[i]])
+                    expected.push_back(j);
+            }
+            std::sort(rows[i].begin(), rows[i].end());
+            EXPECT_EQ(expected, rows[i]);
+        }
+    }
+
     if (const auto *m = dynamic_cast<const GetEntrySupport*>(&matrix)) {
         // check get
         for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {

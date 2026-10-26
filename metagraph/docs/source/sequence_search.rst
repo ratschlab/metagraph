@@ -57,3 +57,37 @@ The output of the query is in TSV format, with one line per query sequence, wher
 An important parameter is the seed length, which can be set with :code:`--align-min-seed-length` and can be shorter than the value of k used to construct the graph.
 
 If an annotator is provided with the :code:`-a` flag, the returned alignments will be label-consistent, meaning that there is at least one label that is shared by all nodes on the path.
+
+Alignment search options
+------------------------
+
+``metagraph align`` defaults to independent seed extension. Full-k searches use
+the column aligner and its covered-seed filtering, including label-constrained
+searches. On succinct and SSHash graphs, shorter seeds also use wavefront
+extension and suffix lookup to retain partial-node matches. The wavefront
+aligner implements the opt-in modes below.
+
+Use ``--align-chain`` to construct and connect seed chains, and
+``--align-two-sided`` to extend both ends of each seed or chain. Both options are
+off by default and can be enabled independently. They can improve sensitivity
+for long, error-prone reads at a higher runtime cost. ``--align-only-forwards``
+controls query orientation independently of the extension direction.
+Backward extension currently requires a seed starting at a node boundary;
+suffix seeds that start inside a node retain forward-only extension.
+
+``--align-post-chain`` joins completed local alignments and can insert graph
+jumps (``G`` in the CIGAR). It uses the column aligner and cannot be combined
+with seed chaining, two-sided extension, or disabled extension. Queries needing
+the wavefront fallback and coordinate-annotated post-chaining are unsupported.
+The CLI's JSON format supports only paths without graph jumps. If post-chaining
+or disabled anchor connection produces a jump, use TSV output.
+
+Alignment queries must contain ASCII characters. Case-insensitive DNA and
+protein builds normalize lowercase letters before alignment.
+
+For the sensitive pipeline with the standard X-drop threshold::
+
+    metagraph align --align-chain --align-two-sided --align-xdrop 27 -i graph.dbg reads.fa
+
+The alignment endpoint accepts the corresponding Boolean fields
+``chain_alignments`` and ``two_sided`` (both default to false).

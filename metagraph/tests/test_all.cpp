@@ -3,9 +3,8 @@
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
 
-#ifndef NDEBUG
+    // Earlier tests may leave library worker threads running in Release too.
     GTEST_FLAG_SET(death_test_style, "threadsafe");
-#endif
 
     return RUN_ALL_TESTS();
 }

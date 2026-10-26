@@ -23,15 +23,21 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)
       : SeedFilteringExtender(&graph, config, query), query_(query) {
-    // compute exact-match scores for all suffixes of the query
+    // Upper bounds for the scores of all query suffixes. A query character
+    // may be clipped or matched to a better-scoring different character.
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
     std::transform(query_.begin(), query_.end(), partial_sums_.begin(),
-                   [&](char c) { return config_.score_matrix[c][c]; });
+                   [&](unsigned char q) {
+        score_t best = std::max<score_t>(0, config_.score_matrix[q][q]);
+        for (unsigned char c : graph.alphabet())
+            best = std::max<score_t>(best, config_.score_matrix[c][q]);
+        return best;
+    });
 
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
-    assert(query_.empty() || config_.match_score(query_) == partial_sums_.front());
-    assert(query_.empty() || config_.score_matrix[query_.back()][query_.back()] == partial_sums_.back());
+    assert(query_.empty() || config_.match_score(query_) <= partial_sums_.front());
+    assert(query_.empty() || config_.score_matrix[query_.back()][query_.back()] <= partial_sums_.back());
 
     partial_sums_.push_back(0);
 
@@ -218,6 +224,10 @@ void update_column(size_t prev_end,
                    score_t init_score,
                    size_t offset) {
     static_assert(DefaultColumnExtender::kPadding == 5);
+    auto *S = S_v.data();
+    auto *E = E_v.data();
+    auto *F = F_v.data();
+    const score_t insertion_penalty = config_.gap_extension_penalty;
     constexpr size_t width = DefaultColumnExtender::kPadding - 1;
     const simde__m128i gap_open = simde_mm_set1_epi32(config_.gap_opening_penalty);
     const simde__m128i gap_extend = simde_mm_set1_epi32(config_.gap_extension_penalty);
@@ -254,38 +264,39 @@ void update_column(size_t prev_end,
             del_score = ninf_v;
         }
 
-        // F_v[j] = del_score
-        simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
+        // F[j] = del_score
+        simde_mm_store_si128((simde__m128i*)&F[j], del_score);
 
         // match = max(match, del_score)
         match = simde_mm_max_epi32(match, del_score);
 
-        // E_v[j + 1] = S[j] + gap_open
+        // E[j + 1] = S[j] + gap_open
         simde__m128i ins_open_next = simde_mm_add_epi32(match, gap_open);
-        simde_mm_storeu_si128((simde__m128i*)&E_v[j + 1], ins_open_next);
+        simde_mm_storeu_si128((simde__m128i*)&E[j + 1], ins_open_next);
 
         // This rolling update is hard to vectorize
-        // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
-        E_v[j + 1] = std::max(E_v[j] + config_.gap_extension_penalty, E_v[j + 1]);
-        E_v[j + 2] = std::max(E_v[j + 1] + config_.gap_extension_penalty, E_v[j + 2]);
-        E_v[j + 3] = std::max(E_v[j + 2] + config_.gap_extension_penalty, E_v[j + 3]);
-        E_v[j + 4] = std::max(E_v[j + 3] + config_.gap_extension_penalty, E_v[j + 4]);
+        // E[j + 1] = max(E[j + 1], E[j] + gap_extend)
+        score_t insertion = E[j];
+        for (size_t i = 1; i <= width; ++i) {
+            insertion = std::max(insertion + insertion_penalty, E[j + i]);
+            E[j + i] = insertion;
+        }
 
-        // S_v[j] = max(match, E_v[j])
-        match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E_v[j]));
+        // S[j] = max(match, E[j])
+        match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E[j]));
 
         // match >= xdrop_cutoff
         simde__m128i mask = simde_mm_cmpgt_epi32(match, xdrop_v);
         match = simde_mm_blendv_epi8(ninf_v, match, mask);
 
-        simde_mm_store_si128((simde__m128i*)&S_v[j], match);
+        simde_mm_store_si128((simde__m128i*)&S[j], match);
     }
 
     if (S_v.size() > std::max(size_t{1}, prev_end)) {
         size_t j = S_v.size() - 1;
-        score_t match = std::max(S_prev_v[j - 1] + init_score + profile_scores[j], E_v[j]);
+        score_t match = std::max(S_prev_v[j - 1] + init_score + profile_scores[j], E[j]);
         if (match >= xdrop_cutoff)
-            S_v[j] = match;
+            S[j] = match;
     }
 }
 
@@ -358,7 +369,8 @@ void DefaultColumnExtender
                 graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
-        const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_);
+        const auto *canonical = graph_->get_mode() == DeBruijnGraph::CANONICAL
+            ? dynamic_cast<const CanonicalDBG*>(graph_) : nullptr;
         // TODO: benchmark to check if this actually makes things faster
         // It might be that `get_node_sequence` in CanonicalDBG is fast enough due to caching
         if (canonical && seed_pos >= graph_->get_k()) {
@@ -447,7 +459,14 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                             query_.data() + query_.size()
                                 - this->seed_->get_query_view().data() - trim_query_suffix);
     score_t partial_sum_offset = partial_sums_.at(start + window.size());
-    assert(partial_sums_.at(start) - partial_sum_offset == config_.match_score(window));
+    assert(partial_sums_.at(start) - partial_sum_offset >= config_.match_score(window));
+
+    // A target-node search ignores min_path_score during backtracking.
+    const int64_t minimum_extension_score = !target_node
+            && config_.gap_opening_penalty <= 0 && config_.gap_extension_penalty <= 0
+        ? int64_t(min_path_score) + partial_sum_offset
+            - (trim_query_suffix ? 0 : std::max<int>(config_.right_end_bonus, 0))
+        : std::numeric_limits<int64_t>::min();
 
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
@@ -518,20 +537,15 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim,
                              xdrop_cutoff_i, score] = table[i];
 
-                double node_counter = config_.global_xdrop
-                    ? table.size()
-                    : next_offset - seed_offset;
-
                 // if we are currently not on the optimal path, check early cutoff criteria
                 if (S[max_pos - trim] < best_score) {
                     // if too many nodes have been explored, give up
-                    if (node_counter / window.size() >= config_.max_nodes_per_seq_char) {
-                        DEBUG_LOG("Position {}: Alignment node limit reached, stopping this branch",
+                    if (static_cast<double>(table.size()) / window.size()
+                            >= config_.max_nodes_per_seq_char) {
+                        DEBUG_LOG("Position {}: Alignment node limit reached, stopping extension",
                                   next_offset - seed_->get_offset());
-                        if (config_.global_xdrop) {
-                            queue = std::priority_queue<TableIt>();
-                            next_nodes.clear();
-                        }
+                        queue = std::priority_queue<TableIt>();
+                        next_nodes.clear();
 
                         continue;
                     }
@@ -628,8 +642,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 ssize_t diag_i = offset - seed_offset;
                 bool has_extension = in_seed;
                 const score_t *partial_sums = &partial_sums_[start + trim];
-                score_t extension_cutoff
-                    = best_score * config_.rel_score_cutoff + partial_sum_offset;
+                const int64_t extension_cutoff = std::max<int64_t>(
+                    static_cast<score_t>(best_score * config_.rel_score_cutoff + partial_sum_offset),
+                    minimum_extension_score);
                 score_t max_diff = ninf;
 
                 size_t scores_reached_sizediff = 0;
@@ -656,9 +671,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
                     // check if this node can be extended to get a better alignment
                     assert(partial_sums[j] - partial_sum_offset
-                            == config_.match_score(window.substr(j + trim)));
+                            >= config_.match_score(window.substr(j + trim)));
                     if (!has_extension && scores_reached_cutoff
-                            && S[j] + partial_sums[j] >= extension_cutoff) {
+                            && int64_t(S[j]) + partial_sums[j] >= extension_cutoff) {
                         has_extension = true;
                     }
 
@@ -892,7 +907,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         std::string seq;
         score_t score = start_score;
 
-        if (score - min_cell_score_ < best_score)
+        if (seed_->label_columns.empty() && score - min_cell_score_ < best_score)
             break;
 
         ++num_backtracks;
@@ -1007,7 +1022,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             assert(!dummy_counter);
             score_t cur_cell_score = table[j].S[pos - table[j].trim];
             best_score = std::max(best_score, score - cur_cell_score);
-            if (score - min_cell_score_ < best_score)
+            if (seed_->label_columns.empty() && score - min_cell_score_ < best_score)
                 break;
 
             if (score >= min_start_score

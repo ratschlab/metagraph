@@ -347,12 +347,18 @@ Config::Config(int argc, char *argv[]) {
             align_output_path = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
+        } else if (!strcmp(argv[i], "--align-two-sided")) {
+            alignment_two_sided = true;
         } else if (!strcmp(argv[i], "--align-chain")) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
             alignment_seed_complexity_filter = false;
+        } else if (!strcmp(argv[i], "--align-no-connect-anchors")) {
+            alignment_connect_anchors = false;
+        } else if (!strcmp(argv[i], "--align-no-extend-chains")) {
+            alignment_extend_chains = false;
         } else if (!strcmp(argv[i], "--num-chars")) {
             num_chars = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
@@ -798,8 +804,21 @@ Config::Config(int argc, char *argv[]) {
         print_usage(argv[0], identity);
     }
 
+    if (!std::isfinite(alignment_max_nodes_per_seq_char) || alignment_max_nodes_per_seq_char < 0
+            || !std::isfinite(alignment_max_ram) || alignment_max_ram < 0) {
+        std::cerr << "Error: alignment node and RAM limits must be finite and nonnegative" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (alignment_max_seed_length < alignment_min_seed_length) {
         std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (identity == ALIGN && alignment_post_chain
+            && (alignment_chain || alignment_two_sided || !alignment_extend_chains)) {
+        std::cerr << "Error: --align-post-chain cannot be combined with --align-chain, "
+                     "--align-two-sided, or --align-no-extend-chains" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1223,23 +1242,26 @@ if (advanced) {
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tsearch only the forward query orientation [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
             fprintf(stderr, "\t   --align-output-path \t\t\t\twith --json, also emit the VG-style path.mapping object [off]\n");
 }
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-two-sided \t\t\textend both ends of each seed or chain. [off]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t   --align-post-chain \t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
 if (advanced) {
+            fprintf(stderr, "\t   --align-no-connect-anchors\t\tskip alignment between anchors [off]\n");
+            fprintf(stderr, "\t   --align-no-extend-chains\t\tskip extension beyond chains [off]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum search workspace in MB, excluding graph/annotations/results [200.0]\n");
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
-            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.95]\n");
+            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tminimum score relative to the best completed alignment per label [0.95]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -1512,14 +1534,15 @@ if (advanced) {
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
+            fprintf(stderr, "\t   --align-two-sided \t\t\textend both ends of each seed or chain. [off]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tsearch only the forward query orientation [off]\n");
 }
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum search workspace in MB, excluding graph/annotations/results [200.0]\n");
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");

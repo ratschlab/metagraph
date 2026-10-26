@@ -2,7 +2,10 @@
 #define __DBG_SSHASH_HPP__
 
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <variant>
+#include <filesystem>
 
 #include <dictionary.hpp>
 #include <offsets.hpp>
@@ -33,10 +36,12 @@ class DBGSSHash : public DeBruijnGraph {
                                 sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
+    // Construction uses scratch files; an empty swap_dir selects the system temp directory.
     DBGSSHash(const std::string& input_filename,
               size_t k,
               Mode mode = BASIC,
-              size_t num_chars = 0);
+              size_t num_chars = 0,
+              const std::filesystem::path &swap_dir = {});
 
     // SequenceGraph overrides
     void add_sequence(
@@ -60,6 +65,7 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<bool()>& terminate = []() { return false; }) const;
 
     uint64_t num_nodes() const override;
+    uint64_t max_index() const override;
 
     bool load(std::istream& in);
     bool load(const std::string& filename) override;
@@ -111,12 +117,15 @@ class DBGSSHash : public DeBruijnGraph {
             node_index node,
             const std::function<void(node_index, char, bool)>& callback) const;
 
+    std::vector<seq_index> get_sequence_ids(node_index node) const override;
+
 
     const std::string& alphabet() const override final { return alphabet_; }
 
     const dict_t& data() const { return dict_; }
 
     node_index reverse_complement(node_index node) const;
+    node_index get_base_node(node_index node) const;
 
     void adjacent_outgoing_nodes(node_index node,
                                  const std::function<void(node_index)>& callback) const override;
@@ -134,8 +143,43 @@ class DBGSSHash : public DeBruijnGraph {
     adjacent_incoming_nodes_with_rc(node_index node,
                                     const std::function<void(node_index, bool)>& callback) const;
 
+    sdsl::bit_vector get_invalid_char_mask(std::string_view sequence) const;
+
+    // Call each node whose prefix matches at least minimum query characters,
+    // reporting its longest matching prefix. Invalid characters end a match.
+    // Return the total number of matching nodes, even when it exceeds maximum
+    // and suppresses all callbacks. The prefix index is lazy
+    // and is not serialized. Canonical DNA includes both orientations; protein
+    // requires BASIC mode. A zero minimum is treated as one.
+    size_t call_nodes_with_prefix_matching(
+            std::string_view query,
+            size_t minimum,
+            const std::function<void(node_index, size_t)>& callback,
+            size_t maximum = std::numeric_limits<size_t>::max()) const;
+
+    // Call nodes whose suffix matches the longest prefix of query (at most k
+    // characters). Reject invalid input and suppress the entire longest-match
+    // bucket if it exceeds maximum. Return its size, capped at maximum + 1.
+    // The suffix order is lazy and is not serialized. A zero minimum is one.
+    size_t call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view query,
+            std::function<void(node_index, uint64_t)> callback,
+            size_t minimum = 1,
+            size_t maximum = std::numeric_limits<size_t>::max()) const;
+
+    static constexpr node_index sshash_to_graph_index(uint64_t idx) {
+        return idx + 1;
+    }
+
+    static constexpr uint64_t graph_index_to_sshash(node_index idx) {
+        return idx - 1;
+    }
 
   private:
+    struct SeedIndexCache;
+    // Copies share only immutable node ordering; a successful load replaces it.
+    std::shared_ptr<SeedIndexCache> seed_index_cache_;
+
     static const std::string alphabet_;
     dict_t dict_;
     size_t k_;

@@ -21,10 +21,154 @@ graph_file_extension = {'succinct': '.dbg',
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 
-@unittest.skipUnless(DNA_MODE, "These alignment tests are only for the DNA4 alphabet")
+@unittest.skipUnless(DNA_MODE and 'DNA5' not in os.readlink(os.path.join(os.getcwd(), 'metagraph')),
+                     "These alignment tests are only for the DNA4 alphabet")
 class TestDNAAlign(TestingBase):
     def setUp(self):
         super().setUpClass()
+
+    def test_post_chain_joins_disconnected_alignments(self):
+        reference = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        with open(reference, 'w') as out:
+            out.write('>first\nTGAGGATCAG\n>second\nCAGCTAGCTAGCTAGC\n')
+        sequence = 'TGAGGATCAGCTAGCTAGCTAGC'
+        with open(query, 'w') as out:
+            out.write('>query\n' + sequence + '\n')
+        graph_base = self.tempdir.name + '/graph'
+        self._build_graph(reference, graph_base, 5, 'succinct')
+        command = [METAGRAPH, 'align', '--align-only-forwards',
+                   '--align-min-exact-match', '0', '--align-min-seed-length', '5',
+                   '--align-no-seed-complexity-filter',
+                   '--align-mm-transition-penalty', '1',
+                   '--align-mm-transversion-penalty', '2',
+                   '--align-gap-open-penalty', '5', '--align-end-bonus', '0',
+                   '-i', graph_base + '.dbg', query]
+        for post_chain, score, cigar in ((False, 32, '7S16='), (True, 41, '10=1G13=')):
+            with self.subTest(post_chain=post_chain):
+                result = subprocess.run(command + (['--align-post-chain'] if post_chain else []),
+                                        stdout=PIPE, stderr=PIPE)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                fields = result.stdout.decode().strip().split('\t')
+                self.assertEqual(int(fields[4]), score)
+                self.assertEqual(fields[6], cigar)
+                if post_chain:
+                    self.assertEqual(fields[3], sequence)
+
+        for option in ('--align-chain', '--align-two-sided', '--align-no-extend-chains'):
+            with self.subTest(unsupported_option=option):
+                result = subprocess.run(command + ['--align-post-chain', option],
+                                        stdout=PIPE, stderr=PIPE)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('--align-post-chain cannot be combined', result.stderr.decode())
+
+        partial_query = self.tempdir.name + '/partial.fa'
+        with open(partial_query, 'w') as out:
+            out.write('>partial\nGATC\n')
+        partial_command = command[:-1] + [partial_query, '--align-min-seed-length', '3',
+                                          '--align-post-chain', '-p', '2']
+        result = subprocess.run(partial_command, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        fields = result.stdout.decode().strip().split('\t')
+        self.assertEqual(fields[1:4], ['GATC', '+', 'GATC'])
+        self.assertEqual((int(fields[4]), fields[6], int(fields[7])), (8, '4=', 1))
+
+        result = subprocess.run(partial_command + ['--json', '--align-output-path'],
+                                stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        alignment = json.loads(result.stdout)
+        self.assertEqual(alignment['sequence'], 'GATC')
+        self.assertEqual(alignment['annotation']['ref_sequence'], 'GATC')
+        self.assertEqual(alignment['annotation']['cigar'], '4=')
+        self.assertEqual(alignment['score'], 8)
+        mapping = alignment['path']['mapping']
+        self.assertEqual(len(mapping), 1)
+        self.assertEqual(mapping[0]['position']['offset'], 1)
+        # The match starts one base into GGATC; verify the emitted graph node.
+        result = subprocess.run([METAGRAPH, 'align', '--map', '--align-only-forwards',
+                                 '-i', graph_base + '.dbg', reference], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        node_ids = dict(line.rsplit(': ', 1) for line in result.stdout.decode().splitlines())
+        self.assertEqual(mapping[0]['position']['node_id'], int(node_ids['GGATC']))
+
+        annotation = self.tempdir.name + '/coordinates'
+        self._annotate_graph(reference, graph_base + '.dbg', annotation, 'column_coord',
+                             anno_type='filename')
+        result = subprocess.run(command + ['--align-post-chain', '-p', '2',
+                                          '-a', annotation + '.column_coord.annodbg'],
+                                stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Post-chaining alignments with coordinates not supported',
+                      result.stderr.decode())
+
+        result = subprocess.run(command + ['--align-post-chain', '--json'],
+                                stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('JSON output for chains not supported', result.stderr.decode())
+
+        exact_query = self.tempdir.name + '/exact.fa'
+        with open(exact_query, 'w') as out:
+            out.write('>exact\nTGAGGATCAG\n')
+        result = subprocess.run(command[:-1] + [exact_query, '--align-chain',
+                                                '--align-no-connect-anchors', '--json'],
+                                stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        record = json.loads(result.stdout)
+        self.assertEqual(record['annotation']['cigar'], '10=')
+        self.assertEqual(record['score'], 20)
+
+    @parameterized.expand([('hashfast', '.hashfastdbg'), ('sshash', '.sshashdbg')])
+    def test_post_chain_keeps_unmapped_reads(self, representation, extension):
+        reference = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        with open(reference, 'w') as out:
+            out.write('>reference\nAACGTCAGTACCTGATGCATGCA\n')
+        with open(query, 'w') as out:
+            out.write('>miss\n' + 'N' * 23 + '\n>short\nAA\n')
+        graph_base = self.tempdir.name + '/graph'
+        result = subprocess.run([METAGRAPH, 'build', '--graph', representation, '-k', '7',
+                                 '-o', graph_base, reference], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        result = subprocess.run([METAGRAPH, 'align', '--align-post-chain',
+                                 '--align-min-seed-length', '5', '--align-only-forwards',
+                                 '--align-min-exact-match', '0', '-i', graph_base + extension,
+                                 query], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        rows = [line.split('\t') for line in result.stdout.decode().splitlines()]
+        self.assertEqual([row[0] for row in rows], ['miss', 'short'])
+        self.assertTrue(all(row[2:4] == ['*', '*'] for row in rows))
+
+    def test_relative_cutoff_preserves_exact_transcript(self):
+        # Its exact path has fragmented seeds, while overlapping transcripts
+        # have longer individual seeds. A cutoff before extension loses it.
+        source = TEST_DATA_DIR + '/transcripts_1000.fa'
+        transcripts = {}
+        with open(source) as inp:
+            for line in inp:
+                if line.startswith('>'):
+                    label = line[1:].strip()
+                    transcripts[label] = ''
+                else:
+                    transcripts[label] += line.strip()
+        label = next(name for name in transcripts if name.startswith('ENST00000440196.3|'))
+        sequence = transcripts[label][13:1013]
+        query = self.tempdir.name + '/query.fa'
+        with open(query, 'w') as out:
+            out.write('>exact\n' + sequence + '\n')
+        graph_base = self.tempdir.name + '/graph'
+        self._build_graph(source, graph_base, 31, 'succinct')
+        res = subprocess.run([METAGRAPH, 'annotate', '--anno-header', '-i', graph_base + '.dbg',
+                              '-o', graph_base, source], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
+                              '-i', graph_base + '.dbg', '-a', graph_base + '.column.annodbg', query],
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        records = [r for r in map(json.loads, res.stdout.decode().splitlines())
+                   if any(item['sample'] == label for item in r['annotation']['labels'])]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['annotation']['cigar'], '1000=')
+        self.assertEqual(records[0]['score'], 2010)
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_all_graphs(self, representation):
@@ -396,10 +540,97 @@ class TestProteinAlign(TestingBase):
     def setUp(self):
         super().setUpClass()
 
-    # TODO: test alignment for protein sequences
-    # @parameterized.expand(GRAPH_TYPES)
-    # def test_simple_align_all_graphs(self, representation):
-    #     pass
+    @parameterized.expand([(representation, annotation)
+                           for representation in ('succinct', 'hashfast', 'sshash')
+                           for annotation in (None, 'column', 'column_coord')])
+    def test_blosum_exact_and_inexact(self, representation, annotation):
+        reference = 'MKWVTFISLLFLFSSAYS'
+        fasta = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        with open(fasta, 'w') as out:
+            out.write('>protein\n' + reference + '\n')
+        with open(query, 'w') as out:
+            out.write('>exact\n' + reference + '\n>changed\nMKWVTFISLLYLFSSAYS\n')
+        graph_base = self.tempdir.name + '/graph'
+        # This reference is one nonbranching path, suitable for SSHash input.
+        build = [METAGRAPH, 'build', '--graph', representation, '-k', '5',
+                 '--disk-swap', self.tempdir.name, '-o', graph_base, fasta]
+        res = subprocess.run(build, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        extension = '.sshashdbg' if representation == 'sshash' else graph_file_extension[representation]
+        options = []
+        if annotation:
+            anno_base = self.tempdir.name + '/annotation'
+            self._annotate_graph(fasta, graph_base + extension, anno_base,
+                                 annotation, anno_type='header')
+            options = ['-a', anno_base + '.' + annotation + '.annodbg']
+        res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
+                              '--align-min-seed-length', '5', '--align-min-exact-match', '0',
+                              '-i', graph_base + extension, *options, query], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        records = {r['name']: r for r in map(json.loads, res.stdout.decode().splitlines())}
+        self.assertEqual(records['exact']['annotation']['cigar'], '18=')
+        self.assertEqual(records['exact']['score'], 101)
+        self.assertEqual(records['changed']['annotation']['cigar'], '10=1X7=')
+        self.assertEqual(records['changed']['score'], 98)
+        self.assertEqual(records['changed']['annotation']['ref_sequence'], reference)
+        if annotation:
+            self.assertEqual(records['changed']['annotation']['labels'][0]['sample'], 'protein')
+        if annotation == 'column_coord':
+            self.assertEqual(records['changed']['annotation']['labels'][0]['nt_coords'], '1-18')
+
+
+@unittest.skipUnless('DNA5' in os.readlink(os.path.join(os.getcwd(), 'metagraph')),
+                     'Requires the DNA5 alphabet')
+class TestDNA5Align(TestingBase):
+    def setUp(self):
+        super().setUpClass()
+
+    @parameterized.expand([(representation, edit_distance)
+                           for representation in ('succinct', 'hashfast')
+                           for edit_distance in (False, True)])
+    def test_query_alignment_ambiguous_matches(self, representation, edit_distance):
+        fasta = self.tempdir.name + '/reference.fa'
+        reference = 'AACNNNACGNNNTTA'
+        with open(fasta, 'w') as out:
+            out.write('>reference\n' + reference + '\n')
+        prefix = self.tempdir.name + '/graph'
+        self._build_graph(fasta, prefix, 3, representation)
+        graph = prefix + graph_file_extension[representation]
+        self._annotate_graph(fasta, graph, prefix, 'column')
+        options = ['--align-edit-distance'] if edit_distance else []
+        result = subprocess.run([METAGRAPH, 'query', '--json', '--align',
+                                 '--align-only-forwards', '--align-min-seed-length', '3',
+                                 '--align-no-seed-complexity-filter', *options,
+                                 '-i', graph, '-a', prefix + '.column.annodbg', fasta],
+                                stdout=PIPE, stderr=PIPE, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        aligned = json.loads(result.stdout)
+        self.assertEqual(aligned['cigar'], '15=')
+        self.assertEqual(aligned['score'], 15 if edit_distance else 40)
+        self.assertEqual(aligned['max_score'], aligned['score'])
+
+    @parameterized.expand(['succinct', 'hashfast'])
+    def test_ambiguous_reference_bases(self, representation):
+        fasta = self.tempdir.name + '/reference.fa'
+        query = self.tempdir.name + '/query.fa'
+        reference = 'AACGTNACGTNACCT'
+        with open(fasta, 'w') as out:
+            out.write('>reference\n' + reference + '\n')
+        with open(query, 'w') as out:
+            out.write('>exact\n' + reference + '\n>changed\nAACGTNATGTNACCT\n')
+        graph_base = self.tempdir.name + '/graph'
+        self._build_graph(fasta, graph_base, 5, representation)
+        res = subprocess.run([METAGRAPH, 'align', '--json', '--align-only-forwards',
+                              '--align-min-seed-length', '5', '--align-min-exact-match', '0',
+                              '-i', graph_base + graph_file_extension[representation], query],
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        records = {r['name']: r for r in map(json.loads, res.stdout.decode().splitlines())}
+        self.assertEqual(records['exact']['annotation']['cigar'], '15=')
+        self.assertEqual(records['exact']['score'], 40)
+        self.assertEqual(records['changed']['annotation']['cigar'], '7=1X7=')
+        self.assertEqual(records['changed']['score'], 35)
 
 
 coord_anno_file_extension = {
@@ -691,8 +922,9 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(rows[0][6], '10=')
         self.assertEqual(rows[0][8], 'seq1/12:3-12')
 
-    @parameterized.expand(COORD_ANNO_TYPES)
-    def test_align_cross_sequence_boundary(self, anno_repr):
+    @parameterized.expand([(anno, sensitive) for anno in COORD_ANNO_TYPES
+                           for sensitive in (False, True)])
+    def test_align_cross_sequence_boundary(self, anno_repr, sensitive):
         """Alignment path crosses from one indexed sequence into the next.
 
         When two sequences share the boundary k-1-mer, the graph connects
@@ -708,22 +940,27 @@ class TestAlignCoordToHeader(TestingBase):
             ('seq1', 'AAAAACGTACGT'),
             ('seq2', 'ACGTTTTTTTTT'),
         ])
-        # The aligner finds a 16bp path crossing the boundary (8bp soft
-        # clip at the start, since the first 8 query bp cannot extend into
-        # a longer run than the cross-boundary one).
+        # A four-base insertion retains all 20 reference bases, scoring 38
+        # with both end bonuses; the former 8S16= alignment scored 37.
         query_fa = self._write_fa('query.fa', [
             ('q_concat', 'AAAAACGTACGTACGTTTTTTTTT'),
         ])
 
         graph, anno = self._setup_graph(test_fa, anno_repr)
-        rows = self._run_align(graph, anno, query_fa)
+        # Both engines retain all 20 reference bases. The repeated ACGT
+        # permits different insertion placements at the same score.
+        flags = '--align-min-exact-match 0'
+        if sensitive:
+            flags += ' --align-chain --align-two-sided --align-xdrop 27'
+        rows = self._run_align(graph, anno, query_fa, flags)
         self.assertEqual(len(rows), 1)
 
         self.assertEqual(rows[0][0], 'q_concat')
-        self.assertEqual(rows[0][6], '8S16=')
-        # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
-        # seq1 -> 12 nt, seq2 -> 12 nt.
-        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-8')
+        self.assertEqual(rows[0][3], 'AAAAACGTACGTTTTTTTTT')
+        self.assertEqual(rows[0][6], '4=4I16=' if sensitive else '12=4I8=')
+        self.assertEqual(int(rows[0][4]), 38)
+        # Both records are fully covered; the shared four bases count in each.
+        self.assertEqual(rows[0][8], 'seq1/12:1-12;seq2/12:1-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_json_labels_array(self, anno_repr):
@@ -833,8 +1070,9 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(by_sample['seq3']['nt_length'], 28)
         self.assertEqual(by_sample['seq3']['nt_coords'], '1-8')
 
-    @parameterized.expand(COORD_ANNO_TYPES)
-    def test_align_json_cross_sequence_boundary(self, anno_repr):
+    @parameterized.expand([(anno, sensitive) for anno in COORD_ANNO_TYPES
+                           for sensitive in (False, True)])
+    def test_align_json_cross_sequence_boundary(self, anno_repr, sensitive):
         """JSON twin of `test_align_cross_sequence_boundary`. When one
         alignment path spans two indexed sequences (sharing a boundary
         k-1-mer), `annotation.labels[]` must contain two entries with
@@ -849,21 +1087,26 @@ class TestAlignCoordToHeader(TestingBase):
         ])
 
         graph, anno = self._setup_graph(test_fa, anno_repr)
+        flags = '--align-chain --align-two-sided --align-xdrop 27' if sensitive else ''
         align_cmd = (f'{METAGRAPH} align --align-only-forwards --json '
+                     f'--align-min-exact-match 0 {flags} '
                      f'-i {graph} -a {anno} {query_fa}' + MMAP_FLAG)
         res = subprocess.run([align_cmd], shell=True, stdout=PIPE, stderr=PIPE)
         self.assertEqual(res.returncode, 0, f"Align failed: {res.stderr.decode()}")
 
         records = [json.loads(line) for line in res.stdout.decode().splitlines() if line.strip()]
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]['annotation']['cigar'], '8S16=')
+        self.assertEqual(records[0]['annotation']['ref_sequence'], 'AAAAACGTACGTTTTTTTTT')
+        self.assertEqual(records[0]['annotation']['cigar'],
+                         '4=4I16=' if sensitive else '12=4I8=')
+        self.assertEqual(records[0]['score'], 38)
         by_sample = {entry['sample']: entry for entry in records[0]['annotation']['labels']}
         self.assertEqual(set(by_sample), {'seq1', 'seq2'})
-        # 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        # Both records include the shared four bases in their covered range.
         self.assertEqual(by_sample['seq1']['nt_length'], 12)
-        self.assertEqual(by_sample['seq1']['nt_coords'], '5-12')
+        self.assertEqual(by_sample['seq1']['nt_coords'], '1-12')
         self.assertEqual(by_sample['seq2']['nt_length'], 12)
-        self.assertEqual(by_sample['seq2']['nt_coords'], '1-8')
+        self.assertEqual(by_sample['seq2']['nt_coords'], '1-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_missing_seqs_warning(self, anno_repr):

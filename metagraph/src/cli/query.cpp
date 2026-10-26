@@ -1,4 +1,5 @@
 #include "query.hpp"
+#include "alignment_config.hpp"
 
 #include <mutex>
 #include <sstream>
@@ -39,6 +40,20 @@ using mtg::graph::boss::BOSS;
 using mtg::graph::boss::BOSSConstructor;
 
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
+
+align::DBGAlignerConfig initialize_align_config(const Config &config,
+                                           const DeBruijnGraph &graph) {
+    assert(config.alignment_num_alternative_paths);
+
+    auto c = detail::make_alignment_config<align::DBGAlignerConfig>(config,
+        std::min(config.alignment_min_seed_length, graph.get_k()));
+
+    c.set_scoring_matrix();
+
+    c.print_summary();
+
+    return c;
+}
 
 
 // Format a range of coordinates (start, first_coord, last_coord) to a string representation
@@ -1145,7 +1160,7 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(*config, *graph)
+            initialize_align_config(*config, *graph)
         ));
     }
     graph.reset();

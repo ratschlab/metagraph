@@ -9,7 +9,7 @@ namespace graph {
 
 class DeBruijnGraph;
 
-namespace align {
+namespace align_redone {
 struct DBGAlignerConfig;
 } // namespace align
 
@@ -19,7 +19,7 @@ namespace cli {
 
 class Config;
 
-graph::align::DBGAlignerConfig initialize_aligner_config(const Config &config,
+graph::align_redone::DBGAlignerConfig initialize_aligner_config(const Config &config,
                                                          const graph::DeBruijnGraph &graph);
 
 int align_to_graph(Config *config);

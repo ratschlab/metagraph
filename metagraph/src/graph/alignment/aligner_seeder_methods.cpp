@@ -1,8 +1,9 @@
 #include "aligner_seeder_methods.hpp"
 
-#include <sdust.h>
+#include "seed_complexity.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
@@ -17,22 +18,6 @@ using mtg::common::logger;
 
 typedef Alignment::score_t score_t;
 
-
-#if ! _PROTEIN_GRAPH
-inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
-    int n;
-    std::unique_ptr<uint64_t, decltype(std::free)*> r {
-        sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
-        std::free
-    };
-    return n > 0;
-}
-#else
-inline bool is_low_complexity(std::string_view, int = 20, int = 64) {
-    // TODO: implement a checker here
-    return false;
-}
-#endif
 
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
@@ -92,10 +77,10 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
     return seeds;
 }
 
-template <class BOSSEdgeRange>
 void suffix_to_prefix(const DBGSuccinct &dbg_succ,
-                      const BOSSEdgeRange &index_range,
-                      const std::function<void(DBGSuccinct::node_index)> &callback) {
+                      const std::tuple<uint64_t, uint64_t, size_t> &index_range,
+                      const std::function<bool(DBGSuccinct::node_index)> &callback) {
+    using BOSSEdgeRange = std::tuple<uint64_t, uint64_t, size_t>;
     const auto &boss = dbg_succ.get_boss();
     assert(std::get<2>(index_range));
     assert(std::get<2>(index_range) < dbg_succ.get_k());
@@ -105,9 +90,10 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         assert(seed_length == boss.get_k());
         for (boss::BOSS::edge_index i = first; i <= last; ++i) {
             DBGSuccinct::node_index node = dbg_succ.validate_edge(i);
-            if (node)
-                callback(node);
+            if (node && !callback(node))
+                return false;
         }
+        return true;
     };
 
     if (std::get<2>(index_range) == boss.get_k()) {
@@ -129,7 +115,8 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 
             if (boss.tighten_range(&first, &last, s)) {
                 if (seed_length == boss.get_k()) {
-                    call_nodes_in_range(next_range);
+                    if (!call_nodes_in_range(next_range))
+                        return;
                 } else {
                     range_stack.emplace_back(std::move(next_range));
                 }
@@ -165,7 +152,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         return;
     }
 
-    const DBGSuccinct &dbg_succ = get_base_dbg_succ(&this->graph_);
+    const auto *sshash = dynamic_cast<const DBGSSHash*>(&this->graph_);
+    const auto *dbg_succ = sshash ? nullptr : &get_base_dbg_succ(&this->graph_);
 
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
@@ -228,14 +216,16 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             continue;
         }
 
-        dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
-            this->query_.substr(i, max_seed_length),
-            [&](node_index alt_node, size_t len) {
-                seed_length = len;
-                alt_nodes.push_back(alt_node);
-            },
-            min_seed_length[i]
-        );
+        auto collect = [&](node_index alt_node, size_t len) {
+            seed_length = len;
+            alt_nodes.push_back(alt_node);
+        };
+        if (sshash)
+            sshash->call_nodes_with_suffix_matching_longest_prefix(
+                this->query_.substr(i, max_seed_length), collect, min_seed_length[i]);
+        else
+            dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
+                this->query_.substr(i, max_seed_length), collect, min_seed_length[i]);
 
         if (i >= last_full_id && alt_nodes.size() == 1
                 && min_seed_length[last_full_id - 1] == this->graph_.get_k()
@@ -284,7 +274,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             if (j_min > j_max)
                 continue;
 
-            const auto &boss = dbg_succ.get_boss();
+            const auto &boss = dbg_succ->get_boss();
 
             auto encoded = boss.encode({ query_rc.data() + i, max_seed_length });
             auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
@@ -304,10 +294,11 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             // e.g., matched: ***ATG, want ATG***
             suffix_to_prefix(
-                dbg_succ,
+                *dbg_succ,
                 std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_length),
                 [&](node_index match) {
                     append_suffix_seed(j, canonical->reverse_complement(match), seed_length);
+                    return true;
                 }
             );
         }
