@@ -65,12 +65,31 @@ class TestDNAAlign(TestingBase):
         partial_query = self.tempdir.name + '/partial.fa'
         with open(partial_query, 'w') as out:
             out.write('>partial\nGATC\n')
-        result = subprocess.run(command[:-1] + [partial_query, '--align-min-seed-length', '3',
-                                                '--align-post-chain', '-p', '2'],
+        partial_command = command[:-1] + [partial_query, '--align-min-seed-length', '3',
+                                          '--align-post-chain', '-p', '2']
+        result = subprocess.run(partial_command, stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        fields = result.stdout.decode().strip().split('\t')
+        self.assertEqual(fields[1:4], ['GATC', '+', 'GATC'])
+        self.assertEqual((int(fields[4]), fields[6], int(fields[7])), (8, '4=', 1))
+
+        result = subprocess.run(partial_command + ['--json', '--align-output-path'],
                                 stdout=PIPE, stderr=PIPE)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('Post-chaining is not supported for partial-node or sub-k alignments',
-                      result.stderr.decode())
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        alignment = json.loads(result.stdout)
+        self.assertEqual(alignment['sequence'], 'GATC')
+        self.assertEqual(alignment['annotation']['ref_sequence'], 'GATC')
+        self.assertEqual(alignment['annotation']['cigar'], '4=')
+        self.assertEqual(alignment['score'], 8)
+        mapping = alignment['path']['mapping']
+        self.assertEqual(len(mapping), 1)
+        self.assertEqual(mapping[0]['position']['offset'], 1)
+        # The match starts one base into GGATC; verify the emitted graph node.
+        result = subprocess.run([METAGRAPH, 'align', '--map', '--align-only-forwards',
+                                 '-i', graph_base + '.dbg', reference], stdout=PIPE, stderr=PIPE)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        node_ids = dict(line.rsplit(': ', 1) for line in result.stdout.decode().splitlines())
+        self.assertEqual(mapping[0]['position']['node_id'], int(node_ids['GGATC']))
 
         annotation = self.tempdir.name + '/coordinates'
         self._annotate_graph(reference, graph_base + '.dbg', annotation, 'column_coord',
