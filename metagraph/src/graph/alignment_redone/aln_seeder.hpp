@@ -75,8 +75,8 @@ class Extender {
     Extender(const Query &query, const DBGAlignerConfig &config);
     virtual ~Extender();
 
-    // Wavefront extension requires a node-boundary seed (zero leading offset).
-    // Throws std::invalid_argument when this precondition is not met.
+    // Extend from the aligned interval, including unused characters inside
+    // the first and last nodes before traversing graph edges.
     void extend(const Alignment &aln,
                 const std::function<void(Alignment&&)> &callback,
                 bool no_bwd = false,

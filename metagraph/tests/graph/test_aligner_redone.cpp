@@ -2288,6 +2288,146 @@ TEST(AlignmentOffset, DistinguishesPositionsWithinOneNode) {
     EXPECT_EQ(prefix, Alignment(anchor));
 }
 
+template <typename Graph>
+class OffsetBackwardExtension : public ::testing::Test {};
+using OffsetBackwardGraphs = ::testing::Types<DBGSuccinct, DBGSSHash>;
+TYPED_TEST_SUITE(OffsetBackwardExtension, OffsetBackwardGraphs);
+
+TYPED_TEST(OffsetBackwardExtension, ConsumesReferencePrefixBeforeIncomingEdges) {
+    const std::string node = "ACGTCAGTACGATCGTACCTGAGCTTAGGCA";
+    auto substitution = node.substr(4);
+    substitution[4] = 'T';
+    auto insertion = node.substr(4);
+    insertion.insert(4, "C");
+    auto deletion = node.substr(4);
+    deletion.erase(4, 1);
+    struct Case {
+        std::string reference, query, spelling, cigar;
+        size_t clipping, seed_length, offset, end_trim;
+        int score;
+    };
+    const std::vector<Case> cases{
+        {node, node.substr(4), node.substr(4), "27=", 5, 22, 4, 0, 54},
+        {node, substitution, node.substr(4), "4=1X22=", 5, 22, 4, 0, 49},
+        {node, insertion, node.substr(4), "4=1I23=", 6, 22, 4, 0, 49},
+        {node, deletion, node.substr(4), "4=1D22=", 4, 22, 4, 0, 47},
+        {node, node, node, "31=", 9, 22, 0, 0, 62},
+        {"GGCT" + node, "GCT" + node, "GCT" + node, "34=", 12, 22, 0, 0, 68},
+        {"GGCT" + node, "GCT" + node.substr(1), "GCT" + node, "3=1D30=", 11, 22, 0, 0, 61},
+        {"GGCT" + node, "GCTT" + node.substr(1), "GCT" + node, "3=1X30=", 12, 22, 0, 0, 63},
+        {node, node.substr(4, 23), node.substr(4, 23), "23=", 5, 10, 4, 4, 46}
+    };
+    for (const auto &test : cases) {
+        SCOPED_TRACE(test.cigar);
+        auto graph = build_graph_batch<TypeParam>(node.size(), {test.reference});
+        Query query(*graph, test.query);
+        Cigar cigar;
+        cigar.append(Cigar::CLIPPED, test.clipping);
+        cigar.append(Cigar::MATCH, test.seed_length);
+        cigar.append(Cigar::CLIPPED, test.query.size() - test.clipping - test.seed_length);
+        Alignment seed(*graph, query.get_query(), false, {graph->kmer_to_node(node)},
+                       std::move(cigar), std::string(node), node.size() - 9 - test.seed_length,
+                       Anchor::nannot, {}, 9);
+        ASSERT_TRUE(seed.get_cigar().is_valid(seed.get_spelling(), seed.get_query()));
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        config.min_exact_match = 0.9;
+        config.min_path_score = test.score;
+        Extender extender(query, config);
+        std::vector<Alignment> results;
+        extender.extend(seed, [&](Alignment&& result) { results.push_back(std::move(result)); });
+        ASSERT_EQ(1u, results.size());
+        const auto &result = results.front();
+        EXPECT_EQ(test.spelling, result.get_spelling());
+        EXPECT_EQ(test.cigar, result.get_cigar().to_string());
+        EXPECT_EQ(test.offset, result.get_offset());
+        EXPECT_EQ(test.end_trim, result.get_end_trim());
+        EXPECT_EQ(test.score, score_match(result, config));
+        EXPECT_TRUE(result.is_spelling_valid(*graph));
+        EXPECT_TRUE(result.get_cigar().is_valid(result.get_spelling(), result.get_query()));
+    }
+}
+
+TYPED_TEST(OffsetBackwardExtension, TwoSidedSearchKeepsSeedsBelowFinalThresholds) {
+    const std::string node = "ACGTCAGTACGATCGTACCTGAGCTTAGGCA";
+    for (bool cross_boundary : {false, true}) {
+        const auto reference = cross_boundary ? "GGCT" + node : node;
+        auto sequence = cross_boundary ? reference : node.substr(4);
+        sequence[cross_boundary ? 8 : 4] = cross_boundary ? 'A' : 'T';
+        auto graph = build_graph_batch<TypeParam>(31, {reference});
+        Query query(*graph, sequence);
+        DBGAlignerConfig config;
+        EXPECT_FALSE(config.two_sided);
+        config.min_seed_length = 10;
+        config.max_seed_length = 31;
+        config.min_exact_match = 0.9;
+        config.min_path_score = cross_boundary ? 65 : 49;
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        for (bool two_sided : {false, true}) {
+            config.two_sided = two_sided;
+            ExactSeeder seeder(query, config);
+            Extender extender(query, config);
+            std::vector<Alignment> results;
+            align_query(query, seeder, extender, [&](Alignment&& result) {
+                results.push_back(std::move(result));
+            });
+            if (!two_sided) {
+                EXPECT_TRUE(results.empty());
+                continue;
+            }
+            ASSERT_EQ(1u, results.size()) << cross_boundary;
+            EXPECT_EQ(cross_boundary ? 0u : 4u, results.front().get_offset());
+            EXPECT_EQ(cross_boundary ? "8=1X26=" : "4=1X22=", results.front().get_cigar().to_string());
+            EXPECT_EQ(config.min_path_score, score_match(results.front(), config));
+            EXPECT_TRUE(results.front().is_spelling_valid(*graph));
+            EXPECT_TRUE(results.front().get_cigar().is_valid(
+                results.front().get_spelling(), results.front().get_query()));
+        }
+    }
+}
+
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(OffsetBackwardExtension, ReverseAndCanonicalQueriesKeepTheirGeometry) {
+    const std::string reference = "ACGTCAGTACGATCGTACCTGAGCTTAGGCA";
+    std::string sequence = reference.substr(4);
+    sequence[4] = 'T';
+    for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY}) {
+        auto graph = build_graph_batch<TypeParam>(31, {reference}, mode);
+        for (bool reverse : {false, true}) {
+            auto input = sequence;
+            if (reverse) reverse_complement(input.begin(), input.end());
+            Query query(*graph, input);
+            DBGAlignerConfig config;
+            config.min_seed_length = 10;
+            config.max_seed_length = 31;
+            config.min_exact_match = 0.9;
+            config.min_path_score = 49;
+            config.two_sided = true;
+            config.forward_and_reverse_complement = mode == DeBruijnGraph::BASIC && reverse;
+            config.seed_complexity_filter = false;
+            config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+            ExactSeeder seeder(query, config);
+            Extender extender(query, config);
+            std::vector<Alignment> results;
+            align_query(query, seeder, extender, [&](Alignment&& result) {
+                results.push_back(std::move(result));
+            });
+            ASSERT_EQ(1u, results.size()) << mode << ' ' << reverse;
+            const auto &result = results.front();
+            const bool reverse_path = mode != DeBruijnGraph::BASIC && reverse;
+            EXPECT_EQ(mode == DeBruijnGraph::BASIC && reverse, result.get_orientation());
+            EXPECT_EQ(reverse_path ? 0u : 4u, result.get_offset());
+            EXPECT_EQ(reverse_path ? 4u : 0u, result.get_end_trim());
+            EXPECT_EQ(49, score_match(result, config));
+            EXPECT_TRUE(result.is_spelling_valid(*graph));
+            EXPECT_TRUE(result.get_cigar().is_valid(result.get_spelling(), result.get_query()));
+        }
+    }
+}
+#endif
+
 TEST(AlignmentExtension, KeepsBetterPathsAfterACompleteQuery) {
     const std::string query = "ACGTTAGGACCTATGCGATTCAGACT";
     const std::string mismatches = "ACGTTAGTACATATGCGATTCAGACT";
