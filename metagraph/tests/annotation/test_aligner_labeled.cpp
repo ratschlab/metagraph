@@ -11,6 +11,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -721,6 +722,30 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(AnnotationBuffer, PendingReverseComplementAliases) {
+    auto annotated = build_anno_graph<DBGSSHash, annot::ColumnCompressed<>>(
+        3, {"AACGT"}, {"reference"}, DeBruijnGraph::CANONICAL);
+    const auto &graph = dynamic_cast<const DBGSSHash&>(annotated->get_graph());
+    graph.call_nodes([&](auto node) {
+        if (graph.get_base_node(node) != node)
+            return;
+        for (bool fetch_between : {false, true}) {
+            AnnotationBuffer buffer(graph, annotated->get_annotator());
+            buffer.queue_path({node});
+            if (fetch_between)
+                buffer.fetch_queued_annotations();
+            const auto reverse = graph.reverse_complement(node);
+            buffer.queue_path({reverse});
+            buffer.fetch_queued_annotations();
+            for (auto orientation : {node, reverse}) {
+                const auto *labels = buffer.get_labels(orientation);
+                ASSERT_NE(nullptr, labels);
+                EXPECT_EQ((AnnotationBuffer::Columns{0}), *labels);
+            }
+        }
+    });
+}
+
 TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     size_t k = 5;
     /*   B     B                AB    AB
