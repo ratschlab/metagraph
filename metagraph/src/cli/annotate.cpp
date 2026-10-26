@@ -268,7 +268,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 {}, // config.anno_labels
                 [&](std::string sequence, auto labels, uint64_t) {
                     const size_t record = calls++ / (forward_and_reverse ? 2 : 1) + 1;
-                    if (labels.size() != 1 || !utils::valid_utf8(labels[0])) {
+                    if (labels.size() != 1 || labels[0].empty() || !utils::valid_utf8(labels[0])) {
                         logger->error("Record {} in '{}' needs one non-empty UTF-8 header for "
                                       "the record mapping; do not split it with --header-delimiter",
                                       record, files[i]);

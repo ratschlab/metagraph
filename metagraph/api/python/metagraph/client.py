@@ -172,8 +172,7 @@ class GraphClientJson:
 
     def resolve(self, sequence: str, *, labels=None, discover=None, select=None,
                 support="kmer", min_block_kmers=1, run_format="intervals", bounds=None,
-                graph=None, graph_path=None, attempt_id=None, expect_server_instance=None,
-                not_after_ms=None, timeout=None) -> JsonDict:
+                graph=None, graph_path=None, timeout=None) -> JsonDict:
         """Resolve annotation support and optionally select traversal seeds.
 
         Supply labels or discover. Options follow the POST /resolve JSON contract;
@@ -183,8 +182,7 @@ class GraphClientJson:
                        min_block_kmers=min_block_kmers, run_format=run_format)
         optional = dict(labels=list(labels) if labels is not None else None,
                         discover=discover, select=select, bounds=bounds,
-                        graph=graph, graph_path=graph_path, attempt_id=attempt_id,
-                        expect_server_instance=expect_server_instance, not_after_ms=not_after_ms)
+                        graph=graph, graph_path=graph_path)
         payload.update({key: value for key, value in optional.items() if value is not None})
         return self._do_request("resolve", payload, timeout=timeout)
 
@@ -324,14 +322,12 @@ class GraphClient:
 
     def resolve(self, sequence: str, *, labels=None, discover=None, select=None,
                 support="kmer", min_block_kmers=1, run_format="intervals", bounds=None,
-                graph=None, graph_path=None, attempt_id=None, expect_server_instance=None,
-                not_after_ms=None, timeout=None) -> JsonDict:
+                graph=None, graph_path=None, timeout=None) -> JsonDict:
         """Return the support profile; see GraphClientJson.resolve for options."""
         return self._json_client.resolve(
             sequence, labels=labels, discover=discover, select=select, support=support,
             min_block_kmers=min_block_kmers, run_format=run_format, bounds=bounds,
-            graph=graph, graph_path=graph_path, attempt_id=attempt_id,
-            expect_server_instance=expect_server_instance, not_after_ms=not_after_ms, timeout=timeout)
+            graph=graph, graph_path=graph_path, timeout=timeout)
 
     def traverse(self, request: JsonDict, timeout=None) -> JsonDict:
         return self._json_client.traverse(request, timeout=timeout)
