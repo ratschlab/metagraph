@@ -887,7 +887,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         std::string seq;
         score_t score = start_score;
 
-        if (score - min_cell_score_ < best_score)
+        if (seed_->label_columns.empty() && score - min_cell_score_ < best_score)
             break;
 
         ++num_backtracks;
@@ -1002,7 +1002,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             assert(!dummy_counter);
             score_t cur_cell_score = table[j].S[pos - table[j].trim];
             best_score = std::max(best_score, score - cur_cell_score);
-            if (score - min_cell_score_ < best_score)
+            if (seed_->label_columns.empty() && score - min_cell_score_ < best_score)
                 break;
 
             if (score >= min_start_score

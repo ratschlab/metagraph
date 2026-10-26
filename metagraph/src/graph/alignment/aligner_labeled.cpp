@@ -271,22 +271,17 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
     assert(remaining_labels_i_ != nannot);
     assert(node_labels_[i] != nannot);
 
-    // if this alignment tree node has been visited previously, ignore it
+    // Remaining labels decide whether this endpoint still needs backtracking.
     assert(remaining_labels_i_);
-    if (!prev_starts.emplace(i).second)
-        return true;
 
     // check if this starting point involves seed labels which have not been considered yet
     const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[i]);
     const auto &left_labels = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
 
     label_intersection_ = Columns{};
-    label_diff_ = Columns{};
-    utils::set_intersection_difference(left_labels.begin(), left_labels.end(),
-                                       end_labels.begin(), end_labels.end(),
-                                       std::back_inserter(label_intersection_),
-                                       std::back_inserter(label_diff_));
-    label_diff_.push_back(nannot);
+    std::set_intersection(left_labels.begin(), left_labels.end(),
+                          end_labels.begin(), end_labels.end(),
+                          std::back_inserter(label_intersection_));
 
     return label_intersection_.empty();
 }
@@ -314,12 +309,13 @@ void LabeledExtender::call_alignments(score_t end_score,
 
     auto call_alignment = [&]() {
         assert(alignment.label_columns.size());
-        if (label_diff_.size() && label_diff_.back() == nannot) {
-            label_diff_.pop_back();
-            remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
-            assert(remaining_labels_i_ != nannot);
-            label_diff_ = Columns{};
-        }
+        const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
+        label_diff_.clear();
+        std::set_difference(remaining.begin(), remaining.end(),
+                            alignment.label_columns.begin(), alignment.label_columns.end(),
+                            std::back_inserter(label_diff_));
+        remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
+        assert(remaining_labels_i_ != nannot);
 
         callback(std::move(alignment));
     };
