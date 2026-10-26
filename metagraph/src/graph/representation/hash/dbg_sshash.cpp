@@ -50,35 +50,41 @@ const std::string DBGSSHash::alphabet_ = kmer::alphabets::kAlphabetDNA;
 // retaining references to any particular graph or dictionary.
 struct DBGSSHash::SeedIndexCache {
     std::once_flag initialized;
+    std::once_flag suffix_initialized;
     sdsl::int_vector<> prefix_order;
+    sdsl::int_vector<> suffix_order;
 
-    template <class Dictionary>
-    void build(const DBGSSHash& graph, const Dictionary& dictionary) {
+    template <bool prefix, class Dictionary>
+    void build(const DBGSSHash& graph, const Dictionary& dictionary, sdsl::int_vector<>& order) {
         using Kmer = typename Dictionary::kmer_type;
         using Word = decltype(Kmer{}.bits);
         const size_t k = graph.get_k();
         const bool canonical = graph.get_mode() == CANONICAL;
         if (graph.get_mode() != BASIC && !canonical)
-            throw std::invalid_argument("Prefix lookup requires BASIC or CANONICAL SSHash");
+            throw std::invalid_argument("Seed lookup requires BASIC or CANONICAL SSHash");
         if constexpr (!Kmer::has_reverse_complement) {
             if (canonical)
-                throw std::invalid_argument("Canonical prefix lookup requires reverse complements");
+                throw std::invalid_argument("Canonical seed lookup requires reverse complements");
         }
 
         std::vector<std::pair<Word, node_index>> entries;
         entries.reserve(graph.num_nodes());
         for (auto it = dictionary.begin(); it.has_next();) {
             auto [id, word] = it.next();
-            // Reverse characters so numeric order is lexicographic.
-            Kmer reversed;
-            for (size_t i = 0; i < k; ++i)
-                reversed.set(k - i - 1, word.at(i));
-            entries.emplace_back(reversed.bits, sshash_to_graph_index(id));
+            // Low characters come first in the packed word. Prefix lookup
+            // reverses them; suffix lookup keeps their colexicographic order.
+            Kmer key = word;
+            if constexpr (prefix) {
+                key = Kmer{};
+                for (size_t i = 0; i < k; ++i)
+                    key.set(k - i - 1, word.at(i));
+            }
+            entries.emplace_back(key.bits, sshash_to_graph_index(id));
             if (canonical) {
                 const auto reverse_node = graph.reverse_complement(sshash_to_graph_index(id));
                 if (reverse_node != sshash_to_graph_index(id)) {
-                    reversed.reverse_complement_inplace(k);
-                    entries.emplace_back(reversed.bits, reverse_node);
+                    key.reverse_complement_inplace(k);
+                    entries.emplace_back(key.bits, reverse_node);
                 }
             }
         }
@@ -87,9 +93,34 @@ struct DBGSSHash::SeedIndexCache {
             return a.first == b.first ? a.second < b.second : a.first < b.first;
         });
         const auto width = std::max<unsigned>(1, std::bit_width(graph.max_index()));
-        prefix_order = sdsl::int_vector<>(entries.size(), 0, width);
+        order = sdsl::int_vector<>(entries.size(), 0, width);
         for (size_t i = 0; i < entries.size(); ++i)
-            prefix_order[i] = entries[i].second;
+            order[i] = entries[i].second;
+    }
+
+    template <class Dictionary>
+    static auto word_at(const DBGSSHash& graph, const Dictionary& dictionary, node_index node) {
+        const size_t base_nodes = dictionary.num_kmers();
+        const bool reverse = node > base_nodes;
+        const auto id = graph_index_to_sshash(node) - (reverse ? base_nodes : 0);
+        auto word = dictionary.at_kmer_id(id).next().second;
+        if (reverse) word.reverse_complement_inplace(graph.get_k());
+        return word;
+    }
+
+    template <class Compare>
+    static auto equal_range(const sdsl::int_vector<>& order, const Compare& compare) {
+        auto bound = [&](bool upper) {
+            size_t first = 0, last = order.size();
+            while (first < last) {
+                const auto middle = first + (last - first) / 2;
+                const int comparison = compare(order[middle]);
+                if (comparison < 0 || (upper && comparison == 0)) first = middle + 1;
+                else last = middle;
+            }
+            return first;
+        };
+        return std::pair { bound(false), bound(true) };
     }
 
     template <class Dictionary>
@@ -102,49 +133,63 @@ struct DBGSSHash::SeedIndexCache {
         query = query.substr(0, valid_end - query.begin());
         if (query.size() < minimum || !dictionary.num_kmers())
             return 0;
-        std::call_once(initialized, [&] { build(graph, dictionary); });
+        std::call_once(initialized, [&] { build<true>(graph, dictionary, prefix_order); });
 
         Kmer wanted;
         for (size_t i = 0; i < query.size(); ++i)
             wanted.set(i, Kmer::char_to_uint(query[i]));
-        const size_t base_nodes = dictionary.num_kmers();
-        auto word_at = [&](node_index node) {
-            const bool reverse = node > base_nodes;
-            const auto id = graph_index_to_sshash(node) - (reverse ? base_nodes : 0);
-            auto word = dictionary.at_kmer_id(id).next().second;
-            if (reverse) word.reverse_complement_inplace(graph.get_k());
-            return word;
-        };
         auto compare = [&](node_index node) {
-            const Kmer candidate = word_at(node);
+            const Kmer candidate = word_at(graph, dictionary, node);
             for (size_t i = 0; i < minimum; ++i) {
                 if (candidate.at(i) < wanted.at(i)) return -1;
                 if (candidate.at(i) > wanted.at(i)) return 1;
             }
             return 0;
         };
-        auto bound = [&](bool upper) {
-            size_t first = 0, last = prefix_order.size();
-            while (first < last) {
-                const auto middle = first + (last - first) / 2;
-                const int comparison = compare(prefix_order[middle]);
-                if (comparison < 0 || (upper && comparison == 0)) first = middle + 1;
-                else last = middle;
-            }
-            return first;
-        };
-        const auto first = bound(false), last = bound(true);
+        const auto [first, last] = equal_range(prefix_order, compare);
         if (last - first > maximum)
             return last - first;
         for (size_t i = first; i < last; ++i) {
             const node_index node = prefix_order[i];
-            const Kmer candidate = word_at(node);
+            const Kmer candidate = word_at(graph, dictionary, node);
             size_t length = minimum;
             while (length < query.size() && candidate.at(length) == wanted.at(length))
                 ++length;
             callback(node, length);
         }
         return last - first;
+    }
+
+    template <class Dictionary>
+    size_t call_suffix(const DBGSSHash& graph, const Dictionary& dictionary,
+                     std::string_view query, size_t minimum,
+                     const std::function<void(node_index, uint64_t)>& callback, size_t maximum) {
+        using Kmer = typename Dictionary::kmer_type;
+        if (!dictionary.num_kmers()
+                || std::any_of(query.begin(), query.end(), [](char c) { return !Kmer::is_valid(c); }))
+            return 0;
+        std::call_once(suffix_initialized, [&] { build<false>(graph, dictionary, suffix_order); });
+
+        Kmer wanted;
+        for (size_t i = 0; i < query.size(); ++i)
+            wanted.set(i, Kmer::char_to_uint(query[i]));
+        for (size_t length = query.size(); length >= minimum; --length) {
+            wanted.take_chars(length);
+            auto compare = [&](node_index node) {
+                auto candidate = word_at(graph, dictionary, node);
+                candidate.drop_chars(graph.get_k() - length);
+                return candidate.bits < wanted.bits ? -1 : candidate.bits > wanted.bits ? 1 : 0;
+            };
+            const auto [first, last] = equal_range(suffix_order, compare);
+            if (first == last)
+                continue;
+            if (last - first > maximum)
+                return maximum + 1;
+            for (size_t i = first; i < last; ++i)
+                callback(suffix_order[i], length);
+            return last - first;
+        }
+        return 0;
     }
 };
 
@@ -157,6 +202,18 @@ size_t DBGSSHash::call_nodes_with_prefix_matching(
         return 0;
     return std::visit([&](const auto& dictionary) {
         return seed_index_cache_->call(*this, dictionary, query, minimum, callback, maximum);
+    }, dict_);
+}
+
+size_t DBGSSHash::call_nodes_with_suffix_matching_longest_prefix(
+        std::string_view query, std::function<void(node_index, uint64_t)> callback,
+        size_t minimum, size_t maximum) const {
+    assert(query.size() <= k_);
+    minimum = std::max(size_t(1), minimum);
+    if (query.size() < minimum)
+        return 0;
+    return std::visit([&](const auto& dictionary) {
+        return seed_index_cache_->call_suffix(*this, dictionary, query, minimum, callback, maximum);
     }, dict_);
 }
 
