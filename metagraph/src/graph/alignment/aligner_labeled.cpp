@@ -1,6 +1,9 @@
 #include "aligner_labeled.hpp"
 
 #include "graph/representation/rc_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
 
@@ -48,6 +51,13 @@ LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view qu
                       dynamic_cast<const LabeledAligner<>&>(aligner).annotation_buffer_,
                       query) {}
 
+bool LabeledExtender::has_seed_label(node_index node) const {
+    if (const auto *labels = annotation_buffer_.get_labels(node))
+        return std::binary_search(labels->begin(), labels->end(), seed_->label_columns.front());
+    return node && (!single_label_boss_ || single_label_boss_->get_W(node))
+        && (*single_label_column_)[AnnotatedDBG::graph_to_anno_index(node)];
+}
+
 void LabeledExtender::flush() {
     annotation_buffer_.fetch_queued_annotations();
     for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
@@ -71,6 +81,14 @@ void LabeledExtender::flush() {
 
         if (table_elem.node == DeBruijnGraph::npos)
             continue;
+
+        if (single_label_column_) {
+            if (has_seed_label(table_elem.node))
+                node_labels_[last_flushed_table_i_] = node_labels_[parent_i];
+            else
+                clear();
+            continue;
+        }
 
         const auto &parent_labels
             = annotation_buffer_.get_cached_column_set(node_labels_[parent_i]);
@@ -105,6 +123,25 @@ void LabeledExtender::flush() {
 bool LabeledExtender::set_seed(const Alignment &seed) {
     if (!DefaultColumnExtender::set_seed(seed))
         return false;
+
+    // BASIC graph node IDs identify annotation rows, including in the RC wrapper.
+    // With one seed label and no coordinates, an uncached row needs one bit only.
+    single_label_column_ = nullptr;
+    single_label_boss_ = nullptr;
+    if (seed.label_columns.size() == 1 && !annotation_buffer_.has_coordinates()
+            && graph_->get_mode() == DeBruijnGraph::BASIC) {
+        if (const auto *matrix = dynamic_cast<const annot::matrix::ColumnMajor*>(
+                &annotation_buffer_.get_annotator().get_matrix())) {
+            single_label_column_ = matrix->data()[seed.label_columns.front()].get();
+            if (const auto *adaptive = dynamic_cast<const bit_vector_adaptive*>(single_label_column_))
+                single_label_column_ = &adaptive->data();
+            const auto *base = graph_;
+            if (const auto *rc = dynamic_cast<const RCDBG*>(base))
+                base = &rc->get_graph();
+            if (const auto *succinct = dynamic_cast<const DBGSuccinct*>(base))
+                single_label_boss_ = &succinct->get_boss();
+        }
+    }
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
                     [&](node_index n) {
@@ -154,16 +191,21 @@ void LabeledExtender
 
     std::vector<std::tuple<node_index, char, score_t>> outgoing;
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
-        [&](node_index next, char c, score_t score) {
+        [&outgoing](node_index next, char c, score_t score) {
             outgoing.emplace_back(next, c, score);
-            if (!in_seed)
-                annotation_buffer_.queue_path({ next });
         },
         table_i, force_fixed_seed
     );
 
     if (outgoing.empty())
         return;
+
+    if (!in_seed && !single_label_column_) {
+        for (const auto &[next, c, score] : outgoing) {
+            if (!annotation_buffer_.get_labels(next))
+                annotation_buffer_.queue_path({ next });
+        }
+    }
 
     if (outgoing.size() == 1) {
         // Assume that annotations are preserved in unitigs. Violations of this
@@ -180,16 +222,25 @@ void LabeledExtender
     if (!node_labels_[table_i])
         return;
 
-    assert(annotation_buffer_.get_labels(node));
+    if (single_label_column_) {
+        for (const auto &[next, c, score] : outgoing) {
+            if (has_seed_label(next)) {
+                node_labels_.push_back(node_labels_[table_i]);
+                callback(next, c, score);
+            }
+        }
+        return;
+    }
 
-    // use the label set of the current node in the alignment tree as the basis
-    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+    assert(annotation_buffer_.get_labels(node));
 
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c, score] : outgoing) {
+            // Caching the preceding intersection may have moved the column sets.
+            const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
 
@@ -216,6 +267,7 @@ void LabeledExtender
     size_t dist = next_offset - graph_->get_k() + 1;
 
     for (const auto &[next, c, score] : outgoing) {
+        const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
         const Columns *base_labels = &seed_->label_columns;
         const CoordinateSet *base_coords = &base_coords_;
         auto [next_labels, next_coords]
@@ -299,14 +351,6 @@ void LabeledExtender::call_alignments(score_t end_score,
     Alignment alignment = construct_alignment(ops, clipping, window, path, match,
                                               end_score, offset, extra_score);
 
-    auto [base_labels, base_coords]
-        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());
-    assert(base_labels);
-    assert(base_labels->size());
-
-    if (!clipping)
-        base_labels = &seed_->label_columns;
-
     auto call_alignment = [&]() {
         assert(alignment.label_columns.size());
         const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
@@ -325,6 +369,14 @@ void LabeledExtender::call_alignments(score_t end_score,
         call_alignment();
         return;
     }
+
+    auto [base_labels, base_coords]
+        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());
+    assert(base_labels);
+    assert(base_labels->size());
+
+    if (!clipping)
+        base_labels = &seed_->label_columns;
 
     ssize_t dist = alignment.get_nodes().size() - 1;
     if (!clipping) {

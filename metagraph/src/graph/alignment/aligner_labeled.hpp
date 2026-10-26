@@ -6,8 +6,11 @@
 #include "graph/annotated_dbg.hpp"
 
 
+class bit_vector;
+
 namespace mtg {
 namespace graph {
+namespace boss { class BOSS; }
 namespace align_redone { class AnnotationBuffer; }
 namespace align {
 
@@ -87,8 +90,12 @@ class LabeledExtender : public DefaultColumnExtender {
     // dynamic programming table for label- (and coordinate-)consistency
     void flush();
 
+    bool has_seed_label(node_index node) const;
+
     // stores annotations for nodes
     AnnotationBuffer &annotation_buffer_;
+    const bit_vector *single_label_column_ = nullptr;
+    const boss::BOSS *single_label_boss_ = nullptr;
 
     // index of the last dynamic programming table element whose node was flushed
     size_t last_flushed_table_i_;

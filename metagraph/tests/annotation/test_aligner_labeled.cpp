@@ -63,6 +63,46 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
+TEST(LabeledExtender, ForkIntersectionsPreserveParentLabels) {
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -6;
+    config.gap_extension_penalty = -2;
+    config.left_end_bonus = config.right_end_bonus = 0;
+    config.rel_score_cutoff = 0;
+    config.global_xdrop = false;
+    config.xdrop = 27;
+    // Intersecting each fork creates a new cached label set. The second branch
+    // must reacquire its parent set if the first insertion reallocates storage.
+    const std::string query = "AAAC";
+    for (bool coordinates : {false, true}) {
+        SCOPED_TRACE(coordinates);
+        auto annotated = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+            3, {"AAAC", "AAAG", "AAA", "AAC", "AAG"}, {"A", "B", "C", "X", "Y"},
+            DeBruijnGraph::BASIC, coordinates);
+        const auto &graph = annotated->get_graph();
+        auto node = graph.kmer_to_node("AAA");
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        buffer.queue_path({node});
+        buffer.fetch_queued_annotations();
+        Seed seed(std::string_view(query).substr(0, 3), {node}, false, 0, 0, 1);
+        auto [columns, positions] = buffer.get_labels_and_coords(node);
+        seed.label_columns = *columns;
+        if (coordinates)
+            seed.label_coordinates = *positions;
+        LabeledExtender extender(graph, config, buffer, query);
+        std::map<std::string, int> scores;
+        for (const auto &alignment : extender.get_extensions(Alignment(seed, config), 0, false)) {
+            ASSERT_TRUE(alignment.is_valid(graph, &config));
+            for (auto label : alignment.label_columns) {
+                auto name = annotated->get_annotator().get_label_encoder().decode(label);
+                scores[name] = std::max(scores[name], alignment.get_score());
+            }
+        }
+        EXPECT_EQ((std::map<std::string, int>{{"A", 8}, {"B", 6}, {"C", 6}}), scores);
+    }
+}
+
 TEST(LabeledExtender, KeepsIndependentLabelScoresAndCoordinates) {
     const size_t k = 5;
     DBGAlignerConfig config;

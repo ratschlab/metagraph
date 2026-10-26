@@ -224,6 +224,10 @@ void update_column(size_t prev_end,
                    score_t init_score,
                    size_t offset) {
     static_assert(DefaultColumnExtender::kPadding == 5);
+    auto *S = S_v.data();
+    auto *E = E_v.data();
+    auto *F = F_v.data();
+    const score_t insertion_penalty = config_.gap_extension_penalty;
     constexpr size_t width = DefaultColumnExtender::kPadding - 1;
     const simde__m128i gap_open = simde_mm_set1_epi32(config_.gap_opening_penalty);
     const simde__m128i gap_extend = simde_mm_set1_epi32(config_.gap_extension_penalty);
@@ -260,38 +264,39 @@ void update_column(size_t prev_end,
             del_score = ninf_v;
         }
 
-        // F_v[j] = del_score
-        simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
+        // F[j] = del_score
+        simde_mm_store_si128((simde__m128i*)&F[j], del_score);
 
         // match = max(match, del_score)
         match = simde_mm_max_epi32(match, del_score);
 
-        // E_v[j + 1] = S[j] + gap_open
+        // E[j + 1] = S[j] + gap_open
         simde__m128i ins_open_next = simde_mm_add_epi32(match, gap_open);
-        simde_mm_storeu_si128((simde__m128i*)&E_v[j + 1], ins_open_next);
+        simde_mm_storeu_si128((simde__m128i*)&E[j + 1], ins_open_next);
 
         // This rolling update is hard to vectorize
-        // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
-        E_v[j + 1] = std::max(E_v[j] + config_.gap_extension_penalty, E_v[j + 1]);
-        E_v[j + 2] = std::max(E_v[j + 1] + config_.gap_extension_penalty, E_v[j + 2]);
-        E_v[j + 3] = std::max(E_v[j + 2] + config_.gap_extension_penalty, E_v[j + 3]);
-        E_v[j + 4] = std::max(E_v[j + 3] + config_.gap_extension_penalty, E_v[j + 4]);
+        // E[j + 1] = max(E[j + 1], E[j] + gap_extend)
+        score_t insertion = E[j];
+        for (size_t i = 1; i <= width; ++i) {
+            insertion = std::max(insertion + insertion_penalty, E[j + i]);
+            E[j + i] = insertion;
+        }
 
-        // S_v[j] = max(match, E_v[j])
-        match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E_v[j]));
+        // S[j] = max(match, E[j])
+        match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E[j]));
 
         // match >= xdrop_cutoff
         simde__m128i mask = simde_mm_cmpgt_epi32(match, xdrop_v);
         match = simde_mm_blendv_epi8(ninf_v, match, mask);
 
-        simde_mm_store_si128((simde__m128i*)&S_v[j], match);
+        simde_mm_store_si128((simde__m128i*)&S[j], match);
     }
 
     if (S_v.size() > std::max(size_t{1}, prev_end)) {
         size_t j = S_v.size() - 1;
-        score_t match = std::max(S_prev_v[j - 1] + init_score + profile_scores[j], E_v[j]);
+        score_t match = std::max(S_prev_v[j - 1] + init_score + profile_scores[j], E[j]);
         if (match >= xdrop_cutoff)
-            S_v[j] = match;
+            S[j] = match;
     }
 }
 
@@ -364,7 +369,8 @@ void DefaultColumnExtender
                 graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
-        const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_);
+        const auto *canonical = graph_->get_mode() == DeBruijnGraph::CANONICAL
+            ? dynamic_cast<const CanonicalDBG*>(graph_) : nullptr;
         // TODO: benchmark to check if this actually makes things faster
         // It might be that `get_node_sequence` in CanonicalDBG is fast enough due to caching
         if (canonical && seed_pos >= graph_->get_k()) {
