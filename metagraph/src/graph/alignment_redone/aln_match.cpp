@@ -18,6 +18,7 @@ bool operator==(const Match &a, const Match &b) {
         && a.get_query().end() == b.get_query().end()
         && a.get_clipping() == b.get_clipping()
         && a.get_end_clipping() == b.get_end_clipping()
+        && a.get_offset() == b.get_offset()
         && a.get_end_trim() == b.get_end_trim()
         && a.get_path() == b.get_path();
 }
@@ -44,7 +45,7 @@ std::ostream& operator<<(std::ostream &out, const Match &a) {
 }
 
 size_t Alignment::trim_end() {
-    assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
+    assert(get_offset() + get_spelling().size() + get_end_trim() == path_spelling_.size());
     if (end_trim_ == 0)
         return 0;
 
@@ -60,7 +61,7 @@ size_t Alignment::trim_end() {
         label_classes_.pop_back();
         --end_trim_;
         ++num_trimmed;
-        assert(get_spelling().size() == get_path_spelling().size() - get_end_trim());
+        assert(get_offset() + get_spelling().size() + get_end_trim() == path_spelling_.size());
         assert(get_spelling() == old_spelling);
     }
 

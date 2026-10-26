@@ -45,6 +45,8 @@ class Match {
 
     bool get_orientation() const { return orientation_; }
 
+    // Unaligned bases at the beginning of the first node.
+    virtual size_t get_offset() const { return 0; }
     virtual size_t get_end_trim() const = 0;
 
     bool empty() const { return path_.empty(); }
@@ -152,16 +154,19 @@ class Alignment : public Match {
               std::string&& path_spelling,
               size_t end_trim = 0,
               label_class_t label_class = Anchor::nannot,
-              CoordinateSet&& coords = {})
+              CoordinateSet&& coords = {},
+              size_t offset = 0)
           : Match(query, cigar.get_clipping(), query.size() - cigar.get_end_clipping(),
                   orientation, std::move(path)),
+            offset_(offset),
             end_trim_(end_trim),
             path_spelling_(std::move(path_spelling)),
             cigar_(std::move(cigar)),
             label_classes_(path_.size(), label_class),
             coords_(std::move(coords)) {
         assert(path_spelling_ == spell_path(graph, path_));
-        assert(get_spelling().size() + get_end_trim() == path_spelling_.size());
+        assert(offset_ < graph.get_k() || path_.empty());
+        assert(get_offset() + get_spelling().size() + get_end_trim() == path_spelling_.size());
         assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
         assert(label_class);
@@ -186,11 +191,15 @@ class Alignment : public Match {
     const Cigar& get_cigar() const { return cigar_; }
     Cigar generate_cigar() const override final { return cigar_; }
 
+    size_t get_offset() const override final { return offset_; }
     size_t get_end_trim() const override final { return end_trim_; }
     size_t trim_end();
 
     std::string_view get_spelling() const override final {
-        return std::string_view(path_spelling_.c_str(), path_spelling_.size() - end_trim_);
+        assert(offset_ <= path_spelling_.size());
+        assert(end_trim_ <= path_spelling_.size() - offset_);
+        return std::string_view(path_spelling_.data() + offset_,
+                                path_spelling_.size() - offset_ - end_trim_);
     }
 
     std::string get_path_spelling() const override final { return path_spelling_; }
@@ -205,6 +214,7 @@ class Alignment : public Match {
     void set_coords(CoordinateSet&& coords) { coords_ = std::move(coords); }
 
   private:
+    size_t offset_ = 0;
     size_t end_trim_;
     std::string path_spelling_;
     Cigar cigar_;

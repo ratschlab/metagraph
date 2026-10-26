@@ -252,11 +252,10 @@ std::string format_alignment(const std::string &header, const std::string &query
     bool secondary = false;
     for (const auto &path : paths) {
         // Reuse the established output schema and coordinate/header mapping.
-        // The refactored path starts at the first base of its first node.
         graph::align::Alignment displayed(
             path.get_seed(), std::vector(path.get_path()), std::string(path.get_spelling()),
             align_redone::score_match(path, scoring),
-            graph::align::Cigar(path.get_cigar().data()), 0, path.get_orientation());
+            graph::align::Cigar(path.get_cigar().data()), 0, path.get_orientation(), path.get_offset());
         if (annotations && !path.get_label_classes().empty()) {
             const auto &columns = annotations->get_cached_column_set(path.get_label_classes()[0]);
             displayed.label_columns.assign(columns.begin(), columns.end());

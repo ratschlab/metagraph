@@ -100,6 +100,197 @@ TEST(LabeledFastAlignment, RelativeCutoffUsesEachLabelsBestScore) {
     }
 }
 
+template <class Graph>
+class SuffixOffsetAlignment : public ::testing::Test {};
+using SuffixOffsetGraphs = ::testing::Types<DBGSuccinct, DBGSSHash>;
+TYPED_TEST_SUITE(SuffixOffsetAlignment, SuffixOffsetGraphs);
+
+TYPED_TEST(SuffixOffsetAlignment, KeepsLeadingOffsetAndLabelCoordinates) {
+#if _PROTEIN_GRAPH
+    const std::string reference = "MKWVTFI";
+    const size_t offset = 4;
+#else
+    const std::string reference = "ACGTTGCAAGTCCTGATCGAGGCTAACGTCA";
+    const size_t offset = 8;
+#endif
+    auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+        reference.size(), {reference, reference}, {"first", "second"},
+        DeBruijnGraph::BASIC, true, {10, 100});
+    const auto &graph = annotated->get_graph();
+    Query query(graph, reference.substr(offset));
+    for (bool extend : {false, true}) {
+        for (bool chain : {false, true}) {
+            AnnotationBuffer buffer(graph, annotated->get_annotator());
+            DBGAlignerConfig config;
+            config.set_scoring_matrix();
+            config.min_seed_length = query.get_query().size();
+            config.min_exact_match = 1;
+            config.forward_and_reverse_complement = false;
+            config.seed_complexity_filter = false;
+            config.chain_alignments = chain;
+            LabeledSeeder seeder(buffer, query, config);
+            LabeledExtender extender(buffer, query, config);
+            std::vector<Alignment> results;
+            auto save = [&](Alignment&& result) { results.push_back(std::move(result)); };
+            if (extend) align_query(query, seeder, extender, save);
+            else align_query(query, seeder, save);
+            ASSERT_EQ(1u, results.size()) << extend << ' ' << chain;
+            const auto &result = results.front();
+            EXPECT_EQ(offset, result.get_offset());
+            EXPECT_EQ(query.get_query(), result.get_spelling());
+            EXPECT_EQ(std::to_string(query.get_query().size()) + "=", result.get_cigar().to_string());
+            EXPECT_FALSE(result.get_orientation());
+            EXPECT_TRUE(result.is_spelling_valid(graph));
+            EXPECT_THROW(extender.extend(result, [](Alignment&&) {}), std::invalid_argument);
+            const auto &columns = buffer.get_cached_column_set(result.get_label_classes().front());
+            ASSERT_EQ(2u, columns.size());
+            ASSERT_EQ(columns.size(), result.get_coords().size());
+            for (size_t i = 0; i < columns.size(); ++i) {
+                const auto &label = annotated->get_annotator().get_label_encoder().decode(columns[i]);
+                EXPECT_EQ(AnnotationBuffer::Tuple({int64_t((label == "first" ? 10 : 100) + offset)}),
+                          result.get_coords()[i]);
+            }
+        }
+    }
+}
+
+TYPED_TEST(SuffixOffsetAlignment, PerLocusBudgetIncludesPrefixAndSuffix) {
+#if _PROTEIN_GRAPH
+    const std::string reference = "MKWVM", sequence = "M";
+#else
+    const std::string reference = "AACAA", sequence = "AA";
+#endif
+    auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+        reference.size(), {reference}, {"reference"});
+    const auto &graph = annotated->get_graph();
+    Query query(graph, sequence);
+    for (size_t cap : {0, 1, 2}) {
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        DBGAlignerConfig config;
+        config.set_scoring_matrix();
+        config.min_seed_length = sequence.size();
+        config.min_exact_match = 1;
+        config.num_alternative_paths = 2;
+        config.max_num_seeds_per_locus = cap;
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        LabeledSeeder seeder(buffer, query, config);
+        LabeledExtender extender(buffer, query, config);
+        std::set<size_t> offsets;
+        align_query(query, seeder, extender, [&](Alignment&& result) {
+            EXPECT_FALSE(result.get_orientation());
+            EXPECT_EQ(sequence, result.get_spelling());
+            EXPECT_TRUE(offsets.insert(result.get_offset()).second);
+        });
+        std::set<size_t> expected;
+        if (cap) expected.insert(0);
+        if (cap == 2) expected.insert(reference.size() - sequence.size());
+        EXPECT_EQ(expected, offsets) << cap;
+    }
+}
+
+TYPED_TEST(SuffixOffsetAlignment, PostChainKeepsShortSuffix) {
+#if _PROTEIN_GRAPH
+    const std::string reference = "MKWVTFI";
+    const size_t offset = 4;
+    const std::vector modes{DeBruijnGraph::BASIC};
+#else
+    const std::string reference = "ACGTTGCAAGTCCTGATCGAGGCTAACGTCA";
+    const size_t offset = 8;
+    const std::vector modes{DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
+                            DeBruijnGraph::PRIMARY};
+#endif
+    for (auto mode : modes) {
+        auto annotated = build_anno_graph<TypeParam, annot::ColumnCompressed<>>(
+            reference.size(), {reference}, {"reference"}, mode);
+        const auto &graph = annotated->get_graph();
+        Query query(graph, reference.substr(offset));
+        AnnotationBuffer buffer(graph, annotated->get_annotator());
+        DBGAlignerConfig config;
+        config.set_scoring_matrix();
+        config.min_seed_length = query.get_query().size();
+        config.min_exact_match = 1;
+        config.post_chain_alignments = true;
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        LabeledSeeder seeder(buffer, query, config);
+        LabeledExtender extender(buffer, query, config);
+        std::vector<Alignment> results;
+        align_query(query, seeder, extender, [&](Alignment&& result) {
+            results.push_back(std::move(result));
+        });
+        ASSERT_EQ(1u, results.size()) << mode;
+        EXPECT_EQ(offset, results.front().get_offset());
+        EXPECT_EQ(query.get_query(), results.front().get_spelling());
+        EXPECT_FALSE(results.front().get_orientation());
+        EXPECT_TRUE(results.front().is_spelling_valid(graph));
+    }
+}
+
+TYPED_TEST(SuffixOffsetAlignment, DummyPrefixesDoNotConsumeSuffixBudget) {
+    for (bool add_real_suffix : {false, true}) {
+        std::vector<std::string> references{"AACGTTA", "AACGTTC", "TGCACTG"};
+        if (add_real_suffix) references.push_back("CAACGTT");
+        auto graph = build_graph<TypeParam>(7, references);
+        if (auto *succinct = dynamic_cast<DBGSuccinct*>(graph.get()))
+            succinct->reset_mask();
+        Query query(*graph, "AACGTT");
+        DBGAlignerConfig config;
+        config.set_scoring_matrix();
+        config.min_seed_length = 6;
+        config.min_exact_match = 1;
+        config.max_num_seeds_per_locus = 1;
+        config.forward_and_reverse_complement = false;
+        config.seed_complexity_filter = false;
+        ExactSeeder seeder(query, config);
+        Extender extender(query, config);
+        std::vector<Alignment> results;
+        align_query(query, seeder, extender, [&](Alignment&& result) {
+            EXPECT_EQ("CAACGTT", result.get_path_spelling());
+            EXPECT_EQ(1u, result.get_offset());
+            EXPECT_EQ("AACGTT", result.get_spelling());
+            results.push_back(std::move(result));
+        });
+        EXPECT_EQ(size_t(add_real_suffix), results.size());
+    }
+}
+
+#if ! _PROTEIN_GRAPH
+TEST(LabeledCanonicalAlternatives, DistinctOffsetsSurviveCommonEmission) {
+    for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL}) {
+        auto annotated = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            4, {"ATAT"}, {"reference"}, mode, mode == DeBruijnGraph::BASIC);
+        const auto &graph = annotated->get_graph();
+        Query query(graph, "AT");
+        for (bool both_orientations : {false, true}) {
+            AnnotationBuffer buffer(graph, annotated->get_annotator());
+            DBGAlignerConfig config;
+            config.set_scoring_matrix();
+            config.min_seed_length = 2;
+            config.min_exact_match = 1;
+            config.num_alternative_paths = 2;
+            config.forward_and_reverse_complement = both_orientations;
+            config.seed_complexity_filter = false;
+            LabeledSeeder seeder(buffer, query, config);
+            LabeledExtender extender(buffer, query, config);
+            std::set<size_t> offsets;
+            align_query(query, seeder, extender, [&](Alignment&& result) {
+                EXPECT_FALSE(result.get_orientation());
+                EXPECT_EQ("AT", result.get_spelling());
+                EXPECT_EQ("2=", result.get_cigar().to_string());
+                EXPECT_TRUE(offsets.insert(result.get_offset()).second);
+                if (mode == DeBruijnGraph::BASIC) {
+                    ASSERT_EQ(1u, result.get_coords().size());
+                    EXPECT_EQ(AnnotationBuffer::Tuple({int64_t(result.get_offset())}),
+                              result.get_coords().front());
+                }
+            });
+            EXPECT_EQ((std::set<size_t>{0, 2}), offsets) << mode << ' ' << both_orientations;
+        }
+    }
+}
+#endif
+
 TEST(LabeledFastAlignment, ReusesAnnotationsWithIndependentSearchConfiguration) {
     const std::vector<std::string> references{
         "AACGTTGCAATGCCGATTCAGGCTAAC", "TTGATAGCCTTGACCGATAGCTTCCA"
