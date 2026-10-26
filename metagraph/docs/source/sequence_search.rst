@@ -63,8 +63,9 @@ Alignment search options
 
 ``metagraph align`` defaults to independent seed extension. Full-k searches use
 the column aligner and its covered-seed filtering, including label-constrained
-searches. Shorter seeds also use wavefront extension and suffix lookup to retain
-partial-node matches. The wavefront aligner implements the opt-in modes below.
+searches. On succinct and SSHash graphs, shorter seeds also use wavefront
+extension and suffix lookup to retain partial-node matches. The wavefront
+aligner implements the opt-in modes below.
 
 Use ``--align-chain`` to construct and connect seed chains, and
 ``--align-two-sided`` to extend both ends of each seed or chain. Both options are
