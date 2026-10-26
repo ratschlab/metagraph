@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <map>
 #include <unordered_set>
 
 #include "../graph/all/test_dbg_helpers.hpp"
@@ -11,6 +12,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -60,6 +62,77 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
+
+TEST(LabeledExtender, KeepsIndependentLabelScoresAndCoordinates) {
+    const size_t k = 5;
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    config.gap_opening_penalty = -6;
+    config.gap_extension_penalty = -2;
+    config.left_end_bonus = config.right_end_bonus = 0;
+    config.rel_score_cutoff = 0;
+    config.global_xdrop = false;
+    config.xdrop = 27;
+    config.num_alternative_paths = 1;
+    for (size_t scenario = 0; scenario < 4; ++scenario) {
+        const std::string query = scenario == 3
+            ? "ATGTTAACTTGGCGGAGTTCGCTGTGGCTGCAGGGGACCAGATGCTTTACAGG"
+            : "ACGTACCTGAGT";
+        std::vector<std::string> sequences {query}, labels {"A"};
+        if (scenario != 2) {
+            sequences.push_back(scenario == 1 ? "ACGTAT" : query.substr(0, 6));
+            labels.push_back("B");
+        } else {
+            // Every k-mer has B, but no B occurrence spans more than one node.
+            for (size_t i = 0; i + k <= query.size(); ++i) {
+                sequences.push_back(query.substr(i, k));
+                labels.push_back("B");
+            }
+        }
+        for (bool coordinates : {false, true}) {
+            auto annotated = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+                k, sequences, labels, DeBruijnGraph::BASIC, coordinates);
+            const auto &graph = annotated->get_graph();
+            const auto node = graph.kmer_to_node(query.substr(0, k));
+            for (bool fixed_seed : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << scenario << ", coordinates="
+                                                  << coordinates << ", fixed=" << fixed_seed);
+                AnnotationBuffer buffer(graph, annotated->get_annotator());
+                buffer.queue_path({node});
+                buffer.fetch_queued_annotations();
+                Seed seed(std::string_view(query).substr(0, k), {node}, false, 0, 0,
+                          query.size() - k);
+                auto [columns, positions] = buffer.get_labels_and_coords(node);
+                ASSERT_TRUE(columns);
+                seed.label_columns = *columns;
+                if (coordinates) {
+                    ASSERT_TRUE(positions);
+                    seed.label_coordinates = *positions;
+                }
+                LabeledExtender extender(graph, config, buffer, query);
+                std::map<std::string, std::pair<int, std::string>> observed;
+                for (const auto &alignment : extender.get_extensions(Alignment(seed, config), 0, fixed_seed)) {
+                    ASSERT_TRUE(alignment.is_valid(graph, &config));
+                    if (coordinates) { ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size()); }
+                    for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
+                        const auto label = annotated->get_annotator().get_label_encoder()
+                                              .decode(alignment.label_columns[i]);
+                        EXPECT_TRUE(observed.emplace(label, std::make_pair(alignment.get_score(),
+                                                       alignment.get_cigar().to_string())).second);
+                        if (coordinates) { EXPECT_EQ(Alignment::Tuple({0}), alignment.label_coordinates[i]); }
+                    }
+                }
+                EXPECT_EQ(2u, observed.size());
+                EXPECT_EQ(std::make_pair(int(2 * query.size()), std::to_string(query.size()) + "="), observed["A"]);
+                const auto expected = scenario == 0 || scenario == 3
+                    ? std::make_pair(12, "6=" + std::to_string(query.size() - 6) + "S")
+                    : scenario == 2 && !coordinates ? std::make_pair(24, std::string("12="))
+                                                   : std::make_pair(10, std::string("5=7S"));
+                EXPECT_EQ(expected, observed["B"]);
+            }
+        }
+    }
+}
 
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;
@@ -721,6 +794,30 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(AnnotationBuffer, PendingReverseComplementAliases) {
+    auto annotated = build_anno_graph<DBGSSHash, annot::ColumnCompressed<>>(
+        3, {"AACGT"}, {"reference"}, DeBruijnGraph::CANONICAL);
+    const auto &graph = dynamic_cast<const DBGSSHash&>(annotated->get_graph());
+    graph.call_nodes([&](auto node) {
+        if (graph.get_base_node(node) != node)
+            return;
+        for (bool fetch_between : {false, true}) {
+            AnnotationBuffer buffer(graph, annotated->get_annotator());
+            buffer.queue_path({node});
+            if (fetch_between)
+                buffer.fetch_queued_annotations();
+            const auto reverse = graph.reverse_complement(node);
+            buffer.queue_path({reverse});
+            buffer.fetch_queued_annotations();
+            for (auto orientation : {node, reverse}) {
+                const auto *labels = buffer.get_labels(orientation);
+                ASSERT_NE(nullptr, labels);
+                EXPECT_EQ((AnnotationBuffer::Columns{0}), *labels);
+            }
+        }
+    });
+}
+
 TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     size_t k = 5;
     /*   B     B                AB    AB
