@@ -200,7 +200,8 @@ class AnnotatedGraph {
                 mtg::graph::align::Alignment displayed(
                     path.get_seed(), std::vector(path.get_path()), std::string(path.get_spelling()),
                     ar::score_match(path, config),
-                    mtg::graph::align::Cigar(path.get_cigar().to_string()), 0, path.get_orientation());
+                    mtg::graph::align::Cigar(path.get_cigar().to_string()), 0,
+                    path.get_orientation(), path.get_offset());
                 const auto *encoder = anno_dbg_ ? &anno_dbg_->get_annotator().get_label_encoder() : nullptr;
                 if (annotations && !path.get_label_classes().empty()) {
                     const auto &cols = annotations->get_cached_column_set(path.get_label_classes()[0]);

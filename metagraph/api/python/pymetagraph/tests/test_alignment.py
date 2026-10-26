@@ -90,6 +90,34 @@ def test_alignment_matches_cli(graph, index, tmp_path):
     assert actual[0]["annotation"]["labels"][0]["nt_coords"] == "5-22"
 
 
+@pytest.mark.parametrize("backend", ["succinct", "sshash"])
+def test_sub_k_suffix_starts_inside_node(tmp_path, backend):
+    reference = "AACGTTGCAATGCCGATTCAGGCTAACTGAC"
+    query = reference[8:]
+    fasta = tmp_path / "reference.fa"
+    fasta.write_text(f">reference\n{reference}\n")
+    run("build", "--graph", backend, "--disk-swap", tmp_path, "-k", 31,
+        "-o", tmp_path / "graph", fasta)
+    extension = ".dbg" if backend == "succinct" else ".sshashdbg"
+    graph_path = tmp_path / ("graph" + extension)
+    reads = tmp_path / "query.fa"
+    reads.write_text(f">query\n{query}\n")
+    expected = [json.loads(line) for line in run(
+        "align", "--json", "--align-output-path", "--align-only-forwards",
+        "--align-min-seed-length", 19, "-i", graph_path, reads).splitlines()]
+    actual = pymetagraph.AnnotatedGraph(graph_path).align(
+        query, seed_length=19, only_forwards=True)
+    assert len(expected) == len(actual) == 1
+    assert expected[0]["path"]["mapping"][0]["position"]["offset"] == 8
+    assert len(expected[0]["path"]["mapping"]) == 1
+    assert actual[0]["score"] == expected[0]["score"] == 56
+    assert actual[0]["annotation"] == expected[0]["annotation"]
+    assert actual[0]["annotation"]["cigar"] == "23="
+    assert actual[0]["annotation"]["ref_sequence"] == query
+    assert actual[0]["strand"] == "+"
+    assert (actual[0]["query_start"], actual[0]["query_end"]) == (0, 23)
+
+
 def test_batches_and_empty_inputs(graph):
     queries = [REFERENCE, OTHER, "", "NNNNNNNN"]
     result = graph.align(queries, seed_length=5, only_forwards=True)
