@@ -167,7 +167,7 @@ class Alignment : public Match {
         assert(cigar_.get_clipping() == get_clipping());
         assert(cigar_.get_end_clipping() == get_end_clipping());
         assert(label_class);
-        assert(label_class != Anchor::nannot || coords.empty());
+        assert(label_class != Anchor::nannot || coords_.empty());
     }
 
     Alignment(const Anchor &anchor)

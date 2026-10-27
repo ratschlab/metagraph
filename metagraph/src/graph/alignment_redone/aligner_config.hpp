@@ -56,10 +56,10 @@ struct DBGAlignerConfig {
     bool no_backtrack = false;
     bool seed_complexity_filter = true;
 
-    bool alignment_edit_distance;
-    int8_t alignment_match_score;
-    int8_t alignment_mm_transition_score;
-    int8_t alignment_mm_transversion_score;
+    bool alignment_edit_distance = false;
+    int8_t alignment_match_score = 2;
+    int8_t alignment_mm_transition_score = 3;
+    int8_t alignment_mm_transversion_score = 3;
 
     ScoreMatrix score_matrix;
 

@@ -41,6 +41,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     }
 
     virtual bool in_graph(node_index node) const override final {
+        if (node == npos || node > max_index())
+            return false;
+
         return graph_->in_graph(get_base_node(node));
     }
 

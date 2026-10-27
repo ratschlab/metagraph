@@ -38,7 +38,7 @@ class DBGSSHash : public DeBruijnGraph {
               size_t k,
               Mode mode = BASIC,
               size_t num_chars = 0,
-              const std::filesystem::path &swap_dir = "/tmp/");
+              const std::filesystem::path &swap_dir = {});
 
     // SequenceGraph overrides
     void add_sequence(

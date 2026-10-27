@@ -71,6 +71,9 @@ class Cigar {
 
     void extend_clipping(LengthType n) {
         assert(cigar_.size());
+        if (!n)
+            return;
+
         if (cigar_.front().first != CLIPPED) {
             cigar_.insert(cigar_.begin(), value_type(CLIPPED, n));
         } else {
@@ -85,21 +88,21 @@ class Cigar {
     bool operator!=(const Cigar &other) const { return !(*this == other); }
 
     size_t get_num_matches() const {
-        return std::accumulate(cigar_.begin(), cigar_.end(), 0,
+        return std::accumulate(cigar_.begin(), cigar_.end(), size_t{0},
                                [&](size_t old, const value_type &op) {
             return old + (op.first == MATCH) * op.second;
         });
     }
 
     size_t get_num_query() const {
-        return std::accumulate(cigar_.begin(), cigar_.end(), 0,
+        return std::accumulate(cigar_.begin(), cigar_.end(), size_t{0},
                                [&](size_t old, const value_type &op) {
             return old + (op.first == MATCH || op.first == MISMATCH || op.first == INSERTION || op.first == CLIPPED) * op.second;
         });
     }
 
     size_t get_num_ref() const {
-        return std::accumulate(cigar_.begin(), cigar_.end(), 0,
+        return std::accumulate(cigar_.begin(), cigar_.end(), size_t{0},
                                [&](size_t old, const value_type &op) {
             return old + (op.first == MATCH || op.first == MISMATCH || op.first == DELETION) * op.second;
         });
@@ -120,9 +123,6 @@ class Cigar {
 };
 
 
-typedef std::array<std::array<Cigar::Operator, 128>, 128> OperatorTable;
-OperatorTable initialize_opt_table();
-static const OperatorTable kCharToOp = initialize_opt_table();
 
 
 } // namespace mtg::graph::align
