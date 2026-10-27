@@ -28,6 +28,17 @@ using namespace mtg::test;
 
 const size_t kTestK = 11;
 
+TEST(AnnotationKeyMapper, EmptyPaths) {
+    const DBGSuccinct basic(3);
+    EXPECT_TRUE(AnnotationKeyMapper(basic).keys({}).empty());
+#if ! _PROTEIN_GRAPH
+    const DBGSuccinct canonical(3, DeBruijnGraph::CANONICAL);
+    EXPECT_TRUE(AnnotationKeyMapper(canonical).keys({}).empty());
+    const CanonicalDBG primary(std::make_shared<DBGSuccinct>(3, DeBruijnGraph::PRIMARY));
+    EXPECT_TRUE(AnnotationKeyMapper(primary).keys({}).empty());
+#endif
+}
+
 // Fixed random sequences: long enough for every k-mer to be distinct with high
 // probability, short enough for RowDiff fixtures to build quickly.
 std::vector<std::string> make_sequences(size_t n, size_t len, uint32_t seed) {

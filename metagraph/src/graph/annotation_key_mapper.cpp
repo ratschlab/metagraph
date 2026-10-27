@@ -30,6 +30,8 @@ auto AnnotationKeyMapper::canonical_key(node_index node, std::string_view kmer) 
 
 auto AnnotationKeyMapper::keys(std::span<const node_index> nodes,
                                 std::string_view sequence) const -> std::vector<node_index> {
+    if (nodes.empty())
+        return {};
     std::vector<node_index> result(nodes.size());
     if (needs_sequence()) {
         assert(sequence.size() == nodes.size() + graph_.get_k() - 1);
