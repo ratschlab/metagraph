@@ -9,7 +9,6 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/representation/hash/dbg_sshash.hpp"
 
 
 namespace mtg {
@@ -594,15 +593,6 @@ void reverse_complement_seq_path(const SequenceGraph &graph,
                                  std::vector<SequenceGraph::node_index> &path) {
     if (const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph)) {
         canonical_dbg->reverse_complement(seq, path);
-        return;
-    }
-
-    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
-        std::reverse(path.begin(), path.end());
-        for (auto &node : path) {
-            sshash->reverse_complement(node);
-        }
-        reverse_complement(seq.begin(), seq.end());
         return;
     }
 
