@@ -902,6 +902,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 // }
 #endif
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
     size_t k = 7;
     std::string reference =    "AAAAGCTTTCGAGGCCAA";
@@ -918,6 +919,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
         run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
     }
 }
+#endif
 
 TYPED_TEST(DBGAlignerRedoneTest, align_both_directions2) {
     size_t k = 11;
