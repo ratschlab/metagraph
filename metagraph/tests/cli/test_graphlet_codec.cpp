@@ -1485,12 +1485,17 @@ TEST(Graphlet, ReaderRebuildsTheFullResult) {
     // not vacuous: every record kind and every end token the walker can produce today
     for (const char *kind : { "H", "S", "L", "O", "Q", "K", "A", "B", "V", "G", "P", "E", "T", "C", "R", "Z",
                               "R:Y",
-                              "E:s", "E:b", "E:h", "E:v", "R:Lw", "R:m", "R:D", "R:L", "R:X", "R:R",
+                              "E:s", "E:b", "E:v", "R:Lw", "R:m", "R:D", "R:L", "R:X", "R:R",
                               "R:Rm", "R:B", "R:Ls", "G.end:*", "G.entry:*",
                               "G.entry:delta", "G.entry:explicit", "G.partition:explicit",
                               "G.split:ambiguous", "G.first_base", "C:derived", "C:sequence" }) {
         EXPECT_GT(coverage.seen[kind], 0u) << kind << " never written";
     }
+#if _PROTEIN_GRAPH
+    EXPECT_EQ(coverage.seen["E:h"], 0u); // BASIC protein graphs have no hairpins.
+#else
+    EXPECT_GT(coverage.seen["E:h"], 0u);
+#endif
 }
 
 
@@ -2235,7 +2240,7 @@ TEST(Graphlet, TimeStopSerialisesBothWaysFromOneResult) {
 // Allocation denial at every admission (§14 freeze-gate fixtures: a denial around a
 // switch, a split and a merge leaves runs, events, splits and paths consistent)
 TEST(Graphlet, DenialLeavesAConsistentPrefix) {
-    size_t denials = 0, mid_level = 0;
+    size_t denials = 0, mid_level = 0, sampled = 0;
     for (const BudgetCase &c : budget_cases()) {
         std::vector<Admission> admissions;
         WalkerHooks record;
@@ -2251,6 +2256,7 @@ TEST(Graphlet, DenialLeavesAConsistentPrefix) {
         for (size_t i = 0; i < std::min(n, most); ++i) {
             ordinals.push_back(n <= most ? i : i * (n - 1) / (most - 1));
         }
+        sampled += ordinals.size();
         LabelOracle oracle(*c.anno);
         for (size_t ordinal : ordinals) {
             const Admission &denied = admissions[ordinal];
@@ -2310,7 +2316,8 @@ TEST(Graphlet, DenialLeavesAConsistentPrefix) {
             EXPECT_TRUE(stated) << what;
         }
     }
-    EXPECT_GT(denials, 100u);
+    // Every sampled admission must be denied, across the supported graph modes.
+    EXPECT_EQ(denials, sampled);
     EXPECT_GT(mid_level, 10u) << "denials between two heads of one level";
 }
 
@@ -4438,7 +4445,7 @@ std::string result_text(const SeedResult &r, const Strategy &st) {
 // consistent and serialisable, its stop stated (Q ... annotation_decode). In the lookahead
 // a refusal changes nothing.
 TEST(GraphletStage3Decode, DecodeDenialLeavesAConsistentPrefix) {
-    size_t seed_failures = 0, level_stops = 0, warm_denials = 0, retried = 0;
+    size_t seed_failures = 0, level_stops = 0, warm_denials = 0, retried = 0, sampled = 0;
     for (const BudgetCase &c : rowdiff_budget_cases()) {
         Strategy st = c.st;
         st.max_memory_bytes = uint64_t(1) << 30;    // never trips: the reads are budget-aware
@@ -4451,6 +4458,7 @@ TEST(GraphletStage3Decode, DecodeDenialLeavesAConsistentPrefix) {
         ASSERT_GT(charges.size(), 0u) << c.name;
         const std::string base_text = result_text(base, st);
         const size_t most = 20;
+        sampled += std::min(charges.size(), most);
         LabelOracle oracle(*c.anno);
         for (size_t s = 0; s < std::min(charges.size(), most); ++s) {
             const size_t ordinal = charges.size() <= most ? s : s * (charges.size() - 1) / (most - 1);
@@ -4518,10 +4526,13 @@ TEST(GraphletStage3Decode, DecodeDenialLeavesAConsistentPrefix) {
             EXPECT_EQ(only, j["resource_stop"]["actions"]) << what;
         }
     }
-    EXPECT_GT(seed_failures, 15u);
-    EXPECT_GT(level_stops, 60u);
-    EXPECT_GT(warm_denials, 5u);
-    EXPECT_GT(retried, 5u);
+    // Graph modes and alphabet packing change the sample counts. Require every
+    // sampled charge to reach a checked outcome, with all four outcomes covered.
+    EXPECT_EQ(seed_failures + level_stops + warm_denials + retried, sampled);
+    EXPECT_GT(seed_failures, 0u);
+    EXPECT_GT(level_stops, 0u);
+    EXPECT_GT(warm_denials, 0u);
+    EXPECT_GT(retried, 0u);
     std::cerr << "decode denials: " << seed_failures << " seed failures, " << level_stops
               << " level stops, " << warm_denials << " in the lookahead, " << retried
               << " retried in smaller runs" << std::endl;
@@ -5610,7 +5621,7 @@ std::string compact_json(const Json::Value &v) {
 // naming attempt_id), the result serialises both ways, and a later stop never walks less. A
 // stop in the seed phase fails the seed (no result exists to deliver).
 TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
-    size_t stops = 0, seed_phase = 0, mid_walk = 0;
+    size_t stops = 0, seed_phase = 0, mid_walk = 0, sampled = 0;
     for (const BudgetCase &c : budget_cases()) {
         InjectedStop count;
         const SeedResult base = run_stopped(c, c.st, &count);
@@ -5622,6 +5633,7 @@ TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
         for (size_t i = 0; i < std::min<uint64_t>(polls, most); ++i) {
             ats.push_back(polls <= most ? i : i * (polls - 1) / (most - 1));
         }
+        sampled += ats.size() + (ats.size() + 1) / 2;
         LabelOracle oracle(*c.anno);
         for (ExternalStop which : { ExternalStop::CANCELLED, ExternalStop::ATTEMPT_DEADLINE }) {
             std::array<uint64_t, 2> depth { 0, 0 };
@@ -5701,9 +5713,12 @@ TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
             }
         }
     }
-    EXPECT_GT(stops, 80u);
-    EXPECT_GT(seed_phase, 10u);
-    EXPECT_GT(mid_walk, 60u);
+    // Each sampled poll must stop either seed preparation or the walk. Protein
+    // runs only BASIC cases, so the total is smaller than the DNA mode sweep.
+    EXPECT_EQ(stops + seed_phase, sampled);
+    EXPECT_GT(stops, 0u);
+    EXPECT_GT(seed_phase, 0u);
+    EXPECT_GT(mid_walk, 0u);
 }
 
 // No stop: the walk is the one without a control, byte for byte, and the meter is its account

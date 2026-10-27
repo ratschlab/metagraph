@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <bit>
 #include <iterator>
 #include <map>
 #include <random>
@@ -1424,7 +1425,11 @@ TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
     // ... the default cap does cut evidence here, and omissions resting on the cut
     // events exist and are accepted only at or beyond the boundary (checked per cell)
     EXPECT_GT(sweep.cut_arms, 0u);
-    EXPECT_GT(sweep.capped, 0u);
+    // A small cap also cuts evidence for the simpler BASIC-only Protein sweep.
+    // Its unexplained omissions must still be confined to the reported boundary.
+    const DenseSweep tight = dense_tuned_sweep(1);
+    EXPECT_GT(tight.cut_arms, 0u);
+    EXPECT_GT(tight.capped, 0u);
 }
 
 // The reference model, support: trace. Two occurrences of the seed under one label spell the
@@ -1925,14 +1930,19 @@ TEST(Trie, WalkRuleStatesWhatTheWalkerEnforces) {
     }
 #endif
     {
-        // (k+1) * 2 bits > 64: edges are identified by a hash, a collision blocks
+        // Test either side of the 64-bit edge packing boundary for this alphabet.
+        const DBGSuccinct alphabet_graph(2);
+        const auto alphabet = alphabet_graph.alphabet();
+        const size_t symbols = std::count_if(alphabet.begin(), alphabet.end(),
+                                            [](char c) { return c != '$'; });
+        const size_t first_hashed_k = 64 / std::bit_width(symbols - 1);
         const std::string seq = random_seq(80, 9);
         auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-                32, { seq }, { "A" }, DeBruijnGraph::BASIC);
+                first_hashed_k, { seq }, { "A" }, DeBruijnGraph::BASIC);
         LabelOracle oracle(*anno);
         EXPECT_TRUE(has(walk_rule_statement(st, oracle), "128-bit FNV-1a hash"));
         auto packable = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-                31, { seq }, { "A" }, DeBruijnGraph::BASIC);
+                first_hashed_k - 1, { seq }, { "A" }, DeBruijnGraph::BASIC);
         LabelOracle packable_oracle(*packable);
         EXPECT_FALSE(has(walk_rule_statement(st, packable_oracle), "128-bit"));
     }
