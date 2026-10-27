@@ -2697,8 +2697,7 @@ Json::Value index_inventory_json(const std::string &graph, const std::string &an
     }
     j["derived"] = std::move(derived);
     j["derived_rule"] = kIndexDerivedDataRule;
-    // the table the paths are derived by (scripts/traversal/index_manifest.py mirrors it, and
-    // an integration test compares the two)
+    // Expose the annotation kinds used to derive the loader inventory.
     Json::Value kinds(Json::arrayValue);
     for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
         Json::Value k;
@@ -2750,8 +2749,7 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
             const size_t slash = p.find_last_of('/');
             throw bad("it lists " + p + ": " + kIndexDerivedDataRule + " (write it again "
                       "without " + (slash == std::string::npos ? p : p.substr(slash + 1))
-                      + ": scripts/traversal/index_manifest.py leaves them out; the new "
-                        "manifest's index_fp differs from this one's)");
+                      + "; the new manifest's index_fp differs from this one's)");
         }
     }
     // A manifest of another bundle must not lend its identity: every loaded file that
@@ -2807,8 +2805,7 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
             // manifest does not cover could change answers under an unchanged fingerprint
             throw bad("it does not cover the file " + path + " (" + std::to_string(size)
                       + " bytes), which the server loads for this index: the manifest must "
-                        "list every file of the loader inventory (traverse --index-inventory; "
-                        "scripts/traversal/index_manifest.py lists them)");
+                        "list every file of the loader inventory (traverse --index-inventory)");
         }
         if (!listed) {
             throw bad("the loaded file " + path + " (" + std::to_string(size)
@@ -2830,7 +2827,7 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
         if ((annotation || name.ends_with("dbg")) && !loaded_names.count(name)) {
             throw bad("it lists the " + std::string(annotation ? "annotation " : "graph ") + p
                       + ", which this index does not load: a manifest describes one graph with "
-                        "one annotation (scripts/traversal/index_manifest.py writes one per pair)");
+                        "one annotation; write a separate manifest for each pair");
         }
     }
     // the canonical file list, in byte order of path (std::map's order)

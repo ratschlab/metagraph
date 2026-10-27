@@ -146,8 +146,7 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
                     + s.second.value + " for two different indexes (" + it->second.first.first
                     + ", " + it->second.first.second + ") and (" + pair.first + ", "
                     + pair.second + "): a manifest states the identity of one graph with one "
-                    "annotation; give each pair its own manifest (scripts/traversal/"
-                    "index_manifest.py --server-csv writes one per pair), or list copies of one "
+                    "annotation; give each pair its own manifest, or list copies of one "
                     "index by one path");
         }
     }

@@ -122,8 +122,7 @@ std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
  * column annotation's .coords (merge_load reads the columns only), the graph's .weights, any
  * leftover <graph>.anchors beside another annotation type (theirs are inside the annotation
  * file) — and the header index of the coordinate mapping, which is built in memory from the
- * .seqs. scripts/traversal/index_manifest.py mirrors this list (load_inventory; an integration
- * test compares the two on every sidecar kind through `traverse --index-inventory`).
+ * .seqs. `traverse --index-inventory` exposes this list to callers.
  */
 struct IndexFile {
     std::string path;
@@ -144,7 +143,7 @@ std::vector<IndexFile> index_load_inventory(const std::string &graph,
  * Both candidates of a .dbg graph are listed, whether they exist or not, with |exists| and
  * whether the loader reads them (|loaded|), so that an operator sees what is loaded; none for
  * another graph type. Paths derived from the LISTED spelling, as the loader derives them.
- * scripts/traversal/index_manifest.py mirrors it (derived_files).
+ * `traverse --index-inventory` exposes these files separately from the loader inventory.
  */
 struct IndexDerivedFile {
     std::string path;
