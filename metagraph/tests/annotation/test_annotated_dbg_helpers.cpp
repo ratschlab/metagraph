@@ -237,6 +237,7 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGBitmap, RowFlatAnnota
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashOrdered, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, const std::vector<uint64_t>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, const std::vector<uint64_t>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, const std::vector<uint64_t>&);
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSSHash, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, const std::vector<uint64_t>&);
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, const std::vector<uint64_t>&);
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool, const std::vector<uint64_t>&);

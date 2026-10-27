@@ -27,6 +27,8 @@ class SequenceGraph {
     // Node indexes [1,...,max_index], but only num_nodes of them are real.
     // For iteration, call `call_nodes`
     typedef uint64_t node_index;
+    typedef uint64_t seq_index;
+
     static constexpr uint64_t npos = 0;
 
     virtual ~SequenceGraph() {}
@@ -77,6 +79,9 @@ class SequenceGraph {
     // Get string corresponding to |node|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index node) const = 0;
+
+    // For a given node, return all sequences containing that node
+    virtual std::vector<seq_index> get_sequence_ids(node_index node) const = 0;
 
     /********************************************************/
     /******************* graph extensions *******************/
@@ -175,10 +180,18 @@ class DeBruijnGraph : public SequenceGraph {
     // when the sequence is exhausted.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones.
     virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
+                          std::string_view seq,
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate = [](){ return false; }) const;
+
+    // Given a starting node and a sequence of edge labels, traverse the graph
+    // backward starting from the end of prefix_seq. The traversal is terminated
+    // once terminate() returns true or when the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones.
+    virtual void traverse_back(node_index start,
+                               std::string_view prefix_seq,
+                               const std::function<void(node_index)> &callback,
+                               const std::function<bool()> &terminate = [](){ return false; }) const;
 
     typedef std::function<void(const std::string&, const std::vector<node_index>&)> CallPath;
 
@@ -250,6 +263,9 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+    // For a given node, return all sequences containing that node
+    virtual std::vector<seq_index> get_sequence_ids(node_index node) const override;
 };
 
 

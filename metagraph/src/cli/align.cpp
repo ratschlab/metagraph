@@ -9,6 +9,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment_redone/aligner_config.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -30,11 +31,14 @@ using mtg::common::logger;
 const size_t SEPARATE_CACHES_SWITCHOVER_THREADS = 8;
 
 
-DBGAlignerConfig initialize_aligner_config(const Config &config,
-                                           const DeBruijnGraph &graph) {
+namespace {
+
+// Both aligner engines take the same options from the command line.
+template <class AlignerConfig>
+AlignerConfig make_aligner_config(const Config &config, const DeBruijnGraph &graph) {
     assert(config.alignment_num_alternative_paths);
 
-    DBGAlignerConfig c = {
+    AlignerConfig c = {
         .num_alternative_paths = config.alignment_num_alternative_paths,
         .min_seed_length = std::min(config.alignment_min_seed_length,
                                     graph.get_k()),
@@ -58,7 +62,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,
         .alignment_mm_transversion_score = config.alignment_mm_transversion_score,
-        .score_matrix = DBGAlignerConfig::ScoreMatrix{},
+        .score_matrix = typename AlignerConfig::ScoreMatrix{},
     };
 
     c.set_scoring_matrix();
@@ -66,6 +70,18 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
     c.print_summary();
 
     return c;
+}
+
+} // namespace
+
+DBGAlignerConfig initialize_aligner_config(const Config &config,
+                                           const DeBruijnGraph &graph) {
+    return make_aligner_config<DBGAlignerConfig>(config, graph);
+}
+
+align_redone::DBGAlignerConfig initialize_redone_aligner_config(const Config &config,
+                                                                const DeBruijnGraph &graph) {
+    return make_aligner_config<align_redone::DBGAlignerConfig>(config, graph);
 }
 
 void map_sequences_in_file(const std::string &file,

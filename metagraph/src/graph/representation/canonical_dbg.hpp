@@ -40,6 +40,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
         return node <= offset_ ? node : node - offset_;
     }
 
+    virtual bool in_graph(node_index node) const override final {
+        return graph_->in_graph(get_base_node(node));
+    }
+
     /**
      * Methods from DeBruijnGraph
      */

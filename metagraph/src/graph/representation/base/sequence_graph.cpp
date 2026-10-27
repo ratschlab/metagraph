@@ -9,6 +9,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_sshash.hpp"
 
 
 namespace mtg {
@@ -118,17 +119,39 @@ bool DeBruijnGraph::operator==(const DeBruijnGraph &other) const {
 }
 
 void DeBruijnGraph::traverse(node_index start,
-                             const char *begin,
-                             const char *end,
+                             std::string_view seq,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
     assert(start >= 1 && start <= max_index());
-    assert(end >= begin);
     if (terminate())
         return;
 
-    for (; begin != end && !terminate(); ++begin) {
-        start = traverse(start, *begin);
+    for (char c : seq) {
+        if (terminate())
+            return;
+
+        start = traverse(start, c);
+
+        if (!in_graph(start))
+            return;
+
+        callback(start);
+    }
+}
+
+void DeBruijnGraph::traverse_back(node_index start,
+                                  std::string_view prefix_seq,
+                                  const std::function<void(node_index)> &callback,
+                                  const std::function<bool()> &terminate) const {
+    assert(start >= 1 && start <= max_index());
+    if (terminate())
+        return;
+
+    for (auto begin = prefix_seq.rbegin(); begin != prefix_seq.rend(); ++begin) {
+        if (terminate())
+            return;
+
+        start = traverse_back(start, *begin);
 
         if (!in_graph(start))
             return;
@@ -509,6 +532,12 @@ void DeBruijnGraph
     });
 }
 
+std::vector<DeBruijnGraph::seq_index> DeBruijnGraph
+::get_sequence_ids(node_index node) const {
+    // In the absence of contig information, treat each node as its own sequence
+    return std::vector<node_index>(1, node);
+}
+
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);
@@ -565,6 +594,15 @@ void reverse_complement_seq_path(const SequenceGraph &graph,
                                  std::vector<SequenceGraph::node_index> &path) {
     if (const auto *canonical_dbg = dynamic_cast<const CanonicalDBG*>(&graph)) {
         canonical_dbg->reverse_complement(seq, path);
+        return;
+    }
+
+    if (const auto *sshash = dynamic_cast<const DBGSSHash*>(&graph)) {
+        std::reverse(path.begin(), path.end());
+        for (auto &node : path) {
+            sshash->reverse_complement(node);
+        }
+        reverse_complement(seq.begin(), seq.end());
         return;
     }
 

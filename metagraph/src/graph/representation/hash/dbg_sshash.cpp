@@ -37,13 +37,6 @@ static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bit
 
 const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 
-constexpr DeBruijnGraph::node_index sshash_to_graph_index(uint64_t idx) {
-    return idx + 1;
-}
-constexpr uint64_t graph_index_to_sshash(DeBruijnGraph::node_index idx) {
-    return idx - 1;
-}
-
 size_t DBGSSHash::dict_size() const {
     return std::visit([](const auto& d) { return d.num_kmers(); }, dict_);
 }
@@ -76,7 +69,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
             [&](const auto& dict) {
                 using kmer_t = typename std::decay_t<decltype(dict)>::kmer_type;
 
-                ProgressBar progress_bar(graph.num_nodes(), "Checking succ/pred",
+                ProgressBar progress_bar(num_nodes, "Checking succ/pred",
                                          std::cerr, !common::get_verbose());
 
                 static const uint64_t BS = 1'048'576;
@@ -114,7 +107,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                     break;
                                 } else {
                                     found_fw = true;
-                                    next = sshash_to_graph_index(nb.forward[i].kmer_id);
+                                    next = DBGSSHash::sshash_to_graph_index(nb.forward[i].kmer_id);
                                     found_i = i;
                                     if (nb.forward[i].kmer_orientation < 0)
                                         next = graph.reverse_complement(next);
@@ -139,7 +132,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                                     break;
                                 } else {
                                     found_bw = true;
-                                    prev = sshash_to_graph_index(nb.backward[i].kmer_id);
+                                    prev = DBGSSHash::sshash_to_graph_index(nb.backward[i].kmer_id);
                                     if (nb.backward[i].kmer_orientation < 0)
                                         prev = graph.reverse_complement(prev);
                                 }
@@ -163,8 +156,12 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                           bit_vector_smart(std::move(pred_is_prev)));
 }
 
-DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, size_t num_chars)
-    : DBGSSHash(k, mode) {
+DBGSSHash::DBGSSHash(const std::string& input_filename,
+                     size_t k,
+                     Mode mode,
+                     size_t num_chars,
+                     const std::filesystem::path &swap_dir)
+          : DBGSSHash(k, mode) {
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
 
@@ -194,6 +191,7 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
+    build_config.tmp_dirname = swap_dir;
     build_config.canonical = mode != BASIC;
 
     std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
@@ -210,6 +208,19 @@ std::string DBGSSHash::file_extension() const {
 void DBGSSHash::add_sequence(std::string_view sequence,
                              const std::function<void(node_index)>& on_insertion) {
     throw std::logic_error("adding sequences not supported");
+}
+
+sdsl::bit_vector DBGSSHash::get_invalid_char_mask(std::string_view sequence) const {
+    sdsl::bit_vector invalid_char(sequence.size());
+
+    std::visit([&](const auto& dict) {
+        using kmer_t = get_kmer_t<decltype(dict)>;
+        for (size_t i = 0; i < sequence.size(); ++i) {
+            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
+        }
+    }, dict_);
+
+    return invalid_char;
 }
 
 template <bool with_rc, class Dict>
@@ -241,11 +252,7 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
             callback(ret_val);
         }
     } else {
-        std::vector<bool> invalid_char(n);
-        for (size_t i = 0; i < n; ++i) {
-            invalid_char[i] = !kmer_t::is_valid(sequence[i]);
-        }
-
+        auto invalid_char = graph.get_invalid_char_mask(sequence);
         auto invalid_kmer = utils::drag_and_mark_segments(invalid_char, true, k);
 
         bool begin = true;
@@ -331,8 +338,21 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     return str_kmer != rc_str_kmer ? node + dict_size() : node;
 }
 
+DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
+    if (node == npos)
+        return npos;
+
+    assert(in_graph(node));
+
+    return node > dict_size() ? node - dict_size() : node;
+}
+
 uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
+}
+
+uint64_t DBGSSHash::max_index() const {
+    return mode_ != BASIC ? dict_size() * 2 : dict_size();
 }
 
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
@@ -716,6 +736,39 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
     return str_kmer;
 }
 
+std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) const {
+    assert(node <= max_index());
+    if (node == npos)
+        return std::vector<seq_index>(1, node);
+
+    if (node > dict_size()) {
+        assert(mode_ == CANONICAL);
+        size_t num_base_contigs = succ_is_next_.size() + pred_is_prev_.size() - succ_is_next_.num_set_bits() - pred_is_prev_.num_set_bits();
+        auto ret_val = get_sequence_ids(reverse_complement(node));
+        for (seq_index &id : ret_val) {
+            id += num_base_contigs;
+        }
+
+        return ret_val;
+    }
+
+    // treat each unitig as a sequence
+    size_t srank = succ_is_next_.rank0(node);
+    size_t prank = pred_is_prev_.rank0(node);
+
+    seq_index contig_id = srank + prank;
+
+    bool s_unitig_back = !succ_is_next_[node];
+    bool s_unitig_front = !pred_is_prev_[node];
+
+    if (s_unitig_back && !s_unitig_front) {
+        assert(contig_id);
+        --contig_id;
+    }
+
+    return std::vector<seq_index>(1, contig_id + 1);
+}
+
 void DBGSSHash::serialize(std::ostream& out) const {
     essentials::generic_saver saver(out);
 
@@ -733,6 +786,12 @@ void DBGSSHash::serialize(std::ostream& out) const {
 void DBGSSHash::serialize(const std::string& filename) const {
     std::string suffixed_filename = utils::make_suffix(filename, kExtension);
     std::ofstream fout(suffixed_filename, std::ios::binary);
+
+    if (!fout.good()) {
+        common::logger->error("Failed to create file {}", suffixed_filename);
+        throw std::runtime_error("Invalid out file");
+    }
+
     serialize(fout);
 }
 
