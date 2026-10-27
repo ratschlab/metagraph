@@ -214,7 +214,7 @@ sdsl::bit_vector DBGSSHash::get_invalid_char_mask(std::string_view sequence) con
     sdsl::bit_vector invalid_char(sequence.size());
 
     std::visit([&](const auto& dict) {
-        using kmer_t = get_kmer_t<decltype(dict)>;
+        using kmer_t = typename std::decay_t<decltype(dict)>::kmer_type;
         for (size_t i = 0; i < sequence.size(); ++i) {
             invalid_char[i] = !kmer_t::is_valid(sequence[i]);
         }

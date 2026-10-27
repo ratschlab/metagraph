@@ -26,17 +26,6 @@ using namespace mtg::graph::align_redone;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
-template <typename T>
-struct template_parameter;
-
-template <template <typename...> class C, typename T>
-struct template_parameter<C<T>> {
-    using type = T;
-};
-
-template <typename T>
-using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
-
 
 void run_alignment(const AnnotatedDBG &anno_graph,
                    DBGAlignerConfig config,
@@ -302,7 +291,7 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphSuffixSeed) {
                     ASSERT_GE(config.min_seed_length, dict.m());
                     const auto &[query, mappings] = exp_alignments[i];
                     ASSERT_LT(0u, mappings.size());
-                    using kmer_t = get_kmer_t<decltype(dict)>;
+                    using kmer_t = typename std::decay_t<decltype(dict)>::kmer_type;
                     auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(std::get<1>(mappings[0]).data(), k);
                     auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
                     // we can only find the first seed of it's also the minimizer
@@ -382,7 +371,7 @@ TYPED_TEST(LabeledAlignerRedoneTest, CanonicalTangleGraph) {
                         ASSERT_GE(config.min_seed_length, dict.m());
                         const auto &[query, mappings] = exp_alignments[i];
                         ASSERT_LT(0u, mappings.size());
-                        using kmer_t = get_kmer_t<decltype(dict)>;
+                        using kmer_t = typename std::decay_t<decltype(dict)>::kmer_type;
                         auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(std::get<1>(mappings[0]).data(), k);
                         auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
                         // we can only find the first seed of it's also the minimizer

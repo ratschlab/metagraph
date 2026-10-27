@@ -26,17 +26,6 @@ using namespace mtg::kmer;
 const std::string test_data_dir = "../tests/data";
 //const bool PICK_REV_COMP = true;
 
-template <typename T>
-struct template_parameter;
-
-template <template <typename...> class C, typename T>
-struct template_parameter<C<T>> {
-    using type = T;
-};
-
-template <typename T>
-using get_kmer_t = typename template_parameter<std::decay_t<T>>::type;
-
 template <typename Graph>
 class DBGAlignerRedoneTest : public DeBruijnGraphTest<Graph> {};
 
@@ -213,7 +202,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_straight_with_N) {
 
     run_alignment(*graph, config, query, { reference }, { "5=1X9=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 3;
         run_alignment(*graph, config, query, { reference }, { "5=1X9=" });
     }
@@ -283,7 +272,7 @@ TYPED_TEST(DBGAlignerRedoneTest, variation) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     run_alignment(*graph, config, query, { reference }, { "5=1X6=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 3;
         run_alignment(*graph, config, query, { reference }, { "5=1X6=" });
     }
@@ -304,7 +293,7 @@ TYPED_TEST(DBGAlignerRedoneTest, variation_in_branching_point) {
 
     run_alignment(*graph, config, query, { "" }, { "8=3X4=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 2;
         run_alignment(*graph, config, query, { "" }, { "8=3X4=" }, 0, true, true);
     }
@@ -321,7 +310,7 @@ TYPED_TEST(DBGAlignerRedoneTest, multiple_variations) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     run_alignment(*graph, config, query, { reference }, { "7=1X6=1X1=1X4=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 4;
         run_alignment(*graph, config, query, { reference }, { "7=1X6=1X1=1X4=" }, 0, true, true);
     }
@@ -342,7 +331,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_noise_in_branching_point) {
     config.gap_extension_penalty = -1;
     run_alignment(*graph, config, query, { "AAAAACTTTTTTT" }, { "5=1D7=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 3;
         run_alignment(*graph, config, query, { "AAAAACTTTTTTT" }, { "5=1D7=" });
     }
@@ -386,7 +375,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_multiple_misalignment) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     run_alignment(*graph, config, query, { reference }, { "5=1X9=1X6=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 3;
         run_alignment(*graph, config, query, { reference }, { "5=1X9=1X6=" });
     }
@@ -405,7 +394,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_non_existent) {
     config.gap_extension_penalty = -3;
     run_alignment(*graph, config, query, { reference }, { "5=1I5=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 2;
         run_alignment(*graph, config, query, { reference }, { "5=1I5=" });
     }
@@ -424,7 +413,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_multi) {
     config.gap_extension_penalty = -3;
     run_alignment(*graph, config, query, { reference }, { "5=2I5=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 2;
         run_alignment(*graph, config, query, { reference }, { "5=2I5=" });
     }
@@ -443,7 +432,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_insert_long) {
     config.gap_extension_penalty = -1;
     run_alignment(*graph, config, query, { reference }, { "5=9I5=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 2;
         run_alignment(*graph, config, query, { reference }, { "5=9I5=" });
     }
@@ -481,7 +470,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_delete) {
     config.gap_extension_penalty = -3;
     run_alignment(*graph, config, query, { reference }, { "6=1D5=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 3;
         run_alignment(*graph, config, query, { reference }, { "6=1D5=" });
     }
@@ -500,7 +489,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_gap) {
     config.gap_extension_penalty = -3;
     run_alignment(*graph, config, query, { reference }, { "11=4D10=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 5;
         run_alignment(*graph, config, query, { reference }, { "11=4D10=" });
     }
@@ -595,7 +584,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_repeat_sequence_no_delete_after_insert) {
     config.gap_extension_penalty = -3;
     run_alignment(*graph, config, query, { reference }, { "45=7I8=1X39=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 25;
         run_alignment(*graph, config, query, { reference }, { "45=7I8=1X39=" }, 0, true, true);
     }
@@ -788,7 +777,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
     config.right_end_bonus = 5;
     run_alignment(*graph, config, query, {}, {});
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 11;
         run_alignment(*graph, config, query, { reference.substr(3, 52) }, { "31=1I2=1X3=2I1=3X11=" }, 0, true, true);
     }
@@ -924,25 +913,9 @@ TYPED_TEST(DBGAlignerRedoneTest, align_both_directions) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     run_alignment(*graph, config, query, { reference }, { "5=1X12=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 5;
-        if constexpr(std::is_same_v<DBGSSHash, TypeParam>) {
-            const auto &sshash = static_cast<const DBGSSHash&>(*graph);
-            std::visit([&](const auto &dict) {
-                using kmer_t = get_kmer_t<decltype(dict)>;
-                auto first_kmer_ref = sshash::util::string_to_uint_kmer<kmer_t>(reference.data(), k);
-                auto first_kmer_query = sshash::util::string_to_uint_kmer<kmer_t>(query.data(), k);
-                // we can only find the first seed of it's also the minimizer
-                if (sshash::util::compute_minimizer<kmer_t>(first_kmer_ref, k, dict.m(), dict.hasher()).pos_in_seq
-                        || sshash::util::compute_minimizer<kmer_t>(first_kmer_query, k, dict.m(), dict.hasher()).pos_in_seq) {
-                    run_alignment(*graph, config, query, { reference }, { "5=1X12=" }, 0, true, true);
-                } else {
-                    run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
-                }
-            }, sshash.data());
-        } else {
-            run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
-        }
+        run_alignment(*graph, config, query, { reference }, { "5=1X12=" });
     }
 }
 
@@ -1027,7 +1000,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_bfs_vs_dfs_xdrop) {
     config.xdrop = 27;
     run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" }, 0, true, true);
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 19;
         run_alignment(*graph, config, query, { "" }, { "48=1X20=1X80=" });
     }
@@ -1045,7 +1018,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short) {
 
     run_alignment(*graph, config, query, {}, {});
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 5;
         run_alignment(*graph, config, query, { reference }, { "6=1X1=" }, 0, true, true);
     }
@@ -1063,7 +1036,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy_short2) {
 
     run_alignment(*graph, config, query, {}, {});
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 19;
         run_alignment(*graph, config, query, { reference.substr(0, 30) }, { "22=3X5=" }, 1, true, true);
     }
@@ -1082,7 +1055,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_dummy) {
     config.right_end_bonus = 2;
     run_alignment(*graph, config, query, {}, {});
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 5;
         run_alignment(*graph, config, query, { reference.substr(0, query.size()) }, { "5=1X6=1X" }, 0, true, true);
     }
@@ -1100,7 +1073,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_extended_insert_after_match) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     run_alignment(*graph, config, query, {}, {});
 
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 15;
         run_alignment(*graph, config, query,
                       { "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC" },
@@ -1119,7 +1092,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_suffix_seed_no_full_seeds) {
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     run_alignment(*graph, config, query, {}, {});
-    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam> || std::is_same_v<DBGSSHash, TypeParam>) {
+    if constexpr(std::is_base_of_v<DBGSuccinct, TypeParam>) {
         config.min_seed_length = 9;
         run_alignment(*graph, config, query,
                       { reference.substr(0, 91) },
