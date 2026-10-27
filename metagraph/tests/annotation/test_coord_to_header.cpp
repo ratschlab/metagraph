@@ -11,6 +11,17 @@ namespace {
 using namespace mtg;
 using namespace mtg::annot;
 
+TEST(CoordToHeader, MovePreservesStorageAndRebuildsLookup) {
+    CoordToHeader original({ { "seq0", "seq1" } }, { { 5, 3 } });
+    const auto *storage = original.get_headers(0).data();
+    const auto found = original.find_header("seq1");
+    ASSERT_TRUE(found);
+    CoordToHeader moved(std::move(original));
+    EXPECT_EQ(storage, moved.get_headers(0).data());
+    EXPECT_EQ(found, moved.find_header("seq1"));
+    EXPECT_EQ(std::make_pair(size_t(1), uint64_t(0)), moved.map_single_coord(0, 5));
+}
+
 TEST(CoordToHeader, MapSingleCoordFirstSequence) {
     // Column 0: two sequences, with 5 and 3 k-mers respectively
     //   seq0: coords 0..4, seq1: coords 5..7

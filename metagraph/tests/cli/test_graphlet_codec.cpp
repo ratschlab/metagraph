@@ -283,7 +283,13 @@ TEST(GraphletCodec, NamesThatAreNotUtf8AreRecognised) {
     };
     for (const auto &[raw, valid] : cases) {
         EXPECT_EQ(valid, valid_utf8(raw)) << raw;
+        if (valid) {
+            EXPECT_EQ(raw, front_decode("", "0 " + pct_escape(raw)));
+        } else {
+            EXPECT_THROW(front_decode("", "0 " + pct_escape(raw)), FormatError);
+        }
     }
+    EXPECT_THROW(front_decode("\xFF", "1 suffix"), FormatError);
 }
 
 // RANGES at the top of the id space: nothing follows UINT64_MAX. MAX + 1 wraps to 0, so a
@@ -691,7 +697,7 @@ struct Reader {
                 if (s.parents.size() > 1 && annotate)
                     s.via.resize(s.parents.size());
             } else {
-                for (const std::string &p : split_on(s.partition, '|')) s.via.push_back(decode_ranges(p));
+                for (const std::string &p : split_on(s.partition, '|')) s.via.push_back(decode_ranges(p, dict.size()));
                 EXPECT_EQ(s.parents.size(), s.via.size());
             }
             std::vector<uint64_t> base;
@@ -711,7 +717,7 @@ struct Reader {
                     s.entry_set = unite(s.via);
                 }
             } else {
-                s.entry_set = decode_setexpr(s.entry, root ? nullptr : &base);
+                s.entry_set = decode_setexpr(s.entry, root ? nullptr : &base, dict.size());
                 // canonical: the shortest form, and never explicit where the rule holds
                 EXPECT_EQ(s.entry, encode_setexpr(s.entry_set, root ? nullptr : &base));
                 if (!annotate && root) {
@@ -731,7 +737,7 @@ struct Reader {
             }
             std::vector<uint64_t> previous = s.entry_set;
             for (const auto &p : s.presence) {
-                std::vector<uint64_t> set = decode_setexpr(p[4], &previous);
+                std::vector<uint64_t> set = decode_setexpr(p[4], &previous, dict.size());
                 EXPECT_EQ(p[4], encode_setexpr(set, &previous));
                 s.totals.push_back(u(p[3]));
                 s.sets.push_back(set);
@@ -761,7 +767,7 @@ struct Reader {
             if (s.end == "*") {
                 s.end_set = rule;
             } else {
-                s.end_set = decode_setexpr(s.end, &s.entry_set);
+                s.end_set = decode_setexpr(s.end, &s.entry_set, dict.size());
                 EXPECT_NE(rule, s.end_set) << "G.end written explicitly where the rule holds";
                 EXPECT_EQ(s.end, encode_setexpr(s.end_set, &s.entry_set));
             }
@@ -902,15 +908,15 @@ struct Reader {
                     ej["type"] = "blocked";
                     ej["char"] = e[3];
                     ej["reason"] = to_string(reason_of(e[4][0]));
-                    ej["labels"] = ids_json(decode_ranges(e[6]));
+                    ej["labels"] = ids_json(decode_ranges(e[6], dict.size()));
                     ej["labels_total"] = Json::UInt64(u(e[5]));
-                    ej["truncated"] = u(e[5]) > decode_ranges(e[6]).size();
+                    ej["truncated"] = u(e[5]) > decode_ranges(e[6], dict.size()).size();
                 } else if (e[2] == "h") {
                     ej["type"] = "hairpin";
                     ej["char"] = e[3];
-                    ej["labels"] = ids_json(decode_ranges(e[5]));
+                    ej["labels"] = ids_json(decode_ranges(e[5], dict.size()));
                     ej["labels_total"] = Json::UInt64(u(e[4]));
-                    ej["truncated"] = u(e[4]) > decode_ranges(e[5]).size();
+                    ej["truncated"] = u(e[4]) > decode_ranges(e[5], dict.size()).size();
                     ej["followed"] = e[6] == "f";
                 } else if (e[2] == "v") {
                     ej["type"] = "revisit";
@@ -1063,7 +1069,7 @@ struct Reader {
                 }
                 EXPECT_EQ(n, sequence.size());
                 pj["continuation"]["sequence"] = sequence;
-                pj["continuation"]["labels"] = ids_json(decode_setexpr(c[4], &s.end_set));
+                pj["continuation"]["labels"] = ids_json(decode_setexpr(c[4], &s.end_set, dict.size()));
                 pj["continuation"]["loss_used"] = decode_float(c[2]);
                 pj["continuation"]["branches_used"] = Json::UInt64(u(c[3]));
             }
@@ -1121,8 +1127,8 @@ struct Reader {
             if (v[4] != ".") {
                 for (const std::string &x : split_on(v[4], ',')) bj["labels_per_successor"].append(Json::UInt64(u(x)));
             }
-            bj["ambiguous"] = ids_json(decode_ranges(v[5]));
-            bj["dropped"] = ids_json(decode_ranges(v[6]));
+            bj["ambiguous"] = ids_json(decode_ranges(v[5], dict.size()));
+            bj["dropped"] = ids_json(decode_ranges(v[6], dict.size()));
             bj["refused"] = Json::Value(Json::arrayValue);
             if (v[7] != ".") {
                 for (const std::string &x : split_on(v[7], ';')) {
@@ -1130,7 +1136,7 @@ struct Reader {
                     Json::Value rj;
                     rj["char"] = f[0];
                     rj["cause"] = f[1];
-                    rj["labels"] = ids_json(decode_ranges(f[2]));
+                    rj["labels"] = ids_json(decode_ranges(f[2], dict.size()));
                     bj["refused"].append(rj);
                 }
             }

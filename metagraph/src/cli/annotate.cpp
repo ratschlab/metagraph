@@ -491,6 +491,11 @@ int annotate_graph(Config *config) {
     assert(config->infbase_annotators.size() <= 1);
 
     if (config->index_header_coords) {
+        if (!config->fasta_header_delimiter.empty()) {
+            logger->error("--index-header-coords requires whole record headers; "
+                          "do not use --header-delimiter");
+            exit(1);
+        }
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
             logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
                           "only be constructed for annotated filenames (use flag `--anno-filename`)");

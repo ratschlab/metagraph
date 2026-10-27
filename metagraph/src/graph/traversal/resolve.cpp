@@ -353,6 +353,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
     if (options.labels.empty() == !options.discover) {
         throw std::invalid_argument("Specify either an explicit label list or discovery, not both");
     }
+    if (options.discover && !options.discover_max_labels)
+        throw std::invalid_argument("Discovery requires a positive label limit");
     if (options.support == Support::TRACE) {
         if (!oracle.has_coordinates())
             throw std::invalid_argument("Trace support requires an annotation with k-mer coordinates");

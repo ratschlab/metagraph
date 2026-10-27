@@ -313,7 +313,6 @@ TEST(GraphletAttempt, AbandonedWalksAreNotFinished) {
     EXPECT_EQ(seeds, state["seeds"]);
     EXPECT_EQ(seeds, state["usage"]["seeds"]);
     EXPECT_FALSE(state["usage"].isMember("per_seed"));
-    EXPECT_NE(std::string::npos, a->stop_summary().find("1 abandoned"));
 }
 
 // The stop latency is measured where a seed's walk ends: its first seed_walked. A second call

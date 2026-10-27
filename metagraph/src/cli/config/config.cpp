@@ -191,6 +191,12 @@ Config::Config(int argc, char *argv[]) {
             index_release = get_value(i++);
         } else if (!strcmp(argv[i], "--index-name")) {
             index_name = get_value(i++);
+            if (index_name.empty() || index_name.find_first_not_of(
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+                    != std::string::npos) {
+                std::cerr << "Error: --index-name must match [A-Za-z0-9._-]+" << std::endl;
+                exit(-1);
+            }
         } else if (!strcmp(argv[i], "--index-manifest")) {
             index_manifest = get_value(i++);
         } else if (!strcmp(argv[i], "--index-inventory")) {

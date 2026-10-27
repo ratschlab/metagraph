@@ -254,7 +254,7 @@ TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
         const uint64_t distinct = std::unique(present_keys.begin(), present_keys.end())
                                 - present_keys.begin();
         ASSERT_GT(distinct, 2 * kResolveFirstBatchRows);
-        if (&query == &repeated) {
+        if (query == repeated) {
             ASSERT_GT(present, distinct + 2 * kResolveFirstBatchRows);
         }
         for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {

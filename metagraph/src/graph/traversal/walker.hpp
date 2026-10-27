@@ -155,6 +155,8 @@ class LabelChangeCost {
 
     static LabelChangeCost forbid() { return LabelChangeCost(); }
     static LabelChangeCost constant(double value) {
+        if (!(value >= 0))
+            throw std::invalid_argument("Label change cost must be non-negative");
         LabelChangeCost c;
         c.model_ = CONSTANT;
         c.constant_ = value;
@@ -163,6 +165,9 @@ class LabelChangeCost {
     // |default_cost| may be kInfiniteLoss
     static LabelChangeCost table(std::map<std::pair<LabelId, LabelId>, double> entries,
                                  double default_cost) {
+        if (!(default_cost >= 0) || std::any_of(entries.begin(), entries.end(),
+                [](const auto &entry) { return !(entry.second >= 0); }))
+            throw std::invalid_argument("Label change costs must be non-negative");
         LabelChangeCost c;
         c.model_ = TABLE;
         c.table_ = std::move(entries);

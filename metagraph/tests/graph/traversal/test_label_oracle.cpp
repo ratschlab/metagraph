@@ -39,6 +39,24 @@ TEST(AnnotationKeyMapper, EmptyPaths) {
 #endif
 }
 
+#if ! _PROTEIN_GRAPH
+TEST(AnnotationKeyMapper, SSHashCanonicalKeys) {
+    // Native canonical construction currently requires odd k.
+    for (size_t k : { 3, 5 }) {
+        auto graph = build_graph<DBGSSHash>(k, { "ACTGATCGATATGCGATC" },
+                                            DeBruijnGraph::CANONICAL);
+        const auto &sshash = dynamic_cast<const DBGSSHash &>(*graph);
+        AnnotationKeyMapper mapper(*graph);
+        EXPECT_FALSE(mapper.needs_sequence());
+        graph->call_nodes([&](DeBruijnGraph::node_index node) {
+            const auto reverse = sshash.reverse_complement(node);
+            EXPECT_EQ(std::min(node, reverse), mapper.key(node));
+            EXPECT_EQ(mapper.key(node), mapper.key(reverse));
+        });
+    }
+}
+#endif
+
 // Fixed random sequences: long enough for every k-mer to be distinct with high
 // probability, short enough for RowDiff fixtures to build quickly.
 std::vector<std::string> make_sequences(size_t n, size_t len, uint32_t seed) {

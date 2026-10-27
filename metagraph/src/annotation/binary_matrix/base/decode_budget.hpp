@@ -105,7 +105,7 @@ class DecodeBudget {
     }
     void release(uint64_t bytes) {
         assert(bytes <= held_);
-        held_ -= bytes;
+        held_ -= std::min(bytes, held_);
     }
     // what a refused call does: back to what was held when it began
     void restore(uint64_t held_at_entry) {

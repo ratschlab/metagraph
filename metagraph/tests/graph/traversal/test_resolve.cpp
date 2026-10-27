@@ -56,6 +56,17 @@ typedef ::testing::Types<
 > ResolveTypes;
 TYPED_TEST_SUITE(ResolveTest, ResolveTypes);
 
+TEST(Resolve, RejectsZeroDiscoveryLimit) {
+    const std::string query = random_seq(50, 42);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { query }, { "A" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    ResolveOptions options;
+    options.discover = true;
+    options.discover_max_labels = 0;
+    EXPECT_THROW(resolve_support(oracle, query, options), std::invalid_argument);
+}
+
 // T3b: hand-built query. Query = 200 bp; a 15 bp foreign insert at [80,95);
 // label A written on query[0,120) (with the insert), B on query[100,200).
 TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {

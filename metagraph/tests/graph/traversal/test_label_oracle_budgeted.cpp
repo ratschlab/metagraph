@@ -5,14 +5,14 @@
 
 #include <algorithm>
 #include <chrono>
-#include <future>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <memory>
 #include <random>
 #include <set>
-#include <thread>
 #include <type_traits>
+#include <unistd.h>
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
@@ -818,19 +818,17 @@ TEST(LabelOracleBudgeted, DecodeChargedTruthTable) {
     EXPECT_FALSE(LabelOracle(*row_flat).decode_charged());
 }
 
-// Runs |body| on a thread of its own and fails if it has not returned within |seconds|: a
-// warm that never advances would otherwise hang the whole suite. On a timeout the thread is
-// left behind (it owns what it uses), and the process ends with the suite.
+// Isolate a potentially stuck warm so its timeout cannot leave work running in the suite.
 template <class Body>
 void returns_within(Body body, int seconds, const std::string &what) {
-    auto done = std::make_shared<std::promise<void>>();
-    std::future<void> finished = done->get_future();
-    std::thread([done, body]() mutable {
+    const auto previous_style = ::testing::GTEST_FLAG(death_test_style);
+    ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+    EXPECT_EXIT({
+        alarm(seconds);
         body();
-        done->set_value();
-    }).detach();
-    if (finished.wait_for(std::chrono::seconds(seconds)) != std::future_status::ready)
-        ADD_FAILURE() << what << " did not return within " << seconds << " s";
+        std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+    }, ::testing::ExitedWithCode(0), ".*") << what << " did not complete within " << seconds << " s";
+    ::testing::GTEST_FLAG(death_test_style) = previous_style;
 }
 
 // A budgeted warm of a cache whose capacity is zero returns at once (runs at most the

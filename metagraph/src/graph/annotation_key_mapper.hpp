@@ -21,6 +21,7 @@ class AnnotationKeyMapper {
     bool needs_sequence() const {
         return mode_ == DeBruijnGraph::CANONICAL && !canonical_ && !sshash_;
     }
+    // For a nonzero node, supply its k-mer spelling when needs_sequence() is true.
     node_index key(node_index node, std::string_view kmer = {}) const {
         if (!node || mode_ == DeBruijnGraph::BASIC)
             return node;

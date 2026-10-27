@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "traversal_types.hpp"
@@ -30,7 +32,7 @@ struct KmerInterval {
 // that the rows it holds stay bounded. The first batch has kResolveFirstBatchRows rows; each
 // next one is sized from the widest row of the one before to about kResolveBatchBytes
 // (row_copy_bytes), at most twice the previous batch's rows and at most kResolveBatchRows rows
-// — so a batch is larger than kResolveBatchBytes only where the rows widen within the query. A
+// — the first batch may exceed kResolveBatchBytes; later batches may do so where rows widen. A
 // row is decoded once per batch; a discovery keeps the row of a k-mer that occurs again later
 // in the query for that occurrence, at most kResolveKeptBytes of such rows (beyond that a
 // repeated row is decoded again), and an explicit profile decodes each distinct row once (its

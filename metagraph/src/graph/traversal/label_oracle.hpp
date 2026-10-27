@@ -41,24 +41,6 @@ class NodeFirstCache;
 namespace traversal {
 
 /**
- * Paces the annotation reads of one request under a deadline (the chunked deadlines of spec
- * §6.8). A read the deadline cannot fall into is decoded in one piece: splitting a read costs
- * what its rows share — on a row-diff annotation the rows of one call share the decoding of
- * their row-diff paths, which every chunk decodes again (one-row chunks make a 1.8 s row_diff
- * walk take 30 s) — and buys nothing when the deadline is far. A read that might reach the
- * deadline is split: a first chunk of at most |first_rows| measures this read's own rows
- * (another read's rows, another level's, may be far cheaper: a first chunk sized from them can
- * take 650 ms of a 50 ms target), each next chunk at most 4 times the previous one and sized
- * at the rate the previous one measured to take min(|target_ms|, the time left), with the
- * deadline checked before each; once the rest is predicted to end well before the deadline it
- * is one piece.
- * One chunk, at least one row, stays uninterruptible. It also measures every read, paced or
- * not: |max_read_ms| is the longest single piece of decoding (and of building what it returns)
- * the request made — what stating an uninterruptible step needs. Chunking never changes what a
- * read returns: the callers keep a read's counting and cache decisions whole and only split
- * its decoding.
- */
-/**
  * One uninterruptible piece of a seed's work, as its deadline record states it (SPEC §6.8;
  * timing only): what ran between two readings of the deadline — |kind| one of "read" (an
  * annotation read in one piece), "chunk" (a chunk of a split read), "rest" (the piece that ended
@@ -79,6 +61,24 @@ struct UninterruptiblePiece {
     uint64_t coordinates = 0;
 };
 
+/**
+ * Paces the annotation reads of one request under a deadline (the chunked deadlines of spec
+ * §6.8). A read the deadline cannot fall into is decoded in one piece: splitting a read costs
+ * what its rows share — on a row-diff annotation the rows of one call share the decoding of
+ * their row-diff paths, which every chunk decodes again (one-row chunks make a 1.8 s row_diff
+ * walk take 30 s) — and buys nothing when the deadline is far. A read that might reach the
+ * deadline is split: a first chunk of at most |first_rows| measures this read's own rows
+ * (another read's rows, another level's, may be far cheaper: a first chunk sized from them can
+ * take 650 ms of a 50 ms target), each next chunk at most 4 times the previous one and sized
+ * at the rate the previous one measured to take min(|target_ms|, the time left), with the
+ * deadline checked before each; once the rest is predicted to end well before the deadline it
+ * is one piece.
+ * One chunk, at least one row, stays uninterruptible. It also measures every read, paced or
+ * not: |max_read_ms| is the longest single piece of decoding (and of building what it returns)
+ * the request made — what stating an uninterruptible step needs. Chunking never changes what a
+ * read returns: the callers keep a read's counting and cache decisions whole and only split
+ * its decoding.
+ */
 struct DecodePacer {
     double target_ms = 0;          // 0: pacing off, one piece per read
     size_t first_rows = 8;         // the most rows of a split read's first chunk

@@ -21,7 +21,7 @@ auto AnnotationKeyMapper::canonical_key(node_index node, std::string_view kmer) 
     if (canonical_)
         return canonical_->get_base_node(node);
     if (sshash_)
-        return std::min(node, sshash_->reverse_complement(node));
+        return sshash_->get_base_node(node);
     assert(kmer.size() == graph_.get_k());
     node_index result = DeBruijnGraph::npos;
     graph_.map_to_nodes(kmer, [&](node_index key) { result = key; });

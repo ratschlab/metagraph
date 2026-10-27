@@ -349,7 +349,7 @@ class Attempt {
     // ---- stops
     // asks the walk to stop; false when another reason was first (the first one wins)
     bool request_stop(graph::traversal::ExternalStop reason);
-    // POST /traverse/cancel: records when it was asked, then request_stop(CANCELLED)
+    // POST /traverse/cancel: atomically check completion and request cancellation.
     bool cancel();
     // the handler's poll, at the walker's checkpoints and between seeds: the stop flag, and at
     // every poll_stride-th poll (or with |force|: between seeds, before a paced read's chunk,
@@ -396,9 +396,6 @@ class Attempt {
     Json::Value usage_json(const std::string &reason, bool per_seed = true) const;
     // the attempt's state (GET /traverse/attempt/{id})
     Json::Value state_json() const;
-    // for the server's log: when the walk stopped, how long after the stop was requested, and
-    // the seeds walked
-    std::string stop_summary() const;
 
     // ---- the end (the registry's; also when the handler returned without registering)
     // |reason| completed | cancelled | client_gone | deadline | error; |status| 0 and |bytes|
@@ -416,6 +413,7 @@ class Attempt {
 
   private:
     friend class AttemptRegistry;
+    bool request_stop_locked(graph::traversal::ExternalStop reason);
     Clock::time_point now() const;
     std::string iso(Clock::time_point t) const;
     double ms_since_received(Clock::time_point t) const;

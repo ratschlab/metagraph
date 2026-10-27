@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "cli/traverse.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace mtg {
@@ -259,7 +260,10 @@ inline std::string front_decode(std::string_view previous, std::string_view toke
     if (p > previous.size()
             || (p < previous.size() && reader_detail::is_continuation(previous[p])))
         reader_detail::fail("prefix beyond the previous name or inside a character", token);
-    return std::string(previous.substr(0, p)) + pct_unescape(token.substr(space + 1));
+    std::string name = std::string(previous.substr(0, p)) + pct_unescape(token.substr(space + 1));
+    if (!utils::valid_utf8(name))
+        reader_detail::fail("front-coded name is not valid UTF-8", token);
+    return name;
 }
 
 

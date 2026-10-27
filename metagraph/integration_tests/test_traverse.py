@@ -108,12 +108,14 @@ class TestTraversal(TestingBase):
                     self.assertTrue(caps['supports_trace'])
                     profile = client.resolve('ACGTA', discover={}, select={'policy': 'longest_first'}, timeout=10)
                     self.assertEqual(profile['selection']['seeds'][0]['labels'], ['A', 'B'])
+                    profile = client.resolve('ACGTA', labels='A', timeout=10)
+                    self.assertEqual([label['label'] for label in profile['labels']], ['A'])
                 for direction in ['left', 'right', 'both']:
                     request = self.request(direction)
                     path = self.root / f'{self._testMethodName}-{mmap}-{direction}.json'
                     path.write_text(json.dumps(request))
                     cli = json.loads(self.command('traverse', '-i', self.graph, '-a', self.annotation,
-                                                  '--mmap', path))
+                                                  *(['--mmap'] if mmap else []), path))
                     output = self.post(http, url, '/traverse', request)
                     python = clients[0].traverse(request, timeout=10)
                     wanted = {'left', 'right'} if direction == 'both' else {direction}
@@ -177,6 +179,9 @@ class TestTraversal(TestingBase):
             self.assertEqual(self.post(http, url, '/traverse', bad, 400)['usage']['attempt_id'], 'bad')
             address = urlsplit(url)
             client = GraphClient(address.hostname, address.port)
+            colon_request = dict(self.request(), attempt_id='run:1')
+            client.traverse(colon_request, timeout=10)
+            self.assertEqual(client.traversal_attempt('run:1', timeout=10)['state'], 'finished')
             with self.assertRaises(GraphApiError) as error:
                 client.cancel_traversal('python-before-start', timeout=10)
             self.assertEqual(error.exception.status_code, 404)
@@ -221,3 +226,23 @@ class TestTraversal(TestingBase):
                                 capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('repeats record', result.stderr)
+
+    def test_record_mapping_preserves_whole_headers(self):
+        fasta = self.root / 'split-header.fa'
+        fasta.write_text('>ACC|\nGGCTTACGTAAGCATG\n')
+        result = subprocess.run([METAGRAPH, 'annotate', '-i', str(self.graph),
+                                 '--anno-filename', '--index-header-coords',
+                                 '--header-delimiter', '|',
+                                 '-o', str(self.root / 'split-header'), str(fasta)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires whole record headers', result.stderr)
+
+    def test_index_names_follow_the_token_grammar(self):
+        for name in ['', 'with space', 'with:colon']:
+            result = subprocess.run([METAGRAPH, 'traverse', '--index-inventory',
+                                     '-i', str(self.graph), '-a', str(self.annotation),
+                                     '--index-name', name],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--index-name must match', result.stderr)

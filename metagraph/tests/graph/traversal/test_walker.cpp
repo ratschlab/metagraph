@@ -41,6 +41,16 @@ const size_t kK = 11;
 const size_t kLeft = static_cast<size_t>(Arm::LEFT);
 const size_t kRight = static_cast<size_t>(Arm::RIGHT);
 
+TEST(LabelChangeCost, RejectsNegativeAndNanCosts) {
+    for (double cost : { -1.0, -kInfiniteLoss, std::numeric_limits<double>::quiet_NaN() }) {
+        EXPECT_THROW(LabelChangeCost::constant(cost), std::invalid_argument);
+        EXPECT_THROW(LabelChangeCost::table({}, cost), std::invalid_argument);
+        EXPECT_THROW(LabelChangeCost::table({ { { 0, 1 }, cost } }, 0), std::invalid_argument);
+    }
+    EXPECT_EQ(0, LabelChangeCost::constant(0).cost(0, 1));
+    EXPECT_EQ(kInfiniteLoss, LabelChangeCost::table({}, kInfiniteLoss).cost(0, 1));
+}
+
 std::string rc(std::string s) { ::reverse_complement(s); return s; }
 
 std::string random_seq(size_t len, uint32_t seed) {

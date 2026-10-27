@@ -439,24 +439,26 @@ double Attempt::max_delivery_gap_ms() const {
 }
 
 bool Attempt::request_stop(ExternalStop reason) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return request_stop_locked(reason);
+}
+
+bool Attempt::request_stop_locked(ExternalStop reason) {
     uint8_t none = 0;
     if (!stop_.compare_exchange_strong(none, static_cast<uint8_t>(reason)))
         return false;
-    std::lock_guard<std::mutex> lock(mutex_);
     stop_requested_at_ = now();
     return true;
 }
 
 bool Attempt::cancel() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // checked with finish() under one lock: a finished attempt is not cancelled (404)
-        if (finished_at_)
-            return false;
-        if (!cancel_requested_at_)
-            cancel_requested_at_ = now();
-    }
-    request_stop(ExternalStop::CANCELLED);
+    std::lock_guard<std::mutex> lock(mutex_);
+    // checked with finish() under one lock: a finished attempt is not cancelled (404)
+    if (finished_at_)
+        return false;
+    if (!cancel_requested_at_)
+        cancel_requested_at_ = now();
+    request_stop_locked(ExternalStop::CANCELLED);
     return true;
 }
 
@@ -778,25 +780,6 @@ Json::Value Attempt::state_json() const {
     j["response"] = std::move(response);
     j["usage"] = finished_at_ ? final_usage_ : Json::Value();
     return j;
-}
-
-std::string Attempt::stop_summary() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::string out = stopped_at_ ? "walk stopped at " + iso(*stopped_at_) : "walk not stopped";
-    const auto stop = static_cast<ExternalStop>(stop_.load(std::memory_order_acquire));
-    if (stopped_at_ && stop_requested_at_ && stop != ExternalStop::NONE) {
-        const auto asked = cancel_requested_at_ ? *cancel_requested_at_ : *stop_requested_at_;
-        out += fmt::format(" ({:.0f} ms after the stop was requested by {}{})",
-                           std::max(0.0, std::chrono::duration<double, std::milli>(
-                                                 *stopped_at_ - asked).count()),
-                           stop_name(stop), stop_seen_ ? "" : "; the walk had already ended");
-    }
-    out += fmt::format(", {} of {} seed(s) walked{}, bound {} ms", seeds_walked_, seeds_requested_,
-                       seeds_abandoned_ ? fmt::format(" ({} abandoned in its walk)", seeds_abandoned_)
-                                        : std::string(),
-                       std::isfinite(bound_ms_) ? fmt::format("{:.0f}", std::ceil(bound_ms_))
-                                                : std::string("none"));
-    return out;
 }
 
 void Attempt::finish(const std::string &reason, int status, std::optional<size_t> bytes) {

@@ -54,7 +54,10 @@ class CoordToHeader {
     ~CoordToHeader();
     // a copy starts without a header index of its own (find_header); not assignable
     CoordToHeader(const CoordToHeader &other);
+    CoordToHeader(CoordToHeader &&other) noexcept;
 
+    // Initialization/mutation requires exclusive access. Concurrent const reads are supported;
+    // the mutex below only synchronizes lazy construction of the reverse header index.
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 

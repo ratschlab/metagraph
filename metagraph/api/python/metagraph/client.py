@@ -161,9 +161,8 @@ class GraphClientJson:
 
         try:
             json_obj = ret.json()
-        except:
-            raise RuntimeError(
-                f"Error while calling the server API. {str(ret.status_code)}: {ret.text}")
+        except ValueError:
+            raise GraphApiError(ret.status_code, ret.text) from None
 
         if not ret.ok:
             raise GraphApiError(ret.status_code, json_obj)
@@ -180,7 +179,8 @@ class GraphClientJson:
         """
         payload = dict(sequence=sequence, support=support,
                        min_block_kmers=min_block_kmers, run_format=run_format)
-        optional = dict(labels=list(labels) if labels is not None else None,
+        optional = dict(labels=([labels] if isinstance(labels, str) else list(labels))
+                        if labels is not None else None,
                         discover=discover, select=select, bounds=bounds,
                         graph=graph, graph_path=graph_path)
         payload.update({key: value for key, value in optional.items() if value is not None})
@@ -207,7 +207,7 @@ class GraphClientJson:
 
     def traversal_attempt(self, attempt_id, timeout=None) -> JsonDict:
         from urllib.parse import quote
-        return self._do_request("traverse/attempt/" + quote(attempt_id, safe=""), {},
+        return self._do_request("traverse/attempt/" + quote(attempt_id, safe="._:-"), {},
                                 post_req=False, timeout=timeout)
 
     # noinspection PyTypeChecker

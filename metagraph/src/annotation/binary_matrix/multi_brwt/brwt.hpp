@@ -46,7 +46,7 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     // to |scratch| (unsorted, in the order slice_rows() produces them), with their column
     // ranks for row_column_ranks(), by a depth-first descent that allocates nothing but
     // the scratch's growth, each growth charged to |budget| before it happens. false: a
-    // growth did not fit (|scratch| keeps what was appended before). Visited in ascending
+    // growth did not fit (|scratch| is then unspecified and must be cleared). Visited in ascending
     // row order this runs at the speed of the batched get_rows(): the descent touches the
     // same bit vectors, and needs no per-batch index vectors.
     bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
