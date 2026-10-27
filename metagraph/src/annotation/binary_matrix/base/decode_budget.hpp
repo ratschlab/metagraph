@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <functional>
 #include <limits>
+#include <span>
+#include <utility>
 #include <vector>
 
 #include "common/vector.hpp"
@@ -157,7 +159,7 @@ struct RowCost {
 };
 
 /**
- * A buffer reused by the rows of one decode call that grows only through grow(): each
+ * A buffer reused by the rows of one decode call that grows only through push_back(): each
  * growth is charged before the larger buffer is allocated and the smaller one released
  * after it is freed, so that the transient of the copy (both buffers) is charged too. The
  * growth policy is fixed (16 elements, then doubling), so that what a row of n entries
@@ -166,20 +168,14 @@ struct RowCost {
 template <class T>
 class ChargedBuffer {
   public:
-    Vector<T> data;
-
-    // room for one more element; false: the growth did not fit (nothing changed)
-    bool reserve_one(DecodeBudget &budget) {
-        if (data.size() < capacity_)
-            return true;
-        const uint64_t next = std::max<uint64_t>(16, 2 * capacity_);
-        const uint64_t bytes = buffer_bytes(next, sizeof(T));
-        if (!budget.charge(bytes))
+    // Views allow element updates, but only push_back() can grow the buffer.
+    std::span<T> data() { return { data_.data(), data_.size() }; }
+    std::span<const T> data() const { return { data_.data(), data_.size() }; }
+    void clear() { data_.clear(); }
+    bool push_back(T value, DecodeBudget &budget) {
+        if (!reserve_one(budget))
             return false;
-        data.reserve(next);
-        budget.release(charged_);
-        charged_ = bytes;
-        capacity_ = next;
+        data_.push_back(std::move(value));
         return true;
     }
     // the bytes charged for the buffer now (the caller releases them when it frees it)
@@ -197,6 +193,22 @@ class ChargedBuffer {
     }
 
   private:
+    // room for one more element; false: the growth did not fit (nothing changed)
+    bool reserve_one(DecodeBudget &budget) {
+        if (data_.size() < capacity_)
+            return true;
+        const uint64_t next = std::max<uint64_t>(16, 2 * capacity_);
+        const uint64_t bytes = buffer_bytes(next, sizeof(T));
+        if (!budget.charge(bytes))
+            return false;
+        data_.reserve(next);
+        budget.release(charged_);
+        charged_ = bytes;
+        capacity_ = next;
+        return true;
+    }
+
+    Vector<T> data_;
     uint64_t capacity_ = 0;     // the modelled capacity (folly may round the real one up)
     uint64_t charged_ = 0;
 };

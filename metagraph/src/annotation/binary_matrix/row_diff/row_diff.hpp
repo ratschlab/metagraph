@@ -308,16 +308,16 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
 
     bool fetch(BinaryMatrix::Row r, BinaryMatrix::SetBitPositions *row, uint64_t *bytes,
                DecodeBudget &budget) override {
-        scratch_.data.clear();
+        scratch_.clear();
         *bytes = 0;
         if (!matrix_.row_columns(r, &scratch_, budget))
             return false;
-        std::sort(scratch_.data.begin(), scratch_.data.end());
-        const uint64_t b = small_vector_bytes(scratch_.data.size(), sizeof(BinaryMatrix::Column));
+        std::sort(scratch_.data().begin(), scratch_.data().end());
+        const uint64_t b = small_vector_bytes(scratch_.data().size(), sizeof(BinaryMatrix::Column));
         if (!budget.charge(b))
             return false;
         *bytes = b;
-        row->assign(scratch_.data.begin(), scratch_.data.end());
+        row->assign(scratch_.data().begin(), scratch_.data().end());
         return true;
     }
     uint64_t scratch_charged() const override { return scratch_.charged(); }

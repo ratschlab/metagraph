@@ -35,7 +35,12 @@ CoordToHeader::CoordToHeader(CoordToHeader &&other) noexcept
 }
 
 size_t CoordToHeader::build_header_index() const {
-    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    {
+        std::shared_lock lock(header_index_mutex_);
+        if (header_index_)
+            return header_index_->map.size();
+    }
+    std::unique_lock lock(header_index_mutex_);
     build_header_index_locked();
     return header_index_->map.size();
 }
@@ -61,8 +66,12 @@ void CoordToHeader::build_header_index_locked() const {
 
 std::optional<std::pair<CoordToHeader::Column, size_t>>
 CoordToHeader::find_header(std::string_view header) const {
-    std::lock_guard<std::mutex> lock(header_index_mutex_);
-    build_header_index_locked();
+    std::shared_lock lock(header_index_mutex_);
+    if (!header_index_) {
+        lock.unlock();
+        build_header_index();
+        lock.lock();
+    }
     auto it = header_index_->map.find(header);
     if (it == header_index_->map.end())
         return std::nullopt;
@@ -214,7 +223,7 @@ bool CoordToHeader::load(const std::string &filename_base) {
     }
     {
         // the index views the headers about to be replaced
-        std::lock_guard<std::mutex> lock(header_index_mutex_);
+        std::unique_lock lock(header_index_mutex_);
         header_index_.reset();
     }
 

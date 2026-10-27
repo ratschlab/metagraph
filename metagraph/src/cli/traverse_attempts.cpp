@@ -620,7 +620,8 @@ void Attempt::seed_delivered(size_t index, const std::string &outcome, double el
 Json::Value Attempt::bound_json() const {
     Json::Value b;
     b["seeds"] = uint_json(bound_seeds_);
-    b["time_budget_ms"] = bound_set_ ? Json::Value(bound_time_budget_ms_) : Json::Value();
+    b["time_budget_ms"] = bound_set_ && std::isfinite(bound_time_budget_ms_)
+        ? Json::Value(bound_time_budget_ms_) : Json::Value();
     b["allowance_ms"] = ceil_ms_json(settings_.allowance_ms);
     // a request that loaded its index into RAM (`in_ram`): the time before its work began
     if (bound_load_ms_)

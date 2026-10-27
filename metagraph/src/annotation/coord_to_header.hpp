@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -141,7 +142,7 @@ class CoordToHeader {
 
     // find_header(): keys are views into |headers_|, which only load() changes, and load()
     // drops the index first
-    mutable std::mutex header_index_mutex_;
+    mutable std::shared_mutex header_index_mutex_;
     mutable std::unique_ptr<const HeaderIndex> header_index_;
 };
 

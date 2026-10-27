@@ -246,3 +246,23 @@ class TestTraversal(TestingBase):
                                     capture_output=True, text=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('--index-name must match', result.stderr)
+
+    def test_record_mapping_rejects_non_sequence_formats(self):
+        vcf = self.root / 'variants.vcf'
+        vcf.write_text('##fileformat=VCFv4.2\n')
+        result = subprocess.run([METAGRAPH, 'annotate', '-i', str(self.graph),
+                                 '--anno-filename', '--index-header-coords',
+                                 '-o', str(self.root / 'variants'), str(vcf)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires FASTA or FASTQ input', result.stderr)
+
+    def test_cli_rejects_server_caps(self):
+        for flag in ['--traverse-max-time-ms', '--traverse-max-seeds',
+                     '--traverse-max-seed-bp', '--traverse-max-seed-labels',
+                     '--traverse-max-memory-mb', '--traverse-max-work-units',
+                     '--resolve-max-query-bp']:
+            result = subprocess.run([METAGRAPH, 'traverse', '-i', str(self.graph), flag, '1'],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('applies only to server_query', result.stderr)

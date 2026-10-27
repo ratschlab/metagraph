@@ -362,7 +362,7 @@ class Attempt {
     void check_delivery();
     // the walk of every seed is over (normally, or at a stop): stopped_at, if not yet
     void walk_ended();
-    // "cancelled" | "deadline" when a stop reached the walk, "completed" otherwise
+    // "cancelled" | "client_gone" | "deadline" when a stop reached the walk, "completed" otherwise
     const char* walk_reason() const;
 
     // ---- seeds (the handler's thread)

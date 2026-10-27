@@ -212,6 +212,7 @@ TEST(GraphletAttempt, BoundIsEnforcedOnTheAttemptsClock) {
     local.set_bound(2, std::numeric_limits<double>::infinity());
     EXPECT_FALSE(local.enforced());
     EXPECT_TRUE(local.usage_json("completed")["bound_ms"].isNull());
+    EXPECT_TRUE(local.usage_json("completed")["bound"]["time_budget_ms"].isNull());
     EXPECT_FALSE(local.usage_json("completed")["bound"]["enforced"].asBool());
 }
 

@@ -40,6 +40,26 @@ using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 using SetBits = BinaryMatrix::SetBitPositions;
 using RowTuples = MultiIntMatrix::RowTuples;
+
+TEST(ChargedBuffer, RefusedGrowthPreservesContentsAndCharge) {
+    const auto bytes = buffer_bytes(16, sizeof(Column));
+    DecodeBudget budget(bytes);
+    ChargedBuffer<Column> buffer;
+    for (Column i = 0; i < 16; ++i) {
+        ASSERT_TRUE(buffer.push_back(i, budget));
+    }
+    EXPECT_FALSE(buffer.push_back(16, budget));
+    ASSERT_EQ(16u, buffer.data().size());
+    for (Column i = 0; i < 16; ++i) {
+        EXPECT_EQ(i, buffer.data()[i]);
+    }
+    EXPECT_EQ(bytes, budget.held());
+    EXPECT_EQ(bytes, buffer.charged());
+    buffer.clear();
+    EXPECT_TRUE(buffer.push_back(42, budget));
+    EXPECT_EQ(42u, buffer.data().front());
+    EXPECT_EQ(bytes, budget.held());
+}
 using ColRank = std::pair<Column, uint64_t>;
 
 std::string random_seq(size_t n, uint32_t seed) {
@@ -100,22 +120,22 @@ TEST(RowDiffBudgetedDecode, DescentEqualsBatchedRead) {
             for (Row r = 0; r < num_rows; ++r) {
                 const std::string what = "arity " + std::to_string(arity) + " density "
                         + std::to_string(density) + " row " + std::to_string(r);
-                scratch.data.clear();
+                scratch.clear();
                 ASSERT_TRUE(brwt.row_columns(r, &scratch, budget)) << what;
                 EXPECT_EQ(sorted(std::vector<Column>(rows[r].begin(), rows[r].end())),
-                          sorted(std::vector<Column>(scratch.data.begin(), scratch.data.end()))) << what;
-                rank_scratch.data.clear();
+                          sorted(std::vector<Column>(scratch.data().begin(), scratch.data().end()))) << what;
+                rank_scratch.clear();
                 ASSERT_TRUE(brwt.row_column_ranks(r, &rank_scratch, budget)) << what;
                 EXPECT_EQ(sorted(std::vector<ColRank>(ranks[r].begin(), ranks[r].end())),
-                          sorted(std::vector<ColRank>(rank_scratch.data.begin(), rank_scratch.data.end()))) << what;
-                scratch.data.clear();
+                          sorted(std::vector<ColRank>(rank_scratch.data().begin(), rank_scratch.data().end()))) << what;
+                scratch.clear();
                 ASSERT_TRUE(column_major.row_columns(r, &scratch, budget)) << what;
                 EXPECT_EQ(sorted(std::vector<Column>(rows[r].begin(), rows[r].end())),
-                          std::vector<Column>(scratch.data.begin(), scratch.data.end())) << what;
-                rank_scratch.data.clear();
+                          std::vector<Column>(scratch.data().begin(), scratch.data().end())) << what;
+                rank_scratch.clear();
                 ASSERT_TRUE(column_major.row_column_ranks(r, &rank_scratch, budget)) << what;
                 EXPECT_EQ(std::vector<ColRank>(cm_ranks[r].begin(), cm_ranks[r].end()),
-                          std::vector<ColRank>(rank_scratch.data.begin(), rank_scratch.data.end())) << what;
+                          std::vector<ColRank>(rank_scratch.data().begin(), rank_scratch.data().end())) << what;
             }
             // the scratch is all that was charged, and only as it grew
             EXPECT_EQ(scratch.charged() + rank_scratch.charged(), budget.held());

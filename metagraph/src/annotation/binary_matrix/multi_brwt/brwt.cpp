@@ -205,16 +205,14 @@ bool BRWT::descend_row(Row row, ChargedBuffer<T> *scratch, DecodeBudget &budget)
     if (child_nodes_.empty()) {
         if constexpr(utils::is_pair_v<T>) {
             if (uint64_t rank = nonzero_rows_->conditional_rank1(row)) {
-                if (!scratch->reserve_one(budget))
-                    return false;
                 // only a single column is stored in leaves
-                scratch->data.emplace_back(0, rank);
+                if (!scratch->push_back({ 0, rank }, budget))
+                    return false;
             }
         } else {
             if ((*nonzero_rows_)[row]) {
-                if (!scratch->reserve_one(budget))
+                if (!scratch->push_back(0, budget))
                     return false;
-                scratch->data.push_back(0);
             }
         }
         return true;
@@ -223,11 +221,11 @@ bool BRWT::descend_row(Row row, ChargedBuffer<T> *scratch, DecodeBudget &budget)
     if (!rank)
         return true;
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
-        const size_t offset = scratch->data.size();
+        const size_t offset = scratch->data().size();
         if (!child_nodes_[j]->descend_row<T>(rank - 1, scratch, budget))
             return false;
-        for (size_t i = offset; i < scratch->data.size(); ++i) {
-            auto &col = utils::get_first(scratch->data[i]);
+        for (size_t i = offset; i < scratch->data().size(); ++i) {
+            auto &col = utils::get_first(scratch->data()[i]);
             col = assignments_.get(j, col);
         }
     }

@@ -58,7 +58,8 @@ bool index_available() {
     return std::filesystem::exists(kGraph)
         && std::filesystem::exists(kAnnoBase + annot::RowDiffBRWTCoordAnnotator::kExtension)
         && std::filesystem::exists(kAnnoBase + annot::CoordToHeader::kExtension)
-        && std::filesystem::exists(kQueryFasta);
+        && std::filesystem::exists(kQueryFasta)
+        && std::filesystem::is_directory(kIndexDir + "/fasta");
 }
 
 std::string read_query() {

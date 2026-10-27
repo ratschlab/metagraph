@@ -149,17 +149,17 @@ inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>
              RowTuples *out, uint64_t *bytes, DecodeBudget &budget) const {
     assert(out->empty());
     *bytes = 0;
-    scratch->data.clear();
+    scratch->clear();
     if (!binary_matrix_.row_column_ranks(row, scratch, budget))
         return false;
     // the row is used sorted by column (as call_rows() sorts what get_row_tuples returns)
-    std::sort(scratch->data.begin(), scratch->data.end(), utils::LessFirst());
-    const uint64_t vec = buffer_bytes(scratch->data.size(), sizeof((*out)[0]));
+    std::sort(scratch->data().begin(), scratch->data().end(), utils::LessFirst());
+    const uint64_t vec = buffer_bytes(scratch->data().size(), sizeof((*out)[0]));
     if (!budget.charge(vec))
         return false;
     *bytes += vec;
-    out->reserve(scratch->data.size());
-    for (auto [j, r] : scratch->data) {
+    out->reserve(scratch->data().size());
+    for (auto [j, r] : scratch->data()) {
         assert(r >= 1 && "matches can't have zero-rank");
         size_t begin = delimiters_[j].select1(r) + 1 - r;
         size_t end = delimiters_[j].select1(r + 1) - r;

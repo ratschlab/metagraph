@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <atomic>
+#include <thread>
 
 #include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
@@ -10,6 +12,32 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::annot;
+
+TEST(CoordToHeader, ConcurrentFirstLookupAndReads) {
+    CoordToHeader headers({ { "seq0", "seq1" } }, { { 5, 3 } });
+    std::atomic<bool> start = false;
+    std::atomic<size_t> ready = 0, failures = 0;
+    std::vector<std::thread> readers;
+    for (size_t i = 0; i < 8; ++i) {
+        readers.emplace_back([&] {
+            ++ready;
+            while (!start.load())
+                std::this_thread::yield();
+            for (size_t j = 0; j < 1000; ++j) {
+                const auto found = headers.find_header("seq1");
+                if (!found || found->first != 0 || found->second != 1
+                        || headers.find_header("absent") || headers.build_header_index() != 2)
+                    ++failures;
+            }
+        });
+    }
+    while (ready.load() != readers.size())
+        std::this_thread::yield();
+    start = true;
+    for (auto &reader : readers)
+        reader.join();
+    EXPECT_EQ(0u, failures.load());
+}
 
 TEST(CoordToHeader, MovePreservesStorageAndRebuildsLookup) {
     CoordToHeader original({ { "seq0", "seq1" } }, { { 5, 3 } });

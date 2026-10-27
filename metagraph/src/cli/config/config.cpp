@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <iostream>
+#include <string_view>
 #include <unordered_set>
 #include <filesystem>
 
@@ -148,6 +149,13 @@ Config::Config(int argc, char *argv[]) {
 
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
+        if (identity == TRAVERSE
+                && (std::string_view(argv[i]).starts_with("--traverse-max-")
+                    || !strcmp(argv[i], "--resolve-max-query-bp"))) {
+            std::cerr << "Error: " << argv[i] << " applies only to server_query; "
+                         "set bounds in the traversal request" << std::endl;
+            exit(-1);
+        }
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--mmap")) {

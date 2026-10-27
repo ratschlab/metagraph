@@ -12,7 +12,7 @@ def test_resolve_preserves_label_names(client_type, labels):
     response.json.return_value = {}
     with patch('metagraph.client.requests.post', return_value=response) as post:
         client_type('localhost', 5555).resolve('ACGTA', labels=labels)
-    assert post.call_args.kwargs['json']['labels'] == ['sample1']
+    assert post.call_args[1]['json']['labels'] == ['sample1']
 
 
 @pytest.mark.parametrize('client_type', [GraphClientJson, GraphClient])
@@ -32,4 +32,4 @@ def test_attempt_id_preserves_server_accepted_characters(client_type):
     response.json.return_value = {}
     with patch('metagraph.client.requests.get', return_value=response) as get:
         client_type('localhost', 5555).traversal_attempt('run:1._-')
-    assert get.call_args.kwargs['url'].endswith('/traverse/attempt/run:1._-')
+    assert get.call_args[1]['url'].endswith('/traverse/attempt/run:1._-')

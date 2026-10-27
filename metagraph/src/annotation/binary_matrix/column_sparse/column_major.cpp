@@ -113,9 +113,8 @@ bool ColumnMajor::row_columns(Row row, ChargedBuffer<Column> *scratch,
         assert(columns_[j]);
         assert(row < columns_[j]->size());
         if ((*columns_[j])[row]) {
-            if (!scratch->reserve_one(budget))
+            if (!scratch->push_back(j, budget))
                 return false;
-            scratch->data.push_back(j);
         }
     }
     return true;
@@ -127,9 +126,8 @@ bool ColumnMajor::row_column_ranks(Row row, ChargedBuffer<std::pair<Column, uint
         assert(columns_[j]);
         assert(row < columns_[j]->size());
         if (uint64_t r = columns_[j]->conditional_rank1(row)) {
-            if (!scratch->reserve_one(budget))
+            if (!scratch->push_back({ j, r }, budget))
                 return false;
-            scratch->data.emplace_back(j, r);
         }
     }
     return true;

@@ -491,6 +491,12 @@ int annotate_graph(Config *config) {
     assert(config->infbase_annotators.size() <= 1);
 
     if (config->index_header_coords) {
+        for (const auto &file : files) {
+            if (file_format(file) != "FASTA" && file_format(file) != "FASTQ") {
+                logger->error("--index-header-coords requires FASTA or FASTQ input: {}", file);
+                exit(1);
+            }
+        }
         if (!config->fasta_header_delimiter.empty()) {
             logger->error("--index-header-coords requires whole record headers; "
                           "do not use --header-delimiter");

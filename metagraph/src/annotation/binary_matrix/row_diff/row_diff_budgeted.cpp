@@ -311,7 +311,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     if (cache)
         cache->trim(cache->limit());
     for (size_t i = 0; i < n; ++i) {
-        start[i] = steps.data.size();
+        start[i] = steps.data().size();
         node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(rows[i]);
         while (true) {
             assert(graph_->in_graph(node));
@@ -319,28 +319,26 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             uint32_t v = index.find(row);
             const bool is_new = v == UINT32_MAX;
             if (is_new) {
-                v = visits.data.size();
-                if (!visits.reserve_one(budget) || !index.insert(row, v, budget))
+                v = visits.data().size();
+                if (!visits.push_back(Visit{ row }, budget) || !index.insert(row, v, budget))
                     return refuse();
-                visits.data.push_back(Visit{ row });
                 if (cache) {
                     if (const auto *entry = cache->find(row, true)) {
-                        set_aggregates(entry->path, &visits.data[v]);
-                        visits.data[v].set_cached();
+                        set_aggregates(entry->path, &visits.data()[v]);
+                        visits.data()[v].set_cached();
                     }
                 }
             }
-            if (!steps.reserve_one(budget))
+            if (!steps.push_back(v, budget))
                 return refuse();
-            steps.data.push_back(v);
-            visits.data[v].times++;
-            if (!is_new || visits.data[v].cached() || anchor_[row])
+            visits.data()[v].times++;
+            if (!is_new || visits.data()[v].cached() || anchor_[row])
                 break;
             node = row_diff_successor(*graph_, node, fork_succ_);
         }
     }
-    start[n] = steps.data.size();
-    const size_t num_visits = visits.data.size();
+    start[n] = steps.data().size();
+    const size_t num_visits = visits.data().size();
 
     // ---- a read admitted as without the cache (RowDiffCache::admit_as_uncached: the
     // lookahead under a memory budget) holds, until its stored rows are read, also what the
@@ -355,7 +353,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     uint64_t unspared = 0;
     if (cache && cache->admit_as_uncached) {
         std::vector<std::tuple<Row, uint32_t, uint64_t>> spared;
-        for (const Visit &visit : visits.data) {
+        for (const Visit &visit : visits.data()) {
             if (visit.cached())
                 spared.emplace_back(visit.anchor(), visit.length, visit.path_stored);
         }
@@ -379,7 +377,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             };
             unspared = beyond(VisitIndex::peak_for(num_visits + extra), index.charged())
                      + beyond(ChargedBuffer<Visit>::peak_for(num_visits + extra), visits.charged())
-                     + beyond(ChargedBuffer<uint32_t>::peak_for(steps.data.size() + extra),
+                     + beyond(ChargedBuffer<uint32_t>::peak_for(steps.data().size() + extra),
                               steps.charged())
                      + buffer_bytes(extra, sizeof(RowT)) + buffer_bytes(extra, sizeof(uint32_t))
                      + stored;
@@ -400,10 +398,10 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         order[v] = v;
     }
     std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
-        return visits.data[a].row < visits.data[b].row;
+        return visits.data()[a].row < visits.data()[b].row;
     });
     for (uint32_t v : order) {
-        Visit &visit = visits.data[v];
+        Visit &visit = visits.data()[v];
         if (visit.cached()) {
             // the cached full row, charged as its copy (its aggregates came with it); the
             // trace's lookups only moved entries within the cache, so it is still there
@@ -447,10 +445,10 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         return true;
     };
     for (size_t i = 0; i < n; ++i) {
-        const uint32_t *path = steps.data.data() + start[i];
-        const uint32_t *path_end = steps.data.data() + start[i + 1];
+        const uint32_t *path = steps.data().data() + start[i];
+        const uint32_t *path_end = steps.data().data() + start[i + 1];
         const uint32_t end = path_end[-1];
-        Visit &last = visits.data[end];
+        Visit &last = visits.data()[end];
         if (!last.length) {
             // an anchor first reached here: its stored row is its full row
             assert(anchor_[last.row]);
@@ -478,8 +476,8 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         uint32_t succ = end;
         for (const uint32_t *p = path_end - 1; p != path; ) {
             const uint32_t y = *--p;
-            Visit &visit = visits.data[y];
-            const Visit &next = visits.data[succ];
+            Visit &visit = visits.data()[y];
+            const Visit &next = visits.data()[succ];
             const uint64_t bound = xor_bound(result, slot[y]);
             if (!budget.charge(bound))
                 return refuse();
@@ -524,7 +522,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             }
             succ = y;
         }
-        const Visit &first = visits.data[path[0]];
+        const Visit &first = visits.data()[path[0]];
         RowCost &cost = result_costs[i];
         cost.dependency_rows = first.length - 1;
         cost.dependency_entries = first.dep_entries;
@@ -547,7 +545,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     // ---- what the call held besides its outputs is freed with its scope
     uint64_t transient = index.charged() + visits.charged() + steps.charged() + per_visit
                        + fetcher.scratch_charged() + buffer_bytes(n + 1, sizeof(uint32_t));
-    for (const Visit &visit : visits.data) {
+    for (const Visit &visit : visits.data()) {
         assert(!visit.times && !visit.slot_bytes);
         transient += visit.slot_bytes;
     }
