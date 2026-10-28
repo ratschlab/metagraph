@@ -4,81 +4,6 @@ namespace mtg::graph::align_redone {
 
 using mtg::common::logger;
 
-std::string spell_path(const DeBruijnGraph &graph,
-                       const std::vector<DeBruijnGraph::node_index> &path) {
-    std::string seq;
-
-    if (path.empty())
-        return seq;
-
-    seq.reserve(path.size() + graph.get_k() - 1);
-
-    size_t num_dummy = 0;
-    size_t num_unknown = 0;
-    if (path.front()) {
-        seq += graph.get_node_sequence(path.front());
-    } else {
-        num_unknown = graph.get_k();
-        seq += std::string(num_unknown, '$');
-        num_dummy = 1;
-    }
-
-    for (size_t i = 1; i < path.size(); ++i) {
-        if (path[i]) {
-            if (num_dummy) {
-                seq += '$';
-                ++num_unknown;
-                std::string next_seq = graph.get_node_sequence(path[i]);
-                auto it = seq.end() - next_seq.size();
-                for (char c : next_seq) {
-                    if (*it == '$' && c != '$') {
-                        --num_unknown;
-                        *it = c;
-                    }
-
-                    ++it;
-                }
-                num_dummy = 0;
-            } else {
-                char next = '\0';
-                graph.call_outgoing_kmers(path[i - 1], [&](auto next_node, char c) {
-                    if (next_node == path[i])
-                        next = c;
-                });
-
-                if (!next) {
-                    logger->error("Invalid edge {} {}\t{} {}",
-                                  path[i - 1], path[i],
-                                  graph.get_node_sequence(path[i - 1]),
-                                  graph.get_node_sequence(path[i]));
-                    throw std::runtime_error("");
-                }
-
-                seq += next;
-                if (num_unknown) {
-                    std::string next_seq = graph.get_node_sequence(path[i]);
-                    auto it = seq.end() - next_seq.size();
-                    for (char c : next_seq) {
-                        if (*it == '$' && c != '$') {
-                            --num_unknown;
-                            *it = c;
-                        }
-
-                        ++it;
-                    }
-                }
-            }
-        } else {
-            seq += '$';
-            ++num_dummy;
-            ++num_unknown;
-        }
-    }
-
-    assert(seq.size() == path.size() + graph.get_k() - 1);
-    return seq;
-}
-
 bool operator==(const Match &a, const Match &b) {
     return a.get_orientation() == b.get_orientation()
         && a.get_query().begin() == b.get_query().begin()
@@ -197,18 +122,3 @@ void Anchor::append(const Anchor &other, const DeBruijnGraph *graph) {
 
 } // namespace mtg::graph::align
 
-namespace std {
-
-std::size_t hash<mtg::graph::align_redone::Match>::operator()(const mtg::graph::align_redone::Match &a) const {
-    return (a.get_path().size() ? a.get_path()[0] : 0) + a.get_clipping() + a.get_end_clipping();
-}
-
-std::size_t hash<mtg::graph::align_redone::Anchor>::operator()(const mtg::graph::align_redone::Anchor &a) const {
-    return std::hash<mtg::graph::align_redone::Match>()(a);
-}
-
-std::size_t hash<mtg::graph::align_redone::Alignment>::operator()(const mtg::graph::align_redone::Alignment &a) const {
-    return std::hash<std::string>()(a.get_cigar().to_string());
-}
-
-} // namespace std

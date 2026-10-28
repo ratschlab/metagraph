@@ -7,17 +7,14 @@
 #include "aligner_config.hpp"
 #include "annotation_buffer.hpp"
 
+#include "graph/alignment/alignment.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/logger.hpp"
 
 namespace mtg::graph::align_redone {
 
-// Return the string spelled by the path. This path may have disconnects (if it came)
-// from a chain alignment), so this method handles that case. If there is an invalid
-// edge, or if there is too long of a stretch of npos nodes, this throws a runtime error.
-std::string spell_path(const DeBruijnGraph &graph,
-                       const std::vector<DeBruijnGraph::node_index> &path);
+using align::spell_path;
 
 class Match {
   public:
@@ -217,21 +214,3 @@ bool operator==(const Alignment &a, const Alignment &b);
 
 } // namespace mtg::graph::align
 
-namespace std {
-
-template<>
-struct hash<mtg::graph::align_redone::Match> {
-    std::size_t operator()(const mtg::graph::align_redone::Match &a) const;
-};
-
-template<>
-struct hash<mtg::graph::align_redone::Anchor> {
-    std::size_t operator()(const mtg::graph::align_redone::Anchor &a) const;
-};
-
-template<>
-struct hash<mtg::graph::align_redone::Alignment> {
-    std::size_t operator()(const mtg::graph::align_redone::Alignment &a) const;
-};
-
-} // namespace std;
