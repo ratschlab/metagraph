@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <random>
 #include <unordered_set>
 
 #include "../graph/all/test_dbg_helpers.hpp"
@@ -95,6 +96,43 @@ TYPED_TEST(LabeledAlignerTest, CachedColumnSetsKeepTheirAddress) {
     EXPECT_EQ((AnnotationBuffer::Columns{ 0, 1 }), first_set);
     EXPECT_EQ(node_labels, buffer.get_labels(path.front()));
     EXPECT_EQ(node_labels_copy, *node_labels);
+}
+
+TYPED_TEST(LabeledAlignerTest, FetchBothStrandsInOneBatch) {
+    // Queue the forward path of a sequence and then its reverse complement in
+    // the same batch. On CANONICAL graphs, the reverse-complement nodes map to
+    // the forward nodes queued just before, and the buffer grows (and may
+    // reallocate) while it registers them. Every node must get its labels.
+    size_t k = 21;
+    std::mt19937 rng(42);
+    std::string sequence(5000, 'A');
+    for (char &c : sequence) {
+        c = "ACGT"[rng() % 4];
+    }
+    std::string rc_sequence = sequence;
+    reverse_complement(rc_sequence.begin(), rc_sequence.end());
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, { sequence }, { "A" }, DeBruijnGraph::CANONICAL
+    );
+    const auto &graph = anno_graph->get_graph();
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+
+    auto path = map_to_nodes_sequentially(graph, sequence);
+    auto rc_path = map_to_nodes_sequentially(graph, rc_sequence);
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(path));
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(rc_path));
+    buffer.fetch_queued_annotations();
+
+    for (const auto *nodes : { &path, &rc_path }) {
+        for (auto node : *nodes) {
+            ASSERT_NE(DeBruijnGraph::npos, node);
+            const auto *labels = buffer.get_labels(node);
+            ASSERT_TRUE(labels) << node;
+            EXPECT_EQ(1u, labels->size()) << node;
+        }
+    }
 }
 
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {

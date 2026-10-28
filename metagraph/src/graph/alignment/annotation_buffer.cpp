@@ -107,13 +107,17 @@ void AnnotationBuffer::fetch_queued_annotations() {
                     queued_nodes.push_back(base_path[i]);
                 }
             } else if (find_a == node_to_cols_.end() && find_b != node_to_cols_.end()) {
-                node_to_cols_.try_emplace(path[i], find_b->second);
-                if (find_b->second == nannot) {
+                // copy the value first: inserting may reallocate the map and
+                // invalidate find_b
+                size_t label_i = find_b->second;
+                node_to_cols_.try_emplace(path[i], label_i);
+                if (label_i == nannot) {
                     queued_rows.push_back(row);
                     queued_nodes.push_back(path[i]);
                 }
             } else if (find_a != node_to_cols_.end() && find_b == node_to_cols_.end()) {
-                node_to_cols_.try_emplace(base_path[i], find_a->second);
+                size_t label_i = find_a->second;
+                node_to_cols_.try_emplace(base_path[i], label_i);
             } else {
                 size_t label_i = std::min(find_a->second, find_b->second);
                 if (label_i != nannot) {
