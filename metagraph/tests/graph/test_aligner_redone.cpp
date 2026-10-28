@@ -666,14 +666,10 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
     run_alignment(*graph, config, query, { reference },           {       "18=7D8=1X39=" }, 0, true, true);
 }
 
-TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
-    GTEST_SKIP() << "Runs for minutes: the engine has no work budget";
-    size_t k = 6;
-    std::vector<std::string> seqs;
-    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
-                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs));
-
+// A repetitive query in a graph of transcripts. The node budget keeps its
+// alignment from running for minutes, and a sequence in the graph must still
+// align exactly.
+void check_low_similarity4(const DeBruijnGraph &graph) {
     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
                         "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
@@ -682,14 +678,40 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
                         "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
                         "CGATCGATCGATCGATCGATCGA";
+    std::string match = "TCGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAACGATCAAT"
+                        "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
+                        "TCGATCAATCGATCAACGATCAATCGATCAATCGATCAACGATCAATCGATCAAT"
+                        "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
+                        "TCGATCAACGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAAT"
+                        "CGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAATCGATCAA"
+                        "CGATCAATCGATCAATCGATCAACGATCAATCGATCAATCGATCAATCGATCAAT"
+                        "CGATCAATCGATCAATCGATC";
 
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.left_end_bonus = 5;
-    config.right_end_bonus = 5;
-    config.gap_opening_penalty = -5;
-    config.gap_extension_penalty = -2;
-    run_alignment(*graph, config, query, { "" }, { "" });
+    ASSERT_TRUE(graph.find(match, 1.0));
+
+    for (double nodes_per_seq_char : { 10.0, 50.0 }) {
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        config.gap_opening_penalty = -5;
+        config.gap_extension_penalty = -2;
+        config.max_nodes_per_seq_char = nodes_per_seq_char;
+
+        Query aln_query(graph, query);
+        ExactSeeder seeder(aln_query, config);
+        Extender extender(aln_query, config);
+        align_query(aln_query, seeder, extender, [](Alignment&&) {});
+
+        run_alignment(graph, config, match, { match },
+                      { std::to_string(match.size()) + "=" });
+    }
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4) {
+    size_t k = 6;
+    std::vector<std::string> seqs;
+    mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
+                                          [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
+    check_low_similarity4(*build_graph_batch<TypeParam>(k, std::move(seqs)));
 }
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
@@ -714,29 +736,16 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity5) {
 #if ! _PROTEIN_GRAPH
 
 TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity4_rep_primary) {
-    GTEST_SKIP() << "Runs for minutes: the engine has no work budget";
+    if constexpr(std::is_same_v<DBGSSHash, TypeParam>) {
+        // primary SSHash graphs need an odd k
+        return;
+    }
+
     size_t k = 6;
     std::vector<std::string> seqs;
     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
                                           [&](auto *seq) { seqs.emplace_back(seq->seq.s); });
-    auto graph = build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY);
-
-    std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "TCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
-                        "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
-                        "CGATCGATCGATCGATCGATCGA";
-
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.left_end_bonus = 5;
-    config.right_end_bonus = 5;
-    config.gap_opening_penalty = -5;
-    config.gap_extension_penalty = -2;
-    run_alignment(*graph, config, query, { "" }, { "" });
+    check_low_similarity4(*build_graph_batch<TypeParam>(k, std::move(seqs), DeBruijnGraph::PRIMARY));
 }
 #endif
 
@@ -1010,5 +1019,32 @@ TYPED_TEST(DBGAlignerRedoneTest, align_reverse_complement_basic) {
     EXPECT_EQ("18=", best->get_cigar().to_string());
 }
 #endif
+
+TYPED_TEST(DBGAlignerRedoneTest, max_num_seeds_per_locus) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        return;
+    }
+
+    size_t k = 5;
+    // ACG continues in four ways, so the query ACGAT has four seeds shorter
+    // than k at its first position
+    auto graph = build_graph_batch<TypeParam>(k, { "ACGAA", "ACGCC", "ACGTT", "ACGGG" });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = 3;
+    config.max_seed_length = k;
+    Query aln_query(*graph, std::string("ACGAT"));
+
+    auto num_short_seeds_at_start = [&]() {
+        auto anchors = ExactSeeder(aln_query, config).get_anchors();
+        return std::count_if(anchors.begin(), anchors.end(), [&](const Anchor &a) {
+            return !a.get_orientation() && !a.get_clipping() && a.get_seed().size() < k;
+        });
+    };
+
+    ASSERT_LT(1, num_short_seeds_at_start());
+    config.max_num_seeds_per_locus = 1;
+    EXPECT_EQ(0, num_short_seeds_at_start());
+}
 
 } // namespace

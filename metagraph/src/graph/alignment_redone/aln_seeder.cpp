@@ -546,7 +546,17 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
     std::vector<sdsl::bit_vector> coverage(2, sdsl::bit_vector(query_.get_query(false).size()));
     for (auto &cur_max_seeds : max_seeds) {
         for (auto &bucket : cur_max_seeds) {
+            // As in the existing aligner, a query position with more than
+            // max_num_seeds_per_locus seeds shorter than k keeps none of them
+            auto is_short = [&](const Anchor &a) { return a.get_seed().size() < graph.get_k(); };
+            bool drop_short = static_cast<size_t>(std::count_if(bucket.begin(), bucket.end(),
+                    [&](const auto &entry) { return is_short(entry.second); }))
+                > config_.max_num_seeds_per_locus;
+
             for (auto it = bucket.begin(); it != bucket.end(); ++it) {
+                if (drop_short && is_short(it->second))
+                    continue;
+
                 auto &cov = coverage[it->second.get_orientation()];
                 std::fill(cov.begin() + it->second.get_clipping(),
                           cov.begin() + it->second.get_clipping() + it->second.get_seed().size(),
@@ -958,6 +968,11 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
     }
 
 
+    // As in the existing aligner, once this many nodes were explored, stop at
+    // the first entry that is not on the furthest-reaching front
+    double max_explored_nodes = config.max_nodes_per_seq_char * query_size;
+    size_t max_query_dist = 0;
+
     for (size_t cost = 0; cost < S.size(); ++cost) {
         bool done = false;
         using HeapEntry = std::tuple<size_t, size_t, DeBruijnGraph::node_index>;
@@ -982,6 +997,13 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 // outdated entry
                 if (std::get<0>(it->second) != best_dist)
                     continue;
+
+                if (num_explored_nodes >= max_explored_nodes && query_dist < max_query_dist) {
+                    common::logger->trace("Node limit reached after {} nodes", num_explored_nodes);
+                    done = true;
+                    break;
+                }
+                max_query_dist = std::max(max_query_dist, query_dist);
 
                 Cigar::Operator last_op = std::get<3>(it->second);
                 size_t num_matches = std::get<5>(it->second);
@@ -2590,10 +2612,11 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                                                                  { last->get_label_class() })
                             : AnnotationBuffer::CoordinateSet()
             );
-            if (!aln_found) {
-                std::cerr << "q: " << aln.get_clipping() - next->get_clipping() << "\td: " << next_to_last_dist - last->get_seed().size() + next->get_seed().size() << "\t" << *next << " " << next->get_path_spelling() << " -> " << aln << std::endl;
-                throw std::runtime_error("Failed to connect anchors");
-            }
+            // The node budget can stop the gap fill before it reaches the
+            // previous anchor. The chain then yields no alignment.
+            if (!aln_found)
+                common::logger->trace("Failed to connect anchors at query positions {} and {}",
+                                      next->get_clipping(), aln.get_clipping());
         },
         [this,&num_chains,&alignments,&ext_success,&last_chain_score,&first_chain,&first_chain_score](Alignment&& aln) {
             aln.trim_end();

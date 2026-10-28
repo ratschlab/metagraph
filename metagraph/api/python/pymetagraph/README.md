@@ -105,7 +105,6 @@ Two unrelated query methods are available via the `method` setting:
   threads = 4
   method = "align"
   seed_length = 19
-  max_alternative_alignments = 1
   max_num_nodes_per_seq_char = 10.0
   min_exact_match = .7
   connect_anchors = true

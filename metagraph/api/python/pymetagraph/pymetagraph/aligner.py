@@ -42,10 +42,12 @@ class Aligner(AlignerABC):
         in the graph at all before querying labels (default: 0.0). Only used
         by ``method="query"``.
     :keyword seed_length: Minimum seed length. Only used by ``method="align"``.
-    :keyword max_alternative_alignments: Number of alternative paths to
-        consider per seed (default: 1). Only used by ``method="align"``.
-    :keyword max_num_nodes_per_seq_char: Max nodes to consider per sequence
-        character during extension. Only used by ``method="align"``.
+    :keyword max_num_nodes_per_seq_char: Max graph nodes to explore per query
+        character in each extension or gap fill (default: 5.0). Only used by
+        ``method="align"``.
+    :keyword max_num_seeds_per_locus: Drop the seeds shorter than k at a
+        query position that has more than this many (default: 1000). Only
+        used by ``method="align"``.
     :keyword min_exact_match: Min fraction of nucleotides covered by seeds
         required to align (default: 0.7). Only used by ``method="align"``.
     :keyword connect_anchors: If ``True`` (default), traverse the graph to

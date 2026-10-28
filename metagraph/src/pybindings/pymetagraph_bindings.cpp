@@ -65,7 +65,6 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, BindingOptions
         { "discovery_fraction", "--min-kmers-fraction-label" },
         { "presence_fraction", "--min-kmers-fraction-graph" },
         { "seed_length", "--align-min-seed-length" },
-        { "max_alternative_alignments", "--align-alternative-alignments" },
         { "max_num_nodes_per_seq_char", "--align-max-nodes-per-seq-char" },
         { "min_exact_match", "--align-min-exact-match" },
         { "max_num_seeds_per_locus", "--align-max-num-seeds-per-locus" },
@@ -222,9 +221,8 @@ class Index {
         futures.reserve(seqs.size());
 
         for (size_t i = 0; i < seqs.size(); ++i) {
-            // A read that throws (e.g. a chain whose anchors cannot be
-            // connected) is reported as unmapped, so it neither terminates
-            // the process nor fails the rest of the batch.
+            // A read that throws is reported as unmapped, so it neither
+            // terminates the process nor fails the rest of the batch.
             futures.push_back(thread_pool_->enqueue([&, i]() {
                 try {
                     results[i] = query(seqs[i]);
