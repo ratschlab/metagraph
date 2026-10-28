@@ -66,11 +66,12 @@ TEST_F(DBGSSHashInput, RejectsSequenceShorterThanK) {
                     "sequence 2 has length 5, shorter than k = 21");
 }
 
-TEST_F(DBGSSHashInput, RejectsWrappedFasta) {
+TEST_F(DBGSSHashInput, AcceptsWrappedFasta) {
     // a wrapped record whose tail is shorter than k, like the
     // records in tests/data/transcripts_100.fa
-    expect_rejected(">a\n" + seq_30 + "\n" + seq_30 + "\nAC\n",
-                    "expected a FASTA header starting with '>' before sequence 2");
+    write_input(">a\n" + seq_30 + "\nTTGACCATGCAGTCAGGTACCATGACTTGA\nAC\n");
+    DBGSSHash graph(test_input, 21, DeBruijnGraph::BASIC);
+    EXPECT_EQ(62u - 21u + 1u, graph.num_nodes());
 }
 
 TEST_F(DBGSSHashInput, RejectsFastq) {
