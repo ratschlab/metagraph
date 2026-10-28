@@ -11,6 +11,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -60,6 +61,41 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
+
+TYPED_TEST(LabeledAlignerTest, CachedColumnSetsKeepTheirAddress) {
+    // The labeled extender holds references to cached column sets while it
+    // caches new ones, so caching must never move the existing sets.
+    size_t k = 4;
+    const std::vector<std::string> sequences { "GCAAT", "AATGCTT" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+    const auto &graph = anno_graph->get_graph();
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+
+    auto path = map_to_nodes_sequentially(graph, sequences[1]);
+    ASSERT_EQ(sequences[1].size() - k + 1, path.size());
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(path));
+    buffer.fetch_queued_annotations();
+
+    const auto *node_labels = buffer.get_labels(path.front());
+    ASSERT_TRUE(node_labels);
+    const auto node_labels_copy = *node_labels;
+
+    size_t first = buffer.cache_column_set(AnnotationBuffer::Columns{ 0, 1 });
+    const auto &first_set = buffer.get_cached_column_set(first);
+
+    // enough new sets to reallocate any contiguous storage several times
+    for (uint64_t i = 2; i < 10'000; ++i) {
+        buffer.cache_column_set(AnnotationBuffer::Columns{ i });
+    }
+
+    EXPECT_EQ(&first_set, &buffer.get_cached_column_set(first));
+    EXPECT_EQ((AnnotationBuffer::Columns{ 0, 1 }), first_set);
+    EXPECT_EQ(node_labels, buffer.get_labels(path.front()));
+    EXPECT_EQ(node_labels_copy, *node_labels);
+}
 
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;

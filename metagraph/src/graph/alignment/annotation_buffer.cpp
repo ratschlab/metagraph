@@ -195,7 +195,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     if (it == node_to_cols_.end() || it->second == nannot)
         return ret_val;
 
-    ret_val.first = &column_sets_.data()[it->second];
+    ret_val.first = &get_cached_column_set(it->second);
 
     if (has_coordinates()) {
         assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
