@@ -772,6 +772,38 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
         }
     }
 }
+
+TYPED_TEST(LabeledAlignerTest, CanonicalBackwardExtensionMismatch) {
+    size_t k = 31;
+    const std::vector<std::string> sequences {
+        "CTGGGCCCCCATCTCAGGCCCCCCTTCCTGGGGGTGCCCTCGGCTCTG"
+    };
+    const std::vector<std::string> labels { "A" };
+
+    // the first character of the query is a mismatch, which is resolved
+    // during the backward extension of the seed
+    std::string query = "TGGCCCCCATCTCAGGCCCCCCTTCCTGGGGGTGCCCTCGGCTCTGT";
+
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                           typename TypeParam::second_type>(
+            k, sequences, labels, mode
+        );
+
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        config.left_end_bonus = 5;
+        config.right_end_bonus = 5;
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+
+        auto alignments = aligner.align(query);
+        ASSERT_EQ(1u, alignments.size()) << mode;
+        EXPECT_EQ(std::string("GGGCCCCCATCTCAGGCCCCCCTTCCTGGGGGTGCCCTCGGCTCTG"),
+                  alignments[0].get_sequence()) << mode;
+        EXPECT_EQ(std::vector<std::string>{ "A" },
+                  get_alignment_labels(*anno_graph, alignments[0])) << mode;
+    }
+}
 #endif
 
 } // namespace
