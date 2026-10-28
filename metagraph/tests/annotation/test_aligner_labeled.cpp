@@ -846,9 +846,13 @@ TEST(LabeledAlignerTest, SubkSeedLabels) {
         { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }, { "TGCA", "B" }
     };
 
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+    // coordinates are only used on BASIC graphs
+    for (auto [mode, coordinates] : { std::make_pair(DeBruijnGraph::BASIC, false),
+                                      std::make_pair(DeBruijnGraph::BASIC, true),
+                                      std::make_pair(DeBruijnGraph::CANONICAL, false),
+                                      std::make_pair(DeBruijnGraph::PRIMARY, false) }) {
         auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-                k, sequences, labels, mode);
+                k, sequences, labels, mode, coordinates);
 
         // as in align_to_graph, unmask the dummy k-mers so that seeds can match
         // them (in BASIC mode, ACGT is matched only by a source dummy k-mer)
@@ -873,17 +877,32 @@ TEST(LabeledAlignerTest, SubkSeedLabels) {
                 std::string sequence_rc = sequence;
                 reverse_complement(sequence_rc.begin(), sequence_rc.end());
                 std::vector<std::string> alignment_labels;
-                for (auto column : alignment.label_columns) {
-                    alignment_labels.emplace_back(label_encoder.decode(column));
+                if (coordinates) {
+                    ASSERT_EQ(alignment.label_columns.size(),
+                              alignment.label_coordinates.size()) << query;
+                }
+                for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
+                    alignment_labels.emplace_back(label_encoder.decode(alignment.label_columns[i]));
                     const std::string &labeled = sequences[alignment_labels.back() == "A" ? 0 : 1];
                     EXPECT_TRUE(labeled.find(sequence) != std::string::npos
                                     || labeled.find(sequence_rc) != std::string::npos)
                         << mode << " " << query << " " << alignment;
+                    if (!coordinates)
+                        continue;
+
+                    // each label holds one sequence, so a coordinate is the
+                    // position of the aligned sequence in it
+                    ASSERT_FALSE(alignment.label_coordinates[i].empty()) << query;
+                    for (int64_t coord : alignment.label_coordinates[i]) {
+                        ASSERT_GE(coord, 0) << query << " " << alignment;
+                        EXPECT_EQ(sequence, labeled.substr(coord, sequence.size()))
+                            << query << " " << alignment;
+                    }
                 }
                 found |= (sequence == query || sequence_rc == query)
                     && alignment_labels == std::vector<std::string>{ label };
             }
-            EXPECT_TRUE(found) << mode << " " << query;
+            EXPECT_TRUE(found) << mode << " " << coordinates << " " << query;
         }
     }
 }

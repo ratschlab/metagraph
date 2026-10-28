@@ -694,8 +694,9 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (identity == ALIGN && align_map_only
-            && (infbase_annotators.empty() || output_json)) {
-        std::cerr << "Error: --align-map-only requires an annotation (-a) and TSV output" << std::endl;
+            && (infbase_annotators.empty() || output_json || map_sequences)) {
+        std::cerr << "Error: --align-map-only requires an annotation (-a) and TSV output,"
+                     " and cannot be combined with --map, --count-kmers or --query-presence" << std::endl;
         print_usage_and_exit = true;
     }
 
