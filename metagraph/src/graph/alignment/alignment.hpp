@@ -94,6 +94,30 @@ class Seed {
     Cigar::LengthType end_clipping_;
 };
 
+// Return the number of query characters covered by at least one seed
+template <class It>
+inline size_t get_num_query_chars_in_seeds(It begin, It end) {
+    std::vector<std::pair<size_t, size_t>> ranges;
+    for (auto it = begin; it != end; ++it) {
+        const auto &aln = utils::get_first(*it);
+        if (!aln.empty()) {
+            ranges.emplace_back(aln.get_clipping(),
+                                aln.get_clipping() + aln.get_query_view().size());
+        }
+    }
+    std::sort(ranges.begin(), ranges.end());
+
+    size_t num_matching = 0;
+    size_t last_q_end = 0;
+    for (const auto &[q_begin, q_end] : ranges) {
+        if (q_end > last_q_end) {
+            num_matching += q_end - std::max(q_begin, last_q_end);
+            last_q_end = q_end;
+        }
+    }
+    return num_matching;
+}
+
 template <class It>
 inline size_t get_num_char_matches_in_seeds(It begin, It end) {
     size_t num_matching = 0;

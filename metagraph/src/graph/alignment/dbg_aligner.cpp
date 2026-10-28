@@ -582,7 +582,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
 
                     double exact_match_fraction
-                        = static_cast<double>(get_num_char_matches_in_seeds(chain.begin(), chain.end()))
+                        = static_cast<double>(get_num_query_chars_in_seeds(chain.begin(), chain.end()))
                             / forward.size();
 
                     logger->trace("Chain: score: {}; exact match fraction: {}",
