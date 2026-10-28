@@ -2,6 +2,8 @@
 #define __LABELED_ALIGNER_HPP__
 
 #include "dbg_aligner.hpp"
+#include <optional>
+
 #include "annotation_buffer.hpp"
 #include "graph/annotated_dbg.hpp"
 
@@ -135,6 +137,26 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
     virtual bool has_coordinates() const override final {
         return annotation_buffer_.has_coordinates();
     }
+
+    // The labels supported by the most query characters in seeds, without
+    // extending the seeds into alignments. Seeds are found and filtered by
+    // label exactly as for alignment (including min_exact_match).
+    struct LabelMapping {
+        bool orientation = false;
+        // all labels covering |num_matches| query characters
+        Alignment::Columns labels;
+        // query characters covered by seeds of each of these labels
+        size_t num_matches = 0;
+        // the query range spanned by these seeds, on the forward query
+        size_t query_begin = 0;
+        size_t query_end = 0;
+    };
+
+    typedef std::function<void(const std::string& /* header */,
+                               std::optional<LabelMapping>&& /* best mapping */)> MappingCallback;
+
+    void map_batch(const std::vector<IDBGAligner::Query> &seq_batch,
+                   const MappingCallback &callback) const;
 
   private:
     mutable AnnotationBuffer annotation_buffer_;
