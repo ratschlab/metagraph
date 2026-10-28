@@ -189,6 +189,16 @@ When configuring via ``cmake .. <arguments>`` additional arguments can be provid
 - ``-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]`` -- alphabet to use (``DNA`` by default)
 
 
+Logging
+-------
+
+Set ``SPDLOG_LEVEL`` to ``trace``, ``debug``, ``info``, ``warn``, ``error``,
+``critical``, or ``off`` to control logging. Values are case-insensitive;
+the default is ``info``. Empty values keep the default, and invalid values
+produce a warning and keep the default. An explicit ``-v`` or ``--verbose``
+overrides the environment setting and selects ``trace``.
+
+
 Install API
 ----------------------------
 See :ref:`API Install <install api>`.
