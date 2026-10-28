@@ -9,6 +9,7 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <exception>
 #include <future>
 #include <memory>
 #include <stdexcept>
@@ -91,9 +92,19 @@ class AnnotatedGraph {
                                                        presence_fraction);
             }));
         }
+        // Wait for every task before rethrowing, as they write into results
+        std::exception_ptr error;
         for (auto &future : futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                if (!error)
+                    error = std::current_exception();
+            }
         }
+        if (error)
+            std::rethrow_exception(error);
+
         return results;
     }
 
