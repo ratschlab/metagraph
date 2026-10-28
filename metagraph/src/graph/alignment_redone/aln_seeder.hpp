@@ -50,7 +50,6 @@ class LabeledSeeder : public ExactSeeder {
           anno_buffer_(anno_buffer) {}
 
     std::vector<Anchor> get_anchors() const override;
-    AnnotationBuffer& get_buffer() const { return anno_buffer_; }
 
   protected:
     virtual AlignmentGraph make_aln_graph(Anchor::label_class_t target) const override;
@@ -67,9 +66,7 @@ class Extender {
     virtual ~Extender() {}
 
     void extend(const Alignment &aln,
-                const std::function<void(Alignment&&)> &callback,
-                bool no_bwd = false,
-                bool no_fwd = false) const;
+                const std::function<void(Alignment&&)> &callback) const;
 
   protected:
     const Query &query_;

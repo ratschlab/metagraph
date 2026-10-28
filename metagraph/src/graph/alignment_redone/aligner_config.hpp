@@ -15,7 +15,6 @@ struct DBGAlignerConfig : public align::DBGAlignerConfig {
     size_t max_dist_between_seeds = 400;
     size_t gap_shrinking_factor = 4;
     double chaining_algorithm_switch_cutoff = 1.0;
-    double chains_per_char = 0;
     size_t chaining_bandwidth = 65;
 
     score_t score_cigar(std::string_view reference,

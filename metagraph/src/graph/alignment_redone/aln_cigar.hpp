@@ -69,18 +69,6 @@ class Cigar {
         return cigar_.size() && cigar_.back().first == CLIPPED ? cigar_.back().second : 0;
     }
 
-    void extend_clipping(LengthType n) {
-        assert(cigar_.size());
-        if (!n)
-            return;
-
-        if (cigar_.front().first != CLIPPED) {
-            cigar_.insert(cigar_.begin(), value_type(CLIPPED, n));
-        } else {
-            cigar_.front().second += n;
-        }
-    }
-
     std::vector<value_type>& data() { return cigar_; }
     const std::vector<value_type>& data() const { return cigar_; }
 
@@ -98,13 +86,6 @@ class Cigar {
         return std::accumulate(cigar_.begin(), cigar_.end(), size_t{0},
                                [&](size_t old, const value_type &op) {
             return old + (op.first == MATCH || op.first == MISMATCH || op.first == INSERTION || op.first == CLIPPED) * op.second;
-        });
-    }
-
-    size_t get_num_ref() const {
-        return std::accumulate(cigar_.begin(), cigar_.end(), size_t{0},
-                               [&](size_t old, const value_type &op) {
-            return old + (op.first == MATCH || op.first == MISMATCH || op.first == DELETION) * op.second;
         });
     }
 
