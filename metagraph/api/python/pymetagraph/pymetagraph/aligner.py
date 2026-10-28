@@ -21,9 +21,9 @@ class Aligner(AlignerABC):
       are placeholder values (``0``, ``len(seq)``, ``+1``) since only the
       matched label is meaningful for accept/reject decisions in this mode.
     - ``"align"``: real seed-and-extend alignment via metagraph's
-      alignment_redone module, the same code path backing the ``metagraph
-      align`` CLI command and the server's ``/align`` endpoint (see the old
-      client's ``GraphClient.align``). ``r_st``/``r_en``/``strand`` reflect
+      alignment_redone module. Neither the ``metagraph align`` CLI command
+      nor the server's ``/align`` endpoint uses this engine.
+      ``r_st``/``r_en``/``strand`` reflect
       the actual matched region and orientation of the read.
 
     :param debug_log: Filename (or ``"stdout"``/``"stderr"``) for debug logging.

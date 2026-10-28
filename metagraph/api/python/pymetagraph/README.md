@@ -95,9 +95,8 @@ Two unrelated query methods are available via the `method` setting:
   discovery_fraction = .4
   presence_fraction = .1
   ```
-- `"align"`: real seed-and-extend alignment via metagraph's alignment_redone module — the same
-  code path backing the `metagraph align` CLI command and the server's `/align` endpoint (what
-  the old HTTP client's `GraphClient.align` calls). Slower, but `r_st`/`r_en`/`strand` reflect the
+- `"align"`: real seed-and-extend alignment via metagraph's alignment_redone module. Neither the
+  `metagraph align` CLI command nor the server's `/align` endpoint uses this engine. Slower, but `r_st`/`r_en`/`strand` reflect the
   actual matched region and orientation of the read.
   ```toml
   [mapper_settings.pymetagraph]

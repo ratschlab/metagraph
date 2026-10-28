@@ -15,6 +15,7 @@
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/load/load_graph.hpp"
+#include "common/logger.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/alignment_redone/aln_match.hpp"
 #include "graph/alignment_redone/aln_query.hpp"
@@ -141,13 +142,11 @@ struct Alignment {
 //    primitive backing the CLI's `query` command. Requires an annotation.
 //    Read-only, no mutable per-call state, safe to call concurrently from
 //    multiple threads.
-//  - "align": the alignment_redone seed-and-extend pipeline, the same one
-//    backing the CLI's `align` command and the server's `/align` endpoint
-//    (see cli/align.cpp::align_to_graph, cli/server.cpp::process_align_request).
+//  - "align": the alignment_redone seed-and-extend pipeline. Neither the CLI's
+//    `align` command nor the server's `/align` endpoint uses this engine.
 //    Reports real r_st/r_en/strand instead of dummy placeholders. Each call
 //    builds its own AnnotationBuffer, since that type caches mutable
-//    per-query state and is not meant to be shared across concurrent queries
-//    (mirrored from how align_to_graph gives each worker its own buffer).
+//    per-query state and is not meant to be shared across concurrent queries.
 //    Annotation is optional here, mirroring align.cpp's own behavior when no
 //    "-a" is given: without one, plain ExactSeeder/Extender is used (no label
 //    lookups at all, so the O(num_labels) annotation-fetch cost is avoided
@@ -222,8 +221,16 @@ class Index {
         futures.reserve(seqs.size());
 
         for (size_t i = 0; i < seqs.size(); ++i) {
+            // A read that throws (e.g. a chain whose anchors cannot be
+            // connected) is reported as unmapped, so it neither terminates
+            // the process nor fails the rest of the batch.
             futures.push_back(thread_pool_->enqueue([&, i]() {
-                results[i] = query(seqs[i]);
+                try {
+                    results[i] = query(seqs[i]);
+                } catch (const std::exception &e) {
+                    mtg::common::logger->warn("pymetagraph: read {} failed: {}", i, e.what());
+                    results[i] = Alignment("*", 0, 0, 1);
+                }
             }));
         }
         for (auto &f : futures)
