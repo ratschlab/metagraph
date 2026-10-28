@@ -545,7 +545,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (config_.chain_alignments) {
         if (!has_coordinates()) {
-            logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
+            logger->error("Chaining requires seeds with coordinates");
             exit(1);
         }
 

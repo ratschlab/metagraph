@@ -10,6 +10,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -381,6 +382,18 @@ int align_to_graph(Config *config) {
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (anno_dbg_future.valid())
         anno_dbg = anno_dbg_future.get();
+
+    // Chaining needs the coordinates of the seeds, which the aligner uses only
+    // with an annotation with coordinates on a BASIC-mode graph.
+    if (config->alignment_chain
+            && (graph->get_mode() != DeBruijnGraph::BASIC || !anno_dbg
+                || !dynamic_cast<const annot::matrix::MultiIntMatrix*>(
+                        &anno_dbg->get_annotator().get_matrix()))) {
+        logger->error("--align-chain requires a BASIC-mode graph and an annotation "
+                      "with coordinates (e.g., annotate --coordinates, then "
+                      "transform_anno --anno-type column_coord)");
+        return 1;
+    }
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
