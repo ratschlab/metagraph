@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, anno_file_extension
+from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, anno_file_extension, DNA_MODE
 from helpers import get_test_class_name
 
 """Test operations on annotation columns"""
@@ -547,7 +547,8 @@ class TestRowDiffAnnoConverters(TestingBase):
 
 
 @parameterized_class(('graph_mode',),
-    input_values=[('basic',), ('canonical',), ('primary',)],
+    # protein graphs have no reverse complement, so only basic mode
+    input_values=[('basic',)] + ([('canonical',), ('primary',)] if DNA_MODE else []),
     class_name_func=get_test_class_name
 )
 class TestRowDiffCharSSHash(TestingBase):
