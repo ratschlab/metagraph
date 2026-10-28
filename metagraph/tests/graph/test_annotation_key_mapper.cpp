@@ -23,6 +23,8 @@ TEST(AnnotationKeyMapper, BasicKeysAreNodes) {
     EXPECT_EQ(path, mapper.keys(path));
 }
 
+#if ! _PROTEIN_GRAPH
+// Primary and canonical graphs need reverse complements, which proteins lack.
 // The test helper returns primary graphs wrapped in CanonicalDBG
 const CanonicalDBG& wrapped_primary(const std::shared_ptr<DeBruijnGraph> &graph) {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get());
@@ -37,7 +39,6 @@ TEST(AnnotationKeyMapper, PrimaryGraphMustBeWrapped) {
     EXPECT_THROW(AnnotationKeyMapper mapper(primary), std::invalid_argument);
 }
 
-#if ! _PROTEIN_GRAPH
 // A k-mer and its reverse complement carry the same annotation row, so their
 // keys must coincide, in reverse order along the path.
 void check_reverse_complement_keys(const DeBruijnGraph &graph) {
