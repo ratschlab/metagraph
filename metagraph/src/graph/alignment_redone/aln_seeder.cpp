@@ -21,7 +21,8 @@ void align_query(const Query &query,
                  const std::function<void(Alignment&&)> &callback,
                  bool connect_anchors_in_chain) {
     align_query(query, seeder,
-                [&](Alignment&& base_path) { extender.extend(base_path, callback); });
+                [&](Alignment&& base_path) { extender.extend(base_path, callback); },
+                connect_anchors_in_chain);
 }
 
 void align_query(const Query &query,
@@ -1804,6 +1805,14 @@ void Extender::extend(const Alignment &aln,
                       const std::function<void(Alignment&&)> &callback,
                       bool no_bwd, bool no_fwd) const {
     // std::cerr << "Base " << aln << "\n";
+    // Chains whose anchors were not connected keep placeholder nodes between
+    // them, which extension cannot start from. Report them unextended.
+    const auto &aln_path = aln.get_path();
+    if (std::find(aln_path.begin(), aln_path.end(), DeBruijnGraph::npos) != aln_path.end()) {
+        callback(Alignment(aln));
+        return;
+    }
+
     DBGAlignerConfig::score_t match_score = config_.match_score("A");
 
     auto set_coords = [&](Alignment &aln) {

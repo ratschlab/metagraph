@@ -1102,4 +1102,119 @@ TYPED_TEST(DBGAlignerRedoneTest, align_suffix_seed_no_full_seeds) {
 }
 #endif
 
+// Records the connect flag that align_query passes to the seeder
+class RecordingSeeder : public ExactSeeder {
+  public:
+    using ExactSeeder::ExactSeeder;
+
+    std::vector<Alignment> get_inexact_anchors(bool align = true) const override {
+        flags.push_back(align);
+        return ExactSeeder::get_inexact_anchors(align);
+    }
+
+    mutable std::vector<bool> flags;
+};
+
+TYPED_TEST(DBGAlignerRedoneTest, align_query_forwards_connect_anchors) {
+    size_t k = 10;
+    std::string reference = "TTTTCTGTATACCTTGGCGCTCTCC";
+    std::string query =     "TTTTCTGTATA"  "GGCGCTCTCC";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -3;
+    config.min_seed_length = k;
+    config.max_seed_length = k;
+    Query aln_query(*graph, query);
+    Extender extender(aln_query, config);
+
+    for (bool connect : { true, false }) {
+        RecordingSeeder seeder(aln_query, config);
+        std::vector<Alignment> paths;
+        auto callback = [&](Alignment&& path) { paths.emplace_back(std::move(path)); };
+
+        align_query(aln_query, seeder, extender, callback, connect);
+        EXPECT_EQ(std::vector<bool>{ connect }, seeder.flags) << "extend";
+        EXPECT_FALSE(paths.empty()) << connect;
+
+        seeder.flags.clear();
+        align_query(aln_query, seeder, callback, connect);
+        EXPECT_EQ(std::vector<bool>{ connect }, seeder.flags) << "no extend";
+    }
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, extend_unconnected_chain) {
+    size_t k = 5;
+    std::string reference = "AGCAACTCGAAA";
+    std::string query =     "AGCAATTCGAAA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    // Anchors are chained across the mismatch with sub-k seeds (DBGSuccinct)
+    // or by SSHash's own chaining
+    config.min_seed_length = std::is_base_of_v<DBGSuccinct, TypeParam> ? 3 : k;
+    config.max_seed_length = k;
+    Query aln_query(*graph, query);
+    ExactSeeder seeder(aln_query, config);
+    Extender extender(aln_query, config);
+
+    bool has_placeholder = false;
+    for (const auto &chain : seeder.get_inexact_anchors(false)) {
+        const auto &path = chain.get_path();
+        if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) == path.end())
+            continue;
+
+        has_placeholder = true;
+        std::vector<Alignment> paths;
+        extender.extend(chain, [&](Alignment&& path) { paths.emplace_back(std::move(path)); });
+        ASSERT_EQ(1u, paths.size());
+        EXPECT_EQ(chain.get_cigar().to_string(), paths[0].get_cigar().to_string());
+        EXPECT_EQ(chain.get_path(), paths[0].get_path());
+    }
+    if constexpr(!std::is_same_v<DBGHashFast, TypeParam>) {
+        EXPECT_TRUE(has_placeholder);
+    }
+}
+
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(DBGAlignerRedoneTest, query_reverse_complement) {
+    auto graph = build_graph_batch<TypeParam>(4, { "AGCTTCGAGGCCAA" });
+    Query query(*graph, std::string("AACCG"));
+    EXPECT_EQ("AACCG", query.get_query(false));
+    EXPECT_EQ("CGGTT", query.get_query(true));
+}
+
+TYPED_TEST(DBGAlignerRedoneTest, align_reverse_complement_basic) {
+    size_t k = 5;
+    std::string reference = "AGCTTCGAGGCCAATCGT";
+    std::string query = reference;
+    ::reverse_complement(query.begin(), query.end());
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
+    ASSERT_EQ(DeBruijnGraph::BASIC, graph->get_mode());
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = k;
+    config.max_seed_length = k;
+    Query aln_query(*graph, query);
+
+    ExactSeeder seeder(aln_query, config);
+    Extender extender(aln_query, config);
+    std::vector<Alignment> paths;
+    align_query(aln_query, seeder, extender,
+                [&](Alignment&& path) { paths.emplace_back(std::move(path)); });
+    ASSERT_FALSE(paths.empty());
+    auto best = std::max_element(paths.begin(), paths.end(),
+        [&](const auto &a, const auto &b) {
+            return score_match(a, config) < score_match(b, config);
+        });
+    EXPECT_TRUE(best->get_orientation());
+    EXPECT_EQ(reference, best->get_spelling());
+    EXPECT_EQ("18=", best->get_cigar().to_string());
+}
+#endif
+
 } // namespace

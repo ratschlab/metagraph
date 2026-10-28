@@ -26,7 +26,7 @@ class Query {
 
     std::string generate_rc() {
         std::string rc = fwd_;
-        reverse_complement(rc_.begin(), rc_.end());
+        reverse_complement(rc.begin(), rc.end());
         return rc;
     }
 };
