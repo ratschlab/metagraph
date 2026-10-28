@@ -362,7 +362,8 @@ int run_server(Config *config) {
                     throw CurrentlyInitializingError();  // graph still loading
 
                 Json::Value content_json = parse_json_string(content);
-                logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
+                if (logger->should_log(spdlog::level::trace))
+                    logger->trace("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
                 const auto search_request = parse_search_request(content_json, *config);
                 // Validate fields omitted from the key before returning a cached result.
