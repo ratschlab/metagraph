@@ -332,12 +332,10 @@ if(APPLE)
   get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
 endif()
 
-# Static Boost libs from most distro packages (e.g. Ubuntu's libboost_iostreams.a)
-# aren't built with -fPIC, so linking them into the _pymetagraph_core shared
-# object fails with "relocation ... can not be used when making a shared
-# object; recompile with -fPIC". Only the python-bindings build needs a
-# shared object, so only it needs Boost as shared libs too.
-if(BUILD_PYTHON_BINDINGS)
+# Static Boost libraries of Linux distributions are usually not
+# position-independent, so they cannot be linked into the Python extension.
+# On macOS, code is position-independent by default.
+if(BUILD_PYTHON_BINDINGS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(Boost_USE_STATIC_LIBS OFF)
 else()
   set(Boost_USE_STATIC_LIBS ON)
