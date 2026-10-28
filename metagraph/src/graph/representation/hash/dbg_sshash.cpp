@@ -163,80 +163,6 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                           bit_vector_smart(std::move(pred_is_prev)));
 }
 
-[[noreturn]] void throw_invalid_input(const std::string& filename, const std::string& reason) {
-    std::string message = "Invalid SSHash input " + filename + ": " + reason
-            + ". SSHash expects a spectrum-preserving string set (e.g., unitigs"
-              " from 'metagraph transform --to-fasta') with one sequence per line";
-    common::logger->error(message);
-    throw std::invalid_argument(message);
-}
-
-// SSHash's parser (dictionary_builder::encode_strings) reads each record as exactly
-// one header line and one sequence line, and does not validate either. A sequence
-// line shorter than k underflows its k-mer count, and the minimizer pass then never
-// terminates, writing temp files until the disk is full. Wrapped FASTA records or
-// headers read as sequences are silently mis-encoded. Reject such inputs upfront,
-// following the same parsing rules.
-template <class Kmer, class Stream>
-void check_sshash_input(Stream& is, bool cf_seg, size_t k, const std::string& filename) {
-    std::string line;
-    size_t line_number = 0;
-    while (true) {
-        if (cf_seg) {
-            std::getline(is, line, '\t');
-        } else {
-            if (!std::getline(is, line))
-                break;
-            ++line_number;
-            if (line.empty() || line[0] != '>') {
-                throw_invalid_input(filename, fmt::format(
-                        "line {} is not a FASTA header (wrapped or multi-line records"
-                        " and FASTQ are not supported)", line_number));
-            }
-        }
-
-        std::getline(is, line);
-        if (is.eof()) {
-            if (line.size()) {
-                throw_invalid_input(filename, fmt::format(
-                        "line {} is not terminated by a newline", line_number + 1));
-            }
-            break;
-        }
-        ++line_number;
-
-        if (line.size() < k) {
-            throw_invalid_input(filename, fmt::format(
-                    "line {} has a sequence of length {}, shorter than k={}",
-                    line_number, line.size(), k));
-        }
-        for (char c : line) {
-            // is_valid indexes a table with the char, so rule out negative values first
-            if (static_cast<unsigned char>(c) >= 128 || !Kmer::is_valid(c)) {
-                throw_invalid_input(filename, fmt::format(
-                        "line {} has an invalid character (code {})",
-                        line_number, static_cast<int>(static_cast<unsigned char>(c))));
-            }
-        }
-    }
-}
-
-template <class Kmer>
-void check_sshash_input(const std::string& filename, size_t k) {
-    std::ifstream is(filename);
-    if (!is.good())
-        throw std::runtime_error("Cannot open SSHash input " + filename);
-
-    // same format dispatch as in dictionary_builder::encode_strings
-    using sshash::util::ends_with;
-    if (ends_with(filename, ".gz")) {
-        zip_istream zis(is);
-        check_sshash_input<Kmer>(zis, ends_with(filename, ".cf_seg.gz"), k, filename);
-    } else {
-        check_sshash_input<Kmer>(is, ends_with(filename, ".cf_seg"), k, filename);
-    }
-}
-
 // SSHash requires each k-mer (and, for canonical graphs, its reverse complement) to
 // occur at most once in the input. Otherwise, a k-mer gets several node indexes,
 // only one of which can be found by a lookup.
@@ -291,10 +217,6 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
     build_config.num_threads = get_num_threads();
     build_config.canonical = mode != BASIC;
 
-    std::visit([&](const auto& d) {
-        check_sshash_input<typename std::decay_t<decltype(d)>::kmer_type>(input_filename, k);
-    }, dict_);
-
     // keep SSHash's temp files out of the working directory
     auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "sshash");
     build_config.tmp_dirname = tmp_dir.string();
@@ -305,7 +227,10 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
 
     if (std::visit([&](const auto& d) { return has_duplicate_kmers(*this, d, num_nodes_); },
                    dict_)) {
-        throw_invalid_input(input_filename, "it contains duplicate k-mers");
+        std::string message = "SSHash input " + input_filename + " contains duplicate"
+                " k-mers. Build from unitigs instead, e.g., from 'metagraph transform --to-fasta'";
+        common::logger->error(message);
+        throw std::invalid_argument(message);
     }
 
     std::tie(succ_is_next_, pred_is_prev_) = generate_succ_pred(*this, num_nodes_);
