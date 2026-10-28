@@ -27,14 +27,10 @@ option(BUILD_PYTHON_BINDINGS "Build the pymetagraph pybind11 extension" OFF)
 if(BUILD_PYTHON_BINDINGS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  # jemalloc (pulled in via folly, if present on the system) uses a TLS model
-  # that can make dlopen()-ing this extension fail at import time with
-  # "cannot allocate memory in static TLS block", which would otherwise force
-  # every user of the plugin to remember to LD_PRELOAD libjemalloc. This is a
-  # non-power-user-facing plugin, so trade away jemalloc's allocator
-  # optimizations here for an extension that just imports cleanly. This only
-  # affects the Python extension -- the regular static `metagraph` binary
-  # build still picks up jemalloc normally.
+  # jemalloc (pulled in via folly, if present on the system) can exhaust the
+  # static TLS space, so importing the extension fails with "cannot allocate
+  # memory in static TLS block" unless libjemalloc is preloaded. Build the
+  # extension without it; builds without BUILD_PYTHON_BINDINGS keep jemalloc.
   set(CMAKE_DISABLE_FIND_PACKAGE_Jemalloc ON)
 endif()
 
