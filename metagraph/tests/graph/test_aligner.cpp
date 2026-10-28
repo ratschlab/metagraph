@@ -1800,4 +1800,10 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
 }
 #endif
 
+TEST(DBGAlignerTest, cigar_string_round_trip) {
+    for (std::string cigar : { "2S3=1X2I1D4=", "2G3=", "3=2G1X1G" }) {
+        EXPECT_EQ(cigar, Cigar(cigar).to_string());
+    }
+}
+
 } // namespace
