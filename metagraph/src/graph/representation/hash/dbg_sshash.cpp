@@ -66,11 +66,15 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     }
 }
 
-std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash& graph,
-                                                                 uint64_t num_nodes) {
+// Also reports whether the input had duplicate k-mers. SSHash requires each k-mer (and,
+// for canonical graphs, its reverse complement) to occur at most once. Otherwise,
+// a k-mer gets several node indexes, only one of which can be found by a lookup.
+std::tuple<bit_vector_smart, bit_vector_smart, bool>
+generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
     sdsl::bit_vector succ_is_next(num_nodes + 1, false);
     sdsl::bit_vector pred_is_prev(num_nodes + 1, false);
     bool with_rc = (graph.get_mode() != DBGSSHash::BASIC);
+    std::atomic<bool> has_duplicates(false);
 
     std::visit(
             [&](const auto& dict) {
@@ -88,7 +92,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
 
 #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
                 for (DBGSSHash::node_index begin = 0; begin <= num_nodes; begin += BS) {
-                    DBGSSHash::node_index end = std::min(begin + BS, num_nodes);
+                    DBGSSHash::node_index end = std::min(begin + BS, num_nodes + 1);
 
                     bool last_single_outdeg = false;
                     kmer_t kmer;
@@ -100,6 +104,11 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             std::string string_kmer = graph.get_node_sequence(node);
                             kmer = sshash::util::string_to_uint_kmer<kmer_t>(
                                     string_kmer.c_str(), graph.get_k());
+                            // a k-mer reached from its predecessor was already found at
+                            // this node by the neighbour lookup, so check only the others
+                            if (dict.lookup(kmer, with_rc).kmer_id
+                                    != graph_index_to_sshash(node))
+                                has_duplicates.store(true, std::memory_order_relaxed);
                         }
 
                         last_single_outdeg = false;
@@ -122,7 +131,9 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             }
                         }
 
-                        if (next == node + 1) {
+                        // in canonical mode, num_nodes + 1 is the reverse complement of
+                        // node 1, not the next forward node
+                        if (node < num_nodes && next == node + 1) {
                             assert(found_fw);
                             succ_is_next[node] = true;
                             last_single_outdeg = true;
@@ -159,8 +170,9 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
             },
             graph.data());
 
-    return std::make_pair(bit_vector_smart(std::move(succ_is_next)),
-                          bit_vector_smart(std::move(pred_is_prev)));
+    return std::make_tuple(bit_vector_smart(std::move(succ_is_next)),
+                           bit_vector_smart(std::move(pred_is_prev)),
+                           has_duplicates.load());
 }
 
 DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, size_t num_chars)
@@ -196,11 +208,27 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
     build_config.num_threads = get_num_threads();
     build_config.allow_reverse_complement_duplicates = mode == BASIC;
 
-    std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
+    // put SSHash's temp files under --disk-swap (default: ./) and clean them up
+    auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "sshash");
+    build_config.tmp_dirname = tmp_dir.string();
+    try {
+        std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
+    } catch (...) {
+        utils::remove_temp_dir(tmp_dir);
+        throw;
+    }
+    utils::remove_temp_dir(tmp_dir);
 
     num_nodes_ = dict_size();
 
-    std::tie(succ_is_next_, pred_is_prev_) = generate_succ_pred(*this, num_nodes_);
+    bool has_duplicates;
+    std::tie(succ_is_next_, pred_is_prev_, has_duplicates) = generate_succ_pred(*this, num_nodes_);
+    if (has_duplicates) {
+        std::string message = "SSHash input " + input_filename + " contains duplicate"
+                " k-mers. Build from unitigs instead, e.g., from 'metagraph transform --to-fasta'";
+        common::logger->error(message);
+        throw std::invalid_argument(message);
+    }
 }
 
 std::string DBGSSHash::file_extension() const {
