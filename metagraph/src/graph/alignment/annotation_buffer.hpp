@@ -14,6 +14,7 @@ namespace mtg {
 namespace graph {
 
 class CanonicalDBG;
+class DBGSuccinct;
 
 namespace align {
 
@@ -70,6 +71,13 @@ class AnnotationBuffer {
     }
 
   private:
+    // A source dummy k-mer continued by more real k-mers than this keeps an
+    // empty label set (the same as a seed locus with too many matches).
+    static constexpr size_t kMaxSourceDummyFanout = 16;
+
+    void resolve_source_dummy_labels(const DBGSuccinct &dbg_succ,
+                                     const std::vector<node_index> &nodes);
+
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
