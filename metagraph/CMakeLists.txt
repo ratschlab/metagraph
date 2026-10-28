@@ -618,10 +618,12 @@ endif()
 # pymetagraph Python extension
 #-------------------
 if(BUILD_PYTHON_BINDINGS)
+  find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
   execute_process(
-    COMMAND python3 -m pybind11 --cmakedir
+    COMMAND ${Python_EXECUTABLE} -m pybind11 --cmakedir
     OUTPUT_VARIABLE pybind11_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
   )
   find_package(pybind11 CONFIG REQUIRED)
 
