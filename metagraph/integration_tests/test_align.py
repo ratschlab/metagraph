@@ -391,6 +391,43 @@ class TestDNAAlign(TestingBase):
             self.assertEqual(a, b)
 
 
+    def test_align_chain_requires_coordinates(self):
+        def build(mode):
+            graph = self.tempdir.name + f'/genome.MT.{mode}'
+            self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                              output=graph, k=11, repr='succinct', mode=mode)
+            return graph + '.dbg'
+
+        def annotate(graph, anno_repr):
+            prefix = graph[:-len('.dbg')]
+            self._annotate_graph(TEST_DATA_DIR + '/genome.MT.fa', graph, prefix, anno_repr)
+            return f'{prefix}.{anno_repr}.annodbg'
+
+        def align(graph, anno):
+            command = f'{METAGRAPH} align --align-chain -i {graph} -a {anno} '\
+                      f'{TEST_DATA_DIR}/genome_MT1.fq'
+            return subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+
+        basic = build('basic')
+        canonical = build('canonical')
+
+        # no coordinates in the annotation
+        res = align(basic, annotate(basic, 'column'))
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('--align-chain requires', res.stderr.decode())
+        self.assertEqual(res.stdout, b'')
+
+        # coordinates are not used on CANONICAL graphs
+        res = align(canonical, annotate(canonical, 'column_coord'))
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('--align-chain requires', res.stderr.decode())
+
+        # a BASIC graph with coordinates is accepted
+        res = align(basic, annotate(basic, 'column_coord'))
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout.decode().rstrip().split('\n')), 7)
+
+
 @unittest.skipUnless(PROTEIN_MODE, "These alignment tests are only for the Protein alphabet")
 class TestProteinAlign(TestingBase):
     def setUp(self):
