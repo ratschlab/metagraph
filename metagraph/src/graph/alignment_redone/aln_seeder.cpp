@@ -969,9 +969,12 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
 
 
     // As in the existing aligner, once this many nodes were explored, stop at
-    // the first entry that is not on the furthest-reaching front
+    // the first entry that is not on the best path: entries are visited by
+    // increasing cost, so that is one which neither reaches further into the
+    // query than any before it, nor ties the cost of the first that got there
     double max_explored_nodes = config.max_nodes_per_seq_char * query_size;
     size_t max_query_dist = 0;
+    size_t max_query_dist_cost = 0;
 
     for (size_t cost = 0; cost < S.size(); ++cost) {
         bool done = false;
@@ -998,12 +1001,17 @@ void align_impl(const std::function<size_t(DeBruijnGraph::node_index, size_t, An
                 if (std::get<0>(it->second) != best_dist)
                     continue;
 
-                if (num_explored_nodes >= max_explored_nodes && query_dist < max_query_dist) {
+                bool on_best_path = query_dist > max_query_dist
+                    || (query_dist == max_query_dist && cost == max_query_dist_cost);
+                if (num_explored_nodes >= max_explored_nodes && !on_best_path) {
                     common::logger->trace("Node limit reached after {} nodes", num_explored_nodes);
                     done = true;
                     break;
                 }
-                max_query_dist = std::max(max_query_dist, query_dist);
+                if (query_dist > max_query_dist) {
+                    max_query_dist = query_dist;
+                    max_query_dist_cost = cost;
+                }
 
                 Cigar::Operator last_op = std::get<3>(it->second);
                 size_t num_matches = std::get<5>(it->second);
