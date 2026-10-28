@@ -846,7 +846,7 @@ TEST(LabeledAlignerTest, DISABLED_SubkSeedLabels) {
                                     || labeled.find(sequence_rc) != std::string::npos)
                         << mode << " " << query << " " << alignment;
                 }
-                found |= sequence.size() == query.size()
+                found |= (sequence == query || sequence_rc == query)
                     && alignment_labels == std::vector<std::string>{ label };
             }
             EXPECT_TRUE(found) << mode << " " << query;

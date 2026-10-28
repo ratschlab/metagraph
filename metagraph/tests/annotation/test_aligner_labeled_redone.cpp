@@ -547,7 +547,8 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsCycle) {
 // Seeds shorter than k on a succinct graph (k = 5, min seed length 3), with
 // A = TTACGAAA and B = ACGTTGCA. ACGT and GTTG occur only in B, TACGA only in
 // A. ACGT is a suffix only of the dummy source k-mer $ACGT that starts B. ACGC
-// occurs nowhere, and being shorter than k, has no full k-mer to compare to.
+// occurs nowhere and is shorter than k, so it is seeded past the last full
+// k-mer; any partial alignment must still spell part of its label's sequence.
 TEST(LabeledAlignerRedoneTest, SubkSeedLabels) {
     size_t k = 5;
     const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
