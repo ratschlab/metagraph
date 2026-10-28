@@ -808,39 +808,48 @@ TYPED_TEST(LabeledAlignerTest, CanonicalBackwardExtensionMismatch) {
 
 #if ! _PROTEIN_GRAPH
 // Seeds shorter than k on a succinct graph (k = 5, min seed length 3), with
-// A = TTACGAAA and B = ACGTTGCA. ACGT and GTTG occur only in B, TACGA only in
-// A. ACGT is a suffix only of the dummy source k-mer $ACGT that starts B.
-// The existing aligner matches sub-k seeds against node suffixes. It finds no
-// alignment for ACGT on the basic graph and reports TTG (only in B) as an
-// alignment to A spelling ACG. Disabled until that is fixed.
+// A = TTACGAAA and B = ACGTTGCA. ACGT, TGCA and GTTG occur only in B, TACGA
+// only in A. ACGT is a suffix only of the dummy source k-mer $ACGT that starts B.
+// The existing aligner matches sub-k seeds against node suffixes, so on the
+// basic graph it finds no alignment for ACGT. Disabled until that is fixed.
 TEST(LabeledAlignerTest, DISABLED_SubkSeedLabels) {
     size_t k = 5;
     const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
     const std::vector<std::string> labels { "A", "B" };
     const std::vector<std::pair<std::string, std::string>> queries {
-        { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }
+        { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }, { "TGCA", "B" }
     };
 
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
         auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
                 k, sequences, labels, mode);
-        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
 
         DBGAlignerConfig config;
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
         config.min_seed_length = 3;
         LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
 
         for (const auto &[query, label] : queries) {
-            auto alignments = aligner.align(query);
-            EXPECT_FALSE(alignments.empty()) << mode << " " << query;
-            for (const auto &alignment : alignments) {
-                EXPECT_EQ(query.substr(alignment.get_clipping(), alignment.get_sequence().size()),
-                          alignment.get_sequence()) << mode << " " << alignment;
+            bool found = false;
+            for (const auto &alignment : aligner.align(query)) {
+                // every label of an alignment, including a partial one, must
+                // contain its sequence on either strand
+                std::string sequence(alignment.get_sequence());
+                std::string sequence_rc = sequence;
+                reverse_complement(sequence_rc.begin(), sequence_rc.end());
+                std::vector<std::string> alignment_labels;
                 for (auto column : alignment.label_columns) {
-                    EXPECT_EQ(label, label_encoder.decode(column)) << mode << " " << alignment;
+                    alignment_labels.emplace_back(label_encoder.decode(column));
+                    const std::string &labeled = sequences[alignment_labels.back() == "A" ? 0 : 1];
+                    EXPECT_TRUE(labeled.find(sequence) != std::string::npos
+                                    || labeled.find(sequence_rc) != std::string::npos)
+                        << mode << " " << query << " " << alignment;
                 }
+                found |= sequence.size() == query.size()
+                    && alignment_labels == std::vector<std::string>{ label };
             }
+            EXPECT_TRUE(found) << mode << " " << query;
         }
     }
 }

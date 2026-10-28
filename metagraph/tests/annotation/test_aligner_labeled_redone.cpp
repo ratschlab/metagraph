@@ -546,16 +546,14 @@ TYPED_TEST(LabeledAlignerRedoneTest, SimpleTangleGraphCoordsCycle) {
 #if ! _PROTEIN_GRAPH
 // Seeds shorter than k on a succinct graph (k = 5, min seed length 3), with
 // A = TTACGAAA and B = ACGTTGCA. ACGT and GTTG occur only in B, TACGA only in
-// A. ACGT is a suffix only of the dummy source k-mer $ACGT that starts B.
+// A. ACGT is a suffix only of the dummy source k-mer $ACGT that starts B. ACGC
+// occurs nowhere, and being shorter than k, has no full k-mer to compare to.
 TEST(LabeledAlignerRedoneTest, SubkSeedLabels) {
     size_t k = 5;
     const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
     const std::vector<std::string> labels { "A", "B" };
-    const std::vector<std::pair<std::string, std::string>> queries {
-        { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }
-    };
 
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
         auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
                 k, sequences, labels, mode);
         const auto &graph = anno_graph->get_graph();
@@ -567,13 +565,67 @@ TEST(LabeledAlignerRedoneTest, SubkSeedLabels) {
         config.min_seed_length = 3;
         config.max_seed_length = k;
 
-        for (const auto &[query, label] : queries) {
+        for (const auto &[query, label] : std::vector<std::pair<std::string, std::string>> {
+                { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }, { "ACGC", "" }
+            }) {
             Query aln_query(graph, query);
             LabeledSeeder seeder(anno_buffer, aln_query, config);
             LabeledExtender extender(anno_buffer, aln_query, config);
             std::vector<Alignment> paths;
             align_query(aln_query, seeder, extender,
                         [&](Alignment&& path) { paths.emplace_back(std::move(path)); });
+
+            if (label.empty()) {
+                EXPECT_TRUE(paths.empty()) << mode << " " << query;
+                continue;
+            }
+
+            ASSERT_FALSE(paths.empty()) << mode << " " << query;
+            for (const auto &path : paths) {
+                EXPECT_EQ(query, path.get_spelling()) << mode;
+                for (auto label_class : path.get_label_classes()) {
+                    ASSERT_NE(Anchor::nannot, label_class) << mode << " " << query;
+                    for (auto column : anno_buffer.get_cached_column_set(label_class)) {
+                        EXPECT_EQ(label, label_encoder.decode(column)) << mode << " " << query;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// TGCA ends B. Sub-k seeds are extended forward to full k-mers, and on basic
+// graphs the reverse complement is not seeded, so the seed is lost. Disabled
+// until that is fixed.
+TEST(LabeledAlignerRedoneTest, DISABLED_SubkSeedAtSequenceEnd) {
+    size_t k = 5;
+    const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    for (auto mode : { DeBruijnGraph::BASIC }) {
+        auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                k, sequences, labels, mode);
+        const auto &graph = anno_graph->get_graph();
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
+        AnnotationBuffer anno_buffer(graph, anno_graph->get_annotator());
+
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+        config.min_seed_length = 3;
+        config.max_seed_length = k;
+
+        for (const auto &[query, label] : std::vector<std::pair<std::string, std::string>> { { "TGCA", "B" } }) {
+            Query aln_query(graph, query);
+            LabeledSeeder seeder(anno_buffer, aln_query, config);
+            LabeledExtender extender(anno_buffer, aln_query, config);
+            std::vector<Alignment> paths;
+            align_query(aln_query, seeder, extender,
+                        [&](Alignment&& path) { paths.emplace_back(std::move(path)); });
+
+            if (label.empty()) {
+                EXPECT_TRUE(paths.empty()) << mode << " " << query;
+                continue;
+            }
 
             ASSERT_FALSE(paths.empty()) << mode << " " << query;
             for (const auto &path : paths) {

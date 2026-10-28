@@ -513,7 +513,8 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             [&](edge_index next_first, edge_index next_last, boss::BOSS::TAlphabet s) {
                                 char c = boss.decode(s);
                                 bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
-                                if (!canonical || next_is_exact_match || nodes[i] == DeBruijnGraph::npos) {
+                                if (!canonical || next_is_exact_match
+                                        || i >= nodes.size() || nodes[i] == DeBruijnGraph::npos) {
                                     traverse.emplace_back(next_first, next_last, suffix + c,
                                                         next_is_exact_match);
                                 }
