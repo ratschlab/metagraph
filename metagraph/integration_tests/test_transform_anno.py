@@ -604,7 +604,8 @@ class TestRowDiffCharSSHash(TestingBase):
                    f'--min-kmers-fraction-label 0 {TEST_DATA_DIR}/transcripts_1000.fa')
             res = subprocess.run(cmd.split(), stdout=PIPE, stderr=PIPE)
             self.assertEqual(res.returncode, 0, msg=res.stderr.decode())
-            return res.stdout
+            # with several threads, results are printed in no fixed order
+            return sorted(res.stdout.splitlines())
         expected = query(self.brwt_path)
         self.assertGreater(len(expected), 0)
         self.assertEqual(expected, query(self.char_path))
