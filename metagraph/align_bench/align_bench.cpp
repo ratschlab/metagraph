@@ -5,7 +5,8 @@
 //   align_bench MODE TIMEOUT_SEC SKIP align -i GRAPH [-a ANNO] [align options] READS.fa
 //
 // MODE:
-//   default           align each read with one aligner object reused across reads
+//   default | map     align (or, with map, only map via LabeledAligner::map_batch)
+//                     each read with one aligner object reused across reads
 //                     (as a binding would), print one TSV line per read:
 //                     name, status, latency_us, score, cigar, orientation,
 //                     query_begin, query_end, spelling, labels (';'-joined)
@@ -81,7 +82,7 @@ void print_histogram(const std::string &name, const std::map<size_t, size_t> &hi
 int main(int argc, char *argv[]) {
     if (argc < 6) {
         std::cerr << "usage: " << argv[0]
-                  << " default|fanout TIMEOUT_SEC SKIP align [options] READS.fa\n";
+                  << " default|map|fanout TIMEOUT_SEC SKIP align [options] READS.fa\n";
         return 1;
     }
     const std::string mode = argv[1];
@@ -134,7 +135,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    if (mode != "default") {
+    if (mode != "default" && mode != "map") {
         std::cerr << "unknown mode " << mode << '\n';
         return 1;
     }
@@ -179,7 +180,27 @@ int main(int argc, char *argv[]) {
             int64_t start = now_us();
             read_start_us = start;
             try {
-                {
+                if (mode == "map") {
+                    std::optional<align::LabeledAligner<>::LabelMapping> mapping;
+                    dynamic_cast<const align::LabeledAligner<>&>(*old_aligner).map_batch(
+                        { { std::string(read->name.s), seq } },
+                        [&](const std::string &, auto&& result) { mapping = std::move(result); }
+                    );
+                    int64_t latency = now_us() - start;
+                    if (mapping) {
+                        std::vector<std::string> labels;
+                        for (auto column : mapping->labels) {
+                            labels.emplace_back(
+                                anno->get_annotator().get_label_encoder().decode(column));
+                        }
+                        line = fmt::format("\tOK\t{}\t{}\t*\t{}\t{}\t{}\t*\t{}", latency,
+                                           mapping->num_matches, mapping->orientation,
+                                           mapping->query_begin, mapping->query_end,
+                                           fmt::join(labels, ";"));
+                    } else {
+                        line = fmt::format("\tUNMAPPED\t{}\t*\t*\t*\t*\t*\t*\t*", latency);
+                    }
+                } else {
                     auto results = old_aligner->align(seq);
                     int64_t latency = now_us() - start;
                     const align::Alignment *best = nullptr;
