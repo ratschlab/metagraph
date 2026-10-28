@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <random>
 #include <unordered_set>
 
 #include "../graph/all/test_dbg_helpers.hpp"
@@ -11,6 +12,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -60,6 +62,80 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
+
+TYPED_TEST(LabeledAlignerTest, CachedColumnSetsKeepTheirAddress) {
+    // The labeled extender holds references to cached column sets while it
+    // caches new ones, so caching must never move the existing sets.
+    size_t k = 4;
+    const std::vector<std::string> sequences { "GCAAT", "AATGCTT" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+    const auto &graph = anno_graph->get_graph();
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+
+    auto path = map_to_nodes_sequentially(graph, sequences[1]);
+    ASSERT_EQ(sequences[1].size() - k + 1, path.size());
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(path));
+    buffer.fetch_queued_annotations();
+
+    const auto *node_labels = buffer.get_labels(path.front());
+    ASSERT_TRUE(node_labels);
+    const auto node_labels_copy = *node_labels;
+
+    size_t first = buffer.cache_column_set(AnnotationBuffer::Columns{ 0, 1 });
+    const auto &first_set = buffer.get_cached_column_set(first);
+
+    // enough new sets to reallocate any contiguous storage several times
+    for (AnnotationBuffer::Columns::value_type i = 2; i < 10'000; ++i) {
+        buffer.cache_column_set(AnnotationBuffer::Columns{ i });
+    }
+
+    EXPECT_EQ(&first_set, &buffer.get_cached_column_set(first));
+    EXPECT_EQ((AnnotationBuffer::Columns{ 0, 1 }), first_set);
+    EXPECT_EQ(node_labels, buffer.get_labels(path.front()));
+    EXPECT_EQ(node_labels_copy, *node_labels);
+}
+
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(LabeledAlignerTest, FetchBothStrandsInOneBatch) {
+    // Queue the forward path of a sequence and then its reverse complement in
+    // the same batch. On CANONICAL graphs, the reverse-complement nodes map to
+    // the forward nodes queued just before, and the buffer grows (and may
+    // reallocate) while it registers them. Every node must get its labels.
+    size_t k = 21;
+    std::mt19937 rng(42);
+    std::string sequence(5000, 'A');
+    for (char &c : sequence) {
+        c = "ACGT"[rng() % 4];
+    }
+    std::string rc_sequence = sequence;
+    reverse_complement(rc_sequence.begin(), rc_sequence.end());
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, { sequence }, { "A" }, DeBruijnGraph::CANONICAL
+    );
+    const auto &graph = anno_graph->get_graph();
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+
+    auto path = map_to_nodes_sequentially(graph, sequence);
+    auto rc_path = map_to_nodes_sequentially(graph, rc_sequence);
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(path));
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(rc_path));
+    buffer.fetch_queued_annotations();
+
+    for (const auto *nodes : { &path, &rc_path }) {
+        for (auto node : *nodes) {
+            ASSERT_NE(DeBruijnGraph::npos, node);
+            const auto *labels = buffer.get_labels(node);
+            ASSERT_TRUE(labels) << node;
+            EXPECT_EQ(1u, labels->size()) << node;
+        }
+    }
+}
+#endif  // ! _PROTEIN_GRAPH
 
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;
