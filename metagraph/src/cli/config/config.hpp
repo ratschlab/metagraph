@@ -120,6 +120,9 @@ class Config {
     bool alignment_chain = false;
     bool alignment_post_chain = false;
     bool alignment_seed_complexity_filter = true;
+    // alignment engine of `align`: "default" (graph/alignment) or "redone"
+    // (graph/alignment_redone, opt-in, TSV output only)
+    std::string alignment_engine = "default";
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;

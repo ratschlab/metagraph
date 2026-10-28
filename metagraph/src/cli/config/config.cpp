@@ -287,6 +287,8 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-xdrop")) {
             alignment_xdrop = atol(get_value(i++));
             xdrop_override = true;
+        } else if (!strcmp(argv[i], "--align-engine")) {
+            alignment_engine = get_value(i++);
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {
             alignment_min_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-seed-length")) {
@@ -689,6 +691,16 @@ Config::Config(int argc, char *argv[]) {
     if (min_count >= max_count) {
         std::cerr << "Error: max-count must be greater than min-count" << std::endl;
         print_usage(argv[0], identity);
+    }
+
+    if (alignment_engine != "default" && alignment_engine != "redone") {
+        std::cerr << "Error: align-engine must be 'default' or 'redone'" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if (identity == ALIGN && alignment_engine == "redone" && output_json) {
+        std::cerr << "Error: --align-engine redone supports TSV output only" << std::endl;
+        print_usage_and_exit = true;
     }
 
     if (alignment_max_seed_length < alignment_min_seed_length) {
@@ -1113,6 +1125,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --align-engine [STR]\t\t\t\talignment engine: 'default' or the opt-in 'redone' (TSV only, best path only) [default]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");

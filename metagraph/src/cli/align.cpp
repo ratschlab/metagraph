@@ -10,6 +10,9 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/alignment_redone/aligner_config.hpp"
+#include "graph/alignment_redone/aln_query.hpp"
+#include "graph/alignment_redone/aln_seeder.hpp"
+#include "graph/alignment_redone/annotation_buffer.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -72,6 +75,74 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
 align_redone::DBGAlignerConfig initialize_redone_aligner_config(const Config &config,
                                                                 const DeBruijnGraph &graph) {
     return { initialize_aligner_config(config, graph) };
+}
+
+std::optional<RedoneBestAlignment>
+align_redone_best(const DeBruijnGraph &graph,
+                  const AnnotatedDBG::Annotator *annotator,
+                  const align_redone::DBGAlignerConfig &config,
+                  std::string_view seq,
+                  bool connect_anchors,
+                  bool extend_chains) {
+    namespace ar = align_redone;
+
+    ar::Query query(graph, std::string(seq));
+
+    std::optional<ar::AnnotationBuffer> buffer;
+    std::unique_ptr<ar::ExactSeeder> seeder;
+    std::unique_ptr<ar::Extender> extender;
+    if (annotator) {
+        buffer.emplace(graph, *annotator);
+        seeder = std::make_unique<ar::LabeledSeeder>(*buffer, query, config);
+        extender = std::make_unique<ar::LabeledExtender>(*buffer, query, config);
+    } else {
+        seeder = std::make_unique<ar::ExactSeeder>(query, config);
+        extender = std::make_unique<ar::Extender>(query, config);
+    }
+
+    std::optional<ar::Alignment> best;
+    auto callback = [&](ar::Alignment&& aln) {
+        if (!best || ar::score_match(aln, config) > ar::score_match(*best, config))
+            best = std::move(aln);
+    };
+    if (extend_chains) {
+        ar::align_query(query, *seeder, *extender, callback, connect_anchors);
+    } else {
+        ar::align_query(query, *seeder, callback, connect_anchors);
+    }
+
+    if (!best)
+        return std::nullopt;
+
+    RedoneBestAlignment result { std::move(*best), {} };
+    const auto &classes = result.alignment.get_label_classes();
+    if (annotator && classes.size() && classes.front() != ar::Anchor::nannot) {
+        for (auto column : buffer->get_cached_column_set(classes.front())) {
+            result.labels.emplace_back(annotator->get_label_encoder().decode(column));
+        }
+    }
+    return result;
+}
+
+// One TSV line in the layout of format_alignment: header, query, then
+// orientation, spelling, score, cigar, and the labels of the best alignment.
+static std::string format_redone_alignment(const std::string &header,
+                                           std::string_view seq,
+                                           const std::optional<RedoneBestAlignment> &best,
+                                           const align_redone::DBGAlignerConfig &config,
+                                           bool labeled) {
+    if (!best)
+        return fmt::format("{}\t{}\t*\t*\t{}\t*\t*\t*\n", header, seq, config.min_path_score);
+
+    const auto &aln = best->alignment;
+    std::string sout = fmt::format("{}\t{}\t{}\t{}\t{}\t{}", header, seq,
+                                   aln.get_orientation() ? '-' : '+',
+                                   aln.get_spelling(),
+                                   align_redone::score_match(aln, config),
+                                   aln.get_cigar().to_string());
+    if (labeled)
+        sout += fmt::format("\t{}", fmt::join(best->labels, ";"));
+    return sout + "\n";
 }
 
 void map_sequences_in_file(const std::string &file,
@@ -381,7 +452,11 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
+    const bool use_redone = config->alignment_engine == "redone";
+    std::optional<align_redone::DBGAlignerConfig> redone_config;
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
+    if (use_redone)
+        redone_config = initialize_redone_aligner_config(*config, *graph);
 
     assert(config->infbase_annotators.size() <= 1);
     std::unique_ptr<AnnotatedDBG> anno_dbg;
@@ -455,6 +530,24 @@ int align_to_graph(Config *config) {
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
                     assert(get_num_threads() > SEPARATE_CACHES_SWITCHOVER_THREADS);
                     aln_graph = wrap_graph(aln_graph);
+                }
+
+                if (use_redone) {
+                    // Labeled alignment goes through the annotated graph, which
+                    // already wraps a PRIMARY graph into CanonicalDBG.
+                    const DeBruijnGraph &redone_graph = anno_dbg ? anno_dbg->get_graph()
+                                                                 : *aln_graph;
+                    const auto *annotator = anno_dbg ? &anno_dbg->get_annotator() : nullptr;
+                    for (const auto &[header, seq] : batch) {
+                        auto best = align_redone_best(redone_graph, annotator, *redone_config,
+                                                      seq, /*connect_anchors=*/true,
+                                                      /*extend_chains=*/true);
+                        auto res = format_redone_alignment(header, seq, best, *redone_config,
+                                                           annotator);
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << res;
+                    }
+                    return;
                 }
 
                 std::unique_ptr<IDBGAligner> aligner;
