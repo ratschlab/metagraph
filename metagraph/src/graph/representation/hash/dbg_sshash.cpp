@@ -383,10 +383,6 @@ uint64_t DBGSSHash::num_nodes() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
 }
 
-uint64_t DBGSSHash::max_index() const {
-    return mode_ != BASIC ? dict_size() * 2 : dict_size();
-}
-
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)>& callback,
                                           const std::function<bool()>& terminate) const {
@@ -768,27 +764,22 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
     return str_kmer;
 }
 
-std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) const {
+uint64_t DBGSSHash::get_sequence_id(node_index node) const {
     assert(node <= max_index());
     if (node == npos)
-        return std::vector<seq_index>(1, node);
+        return npos;
 
     if (node > dict_size()) {
         assert(mode_ == CANONICAL);
         size_t num_base_contigs = succ_is_next_.size() + pred_is_prev_.size() - succ_is_next_.num_set_bits() - pred_is_prev_.num_set_bits();
-        auto ret_val = get_sequence_ids(reverse_complement(node));
-        for (seq_index &id : ret_val) {
-            id += num_base_contigs;
-        }
-
-        return ret_val;
+        return get_sequence_id(reverse_complement(node)) + num_base_contigs;
     }
 
     // treat each unitig as a sequence
     size_t srank = succ_is_next_.rank0(node);
     size_t prank = pred_is_prev_.rank0(node);
 
-    seq_index contig_id = srank + prank;
+    uint64_t contig_id = srank + prank;
 
     bool s_unitig_back = !succ_is_next_[node];
     bool s_unitig_front = !pred_is_prev_[node];
@@ -798,7 +789,7 @@ std::vector<DBGSSHash::seq_index> DBGSSHash::get_sequence_ids(node_index node) c
         --contig_id;
     }
 
-    return std::vector<seq_index>(1, contig_id + 1);
+    return contig_id + 1;
 }
 
 void DBGSSHash::serialize(std::ostream& out) const {

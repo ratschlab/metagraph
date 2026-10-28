@@ -2087,8 +2087,8 @@ std::vector<Alignment> ExactSeeder::get_inexact_anchors(bool align) const {
                     return;
 
                 auto get_sshash_distance = [&](DeBruijnGraph::node_index node, DeBruijnGraph::node_index target_node) -> size_t {
-                    DeBruijnGraph::seq_index contig = sshash->get_sequence_ids(node)[0];
-                    DeBruijnGraph::seq_index target_contig = sshash->get_sequence_ids(target_node)[0];
+                    uint64_t contig = sshash->get_sequence_id(node);
+                    uint64_t target_contig = sshash->get_sequence_id(target_node);
                     if (contig == target_contig) {
                         if (node < sshash->reverse_complement(node)) {
                             // canonical strand
