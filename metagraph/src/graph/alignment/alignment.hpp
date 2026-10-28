@@ -418,9 +418,10 @@ class AlignmentResults {
 };
 
 // Return the string spelled by the path, skipping the first offset characters.
-// The path may have disconnects (if it came from a chain alignment), which are
-// spelled from the neighbouring nodes. If there is an invalid edge, or too long
-// a stretch of npos nodes, this throws a runtime error.
+// The path may have disconnects (npos nodes, if it came from a chain alignment).
+// Their characters are filled in from overlapping neighbouring nodes, and are
+// '$' where no node covers them. If there is an invalid edge, this throws a
+// runtime error.
 std::string spell_path(const DeBruijnGraph &graph,
                        const std::vector<DeBruijnGraph::node_index> &path,
                        size_t offset = 0);
