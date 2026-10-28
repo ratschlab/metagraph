@@ -670,6 +670,7 @@ TYPED_TEST(DBGAlignerRedoneTest, align_low_similarity2_del) {
 // alignment from running for minutes, and a sequence in the graph must still
 // align exactly.
 void check_low_similarity4(const DeBruijnGraph &graph) {
+    size_t k = graph.get_k();
     std::string query = "TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGAT"
                         "CGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"
                         "TCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGAT"
@@ -695,6 +696,8 @@ void check_low_similarity4(const DeBruijnGraph &graph) {
         config.gap_opening_penalty = -5;
         config.gap_extension_penalty = -2;
         config.max_nodes_per_seq_char = nodes_per_seq_char;
+        config.min_seed_length = k;
+        config.max_seed_length = k;
 
         Query aln_query(graph, query);
         ExactSeeder seeder(aln_query, config);

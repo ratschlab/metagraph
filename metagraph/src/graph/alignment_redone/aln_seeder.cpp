@@ -486,8 +486,13 @@ std::vector<Anchor> ExactSeeder::get_anchors() const {
                             [&](edge_index next_first, edge_index next_last, boss::BOSS::TAlphabet s) {
                                 char c = boss.decode(s);
                                 bool next_is_exact_match = is_exact_match && i + cur_match_size < this_query.size() && this_query[i + cur_match_size] == c;
-                                if (!canonical || next_is_exact_match
-                                        || i >= nodes.size() || nodes[i] == DeBruijnGraph::npos) {
+                                // The reverse-complement pass only creates anchors from
+                                // exact matches, which are complete at length k
+                                bool keep = orientation
+                                    ? next_is_exact_match && cur_match_size + 1 < k
+                                    : !canonical || next_is_exact_match
+                                        || i >= nodes.size() || nodes[i] == DeBruijnGraph::npos;
+                                if (keep) {
                                     traverse.emplace_back(next_first, next_last, suffix + c,
                                                         next_is_exact_match);
                                 }
@@ -1881,8 +1886,9 @@ void Extender::extend(const Alignment &aln,
                 if (query_dist < max_query_dist)
                     return false;
 
+                // Entries the node budget left unexplored can score higher
+                // than the best explored one; do not start from them.
                 auto score = get_score(cost, dist, query_dist);
-                assert(score <= best_score);
                 return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
@@ -1990,8 +1996,9 @@ void Extender::extend(const Alignment &aln,
                 if (query_dist < max_query_dist)
                     return false;
 
+                // Entries the node budget left unexplored can score higher
+                // than the best explored one; do not start from them.
                 auto score = get_score(cost, dist, query_dist);
-                assert(score <= best_score);
                 return score == best_score;
             },
             [&](size_t cost, const SMap &data, size_t query_dist, DeBruijnGraph::node_index node) {
