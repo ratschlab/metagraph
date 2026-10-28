@@ -13,6 +13,8 @@
   start with (`prefix`, forward resolution) each 19-mer read window, CANONICAL
   graph. Windows with at least one match.
 
+- `summary_subk_51cf39976.tsv`: rerun on `51cf39976` (sub-k reverse-complement pass fix on CanonicalDBG): redone, labeled, seed 19 on PRIMARY, BASIC and CANONICAL (control).
+
 Column definitions are in `metrics.py` and `fanout_summary.py`. Seeds:
 - `fullk`: `--align-min-seed-length 31`;
 - `s19`: 19;
