@@ -308,6 +308,24 @@ std::string format_alignment(const std::string &header,
     return sout;
 }
 
+// header, strand, labels, number of query characters covered by their seeds,
+// and the query range they span
+static std::string format_mapping(const std::string &header,
+                                  const std::optional<LabeledAligner<>::LabelMapping> &mapping,
+                                  const annot::LabelEncoder<> &encoder) {
+    if (!mapping)
+        return fmt::format("{}\t*\t*\t0\t*\t*\n", header);
+
+    std::vector<std::string> labels;
+    labels.reserve(mapping->labels.size());
+    for (auto column : mapping->labels) {
+        labels.emplace_back(encoder.decode(column));
+    }
+    return fmt::format("{}\t{}\t{}\t{}\t{}\t{}\n", header,
+                       mapping->orientation ? '-' : '+', fmt::join(labels, ";"),
+                       mapping->num_matches, mapping->query_begin, mapping->query_end);
+}
+
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -465,6 +483,19 @@ int align_to_graph(Config *config) {
                 if (anno_dbg) {
                     encoder = &anno_dbg->get_annotator().get_label_encoder();
                     cth = anno_dbg->get_coord_to_header();
+                }
+
+                if (config->align_map_only) {
+                    assert(anno_dbg);
+                    dynamic_cast<const LabeledAligner<>&>(*aligner).map_batch(batch,
+                        [&](const std::string &header,
+                            std::optional<LabeledAligner<>::LabelMapping>&& mapping) {
+                            auto res = format_mapping(header, mapping, *encoder);
+                            std::lock_guard<std::mutex> lock(print_mutex);
+                            *out << res;
+                        }
+                    );
+                    return;
                 }
 
                 aligner->align_batch(batch,

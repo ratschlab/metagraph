@@ -180,6 +180,50 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     }
 }
 
+TYPED_TEST(LabeledAlignerTest, MapWithoutExtension) {
+    size_t k = 4;
+    /*
+        A    A    B    B    B    B
+        GCAA-CAAT-AATG-ATGC-TGCT-GCTT
+    */
+    const std::vector<std::string> sequences { "GCAAT", "AATGCTT" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.min_exact_match = 0.5;
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+    const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
+
+    std::vector<std::optional<LabeledAligner<>::LabelMapping>> mappings;
+    aligner.map_batch({ { "B", "TAATGCTTA" }, { "AB", "GCAATGCTT" }, { "none", "CCCCCCCC" } },
+        [&](const std::string &, auto&& mapping) { mappings.push_back(std::move(mapping)); }
+    );
+    ASSERT_EQ(3u, mappings.size());
+
+    // AATGCTT is B's, covered in full
+    ASSERT_TRUE(mappings[0]);
+    EXPECT_FALSE(mappings[0]->orientation);
+    ASSERT_EQ(1u, mappings[0]->labels.size());
+    EXPECT_EQ("B", label_encoder.decode(mappings[0]->labels[0]));
+    EXPECT_EQ(7u, mappings[0]->num_matches);
+    EXPECT_EQ(1u, mappings[0]->query_begin);
+    EXPECT_EQ(8u, mappings[0]->query_end);
+
+    // GCAAT (A) covers 5 characters, AATGCTT (B) covers 7
+    ASSERT_TRUE(mappings[1]);
+    ASSERT_EQ(1u, mappings[1]->labels.size());
+    EXPECT_EQ("B", label_encoder.decode(mappings[1]->labels[0]));
+    EXPECT_EQ(7u, mappings[1]->num_matches);
+    EXPECT_EQ(2u, mappings[1]->query_begin);
+    EXPECT_EQ(9u, mappings[1]->query_end);
+
+    EXPECT_FALSE(mappings[2]);
+}
+
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     size_t k = 3;
     /*  B                  AB  AB
