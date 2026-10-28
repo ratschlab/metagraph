@@ -98,6 +98,7 @@ TYPED_TEST(LabeledAlignerTest, CachedColumnSetsKeepTheirAddress) {
     EXPECT_EQ(node_labels_copy, *node_labels);
 }
 
+#if ! _PROTEIN_GRAPH
 TYPED_TEST(LabeledAlignerTest, FetchBothStrandsInOneBatch) {
     // Queue the forward path of a sequence and then its reverse complement in
     // the same batch. On CANONICAL graphs, the reverse-complement nodes map to
@@ -134,6 +135,7 @@ TYPED_TEST(LabeledAlignerTest, FetchBothStrandsInOneBatch) {
         }
     }
 }
+#endif  // ! _PROTEIN_GRAPH
 
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;
