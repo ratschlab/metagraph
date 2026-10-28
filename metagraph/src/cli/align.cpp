@@ -31,14 +31,11 @@ using mtg::common::logger;
 const size_t SEPARATE_CACHES_SWITCHOVER_THREADS = 8;
 
 
-namespace {
-
-// Both aligner engines take the same options from the command line.
-template <class AlignerConfig>
-AlignerConfig make_aligner_config(const Config &config, const DeBruijnGraph &graph) {
+DBGAlignerConfig initialize_aligner_config(const Config &config,
+                                           const DeBruijnGraph &graph) {
     assert(config.alignment_num_alternative_paths);
 
-    AlignerConfig c = {
+    DBGAlignerConfig c = {
         .num_alternative_paths = config.alignment_num_alternative_paths,
         .min_seed_length = std::min(config.alignment_min_seed_length,
                                     graph.get_k()),
@@ -62,7 +59,7 @@ AlignerConfig make_aligner_config(const Config &config, const DeBruijnGraph &gra
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,
         .alignment_mm_transversion_score = config.alignment_mm_transversion_score,
-        .score_matrix = typename AlignerConfig::ScoreMatrix{},
+        .score_matrix = DBGAlignerConfig::ScoreMatrix{},
     };
 
     c.set_scoring_matrix();
@@ -72,16 +69,9 @@ AlignerConfig make_aligner_config(const Config &config, const DeBruijnGraph &gra
     return c;
 }
 
-} // namespace
-
-DBGAlignerConfig initialize_aligner_config(const Config &config,
-                                           const DeBruijnGraph &graph) {
-    return make_aligner_config<DBGAlignerConfig>(config, graph);
-}
-
 align_redone::DBGAlignerConfig initialize_redone_aligner_config(const Config &config,
                                                                 const DeBruijnGraph &graph) {
-    return make_aligner_config<align_redone::DBGAlignerConfig>(config, graph);
+    return { initialize_aligner_config(config, graph) };
 }
 
 void map_sequences_in_file(const std::string &file,
