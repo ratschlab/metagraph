@@ -790,6 +790,58 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(LabeledAlignerTest, SubkSeedLabels) {
+    // ACGT occurs only within the first k-1 characters of B, so the only k-mer
+    // ending with it is a source dummy k-mer. TGCA occurs only at the end of B.
+    size_t k = 5;
+    const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
+    const std::vector<std::string> labels { "A", "B" };
+    const std::vector<std::pair<std::string, std::string>> queries {
+        { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }, { "TGCA", "B" }
+    };
+
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                k, sequences, labels, mode);
+
+        // as in align_to_graph, unmask the dummy k-mers so that seeds can match
+        // them (in BASIC mode, ACGT is matched only by a source dummy k-mer)
+        if (mode == DeBruijnGraph::BASIC) {
+            const_cast<DBGSuccinct&>(
+                dynamic_cast<const DBGSuccinct&>(anno_graph->get_graph())
+            ).reset_mask();
+        }
+
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+        config.min_seed_length = 3;
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
+
+        for (const auto &[query, label] : queries) {
+            bool found = false;
+            for (const auto &alignment : aligner.align(query)) {
+                // every label of an alignment, including a partial one, must
+                // contain its sequence on either strand
+                std::string sequence(alignment.get_sequence());
+                std::string sequence_rc = sequence;
+                reverse_complement(sequence_rc.begin(), sequence_rc.end());
+                std::vector<std::string> alignment_labels;
+                for (auto column : alignment.label_columns) {
+                    alignment_labels.emplace_back(label_encoder.decode(column));
+                    const std::string &labeled = sequences[alignment_labels.back() == "A" ? 0 : 1];
+                    EXPECT_TRUE(labeled.find(sequence) != std::string::npos
+                                    || labeled.find(sequence_rc) != std::string::npos)
+                        << mode << " " << query << " " << alignment;
+                }
+                found |= (sequence == query || sequence_rc == query)
+                    && alignment_labels == std::vector<std::string>{ label };
+            }
+            EXPECT_TRUE(found) << mode << " " << query;
+        }
+    }
+}
+
 TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     size_t k = 5;
     /*   B     B                AB    AB

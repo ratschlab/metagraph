@@ -7,6 +7,8 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
 
+#include <map>
+
 namespace mtg {
 namespace graph {
 namespace align {
@@ -178,11 +180,98 @@ void AnnotationBuffer::fetch_queued_annotations() {
         }
     }
 
+    if (dbg_succ && graph_.get_mode() == DeBruijnGraph::BASIC)
+        resolve_source_dummy_labels(*dbg_succ, queued_nodes);
+
 #ifndef NDEBUG
     for (const auto &[node, val] : node_to_cols_) {
         assert(val != nannot);
     }
 #endif
+}
+
+void AnnotationBuffer::resolve_source_dummy_labels(const DBGSuccinct &dbg_succ,
+                                                   const std::vector<node_index> &nodes) {
+    // A source dummy k-mer $...$T has no annotation, but a seed shorter than k
+    // which occurs only within the first k-1 characters of an input sequence
+    // matches only such a k-mer. Give it the labels of the real k-mers that
+    // continue it (they all start with T), with their coordinates shifted back
+    // to the start of the dummy k-mer.
+    for (node_index node : nodes) {
+        auto find = node_to_cols_.find(node);
+        assert(find != node_to_cols_.end());
+        if (find->second)
+            continue;  // has labels, so it is a real k-mer
+
+        std::string spelling = dbg_succ.get_node_sequence(node);
+        size_t num_dummy = std::find_if(spelling.begin(), spelling.end(),
+                                        [](char c) { return c != boss::BOSS::kSentinel; })
+                                - spelling.begin();
+        if (!num_dummy || num_dummy == spelling.size())
+            continue;
+
+        // walk |num_dummy| steps forward to reach the real k-mers
+        std::vector<node_index> frontier { node };
+        for (size_t step = 0; step < num_dummy && frontier.size(); ++step) {
+            std::vector<node_index> next;
+            for (node_index n : frontier) {
+                dbg_succ.adjacent_outgoing_nodes(n, [&](node_index out) {
+                    next.push_back(out);
+                });
+            }
+            frontier = next.size() <= kMaxSourceDummyFanout
+                ? std::move(next)
+                : std::vector<node_index>{};
+        }
+
+        if (frontier.empty())
+            continue;
+
+        std::vector<Row> rows;
+        rows.reserve(frontier.size());
+        for (node_index n : frontier) {
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(n));
+        }
+
+        // union of the labels (and of their coordinates) of the real k-mers
+        std::map<Column, std::vector<int64_t>> label_coords;
+        if (has_coordinates()) {
+            for (auto&& row_tuples : multi_int_->get_row_tuples(rows)) {
+                for (auto&& [label, coords] : row_tuples) {
+                    auto &out = label_coords[label];
+                    for (int64_t coord : coords) {
+                        out.push_back(coord - num_dummy);
+                    }
+                }
+            }
+        } else {
+            for (auto&& labels : annotator_.get_matrix().get_rows(rows)) {
+                for (Column label : labels) {
+                    label_coords[label];
+                }
+            }
+        }
+
+        if (label_coords.empty())
+            continue;
+
+        Columns labels;
+        labels.reserve(label_coords.size());
+        for (const auto &[label, coords] : label_coords) {
+            labels.push_back(label);
+        }
+        find.value() = cache_column_set(std::move(labels));
+
+        if (has_coordinates()) {
+            auto &coord_set = label_coords_[find - node_to_cols_.begin()];
+            coord_set.clear();
+            for (auto &[label, coords] : label_coords) {
+                std::sort(coords.begin(), coords.end());
+                coords.erase(std::unique(coords.begin(), coords.end()), coords.end());
+                coord_set.emplace_back(coords.begin(), coords.end());
+            }
+        }
+    }
 }
 
 auto AnnotationBuffer::get_labels_and_coords(node_index node) const
