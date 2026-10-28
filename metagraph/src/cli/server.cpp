@@ -684,11 +684,16 @@ int run_server(Config *config) {
     shutdown_signals.async_wait([&](const asio::error_code &error, int) {
         if (!error) {
             logger->info("[Server] Shutting down...");
-            server.stop();
+            // Only stop the HTTP workers here. Closing the acceptor and the
+            // connections from this thread would race with the accept and read
+            // handlers the workers are running (and could crash in asio).
+            server.io_service->stop();
         }
     });
     shutdown_service.run();
     server_thread.join();
+    // No HTTP worker is left: close the acceptor and the open connections.
+    server.stop();
 
     return 0;
 }

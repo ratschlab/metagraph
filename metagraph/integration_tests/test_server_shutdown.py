@@ -5,9 +5,11 @@ import os
 import re
 import signal
 import socket
+import struct
 import subprocess
 import tempfile
 import termios
+import threading
 import time
 
 import requests
@@ -31,8 +33,10 @@ class TestServerShutdown(TestingBase):
         ('term_multiple_threads', signal.SIGTERM, 4, False),
         ('term_mmap', signal.SIGTERM, 2, True),
         ('interrupt', signal.SIGINT, 2, False),
+        # Keep accepting connections while the signal arrives.
+        ('term_while_connecting', signal.SIGTERM, 4, False, True),
     ])
-    def test_shutdown(self, name, shutdown_signal, threads, mmap):
+    def test_shutdown(self, name, shutdown_signal, threads, mmap, connecting=False):
         command = [METAGRAPH, 'server_query', '-i', self.graph,
                    '-a', self.annotation + '.column.annodbg',
                    '--address', '127.0.0.1', '--port', '0', '-p', str(threads)]
@@ -64,11 +68,37 @@ class TestServerShutdown(TestingBase):
                     else:
                         self.fail('Server did not become ready')
 
-                # An incomplete request must not keep the HTTP worker alive.
-                with socket.create_connection(('127.0.0.1', port), timeout=2) as connection:
-                    connection.sendall(b'GET /stats HTTP/1.1\r\nHost: localhost\r\n')
-                    process.send_signal(shutdown_signal)
-                    self.assertEqual(process.wait(timeout=10), 0)
+                stop_connecting = threading.Event()
+
+                def connect_until_refused():
+                    for _ in range(200):
+                        if stop_connecting.is_set():
+                            return
+                        try:
+                            with socket.create_connection(('127.0.0.1', port), timeout=2) as c:
+                                c.sendall(b'GET /stats HTTP/1.1\r\n')
+                                # Reset on close to leave no TIME_WAIT behind.
+                                c.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                                             struct.pack('ii', 1, 0))
+                        except OSError:
+                            return
+
+                connectors = [threading.Thread(target=connect_until_refused)
+                              for _ in range(4 if connecting else 0)]
+                for connector in connectors:
+                    connector.start()
+                try:
+                    # An incomplete request must not keep the HTTP worker alive.
+                    with socket.create_connection(('127.0.0.1', port), timeout=2) as connection:
+                        connection.sendall(b'GET /stats HTTP/1.1\r\nHost: localhost\r\n')
+                        if connecting:
+                            time.sleep(0.05)
+                        process.send_signal(shutdown_signal)
+                        self.assertEqual(process.wait(timeout=10), 0)
+                finally:
+                    stop_connecting.set()
+                    for connector in connectors:
+                        connector.join()
                 log.seek(0)
                 self.assertIn('[Server] Shutting down...', log.read())
             finally:
