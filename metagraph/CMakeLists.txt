@@ -421,6 +421,13 @@ set(HTSLIB_PIC_FLAG "")
 if(BUILD_PYTHON_BINDINGS)
   set(HTSLIB_PIC_FLAG "-fPIC ")
 endif()
+# $(MAKE) joins the jobserver of a make-driven build; other generators, such as
+# Ninja (the scikit-build-core default), need a make program by name.
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+  set(HTSLIB_MAKE "$(MAKE)")
+else()
+  find_program(HTSLIB_MAKE NAMES gmake make REQUIRED)
+endif()
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
@@ -431,7 +438,7 @@ ExternalProject_Add(HTSLIB
       "CFLAGS=${HTSLIB_PIC_FLAG}${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${PROJECT_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
-  BUILD_COMMAND make -j${N} lib-static
+  BUILD_COMMAND ${HTSLIB_MAKE} -j${N} lib-static
   #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
   # Install only static lib to avoid the dependency
   INSTALL_COMMAND
