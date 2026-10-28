@@ -82,6 +82,22 @@ TEST_F(DBGSSHashInput, RejectsMissingTrailingNewline) {
     expect_rejected(">a\n" + seq_30, "sequence 1 is not terminated by a newline");
 }
 
+TEST_F(DBGSSHashInput, RejectsHeaderWithoutSequence) {
+    expect_rejected(">a\n" + seq_30 + "\n>b\n", "record 2 has a header but no sequence");
+}
+
+TEST_F(DBGSSHashInput, RejectsInvalidCharacter) {
+#if ! _PROTEIN_GRAPH
+    const char invalid = 'N';
+#else
+    const char invalid = '#';
+#endif
+    std::string seq = seq_30;
+    seq[12] = invalid;
+    expect_rejected(">a\n" + seq + "\n", std::string("sequence 1 has character '")
+                    + invalid + "' at position 12, outside the alphabet");
+}
+
 TEST_F(DBGSSHashInput, RejectsDuplicateKmers) {
     expect_rejected(">a\n" + seq_30 + "\n>b\n" + seq_30 + "\n", "contains duplicate k-mers");
 }
