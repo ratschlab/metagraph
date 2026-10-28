@@ -1,0 +1,99 @@
+name: pymetagraph
+
+on:
+  push:
+    paths:
+      - 'metagraph/src/pybindings/**'
+      - 'metagraph/api/python/pymetagraph/**'
+      - 'metagraph/CMakeLists.txt'
+      - 'metagraph/CMakeListsHelpers.txt'
+      - '.github/workflows/pymetagraph.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'metagraph/src/**'
+      - 'metagraph/api/python/pymetagraph/**'
+      - 'metagraph/CMakeLists.txt'
+      - 'metagraph/CMakeListsHelpers.txt'
+      - 'metagraph/external-libraries/**'
+      - '.github/workflows/pymetagraph.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build extension and run pytest
+    runs-on: ubuntu-24.04
+
+    env:
+      CCACHE_DIR: ~/.cache/ccache
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get dependency revision
+        id: submodules
+        run: echo "revision=$(git rev-parse HEAD:metagraph/external-libraries)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout submodules cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .git/modules
+            metagraph/external-libraries
+          key: submodules-${{ hashFiles('.gitmodules') }}-${{ steps.submodules.outputs.revision }}
+
+      - name: Checkout submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 cmake make ccache libbz2-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
+          echo "CC=$(which gcc-13)" >> $GITHUB_ENV
+          echo "CXX=$(which g++-13)" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - name: Install Python dependencies
+        run: python -m pip install pybind11 pytest
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-pymetagraph-${{ github.sha }}
+          restore-keys: |
+            ccache-pymetagraph-
+
+      - name: Configure
+        run: |
+          ccache --set-config=max_size=1G
+          cmake -S metagraph -B metagraph/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON_BINDINGS=ON \
+            -DPython_EXECUTABLE="$(which python)"
+
+      - name: Build metagraph and the extension
+        run: cmake --build metagraph/build -j"$(getconf _NPROCESSORS_ONLN)" --target metagraph _pymetagraph_core
+
+      - name: Run pymetagraph tests
+        env:
+          METAGRAPH: ${{ github.workspace }}/metagraph/build/metagraph
+          PYMETAGRAPH_REQUIRE_METAGRAPH: '1'
+          PYTHONPATH: ${{ github.workspace }}/metagraph/api/python/pymetagraph
+        run: |
+          ln -s "$PWD"/metagraph/build/_pymetagraph_core*.so metagraph/api/python/pymetagraph/pymetagraph/
+          cd metagraph/api/python/pymetagraph
+          pytest -v tests
