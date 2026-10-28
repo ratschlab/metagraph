@@ -567,6 +567,10 @@ if(METAGRAPH_BUILD_EXECUTABLE)
   set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
   target_link_libraries(metagraph metagraph-core metagraph-cli)
 
+  # aligner benchmark driver (not built by default)
+  add_executable(align_bench EXCLUDE_FROM_ALL "align_bench/align_bench.cpp")
+  target_link_libraries(align_bench metagraph-core metagraph-cli)
+
   add_custom_target(link_target ALL
     COMMAND ${CMAKE_COMMAND} -E
     create_symlink
