@@ -23,9 +23,18 @@ TEST(AnnotationKeyMapper, BasicKeysAreNodes) {
     EXPECT_EQ(path, mapper.keys(path));
 }
 
+// The test helper returns primary graphs wrapped in CanonicalDBG
+const CanonicalDBG& wrapped_primary(const std::shared_ptr<DeBruijnGraph> &graph) {
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get());
+    EXPECT_TRUE(canonical);
+    return *canonical;
+}
+
 TEST(AnnotationKeyMapper, PrimaryGraphMustBeWrapped) {
     auto graph = build_graph_batch<DBGSuccinct>(5, { kSequence }, DeBruijnGraph::PRIMARY);
-    EXPECT_THROW(AnnotationKeyMapper mapper(*graph), std::invalid_argument);
+    const DeBruijnGraph &primary = wrapped_primary(graph).get_graph();
+    ASSERT_EQ(DeBruijnGraph::PRIMARY, primary.get_mode());
+    EXPECT_THROW(AnnotationKeyMapper mapper(primary), std::invalid_argument);
 }
 
 #if ! _PROTEIN_GRAPH
@@ -60,7 +69,7 @@ TEST(AnnotationKeyMapper, CanonicalGraphMapsBothStrandsToOneKey) {
 
 TEST(AnnotationKeyMapper, WrappedPrimaryGraphMapsBothStrandsToOneKey) {
     auto primary = build_graph_batch<DBGSuccinct>(5, { kSequence }, DeBruijnGraph::PRIMARY);
-    CanonicalDBG graph(primary);
+    const CanonicalDBG &graph = wrapped_primary(primary);
     ASSERT_FALSE(AnnotationKeyMapper(graph).needs_sequence());
     check_reverse_complement_keys(graph);
 }
