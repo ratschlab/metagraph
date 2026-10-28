@@ -131,7 +131,9 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
                             }
                         }
 
-                        if (next == node + 1) {
+                        // in canonical mode, num_nodes + 1 is the reverse complement of
+                        // node 1, not the next forward node
+                        if (node < num_nodes && next == node + 1) {
                             assert(found_fw);
                             succ_is_next[node] = true;
                             last_single_outdeg = true;
