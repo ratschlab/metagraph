@@ -12,7 +12,7 @@
 
 // sshash template implementations
 #include <src/dictionary.cpp>
-#include <src/build.cpp>
+#include <src/builder/build.cpp>
 #include <src/query.cpp>
 #include <src/info.cpp>
 
@@ -193,7 +193,7 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     build_config.num_threads = get_num_threads();
     if (!swap_dir.empty())
         build_config.tmp_dirname = swap_dir;
-    build_config.canonical = mode != BASIC;
+    build_config.allow_reverse_complement_duplicates = mode == BASIC;
 
     std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
 
@@ -245,10 +245,13 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
     using kmer_t = typename Dict::kmer_type;
 
     if (with_rc) {
-        auto parser = sshash::streaming_query<Dict, true>(&dict);
+        auto parser = sshash::streaming_query<Dict>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             auto ret_val = parser.lookup(sequence.data() + i);
-            assert(sshash::equal_lookup_result(ret_val,
+            // Direct dictionary lookup assumes a valid alphabet. Streaming
+            // lookup also accepts ambiguous bases and returns no match.
+            assert(!sshash::util::is_valid<kmer_t>(sequence.data() + i, k)
+                   || sshash::equal_lookup_result(ret_val,
                                                dict.lookup(sequence.data() + i, with_rc)));
             callback(ret_val);
         }
