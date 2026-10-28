@@ -2,7 +2,8 @@
 
 The fixture is built from metagraph's own test data with the `metagraph`
 binary (taken from $METAGRAPH, else from PATH); the tests are skipped if
-neither is available. Query results are compared to `metagraph query`.
+neither is available, unless PYMETAGRAPH_REQUIRE_METAGRAPH=1. Query results
+are compared to `metagraph query`.
 """
 import os
 import re
@@ -17,6 +18,11 @@ import pymetagraph
 DATA = Path(__file__).resolve().parents[4] / "tests" / "data" / "metasub_fake_data.fa"
 K = 21
 METAGRAPH = os.environ.get("METAGRAPH") or shutil.which("metagraph")
+
+# CI sets PYMETAGRAPH_REQUIRE_METAGRAPH=1 so that a missing binary fails the
+# tests instead of skipping them
+if METAGRAPH is None and os.environ.get("PYMETAGRAPH_REQUIRE_METAGRAPH") == "1":
+    raise RuntimeError("metagraph binary not found: set METAGRAPH or add it to PATH")
 
 pytestmark = pytest.mark.skipif(METAGRAPH is None, reason="metagraph binary not found")
 
