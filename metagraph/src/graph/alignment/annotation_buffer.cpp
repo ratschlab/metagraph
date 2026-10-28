@@ -1,4 +1,5 @@
 #include "annotation_buffer.hpp"
+#include "graph/annotation_key_mapper.hpp"
 
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -46,25 +47,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
+    const AnnotationKeyMapper key_mapper(graph_);
+
     for (const auto &path : queued_paths_) {
-        std::vector<node_index> base_path;
-        if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
-            // TODO: avoid this call of spell_path
-            std::string query = spell_path(graph_, path);
-            base_path = map_to_nodes(*base_graph, query);
-
-        } else if (canonical_) {
-            base_path.reserve(path.size());
-            for (node_index node : path) {
-                base_path.emplace_back(canonical_->get_base_node(node));
-            }
-
-        } else {
-            assert(graph_.get_mode() == DeBruijnGraph::BASIC);
-            base_path = path;
-            if (dynamic_cast<const RCDBG*>(&graph_))
-                std::reverse(base_path.begin(), base_path.end());
-        }
+        const std::string sequence = key_mapper.needs_sequence() ? spell_path(graph_, path) : "";
+        auto base_path = key_mapper.keys(path, sequence);
+        if (graph_.get_mode() == DeBruijnGraph::BASIC && dynamic_cast<const RCDBG*>(&graph_))
+            std::reverse(base_path.begin(), base_path.end());
 
         assert(base_path.size() == path.size());
 
