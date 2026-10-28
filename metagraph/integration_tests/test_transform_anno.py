@@ -558,16 +558,18 @@ class TestRowDiffCharSSHash(TestingBase):
     def setUpClass(cls):
         cls.tempdir = TemporaryDirectory()
         cls.graph_path = cls.tempdir.name + '/graph.sshashdbg'
-        input_fa = TEST_DATA_DIR + '/transcripts_100.fa'
+        # SSHash is built from contigs without repeated k-mers, as in the unit tests
+        # (building it from the raw reads makes it write minimizer files without bound)
+        contig_mode = 'canonical' if cls.graph_mode == 'primary' else cls.graph_mode
+        cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode {contig_mode} -k 21 '
+                         f'-o {cls.tempdir.name}/contigs {TEST_DATA_DIR}/transcripts_100.fa',
+                         "Build command")
+        primary_flag = ' --primary-kmers' if cls.graph_mode == 'primary' else ''
+        cls._run_command(f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta{primary_flag} '
+                         f'-o {cls.tempdir.name}/contigs {cls.tempdir.name}/contigs.dbg',
+                         "Transform command")
+        input_fa = cls.tempdir.name + '/contigs.fasta.gz'
         build_mode = cls.graph_mode
-        if cls.graph_mode == 'primary':
-            # SSHash primary graphs are built from primary contigs
-            cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode canonical -k 21 '
-                             f'-o {cls.tempdir.name}/canonical {input_fa}', "Build command")
-            cls._run_command(f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta --primary-kmers '
-                             f'-o {cls.tempdir.name}/primary {cls.tempdir.name}/canonical.dbg',
-                             "Transform command")
-            input_fa = cls.tempdir.name + '/primary.fasta.gz'
         cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --graph sshash --mode {build_mode} '
                          f'-k 21 -o {cls.graph_path} {input_fa}', "Build command")
 
