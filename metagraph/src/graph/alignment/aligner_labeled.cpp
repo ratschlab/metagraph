@@ -106,6 +106,17 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     if (!DefaultColumnExtender::set_seed(seed))
         return false;
 
+    // Seeds passed to the backward extension are reverse complements of forward
+    // extensions. In CANONICAL graphs, their nodes are distinct from those
+    // traversed in the forward direction, so their labels may not be fetched yet.
+    if (std::any_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+                    [&](node_index n) {
+                        return n != DeBruijnGraph::npos && !annotation_buffer_.get_labels(n);
+                    })) {
+        annotation_buffer_.queue_path(std::vector<node_index>(seed.get_nodes()));
+        annotation_buffer_.fetch_queued_annotations();
+    }
+
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
                     [&](node_index n) {
                         return n == DeBruijnGraph::npos || annotation_buffer_.get_labels(n);

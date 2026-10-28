@@ -533,22 +533,32 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 
 TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
     using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint8_t>;
-    Container result(1, 100'000);
-    size_t sequence_size = 500;
+    // not the default /tmp/, whose chunk files would be shared by parallel test processes
+    auto tmp_dir = utils::create_temp_dir(test_dump_dir(), "count_kmers");
+    {
+        Container result(1, 100'000, tmp_dir);
+        size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 255u });
+        sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
+                new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+        assert_contents(result, { 255u });
+    }
+    utils::remove_temp_dir(tmp_dir);
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
     using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint32_t>;
-    Container result(1, 100'000);
-    size_t sequence_size = 500;
+    // not the default /tmp/, whose chunk files would be shared by parallel test processes
+    auto tmp_dir = utils::create_temp_dir(test_dump_dir(), "count_kmers");
+    {
+        Container result(1, 100'000, tmp_dir);
+        size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5 * (sequence_size - 2 + 1) });
+        sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
+                new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+        assert_contents(result, { 5 * (sequence_size - 2 + 1) });
+    }
+    utils::remove_temp_dir(tmp_dir);
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {

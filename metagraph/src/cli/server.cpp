@@ -362,7 +362,8 @@ int run_server(Config *config) {
                     throw CurrentlyInitializingError();  // graph still loading
 
                 Json::Value content_json = parse_json_string(content);
-                logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
+                if (logger->should_log(spdlog::level::trace))
+                    logger->trace("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
                 const auto search_request = parse_search_request(content_json, *config);
                 // Validate fields omitted from the key before returning a cached result.
@@ -684,11 +685,16 @@ int run_server(Config *config) {
     shutdown_signals.async_wait([&](const asio::error_code &error, int) {
         if (!error) {
             logger->info("[Server] Shutting down...");
-            server.stop();
+            // Only stop the HTTP workers here. Closing the acceptor and the
+            // connections from this thread would race with the accept and read
+            // handlers the workers are running (and could crash in asio).
+            server.io_service->stop();
         }
     });
     shutdown_service.run();
     server_thread.join();
+    // No HTTP worker is left: close the acceptor and the open connections.
+    server.stop();
 
     return 0;
 }
