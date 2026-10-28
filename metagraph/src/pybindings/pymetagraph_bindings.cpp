@@ -46,12 +46,17 @@ namespace {
 // one is picked -- e.g. -a/--num-top-labels/etc. are recognized the same way
 // under both -- so this only changes which validation rules apply.
 //
-// "method" is consumed here rather than forwarded to Config: it selects which
-// pymetagraph binding code path runs (label-presence vs. real alignment), not
-// a CLI flag. "connect_anchors"/"extend_chains" are consumed specially too,
-// since their CLI flags are bare negations (`--align-no-...`) with no value
-// syntax, unlike the rest of kFlagAliases.
-std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *method) {
+// "method", "connect_anchors" and "extend_chains" are consumed here rather
+// than forwarded to Config: "method" selects which pymetagraph binding code
+// path runs (label-presence vs. real alignment), and the other two only
+// configure the alignment path, which no CLI command uses.
+struct BindingOptions {
+    std::string method = "query";
+    bool connect_anchors = true;
+    bool extend_chains = true;
+};
+
+std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, BindingOptions *options) {
     static const std::unordered_map<std::string, std::string> kFlagAliases = {
         { "input", "-i" },
         { "annotator", "-a" },
@@ -67,28 +72,24 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *m
         { "xdrop", "--align-xdrop" },
         { "rel_score_cutoff", "--align-rel-score-cutoff" },
     };
-    static const std::unordered_map<std::string, std::string> kNegationFlagAliases = {
-        { "connect_anchors", "--align-no-connect-anchors" },
-        { "extend_chains", "--align-no-extend-chains" },
-    };
 
     // args[1] (the identity) is filled in below once "method" has been seen,
     // since kwargs iteration order isn't guaranteed to visit it first.
     std::vector<std::string> args = { "pymetagraph", "" };
-    *method = "query";
 
     for (auto item : kwargs) {
         auto key = item.first.cast<std::string>();
 
         if (key == "method") {
-            *method = py::str(item.second).cast<std::string>();
+            options->method = py::str(item.second).cast<std::string>();
             continue;
         }
-
-        auto neg_it = kNegationFlagAliases.find(key);
-        if (neg_it != kNegationFlagAliases.end()) {
-            if (!item.second.cast<bool>())
-                args.push_back(neg_it->second);
+        if (key == "connect_anchors") {
+            options->connect_anchors = item.second.cast<bool>();
+            continue;
+        }
+        if (key == "extend_chains") {
+            options->extend_chains = item.second.cast<bool>();
             continue;
         }
 
@@ -100,12 +101,12 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *m
         args.push_back(py::str(item.second).cast<std::string>());
     }
 
-    if (*method != "query" && *method != "align") {
+    if (options->method != "query" && options->method != "align") {
         throw std::invalid_argument(
-            "pymetagraph: unknown method '" + *method + "' (expected 'query' or 'align')");
+            "pymetagraph: unknown method '" + options->method + "' (expected 'query' or 'align')");
     }
 
-    args[1] = (*method == "align") ? "align" : "server_query";
+    args[1] = (options->method == "align") ? "align" : "server_query";
 
     // Unlike "server_query", the "align" identity's validation unconditionally
     // requires at least one positional input file (config.cpp: "No input
@@ -113,7 +114,7 @@ std::vector<std::string> kwargs_to_argv(const py::kwargs &kwargs, std::string *m
     // reads.fq`. We never read config.fnames ourselves -- queries come in via
     // Index::query/query_batch instead -- so a placeholder that's never opened
     // is enough to satisfy that check.
-    if (*method == "align")
+    if (options->method == "align")
         args.push_back("__pymetagraph_placeholder__");
 
     return args;
@@ -155,9 +156,9 @@ struct Alignment {
 class Index {
   public:
     explicit Index(const py::kwargs &kwargs) {
-        std::string method_str;
-        auto arg_strings = kwargs_to_argv(kwargs, &method_str);
-        method_ = (method_str == "align") ? Method::kAlign : Method::kQuery;
+        BindingOptions options;
+        auto arg_strings = kwargs_to_argv(kwargs, &options);
+        method_ = (options.method == "align") ? Method::kAlign : Method::kQuery;
 
         std::vector<char*> argv;
         argv.reserve(arg_strings.size());
@@ -187,8 +188,8 @@ class Index {
         presence_fraction_ = config.presence_fraction;
 
         if (method_ == Method::kAlign) {
-            connect_anchors_ = config.alignment_connect_anchors;
-            extend_chains_ = config.alignment_extend_chains;
+            connect_anchors_ = options.connect_anchors;
+            extend_chains_ = options.extend_chains;
 
             if (anno_dbg_) {
                 aligner_config_ = mtg::cli::initialize_redone_aligner_config(config, anno_dbg_->get_graph());
