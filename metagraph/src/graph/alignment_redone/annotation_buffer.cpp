@@ -1,11 +1,11 @@
 #include "annotation_buffer.hpp"
+#include "graph/annotation_key_mapper.hpp"
 
 #include <sstream>
 
 #include "aln_match.hpp"
 
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/representation/hash/dbg_sshash.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/algorithms.hpp"
@@ -39,29 +39,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
     std::vector<node_index> queued_nodes;
     std::vector<Row> queued_rows;
 
-    const DeBruijnGraph *base_graph = &graph_;
-    const auto *sshash = dynamic_cast<const DBGSSHash*>(base_graph);
-
-    if (canonical_)
-        base_graph = &canonical_->get_graph();
+    const AnnotationKeyMapper key_mapper(graph_);
 
     for (const auto &path : queued_paths_) {
         assert(std::find(path.begin(), path.end(), DeBruijnGraph::npos) == path.end());
         assert(path == map_to_nodes_sequentially(graph_, spell_path(graph_, path)));
-        std::vector<node_index> base_path;
-        if (base_graph->get_mode() == DeBruijnGraph::BASIC) {
-            base_path = path;
-        } else if (canonical_) {
-            base_path.reserve(path.size());
-            std::transform(path.begin(), path.end(), std::back_inserter(base_path),
-                           [&](node_index node) { return canonical_->get_base_node(node); });
-        } else if (sshash) {
-            base_path.reserve(path.size());
-            std::transform(path.begin(), path.end(), std::back_inserter(base_path),
-                           [&](node_index node) { return sshash->get_base_node(node); });
-        } else {
-            base_path = map_to_nodes(graph_, spell_path(graph_, path));
-        }
+        const std::string sequence = key_mapper.needs_sequence() ? spell_path(graph_, path) : "";
+        auto base_path = key_mapper.keys(path, sequence);
         assert(base_path.size() == path.size());
         assert(std::find(base_path.begin(), base_path.end(), DeBruijnGraph::npos)
                 == base_path.end());
