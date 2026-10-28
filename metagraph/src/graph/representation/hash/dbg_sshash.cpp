@@ -100,7 +100,7 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
                             // a k-mer reached from its predecessor was already found at
                             // this node by the neighbour lookup, so check only the others
                             if (dict.lookup(kmer, with_rc).kmer_id
-                                    != graph_index_to_sshash(node))
+                                    != DBGSSHash::graph_index_to_sshash(node))
                                 has_duplicates.store(true, std::memory_order_relaxed);
                         }
 
