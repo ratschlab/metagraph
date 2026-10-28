@@ -69,21 +69,23 @@ class TestServerShutdown(TestingBase):
                         self.fail('Server did not become ready')
 
                 stop_connecting = threading.Event()
+                connected = threading.Event()
 
-                def connect_until_refused():
-                    for _ in range(200):
-                        if stop_connecting.is_set():
-                            return
+                def connect_until_stopped():
+                    while not stop_connecting.is_set():
                         try:
                             with socket.create_connection(('127.0.0.1', port), timeout=2) as c:
                                 c.sendall(b'GET /stats HTTP/1.1\r\n')
                                 # Reset on close to leave no TIME_WAIT behind.
                                 c.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
                                              struct.pack('ii', 1, 0))
+                            connected.set()
                         except OSError:
-                            return
+                            # Refused once the server stops listening.
+                            if process.poll() is not None:
+                                return
 
-                connectors = [threading.Thread(target=connect_until_refused)
+                connectors = [threading.Thread(target=connect_until_stopped)
                               for _ in range(4 if connecting else 0)]
                 for connector in connectors:
                     connector.start()
@@ -91,8 +93,9 @@ class TestServerShutdown(TestingBase):
                     # An incomplete request must not keep the HTTP worker alive.
                     with socket.create_connection(('127.0.0.1', port), timeout=2) as connection:
                         connection.sendall(b'GET /stats HTTP/1.1\r\nHost: localhost\r\n')
+                        # Send the signal while the connectors keep connecting.
                         if connecting:
-                            time.sleep(0.05)
+                            self.assertTrue(connected.wait(timeout=10))
                         process.send_signal(shutdown_signal)
                         self.assertEqual(process.wait(timeout=10), 0)
                 finally:
