@@ -806,4 +806,45 @@ TYPED_TEST(LabeledAlignerTest, CanonicalBackwardExtensionMismatch) {
 }
 #endif
 
+#if ! _PROTEIN_GRAPH
+// Seeds shorter than k on a succinct graph (k = 5, min seed length 3), with
+// A = TTACGAAA and B = ACGTTGCA. ACGT and GTTG occur only in B, TACGA only in
+// A. ACGT is a suffix only of the dummy source k-mer $ACGT that starts B.
+// The existing aligner matches sub-k seeds against node suffixes. It finds no
+// alignment for ACGT on the basic graph and reports TTG (only in B) as an
+// alignment to A spelling ACG. Disabled until that is fixed.
+TEST(LabeledAlignerTest, DISABLED_SubkSeedLabels) {
+    size_t k = 5;
+    const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
+    const std::vector<std::string> labels { "A", "B" };
+    const std::vector<std::pair<std::string, std::string>> queries {
+        { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }
+    };
+
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                k, sequences, labels, mode);
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
+
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+        config.min_seed_length = 3;
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+
+        for (const auto &[query, label] : queries) {
+            auto alignments = aligner.align(query);
+            EXPECT_FALSE(alignments.empty()) << mode << " " << query;
+            for (const auto &alignment : alignments) {
+                EXPECT_EQ(query.substr(alignment.get_clipping(), alignment.get_sequence().size()),
+                          alignment.get_sequence()) << mode << " " << alignment;
+                for (auto column : alignment.label_columns) {
+                    EXPECT_EQ(label, label_encoder.decode(column)) << mode << " " << alignment;
+                }
+            }
+        }
+    }
+}
+
+#endif
+
 } // namespace
