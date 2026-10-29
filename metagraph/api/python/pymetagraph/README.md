@@ -46,7 +46,9 @@ hits = graph.query(["ACGT...", "TTGA..."], num_top_labels=1, discovery_fraction=
 graph.query("ACGT...")     # a single sequence gives a single list
 ```
 
-`query` releases the GIL and spreads the sequences over `threads` threads.
+`query` has the defaults of `metagraph query`: all labels (`num_top_labels=None`),
+`discovery_fraction=0.7` (`--min-kmers-fraction-label`) and `presence_fraction=0.0`.
+It releases the GIL and spreads the sequences over `threads` threads.
 
 ## Tests
 

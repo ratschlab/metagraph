@@ -13,8 +13,10 @@
 #include <exception>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>
@@ -108,9 +110,9 @@ class AnnotatedGraph {
 
     // Top labels of each sequence with their numbers of matching k-mers, by
     // decreasing count. A sequence without hits (or shorter than k) gets an
-    // empty list.
+    // empty list. No num_top_labels means no limit, as in `metagraph query`.
     std::vector<Hits> query(const std::vector<std::string> &seqs,
-                            size_t num_top_labels,
+                            std::optional<size_t> num_top_labels,
                             double discovery_fraction,
                             double presence_fraction) const {
         if (!std::isfinite(discovery_fraction) || !std::isfinite(presence_fraction)
@@ -119,6 +121,7 @@ class AnnotatedGraph {
             throw std::invalid_argument(
                 "discovery_fraction and presence_fraction must be in [0, 1]");
         }
+        const size_t max_labels = num_top_labels.value_or(std::numeric_limits<size_t>::max());
         std::shared_lock<std::shared_mutex> lock(num_threads_mutex);
         std::vector<Hits> results(seqs.size());
         std::vector<size_t> indices;
@@ -127,7 +130,7 @@ class AnnotatedGraph {
                 indices.push_back(i);
         }
         run_in_pool(*thread_pool_, indices, [&](size_t i) {
-            results[i] = anno_dbg_->get_top_labels(seqs[i], num_top_labels,
+            results[i] = anno_dbg_->get_top_labels(seqs[i], max_labels,
                                                    discovery_fraction,
                                                    presence_fraction);
             // get_top_labels sorts only when it truncates to num_top_labels
@@ -153,8 +156,9 @@ PYBIND11_MODULE(_pymetagraph_core, m) {
         .def_property_readonly("k", &AnnotatedGraph::k)
         .def_property_readonly("labels", &AnnotatedGraph::labels)
         .def("query", &AnnotatedGraph::query,
-             py::arg("seqs"), py::arg("num_top_labels") = 1,
-             py::arg("discovery_fraction") = 0.0, py::arg("presence_fraction") = 0.0,
+             // same defaults as `metagraph query`
+             py::arg("seqs"), py::arg("num_top_labels") = py::none(),
+             py::arg("discovery_fraction") = 0.7, py::arg("presence_fraction") = 0.0,
              py::call_guard<py::gil_scoped_release>());
 
     // Test hook: a task that throws on a worker thread must surface as a Python

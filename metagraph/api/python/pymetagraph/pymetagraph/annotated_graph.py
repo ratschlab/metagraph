@@ -1,6 +1,6 @@
 import math
 from pathlib import Path
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from . import _pymetagraph_core
 
@@ -35,14 +35,17 @@ class AnnotatedGraph:
         return self._graph.labels
 
     def query(self, seqs: Union[str, Iterable[str]],
-              num_top_labels: int = 1,
-              discovery_fraction: float = 0.0,
+              num_top_labels: Optional[int] = None,
+              discovery_fraction: float = 0.7,
               presence_fraction: float = 0.0) -> Union[Hits, List[Hits]]:
         """Top labels of each sequence with their numbers of matching k-mers.
 
         Same semantics as ``metagraph query``: a label is reported if at least
         ``discovery_fraction`` of the sequence's k-mers carry it, and only if at
         least ``presence_fraction`` of its k-mers are in the graph at all.
+        The defaults are those of ``metagraph query``: all labels
+        (``num_top_labels=None``), ``discovery_fraction=0.7`` and
+        ``presence_fraction=0.0``.
 
         :param seqs: A sequence, or an iterable of sequences.
         :return: For each sequence, a list of ``(label, kmer_count)`` sorted by
