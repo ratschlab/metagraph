@@ -2,6 +2,7 @@
 
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
+#include "common/unix_tools.hpp"
 #include "cli/config/config.hpp"
 #include "cli/build.hpp"
 #include "cli/annotate.hpp"
@@ -23,6 +24,9 @@ using mtg::cli::Config;
 
 int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
+
+    // external merges (BOSS chunks, SSHash sorted runs) keep one file open per input
+    raise_max_files_open();
 
     // Keep SPDLOG_LEVEL (or the INFO default) unless verbose was requested.
     if (common::get_verbose())

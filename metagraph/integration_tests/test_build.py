@@ -5,6 +5,7 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
+import resource
 from base import PROTEIN_MODE, DNA_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
 
 
@@ -46,6 +47,32 @@ class TestBuild(TestingBase):
         self.assertEqual('20', stats_graph['k'])
         self.assertEqual('591997', stats_graph['nodes (k)'])
         self.assertEqual('basic', stats_graph['mode'])
+
+    @parameterized.expand([('soft', False), ('soft_and_hard', True)])
+    @unittest.skipIf(PROTEIN_MODE, "Contigs from a DNA graph")
+    def test_sshash_low_open_file_limit(self, _, lower_hard):
+        """Each of 32 threads writes a sorted SSHash run, more than the limit allows open.
+        A low soft limit is raised at startup; a low hard limit needs SSHash's bounded merge."""
+        construct_command = f'{METAGRAPH} build -k 20 -o {self.tempdir.name}/graph \
+                                {TEST_DATA_DIR}/transcripts_1000.fa'
+        self.assertEqual(subprocess.run([construct_command], shell=True).returncode, 0)
+        transform_command = f'{METAGRAPH} transform --to-fasta -o {self.tempdir.name}/contigs \
+                                {self.tempdir.name}/graph.dbg'
+        self.assertEqual(subprocess.run([transform_command], shell=True).returncode, 0)
+
+        def lower_limit():
+            _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+            resource.setrlimit(resource.RLIMIT_NOFILE, (24, 24 if lower_hard else hard))
+
+        construct_command = f'{METAGRAPH} build --graph sshash -k 20 -p 32 \
+                                --disk-swap {self.tempdir.name} -o {self.tempdir.name}/graph \
+                                {self.tempdir.name}/contigs.fasta.gz'
+        res = subprocess.run([construct_command], shell=True, preexec_fn=lower_limit)
+        self.assertEqual(res.returncode, 0)
+
+        stats_graph = self._get_stats(self.tempdir.name + '/graph.sshashdbg')
+        self.assertEqual(stats_graph['returncode'], 0)
+        self.assertEqual('591997', stats_graph['nodes (k)'])
 
     @parameterized.expand(succinct_states)
     def test_build_succinct_in_ram(self, state):
