@@ -3,10 +3,11 @@ name: pymetagraph
 on:
   push:
     paths:
-      - 'metagraph/src/pybindings/**'
+      - 'metagraph/src/**'
       - 'metagraph/api/python/pymetagraph/**'
-      - 'metagraph/CMakeLists.txt'
-      - 'metagraph/CMakeListsHelpers.txt'
+      - 'metagraph/CMakeLists*'
+      - 'metagraph/external-libraries/**'
+      - '.gitmodules'
       - '.github/workflows/pymetagraph.yml'
   pull_request:
     branches:
@@ -14,9 +15,9 @@ on:
     paths:
       - 'metagraph/src/**'
       - 'metagraph/api/python/pymetagraph/**'
-      - 'metagraph/CMakeLists.txt'
-      - 'metagraph/CMakeListsHelpers.txt'
+      - 'metagraph/CMakeLists*'
       - 'metagraph/external-libraries/**'
+      - '.gitmodules'
       - '.github/workflows/pymetagraph.yml'
   workflow_dispatch:
 

@@ -62,5 +62,9 @@ METAGRAPH=/path/to/metagraph pytest tests
 - Exactly one annotation file is supported.
 - Missing files raise `FileNotFoundError`, but a graph or annotation that MetaGraph cannot load
   ends the Python process, as the loaders exit on errors.
+- On Linux, the extension links Boost dynamically and the wheel does not bundle it, so the Boost
+  runtime (`libboost_iostreams`) it was built against must be installed where it is imported.
+  The wheel is meant for the machine that built it.
+- `BUILD_STATIC=ON` cannot be combined with `BUILD_PYTHON_BINDINGS=ON`.
 - The extension is built without jemalloc, which can otherwise exhaust the static TLS space when
   the extension is imported.

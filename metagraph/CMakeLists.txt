@@ -25,6 +25,10 @@ include(CMakeListsHelpers.txt)
 # This is opt-in so the default static `metagraph` binary build is unaffected.
 option(BUILD_PYTHON_BINDINGS "Build the pymetagraph pybind11 extension" OFF)
 if(BUILD_PYTHON_BINDINGS)
+  if(BUILD_STATIC)
+    message(FATAL_ERROR "BUILD_PYTHON_BINDINGS cannot be combined with BUILD_STATIC: "
+                        "the extension must link shared (or position-independent) libraries")
+  endif()
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
   # jemalloc (pulled in via folly, if present on the system) can exhaust the
