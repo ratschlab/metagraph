@@ -176,7 +176,7 @@ REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_require
             'annotation_unbudgeted', 'mask_invalid', 'alphabet_untested',
             # require_support "record_verified" on an index that cannot verify, genetic_code no
             # NCBI table, and a predicate listing more names than caps.max_predicate_labels
-            'support_unavailable', 'genetic_code_unknown', 'predicate_too_large')
+            'support_unavailable', 'genetic_code_unknown', 'predicate_too_large', 'taxonomy_unavailable')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment', 'mask_invalid',
                'alphabet_untested')
@@ -193,6 +193,8 @@ UNPRODUCIBLE = ('primary_unwrapped', 'alphabet_unsupported',
 # needs: named here rather than left out of the expected sets, so that the coverage tests list
 # every code without a fixture. Every other code has a fixture.
 NO_FIXTURE = {
+    'taxonomy_unavailable': 'an opt-in taxid request without a loaded mapping; exercised by '
+                            'tests/scripts/test_record_taxonomy_end_to_end.py',
     'mask_invalid': 'a graph whose .edgemask marks an edge with W = $ valid: one extended after '
                     'masking by a build older than 85614d30 (metagraph extend on a masked '
                     'graph), or a stale mask',
@@ -240,7 +242,7 @@ SCHEMA = {
                 # a predicate (SPEC §19.2)
                 'predicate', 'max_predicate_contexts', 'max_predicate_work', 'predicate_strands',
                 # supported paths (SPEC §20.2) and the motif-level predicate (SPEC §25.2)
-                'supported_paths_level', 'predicate_scope',
+                'supported_paths_level', 'predicate_scope', 'predicate_namespace',
                 # the server's (SPEC §24): the graphs of a multi-graph server, the load into RAM
                 'graphs', 'in_ram',
                 # bounded mismatches (SPEC §21.2)
@@ -264,7 +266,7 @@ SCHEMA = {
                'max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
                'predicate_strands',
                # supported paths (SPEC §20.2), the motif-level predicate (SPEC §25.2)
-               'supported_paths_level', 'predicate_scope',
+               'supported_paths_level', 'predicate_scope', 'predicate_namespace',
                # bounded mismatches (SPEC §21.8): echoed above 0 only
                'max_mismatches', 'clamped'],
     'clamped': ['field', 'requested', 'effective'],
@@ -368,9 +370,10 @@ SCHEMA = {
     # answer's predicate block, an entry's selection, and the capabilities' predicate object
     'predicate': list(PREDICATE_OPERATORS),
     'predicate_block': ['normal_form', 'names', 'known', 'unknown_labels', 'vacuous', 'scope',
-                        'strands', 'motif_scope'],
+                        'strands', 'motif_scope', 'namespace'],
     'selection': ['pass', 'support', 'access'],
-    'capabilities_predicate': ['operators', 'strands', 'scopes', 'access'],
+    'capabilities_predicate': ['operators', 'strands', 'scopes', 'access',
+                               'namespaces', 'default_namespace'],
     # bounded mismatches (SPEC §21): the capabilities object, a substitution of a dna or iupac
     # pattern's instance, a substituted residue of a peptide's
     'capabilities_mismatches': ['max', 'default', 'unit', 'protein_substitutes', 'edits', 'order',
@@ -1076,7 +1079,11 @@ class Checker:
         labels), the scope, the strands evaluated (either on CANONICAL and PRIMARY graphs). A
         binding the account or the time stopped states the names only (the rest null)."""
         motif = request.get('predicate_scope') == 'motif'
-        self.keys(b, [f for f in SCHEMA['predicate_block'] if motif or f != 'motif_scope'], path)
+        taxid = request.get('predicate_namespace') == 'taxid'
+        self.keys(b, [f for f in SCHEMA['predicate_block']
+                      if (motif or f != 'motif_scope') and (taxid or f != 'namespace')], path)
+        if taxid:
+            self.ok(b['namespace'] == 'taxid', path + '.namespace')
         if motif:
             # SPEC §25.3: the scope of each pattern's motif claim
             self.one_of(b['motif_scope'], MOTIF_SCOPES, path + '.motif_scope')
@@ -1525,6 +1532,8 @@ class Checker:
                            and (predicate or f not in LIMITS_PREDICATE)
                            and (predicate and 'predicate_scope' in request
                                 or f != 'predicate_scope')
+                           and (request.get('predicate_namespace') == 'taxid'
+                                or f != 'predicate_namespace')
                            and (request.get('max_mismatches', 0) > 0 or f != 'max_mismatches')],
                   'limits')
         if request.get('max_mismatches', 0) > 0:
@@ -1533,6 +1542,8 @@ class Checker:
                     'as requested')
             self.ok(all(c['field'] != 'max_mismatches' for c in limits['clamped']),
                     'limits.clamped', 'max_mismatches is never lowered')
+        if request.get('predicate_namespace') == 'taxid':
+            self.ok(limits['predicate_namespace'] == 'taxid', 'limits.predicate_namespace')
         if predicate and 'predicate_scope' in request:
             self.ok(limits['predicate_scope'] == request['predicate_scope'],
                     'limits.predicate_scope', 'as requested')
@@ -3191,7 +3202,15 @@ class Checker:
         self.keys(b['caps'], CAPS, path + '.caps')
         # SPEC §19.12: "predicate_only" served with the predicate object (the operators, the
         # strands, the access: null while the annotation is not described)
-        self.keys(b['predicate'], SCHEMA['capabilities_predicate'], path + '.predicate')
+        namespace_fields = ('namespaces', 'default_namespace')
+        self.keys(b['predicate'], [f for f in SCHEMA['capabilities_predicate']
+                                   if f not in namespace_fields or f in b['predicate']],
+                  path + '.predicate')
+        if any(f in b['predicate'] for f in namespace_fields):
+            self.ok(b['predicate'].get('namespaces') in (['column'], ['column', 'taxid']),
+                    path + '.predicate.namespaces')
+            self.ok(b['predicate'].get('default_namespace') == 'column',
+                    path + '.predicate.default_namespace')
         self.ok(b['predicate']['operators'] == list(PREDICATE_OPERATORS),
                 path + '.predicate.operators')
         self.ok(b['predicate']['strands'] == list(PREDICATE_STRANDS), path + '.predicate.strands')
@@ -3507,6 +3526,11 @@ class TestPatternFixtures(unittest.TestCase):
                      'a predicate with long_search "paths" is refused')
         # SPEC §25.2: predicate_scope "motif" needs a predicate ("context", the default, is
         # accepted with any request)
+        if 'predicate_namespace' in request:
+            check.one_of(request['predicate_namespace'], ('column', 'taxid'),
+                         'request.predicate_namespace')
+            check.ok(request['predicate_namespace'] != 'taxid' or 'predicate' in request,
+                     'request.predicate_namespace', 'taxid needs a predicate')
         if 'predicate_scope' in request:
             check.one_of(request['predicate_scope'], PREDICATE_SCOPE_VALUES,
                          'request.predicate_scope')
@@ -4073,7 +4097,7 @@ class TestPatternFixtures(unittest.TestCase):
         # by name with the index each needs (derived from REFUSALS alone, the expectation could
         # not notice REFUSALS missing codes; test_the_codes_are_the_sources compares it with the
         # code); the retired mask_required has none either (RETIRED)
-        without_fixture = {'mask_invalid', 'alphabet_untested'}
+        without_fixture = {'mask_invalid', 'alphabet_untested', 'taxonomy_unavailable'}
         self.assertEqual(without_fixture, set(NO_FIXTURE))
         self.assertEqual({'mask_required', 'resident_only'}, set(RETIRED))
         unproducible = set(UNPRODUCIBLE) & set(REFUSALS)
@@ -4242,7 +4266,7 @@ class TestPatternFixtures(unittest.TestCase):
             if b.get('mask') is not None:
                 seen['mask'].setdefault(b['mask'], set()).add(route)
         without_fixture = {'mask_invalid', 'alphabet_untested'}
-        self.assertEqual(without_fixture, set(NO_FIXTURE))
+        self.assertEqual(without_fixture, set(NO_FIXTURE) & set(UNAVAILABLE))
         self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE) - without_fixture
                          - RETIRED_REASONS,
                          set(seen['unavailable']))
@@ -5278,6 +5302,21 @@ class TestPatternFixtures(unittest.TestCase):
                          served_bytes({'a': [1, 'b', None, True, {}]}))
         self.assertEqual(len('{"x":"\\u00a7"}'), served_bytes({'x': '§'}))
         self.assertEqual(len('{"f":}') + 24, served_bytes({'f': 0.5}))
+
+
+    def test_taxid_namespace_is_explicit_and_echoed(self):
+        request, answer = copy.deepcopy(self.bodies['predicate_filter'])
+        request['predicate_namespace'] = 'taxid'
+        answer['predicate']['namespace'] = 'taxid'
+        answer['limits']['predicate_namespace'] = 'taxid'
+        self.request_200(Checker(Raising(), 'request'), request)
+        Checker(Raising(), 'taxid').answer(answer, request)
+        for part, key in ((answer['predicate'], 'namespace'),
+                          (answer['limits'], 'predicate_namespace')):
+            part[key] = 'column'
+            with self.assertRaises(AssertionError):
+                Checker(Raising(), 'taxid').answer(answer, request)
+            part[key] = 'taxid'
 
 
 if __name__ == '__main__':

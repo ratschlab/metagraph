@@ -1198,7 +1198,9 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ(kK, caps["k"].asUInt64());
     // the access a column annotation (unbudgeted, direct access) gives a selection, and the
     // scopes a predicate is asked in (SPEC §25)
-    EXPECT_EQ(4u, caps["predicate"].size());
+    EXPECT_EQ(6u, caps["predicate"].size());
+    EXPECT_EQ(strings_of({ "column" }), caps["predicate"]["namespaces"]);
+    EXPECT_EQ("column", caps["predicate"]["default_namespace"].asString());
     EXPECT_EQ("columns", caps["predicate"]["access"].asString());
     EXPECT_EQ(strings_of({ "context", "motif" }), caps["predicate"]["scopes"]);
     // the long patterns' searches: anchors (the default), every walk, the supported walks

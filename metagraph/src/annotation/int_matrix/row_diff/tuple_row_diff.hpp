@@ -17,6 +17,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/int_matrix/row_diff/tuple_row_stream.hpp"
 
 
 namespace mtg {
@@ -67,6 +68,14 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
                                    std::vector<RowTuples> *out, std::vector<RowCost> *costs,
                                    std::vector<uint64_t> *held,
                                    RowDiffPathCache *cache = nullptr) const override;
+
+    DecodeStatus stream_row_tuples(Row row, DecodeBudget &budget, RowCost *cost,
+            const std::function<uint64_t(Column, uint64_t)> &emit,
+            const std::function<bool(uint64_t)> &stop = {}) const override {
+        if constexpr (HasRowTuples<BaseMatrix>::value)
+            return stream_tuple_row(*this, row, budget, cost, emit, stop);
+        return DecodeStatus::UNSUPPORTED;
+    }
 
     // the default decode with the path cache (IRowDiff): the cache holds full tuple rows,
     // from which get_rows_cached() keeps the columns, as get_rows() does
@@ -134,6 +143,62 @@ DecodeStatus TupleRowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows,
                                                    std::vector<uint64_t> *held,
                                                    RowDiffPathCache *cache) const {
     if constexpr(HasRowTuples<BaseMatrix>::value) {
+        // At anchors the stored binary columns already ARE the reconstructed
+        // memberships. Do not materialize potentially billions of coordinates
+        // just to return their column IDs. Non-anchors still need coordinate XOR.
+        const size_t num_anchors = std::count_if(rows.begin(), rows.end(),
+                                                [&](Row row) { return anchor_[row]; });
+        if (num_anchors == rows.size()) {
+            using Binary = std::decay_t<decltype(diffs_.get_binary_matrix())>;
+            BudgetedRowFetcher<Binary> fetcher(diffs_.get_binary_matrix());
+            // Tuple caches remain for coordinate reads; these inexpensive binary
+            // descents need no additional cache or change to the file format.
+            return decode_budgeted<SetBitPositions>(rows, budget, fetcher, out, costs, held);
+        }
+        if (num_anchors) {
+            const uint64_t entry = budget.held();
+            const size_t n = rows.size(), num_other = n - num_anchors;
+            const uint64_t inputs = buffer_bytes(num_anchors, sizeof(Row))
+                                    + buffer_bytes(num_other, sizeof(Row));
+            if (!budget.charge(output_bytes<SetBitPositions>(n) + inputs))
+                return DecodeStatus::REFUSED;
+            std::vector<SetBitPositions> result(n);
+            std::vector<RowCost> result_costs(n);
+            std::vector<uint64_t> result_held(n);
+            std::vector<Row> anchors, other;
+            anchors.reserve(num_anchors);
+            other.reserve(num_other);
+            for (Row row : rows)
+                (anchor_[row] ? anchors : other).push_back(row);
+            for (bool direct : { true, false }) {
+                const auto &group = direct ? anchors : other;
+                {
+                    std::vector<SetBitPositions> labels;
+                    std::vector<RowCost> group_costs;
+                    std::vector<uint64_t> group_held;
+                    const auto status = decode_rows(group, budget, &labels, &group_costs,
+                                                     &group_held, cache);
+                    if (status != DecodeStatus::OK) {
+                        budget.restore(entry);
+                        return status;
+                    }
+                    size_t j = 0;
+                    for (size_t i = 0; i < n; ++i) {
+                        if (bool(anchor_[rows[i]]) != direct)
+                            continue;
+                        result[i] = std::move(labels[j]);
+                        result_costs[i] = group_costs[j];
+                        result_held[i] = group_held[j++];
+                    }
+                }
+                budget.release(output_bytes<SetBitPositions>(group.size()));
+            }
+            budget.release(inputs);
+            out->swap(result);
+            costs->swap(result_costs);
+            held->swap(result_held);
+            return DecodeStatus::OK;
+        }
         const uint64_t at_entry = budget.held();
         std::vector<RowTuples> tuples;
         std::vector<RowCost> row_costs;

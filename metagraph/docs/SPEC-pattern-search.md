@@ -195,6 +195,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate |
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
 | `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. `"motif"` needs a predicate (else 400 `invalid_request`); `"context"` is accepted with any request and acts only with a predicate |
+| `predicate_namespace` | `"column"` \| `"taxid"` | `"column"` | [Record taxonomy](record-taxonomy.md): `taxid` requires a predicate and a complete loaded record mapping; otherwise 400 `taxonomy_unavailable`. Names match exact taxids; no descendant expansion. Selection remains per graph |
 | `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
 | `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, the graphs `/search`'s field selects, read more strictly (§24.1): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
 | `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
@@ -967,6 +968,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `max_predicate_labels` | integer | likewise: the server's (`caps.max_predicate_labels`) |
 | `predicate_strands` | string | likewise: as requested, default applied (`predicate.strands` states what was evaluated) |
 | `predicate_scope` | `"context"` \| `"motif"` | §25, answers with a predicate whose request named it only: as requested |
+| `predicate_namespace` | `"taxid"` | present only for a taxid predicate; as requested |
 | `max_mismatches` | integer | increment 5m-3 (§21.8), answers to `max_mismatches` above 0 only: as requested (never lowered) |
 | `clamped` | list of objects | one per request value lowered to its cap, in the order of §7.9; `[]` when none |
 
@@ -1353,6 +1355,8 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
 | `operators` | list | `["any", "all", "none", "at_least", "and", "or", "not"]`: the operators a predicate may use (§19.3) |
 | `strands` | list | `["either", "context"]`: the `predicate_strands` values (on CANONICAL and PRIMARY graphs both are evaluated as `"either"`, §19.5) |
 | `scopes` | list | `["context", "motif"]`: the `predicate_scope` values (§25) |
+| `namespaces` | list | `["column"]`, plus `"taxid"` when complete record taxonomy is loaded; absent in older builds |
+| `default_namespace` | string | `"column"`; absent in older builds |
 | `access` | `"rows"` \| `"columns"` \| null | how a selection reads this index's annotation: `"rows"` (the budget-aware decode, or an unbudgeted annotation without direct access) or `"columns"` (an unbudgeted annotation with direct access: single cells for at most 16 labels of a predicate, rows above); `null` while the index loads or when the annotation could not be described |
 
 **The mask, for a client** (the operator's side is design §4):
@@ -3122,6 +3126,7 @@ cut `all_or_count` list are released with it.
 | `vacuous` | boolean \| null | the normal form holds on a context carrying none of its labels (§19.4) |
 | `scope` | `"shard_context"` | §19.5: per context, per index; not motif-level |
 | `motif_scope` | `"shard_motif"` | §25, with `predicate_scope: "motif"` only: each pattern's motif claim is per pattern, on this index |
+| `namespace` | `"taxid"` | present only when `predicate_namespace: "taxid"` was requested; label projections use virtual taxid columns while record placements retain accession headers |
 | `strands` | `"either"` \| `"context"` | what was evaluated (§19.5): `"either"` on CANONICAL and PRIMARY graphs whatever was asked (`limits.predicate_strands` echoes the request) |
 
 **Entry.** Every answered entry of a predicate request gains `counts.tested`, `counts.selected` (§19.7),
@@ -4899,3 +4904,7 @@ no other stored body changes. Tests:
 `WindowedMaximumBucketsAndLateNotes`, `ObservedMaximumUnderConcurrentNotes`, `ObservedWindowFlagIsValidated`;
 integration `TestTraverseAttempts.test_observed_window_is_validated_and_stated` (a 5 s window: the piece of one
 `/traverse` stated on both routes, gone 2.2 s later; the flag's refusals).
+
+## Record taxonomy for balanced coordinate annotations
+
+[Record taxonomy](record-taxonomy.md) documents the opt-in loader, metadata preparation and predicate namespace. It preserves record boundaries for supported paths and keeps the existing Boolean and strand semantics. Missing or invalid metadata cannot be interpreted as taxon absence. The new `taxonomy_unavailable` refusal is tested by the real CLI/HTTP integration test; the stored mini-index fixture set predates this namespace. Contract version 1 remains: existing requests keep column semantics, and older capability documents may omit the namespace fields.

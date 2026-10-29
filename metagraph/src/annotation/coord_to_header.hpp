@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -55,7 +56,7 @@ class CoordToHeader {
     // a copy starts without a header index of its own (find_header); not assignable
     CoordToHeader(const CoordToHeader &other);
 
-    bool load(const std::string &filename_base);
+    bool load(const std::string &filename_base, bool record_taxonomy = false);
     void serialize(const std::string &filename_base) const;
 
     // global_coord -> (seq_id, local_coord)
@@ -118,6 +119,23 @@ class CoordToHeader {
     // how many times this object built its reverse index (to test that it is built once)
     size_t num_header_index_builds() const;
 
+    // Optional, complete record taxonomy. The sidecar has a version line followed by
+    // column, sequence id, exact header and positive taxid (tab separated), in record
+    // order. Every header must match; partial mappings are never used for absence claims.
+    bool load_taxids(std::istream &in);
+    bool has_taxids() const { return !taxids_.empty(); }
+    uint32_t taxid(Column column, size_t seq_id) const {
+        return taxid_ids_.at(taxids_.at(column).at(seq_id));
+    }
+    // The same records grouped into virtual taxid columns, in ascending taxid order.
+    // The physical bin annotation is unchanged. Records retain separate coordinate ranges.
+    const CoordToHeader* taxonomy_view() const { return taxonomy_view_.get(); }
+    const std::string& taxid_name(Column column) const { return taxid_names_.at(column); }
+    std::pair<Column, uint64_t> taxonomy_coord(Column column, uint64_t seq_id,
+                                               uint64_t local_coord) const;
+    std::optional<Column> find_taxid(std::string_view name) const;
+    static constexpr auto kTaxidsExtension = ".taxids.tsv";
+
     /**
      * The records of |headers| whose header repeats an earlier record's, in record order:
      * |callback|(first, repeat) with the 0-based indices of the first occurrence and of the
@@ -138,6 +156,12 @@ class CoordToHeader {
 
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
+    std::vector<std::vector<uint32_t>> taxids_;
+    std::vector<std::vector<uint32_t>> taxonomy_seq_ids_;
+    std::vector<uint32_t> taxid_ids_;
+    std::vector<std::string> taxid_names_;
+    std::unordered_map<uint32_t, Column> taxid_columns_;
+    std::shared_ptr<const CoordToHeader> taxonomy_view_;
 
     // find_header(): keys are views into |headers_|, which only load() changes, and load()
     // drops the index first

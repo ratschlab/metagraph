@@ -1,5 +1,8 @@
 #include "annotation/coord_to_header.hpp"
 
+#include <charconv>
+#include <filesystem>
+
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
@@ -27,7 +30,108 @@ CoordToHeader::~CoordToHeader() {}
 // The index is never shared or carried over: its keys view the headers of the object that
 // built it, so a copy builds its own on first use
 CoordToHeader::CoordToHeader(const CoordToHeader &other)
-      : headers_(other.headers_), coord_offsets_(other.coord_offsets_) {}
+      : headers_(other.headers_), coord_offsets_(other.coord_offsets_),
+        taxids_(other.taxids_), taxonomy_seq_ids_(other.taxonomy_seq_ids_),
+        taxid_ids_(other.taxid_ids_), taxid_names_(other.taxid_names_),
+        taxid_columns_(other.taxid_columns_), taxonomy_view_(other.taxonomy_view_) {}
+
+namespace {
+template <class T>
+bool parse_unsigned(std::string_view text, T *value) {
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), *value);
+    return !text.empty() && error == std::errc() && end == text.data() + text.size()
+        && (text.size() == 1 || text.front() != '0');
+}
+}
+
+std::optional<CoordToHeader::Column> CoordToHeader::find_taxid(std::string_view name) const {
+    uint32_t id = 0;
+    if (!parse_unsigned(name, &id))
+        return std::nullopt;
+    auto found = taxid_columns_.find(id);
+    return found == taxid_columns_.end() ? std::nullopt : std::optional<Column>(found->second);
+}
+
+std::pair<CoordToHeader::Column, uint64_t>
+CoordToHeader::taxonomy_coord(Column column, uint64_t seq_id, uint64_t local_coord) const {
+    const Column target = taxids_.at(column).at(seq_id);
+    const uint32_t sequence = taxonomy_seq_ids_.at(column).at(seq_id);
+    return { target, local_coord + (sequence ? taxonomy_view_->last_coord(target, sequence - 1) + 1 : 0) };
+}
+
+bool CoordToHeader::load_taxids(std::istream &in) {
+    taxids_.clear();
+    taxonomy_seq_ids_.clear();
+    taxid_ids_.clear();
+    taxid_names_.clear();
+    taxid_columns_.clear();
+    taxonomy_view_.reset();
+    std::string line;
+    if (!std::getline(in, line) || line != "METAGRAPH_RECORD_TAXIDS_V1")
+        return false;
+    std::vector<std::vector<uint32_t>> values(headers_.size());
+    std::unordered_map<uint32_t, size_t> counts;
+    for (size_t col = 0; col < headers_.size(); ++col) {
+        values[col].reserve(headers_[col].size());
+        for (size_t seq = 0; seq < headers_[col].size(); ++seq) {
+            if (!std::getline(in, line))
+                return false;
+            const size_t a = line.find('\t'), b = line.find('\t', a + 1),
+                         c = line.find('\t', b + 1);
+            if (a == std::string::npos || b == std::string::npos || c == std::string::npos
+                    || line.find('\t', c + 1) != std::string::npos)
+                return false;
+            const std::string_view row(line);
+            uint64_t column = 0, sequence = 0;
+            uint32_t id = 0;
+            if (!parse_unsigned(row.substr(0, a), &column) || column != col
+                    || !parse_unsigned(row.substr(a + 1, b - a - 1), &sequence) || sequence != seq
+                    || row.substr(b + 1, c - b - 1) != headers_[col][seq]
+                    || !parse_unsigned(row.substr(c + 1), &id) || !id)
+                return false;
+            values[col].push_back(id);
+            ++counts[id];
+        }
+    }
+    if (std::getline(in, line) || !in.eof() || in.bad())
+        return false;
+    std::vector<uint32_t> ids;
+    ids.reserve(counts.size());
+    for (const auto &[id, count] : counts)
+        ids.push_back(id);
+    std::sort(ids.begin(), ids.end());
+    std::unordered_map<uint32_t, Column> columns;
+    std::vector<std::string> names;
+    std::vector<std::vector<std::string>> headers(ids.size());
+    std::vector<std::vector<uint64_t>> lengths(ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) {
+        columns.emplace(ids[i], i);
+        names.push_back(std::to_string(ids[i]));
+        headers[i].reserve(counts.at(ids[i]));
+        lengths[i].reserve(counts.at(ids[i]));
+    }
+    std::vector<std::vector<uint32_t>> sequences(headers_.size());
+    for (Column col = 0; col < headers_.size(); ++col) {
+        sequences[col].reserve(headers_[col].size());
+        for (size_t seq = 0; seq < headers_[col].size(); ++seq) {
+            const Column target = columns.at(values[col][seq]);
+            if (headers[target].size() > std::numeric_limits<uint32_t>::max())
+                throw std::overflow_error("Too many records in one taxonomy column");
+            sequences[col].push_back(headers[target].size());
+            values[col][seq] = target;
+            headers[target].push_back(headers_[col][seq]);
+            lengths[target].push_back(num_kmers_in_sequence(col, seq));
+        }
+    }
+    auto view = std::make_shared<CoordToHeader>(std::move(headers), std::move(lengths));
+    taxids_ = std::move(values);
+    taxonomy_seq_ids_ = std::move(sequences);
+    taxid_ids_ = std::move(ids);
+    taxid_names_ = std::move(names);
+    taxid_columns_ = std::move(columns);
+    taxonomy_view_ = std::move(view);
+    return true;
+}
 
 size_t CoordToHeader::build_header_index() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);
@@ -205,7 +309,13 @@ uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
     return end - start + 1;
 }
 
-bool CoordToHeader::load(const std::string &filename_base) {
+bool CoordToHeader::load(const std::string &filename_base, bool record_taxonomy) {
+    taxids_.clear();
+    taxonomy_seq_ids_.clear();
+    taxid_ids_.clear();
+    taxid_names_.clear();
+    taxid_columns_.clear();
+    taxonomy_view_.reset();
     const std::string path = utils::make_suffix(filename_base, kExtension);
     std::unique_ptr<std::ifstream> in = utils::open_ifstream(path);
     if (!in->good()) {
@@ -227,6 +337,15 @@ bool CoordToHeader::load(const std::string &filename_base) {
         for (uint64_t i = 0; i < num_columns; ++i) {
             load_string_vector(*in, &headers_[i]);
             coord_offsets_[i].load(*in);
+        }
+        const std::string taxids_path = path.substr(0, path.size() - std::string(kExtension).size())
+                + kTaxidsExtension;
+        if (record_taxonomy) {
+            auto taxids = utils::open_ifstream(taxids_path);
+            if (!taxids->good() || !load_taxids(*taxids)) {
+                logger->error("Invalid or incomplete record taxonomy sidecar '{}'", taxids_path);
+                return false;
+            }
         }
         return true;
 

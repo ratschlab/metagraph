@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <sstream>
 
 #include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
@@ -10,6 +11,54 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::annot;
+
+TEST(CoordToHeaderTaxids, CompleteMappingPreservesRecordBoundaries) {
+    CoordToHeader mapping({ { "A.1", "B.1" }, { "C.1" } }, { { 3, 4 }, { 5 } });
+    std::istringstream in("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n0\t1\tB.1\t200\n1\t0\tC.1\t100\n");
+    ASSERT_TRUE(mapping.load_taxids(in));
+    ASSERT_TRUE(mapping.has_taxids());
+    ASSERT_EQ(0u, *mapping.find_taxid("100"));
+    ASSERT_EQ(1u, *mapping.find_taxid("200"));
+    EXPECT_FALSE(mapping.find_taxid("0100"));
+    EXPECT_FALSE(mapping.find_taxid("100junk"));
+    EXPECT_FALSE(mapping.find_taxid("4294967296"));
+    EXPECT_EQ(200u, mapping.taxid(0, 1));
+    const auto &view = *mapping.taxonomy_view();
+    EXPECT_EQ((std::vector<std::string>{ "A.1", "C.1" }), view.get_headers(0));
+    EXPECT_EQ(3u, view.num_kmers_in_sequence(0, 0));
+    EXPECT_EQ(5u, view.num_kmers_in_sequence(0, 1));
+    auto translated = mapping.taxonomy_coord(1, 0, 2);
+    EXPECT_EQ(0u, translated.first);
+    EXPECT_EQ(5u, translated.second);
+    EXPECT_EQ((std::pair<size_t, uint64_t>{ 1, 2 }), view.map_single_coord(translated.first, translated.second));
+    CoordToHeader copy(mapping);
+    EXPECT_EQ(mapping.taxonomy_view(), copy.taxonomy_view());
+    EXPECT_EQ(translated, copy.taxonomy_coord(1, 0, 2));
+}
+
+TEST(CoordToHeaderTaxids, RejectsIncompleteMisalignedAndInvalidMappings) {
+    const std::vector<std::string> bad = {
+        "", "BAD_VERSION\n", "METAGRAPH_RECORD_TAXIDS_V1\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.2\t100\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n1\t0\tA.1\t100\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n0\t1\tA.1\t100\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t0\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t-1\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t4294967296\n",
+        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n0\t1\tB.1\t200\n",
+    };
+    for (const auto &text : bad) {
+        SCOPED_TRACE(text);
+        CoordToHeader mapping({ { "A.1" } }, { { 3 } });
+        std::istringstream good("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n");
+        ASSERT_TRUE(mapping.load_taxids(good));
+        std::istringstream in(text);
+        EXPECT_FALSE(mapping.load_taxids(in));
+        EXPECT_FALSE(mapping.has_taxids());
+        EXPECT_EQ(nullptr, mapping.taxonomy_view());
+        EXPECT_FALSE(mapping.find_taxid("100"));
+    }
+}
 
 TEST(CoordToHeader, MapSingleCoordFirstSequence) {
     // Column 0: two sequences, with 5 and 3 k-mers respectively

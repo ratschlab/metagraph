@@ -204,6 +204,8 @@ Config::Config(int argc, char *argv[]) {
                 print_usage_and_exit = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
             print_column_names = true;
+        } else if (!strcmp(argv[i], "--print-sequence-headers")) {
+            print_sequence_headers = true;
         } else if (!strcmp(argv[i], "--check-names")) {
             check_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
@@ -218,6 +220,8 @@ Config::Config(int argc, char *argv[]) {
             allow_unchecked_headers = true;
         } else if (!strcmp(argv[i], "--no-coord-mapping")) {
             no_coord_mapping = true;
+        } else if (!strcmp(argv[i], "--record-taxonomy")) {
+            record_taxonomy = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
             // FYI: experimental
             std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
@@ -985,6 +989,10 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
+    if (record_taxonomy && no_coord_mapping) {
+        std::cerr << "Error: --record-taxonomy requires coordinate-to-header mapping" << std::endl;
+        print_usage_and_exit = true;
+    }
     if ((identity == TRAVERSE || identity == SERVER_QUERY || identity == PATTERN)
             && (!index_name.empty() || !index_manifest.empty())) {
         if (fnames.size() && identity == SERVER_QUERY) {
@@ -1654,6 +1662,7 @@ if (advanced) {
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
             fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
+            fprintf(stderr, "\t   --print-sequence-headers \texport column, record id and exact header from one .seqs file as TSV [off]\n");
             fprintf(stderr, "\t   --check-names \tcheck the names of the annotation (-a): every label name valid UTF-8 and, for a coordinate\n"
                             "\t                 \tannotation with its record mapping (.seqs), every record header valid UTF-8 and distinct\n"
                             "\t                 \twithin its column; prints one JSON object (record: 0-based in its column), exits 1 on a failure [off]\n");
@@ -1807,6 +1816,7 @@ if (advanced) {
             fprintf(stderr, "\t   --min-kmers-fraction-label [FLOAT] \tmin fraction of k-mers from the query required to be present in a label [0.7]\n");
             fprintf(stderr, "\t   --min-kmers-fraction-graph [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
+            fprintf(stderr, "\t   --record-taxonomy \t\tload complete .taxids.tsv sidecars for taxid pattern predicates [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
@@ -1939,6 +1949,7 @@ if (advanced) {
             fprintf(stderr, "\t   --cache-size [GB] \tmax size of the /search result cache, in GB (0 disables) [1]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
+            fprintf(stderr, "\t   --record-taxonomy \t\tload complete .taxids.tsv sidecars for taxid pattern predicates [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
             fprintf(stderr, "\t   --max-graphs-without-selection [INT] \ta POST /search or /pattern request without `graphs` queries every name of a graph list of at most this many names, and is refused (400) on a longer list; stated by GET /capabilities; at least 1 [10]\n");
             fprintf(stderr, "\t   --max-request-body-mb [INT] \tlargest request body read, in MiB: a request with a longer body is dropped (its connection closed without a response, logged); stated by GET /capabilities; 0 = unlimited [0]\n");

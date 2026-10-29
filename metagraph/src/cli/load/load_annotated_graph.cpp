@@ -302,7 +302,7 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
         // Load CoordToHeader mapping if exists
         if (std::filesystem::exists(cth_fname)) {
             coord_to_header = std::make_unique<annot::CoordToHeader>();
-            if (!coord_to_header->load(cth_fname)) {
+            if (!coord_to_header->load(cth_fname, config.record_taxonomy)) {
                 if (on_failure == LoadFailure::THROW) {
                     throw std::runtime_error(load_failure("the record mapping", cth_fname));
                 }
@@ -328,6 +328,12 @@ load_coord_to_header(const annot::MultiLabelAnnotation<std::string> &annotation,
         }
     }
 
+    if (config.record_taxonomy && !coord_to_header) {
+        if (on_failure == LoadFailure::THROW)
+            throw std::runtime_error("--record-taxonomy requires coordinate annotation and a record mapping");
+        logger->error("--record-taxonomy requires coordinate annotation and a record mapping");
+        exit(1);
+    }
     return coord_to_header;
 }
 
