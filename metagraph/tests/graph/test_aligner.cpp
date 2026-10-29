@@ -1599,6 +1599,77 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, extend_second_strand_only_if_needed) {
+    size_t k = 7;
+    std::string reference = "AAAAGCTTTCGAGGCCAAGGTCACTTGCA";
+    auto canonical = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
+    auto basic = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
+
+    DBGAlignerConfig config;
+    // on CANONICAL graphs, a first strand alignment spanning most of the query
+    // makes the second strand redundant
+    EXPECT_FALSE(extend_second_strand(*canonical, config, 100, 100));
+    EXPECT_FALSE(extend_second_strand(*canonical, config, 100, 95));
+    EXPECT_TRUE(extend_second_strand(*canonical, config, 100, 94));
+    EXPECT_TRUE(extend_second_strand(*canonical, config, 100, 0));
+    // on BASIC graphs, the strands match different k-mers
+    EXPECT_TRUE(extend_second_strand(*basic, config, 100, 100));
+    // the second strand may provide alternative alignments
+    config.num_alternative_paths = 2;
+    EXPECT_TRUE(extend_second_strand(*canonical, config, 100, 100));
+}
+
+TYPED_TEST(DBGAlignerTest, align_canonical_both_strands_default_config) {
+    size_t k = 7;
+    std::string reference = "AAAAGCTTTCGAGGCCAAGGTCACTTGCA";
+    std::string query =     "AAAAGTTTTCGAGGCCAAGGTCACTTGCA";
+    //                            X
+    auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
+
+    // rel_score_cutoff is 0 by default, so both strands pass the seed count check
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    ASSERT_EQ(0.0, config.rel_score_cutoff);
+    DBGAligner<> aligner(*graph, config);
+
+    std::string query_rc = query;
+    reverse_complement(query_rc.begin(), query_rc.end());
+    for (const std::string &q : { query, query_rc }) {
+        auto paths = aligner.align(q);
+        ASSERT_EQ(1ull, paths.size()) << q;
+        EXPECT_EQ(config.score_sequences(query, reference), paths[0].get_score()) << q;
+        EXPECT_EQ(0u, paths[0].get_clipping()) << q;
+        EXPECT_EQ(0u, paths[0].get_end_clipping()) << q;
+        EXPECT_TRUE(paths[0].is_valid(*graph, &config));
+    }
+}
+
+TYPED_TEST(DBGAlignerTest, align_canonical_alternative_paths) {
+    size_t k = 7;
+    // two copies of a region that differ in one position
+    std::string reference_1 = "AAAAGCTTTCGAGGCCAAGGTCACTTGCA";
+    std::string reference_2 = "GGTACGTTTCGAGGCCATGGTCACTTGCA";
+    std::string query =       "AAAAGCTTTCGAGGCCAAGGTCACTTGCA";
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 },
+                                              DeBruijnGraph::CANONICAL);
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_exact_match = 0.0;
+    config.num_alternative_paths = 3;
+    DBGAligner<> aligner(*graph, config);
+
+    std::string query_rc = query;
+    reverse_complement(query_rc.begin(), query_rc.end());
+    for (const std::string &q : { query, query_rc }) {
+        auto paths = aligner.align(q);
+        EXPECT_EQ(3u, paths.size()) << q;
+        for (const auto &path : paths) {
+            EXPECT_TRUE(path.is_valid(*graph, &config));
+        }
+    }
+}
+
 TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
     size_t k = 6;
     std::vector<std::string> seqs;
