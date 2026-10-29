@@ -2812,7 +2812,9 @@ TEST(PatternTaxidStream, RepetitiveMembershipFitsSmallBudgetAndInterruptsAtomica
     pacing.stop = [&]() { return ++checks >= 3; };
     LabelOracle::StreamReadScope scope(oracle, &pacing);
     const auto before_refusal = oracle.counters();
-    result = {{123}}; costs = {{1,2,3}}; held = {456};
+    result = {{123}}; costs = {{1,2,3}};
+    held.clear();
+    held.push_back(456);
     ASSERT_EQ(DecodeStatus::REFUSED, oracle.get_rows({row}, interrupted, &result, &costs, &held));
     EXPECT_TRUE(pacing.interrupted);
     EXPECT_EQ(before_refusal.coords_mapped, oracle.counters().coords_mapped);
