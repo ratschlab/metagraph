@@ -33,7 +33,7 @@ class DBGSSHash : public DeBruijnGraph {
                                 sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>;
 
     explicit DBGSSHash(size_t k, Mode mode = BASIC);
-    // |ram_limit_gb| is SSHash's construction budget, never below its default
+    // |ram_limit_gb| (in GB) is SSHash's construction budget, never below its default
     DBGSSHash(const std::string& input_filename,
               size_t k,
               Mode mode = BASIC,

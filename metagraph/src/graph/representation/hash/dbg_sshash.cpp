@@ -212,8 +212,9 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     build_config.num_threads = get_num_threads();
     // SSHash writes its minimizer tuples to sorted runs of ~RAM / (2 * threads) bytes
     // each, so a larger budget means fewer and longer runs to merge
-    build_config.ram_limit_in_GiB = std::max(build_config.ram_limit_in_GiB,
-                                             uint64_t(std::ceil(ram_limit_gb)));
+    double ram_limit_GiB = ram_limit_gb * 1e9 / (1ull << 30);
+    if (std::isfinite(ram_limit_GiB) && ram_limit_GiB > build_config.ram_limit_in_GiB)
+        build_config.ram_limit_in_GiB = std::ceil(ram_limit_GiB);
     build_config.allow_reverse_complement_duplicates = mode == BASIC;
 
     // put SSHash's temp files under --disk-swap (default: ./) and clean them up

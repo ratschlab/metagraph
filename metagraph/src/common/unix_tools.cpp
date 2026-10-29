@@ -125,8 +125,10 @@ size_t get_max_files_open() {
 void raise_max_files_open() {
     struct rlimit lim;
     if (getrlimit(RLIMIT_NOFILE, &lim) == 0 && lim.rlim_cur < lim.rlim_max) {
+        rlim_t soft = lim.rlim_cur;
         lim.rlim_cur = lim.rlim_max;
-        setrlimit(RLIMIT_NOFILE, &lim);
+        if (setrlimit(RLIMIT_NOFILE, &lim) != 0)
+            logger->warn("Could not raise the limit on open files from {}", soft);
     }
 }
 
