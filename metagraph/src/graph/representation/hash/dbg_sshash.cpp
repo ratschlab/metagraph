@@ -175,7 +175,11 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
                            has_duplicates.load());
 }
 
-DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, size_t num_chars)
+DBGSSHash::DBGSSHash(const std::string& input_filename,
+                     size_t k,
+                     Mode mode,
+                     size_t num_chars,
+                     double ram_limit_gb)
     : DBGSSHash(k, mode) {
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
@@ -206,6 +210,10 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
+    // SSHash writes its minimizer tuples to sorted runs of ~RAM / (2 * threads) bytes
+    // each, so a larger budget means fewer and longer runs to merge
+    build_config.ram_limit_in_GiB = std::max(build_config.ram_limit_in_GiB,
+                                             uint64_t(std::ceil(ram_limit_gb)));
     build_config.allow_reverse_complement_duplicates = mode == BASIC;
 
     // put SSHash's temp files under --disk-swap (default: ./) and clean them up

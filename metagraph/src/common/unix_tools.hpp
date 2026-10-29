@@ -26,6 +26,9 @@ size_t get_peak_RSS();
 
 size_t get_max_files_open();
 
+// Raise the soft limit on open files to the hard limit
+void raise_max_files_open();
+
 int get_num_fds();
 
 /**
