@@ -59,11 +59,12 @@ def server(graph, annotation, *extra):
             deadline = time.monotonic() + 20
             while process.poll() is None and time.monotonic() < deadline:
                 try:
-                    if http(url + '/stats')[0] == 200:
-                        yield url
-                        return
+                    ready = http(url + '/stats')[0] == 200
                 except (OSError, urllib.error.URLError):
-                    pass
+                    ready = False
+                if ready:
+                    yield url
+                    return
                 time.sleep(0.1)
             log.seek(0)
             raise AssertionError(f'Server did not become ready: {log.read().decode()}')

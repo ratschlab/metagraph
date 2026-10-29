@@ -115,6 +115,8 @@ std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
  *   row_diff_fork_succ  <graph>.rd_succ, for a .row_diff.annodbg (required: build_annotated_dbg)
  *   coord_to_header     <annotation without .<type>.annodbg>.seqs, for a coordinate
  *                       annotation when it exists and |coord_mapping| (not --no-coord-mapping)
+ *   record_taxonomy     <annotation without .<type>.annodbg>.taxids.tsv, required when
+ *                       |record_taxonomy| enables the coordinate annotation taxonomy
  * A required file is listed whether it exists or not (the loader fails without it), an
  * optional one only when the loader would read it. Deliberately not listed: the graph's
  * DERIVED data, which the loader reads too (index_derived_files: the dummy-edge mask and the
@@ -173,8 +175,8 @@ std::vector<std::string> index_bundle_files(const std::string &graph,
                                             const std::string &annotation,
                                             bool coord_mapping = true, bool record_taxonomy = false);
 // the optional identity files the inventory derives for the pair — a coordinate annotation's
-// .seqs — that index_load_inventory leaves out (missing beside the listed spelling,
-// |coord_mapping| false): a manifest must not list them (by base name). The graph's mask and
+// .seqs and .taxids.tsv — that index_load_inventory leaves out (missing beside the listed
+// spelling, |coord_mapping| false, or |record_taxonomy| false for .taxids.tsv): a manifest must not list them (by base name). The graph's mask and
 // Bloom filter are not among them: a manifest lists those never (index_derived_files)
 std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
                                                        const std::string &annotation,

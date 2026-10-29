@@ -634,7 +634,7 @@ DecodeStatus LabelOracle::get_taxonomy_rows_streamed(
     std::vector<BinaryMatrix::SetBitPositions> result(rows.size());
     std::vector<RowCost> row_costs(rows.size());
     std::vector<uint64_t> row_held(rows.size()), seen(words);
-    uint64_t finished_work = 0;
+    uint64_t finished_work = 0, coordinates_mapped = 0;
     for (size_t i = 0; i < rows.size(); ++i) {
         std::fill(seen.begin(), seen.end(), 0);
         const auto status = rd_->stream_row_tuples(rows[i], budget, &row_costs[i],
@@ -644,7 +644,7 @@ DecodeStatus LabelOracle::get_taxonomy_rows_streamed(
                 const auto range = taxonomy_source_->sequence_range(column, coordinate);
                 const Column taxon = taxonomy_source_->taxonomy_coord(column, range.seq_id, 0).first;
                 seen[taxon / 64] |= uint64_t(1) << (taxon % 64);
-                ++counters_.coords_mapped;
+                ++coordinates_mapped;
                 // One occurrence proves this record's taxon. Seek past the record
                 // in every immutable stream, preserving XOR parity afterwards.
                 return range.last + 1;
@@ -673,6 +673,8 @@ DecodeStatus LabelOracle::get_taxonomy_rows_streamed(
     out->swap(result); costs->swap(row_costs); held->swap(row_held);
     committed = true;
     counters_.rows_fetched += rows.size();
+    counters_.tuple_rows_fetched += rows.size();
+    counters_.coords_mapped += coordinates_mapped;
     return DecodeStatus::OK;
 }
 
@@ -2470,6 +2472,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
 
 void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
                          ReadPacing *pacing) {
+    LabelOracle::StreamReadScope stream_scope(oracle_, pacing);
     if (costs_.size() != cache_.size())
         clear_cache();
     struct Run {

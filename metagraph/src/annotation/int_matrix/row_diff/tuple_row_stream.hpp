@@ -77,6 +77,7 @@ DecodeStatus stream_tuple_row(const Matrix &matrix, BinaryMatrix::Row row,
         if (!matrix.diffs().call_row_tuple_views(path.data[i], &ranks, budget,
                 [&](Column col, const Values &values, uint64_t begin, uint64_t end) {
             ++work;
+            if (halted()) return false;
             if (reset[col]) return true;
             if (begin == end) { reset[col] = true; return true; }
             if (!inputs.reserve_one(budget)) return false;

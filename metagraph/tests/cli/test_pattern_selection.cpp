@@ -2797,7 +2797,9 @@ TEST(PatternTaxidStream, RepetitiveMembershipFitsSmallBudgetAndInterruptsAtomica
     std::vector<BinaryMatrix::SetBitPositions> result;
     std::vector<RowCost> costs;
     std::vector<uint64_t> held;
+    const auto before_success = oracle.counters();
     ASSERT_EQ(DecodeStatus::OK, oracle.get_rows({row}, budget, &result, &costs, &held));
+    EXPECT_EQ(before_success.tuple_rows_fetched + 1, oracle.counters().tuple_rows_fetched);
     EXPECT_EQ(expected, result);
     EXPECT_LE(budget.peak(), 64u << 10);
     EXPECT_LT(costs[0].dependency_entries, 1000u);  // seeks past repeated occurrences
@@ -2809,12 +2811,36 @@ TEST(PatternTaxidStream, RepetitiveMembershipFitsSmallBudgetAndInterruptsAtomica
     unsigned checks = 0;
     pacing.stop = [&]() { return ++checks >= 3; };
     LabelOracle::StreamReadScope scope(oracle, &pacing);
+    const auto before_refusal = oracle.counters();
     result = {{123}}; costs = {{1,2,3}}; held = {456};
     ASSERT_EQ(DecodeStatus::REFUSED, oracle.get_rows({row}, interrupted, &result, &costs, &held));
     EXPECT_TRUE(pacing.interrupted);
+    EXPECT_EQ(before_refusal.coords_mapped, oracle.counters().coords_mapped);
+    EXPECT_EQ(before_refusal.tuple_rows_fetched, oracle.counters().tuple_rows_fetched);
     EXPECT_EQ(17u, interrupted.held());
     EXPECT_EQ((std::vector<BinaryMatrix::SetBitPositions>{{123}}), result);
     EXPECT_EQ((std::vector<uint64_t>{456}), held);
+}
+
+
+TEST(PatternTaxidStream, WideRowStopsBeforeEmittingCoordinates) {
+    using namespace annot::matrix;
+    std::vector<Record> records;
+    for (size_t i = 0; i < 64; ++i)
+        records.push_back({"bin" + std::to_string(i), "A.1", "AAAAA"});
+    auto index = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    graph::traversal::LabelOracle oracle(*index.anno, index.cth.get());
+    const auto row = AnnotatedDBG::graph_to_anno_index(oracle.keys_of_sequence("AAAAA")[0]);
+    const auto &rd = dynamic_cast<const IRowDiff&>(index.anno->get_annotator().get_matrix());
+    DecodeBudget budget(1 << 20);
+    ASSERT_TRUE(budget.charge(17));
+    RowCost cost;
+    unsigned emitted = 0;
+    EXPECT_EQ(DecodeStatus::REFUSED, rd.stream_row_tuples(row, budget, &cost,
+        [&](uint64_t, uint64_t coordinate) { ++emitted; return coordinate + 1; },
+        [&](uint64_t work) { return work >= 10; }));
+    EXPECT_EQ(0u, emitted);
+    EXPECT_EQ(17u, budget.held());
 }
 
 } // namespace

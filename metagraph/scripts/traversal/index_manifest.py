@@ -233,8 +233,8 @@ def load_inventory(graph, annotation, coord_mapping=True, record_taxonomy=False)
 
 def unloaded_optional(graph, annotation, coord_mapping=True, record_taxonomy=False):
     """The optional identity files the inventory derives for the pair -- a coordinate
-    annotation's .seqs -- that it does not load (missing beside the listed spelling, or
-    coord_mapping off), as metagraph's index_unloaded_optional_files: the server refuses a
+    annotation's .seqs and .taxids.tsv -- that it does not load (missing beside the listed
+    spelling, coord_mapping off, or record_taxonomy off for .taxids.tsv), as metagraph's index_unloaded_optional_files: the server refuses a
     manifest that lists one (by base name), so that index_fp identifies the files it loads.
     (The graph's mask and Bloom filter are refused in any manifest: derived_role.)"""
     candidates = []
@@ -391,7 +391,7 @@ def manifest_problems(manifest, loaded=None, not_loaded=()):
         listed = by_name.get(os.path.basename(path))
         if listed is not None:
             out.append(f'it lists {listed}, which the server does not load for this index ({path}: '
-                       f'missing beside the listed file, or --no-coord-mapping)')
+                       f'missing beside the listed file, --no-coord-mapping, or --record-taxonomy omitted)')
     if loaded is not None:
         for path in loaded:
             if os.path.isfile(path) and os.path.basename(path) not in by_name:

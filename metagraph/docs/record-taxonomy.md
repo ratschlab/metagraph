@@ -22,7 +22,7 @@ python scripts/prepare_record_taxids.py \
   --output prepared-taxonomy
 ```
 
-List every chunk being deployed. The output directory must not exist. The SQLite join uses bounded cache memory and disk-backed temporary data. Only a `coverage.json` with `complete: true`, all expected chunks and zero missing accessions is deployable. Preserve its catalogue, inventory and sidecar SHA-256 values. Conflicting taxids are errors. Missing records never become taxid zero or an assumed absence.
+List every chunk being deployed and compare the names in `coverage.json` with the deployment chunk list; the script cannot detect a chunk omitted from its arguments. The output directory must not exist. The SQLite join uses bounded cache memory and disk-backed temporary data. Only a `coverage.json` with `complete: true`, all expected chunks and zero missing accessions is deployable. Preserve its catalogue, inventory and sidecar SHA-256 values. Conflicting taxids are errors. Missing records never become taxid zero or an assumed absence.
 
 Each `annotation.taxids.tsv` belongs beside its matching `annotation.seqs`. It contains the version line `METAGRAPH_RECORD_TAXIDS_V1`, followed by column, sequence ID, exact header and positive taxid, tab separated in record order. Loading verifies every record and rejects missing, extra, reordered or mismatched rows. A changed sidecar changes index identity: generate and verify manifests with `scripts/traversal/index_manifest.py --record-taxonomy`, matching the server's flag.
 
@@ -34,7 +34,7 @@ An enabled graph advertises `predicate.namespaces: ["column", "taxid"]`. Clients
 {"patterns":[{"dna":"AGCTTTTCATTCTGACTGCAACGGGCAATAT"}],"mode":"count","predicate_namespace":"taxid","predicate":{"any":["511145"]}}
 ```
 
-`column` is the unchanged default. `taxid` requires a predicate and a complete loaded mapping; otherwise the request is refused with `taxonomy_unavailable`. All existing Boolean predicate operators, projections and supported-path rules apply to the taxid view. Taxids match exactly; there is no implicit descendant or merged-taxid expansion. Headers remain accession labels in record placements.
+`column` is the unchanged default. `taxid` requires a predicate (`invalid_request` when absent) and a complete loaded mapping (`taxonomy_unavailable` when absent or invalid). All existing Boolean predicate operators, projections and supported-path rules apply to the taxid view. Taxids match exactly; there is no implicit descendant or merged-taxid expansion. Headers remain accession labels in record placements.
 
 Each source record gets its own interval in the virtual taxid column. A long path can therefore have taxon-wide `label_intersection` support while failing `record_verified` support because its k-mers occur in different records. This distinction is preserved by coordinate translation. Duplicate record names retain separate record IDs and intervals.
 

@@ -528,7 +528,8 @@ int print_stats(Config *config) {
     const auto &files = config->fnames;
 
     if (config->print_sequence_headers) {
-        if (files.size() != 1 || !config->infbase_annotators.empty() || config->check_names
+        if (files.size() != 1 || !config->infbase.empty()
+                || !config->infbase_annotators.empty() || config->check_names
                 || !utils::ends_with(files.front(), annot::CoordToHeader::kExtension)) {
             logger->error("--print-sequence-headers takes exactly one .seqs file");
             return 1;
@@ -538,8 +539,8 @@ int print_stats(Config *config) {
             return 1;
         for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
             for (const auto &header : mapping.get_headers(column)) {
-                if (header.find_first_of("\t\r\n") != std::string::npos) {
-                    logger->error("Sequence header contains a TSV delimiter");
+                if (!utils::valid_utf8(header) || header.find_first_of("\t\r\n") != std::string::npos) {
+                    logger->error("Sequence header contains invalid UTF-8 or a TSV delimiter");
                     return 1;
                 }
             }
@@ -550,6 +551,7 @@ int print_stats(Config *config) {
             for (size_t sequence = 0; sequence < headers.size(); ++sequence)
                 std::cout << column << '\t' << sequence << '\t' << headers[sequence] << '\n';
         }
+        std::cout.flush();
         return std::cout.good() ? 0 : 1;
     }
 
