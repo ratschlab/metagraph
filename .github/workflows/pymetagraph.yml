@@ -2,6 +2,8 @@ name: pymetagraph
 
 on:
   push:
+    branches:
+      - master
     paths:
       - 'metagraph/src/**'
       - 'metagraph/api/python/pymetagraph/**'
