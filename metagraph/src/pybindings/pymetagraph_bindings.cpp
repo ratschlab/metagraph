@@ -9,9 +9,13 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
+#include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -48,6 +52,38 @@ mtg::cli::Config make_config(const std::string &graph,
     return mtg::cli::Config(static_cast<int>(argv.size()), argv.data());
 }
 
+// Config sets MetaGraph's process-global (non-atomic) thread count, which the
+// loaders and some annotation queries read. Constructions write it exclusively,
+// queries read it under a shared lock.
+std::shared_mutex num_threads_mutex;
+
+// Run task(i) for every i in indices on the pool and wait for all of them.
+// ThreadPool terminates the process if a task throws on a worker, so catch
+// inside each task and rethrow the first exception once all have finished.
+void run_in_pool(ThreadPool &pool, const std::vector<size_t> &indices,
+                 const std::function<void(size_t)> &task) {
+    std::mutex error_mutex;
+    std::exception_ptr error;
+    std::vector<std::shared_future<void>> futures;
+    futures.reserve(indices.size());
+    for (size_t i : indices) {
+        futures.push_back(pool.enqueue([&, i]() {
+            try {
+                task(i);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
+                if (!error)
+                    error = std::current_exception();
+            }
+        }));
+    }
+    for (auto &future : futures) {
+        future.wait();
+    }
+    if (error)
+        std::rethrow_exception(error);
+}
+
 } // namespace
 
 class AnnotatedGraph {
@@ -57,10 +93,11 @@ class AnnotatedGraph {
     AnnotatedGraph(const std::string &graph,
                    const std::string &annotation,
                    unsigned int threads) {
+        std::unique_lock<std::shared_mutex> lock(num_threads_mutex);
         auto config = make_config(graph, annotation, threads);
         graph_ = mtg::cli::load_critical_dbg(config.infbase);
         anno_dbg_ = mtg::cli::initialize_annotated_dbg(graph_, config);
-        thread_pool_ = std::make_unique<ThreadPool>(std::max(1u, get_num_threads()));
+        thread_pool_ = std::make_unique<ThreadPool>(std::max(1u, threads));
     }
 
     size_t k() const { return graph_->get_k(); }
@@ -75,35 +112,24 @@ class AnnotatedGraph {
                             size_t num_top_labels,
                             double discovery_fraction,
                             double presence_fraction) const {
-        if (discovery_fraction < 0 || discovery_fraction > 1
+        if (!std::isfinite(discovery_fraction) || !std::isfinite(presence_fraction)
+                || discovery_fraction < 0 || discovery_fraction > 1
                 || presence_fraction < 0 || presence_fraction > 1) {
             throw std::invalid_argument(
                 "discovery_fraction and presence_fraction must be in [0, 1]");
         }
+        std::shared_lock<std::shared_mutex> lock(num_threads_mutex);
         std::vector<Hits> results(seqs.size());
-        std::vector<std::shared_future<void>> futures;
-        futures.reserve(seqs.size());
+        std::vector<size_t> indices;
         for (size_t i = 0; i < seqs.size(); ++i) {
-            if (seqs[i].size() < k())
-                continue;
-            futures.push_back(thread_pool_->enqueue([&, i]() {
-                results[i] = anno_dbg_->get_top_labels(seqs[i], num_top_labels,
-                                                       discovery_fraction,
-                                                       presence_fraction);
-            }));
+            if (seqs[i].size() >= k())
+                indices.push_back(i);
         }
-        // Wait for every task before rethrowing, as they write into results
-        std::exception_ptr error;
-        for (auto &future : futures) {
-            try {
-                future.get();
-            } catch (...) {
-                if (!error)
-                    error = std::current_exception();
-            }
-        }
-        if (error)
-            std::rethrow_exception(error);
+        run_in_pool(*thread_pool_, indices, [&](size_t i) {
+            results[i] = anno_dbg_->get_top_labels(seqs[i], num_top_labels,
+                                                   discovery_fraction,
+                                                   presence_fraction);
+        });
 
         return results;
     }
@@ -127,4 +153,14 @@ PYBIND11_MODULE(_pymetagraph_core, m) {
              py::arg("seqs"), py::arg("num_top_labels") = 1,
              py::arg("discovery_fraction") = 0.0, py::arg("presence_fraction") = 0.0,
              py::call_guard<py::gil_scoped_release>());
+
+    // Test hook: a task that throws on a worker thread must surface as a Python
+    // exception rather than terminate the process
+    m.def("_raise_in_worker", [](unsigned int threads) {
+        ThreadPool pool(std::max(1u, threads));
+        run_in_pool(pool, { 0, 1, 2, 3 }, [](size_t i) {
+            if (i == 2)
+                throw std::runtime_error("error in worker");
+        });
+    }, py::arg("threads") = 2, py::call_guard<py::gil_scoped_release>());
 }

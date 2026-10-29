@@ -108,5 +108,16 @@ def test_invalid_arguments(graph, index):
         pymetagraph.AnnotatedGraph("missing.dbg", index[1])
     with pytest.raises(ValueError):
         pymetagraph.AnnotatedGraph(*index, threads=0)
-    with pytest.raises(ValueError):
-        graph.query(["ACGT"], discovery_fraction=1.5)
+    for fraction in (1.5, -0.1, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            graph.query(["ACGT"], discovery_fraction=fraction)
+        with pytest.raises(ValueError):
+            graph.query("ACGT", presence_fraction=fraction)
+        # the extension checks the same without the Python wrapper
+        with pytest.raises(ValueError):
+            graph._graph.query(["ACGT"], 1, fraction, 0.0)
+
+
+def test_worker_error_raises():
+    with pytest.raises(RuntimeError, match="error in worker"):
+        pymetagraph._pymetagraph_core._raise_in_worker(threads=2)

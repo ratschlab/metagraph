@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 from typing import Iterable, List, Tuple, Union
 
@@ -48,6 +49,9 @@ class AnnotatedGraph:
             decreasing count, empty if nothing passes the thresholds or the
             sequence is shorter than ``k``. A single sequence gives a single list.
         """
+        for fraction in (discovery_fraction, presence_fraction):
+            if not (math.isfinite(fraction) and 0 <= fraction <= 1):
+                raise ValueError("discovery_fraction and presence_fraction must be in [0, 1]")
         if isinstance(seqs, str):
             return self._graph.query([seqs], num_top_labels, discovery_fraction, presence_fraction)[0]
         return self._graph.query(list(seqs), num_top_labels, discovery_fraction, presence_fraction)
