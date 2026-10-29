@@ -1634,10 +1634,18 @@ TYPED_TEST(DBGAlignerTest, align_canonical_both_strands_default_config) {
 
     std::string query_rc = query;
     reverse_complement(query_rc.begin(), query_rc.end());
+    std::string reference_rc = reference;
+    reverse_complement(reference_rc.begin(), reference_rc.end());
     for (const std::string &q : { query, query_rc }) {
         auto paths = aligner.align(q);
         ASSERT_EQ(1ull, paths.size()) << q;
-        EXPECT_EQ(config.score_sequences(query, reference), paths[0].get_score()) << q;
+        // the alignment covers the reference on either strand
+        if (paths[0].get_sequence() == reference) {
+            EXPECT_EQ(config.score_sequences(query, reference), paths[0].get_score()) << q;
+        } else {
+            ASSERT_EQ(reference_rc, paths[0].get_sequence()) << q;
+            EXPECT_EQ(config.score_sequences(query_rc, reference_rc), paths[0].get_score()) << q;
+        }
         EXPECT_EQ(0u, paths[0].get_clipping()) << q;
         EXPECT_EQ(0u, paths[0].get_end_clipping()) << q;
         EXPECT_TRUE(paths[0].is_valid(*graph, &config));

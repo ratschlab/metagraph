@@ -1,6 +1,7 @@
 #ifndef __ALIGNER_ALIGNMENT_HPP__
 #define __ALIGNER_ALIGNMENT_HPP__
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <ostream>
