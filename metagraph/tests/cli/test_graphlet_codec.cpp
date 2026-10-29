@@ -1830,8 +1830,10 @@ TEST(Graphlet, IndexIdentity) {
     EXPECT_NO_THROW(index_manifest_fingerprint(coord_manifest, index_bundle_files(graph, coord_anno),
                                                nullptr,
                                                index_unloaded_optional_files(graph, coord_anno)));
-    EXPECT_TRUE(index_unloaded_optional_files(graph, coord_anno).empty());
-    EXPECT_EQ((std::vector<std::string> { seqs }),
+    const std::string taxids = (dir / "x.taxids.tsv").string();
+    EXPECT_EQ((std::vector<std::string> { taxids }),
+              index_unloaded_optional_files(graph, coord_anno));
+    EXPECT_EQ((std::vector<std::string> { seqs, taxids }),
               index_unloaded_optional_files(graph, coord_anno, false));
     try {
         index_manifest_fingerprint(coord_manifest, index_bundle_files(graph, coord_anno, false),

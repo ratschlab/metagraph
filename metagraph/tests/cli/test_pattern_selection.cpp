@@ -2585,6 +2585,8 @@ void compare_taxonomy_answers(const Index &actual, const Index &reference, Ask a
 
 TEST(PatternTaxidView, MatchesPhysicalTaxidColumnsForBooleanPredicatesAndProjections) {
     auto [actual, reference] = taxonomy_twins();
+    if (!route_support(actual.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
     for (const std::string predicate : {
             R"({"any":["100"]})", R"({"all":["100","300"]})", R"({"none":["200"]})",
             R"({"at_least":{"n":2,"labels":["100","200","300"]}})",
@@ -2609,6 +2611,8 @@ TEST(PatternTaxidView, MatchesPhysicalTaxidColumnsForBooleanPredicatesAndProject
 
 TEST(PatternTaxidView, LongPathsKeepRecordBoundariesAndTaxonMembership) {
     auto [actual, reference] = taxonomy_twins();
+    if (!route_support(actual.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
     for (const std::string level : { "best", "label_intersection" }) {
         for (const std::string predicate : {
                 R"({"any":["100"]})", R"({"any":["200"]})", R"({"any":["300"]})",
@@ -2638,6 +2642,8 @@ TEST(PatternTaxidView, LongPathsKeepRecordBoundariesAndTaxonMembership) {
 
 TEST(PatternTaxidView, MotifUnionAndColumnDefaultRemainDistinct) {
     auto [actual, reference] = taxonomy_twins();
+    if (!route_support(actual.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
     Ask ask;
     ask.patterns = { "AAAAA", "CCCCC" };
     ask.predicate = R"({"all":["100","300"]})";
@@ -2652,6 +2658,8 @@ TEST(PatternTaxidView, MotifUnionAndColumnDefaultRemainDistinct) {
 
 TEST(PatternTaxidView, MissingMappingIsARefusalRatherThanAnAbsentTaxon) {
     auto index = build<annot::RowDiffColumnAnnotator>(5, { { "bin", "A.1", "AAAAACCCCC" } }, true);
+    if (!route_support(index.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
     Ask ask;
     ask.patterns = { "AAAAA" };
     ask.predicate = R"({"any":["100"]})";
@@ -2662,6 +2670,8 @@ TEST(PatternTaxidView, MissingMappingIsARefusalRatherThanAnAbsentTaxon) {
 TEST(PatternTaxidView, CanonicalAndPrimaryMatchTheirPhysicalTaxidTwins) {
     for (const auto mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
         auto [actual, reference] = taxonomy_twins(mode);
+        if (!route_support(actual.anno->get_graph()).supported)
+            GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
         for (const std::string predicate : { R"({"any":["100"]})", R"({"none":["200"]})",
                                             R"({"all":["100","300"]})" }) {
             Ask ask;
