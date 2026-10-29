@@ -1,7 +1,7 @@
 """Tests for pymetagraph.AnnotatedGraph.
 
 The fixture is built from metagraph's own test data with the `metagraph`
-binary (taken from $METAGRAPH, else from PATH); the tests are skipped if
+binary (taken from $METAGRAPH, else from PATH); the tests using it are skipped if
 neither is available, unless PYMETAGRAPH_REQUIRE_METAGRAPH=1. Query results
 are compared to `metagraph query`.
 """
@@ -24,8 +24,6 @@ METAGRAPH = os.environ.get("METAGRAPH") or shutil.which("metagraph")
 if METAGRAPH is None and os.environ.get("PYMETAGRAPH_REQUIRE_METAGRAPH") == "1":
     raise RuntimeError("metagraph binary not found: set METAGRAPH or add it to PATH")
 
-pytestmark = pytest.mark.skipif(METAGRAPH is None, reason="metagraph binary not found")
-
 
 def read_fasta(path):
     records, name = {}, None
@@ -41,6 +39,9 @@ def read_fasta(path):
 
 @pytest.fixture(scope="module")
 def index(tmp_path_factory):
+    # only the tests that need an index are skipped without the binary
+    if METAGRAPH is None:
+        pytest.skip("metagraph binary not found")
     out = tmp_path_factory.mktemp("index") / "graph"
     subprocess.run([METAGRAPH, "build", "-k", str(K), "-o", str(out), str(DATA)],
                    check=True, capture_output=True)
