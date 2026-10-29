@@ -242,6 +242,71 @@ bool same_costs(const RowCost &a, const RowCost &b) {
         && a.demand == b.demand;
 }
 
+// Membership of a direct anchor is its stored column bitmap. A large coordinate
+// payload must not make an otherwise tiny membership read exceed its allowance,
+// including when the batch also contains a reconstructed row and duplicates.
+TEST(RowDiffBudgetedDecode, AnchorMembershipDoesNotMaterializeCoordinates) {
+    graph::DBGSuccinct graph(3);
+    graph.add_sequence("AAACCCGGGTTT");
+    const Row heavy = graph.kmer_to_node("AAA") - 1;
+    const Row other = graph.kmer_to_node("CCG") - 1;
+    const Row next = graph.kmer_to_node("CGG") - 1;
+    const uint64_t n = graph.max_index();
+    sdsl::bit_vector anchors(n, 1);
+    anchors[other] = 0;
+    utils::TempFile anchor_file;
+    {
+        std::ofstream stream(anchor_file.name(), std::ios::binary);
+        IRowDiff::anchor_bv_type(anchors).serialize(stream);
+    }
+    for (bool use_brwt : { false, true }) {
+        std::vector<std::unique_ptr<bit_vector>> columns;
+        std::vector<bit_vector_smart> delimiters;
+        std::vector<sdsl::int_vector<>> values;
+        for (auto [row, count] : { std::pair<Row, uint64_t>{heavy, 1000000},
+                                   std::pair<Row, uint64_t>{next, 2} }) {
+            sdsl::bit_vector bits(n, 0);
+            bits[row] = 1;
+            columns.push_back(std::make_unique<bit_vector_sd>(bits));
+            sdsl::bit_vector marks(count + 2, 0);
+            marks[0] = marks[count + 1] = 1;
+            delimiters.emplace_back(marks);
+            values.emplace_back(count, 0, 32);
+            for (uint64_t i = 0; i < count; ++i)
+                values.back()[i] = i + 100;
+        }
+        std::unique_ptr<IRowDiff> matrix;
+        if (use_brwt) {
+            matrix = std::make_unique<TupleRowDiff<TupleCSCMatrix<BRWT>>>(
+                &graph, TupleCSCMatrix<BRWT>(BRWTBottomUpBuilder::build(std::move(columns)),
+                                             std::move(delimiters), std::move(values)));
+        } else {
+            matrix = std::make_unique<TupleRowDiff<TupleCSCMatrix<ColumnMajor>>>(
+                &graph, TupleCSCMatrix<ColumnMajor>(ColumnMajor(std::move(columns)),
+                                                    std::move(delimiters), std::move(values)));
+        }
+        matrix->load_anchor(anchor_file.name());
+        for (auto rows : { std::vector<Row>{heavy}, std::vector<Row>{heavy, other, heavy} }) {
+            DecodeBudget budget(65536);
+            std::vector<SetBits> labels;
+            std::vector<RowCost> costs;
+            std::vector<uint64_t> held;
+            ASSERT_EQ(DecodeStatus::OK, matrix->decode_rows(rows, budget, &labels, &costs, &held));
+            for (size_t i = 0; i < rows.size(); ++i)
+                EXPECT_EQ(SetBits({rows[i] == heavy ? 0u : 1u}), labels[i]);
+            EXPECT_LT(budget.peak(), 65536u);
+        }
+        DecodeBudget coordinate_budget(65536);
+        std::vector<RowTuples> tuples;
+        std::vector<RowCost> costs;
+        std::vector<uint64_t> held;
+        EXPECT_EQ(DecodeStatus::REFUSED,
+                  matrix->decode_row_tuples({heavy}, coordinate_budget, &tuples, &costs, &held));
+        EXPECT_TRUE(tuples.empty());
+        EXPECT_EQ(0u, coordinate_budget.held());
+    }
+}
+
 template <class RowT>
 DecodeStatus decode(const Annotation &a, const std::vector<Row> &rows, DecodeBudget &budget,
                     std::vector<RowT> *out, std::vector<RowCost> *costs, std::vector<uint64_t> *held) {

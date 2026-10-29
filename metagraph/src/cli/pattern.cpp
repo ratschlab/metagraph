@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "common/logger.hpp"
+#include "annotation/coord_to_header.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -243,6 +244,7 @@ struct ParsedRequest {
     // echoed in limits)
     bool motif = false;
     bool predicate_scope_named = false;
+    bool record_taxids = false;
 };
 
 // A cap of the request (max_contexts, max_anchors, max_steps): |omitted| when the field is
@@ -566,6 +568,12 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         throw invalid(f.path("predicate_strands") + ": expected one of either|context");
     }
     req.selection.either = predicate_strands == kPredicateStrandsEither;
+    const std::string predicate_namespace = f.str("predicate_namespace", "column");
+    if (predicate_namespace != "column" && predicate_namespace != "taxid")
+        throw invalid("request.predicate_namespace: expected column|taxid");
+    req.record_taxids = predicate_namespace == "taxid";
+    if (req.record_taxids && !req.predicate)
+        throw invalid("request.predicate_namespace: taxid requires a predicate");
     // bounded mismatches (SPEC §21.2): 0 to kMaxMismatches, 0 (the default) the field's
     // absence; never lowered to a cap, since it changes what is searched: the caps are per
     // kind and checked per pattern (its slot answers mismatches_above_cap)
@@ -1555,6 +1563,14 @@ Json::Value process_pattern_request(
         throw PatternRefusal(400, support.reason, support_message(support));
 
     ParsedRequest req = parse_request(json, limits);
+    if (req.record_taxids) {
+        const auto *mapping = hooks && hooks->coord_to_header
+                ? hooks->coord_to_header : anno_graph.get_coord_to_header();
+        if (!mapping || !mapping->has_taxids()
+                || !graph::traversal::LabelOracle(anno_graph, mapping).has_coordinates())
+            throw PatternRefusal(400, "taxonomy_unavailable",
+                    "Taxid predicates require a complete, validated record taxonomy mapping");
+    }
     const Mode mode = req.request.mode;
 
     const Deadline deadline(start, req.time_budget_ms, limits.finalize_ms, now);
@@ -1617,7 +1633,7 @@ Json::Value process_pattern_request(
     std::optional<PatternRetrieval> retrieval;
     if (read_labels || has_predicate || req.long_supported) {
         retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks, &volume,
-                          &account);
+                          &account, req.record_taxids);
         if (!retrieval->description().budgeted && !req.retrieval.allow_unbudgeted) {
             if (req.long_supported && !has_predicate) {
                 throw PatternRefusal(400, "annotation_unbudgeted",
@@ -2756,6 +2772,8 @@ Json::Value process_pattern_request(
             p["vacuous"] = Json::Value();
         }
         p["scope"] = kPredicateScope;
+        if (req.record_taxids)
+            p["namespace"] = "taxid";
         p["strands"] = retrieval->selection_strands();
         // predicate_scope "motif": the scope of each pattern's motif claim (SPEC §25)
         if (req.motif)
@@ -2828,6 +2846,8 @@ Json::Value process_pattern_request(
         l["predicate_strands"] = req.selection.either ? kPredicateStrandsEither
                                                       : kPredicateStrandsContext;
         // (SPEC §25) as requested, when named
+        if (req.record_taxids)
+            l["predicate_namespace"] = "taxid";
         if (req.predicate_scope_named)
             l["predicate_scope"] = req.motif ? kPredicateScopeMotif : kPredicateScopeContext;
     }
@@ -2950,6 +2970,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     predicate["strands"] = strings_json({ kPredicateStrandsEither, kPredicateStrandsContext });
     // predicate_scope's values: per context, and also per pattern (SPEC §25)
     predicate["scopes"] = strings_json({ kPredicateScopeContext, kPredicateScopeMotif });
+    predicate["namespaces"] = strings_json({ "column" });
+    predicate["default_namespace"] = "column";
     predicate["access"] = Json::Value();
     p["predicate"] = std::move(predicate);
     // bounded mismatches (SPEC §21.12), in the full block only: the most substitutions served
@@ -3010,6 +3032,9 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
 
     const DeBruijnGraph &graph = anno_graph->get_graph();
+    if (const auto *mapping = anno_graph->get_coord_to_header(); mapping && mapping->has_taxids()
+            && graph::traversal::LabelOracle(*anno_graph).has_coordinates())
+        p["predicate"]["namespaces"].append("taxid");
     const GraphSupport support = route_support(graph);
     p["available"] = support.supported;
     p["unavailable_reason"] = support.supported ? Json::Value() : Json::Value(support.reason);

@@ -295,8 +295,8 @@ class PendingText {
 struct PatternRetrieval::Impl {
     Impl(const graph::AnnotatedDBG &anno_graph, const RetrievalLimits &limits,
          graph::pattern::Budget &budget, const RetrievalHooks *hooks, AnswerVolume *volume,
-         retrieval::Account *shared)
-          : oracle(anno_graph, hooks ? hooks->coord_to_header : nullptr),
+         retrieval::Account *shared, bool record_taxids)
+          : oracle(anno_graph, hooks ? hooks->coord_to_header : nullptr, record_taxids),
             limits(limits), budget(budget),
             own_account(shared ? std::nullopt
                                : std::optional<retrieval::Account>(

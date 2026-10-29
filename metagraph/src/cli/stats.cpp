@@ -499,7 +499,7 @@ bool check_index_names(const std::string &fname, const Config &config) {
                 + annot::CoordToHeader::kExtension;
         if (std::filesystem::exists(seqs)) {
             mapping = std::make_unique<annot::CoordToHeader>();
-            if (!mapping->load(seqs))
+            if (!mapping->load(seqs, config.record_taxonomy))
                 exit(1);
             logger->trace("Checking the names of '{}' and of its record mapping '{}'",
                           fname, seqs);
@@ -511,6 +511,10 @@ bool check_index_names(const std::string &fname, const Config &config) {
                       " mapping)", fname);
     }
 
+    if (config.record_taxonomy && !mapping) {
+        logger->error("--record-taxonomy requires a coordinate-to-header mapping");
+        return false;
+    }
     const Json::Value report = index_names_report(labels, mapping.get());
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "  ";
@@ -522,6 +526,34 @@ int print_stats(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
+
+    if (config->print_sequence_headers) {
+        if (files.size() != 1 || !config->infbase.empty()
+                || !config->infbase_annotators.empty() || config->check_names
+                || !utils::ends_with(files.front(), annot::CoordToHeader::kExtension)) {
+            logger->error("--print-sequence-headers takes exactly one .seqs file");
+            return 1;
+        }
+        annot::CoordToHeader mapping;
+        if (!mapping.load(files.front()))
+            return 1;
+        for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
+            for (const auto &header : mapping.get_headers(column)) {
+                if (!utils::valid_utf8(header) || header.find_first_of("\t\r\n") != std::string::npos) {
+                    logger->error("Sequence header contains invalid UTF-8 or a TSV delimiter");
+                    return 1;
+                }
+            }
+        }
+        std::cout << "METAGRAPH_SEQUENCE_HEADERS_V1\n";
+        for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
+            const auto &headers = mapping.get_headers(column);
+            for (size_t sequence = 0; sequence < headers.size(); ++sequence)
+                std::cout << column << '\t' << sequence << '\t' << headers[sequence] << '\n';
+        }
+        std::cout.flush();
+        return std::cout.good() ? 0 : 1;
+    }
 
     // the report is the only thing written to stdout: one annotation, no graph or mapping
     // beside it (whose statistics go to stdout too), refused before any output

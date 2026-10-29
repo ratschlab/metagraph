@@ -6,6 +6,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -28,6 +29,8 @@
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/traversal/label_oracle.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 
 
 // A predicate's selection for patterns of L <= k (SPEC-pattern-search.md §19, TESTS §3),
@@ -375,6 +378,10 @@ struct Oracle {
 
 // One request: its body's fields, and the test hooks of the route
 struct Ask {
+    std::string predicate_namespace;
+    std::string predicate_scope;
+    std::string long_search;
+    std::string supported_paths_level;
     // the predicate's JSON; empty: a request without one
     std::string predicate = "{\"any\": [\"c1\"]}";
     std::vector<std::string> patterns = { "AC" };
@@ -427,6 +434,10 @@ std::string compact(const Json::Value &v) {
 
 std::string body_of(const Ask &r) {
     Json::Value b;
+    if (!r.predicate_namespace.empty()) b["predicate_namespace"] = r.predicate_namespace;
+    if (!r.predicate_scope.empty()) b["predicate_scope"] = r.predicate_scope;
+    if (!r.long_search.empty()) b["long_search"] = r.long_search;
+    if (!r.supported_paths_level.empty()) b["supported_paths_level"] = r.supported_paths_level;
     Json::Value patterns(Json::arrayValue);
     for (const std::string &p : r.patterns) {
         Json::Value q;
@@ -2523,6 +2534,325 @@ TEST(PatternSelection, EngineStopBeforeTheReleaseNotStarted) {
             }
         }
     }
+}
+
+// The physical annotation puts unrelated taxa in the same bin. Its reference twin
+// stores one column per taxid, independently constructed from the same input records.
+std::pair<Index, Index> taxonomy_twins(DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC) {
+    const std::vector<Record> bins = {
+        { "bin-A", "A.1", "AAAAACCCCC" },
+        { "bin-A", "B.1", "GGGGGTTTTT" },
+        { "bin-A", "C.1", "CCCCCGGGGG" },
+        { "bin-B", "D.1", "AAAAACCCCCGGGGG" },
+    };
+    const std::map<std::string, std::string> taxa = {
+        { "A.1", "100" }, { "B.1", "200" }, { "C.1", "100" }, { "D.1", "300" },
+    };
+    auto records = bins;
+    for (auto &record : records)
+        record.column = taxa.at(record.header);
+    auto actual = build<annot::RowDiffColumnAnnotator>(5, bins, true, mode);
+    auto reference = build<annot::RowDiffColumnAnnotator>(5, records, true, mode);
+    std::ostringstream text;
+    text << "METAGRAPH_RECORD_TAXIDS_V1\n";
+    for (size_t col = 0; col < actual.cth->num_columns(); ++col) {
+        const auto &headers = actual.cth->get_headers(col);
+        for (size_t seq = 0; seq < headers.size(); ++seq)
+            text << col << '\t' << seq << '\t' << headers[seq] << '\t' << taxa.at(headers[seq]) << '\n';
+    }
+    std::istringstream in(text.str());
+    if (!actual.cth->load_taxids(in))
+        throw std::runtime_error("Invalid test taxonomy fixture");
+    return { std::move(actual), std::move(reference) };
+}
+
+void compare_taxonomy_answers(const Index &actual, const Index &reference, Ask ask) {
+    const auto expected = answer_of(reference, ask);
+    ask.predicate_namespace = "taxid";
+    const auto observed = answer_of(actual, ask);
+    ASSERT_EQ(expected["patterns"].size(), observed["patterns"].size());
+    for (Json::ArrayIndex i = 0; i < expected["patterns"].size(); ++i) {
+        for (const char *field : { "counts", "results", "withheld", "withheld_reason", "cut", "motif" }) {
+            EXPECT_EQ(expected["patterns"][i][field], observed["patterns"][i][field])
+                    << field << " pattern=" << i << " request=" << body_of(ask)
+                    << "\nexpected=" << compact(expected["patterns"][i])
+                    << "\nobserved=" << compact(observed["patterns"][i]);
+        }
+    }
+    EXPECT_EQ("taxid", observed["predicate"]["namespace"].asString());
+    EXPECT_EQ(expected["predicate"]["unknown_labels"], observed["predicate"]["unknown_labels"]);
+}
+
+TEST(PatternTaxidView, MatchesPhysicalTaxidColumnsForBooleanPredicatesAndProjections) {
+    auto [actual, reference] = taxonomy_twins();
+    if (!route_support(actual.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
+    for (const std::string predicate : {
+            R"({"any":["100"]})", R"({"all":["100","300"]})", R"({"none":["200"]})",
+            R"({"at_least":{"n":2,"labels":["100","200","300"]}})",
+            R"({"and":[{"any":["100"]},{"not":{"any":["200"]}}]})",
+            R"({"or":[{"any":["200"]},{"none":["100","300"]}]})",
+            R"({"any":["999999"]})", R"({"none":["999999"]})" }) {
+        for (const std::string mode : { "count", "all_or_count", "partial" }) {
+            for (const std::string labels : { "none", "predicate_only", "all" }) {
+                for (const std::string strands : { "forward", "both" }) {
+                    Ask ask;
+                    ask.patterns = { "AAAAA", "CCCCC", "GGGGG" };
+                    ask.predicate = predicate;
+                    ask.mode = mode;
+                    ask.labels = labels;
+                    ask.strands = strands;
+                    compare_taxonomy_answers(actual, reference, ask);
+                }
+            }
+        }
+    }
+}
+
+TEST(PatternTaxidView, LongPathsKeepRecordBoundariesAndTaxonMembership) {
+    auto [actual, reference] = taxonomy_twins();
+    if (!route_support(actual.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
+    for (const std::string level : { "best", "label_intersection" }) {
+        for (const std::string predicate : {
+                R"({"any":["100"]})", R"({"any":["200"]})", R"({"any":["300"]})",
+                R"({"all":["100","300"]})", R"({"none":["300"]})" }) {
+            for (const std::string labels : { "none", "predicate_only", "all" }) {
+                Ask ask;
+                ask.patterns = { "AAAAACCCCCGGGGG" };
+                ask.predicate = predicate;
+                ask.long_search = "supported_paths";
+                ask.supported_paths_level = level;
+                ask.strands = "forward";
+                ask.labels = labels;
+                compare_taxonomy_answers(actual, reference, ask);
+            }
+        }
+    }
+    Ask ask;
+    ask.patterns = { "AAAAACCCCCGGGGG" };
+    ask.predicate = R"({"any":["100"]})";
+    ask.predicate_namespace = "taxid";
+    ask.long_search = "supported_paths";
+    ask.strands = "forward";
+    EXPECT_EQ(0u, answer_of(actual, ask)["patterns"][0]["counts"]["selected"]["value"].asUInt64());
+    ask.supported_paths_level = "label_intersection";
+    EXPECT_EQ(1u, answer_of(actual, ask)["patterns"][0]["counts"]["selected"]["value"].asUInt64());
+}
+
+TEST(PatternTaxidView, MotifUnionAndColumnDefaultRemainDistinct) {
+    auto [actual, reference] = taxonomy_twins();
+    if (!route_support(actual.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
+    Ask ask;
+    ask.patterns = { "AAAAA", "CCCCC" };
+    ask.predicate = R"({"all":["100","300"]})";
+    ask.predicate_scope = "motif";
+    compare_taxonomy_answers(actual, reference, ask);
+    const auto column = answer_of(actual, ask);
+    EXPECT_EQ(0u, column["predicate"]["known"].asUInt64());
+    EXPECT_FALSE(column["predicate"].isMember("namespace"));
+    ask.predicate = R"({"any":["bin-A"]})";
+    EXPECT_GT(answer_of(actual, ask)["patterns"][0]["counts"]["selected"]["value"].asUInt64(), 0u);
+}
+
+TEST(PatternTaxidView, MissingMappingIsARefusalRatherThanAnAbsentTaxon) {
+    auto index = build<annot::RowDiffColumnAnnotator>(5, { { "bin", "A.1", "AAAAACCCCC" } }, true);
+    if (!route_support(index.anno->get_graph()).supported)
+        GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
+    Ask ask;
+    ask.patterns = { "AAAAA" };
+    ask.predicate = R"({"any":["100"]})";
+    ask.predicate_namespace = "taxid";
+    EXPECT_THROW(answer_of(index, ask), PatternRefusal);
+}
+
+TEST(PatternTaxidView, CanonicalAndPrimaryMatchTheirPhysicalTaxidTwins) {
+    for (const auto mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto [actual, reference] = taxonomy_twins(mode);
+        if (!route_support(actual.anno->get_graph()).supported)
+            GTEST_SKIP() << "Taxid pattern requests require a DNA4 build";
+        for (const std::string predicate : { R"({"any":["100"]})", R"({"none":["200"]})",
+                                            R"({"all":["100","300"]})" }) {
+            Ask ask;
+            ask.patterns = { "AAAAA", "CCCCC", "GGGGG" };
+            ask.predicate = predicate;
+            ask.labels = "all";
+            compare_taxonomy_answers(actual, reference, ask);
+        }
+    }
+}
+
+TEST(PatternTaxidView, ProjectionBudgetRefusalsAreAtomicAndBatchCostsStable) {
+    using namespace graph::traversal;
+    using namespace annot::matrix;
+    auto [actual, reference] = taxonomy_twins();
+    LabelOracle oracle(*actual.anno, actual.cth.get(), true);
+    const auto keys = oracle.keys_of_sequence("AAAAACCCCC");
+    std::vector<BinaryMatrix::Row> rows;
+    for (const auto key : keys)
+        rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+    const auto expected = oracle.get_row_tuples(rows);
+    DecodeBudget full;
+    std::vector<MultiIntMatrix::RowTuples> tuples;
+    std::vector<RowCost> costs;
+    std::vector<uint64_t> held;
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_row_tuples(rows, full, &tuples, &costs, &held));
+    EXPECT_EQ(expected, tuples);
+    uint64_t expected_bytes = IRowDiff::output_bytes<MultiIntMatrix::RowTuples>(rows.size());
+    for (uint64_t bytes : held) expected_bytes += bytes;
+    EXPECT_EQ(expected_bytes, full.held());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        DecodeBudget one;
+        std::vector<MultiIntMatrix::RowTuples> single;
+        std::vector<RowCost> single_cost;
+        std::vector<uint64_t> single_held;
+        ASSERT_EQ(DecodeStatus::OK, oracle.get_row_tuples({ rows[i] }, one, &single, &single_cost, &single_held));
+        EXPECT_EQ(tuples[i], single[0]);
+        EXPECT_EQ(costs[i].demand, single_cost[0].demand);
+        EXPECT_EQ(costs[i].dependency_entries, single_cost[0].dependency_entries);
+    }
+    for (uint64_t ordinal = 0; ordinal < full.charges(); ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        DecodeBudget denied;
+        ASSERT_TRUE(denied.charge(17));
+        denied.deny = [ordinal](uint64_t charge) { return charge == ordinal + 1; };
+        std::vector<MultiIntMatrix::RowTuples> result;
+        std::vector<RowCost> result_cost;
+        std::vector<uint64_t> result_held;
+        EXPECT_EQ(DecodeStatus::REFUSED, oracle.get_row_tuples(rows, denied, &result, &result_cost, &result_held));
+        EXPECT_TRUE(result.empty());
+        EXPECT_TRUE(result_cost.empty());
+        EXPECT_TRUE(result_held.empty());
+        EXPECT_EQ(17u, denied.held());
+    }
+    DecodeBudget binary_budget;
+    std::vector<BinaryMatrix::SetBitPositions> binary;
+    std::vector<RowCost> binary_cost;
+    std::vector<uint64_t> binary_held;
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows(rows, binary_budget, &binary, &binary_cost, &binary_held));
+    EXPECT_EQ(oracle.get_rows(rows), binary);
+    uint64_t binary_bytes = IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(rows.size());
+    for (uint64_t bytes : binary_held) binary_bytes += bytes;
+    EXPECT_EQ(binary_bytes, binary_budget.held());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        BinaryMatrix::SetBitPositions projected;
+        for (const auto &[column, coordinates] : expected[i]) projected.push_back(column);
+        EXPECT_EQ(projected, binary[i]);
+        DecodeBudget one;
+        std::vector<BinaryMatrix::SetBitPositions> single;
+        std::vector<RowCost> single_cost;
+        std::vector<uint64_t> single_held;
+        ASSERT_EQ(DecodeStatus::OK, oracle.get_rows({ rows[i] }, one, &single, &single_cost, &single_held));
+        EXPECT_EQ(binary[i], single[0]);
+        EXPECT_EQ(binary_cost[i].demand, single_cost[0].demand);
+        EXPECT_EQ(binary_cost[i].dependency_entries, single_cost[0].dependency_entries);
+    }
+    for (uint64_t ordinal = 0; ordinal < binary_budget.charges(); ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        DecodeBudget denied;
+        ASSERT_TRUE(denied.charge(17));
+        denied.deny = [ordinal](uint64_t charge) { return charge == ordinal + 1; };
+        std::vector<BinaryMatrix::SetBitPositions> result;
+        std::vector<RowCost> result_cost;
+        std::vector<uint64_t> result_held;
+        EXPECT_EQ(DecodeStatus::REFUSED, oracle.get_rows(rows, denied, &result, &result_cost, &result_held));
+        EXPECT_TRUE(result.empty());
+        EXPECT_TRUE(result_cost.empty());
+        EXPECT_TRUE(result_held.empty());
+        EXPECT_EQ(17u, denied.held());
+    }
+}
+
+TEST(PatternTaxidStream, ReconstructsEveryTupleAndCanSeekAcrossRecordBoundaries) {
+    using namespace annot::matrix;
+    auto [actual, reference] = taxonomy_twins();
+    const auto &matrix = actual.anno->get_annotator().get_matrix();
+    const auto &rd = dynamic_cast<const IRowDiff&>(matrix);
+    const auto &tuples = dynamic_cast<const MultiIntMatrix&>(matrix);
+    for (uint64_t row = 0; row < matrix.num_rows(); ++row) {
+        if (!actual.anno->get_graph().in_graph(row + 1)) continue;
+        const auto expected = tuples.get_row_tuples({row})[0];
+        for (uint64_t stride : {1, 2, 7}) {
+            DecodeBudget budget(1 << 20);
+            ASSERT_TRUE(budget.charge(17));
+            RowCost cost;
+            std::map<uint64_t, std::vector<uint64_t>> got, want;
+            for (const auto &[col, coords] : expected) {
+                uint64_t next = 0;
+                for (uint64_t c : coords) if (c >= next) { want[col].push_back(c); next = c + stride; }
+            }
+            ASSERT_EQ(DecodeStatus::OK, rd.stream_row_tuples(row, budget, &cost,
+                [&](uint64_t col, uint64_t c) { got[col].push_back(c); return c + stride; }));
+            EXPECT_EQ(want, got) << row << " stride=" << stride;
+            EXPECT_EQ(17u, budget.held());
+        }
+    }
+}
+
+TEST(PatternTaxidStream, RepetitiveMembershipFitsSmallBudgetAndInterruptsAtomically) {
+    using namespace graph::traversal;
+    using namespace annot::matrix;
+    auto index = build<annot::RowDiffColumnAnnotator>(5,
+        {{"bin", "A.1", std::string(200000, 'A')},
+         {"bin", "B.1", std::string(200000, 'A')}}, true);
+    std::istringstream mapping("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n0\t1\tB.1\t200\n");
+    ASSERT_TRUE(index.cth->load_taxids(mapping));
+    LabelOracle oracle(*index.anno, index.cth.get(), true);
+    const auto key = oracle.keys_of_sequence("AAAAA")[0];
+    const auto row = AnnotatedDBG::graph_to_anno_index(key);
+    const auto expected = oracle.get_rows({row});
+    ASSERT_EQ(2u, expected[0].size());
+    DecodeBudget budget(64 << 10);
+    std::vector<BinaryMatrix::SetBitPositions> result;
+    std::vector<RowCost> costs;
+    std::vector<uint64_t> held;
+    const auto before_success = oracle.counters();
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows({row}, budget, &result, &costs, &held));
+    EXPECT_EQ(before_success.tuple_rows_fetched + 1, oracle.counters().tuple_rows_fetched);
+    EXPECT_EQ(expected, result);
+    EXPECT_LE(budget.peak(), 64u << 10);
+    EXPECT_LT(costs[0].dependency_entries, 1000u);  // seeks past repeated occurrences
+    EXPECT_EQ(IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(1) + held[0], budget.held());
+
+    DecodeBudget interrupted(64 << 10);
+    ASSERT_TRUE(interrupted.charge(17));
+    ReadPacing pacing;
+    unsigned checks = 0;
+    pacing.stop = [&]() { return ++checks >= 3; };
+    LabelOracle::StreamReadScope scope(oracle, &pacing);
+    const auto before_refusal = oracle.counters();
+    result = {{123}}; costs = {{1,2,3}};
+    held.clear();
+    held.push_back(456);
+    ASSERT_EQ(DecodeStatus::REFUSED, oracle.get_rows({row}, interrupted, &result, &costs, &held));
+    EXPECT_TRUE(pacing.interrupted);
+    EXPECT_EQ(before_refusal.coords_mapped, oracle.counters().coords_mapped);
+    EXPECT_EQ(before_refusal.tuple_rows_fetched, oracle.counters().tuple_rows_fetched);
+    EXPECT_EQ(17u, interrupted.held());
+    EXPECT_EQ((std::vector<BinaryMatrix::SetBitPositions>{{123}}), result);
+    EXPECT_EQ((std::vector<uint64_t>{456}), held);
+}
+
+
+TEST(PatternTaxidStream, WideRowStopsBeforeEmittingCoordinates) {
+    using namespace annot::matrix;
+    std::vector<Record> records;
+    for (size_t i = 0; i < 64; ++i)
+        records.push_back({"bin" + std::to_string(i), "A.1", "AAAAA"});
+    auto index = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    graph::traversal::LabelOracle oracle(*index.anno, index.cth.get());
+    const auto row = AnnotatedDBG::graph_to_anno_index(oracle.keys_of_sequence("AAAAA")[0]);
+    const auto &rd = dynamic_cast<const IRowDiff&>(index.anno->get_annotator().get_matrix());
+    DecodeBudget budget(1 << 20);
+    ASSERT_TRUE(budget.charge(17));
+    RowCost cost;
+    unsigned emitted = 0;
+    EXPECT_EQ(DecodeStatus::REFUSED, rd.stream_row_tuples(row, budget, &cost,
+        [&](uint64_t, uint64_t coordinate) { ++emitted; return coordinate + 1; },
+        [&](uint64_t work) { return work >= 10; }));
+    EXPECT_EQ(0u, emitted);
+    EXPECT_EQ(17u, budget.held());
 }
 
 } // namespace

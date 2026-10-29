@@ -222,7 +222,8 @@ class LabelOracle {
 
     // |coord_to_header_override| replaces the mapping loaded with the index (tests).
     explicit LabelOracle(const AnnotatedDBG &anno_graph,
-                         const annot::CoordToHeader *coord_to_header_override = nullptr);
+                         const annot::CoordToHeader *coord_to_header_override = nullptr,
+                         bool record_taxids = false);
     ~LabelOracle();
 
     const AnnotatedDBG& anno_graph() const { return anno_graph_; }
@@ -363,6 +364,17 @@ class LabelOracle {
     // the request's read pacing and measurement (the oracle is per request)
     DecodePacer& pacer() const { return pacer_; }
 
+    // Let a streamed fallback poll inside one row; restore nested scopes on exit.
+    class StreamReadScope {
+      public:
+        StreamReadScope(const LabelOracle &oracle, ReadPacing *pacing)
+            : oracle_(oracle), previous_(oracle.stream_pacing_) { oracle_.stream_pacing_ = pacing; }
+        ~StreamReadScope() { oracle_.stream_pacing_ = previous_; }
+      private:
+        const LabelOracle &oracle_;
+        ReadPacing *previous_;
+    };
+
     /**
      * The row-diff path cache (row_diff_cache.hpp): on a row-diff
      * annotation every read above — the default and the budget-aware ones — keeps rows it
@@ -413,9 +425,17 @@ class LabelOracle {
     const annot::matrix::MultiIntMatrix *tuples_ = nullptr;
     const annot::matrix::IRowDiff *rd_ = nullptr;
     const annot::CoordToHeader *coord_to_header_ = nullptr;
+    // Source coordinates remain in balanced physical bins; the public oracle view can
+    // group them by taxid while preserving each record's separate coordinate interval.
+    const annot::CoordToHeader *taxonomy_source_ = nullptr;
 
     mutable Counters counters_;
     mutable DecodePacer pacer_;
+    mutable ReadPacing *stream_pacing_ = nullptr;
+    annot::matrix::DecodeStatus get_taxonomy_rows_streamed(
+        const std::vector<Row> &rows, annot::matrix::DecodeBudget &budget,
+        std::vector<annot::matrix::BinaryMatrix::SetBitPositions> *out,
+        std::vector<annot::matrix::RowCost> *costs, std::vector<uint64_t> *held) const;
     mutable uint64_t path_cache_max_ = 0;
     mutable annot::matrix::RowDiffPathCache path_cache_;
 };

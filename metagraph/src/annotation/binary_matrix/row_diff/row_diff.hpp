@@ -145,6 +145,19 @@ class IRowDiff {
         return DecodeStatus::UNSUPPORTED;
     }
 
+    // Visit one reconstructed coordinate row without materializing occurrences.
+    // The callback returns the next coordinate of interest in this column (strictly
+    // greater than the emitted one); UINT64_MAX ends the column. Skipping preserves
+    // XOR reconstruction. Temporary buffers are charged then released. Callback
+    // effects belong to the caller and must be discarded on REFUSED. stop(work)
+    // may interrupt; REFUSED also covers that case, distinguished by the stop hook.
+    virtual DecodeStatus stream_row_tuples(
+            BinaryMatrix::Row, DecodeBudget &, RowCost *,
+            const std::function<uint64_t(BinaryMatrix::Column, uint64_t)> &,
+            const std::function<bool(uint64_t)> & = {}) const {
+        return DecodeStatus::UNSUPPORTED;
+    }
+
     /**
      * The default decode with the request's path cache (row_diff_cache.hpp; the efficiency
      * pass): the rows get_rows() / get_row_tuples() return, serial. Each row-diff path

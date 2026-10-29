@@ -781,11 +781,11 @@ int run_server(Config *config) {
                 single_identity.fp = index_manifest_fingerprint(
                         config->index_manifest,
                         index_bundle_files(config->infbase, config->infbase_annotators[0],
-                                           !config->no_coord_mapping),
+                                           !config->no_coord_mapping, config->record_taxonomy),
                         nullptr,
                         index_unloaded_optional_files(config->infbase,
                                                       config->infbase_annotators[0],
-                                                      !config->no_coord_mapping));
+                                                      !config->no_coord_mapping, config->record_taxonomy));
                 logger->info("[Server] Index manifest {}: index_fp {}", config->index_manifest,
                              single_identity.fp);
                 log_derived_data(config->infbase);
@@ -838,7 +838,7 @@ int run_server(Config *config) {
             // what each pair loads (the loader dependency inventory of its listed spellings)
             auto inventory = [&](const GraphListEntry &e) {
                 return index_bundle_files(e.graph_path, e.annotation_path,
-                                          !config->no_coord_mapping);
+                                          !config->no_coord_mapping, config->record_taxonomy);
             };
             pair_identity = graph_list_identities(entries, [&](const GraphListEntry &e) {
                 std::string stated;
@@ -847,7 +847,7 @@ int run_server(Config *config) {
                     fp = index_manifest_fingerprint(
                             e.manifest_path, inventory(e), &stated,
                             index_unloaded_optional_files(e.graph_path, e.annotation_path,
-                                                          !config->no_coord_mapping));
+                                                          !config->no_coord_mapping, config->record_taxonomy));
                 } catch (const std::exception &ex) {
                     throw std::invalid_argument("line " + std::to_string(e.line) + " of the "
                                                 "graph list: " + ex.what());

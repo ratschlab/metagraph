@@ -85,7 +85,8 @@ static size_t miss_run_end(const node_index *keys, size_t pos, size_t n, size_t 
 
 
 LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
-                         const annot::CoordToHeader *coord_to_header_override)
+                         const annot::CoordToHeader *coord_to_header_override,
+                         bool record_taxids)
       : anno_graph_(anno_graph) {
     // the pieces of the reads state the coordinates mapped in them (the oracle is neither
     // copied nor moved: its caches are per request)
@@ -132,13 +133,22 @@ LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
                      "header labels are unavailable");
         coord_to_header_ = nullptr;
     }
+    if (record_taxids) {
+        if (!coord_to_header_ || !coord_to_header_->has_taxids())
+            throw std::invalid_argument("Taxid predicates require a complete record taxonomy mapping");
+        taxonomy_source_ = coord_to_header_;
+        coord_to_header_ = taxonomy_source_->taxonomy_view();
+        get_entry_ = nullptr;  // a physical bin cell cannot answer taxon membership
+    }
 }
 
 LabelOracle::~LabelOracle() {}
 
 size_t LabelOracle::get_k() const { return graph_->get_k(); }
 
-uint64_t LabelOracle::num_columns() const { return matrix_->num_columns(); }
+uint64_t LabelOracle::num_columns() const {
+    return taxonomy_source_ ? coord_to_header_->num_columns() : matrix_->num_columns();
+}
 uint64_t LabelOracle::num_rows() const { return matrix_->num_rows(); }
 
 std::vector<node_index> LabelOracle::keys_of_sequence(std::string_view sequence) const {
@@ -208,6 +218,8 @@ LabelOracle::keys_of_path(const std::vector<node_index> &nodes, std::string_view
 }
 
 std::optional<Column> LabelOracle::find_column(const std::string &name) const {
+    if (taxonomy_source_)
+        return taxonomy_source_->find_taxid(name);
     const auto &encoder = anno_graph_.get_annotator().get_label_encoder();
     if (!encoder.label_exists(name))
         return std::nullopt;
@@ -215,6 +227,8 @@ std::optional<Column> LabelOracle::find_column(const std::string &name) const {
 }
 
 const std::string& LabelOracle::column_name(Column column) const {
+    if (taxonomy_source_)
+        return taxonomy_source_->taxid_name(column);
     return anno_graph_.get_annotator().get_label_encoder().decode(column);
 }
 
@@ -412,8 +426,147 @@ void LabelOracle::sync_path_cache_counters() const {
     counters_.path_cache_peak_bytes = path_cache_.peak_bytes();
 }
 
+namespace {
+
+// Membership needs only one bit per taxon. Avoid allocating and sorting a copy
+// of every occurrence; coordinates remain untouched for record-aware queries.
+bool project_taxonomy_membership(const MultiIntMatrix::RowTuples &row,
+                                  const annot::CoordToHeader &source, DecodeBudget &budget,
+                                  BinaryMatrix::SetBitPositions *out, uint64_t *held,
+                                  uint64_t *peak, uint64_t *work) {
+    const uint64_t words = (source.taxonomy_view()->num_columns() + 63) / 64;
+    const uint64_t scratch = buffer_bytes(words, sizeof(uint64_t));
+    if (!budget.charge(scratch))
+        return false;
+    std::vector<uint64_t> seen(words, 0);
+    uint64_t n = 0;
+    for (const auto &[column, coords] : row) {
+        annot::CoordToHeader::SequenceRange range{};
+        bool have_range = false;
+        Column target = 0;
+        for (Coord coordinate : coords) {
+            if (!have_range || coordinate < range.first || coordinate > range.last) {
+                range = source.sequence_range(column, coordinate);
+                target = source.taxonomy_coord(column, range.seq_id, 0).first;
+                have_range = true;
+            }
+            seen[target / 64] |= uint64_t(1) << (target % 64);
+            ++n;
+        }
+    }
+    uint64_t count = 0;
+    for (uint64_t word : seen)
+        count += __builtin_popcountll(word);
+    const uint64_t bytes = small_vector_bytes(count, sizeof(Column));
+    if (!budget.charge(bytes)) {
+        budget.release(scratch);
+        return false;
+    }
+    out->reserve(count);
+    for (uint64_t i = 0; i < words; ++i) {
+        for (uint64_t word = seen[i]; word; word &= word - 1)
+            out->push_back(i * 64 + __builtin_ctzll(word));
+    }
+    *held = bytes;
+    *peak = scratch + bytes;
+    *work = 2 * n + 2 * words + count;
+    std::vector<uint64_t>().swap(seen);
+    budget.release(scratch);
+    return true;
+}
+
+// Re-key a physical tuple row by taxon, retaining a distinct coordinate interval for
+// every source record. Sorting restores the matrix's column/coordinate ordering.
+// All transient and returned buffers are admitted before allocation.
+bool project_taxonomy_row(const MultiIntMatrix::RowTuples &row,
+                          const annot::CoordToHeader &source, DecodeBudget &budget,
+                          MultiIntMatrix::RowTuples *out, uint64_t *held,
+                          uint64_t *peak, uint64_t *work) {
+    using Entry = std::pair<Column, Coord>;
+    uint64_t n = 0;
+    for (const auto &[column, coords] : row)
+        n += coords.size();
+    const uint64_t scratch = buffer_bytes(n, sizeof(Entry));
+    if (!budget.charge(scratch))
+        return false;
+    std::vector<Entry> entries;
+    entries.reserve(n);
+    for (const auto &[column, coords] : row) {
+        annot::CoordToHeader::SequenceRange range{};
+        bool have_range = false;
+        Entry target{};
+        for (Coord coordinate : coords) {
+            if (!have_range || coordinate < range.first || coordinate > range.last) {
+                range = source.sequence_range(column, coordinate);
+                target = source.taxonomy_coord(column, range.seq_id, 0);
+                have_range = true;
+            }
+            entries.emplace_back(target.first, target.second + coordinate - range.first);
+        }
+    }
+    std::sort(entries.begin(), entries.end());
+    uint64_t groups = 0, coordinates_bytes = 0;
+    for (size_t i = 0; i < entries.size();) {
+        size_t end = i + 1;
+        while (end < entries.size() && entries[end].first == entries[i].first)
+            ++end;
+        ++groups;
+        coordinates_bytes += small_vector_bytes(end - i, sizeof(Coord));
+        i = end;
+    }
+    const uint64_t bytes = buffer_bytes(groups, sizeof(MultiIntMatrix::RowTuples::value_type))
+            + coordinates_bytes;
+    if (!budget.charge(bytes)) {
+        budget.release(scratch);
+        return false;
+    }
+    out->reserve(groups);
+    for (size_t i = 0; i < entries.size();) {
+        size_t end = i + 1;
+        while (end < entries.size() && entries[end].first == entries[i].first)
+            ++end;
+        out->emplace_back(entries[i].first, MultiIntMatrix::Tuple());
+        auto &coordinates = out->back().second;
+        coordinates.reserve(end - i);
+        for (; i < end; ++i)
+            coordinates.push_back(entries[i].second);
+    }
+    *held = bytes;
+    *peak = scratch + bytes;
+    // Include coordinate remapping and sorting in the selection's work admission.
+    *work = 2 * n;
+    for (uint64_t remaining = n; remaining > 1; remaining >>= 1)
+        *work += n;
+    std::vector<Entry>().swap(entries);
+    budget.release(scratch);
+    return true;
+}
+
+} // namespace
+
 std::vector<BinaryMatrix::SetBitPositions>
 LabelOracle::get_rows(const std::vector<Row> &rows) const {
+    if (taxonomy_source_) {
+        if (test_read_hook)
+            test_read_hook(rows.size());
+        Timer timer;
+        auto tuples = path_cached() ? rd_->get_row_tuples_cached(rows, path_cache_)
+                                    : tuples_->get_row_tuples(rows);
+        std::vector<BinaryMatrix::SetBitPositions> result(rows.size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            DecodeBudget unlimited;
+            uint64_t held = 0, peak = 0, work = 0;
+            if (!project_taxonomy_membership(tuples[i], *taxonomy_source_, unlimited,
+                                             &result[i], &held, &peak, &work))
+                throw std::runtime_error("Taxonomy membership exceeded addressable memory");
+            for (const auto &[column, coords] : tuples[i])
+                counters_.coords_mapped += coords.size();
+        }
+        counters_.rows_fetched += rows.size();
+        counters_.tuple_rows_fetched += rows.size();
+        counters_.fetch_seconds += timer.elapsed();
+        return result;
+    }
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
@@ -434,6 +587,19 @@ LabelOracle::get_row_tuples(const std::vector<Row> &rows) const {
     Timer timer;
     auto result = path_cached() ? rd_->get_row_tuples_cached(rows, path_cache_)
                                 : tuples_->get_row_tuples(rows);
+    if (taxonomy_source_) {
+        for (auto &row : result) {
+            DecodeBudget unlimited;
+            MultiIntMatrix::RowTuples projected;
+            uint64_t held = 0, peak = 0, work = 0;
+            if (!project_taxonomy_row(row, *taxonomy_source_, unlimited, &projected,
+                                      &held, &peak, &work))
+                throw std::runtime_error("Taxonomy projection exceeded addressable memory");
+            for (const auto &[column, coordinates] : row)
+                counters_.coords_mapped += coordinates.size();
+            row.swap(projected);
+        }
+    }
     counters_.tuple_rows_fetched += rows.size();
     counters_.fetch_seconds += timer.elapsed();
     return result;
@@ -451,9 +617,123 @@ bool LabelOracle::decode_charged() const {
     return rd_ && rd_->supports_budgeted_decode();
 }
 
+DecodeStatus LabelOracle::get_taxonomy_rows_streamed(
+        const std::vector<Row> &rows, DecodeBudget &budget,
+        std::vector<BinaryMatrix::SetBitPositions> *out, std::vector<RowCost> *costs,
+        std::vector<uint64_t> *held) const {
+    const uint64_t entry = budget.held();
+    bool committed = false;
+    struct Restore {
+        DecodeBudget &budget; uint64_t entry; bool &committed;
+        ~Restore() { if (!committed) budget.restore(entry); }
+    } restore {budget, entry, committed};
+    const uint64_t container = annot::matrix::IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(rows.size());
+    const uint64_t words = (num_columns() + 63) / 64;
+    const uint64_t scratch = buffer_bytes(words, sizeof(uint64_t));
+    if (!budget.charge(container + scratch)) return DecodeStatus::REFUSED;
+    std::vector<BinaryMatrix::SetBitPositions> result(rows.size());
+    std::vector<RowCost> row_costs(rows.size());
+    std::vector<uint64_t> row_held(rows.size()), seen(words);
+    uint64_t finished_work = 0, coordinates_mapped = 0;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        std::fill(seen.begin(), seen.end(), 0);
+        const auto status = rd_->stream_row_tuples(rows[i], budget, &row_costs[i],
+            [&](Column column, uint64_t coordinate) {
+                if (coordinate >= taxonomy_source_->num_kmers(column))
+                    throw std::runtime_error("Uncancelled coordinate outside record domain");
+                const auto range = taxonomy_source_->sequence_range(column, coordinate);
+                const Column taxon = taxonomy_source_->taxonomy_coord(column, range.seq_id, 0).first;
+                seen[taxon / 64] |= uint64_t(1) << (taxon % 64);
+                ++coordinates_mapped;
+                // One occurrence proves this record's taxon. Seek past the record
+                // in every immutable stream, preserving XOR parity afterwards.
+                return range.last + 1;
+            }, [&](uint64_t work) {
+                if (!stream_pacing_ || !stream_pacing_->stop || !stream_pacing_->stop()) return false;
+                stream_pacing_->interrupted = true;
+                stream_pacing_->units = finished_work + work + 8;
+                return true;
+            });
+        if (status != DecodeStatus::OK) return status;
+        uint64_t count = 0;
+        for (uint64_t word : seen) count += __builtin_popcountll(word);
+        const uint64_t bytes = small_vector_bytes(count, sizeof(Column));
+        if (!budget.charge(bytes)) return DecodeStatus::REFUSED;
+        result[i].reserve(count);
+        for (uint64_t j = 0; j < words; ++j)
+            for (uint64_t word = seen[j]; word; word &= word - 1)
+                result[i].push_back(j * 64 + __builtin_ctzll(word));
+        row_held[i] = bytes;
+        row_costs[i].demand += scratch + bytes
+            + annot::matrix::IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(1);
+        finished_work += row_costs[i].dependency_entries + 8 * (row_costs[i].dependency_rows + 1);
+    }
+    std::vector<uint64_t>().swap(seen);
+    budget.release(scratch);
+    out->swap(result); costs->swap(row_costs); held->swap(row_held);
+    committed = true;
+    counters_.rows_fetched += rows.size();
+    counters_.tuple_rows_fetched += rows.size();
+    counters_.coords_mapped += coordinates_mapped;
+    return DecodeStatus::OK;
+}
+
 DecodeStatus LabelOracle::get_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                                    std::vector<BinaryMatrix::SetBitPositions> *out,
                                    std::vector<RowCost> *costs, std::vector<uint64_t> *held) const {
+    if (taxonomy_source_) {
+        if (!rd_ || !tuples_)
+            return DecodeStatus::UNSUPPORTED;
+        if (test_read_hook)
+            test_read_hook(rows.size());
+        Timer timer;
+        // Use the same bounded access policy regardless of batch size or how much
+        // memory previous rows hold. This keeps per-row admission costs stable.
+        const auto streamed = get_taxonomy_rows_streamed(rows, budget, out, costs, held);
+        if (streamed != DecodeStatus::UNSUPPORTED) {
+            counters_.fetch_seconds += timer.elapsed();
+            return streamed;
+        }
+        const uint64_t entry = budget.held();
+        std::vector<MultiIntMatrix::RowTuples> raw;
+        std::vector<RowCost> new_costs;
+        std::vector<uint64_t> new_held;
+        const auto status = rd_->decode_row_tuples(rows, budget, &raw, &new_costs, &new_held,
+                                                   path_cache_.enabled() ? &path_cache_ : nullptr);
+        if (status != DecodeStatus::OK) {
+            return status;
+        }
+        counters_.tuple_rows_fetched += rows.size();
+        const uint64_t container = buffer_bytes(rows.size(), sizeof(BinaryMatrix::SetBitPositions));
+        if (!budget.charge(container)) {
+            budget.restore(entry);
+            return DecodeStatus::REFUSED;
+        }
+        std::vector<BinaryMatrix::SetBitPositions> result(rows.size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            uint64_t bytes = 0, peak = 0, work = 0;
+            if (!project_taxonomy_membership(raw[i], *taxonomy_source_, budget,
+                                             &result[i], &bytes, &peak, &work)) {
+                budget.restore(entry);
+                return DecodeStatus::REFUSED;
+            }
+            for (const auto &[column, coords] : raw[i])
+                counters_.coords_mapped += coords.size();
+            MultiIntMatrix::RowTuples().swap(raw[i]);
+            budget.release(new_held[i]);
+            new_held[i] = bytes;
+            new_costs[i].demand += peak + buffer_bytes(1, sizeof(BinaryMatrix::SetBitPositions));
+            new_costs[i].dependency_entries += work;
+        }
+        std::vector<MultiIntMatrix::RowTuples>().swap(raw);
+        budget.release(buffer_bytes(rows.size(), sizeof(MultiIntMatrix::RowTuples)));
+        *out = std::move(result);
+        *costs = std::move(new_costs);
+        *held = std::move(new_held);
+        counters_.rows_fetched += rows.size();
+        counters_.fetch_seconds += timer.elapsed();
+        return DecodeStatus::OK;
+    }
     if (!rd_)
         return DecodeStatus::UNSUPPORTED;
     if (test_read_hook)
@@ -475,6 +755,48 @@ DecodeStatus LabelOracle::get_row_tuples(const std::vector<Row> &rows, DecodeBud
                                          std::vector<uint64_t> *held) const {
     if (!rd_ || !tuples_)
         return DecodeStatus::UNSUPPORTED;
+    if (taxonomy_source_) {
+        if (test_read_hook)
+            test_read_hook(rows.size());
+        Timer timer;
+        const uint64_t entry = budget.held();
+        std::vector<MultiIntMatrix::RowTuples> raw;
+        std::vector<RowCost> new_costs;
+        std::vector<uint64_t> new_held;
+        const auto status = rd_->decode_row_tuples(rows, budget, &raw, &new_costs, &new_held,
+                                                   path_cache_.enabled() ? &path_cache_ : nullptr);
+        if (status != DecodeStatus::OK)
+            return status;
+        counters_.tuple_rows_fetched += rows.size();
+        const uint64_t container = buffer_bytes(rows.size(), sizeof(MultiIntMatrix::RowTuples));
+        if (!budget.charge(container)) {
+            budget.restore(entry);
+            return DecodeStatus::REFUSED;
+        }
+        std::vector<MultiIntMatrix::RowTuples> result(rows.size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            uint64_t bytes = 0, peak = 0, work = 0;
+            if (!project_taxonomy_row(raw[i], *taxonomy_source_, budget, &result[i],
+                                      &bytes, &peak, &work)) {
+                budget.restore(entry);
+                return DecodeStatus::REFUSED;
+            }
+            for (const auto &[column, coordinates] : raw[i])
+                counters_.coords_mapped += coordinates.size();
+            MultiIntMatrix::RowTuples().swap(raw[i]);
+            budget.release(new_held[i]);
+            new_held[i] = bytes;
+            new_costs[i].demand += peak + buffer_bytes(1, sizeof(MultiIntMatrix::RowTuples));
+            new_costs[i].dependency_entries += work;
+        }
+        std::vector<MultiIntMatrix::RowTuples>().swap(raw);
+        budget.release(container);
+        *out = std::move(result);
+        *costs = std::move(new_costs);
+        *held = std::move(new_held);
+        counters_.fetch_seconds += timer.elapsed();
+        return DecodeStatus::OK;
+    }
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
@@ -1187,6 +1509,7 @@ bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
 bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
                        std::vector<NodeHits> *out, std::vector<KeyCost> *costs,
                        size_t *refused_at, ReadPacing *pacing) {
+    LabelOracle::StreamReadScope stream_scope(oracle_, pacing);
     // every cached key has its costs (a walk reads by one path; entries the unbudgeted path
     // cached would have none)
     if (costs_.size() != cache_.size())
@@ -1232,7 +1555,7 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
     double previous_ms = 0;
     auto interrupt = [&](size_t pos) {
         pacing->interrupted = true;
-        pacing->units = decoded_units(pos);
+        pacing->units += decoded_units(pos);
         refuse(pos, FetchRefusal::INTERRUPTED, 0, 0, pos);
         return false;
     };
@@ -1285,6 +1608,11 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         pacer.record(len, previous_ms, piece_kind(paced, pos, end, n),
                      pacer.coords_now() - coords);
         previous = len;
+        if (pacing && pacing->interrupted) {
+            out->resize(base + pos);
+            costs->resize(base + pos);
+            return interrupt(pos);
+        }
         // the keys built, each admitted against what was left at its position
         for (size_t j = 0; j < built; ++j) {
             const uint64_t demand = (*costs)[base + pos + j].demand;
@@ -1414,6 +1742,7 @@ static void warm_runs(DecodePacer &pacer, const std::vector<node_index> &keys,
 
 void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
                       ReadPacing *pacing) {
+    LabelOracle::StreamReadScope stream_scope(oracle_, pacing);
     if (costs_.size() != cache_.size())
         clear_cache();
     struct Run {
@@ -1862,6 +2191,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
                           size_t *refused_at,
                           const std::function<uint64_t(std::string_view name)> &name_bytes,
                           ReadPacing *pacing) {
+    LabelOracle::StreamReadScope stream_scope(oracle_, pacing);
     if (costs_.size() != cache_.size())
         clear_cache();
     const uint64_t at_entry = budget.held();
@@ -1956,7 +2286,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
     auto interrupt = [&](size_t pos) {
         assert(out->size() == base + pos);
         pacing->interrupted = true;
-        pacing->units = decoded_units();
+        pacing->units += decoded_units();
         return refuse(pos, FetchRefusal::INTERRUPTED, 0, 0, 0, 0, 0);
     };
     size_t requested = 0, hits_from_cache = 0;
@@ -2022,6 +2352,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         pacer.record(len, previous_ms, piece_kind(paced, pos, end, n),
                      pacer.coords_now() - coords);
         previous = len;
+        if (pacing && pacing->interrupted) return interrupt(pos);
         if (!built && len == 1) {
             assert(status == DecodeStatus::REFUSED);
             // seen before the run's own buffers are freed: they are part of the read
@@ -2141,6 +2472,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
 
 void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
                          ReadPacing *pacing) {
+    LabelOracle::StreamReadScope stream_scope(oracle_, pacing);
     if (costs_.size() != cache_.size())
         clear_cache();
     struct Run {
