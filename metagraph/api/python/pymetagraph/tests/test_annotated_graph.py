@@ -77,7 +77,7 @@ def test_properties(graph):
 
 def test_matches_cli(graph, index, tmp_path):
     seqs = list(read_fasta(DATA).values())
-    queries = [seqs[0], seqs[1][:100], seqs[2][50:150], "ACGT" * 30]
+    queries = [seqs[0], seqs[1][:100], seqs[2][50:150], seqs[2], "ACGT" * 30]
     fasta = tmp_path / "queries.fa"
     fasta.write_text("".join(f">{i}\n{s}\n" for i, s in enumerate(queries)))
 
@@ -87,6 +87,9 @@ def test_matches_cli(graph, index, tmp_path):
                              discovery_fraction=discovery_fraction)
         for i, hits in enumerate(result):
             assert sorted(hits) == sorted(expected.get(i, []))
+            # the CLI prints untruncated hits in label order, query sorts them
+            counts = [count for _, count in hits]
+            assert counts == sorted(counts, reverse=True)
 
 
 def test_counts_and_order(graph):

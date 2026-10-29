@@ -106,8 +106,9 @@ class AnnotatedGraph {
         return anno_dbg_->get_annotator().get_label_encoder().get_labels();
     }
 
-    // Top labels of each sequence with their numbers of matching k-mers.
-    // A sequence without hits (or shorter than k) gets an empty list.
+    // Top labels of each sequence with their numbers of matching k-mers, by
+    // decreasing count. A sequence without hits (or shorter than k) gets an
+    // empty list.
     std::vector<Hits> query(const std::vector<std::string> &seqs,
                             size_t num_top_labels,
                             double discovery_fraction,
@@ -129,6 +130,8 @@ class AnnotatedGraph {
             results[i] = anno_dbg_->get_top_labels(seqs[i], num_top_labels,
                                                    discovery_fraction,
                                                    presence_fraction);
+            // get_top_labels sorts only when it truncates to num_top_labels
+            std::ranges::stable_sort(results[i], std::greater<>(), &Hits::value_type::second);
         });
 
         return results;
