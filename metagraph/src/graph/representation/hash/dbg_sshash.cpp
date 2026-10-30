@@ -177,16 +177,22 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
                            has_duplicates.load());
 }
 
-// Total length of the sequences in a FASTA file
+// Total length of the sequences in a FASTA file, read like SSHash reads it:
+// gzipped if the name ends with .gz, plain otherwise
 static uint64_t count_input_chars(const std::string& input_filename) {
     using namespace seq_io;
 
-    compFile input = compFile::open_read(input_filename.c_str(), 1 << 20);
-    if (!input.good())
+    std::ifstream file(input_filename, std::ios::binary);
+    if (!file)
         throw std::runtime_error("Cannot read SSHash input " + input_filename);
 
-    std::unique_ptr<kseq_t, decltype(&kseq_destroy)> read_stream(kseq_init(input),
-                                                                 kseq_destroy);
+    boost::iostreams::filtering_istream in;
+    if (std::string_view(input_filename).ends_with(".gz"))
+        in.push(boost::iostreams::gzip_decompressor(), 1 << 20);
+    in.push(file, 1 << 20);
+
+    std::unique_ptr<kseq_t, decltype(&kseq_destroy)> read_stream(
+            kseq_init(compFile::open_read(in)), kseq_destroy);
     uint64_t num_chars = 0;
     while (kseq_read(read_stream.get()) >= 0) {
         num_chars += read_stream->seq.l;
@@ -237,7 +243,7 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
             | 1;
     common::logger->info("SSHash minimizer length m = {} for {} input characters ({})",
                          build_config.m, num_chars,
-                         num_chars_counted ? "counted" : "given by --num-chars");
+                         num_chars_counted ? "counted" : "given");
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
