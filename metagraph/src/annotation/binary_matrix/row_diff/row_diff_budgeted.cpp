@@ -292,7 +292,6 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         return DecodeStatus::REFUSED;
     };
     const size_t n = rows.size();
-    if (!budget.poll()) return refuse();
 
     // the outputs and the paths' offsets, at their exact sizes
     const uint64_t fixed = output_bytes<RowT>(n) + buffer_bytes(n + 1, sizeof(uint32_t));
@@ -315,7 +314,6 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         start[i] = steps.data.size();
         node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(rows[i]);
         while (true) {
-            if (!budget.poll()) return refuse();
             assert(graph_->in_graph(node));
             const Row row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
             uint32_t v = index.find(row);
@@ -405,7 +403,6 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         return visits.data[a].row < visits.data[b].row;
     });
     for (uint32_t v : order) {
-        if (!budget.poll()) return refuse();
         Visit &visit = visits.data[v];
         if (visit.cached()) {
             // the cached full row, charged as its copy (its aggregates came with it); the
@@ -451,7 +448,6 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     };
     for (size_t i = 0; i < n; ++i) {
         const uint32_t *path = steps.data.data() + start[i];
-        if (!budget.poll()) return refuse();
         const uint32_t *path_end = steps.data.data() + start[i + 1];
         const uint32_t end = path_end[-1];
         Visit &last = visits.data[end];
@@ -481,7 +477,6 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             return refuse();
         uint32_t succ = end;
         for (const uint32_t *p = path_end - 1; p != path; ) {
-            if (!budget.poll()) return refuse();
             const uint32_t y = *--p;
             Visit &visit = visits.data[y];
             const Visit &next = visits.data[succ];

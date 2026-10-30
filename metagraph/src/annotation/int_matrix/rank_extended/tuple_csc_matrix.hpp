@@ -26,7 +26,6 @@ template <class BaseMatrix,
           class Delims = bit_vector_smart>
 class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEntrySupport {
   public:
-    using values_type = Values;
     TupleCSCMatrix() {}
 
     TupleCSCMatrix(BaseMatrix&& index_matrix)
@@ -81,47 +80,6 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
     static void load_tuples(std::istream &in, uint64_t num_columns, const Callback &callback);
     bool load_tuples(std::istream &in);
     void serialize_tuples(std::ostream &out) const;
-
-    // Immutable views of the stored coordinate tuples of one row. The callback
-    // receives (column, values, begin, end); values remain owned by this matrix.
-    // This avoids materializing large tuples during offline streaming conversion.
-    template <class Callback>
-    void call_row_tuple_views(Row row, const Callback &callback) const {
-        const auto ranks = binary_matrix_.get_column_ranks({row}, 1);
-        for (auto [column, rank] : ranks.at(0)) {
-            const uint64_t begin = delimiters_.at(column).select1(rank) + 1 - rank;
-            const uint64_t end = delimiters_.at(column).select1(rank + 1) - rank;
-            callback(column, column_values_.at(column), begin, end);
-        }
-    }
-
-    // Budgeted immutable views: callback allocations belong to the caller.
-    template <class Callback>
-    bool call_row_tuple_views(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
-                              DecodeBudget &budget, const Callback &callback) const {
-        scratch->data.clear();
-        if (!binary_matrix_.row_column_ranks(row, scratch, budget)) return false;
-        for (auto [column, rank] : scratch->data) {
-            const uint64_t begin = delimiters_.at(column).select1(rank) + 1 - rank;
-            const uint64_t end = delimiters_.at(column).select1(rank + 1) - rank;
-            if (!callback(column, column_values_.at(column), begin, end)) return false;
-        }
-        return true;
-    }
-
-    // Offline batch access to immutable tuples; callback receives the input-row
-    // index, column, owned values and half-open tuple offsets. No coordinates
-    // are copied, including for oversized cells and empty reset markers.
-    template <class Callback>
-    void call_rows_tuple_views(const std::vector<Row>& rows, const Callback& callback) const {
-        const auto ranks = binary_matrix_.get_column_ranks(rows, 1);
-        for (size_t i = 0; i < rows.size(); ++i)
-            for (auto [column, rank] : ranks[i]) {
-                const uint64_t begin = delimiters_.at(column).select1(rank) + 1 - rank;
-                const uint64_t end = delimiters_.at(column).select1(rank + 1) - rank;
-                callback(i, column, column_values_.at(column), begin, end);
-            }
-    }
 
     const BaseMatrix& get_binary_matrix() const { return binary_matrix_; }
 
@@ -213,7 +171,6 @@ inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>
         Tuple tuple;
         tuple.reserve(end - begin);
         for (size_t t = begin; t < end; ++t) {
-            if (((t - begin) & 1023) == 0 && !budget.poll()) return false;
             tuple.push_back(column_values_[j][t]);
         }
         out->emplace_back(j, std::move(tuple));

@@ -207,7 +207,7 @@ def derived_files(graph):
             (bloom, 'graph_bloom', bloom_exists, mask_loaded and bloom_exists)]
 
 
-def load_inventory(graph, annotation, coord_mapping=True, record_taxonomy=False):
+def load_inventory(graph, annotation, coord_mapping=True):
     """[(path, role, required)]: every identity file the server's loaders open for the pair
     listed as |graph| and |annotation|, as metagraph's index_load_inventory derives them (a
     required file is listed whether it exists or not, an optional one only when the loader
@@ -222,27 +222,23 @@ def load_inventory(graph, annotation, coord_mapping=True, record_taxonomy=False)
             files.append((graph + '.rd_succ', 'row_diff_fork_succ', True))
         if coordinates and coord_mapping:
             seqs = annotation[:-len(extension)] + '.seqs'
-            if os.path.exists(seqs) or record_taxonomy:
-                files.append((seqs, 'coord_to_header', record_taxonomy))
-                taxids = annotation[:-len(extension)] + '.taxids.tsv'
-                if record_taxonomy:
-                    files.append((taxids, 'record_taxonomy', True))
+            if os.path.exists(seqs):
+                files.append((seqs, 'coord_to_header', False))
         break
     return files
 
 
-def unloaded_optional(graph, annotation, coord_mapping=True, record_taxonomy=False):
+def unloaded_optional(graph, annotation, coord_mapping=True):
     """The optional identity files the inventory derives for the pair -- a coordinate
-    annotation's .seqs and .taxids.tsv -- that it does not load (missing beside the listed
-    spelling, coord_mapping off, or record_taxonomy off for .taxids.tsv), as metagraph's index_unloaded_optional_files: the server refuses a
+    annotation's .seqs -- that it does not load (missing beside the listed spelling, or
+    coord_mapping off), as metagraph's index_unloaded_optional_files: the server refuses a
     manifest that lists one (by base name), so that index_fp identifies the files it loads.
     (The graph's mask and Bloom filter are refused in any manifest: derived_role.)"""
     candidates = []
     seqs = coordinate_headers(annotation)
     if seqs:
         candidates.append(seqs)
-        candidates.append(seqs[:-len('.seqs')] + '.taxids.tsv')
-    loaded = [path for path, _, _ in load_inventory(graph, annotation, coord_mapping, record_taxonomy)]
+    loaded = [path for path, _, _ in load_inventory(graph, annotation, coord_mapping)]
     return [c for c in candidates if c not in loaded]
 
 
@@ -253,10 +249,10 @@ def duplicate_base_names(paths):
     return sorted({n for n in names if names.count(n) > 1})
 
 
-def sidecars(graph, annotation, coord_mapping=True, record_taxonomy=False):
+def sidecars(graph, annotation, coord_mapping=True):
     """The files of the inventory besides the graph and the annotation (the identity files the
     server loads beside them; never the graph's derived mask or Bloom filter)."""
-    return [path for path, role, _ in load_inventory(graph, annotation, coord_mapping, record_taxonomy)
+    return [path for path, role, _ in load_inventory(graph, annotation, coord_mapping)
             if role not in ('graph', 'annotation')]
 
 
@@ -274,8 +270,8 @@ def is_graph_or_annotation(path):
     return name.endswith('.annodbg') or name.endswith('dbg')
 
 
-def bundle_files(graph, annotation, extra, *, fail=None, coord_mapping=True, record_taxonomy=False):
-    files = [path for path, _, _ in load_inventory(graph, annotation, coord_mapping, record_taxonomy)]
+def bundle_files(graph, annotation, extra, *, fail=None, coord_mapping=True):
+    files = [path for path, _, _ in load_inventory(graph, annotation, coord_mapping)]
     others = [f for f in extra if is_graph_or_annotation(f)]
     if others:
         (fail or sys.exit)('--extra %s: a manifest describes one graph with one annotation (the '
@@ -284,7 +280,7 @@ def bundle_files(graph, annotation, extra, *, fail=None, coord_mapping=True, rec
     if derived:
         (fail or sys.exit)('--extra %s: %s (the server refuses a manifest that lists one)'
                            % (', '.join(derived), DERIVED_RULE))
-    unloaded = {os.path.basename(p) for p in unloaded_optional(graph, annotation, coord_mapping, record_taxonomy)}
+    unloaded = {os.path.basename(p) for p in unloaded_optional(graph, annotation, coord_mapping)}
     not_loaded = [f for f in extra if os.path.basename(f) in unloaded]
     if not_loaded:
         (fail or sys.exit)('--extra %s: an optional file of the loader inventory that the server '
@@ -391,7 +387,7 @@ def manifest_problems(manifest, loaded=None, not_loaded=()):
         listed = by_name.get(os.path.basename(path))
         if listed is not None:
             out.append(f'it lists {listed}, which the server does not load for this index ({path}: '
-                       f'missing beside the listed file, --no-coord-mapping, or --record-taxonomy omitted)')
+                       f'missing beside the listed file, or --no-coord-mapping)')
     if loaded is not None:
         for path in loaded:
             if os.path.isfile(path) and os.path.basename(path) not in by_name:
@@ -423,14 +419,12 @@ NAMES_KEYS = ('labels', 'labels_invalid_utf8', 'headers', 'headers_invalid_utf8'
               'duplicate_record_headers', 'first_invalid', 'names_ok')
 
 
-def check_names(metagraph, annotation, record_taxonomy=False):
+def check_names(metagraph, annotation):
     """The JSON object `metagraph stats --check-names -a ANNOTATION` prints: the names the index
     carries, as the serving routes need them. The binary exits 1 for a failed check (names_ok
     false), which is a result; any other failure, or output that is not that object, is a
     ManifestError."""
     cmd = [metagraph, 'stats', '--check-names', '-a', annotation]
-    if record_taxonomy:
-        cmd.append('--record-taxonomy')
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as e:
@@ -509,10 +503,10 @@ def write(args, hasher=sha256_file):
         print(names_skipped_note(args), file=sys.stderr)
     out = args.output or annotation_base(args.annotation) + '.manifest.json'
     files = bundle_files(args.graph, args.annotation, args.extra,
-                         coord_mapping=not args.no_coord_mapping, record_taxonomy=getattr(args, 'record_taxonomy', False))
+                         coord_mapping=not args.no_coord_mapping)
     # the names before the hashing: the check reads the labels and the .seqs only, and its
     # refusal (the binary's own failure) then costs no hashing
-    names = check_names(binary, args.annotation, getattr(args, 'record_taxonomy', False)) if binary else None
+    names = check_names(binary, args.annotation) if binary else None
     total = sum(os.path.getsize(f) for f in files)
     print(f'{len(files)} files, {total / 1e9:.2f} GB to hash', file=sys.stderr)
     entries, hashed, t0 = [], 0, time.time()
@@ -691,7 +685,7 @@ def batch(args, hasher=sha256_file):
         def fail(msg, no=no):
             raise ManifestError('line %d: %s' % (no, msg))
         files = bundle_files(graph, annotation, [], fail=fail,
-                             coord_mapping=not getattr(args, 'no_coord_mapping', False), record_taxonomy=getattr(args, 'record_taxonomy', False))
+                             coord_mapping=not getattr(args, 'no_coord_mapping', False))
         if entry['manifest']:
             out = entry['manifest']
         elif args.out_dir:
@@ -716,7 +710,7 @@ def batch(args, hasher=sha256_file):
     for pair, no, _, _, _ in plan:
         if binary:
             try:
-                names_of[pair] = check_names(binary, pair[1], getattr(args, 'record_taxonomy', False))
+                names_of[pair] = check_names(binary, pair[1])
             except ManifestError as e:
                 raise ManifestError('line %d: %s' % (no, e))
     # every distinct file once (by real path): a precomputed digest, else hashed
@@ -803,7 +797,7 @@ def batch(args, hasher=sha256_file):
     return written
 
 
-def verify(path, root=None, metagraph=None, coord_mapping=True, record_taxonomy=False):
+def verify(path, root=None, metagraph=None, coord_mapping=True):
     """Re-hash every listed file under |root| (default: the manifest's directory) and apply the
     server's acceptance rules of the manifest (manifest_problems; the loader inventory of the
     one graph and the one annotation it lists, under root, for the coverage rules, with
@@ -826,7 +820,7 @@ def verify(path, root=None, metagraph=None, coord_mapping=True, record_taxonomy=
                             % len(annotations))
         else:
             try:
-                fresh = check_names(metagraph, os.path.join(root, annotations[0]), record_taxonomy)
+                fresh = check_names(metagraph, os.path.join(root, annotations[0]))
             except ManifestError as e:
                 problems.append('names: %s' % e)
             else:
@@ -839,8 +833,8 @@ def verify(path, root=None, metagraph=None, coord_mapping=True, record_taxonomy=
     loaded, not_loaded = None, []
     if len(graphs) == 1 and len(annotations) == 1:
         graph, annotation = os.path.join(root, graphs[0]), os.path.join(root, annotations[0])
-        loaded = [p for p, _, _ in load_inventory(graph, annotation, coord_mapping, record_taxonomy)]
-        not_loaded = unloaded_optional(graph, annotation, coord_mapping, record_taxonomy)
+        loaded = [p for p, _, _ in load_inventory(graph, annotation, coord_mapping)]
+        not_loaded = unloaded_optional(graph, annotation, coord_mapping)
     problems.extend(manifest_problems(manifest, loaded, not_loaded))
     for e in files:
         p = os.path.join(root, e['path'])
@@ -884,8 +878,6 @@ def main():
     ap.add_argument('--force', action='store_true', help='batch: replace existing manifests')
     ap.add_argument('--no-coord-mapping', action='store_true',
                     help='the server runs with --no-coord-mapping: it does not load the .seqs')
-    ap.add_argument('--record-taxonomy', action='store_true',
-                    help='the server loads complete .taxids.tsv mappings beside coordinate annotations')
     ap.add_argument('--inventory', action='store_true',
                     help='with -i and -a: print the loader dependency inventory (JSON: the '
                          'identity files, and the derived mask and Bloom filter no manifest '
@@ -898,13 +890,11 @@ def main():
                     help='run the names check (default: when --metagraph is given; '
                          '--no-check-names skips it, in every mode)')
     args = ap.parse_args()
-    if args.record_taxonomy and args.no_coord_mapping:
-        ap.error('--record-taxonomy requires coordinate-to-header mapping')
     try:
         if args.verify:
             # the names arguments are refused before any file is hashed (write and batch probe
             # the binary themselves; the inventory runs no check and probes nothing)
-            verify(args.verify, args.root, names_binary(args), not args.no_coord_mapping, args.record_taxonomy)
+            verify(args.verify, args.root, names_binary(args), not args.no_coord_mapping)
         elif args.server_csv:
             batch(args)
         elif args.graph and args.annotation and args.inventory:
@@ -913,7 +903,7 @@ def main():
             print(json.dumps({
                 'files': [{'path': p, 'role': r, 'required': q, 'exists': os.path.exists(p)}
                           for p, r, q in load_inventory(args.graph, args.annotation,
-                                                        not args.no_coord_mapping, args.record_taxonomy)],
+                                                        not args.no_coord_mapping)],
                 'derived': [{'path': p, 'role': r, 'exists': e, 'loaded': l}
                             for p, r, e, l in derived_files(args.graph)],
                 'derived_rule': DERIVED_RULE}, indent=1))

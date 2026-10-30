@@ -2572,7 +2572,7 @@ const std::vector<IndexAnnotationKind>& index_annotation_kinds() {
 
 std::vector<IndexFile> index_load_inventory(const std::string &graph,
                                             const std::string &annotation,
-                                            bool coord_mapping, bool record_taxonomy) {
+                                            bool coord_mapping) {
     std::vector<IndexFile> files;
     // The paths are derived from the LISTED spelling, as the loaders derive them: a sidecar is
     // looked up next to a symlinked main file, not next to its target (otherwise two symlinks
@@ -2595,13 +2595,8 @@ std::vector<IndexFile> index_load_inventory(const std::string &graph,
         if (kind.coordinates && coord_mapping) {
             const std::string seqs = utils::remove_suffix(annotation, kind.extension)
                                    + annot::CoordToHeader::kExtension;
-            if (std::filesystem::exists(seqs) || record_taxonomy) {
-                files.push_back({ seqs, "coord_to_header", record_taxonomy });
-                const std::string taxids = utils::remove_suffix(annotation, kind.extension)
-                        + annot::CoordToHeader::kTaxidsExtension;
-                if (record_taxonomy)
-                    files.push_back({ taxids, "record_taxonomy", true });
-            }
+            if (std::filesystem::exists(seqs))
+                files.push_back({ seqs, "coord_to_header", false });
         }
         break;
     }
@@ -2610,9 +2605,9 @@ std::vector<IndexFile> index_load_inventory(const std::string &graph,
 
 std::vector<std::string> index_bundle_files(const std::string &graph,
                                             const std::string &annotation,
-                                            bool coord_mapping, bool record_taxonomy) {
+                                            bool coord_mapping) {
     std::vector<std::string> files;
-    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping, record_taxonomy)) {
+    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping)) {
         files.push_back(f.path);
     }
     return files;
@@ -2654,7 +2649,7 @@ std::vector<IndexDerivedFile> index_derived_files(const std::string &graph) {
 
 std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
                                                        const std::string &annotation,
-                                                       bool coord_mapping, bool record_taxonomy) {
+                                                       bool coord_mapping) {
     // every optional identity file the inventory could hold for the pair, as it derives the
     // paths (the graph's mask and Bloom filter are derived data: a manifest lists them never)
     std::vector<std::string> candidates;
@@ -2664,12 +2659,10 @@ std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
         if (kind.coordinates) {
             candidates.push_back(utils::remove_suffix(annotation, kind.extension)
                                  + annot::CoordToHeader::kExtension);
-            candidates.push_back(utils::remove_suffix(annotation, kind.extension)
-                                 + annot::CoordToHeader::kTaxidsExtension);
         }
         break;
     }
-    const std::vector<std::string> loaded = index_bundle_files(graph, annotation, coord_mapping, record_taxonomy);
+    const std::vector<std::string> loaded = index_bundle_files(graph, annotation, coord_mapping);
     std::vector<std::string> unloaded;
     for (const std::string &c : candidates) {
         if (std::find(loaded.begin(), loaded.end(), c) == loaded.end())
@@ -2679,13 +2672,13 @@ std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
 }
 
 Json::Value index_inventory_json(const std::string &graph, const std::string &annotation,
-                                 bool coord_mapping, bool record_taxonomy) {
+                                 bool coord_mapping) {
     Json::Value j;
     j["graph"] = graph;
     j["annotation"] = annotation;
     j["coord_mapping"] = coord_mapping;
     Json::Value files(Json::arrayValue);
-    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping, record_taxonomy)) {
+    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping)) {
         Json::Value e;
         e["path"] = f.path;
         e["role"] = f.role;
@@ -2877,10 +2870,10 @@ IndexIdentity index_identity(const Config &config, const graph::AnnotatedDBG &an
         id.fp = index_manifest_fingerprint(
                 config.index_manifest,
                 index_bundle_files(config.infbase, config.infbase_annotators[0],
-                                   !config.no_coord_mapping, config.record_taxonomy),
+                                   !config.no_coord_mapping),
                 nullptr,
                 index_unloaded_optional_files(config.infbase, config.infbase_annotators[0],
-                                              !config.no_coord_mapping, config.record_taxonomy));
+                                              !config.no_coord_mapping));
     }
     id.meta_fp = index_meta_fingerprint(LabelOracle(anno_graph));
     return id;
@@ -5586,7 +5579,7 @@ int traverse_graph(Config *config) {
         builder["indentation"] = config->output_json ? "" : "  ";
         std::cout << Json::writeString(builder, index_inventory_json(
                              config->infbase, config->infbase_annotators[0],
-                             !config->no_coord_mapping, config->record_taxonomy)) << std::endl;
+                             !config->no_coord_mapping)) << std::endl;
         return 0;
     }
 

@@ -32,7 +32,6 @@ class Config {
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
-    bool print_sequence_headers = false;
     bool check_names = false;
     bool print_counts_hist = false;
     bool forward_and_reverse = false;
@@ -74,7 +73,6 @@ class Config {
     bool index_header_coords = false;
     bool allow_unchecked_headers = false;
     bool no_coord_mapping = false;
-    bool record_taxonomy = false;
     // Opt-in: include the bulky VG-style `path.mapping[]` object in
     // `metagraph align --json` output. Off by default since nothing in-tree
     // consumes it and it dominates the JSON size for long alignments.

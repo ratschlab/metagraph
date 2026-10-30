@@ -115,8 +115,6 @@ std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
  *   row_diff_fork_succ  <graph>.rd_succ, for a .row_diff.annodbg (required: build_annotated_dbg)
  *   coord_to_header     <annotation without .<type>.annodbg>.seqs, for a coordinate
  *                       annotation when it exists and |coord_mapping| (not --no-coord-mapping)
- *   record_taxonomy     <annotation without .<type>.annodbg>.taxids.tsv, required when
- *                       |record_taxonomy| enables the coordinate annotation taxonomy
  * A required file is listed whether it exists or not (the loader fails without it), an
  * optional one only when the loader would read it. Deliberately not listed: the graph's
  * DERIVED data, which the loader reads too (index_derived_files: the dummy-edge mask and the
@@ -134,7 +132,7 @@ struct IndexFile {
 };
 std::vector<IndexFile> index_load_inventory(const std::string &graph,
                                             const std::string &annotation,
-                                            bool coord_mapping = true, bool record_taxonomy = false);
+                                            bool coord_mapping = true);
 /**
  * The derived data of the graph listed as |graph|:
  * files computed from the graph alone that DBGSuccinct::load reads beside it, and that are
@@ -173,20 +171,20 @@ const std::vector<IndexAnnotationKind>& index_annotation_kinds();
 // the paths of index_load_inventory (what a manifest is checked against; never a derived file)
 std::vector<std::string> index_bundle_files(const std::string &graph,
                                             const std::string &annotation,
-                                            bool coord_mapping = true, bool record_taxonomy = false);
+                                            bool coord_mapping = true);
 // the optional identity files the inventory derives for the pair — a coordinate annotation's
-// .seqs and .taxids.tsv — that index_load_inventory leaves out (missing beside the listed
-// spelling, |coord_mapping| false, or |record_taxonomy| false for .taxids.tsv): a manifest must not list them (by base name). The graph's mask and
+// .seqs — that index_load_inventory leaves out (missing beside the listed spelling,
+// |coord_mapping| false): a manifest must not list them (by base name). The graph's mask and
 // Bloom filter are not among them: a manifest lists those never (index_derived_files)
 std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
                                                        const std::string &annotation,
-                                                       bool coord_mapping = true, bool record_taxonomy = false);
+                                                       bool coord_mapping = true);
 // `traverse --index-inventory`: {graph, annotation, coord_mapping, files: [{path, role,
 // required, exists}] (the identity: what a manifest lists), derived: [{path, role, exists,
 // loaded}] (index_derived_files: loaded or not, never in a manifest), derived_rule (the text of
 // kIndexDerivedDataRule), annotation_kinds: [{extension, row_diff_anchors, coordinates}]}
 Json::Value index_inventory_json(const std::string &graph, const std::string &annotation,
-                                 bool coord_mapping = true, bool record_taxonomy = false);
+                                 bool coord_mapping = true);
 /**
  * Read an index manifest, validate it and return its fingerprint. The manifest is a JSON
  * object with `files: [{path, size, sha256}, ...]` (paths relative to the manifest,

@@ -798,8 +798,8 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
 PatternRetrieval::PatternRetrieval(const AnnotatedDBG &anno_graph, GraphMode mode,
                                    const RetrievalLimits &limits, Budget &budget,
                                    const RetrievalHooks *hooks, AnswerVolume *volume,
-                                   retrieval::Account *account, bool record_taxids)
-      : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks, volume, account, record_taxids)),
+                                   retrieval::Account *account)
+      : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks, volume, account)),
         limits_(limits) {
     description_ = describe_annotation(impl_->oracle, mode);
     impl_->mode = mode;

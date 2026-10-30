@@ -614,7 +614,7 @@ class PatternRetrieval {
     PatternRetrieval(const graph::AnnotatedDBG &anno_graph, graph::pattern::GraphMode mode,
                      const RetrievalLimits &limits, graph::pattern::Budget &budget,
                      const RetrievalHooks *hooks = nullptr, AnswerVolume *volume = nullptr,
-                     retrieval::Account *account = nullptr, bool record_taxids = false);
+                     retrieval::Account *account = nullptr);
     ~PatternRetrieval();
 
     const AnnotationDescription& description() const { return description_; }

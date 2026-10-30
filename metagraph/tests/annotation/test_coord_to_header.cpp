@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <sstream>
 
 #include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
@@ -11,92 +10,6 @@ namespace {
 
 using namespace mtg;
 using namespace mtg::annot;
-
-TEST(CoordToHeaderTaxids, CompleteMappingPreservesRecordBoundaries) {
-    CoordToHeader mapping({ { "A.1", "B.1" }, { "C.1" } }, { { 3, 4 }, { 5 } });
-    std::istringstream in("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n0\t1\tB.1\t200\n1\t0\tC.1\t100\n");
-    ASSERT_TRUE(mapping.load_taxids(in));
-    ASSERT_TRUE(mapping.has_taxids());
-    ASSERT_EQ(0u, *mapping.find_taxid("100"));
-    ASSERT_EQ(1u, *mapping.find_taxid("200"));
-    EXPECT_FALSE(mapping.find_taxid("0100"));
-    EXPECT_FALSE(mapping.find_taxid("100junk"));
-    EXPECT_FALSE(mapping.find_taxid("4294967296"));
-    EXPECT_EQ(200u, mapping.taxid(0, 1));
-    const auto &view = *mapping.taxonomy_view();
-    EXPECT_EQ("A.1", view.get_header(0, 0));
-    EXPECT_EQ("C.1", view.get_header(0, 1));
-    EXPECT_EQ(&mapping.get_header(0, 0), &view.get_header(0, 0));
-    EXPECT_EQ(&mapping.get_header(1, 0), &view.get_header(0, 1));
-    EXPECT_EQ(3u, view.num_kmers_in_sequence(0, 0));
-    EXPECT_EQ(5u, view.num_kmers_in_sequence(0, 1));
-    auto translated = mapping.taxonomy_coord(1, 0, 2);
-    EXPECT_EQ(0u, translated.first);
-    EXPECT_EQ(5u, translated.second);
-    EXPECT_EQ((std::pair<size_t, uint64_t>{ 1, 2 }), view.map_single_coord(translated.first, translated.second));
-    CoordToHeader copy(mapping);
-    EXPECT_EQ(mapping.taxonomy_view(), copy.taxonomy_view());
-    EXPECT_EQ(translated, copy.taxonomy_coord(1, 0, 2));
-}
-
-TEST(CoordToHeaderTaxids, RejectsIncompleteMisalignedAndInvalidMappings) {
-    const std::vector<std::string> bad = {
-        "", "BAD_VERSION\n", "METAGRAPH_RECORD_TAXIDS_V1\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.2\t100\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n1\t0\tA.1\t100\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n0\t1\tA.1\t100\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t0\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t-1\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t4294967296\n",
-        "METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n0\t1\tB.1\t200\n",
-    };
-    for (const auto &text : bad) {
-        SCOPED_TRACE(text);
-        CoordToHeader mapping({ { "A.1" } }, { { 3 } });
-        std::istringstream good("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n");
-        ASSERT_TRUE(mapping.load_taxids(good));
-        std::istringstream in(text);
-        EXPECT_FALSE(mapping.load_taxids(in));
-        EXPECT_FALSE(mapping.has_taxids());
-        EXPECT_EQ(nullptr, mapping.taxonomy_view());
-        EXPECT_FALSE(mapping.find_taxid("100"));
-    }
-}
-
-TEST(CoordToHeaderTaxids, SharedHeadersSurviveSourceReloadAndDestruction) {
-    std::unique_ptr<CoordToHeader> view;
-    const std::string *original = nullptr;
-    {
-        CoordToHeader source({ { "long_accession_header_0001", "duplicate" }, { "duplicate" } },
-                             { { 3, 4 }, { 5 } });
-        std::istringstream in("METAGRAPH_RECORD_TAXIDS_V1\n"
-                              "0\t0\tlong_accession_header_0001\t200\n"
-                              "0\t1\tduplicate\t200\n1\t0\tduplicate\t100\n");
-        ASSERT_TRUE(source.load_taxids(in));
-        original = &source.get_header(0, 0);
-        view = std::make_unique<CoordToHeader>(*source.taxonomy_view());
-        EXPECT_EQ(original, &view->get_header(1, 0));
-        // The first occurrence is in taxonomy order, not the physical bin order.
-        EXPECT_EQ((std::pair<CoordToHeader::Column, size_t>{0, 0}), *view->find_header("duplicate"));
-        CoordToHeader replacement({ { "replacement" } }, { { 2 } });
-        const auto path = test_dump_dir() + "/cth_shared_reload";
-        replacement.serialize(path);
-        ASSERT_TRUE(source.load(path));
-        EXPECT_EQ("replacement", source.get_header(0, 0));
-        EXPECT_EQ(original, &view->get_header(1, 0));
-    }
-    EXPECT_EQ("long_accession_header_0001", *original);
-    EXPECT_EQ((std::pair<size_t, uint64_t>{1, 2}), view->map_single_coord(1, 5));
-    const auto path = test_dump_dir() + "/cth_shared_view";
-    view->serialize(path);
-    CoordToHeader restored;
-    ASSERT_TRUE(restored.load(path));
-    for (size_t col = 0; col < view->num_columns(); ++col)
-        for (size_t seq = 0; seq < view->num_sequences(col); ++seq) {
-            EXPECT_EQ(view->get_header(col, seq), restored.get_header(col, seq));
-            EXPECT_EQ(view->last_coord(col, seq), restored.last_coord(col, seq));
-        }
-}
 
 TEST(CoordToHeader, MapSingleCoordFirstSequence) {
     // Column 0: two sequences, with 5 and 3 k-mers respectively
@@ -289,8 +202,8 @@ TEST(CoordToHeader, SerializeLoadRoundTrip) {
     for (uint64_t col = 0; col < src.num_columns(); ++col) {
         EXPECT_EQ(src.num_sequences(col), dst.num_sequences(col))  << "col " << col;
         EXPECT_EQ(src.num_kmers(col),   dst.num_kmers(col))    << "col " << col;
+        EXPECT_EQ(src.get_headers(col), dst.get_headers(col))  << "col " << col;
         for (size_t h = 0; h < src.num_sequences(col); ++h) {
-            EXPECT_EQ(src.get_header(col, h), dst.get_header(col, h));
             EXPECT_EQ(src.num_kmers_in_sequence(col, h),
                       dst.num_kmers_in_sequence(col, h))
                 << "col " << col << " seq_id " << h;

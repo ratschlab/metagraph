@@ -395,10 +395,10 @@ void print_coord_to_header_stats(const std::string &fname) {
     if (get_verbose()) {
         std::cout << "=================== PER-COLUMN STATS ===================" << '\n';
         auto first_headers = [&](size_t col, size_t num_first = 3) {
-            std::vector<std::string> first_labels;
-            for (size_t i = 0; i < std::min(num_first, coord_to_header.num_sequences(col)); ++i)
-                first_labels.push_back(coord_to_header.get_header(col, i));
-            if (first_labels.size() < coord_to_header.num_sequences(col))
+            const auto &labels = coord_to_header.get_headers(col);
+            auto first_labels = std::vector<std::string>(labels.begin(),
+                                                         std::min(labels.begin() + num_first, labels.end()));
+            if (first_labels.size() < labels.size())
                 first_labels.push_back("...");
             return fmt::format(" ({})", fmt::join(first_labels, "\t"));
         };
@@ -449,17 +449,18 @@ Json::Value index_names_report(const std::vector<std::string> &labels,
     uint64_t duplicates = 0;
     if (mapping) {
         for (uint64_t col = 0; col < mapping->num_columns(); ++col) {
-            num_headers += mapping->num_sequences(col);
-            for (size_t s = 0; s < mapping->num_sequences(col); ++s) {
-                if (!utils::valid_utf8(mapping->get_header(col, s))) {
+            const auto &headers = mapping->get_headers(col);
+            num_headers += headers.size();
+            for (size_t s = 0; s < headers.size(); ++s) {
+                if (!utils::valid_utf8(headers[s])) {
                     ++headers_invalid;
-                    note("header", "invalid_utf8", col, s, mapping->get_header(col, s));
+                    note("header", "invalid_utf8", col, s, headers[s]);
                 }
             }
-            mapping->call_duplicate_headers(col,
+            annot::CoordToHeader::find_duplicate_headers(headers,
                 [&](size_t first_record, size_t repeat) {
                     ++duplicates;
-                    note("header", "duplicate", col, repeat, mapping->get_header(col, repeat), first_record);
+                    note("header", "duplicate", col, repeat, headers[repeat], first_record);
                     return true;
                 }
             );
@@ -498,7 +499,7 @@ bool check_index_names(const std::string &fname, const Config &config) {
                 + annot::CoordToHeader::kExtension;
         if (std::filesystem::exists(seqs)) {
             mapping = std::make_unique<annot::CoordToHeader>();
-            if (!mapping->load(seqs, config.record_taxonomy))
+            if (!mapping->load(seqs))
                 exit(1);
             logger->trace("Checking the names of '{}' and of its record mapping '{}'",
                           fname, seqs);
@@ -510,10 +511,6 @@ bool check_index_names(const std::string &fname, const Config &config) {
                       " mapping)", fname);
     }
 
-    if (config.record_taxonomy && !mapping) {
-        logger->error("--record-taxonomy requires a coordinate-to-header mapping");
-        return false;
-    }
     const Json::Value report = index_names_report(labels, mapping.get());
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "  ";
@@ -525,34 +522,6 @@ int print_stats(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
-
-    if (config->print_sequence_headers) {
-        if (files.size() != 1 || !config->infbase.empty()
-                || !config->infbase_annotators.empty() || config->check_names
-                || !utils::ends_with(files.front(), annot::CoordToHeader::kExtension)) {
-            logger->error("--print-sequence-headers takes exactly one .seqs file");
-            return 1;
-        }
-        annot::CoordToHeader mapping;
-        if (!mapping.load(files.front()))
-            return 1;
-        for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
-            for (size_t sequence = 0; sequence < mapping.num_sequences(column); ++sequence) {
-                const auto &header = mapping.get_header(column, sequence);
-                if (!utils::valid_utf8(header) || header.find_first_of("\t\r\n") != std::string::npos) {
-                    logger->error("Sequence header contains invalid UTF-8 or a TSV delimiter");
-                    return 1;
-                }
-            }
-        }
-        std::cout << "METAGRAPH_SEQUENCE_HEADERS_V1\n";
-        for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
-            for (size_t sequence = 0; sequence < mapping.num_sequences(column); ++sequence)
-                std::cout << column << '\t' << sequence << '\t' << mapping.get_header(column, sequence) << '\n';
-        }
-        std::cout.flush();
-        return std::cout.good() ? 0 : 1;
-    }
 
     // the report is the only thing written to stdout: one annotation, no graph or mapping
     // beside it (whose statistics go to stdout too), refused before any output
