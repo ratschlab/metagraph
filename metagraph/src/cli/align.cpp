@@ -10,6 +10,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -308,6 +309,24 @@ std::string format_alignment(const std::string &header,
     return sout;
 }
 
+// header, strand, labels, number of query characters covered by their seeds,
+// and the query range they span
+static std::string format_mapping(const std::string &header,
+                                  const std::optional<LabeledAligner<>::LabelMapping> &mapping,
+                                  const annot::LabelEncoder<> &encoder) {
+    if (!mapping)
+        return fmt::format("{}\t*\t*\t0\t*\t*\n", header);
+
+    std::vector<std::string> labels;
+    labels.reserve(mapping->labels.size());
+    for (auto column : mapping->labels) {
+        labels.emplace_back(encoder.decode(column));
+    }
+    return fmt::format("{}\t{}\t{}\t{}\t{}\t{}\n", header,
+                       mapping->orientation ? '-' : '+', fmt::join(labels, ";"),
+                       mapping->num_matches, mapping->query_begin, mapping->query_end);
+}
+
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -381,6 +400,18 @@ int align_to_graph(Config *config) {
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (anno_dbg_future.valid())
         anno_dbg = anno_dbg_future.get();
+
+    // Chaining needs the coordinates of the seeds, which the aligner uses only
+    // with an annotation with coordinates on a BASIC-mode graph.
+    if (config->alignment_chain
+            && (graph->get_mode() != DeBruijnGraph::BASIC || !anno_dbg
+                || !dynamic_cast<const annot::matrix::MultiIntMatrix*>(
+                        &anno_dbg->get_annotator().get_matrix()))) {
+        logger->error("--align-chain requires a BASIC-mode graph and an annotation "
+                      "with coordinates (e.g., annotate --coordinates, then "
+                      "transform_anno --anno-type column_coord)");
+        return 1;
+    }
 
     auto wrap_graph = [&](auto graph) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
@@ -465,6 +496,19 @@ int align_to_graph(Config *config) {
                 if (anno_dbg) {
                     encoder = &anno_dbg->get_annotator().get_label_encoder();
                     cth = anno_dbg->get_coord_to_header();
+                }
+
+                if (config->align_map_only) {
+                    assert(anno_dbg);
+                    dynamic_cast<const LabeledAligner<>&>(*aligner).map_batch(batch,
+                        [&](const std::string &header,
+                            std::optional<LabeledAligner<>::LabelMapping>&& mapping) {
+                            auto res = format_mapping(header, mapping, *encoder);
+                            std::lock_guard<std::mutex> lock(print_mutex);
+                            *out << res;
+                        }
+                    );
+                    return;
                 }
 
                 aligner->align_batch(batch,

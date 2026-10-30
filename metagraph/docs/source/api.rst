@@ -6,6 +6,9 @@ Python API
 The MetaGraph API provides a simple way to query indexes (running on a remote server or locally) in Python and supports both exact k-mer
 matching as well as inexact search (alignment).
 
+.. note:: To query an index inside the Python process, without running a server, see
+    :ref:`In-process queries with pymetagraph <pymetagraph>` below.
+
 .. attention:: The API described here was used in the internal implementation of :ref:`metagraph_online`
     and can also be used to query indexes hosted **locally**. For the API of MetaGraph Online, refer to
     `MetaGraph Online Help <https://metagraph.ethz.ch/help#api-cli>`_.
@@ -220,3 +223,54 @@ must be started to load up an index for query. This can be done, for instance, a
 Other examples
 ^^^^^^^^^^^^^^
 Find more examples `here <https://github.com/ratschlab/metagraph_paper_resources/blob/master/notebooks/>`_.
+
+
+.. _pymetagraph:
+
+In-process queries with pymetagraph
+-----------------------------------
+.. attention:: pymetagraph is experimental. Its interface may still change.
+
+``pymetagraph`` loads an annotated index into the Python process and runs the same label query as
+``metagraph query``, without a ``metagraph server_query`` process. It is built from source together
+with MetaGraph.
+
+Install it from a clone with initialized submodules::
+
+    git clone --recursive https://github.com/ratschlab/metagraph.git
+    cd metagraph/metagraph/api/python/pymetagraph
+    pip install .
+
+This compiles MetaGraph with ``-DBUILD_PYTHON_BINDINGS=ON``, so it takes as long as a regular
+MetaGraph build. The result is meant for the machine that built it: it uses the SSE4.2 and AVX2
+instructions if the build machine's CPU has them, and links the Boost libraries found there. See the
+`pymetagraph README <https://github.com/ratschlab/metagraph/tree/master/metagraph/api/python/pymetagraph>`_
+for build options and known limitations.
+
+Usage::
+
+    import pymetagraph
+
+    graph = pymetagraph.AnnotatedGraph("graph.dbg", "annotation.column.annodbg", threads=8)
+    graph.k        # k-mer length
+    graph.labels   # all labels in the annotation
+
+    hits = graph.query(["ACGT...", "TTGA..."])
+    # one list of (label, number of matching k-mers) per sequence, by decreasing count
+    graph.query("ACGT...", num_top_labels=1, discovery_fraction=0.1)
+
+The options and their defaults are those of ``metagraph query``:
+
+========================  =================================  =========
+pymetagraph               ``metagraph query``                default
+========================  =================================  =========
+``num_top_labels``        ``--num-top-labels``               all labels (``None``)
+``discovery_fraction``    ``--min-kmers-fraction-label``     0.7
+``presence_fraction``     ``--min-kmers-fraction-graph``     0.0
+``threads``               ``-p``                             1
+========================  =================================  =========
+
+For indexes with coordinates and a ``.seqs`` file, labels are mapped to sequence headers, as in
+``metagraph query``. Only this label query is available: strand options (``--fwd-and-reverse``),
+alignment (``--align``), and the ``labels``, ``counts-sum``, ``signature``, ``counts`` and ``coords``
+query modes are not exposed. Use the command line tool or the server API above for those.

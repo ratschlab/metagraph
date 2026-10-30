@@ -66,6 +66,7 @@ class Config {
     // `metagraph align --json` output. Off by default since nothing in-tree
     // consumes it and it dominates the JSON size for long alignments.
     bool align_output_path = false;
+    bool align_map_only = false;
     bool advanced = false;
 
     unsigned int k = 3;

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <random>
 #include <unordered_set>
 
 #include "../graph/all/test_dbg_helpers.hpp"
@@ -11,6 +12,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/alignment/annotation_buffer.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "kmer/alphabets.hpp"
 #include "seq_io/sequence_io.hpp"
@@ -61,6 +63,80 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
+TYPED_TEST(LabeledAlignerTest, CachedColumnSetsKeepTheirAddress) {
+    // The labeled extender holds references to cached column sets while it
+    // caches new ones, so caching must never move the existing sets.
+    size_t k = 4;
+    const std::vector<std::string> sequences { "GCAAT", "AATGCTT" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+    const auto &graph = anno_graph->get_graph();
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+
+    auto path = map_to_nodes_sequentially(graph, sequences[1]);
+    ASSERT_EQ(sequences[1].size() - k + 1, path.size());
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(path));
+    buffer.fetch_queued_annotations();
+
+    const auto *node_labels = buffer.get_labels(path.front());
+    ASSERT_TRUE(node_labels);
+    const auto node_labels_copy = *node_labels;
+
+    size_t first = buffer.cache_column_set(AnnotationBuffer::Columns{ 0, 1 });
+    const auto &first_set = buffer.get_cached_column_set(first);
+
+    // enough new sets to reallocate any contiguous storage several times
+    for (AnnotationBuffer::Columns::value_type i = 2; i < 10'000; ++i) {
+        buffer.cache_column_set(AnnotationBuffer::Columns{ i });
+    }
+
+    EXPECT_EQ(&first_set, &buffer.get_cached_column_set(first));
+    EXPECT_EQ((AnnotationBuffer::Columns{ 0, 1 }), first_set);
+    EXPECT_EQ(node_labels, buffer.get_labels(path.front()));
+    EXPECT_EQ(node_labels_copy, *node_labels);
+}
+
+#if ! _PROTEIN_GRAPH
+TYPED_TEST(LabeledAlignerTest, FetchBothStrandsInOneBatch) {
+    // Queue the forward path of a sequence and then its reverse complement in
+    // the same batch. On CANONICAL graphs, the reverse-complement nodes map to
+    // the forward nodes queued just before, and the buffer grows (and may
+    // reallocate) while it registers them. Every node must get its labels.
+    size_t k = 21;
+    std::mt19937 rng(42);
+    std::string sequence(5000, 'A');
+    for (char &c : sequence) {
+        c = "ACGT"[rng() % 4];
+    }
+    std::string rc_sequence = sequence;
+    reverse_complement(rc_sequence.begin(), rc_sequence.end());
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, { sequence }, { "A" }, DeBruijnGraph::CANONICAL
+    );
+    const auto &graph = anno_graph->get_graph();
+    AnnotationBuffer buffer(graph, anno_graph->get_annotator());
+
+    auto path = map_to_nodes_sequentially(graph, sequence);
+    auto rc_path = map_to_nodes_sequentially(graph, rc_sequence);
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(path));
+    buffer.queue_path(std::vector<DeBruijnGraph::node_index>(rc_path));
+    buffer.fetch_queued_annotations();
+
+    for (const auto *nodes : { &path, &rc_path }) {
+        for (auto node : *nodes) {
+            ASSERT_NE(DeBruijnGraph::npos, node);
+            const auto *labels = buffer.get_labels(node);
+            ASSERT_TRUE(labels) << node;
+            EXPECT_EQ(1u, labels->size()) << node;
+        }
+    }
+}
+#endif  // ! _PROTEIN_GRAPH
+
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;
     /*
@@ -104,6 +180,50 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
             EXPECT_TRUE(found) << alignment;
         }
     }
+}
+
+TYPED_TEST(LabeledAlignerTest, MapWithoutExtension) {
+    size_t k = 4;
+    /*
+        A    A    B    B    B    B
+        GCAA-CAAT-AATG-ATGC-TGCT-GCTT
+    */
+    const std::vector<std::string> sequences { "GCAAT", "AATGCTT" };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    config.min_exact_match = 0.5;
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+    const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
+
+    std::vector<std::optional<LabeledAligner<>::LabelMapping>> mappings;
+    aligner.map_batch({ { "B", "TAATGCTTA" }, { "AB", "GCAATGCTT" }, { "none", "CCCCCCCC" } },
+        [&](const std::string &, auto&& mapping) { mappings.push_back(std::move(mapping)); }
+    );
+    ASSERT_EQ(3u, mappings.size());
+
+    // AATGCTT is B's, covered in full
+    ASSERT_TRUE(mappings[0]);
+    EXPECT_FALSE(mappings[0]->orientation);
+    ASSERT_EQ(1u, mappings[0]->labels.size());
+    EXPECT_EQ("B", label_encoder.decode(mappings[0]->labels[0]));
+    EXPECT_EQ(7u, mappings[0]->num_matches);
+    EXPECT_EQ(1u, mappings[0]->query_begin);
+    EXPECT_EQ(8u, mappings[0]->query_end);
+
+    // GCAAT (A) covers 5 characters, AATGCTT (B) covers 7
+    ASSERT_TRUE(mappings[1]);
+    ASSERT_EQ(1u, mappings[1]->labels.size());
+    EXPECT_EQ("B", label_encoder.decode(mappings[1]->labels[0]));
+    EXPECT_EQ(7u, mappings[1]->num_matches);
+    EXPECT_EQ(2u, mappings[1]->query_begin);
+    EXPECT_EQ(9u, mappings[1]->query_end);
+
+    EXPECT_FALSE(mappings[2]);
 }
 
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
@@ -716,6 +836,77 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(LabeledAlignerTest, SubkSeedLabels) {
+    // ACGT occurs only within the first k-1 characters of B, so the only k-mer
+    // ending with it is a source dummy k-mer. TGCA occurs only at the end of B.
+    size_t k = 5;
+    const std::vector<std::string> sequences { "TTACGAAA", "ACGTTGCA" };
+    const std::vector<std::string> labels { "A", "B" };
+    const std::vector<std::pair<std::string, std::string>> queries {
+        { "ACGT", "B" }, { "TACGA", "A" }, { "CGTTG", "B" }, { "TGCA", "B" }
+    };
+
+    // coordinates are only used on BASIC graphs
+    for (auto [mode, coordinates] : { std::make_pair(DeBruijnGraph::BASIC, false),
+                                      std::make_pair(DeBruijnGraph::BASIC, true),
+                                      std::make_pair(DeBruijnGraph::CANONICAL, false),
+                                      std::make_pair(DeBruijnGraph::PRIMARY, false) }) {
+        auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                k, sequences, labels, mode, coordinates);
+
+        // as in align_to_graph, unmask the dummy k-mers so that seeds can match
+        // them (in BASIC mode, ACGT is matched only by a source dummy k-mer)
+        if (mode == DeBruijnGraph::BASIC) {
+            const_cast<DBGSuccinct&>(
+                dynamic_cast<const DBGSuccinct&>(anno_graph->get_graph())
+            ).reset_mask();
+        }
+
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+        config.min_seed_length = 3;
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
+
+        for (const auto &[query, label] : queries) {
+            bool found = false;
+            for (const auto &alignment : aligner.align(query)) {
+                // every label of an alignment, including a partial one, must
+                // contain its sequence on either strand
+                std::string sequence(alignment.get_sequence());
+                std::string sequence_rc = sequence;
+                reverse_complement(sequence_rc.begin(), sequence_rc.end());
+                std::vector<std::string> alignment_labels;
+                if (coordinates) {
+                    ASSERT_EQ(alignment.label_columns.size(),
+                              alignment.label_coordinates.size()) << query;
+                }
+                for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
+                    alignment_labels.emplace_back(label_encoder.decode(alignment.label_columns[i]));
+                    const std::string &labeled = sequences[alignment_labels.back() == "A" ? 0 : 1];
+                    EXPECT_TRUE(labeled.find(sequence) != std::string::npos
+                                    || labeled.find(sequence_rc) != std::string::npos)
+                        << mode << " " << query << " " << alignment;
+                    if (!coordinates)
+                        continue;
+
+                    // each label holds one sequence, so a coordinate is the
+                    // position of the aligned sequence in it
+                    ASSERT_FALSE(alignment.label_coordinates[i].empty()) << query;
+                    for (int64_t coord : alignment.label_coordinates[i]) {
+                        ASSERT_GE(coord, 0) << query << " " << alignment;
+                        EXPECT_EQ(sequence, labeled.substr(coord, sequence.size()))
+                            << query << " " << alignment;
+                    }
+                }
+                found |= (sequence == query || sequence_rc == query)
+                    && alignment_labels == std::vector<std::string>{ label };
+            }
+            EXPECT_TRUE(found) << mode << " " << coordinates << " " << query;
+        }
+    }
+}
+
 TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
     size_t k = 5;
     /*   B     B                AB    AB

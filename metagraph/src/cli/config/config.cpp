@@ -248,6 +248,8 @@ Config::Config(int argc, char *argv[]) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
+        } else if (!strcmp(argv[i], "--align-map-only")) {
+            align_map_only = true;
         } else if (!strcmp(argv[i], "--align-only-forwards")) {
             align_only_forwards = true;
         } else if (!strcmp(argv[i], "--align-output-path")) {
@@ -694,6 +696,13 @@ Config::Config(int argc, char *argv[]) {
         print_usage(argv[0], identity);
     }
 
+    if (identity == ALIGN && align_map_only
+            && (infbase_annotators.empty() || output_json || map_sequences)) {
+        std::cerr << "Error: --align-map-only requires an annotation (-a) and TSV output,"
+                     " and cannot be combined with --map, --count-kmers or --query-presence" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (alignment_max_seed_length < alignment_min_seed_length) {
         std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
         print_usage_and_exit = true;
@@ -1034,7 +1043,7 @@ if (advanced) {
             fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB (sshash: RAM budget, at least 8) [1]\n");
 if (advanced) {
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
@@ -1120,6 +1129,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --align-map-only \t\t\t\treport the labels best supported by seeds, without extending them into alignments (requires -a) [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");

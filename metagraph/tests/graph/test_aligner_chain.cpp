@@ -28,6 +28,31 @@ TEST(Seed, expand_from_borrowed_tail) {
     EXPECT_EQ(query, seed.get_query_view());
 }
 
+TEST(Seed, num_char_matches_counts_union_of_seeds) {
+    const std::string query = "ACGTACGTACGTACGTACGT";
+    std::string_view view(query);
+    auto make_seed = [&](size_t begin, size_t length, size_t offset) {
+        return Seed(view.substr(begin, length), { 1 }, false, offset,
+                    begin, query.size() - begin - length);
+    };
+
+    // a seed with an offset must not hide the seeds after it
+    std::vector<Seed> seeds {
+        make_seed(0, 5, 2), make_seed(8, 4, 0), make_seed(14, 6, 1)
+    };
+    EXPECT_EQ(15u, get_num_char_matches_in_seeds(seeds.begin(), seeds.end()));
+
+    // overlapping, duplicate, contained and unsorted seeds are counted once
+    seeds = {
+        make_seed(10, 6, 0), make_seed(0, 8, 1), make_seed(0, 8, 1),
+        make_seed(2, 3, 0), make_seed(6, 6, 2), make_seed(13, 2, 0)
+    };
+    EXPECT_EQ(16u, get_num_char_matches_in_seeds(seeds.begin(), seeds.end()));
+
+    seeds.emplace_back();
+    EXPECT_EQ(16u, get_num_char_matches_in_seeds(seeds.begin(), seeds.end()));
+}
+
 template <typename Graph>
 class DBGAlignerPostChainTest : public DeBruijnGraphTest<Graph> {};
 

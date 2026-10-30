@@ -20,6 +20,24 @@ include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
 
+# Building the pymetagraph Python extension requires every static library in the
+# link chain (including vendored deps and HTSLIB) to be position-independent.
+# This is opt-in so the default static `metagraph` binary build is unaffected.
+option(BUILD_PYTHON_BINDINGS "Build the pymetagraph pybind11 extension" OFF)
+if(BUILD_PYTHON_BINDINGS)
+  if(BUILD_STATIC)
+    message(FATAL_ERROR "BUILD_PYTHON_BINDINGS cannot be combined with BUILD_STATIC: "
+                        "the extension must link shared (or position-independent) libraries")
+  endif()
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+  # jemalloc (pulled in via folly, if present on the system) can exhaust the
+  # static TLS space, so importing the extension fails with "cannot allocate
+  # memory in static TLS block" unless libjemalloc is preloaded. Build the
+  # extension without it; builds without BUILD_PYTHON_BINDINGS keep jemalloc.
+  set(CMAKE_DISABLE_FIND_PACKAGE_Jemalloc ON)
+endif()
+
 enable_testing()
 include(GoogleTest)
 
@@ -202,6 +220,7 @@ configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
   -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
   -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
+  -DCMAKE_POSITION_INDEPENDENT_CODE=${CMAKE_POSITION_INDEPENDENT_CODE}
   .
   RESULT_VARIABLE result
   WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/KMC
@@ -313,7 +332,14 @@ if(APPLE)
   get_filename_component(ICU_DATA_LIBRARY_PATH ${ICU_DATA_LIBRARY} DIRECTORY)
 endif()
 
-set(Boost_USE_STATIC_LIBS ON)
+# Static Boost libraries of Linux distributions are usually not
+# position-independent, so they cannot be linked into the Python extension.
+# On macOS, code is position-independent by default.
+if(BUILD_PYTHON_BINDINGS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(Boost_USE_STATIC_LIBS OFF)
+else()
+  set(Boost_USE_STATIC_LIBS ON)
+endif()
 find_package(Boost REQUIRED COMPONENTS iostreams)
 find_library(LIBDEFLATE_LIBRARY NAMES deflate HINTS ENV LIBRARY_PATH
              PATHS ${HOMEBREW_DIR}/lib REQUIRED)
@@ -386,17 +412,31 @@ else()
 endif()
 
 include(ExternalProject)
+# HTSLIB is built via autoconf/make, outside CMAKE_POSITION_INDEPENDENT_CODE's reach,
+# so -fPIC has to be injected into its CFLAGS/CPPFLAGS by hand when building the
+# Python extension (see BUILD_PYTHON_BINDINGS above).
+set(HTSLIB_PIC_FLAG "")
+if(BUILD_PYTHON_BINDINGS)
+  set(HTSLIB_PIC_FLAG "-fPIC ")
+endif()
+# $(MAKE) joins the jobserver of a make-driven build; other generators, such as
+# Ninja (the scikit-build-core default), need a make program by name.
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+  set(HTSLIB_MAKE "$(MAKE)")
+else()
+  find_program(HTSLIB_MAKE NAMES gmake make REQUIRED)
+endif()
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   PREFIX "${PROJECT_BINARY_DIR}/HTSLIB-build"
   CONFIGURE_COMMAND
     ${CMAKE_COMMAND} -E env
       "CC=${HTSLIB_CC}"
-      "CPPFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
-      "CFLAGS=${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
+      "CPPFLAGS=${HTSLIB_PIC_FLAG}${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
+      "CFLAGS=${HTSLIB_PIC_FLAG}${OSX_ARCH_FLAGS}\ -I${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/zlib"
       "LDFLAGS=${OSX_ARCH_FLAGS}\ -L${PROJECT_BINARY_DIR}/external-libraries/zlib"
     /bin/sh -c "autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && exec ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --disable-libcurl --disable-bz2 --disable-lzma"
-  BUILD_COMMAND $(MAKE) -j${N} lib-static
+  BUILD_COMMAND ${HTSLIB_MAKE} -j${N} lib-static
   #INSTALL_COMMAND $(MAKE) install prefix=${HTSLIB_INSTALL}  # this installs both static and dynamic
   # Install only static lib to avoid the dependency
   INSTALL_COMMAND
@@ -434,6 +474,8 @@ list(REVERSE metagraph_core_files)  # for compiling faster
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*main.cpp")
 list(FILTER metagraph_core_files EXCLUDE REGEX ".*/cli/.*")
+list(FILTER metagraph_core_files EXCLUDE REGEX ".*/pybindings/.*")
+
 add_library(metagraph-core STATIC ${metagraph_core_files})
 
 # Set up include directories for metagraph-core
@@ -575,6 +617,25 @@ if(METAGRAPH_BUILD_EXECUTABLE)
   )
 
   add_dependencies(metagraph link_target)
+endif()
+
+#-------------------
+# pymetagraph Python extension
+#-------------------
+if(BUILD_PYTHON_BINDINGS)
+  find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+  execute_process(
+    COMMAND ${Python_EXECUTABLE} -m pybind11 --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+  find_package(pybind11 CONFIG REQUIRED)
+
+  pybind11_add_module(_pymetagraph_core src/pybindings/pymetagraph_bindings.cpp)
+  target_link_libraries(_pymetagraph_core PRIVATE metagraph-cli metagraph-core)
+  add_dependencies(_pymetagraph_core HTSLIB)
+  install(TARGETS _pymetagraph_core DESTINATION pymetagraph COMPONENT _pymetagraph_core)
 endif()
 
 

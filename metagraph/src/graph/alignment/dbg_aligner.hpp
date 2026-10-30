@@ -17,6 +17,15 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+// On CANONICAL graphs, a query and its reverse complement match the same
+// k-mers, so aligning the second strand mostly finds the reverse complements of
+// the first strand's alignments. Return true if the second strand should still
+// be aligned, given the longest query span aligned on the first strand.
+bool extend_second_strand(const DeBruijnGraph &graph,
+                          const DBGAlignerConfig &config,
+                          size_t query_size,
+                          size_t first_strand_query_span);
+
 class IDBGAligner {
   public:
     typedef std::pair<std::string /* header */, std::string /* seq */> Query;
