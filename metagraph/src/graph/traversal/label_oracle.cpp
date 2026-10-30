@@ -433,7 +433,8 @@ namespace {
 bool project_taxonomy_membership(const MultiIntMatrix::RowTuples &row,
                                   const annot::CoordToHeader &source, DecodeBudget &budget,
                                   BinaryMatrix::SetBitPositions *out, uint64_t *held,
-                                  uint64_t *peak, uint64_t *work) {
+                                  uint64_t *peak, uint64_t *work,
+                                  const std::function<bool()> &stop = {}) {
     const uint64_t words = (source.taxonomy_view()->num_columns() + 63) / 64;
     const uint64_t scratch = buffer_bytes(words, sizeof(uint64_t));
     if (!budget.charge(scratch))
@@ -441,22 +442,21 @@ bool project_taxonomy_membership(const MultiIntMatrix::RowTuples &row,
     std::vector<uint64_t> seen(words, 0);
     uint64_t n = 0;
     for (const auto &[column, coords] : row) {
-        annot::CoordToHeader::SequenceRange range{};
-        bool have_range = false;
-        Column target = 0;
-        for (Coord coordinate : coords) {
-            if (!have_range || coordinate < range.first || coordinate > range.last) {
-                range = source.sequence_range(column, coordinate);
-                target = source.taxonomy_coord(column, range.seq_id, 0).first;
-                have_range = true;
-            }
+        for (auto at = coords.begin(); at != coords.end();) {
+            if (stop && stop()) { budget.release(scratch); return false; }
+            const auto range = source.sequence_range(column, *at);
+            const Column target = source.taxonomy_coord(column, range.seq_id, 0).first;
             seen[target / 64] |= uint64_t(1) << (target % 64);
-            ++n;
+            const auto next = std::upper_bound(at, coords.end(), range.last);
+            n += next - at; // logical projection cost is independent of skipping
+            at = next;
         }
     }
     uint64_t count = 0;
-    for (uint64_t word : seen)
-        count += __builtin_popcountll(word);
+    for (size_t i = 0; i < words; ++i) {
+        if (!(i & 1023) && stop && stop()) { budget.release(scratch); return false; }
+        count += __builtin_popcountll(seen[i]);
+    }
     const uint64_t bytes = small_vector_bytes(count, sizeof(Column));
     if (!budget.charge(bytes)) {
         budget.release(scratch);
@@ -464,6 +464,7 @@ bool project_taxonomy_membership(const MultiIntMatrix::RowTuples &row,
     }
     out->reserve(count);
     for (uint64_t i = 0; i < words; ++i) {
+        if (!(i & 1023) && stop && stop()) { budget.release(scratch); return false; }
         for (uint64_t word = seen[i]; word; word &= word - 1)
             out->push_back(i * 64 + __builtin_ctzll(word));
     }
@@ -678,6 +679,124 @@ DecodeStatus LabelOracle::get_taxonomy_rows_streamed(
     return DecodeStatus::OK;
 }
 
+// The cap selects an optimization, never a different request-memory allowance.
+// Only cap exhaustion may split/retry; request refusal and cancellation are terminal.
+DecodeStatus LabelOracle::get_taxonomy_rows_bounded(
+        const std::vector<Row> &rows, DecodeBudget &budget,
+        std::vector<BinaryMatrix::SetBitPositions> *out, std::vector<RowCost> *costs,
+        std::vector<uint64_t> *held) const {
+    constexpr uint64_t cap = 256ULL << 10;
+    using Bits = BinaryMatrix::SetBitPositions;
+    const uint64_t entry = budget.held();
+    const auto original_counters = counters_;
+    bool committed = false;
+    struct Restore {
+        DecodeBudget &budget; uint64_t entry; Counters &counters;
+        const Counters &original; bool &committed;
+        ~Restore() { if (!committed) { budget.restore(entry); counters = original; } }
+    } restore {budget, entry, counters_, original_counters, committed};
+    if (!budget.charge(annot::matrix::IRowDiff::output_bytes<Bits>(rows.size())))
+        return DecodeStatus::REFUSED;
+    std::vector<Bits> result(rows.size());
+    std::vector<RowCost> result_costs(rows.size());
+    std::vector<uint64_t> result_held(rows.size());
+    uint64_t polls = 0;
+    const auto stop = [this, &polls]() {
+        ++polls;
+        if (!stream_pacing_ || !stream_pacing_->stop || !stream_pacing_->stop()) return false;
+        stream_pacing_->interrupted = true;
+        stream_pacing_->units = polls;
+        return true;
+    };
+    const uint64_t one_input = buffer_bytes(1, sizeof(Row));
+    const auto read = [&](auto &&self, size_t first, size_t last) -> DecodeStatus {
+        if (stop()) return DecodeStatus::REFUSED;
+        const size_t n = last - first;
+        bool split = false;
+        uint64_t attempt_peak = 0;
+        DecodeStatus status = DecodeStatus::REFUSED;
+        {
+            DecodeBudget probe(cap, budget);
+            probe.stop = stop;
+            struct Release { DecodeBudget &b; ~Release() { b.restore(0); } } release {probe};
+            // Declared after the account guard: buffers die before their charges.
+            std::vector<Row> group;
+            std::vector<MultiIntMatrix::RowTuples> raw;
+            std::vector<RowCost> raw_costs;
+            std::vector<uint64_t> raw_held;
+            if (probe.charge(buffer_bytes(n, sizeof(Row)))) {
+                group.assign(rows.begin() + first, rows.begin() + last);
+                status = rd_->decode_row_tuples(group, probe, &raw, &raw_costs, &raw_held);
+            }
+            if (probe.parent_refused() || probe.interrupted()) return DecodeStatus::REFUSED;
+            attempt_peak = probe.peak();
+            split = probe.limit_refused() || status == DecodeStatus::UNSUPPORTED;
+            if (status == DecodeStatus::OK) {
+                // Batch sharing can make a large standalone row fit. Its canonical
+                // policy must still be streaming, also when queried on its own.
+                split = std::any_of(raw_costs.begin(), raw_costs.end(), [&](const auto &cost) {
+                    return cost.demand > cap - one_input;
+                });
+                if (!split) {
+                    for (size_t i = 0; i < n; ++i) {
+                        uint64_t bytes = 0, peak = 0, work = 0;
+                        if (!project_taxonomy_membership(raw[i], *taxonomy_source_, budget,
+                                &result[first + i], &bytes, &peak, &work, stop))
+                            return DecodeStatus::REFUSED;
+                        result_held[first + i] = bytes;
+                        result_costs[first + i] = raw_costs[i];
+                        result_costs[first + i].demand += one_input + peak
+                            + annot::matrix::IRowDiff::output_bytes<Bits>(1);
+                        result_costs[first + i].dependency_entries += work;
+                        for (const auto &[column, coords] : raw[i]) counters_.coords_mapped += coords.size();
+                    }
+                    counters_.rows_fetched += n;
+                    counters_.tuple_rows_fetched += n;
+                    return DecodeStatus::OK;
+                }
+            } else if (!split && status != DecodeStatus::UNSUPPORTED) {
+                return status;
+            }
+        }
+        if (n > 1 && split) {
+            const size_t middle = first + n / 2;
+            const auto left = self(self, first, middle);
+            return left == DecodeStatus::OK ? self(self, middle, last) : left;
+        }
+        // A single row over the fixed cap uses the existing streaming reader.
+        if (!budget.charge(one_input)) return DecodeStatus::REFUSED;
+        std::vector<Row> group {rows[first]};
+        std::vector<Bits> bits;
+        std::vector<RowCost> row_costs;
+        std::vector<uint64_t> row_held;
+        status = get_taxonomy_rows_streamed(group, budget, &bits, &row_costs, &row_held);
+        if (status != DecodeStatus::OK) {
+            if (stream_pacing_ && stream_pacing_->interrupted) stream_pacing_->units += polls;
+            return status;
+        }
+        result[first] = std::move(bits[0]);
+        result_costs[first] = row_costs[0];
+        result_costs[first].demand += one_input + annot::matrix::IRowDiff::output_bytes<Bits>(1);
+        // Include the bounded attempt's peak, even though its buffers were freed
+        // before streaming. A fallback is always classified by a singleton read.
+        result_costs[first].demand = std::max(result_costs[first].demand,
+            attempt_peak + annot::matrix::IRowDiff::output_bytes<Bits>(1));
+        result_held[first] = row_held[0];
+        std::vector<Row>().swap(group); std::vector<Bits>().swap(bits);
+        std::vector<RowCost>().swap(row_costs); std::vector<uint64_t>().swap(row_held);
+        budget.release(one_input + annot::matrix::IRowDiff::output_bytes<Bits>(1));
+        return DecodeStatus::OK;
+    };
+    if (!rows.empty()) {
+        const auto status = read(read, 0, rows.size());
+        if (status != DecodeStatus::OK) return status;
+    }
+    if (stop()) return DecodeStatus::REFUSED;
+    out->swap(result); costs->swap(result_costs); held->swap(result_held);
+    committed = true;
+    return DecodeStatus::OK;
+}
+
 DecodeStatus LabelOracle::get_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                                    std::vector<BinaryMatrix::SetBitPositions> *out,
                                    std::vector<RowCost> *costs, std::vector<uint64_t> *held) const {
@@ -687,52 +806,9 @@ DecodeStatus LabelOracle::get_rows(const std::vector<Row> &rows, DecodeBudget &b
         if (test_read_hook)
             test_read_hook(rows.size());
         Timer timer;
-        // Use the same bounded access policy regardless of batch size or how much
-        // memory previous rows hold. This keeps per-row admission costs stable.
-        const auto streamed = get_taxonomy_rows_streamed(rows, budget, out, costs, held);
-        if (streamed != DecodeStatus::UNSUPPORTED) {
-            counters_.fetch_seconds += timer.elapsed();
-            return streamed;
-        }
-        const uint64_t entry = budget.held();
-        std::vector<MultiIntMatrix::RowTuples> raw;
-        std::vector<RowCost> new_costs;
-        std::vector<uint64_t> new_held;
-        const auto status = rd_->decode_row_tuples(rows, budget, &raw, &new_costs, &new_held,
-                                                   path_cache_.enabled() ? &path_cache_ : nullptr);
-        if (status != DecodeStatus::OK) {
-            return status;
-        }
-        counters_.tuple_rows_fetched += rows.size();
-        const uint64_t container = buffer_bytes(rows.size(), sizeof(BinaryMatrix::SetBitPositions));
-        if (!budget.charge(container)) {
-            budget.restore(entry);
-            return DecodeStatus::REFUSED;
-        }
-        std::vector<BinaryMatrix::SetBitPositions> result(rows.size());
-        for (size_t i = 0; i < rows.size(); ++i) {
-            uint64_t bytes = 0, peak = 0, work = 0;
-            if (!project_taxonomy_membership(raw[i], *taxonomy_source_, budget,
-                                             &result[i], &bytes, &peak, &work)) {
-                budget.restore(entry);
-                return DecodeStatus::REFUSED;
-            }
-            for (const auto &[column, coords] : raw[i])
-                counters_.coords_mapped += coords.size();
-            MultiIntMatrix::RowTuples().swap(raw[i]);
-            budget.release(new_held[i]);
-            new_held[i] = bytes;
-            new_costs[i].demand += peak + buffer_bytes(1, sizeof(BinaryMatrix::SetBitPositions));
-            new_costs[i].dependency_entries += work;
-        }
-        std::vector<MultiIntMatrix::RowTuples>().swap(raw);
-        budget.release(buffer_bytes(rows.size(), sizeof(MultiIntMatrix::RowTuples)));
-        *out = std::move(result);
-        *costs = std::move(new_costs);
-        *held = std::move(new_held);
-        counters_.rows_fetched += rows.size();
+        const auto status = get_taxonomy_rows_bounded(rows, budget, out, costs, held);
         counters_.fetch_seconds += timer.elapsed();
-        return DecodeStatus::OK;
+        return status;
     }
     if (!rd_)
         return DecodeStatus::UNSUPPORTED;

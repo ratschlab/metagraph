@@ -41,6 +41,43 @@ using SetBits = BinaryMatrix::SetBitPositions;
 using RowTuples = MultiIntMatrix::RowTuples;
 using ColRank = std::pair<Column, uint64_t>;
 
+TEST(RowDiffBudgetedDecode, SubBudgetSeparatesItsCapFromTheRequestLimit) {
+    DecodeBudget request(128);
+    ASSERT_TRUE(request.charge(17));
+    DecodeBudget local(64, request);
+    ASSERT_TRUE(local.charge(32));
+    EXPECT_EQ(49u, request.held());
+    EXPECT_FALSE(local.charge(40));
+    EXPECT_TRUE(local.limit_refused());
+    EXPECT_FALSE(local.parent_refused());
+    EXPECT_EQ(49u, request.held());
+    local.restore(0);
+    EXPECT_EQ(17u, request.held());
+
+    DecodeBudget hard(16);
+    DecodeBudget attempt(64, hard);
+    EXPECT_FALSE(attempt.charge(32));
+    EXPECT_TRUE(attempt.parent_refused());
+    EXPECT_FALSE(attempt.limit_refused());
+    EXPECT_EQ(0u, attempt.held());
+    EXPECT_EQ(0u, hard.held());
+
+    DecodeBudget denied;
+    denied.deny = [](uint64_t) { return true; };
+    DecodeBudget denied_child(64, denied);
+    EXPECT_FALSE(denied_child.charge(32));
+    EXPECT_TRUE(denied_child.parent_refused());
+    EXPECT_FALSE(denied_child.limit_refused());
+
+    DecodeBudget canceled;
+    DecodeBudget canceled_child(64, canceled);
+    canceled_child.stop = [] { return true; };
+    EXPECT_FALSE(canceled_child.charge(32));
+    EXPECT_TRUE(canceled_child.interrupted());
+    EXPECT_FALSE(canceled_child.limit_refused());
+    EXPECT_EQ(0u, canceled.held());
+}
+
 std::string random_seq(size_t n, uint32_t seed) {
     std::mt19937 rng(seed);
     std::string s(n, 'A');

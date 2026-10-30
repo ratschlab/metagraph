@@ -432,6 +432,10 @@ class LabelOracle {
     mutable Counters counters_;
     mutable DecodePacer pacer_;
     mutable ReadPacing *stream_pacing_ = nullptr;
+    annot::matrix::DecodeStatus get_taxonomy_rows_bounded(
+        const std::vector<Row> &rows, annot::matrix::DecodeBudget &budget,
+        std::vector<annot::matrix::BinaryMatrix::SetBitPositions> *out,
+        std::vector<annot::matrix::RowCost> *costs, std::vector<uint64_t> *held) const;
     annot::matrix::DecodeStatus get_taxonomy_rows_streamed(
         const std::vector<Row> &rows, annot::matrix::DecodeBudget &budget,
         std::vector<annot::matrix::BinaryMatrix::SetBitPositions> *out,

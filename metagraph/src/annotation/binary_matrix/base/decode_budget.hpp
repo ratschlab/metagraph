@@ -90,13 +90,39 @@ class DecodeBudget {
     explicit DecodeBudget(uint64_t max_bytes = std::numeric_limits<uint64_t>::max())
           : max_(max_bytes) {}
 
+    // A temporary sub-budget enforces a local cap AND charges the request account.
+    // Release/restore its held bytes before it leaves scope, after freeing its buffers.
+    DecodeBudget(uint64_t max_bytes, DecodeBudget &parent)
+          : max_(max_bytes), parent_(&parent) {}
+
+    // Optional cancellation for bounded decoding. Callers also poll between steps
+    // that reuse an already allocated buffer and therefore make no new charge.
+    bool poll() {
+        if (interrupted_ || (stop && stop())) {
+            interrupted_ = true;
+            return false;
+        }
+        if (parent_ && !parent_->poll()) {
+            parent_refused_ = true;
+            return false;
+        }
+        return true;
+    }
+
     // Reserve |bytes| before they are allocated. false: nothing was reserved — held + bytes
     // would exceed the maximum, or the test hook denied this charge.
     bool charge(uint64_t bytes) {
+        if (!poll()) return false;
         const uint64_t ordinal = charges_++;
-        if ((deny && deny(ordinal)) || bytes > max_ - held_) {
+        const bool denied = deny && deny(ordinal);
+        if (denied || bytes > max_ - held_) {
+            limit_refused_ |= !denied;
             refused_need_ = bytes > std::numeric_limits<uint64_t>::max() - held_
                 ? std::numeric_limits<uint64_t>::max() : held_ + bytes;
+            return false;
+        }
+        if (parent_ && !parent_->charge(bytes)) {
+            parent_refused_ = true;
             return false;
         }
         held_ += bytes;
@@ -105,12 +131,13 @@ class DecodeBudget {
     }
     void release(uint64_t bytes) {
         assert(bytes <= held_);
+        if (parent_) parent_->release(bytes);
         held_ -= bytes;
     }
     // what a refused call does: back to what was held when it began
     void restore(uint64_t held_at_entry) {
         assert(held_at_entry <= held_);
-        held_ = held_at_entry;
+        release(held_ - held_at_entry);
     }
 
     uint64_t max_bytes() const { return max_; }
@@ -120,6 +147,9 @@ class DecodeBudget {
     uint64_t charges() const { return charges_; }
     // held + the charge that did not fit, at the last refusal
     uint64_t refused_need() const { return refused_need_; }
+    bool limit_refused() const { return limit_refused_; }
+    bool parent_refused() const { return parent_refused_; }
+    bool interrupted() const { return interrupted_; }
     // start measuring a call's own peak: returns the peak so far and restarts it at held
     // (end_peak() combines them again)
     uint64_t begin_peak() {
@@ -132,6 +162,7 @@ class DecodeBudget {
     // Test hook: asked at every charge with its ordinal; true refuses that charge as if it
     // did not fit. Empty by default.
     std::function<bool(uint64_t ordinal)> deny;
+    std::function<bool()> stop;
 
   private:
     uint64_t max_;
@@ -139,6 +170,8 @@ class DecodeBudget {
     uint64_t peak_ = 0;
     uint64_t charges_ = 0;
     uint64_t refused_need_ = 0;
+    DecodeBudget *parent_ = nullptr;
+    bool limit_refused_ = false, parent_refused_ = false, interrupted_ = false;
 };
 
 /**

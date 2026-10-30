@@ -213,6 +213,7 @@ inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>
         Tuple tuple;
         tuple.reserve(end - begin);
         for (size_t t = begin; t < end; ++t) {
+            if (((t - begin) & 1023) == 0 && !budget.poll()) return false;
             tuple.push_back(column_values_[j][t]);
         }
         out->emplace_back(j, std::move(tuple));

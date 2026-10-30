@@ -2856,4 +2856,138 @@ TEST(PatternTaxidStream, WideRowStopsBeforeEmittingCoordinates) {
     EXPECT_EQ(17u, budget.held());
 }
 
+
+TEST(PatternTaxidBatch, SharedRowsSplitAtTheLocalCapWithStableCosts) {
+    using namespace graph::traversal;
+    using namespace annot::matrix;
+    auto index = build<annot::RowDiffColumnAnnotator>(5,
+        {{"bin", "A.1", std::string(4096, 'A')}}, true);
+    std::istringstream mapping("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n");
+    ASSERT_TRUE(index.cth->load_taxids(mapping));
+    LabelOracle oracle(*index.anno, index.cth.get(), true);
+    const auto row = AnnotatedDBG::graph_to_anno_index(oracle.keys_of_sequence("AAAAA")[0]);
+    std::vector<BinaryMatrix::Row> rows(128, row);
+    std::vector<BinaryMatrix::SetBitPositions> result, single;
+    std::vector<RowCost> costs, single_cost;
+    std::vector<uint64_t> held, single_held;
+    DecodeBudget budget(8 << 20), one(8 << 20);
+    ASSERT_TRUE(budget.charge(17));
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows(rows, budget, &result, &costs, &held));
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows({row}, one, &single, &single_cost, &single_held));
+    EXPECT_LE(one.peak(), single_cost[0].demand);
+    ASSERT_EQ(rows.size(), result.size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(single[0], result[i]);
+        EXPECT_EQ(single_cost[0].demand, costs[i].demand);
+        EXPECT_EQ(single_cost[0].dependency_entries, costs[i].dependency_entries);
+        EXPECT_EQ(single_cost[0].dependency_rows, costs[i].dependency_rows);
+    }
+    EXPECT_LE(budget.peak(), (256u << 10) + IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(rows.size()) + 512);
+    uint64_t retained = 17 + IRowDiff::output_bytes<BinaryMatrix::SetBitPositions>(rows.size());
+    for (auto bytes : held) retained += bytes;
+    EXPECT_EQ(retained, budget.held());
+
+    ReadPacing pacing;
+    size_t polls = 0;
+    pacing.stop = [&]() { ++polls; return false; };
+    LabelOracle::StreamReadScope scope(oracle, &pacing);
+    DecodeBudget measured(8 << 20);
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows(rows, measured, &result, &costs, &held));
+    const size_t all_polls = polls;
+    ASSERT_GT(all_polls, 10u);
+    for (size_t stop_at : {size_t(1), all_polls / 3, 2 * all_polls / 3, all_polls}) {
+        SCOPED_TRACE(stop_at);
+        polls = 0; pacing.interrupted = false;
+        pacing.stop = [&]() { return ++polls >= stop_at; };
+        DecodeBudget interrupted(8 << 20);
+        ASSERT_TRUE(interrupted.charge(17));
+        result = {{123}}; costs = {{1, 2, 3}}; held.clear(); held.push_back(456);
+        const auto before = oracle.counters();
+        EXPECT_EQ(DecodeStatus::REFUSED, oracle.get_rows(rows, interrupted, &result, &costs, &held));
+        EXPECT_TRUE(pacing.interrupted);
+        EXPECT_EQ(17u, interrupted.held());
+        EXPECT_EQ((std::vector<BinaryMatrix::SetBitPositions>{{123}}), result);
+        EXPECT_EQ((std::vector<uint64_t>{456}), held);
+        EXPECT_EQ(3u, costs[0].demand);
+        EXPECT_EQ(before.coords_mapped, oracle.counters().coords_mapped);
+        EXPECT_EQ(before.rows_fetched, oracle.counters().rows_fetched);
+        EXPECT_EQ(before.tuple_rows_fetched, oracle.counters().tuple_rows_fetched);
+    }
+}
+
+TEST(PatternTaxidBatch, MixedOversizedRowsKeepSingleRowPolicyAndNeverBypassRequestDenial) {
+    using namespace graph::traversal;
+    using namespace annot::matrix;
+    auto index = build<annot::RowDiffColumnAnnotator>(5,
+        {{"bin", "A.1", std::string(270000, 'A')},
+         {"bin", "B.1", "ACGTCGATGCTAGTCGATCGTACGTAGCTAGCATGCTAGTCG"}}, true);
+    std::istringstream mapping("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n0\t1\tB.1\t200\n");
+    ASSERT_TRUE(index.cth->load_taxids(mapping));
+    LabelOracle oracle(*index.anno, index.cth.get(), true);
+    const auto large = AnnotatedDBG::graph_to_anno_index(oracle.keys_of_sequence("AAAAA")[0]);
+    const auto small = AnnotatedDBG::graph_to_anno_index(oracle.keys_of_sequence("CGTCG")[0]);
+    const std::vector<BinaryMatrix::Row> rows {small, large, small};
+    std::vector<BinaryMatrix::SetBitPositions> result;
+    std::vector<RowCost> costs;
+    std::vector<uint64_t> held;
+    DecodeBudget full;
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows(rows, full, &result, &costs, &held));
+    EXPECT_LT(costs[1].dependency_entries, 1000u);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        DecodeBudget one;
+        std::vector<BinaryMatrix::SetBitPositions> single;
+        std::vector<RowCost> single_cost;
+        std::vector<uint64_t> single_held;
+        ASSERT_EQ(DecodeStatus::OK, oracle.get_rows({rows[i]}, one, &single, &single_cost, &single_held));
+        EXPECT_LE(one.peak(), single_cost[0].demand);
+        EXPECT_EQ(single[0], result[i]);
+        EXPECT_EQ(single_cost[0].demand, costs[i].demand);
+        EXPECT_EQ(single_cost[0].dependency_entries, costs[i].dependency_entries);
+    }
+    DecodeBudget small_budget(64 << 10);
+    std::vector<BinaryMatrix::SetBitPositions> small_result;
+    std::vector<RowCost> small_cost;
+    std::vector<uint64_t> small_held;
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows(rows, small_budget, &small_result, &small_cost, &small_held));
+    EXPECT_EQ(result, small_result);
+    EXPECT_LE(small_budget.peak(), 64u << 10);
+    for (uint64_t ordinal = 0; ordinal < full.charges(); ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        DecodeBudget denied;
+        ASSERT_TRUE(denied.charge(17));
+        denied.deny = [ordinal](uint64_t charge) { return charge == ordinal + 1; };
+        small_result = {{123}}; small_cost = {{1, 2, 3}}; small_held.clear(); small_held.push_back(456);
+        const auto before = oracle.counters();
+        EXPECT_EQ(DecodeStatus::REFUSED, oracle.get_rows(rows, denied, &small_result, &small_cost, &small_held));
+        EXPECT_EQ(17u, denied.held());
+        EXPECT_EQ((std::vector<BinaryMatrix::SetBitPositions>{{123}}), small_result);
+        EXPECT_EQ((std::vector<uint64_t>{456}), small_held);
+        EXPECT_EQ(before.coords_mapped, oracle.counters().coords_mapped);
+        EXPECT_EQ(before.rows_fetched, oracle.counters().rows_fetched);
+        EXPECT_EQ(before.tuple_rows_fetched, oracle.counters().tuple_rows_fetched);
+    }
+}
+
+
+TEST(PatternTaxidBatch, StandaloneDemandIncludesTheDiscardedAttempt) {
+    using namespace graph::traversal;
+    using namespace annot::matrix;
+    auto index = build<annot::RowDiffColumnAnnotator>(5,
+        {{"bin", "A.1", std::string(20000, 'A')}}, true);
+    std::istringstream mapping("METAGRAPH_RECORD_TAXIDS_V1\n0\t0\tA.1\t100\n");
+    ASSERT_TRUE(index.cth->load_taxids(mapping));
+    LabelOracle oracle(*index.anno, index.cth.get(), true);
+    const auto row = AnnotatedDBG::graph_to_anno_index(oracle.keys_of_sequence("AAAAA")[0]);
+    DecodeBudget budget(1 << 20);
+    std::vector<BinaryMatrix::SetBitPositions> result;
+    std::vector<RowCost> costs;
+    std::vector<uint64_t> held;
+    ASSERT_EQ(DecodeStatus::OK, oracle.get_rows({row}, budget, &result, &costs, &held));
+    ASSERT_EQ(1u, result.size());
+    EXPECT_EQ((BinaryMatrix::SetBitPositions{0}), result[0]);
+    EXPECT_GT(budget.peak(), 64u << 10);
+    EXPECT_LE(budget.peak(), costs[0].demand);
+    EXPECT_LT(costs[0].dependency_entries, 1000u);
+}
+
 } // namespace
