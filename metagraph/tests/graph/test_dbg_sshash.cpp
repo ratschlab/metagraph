@@ -1,6 +1,8 @@
 #include <fstream>
+#include <random>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <sys/resource.h>
 
@@ -117,5 +119,39 @@ TEST_F(DBGSSHashInput, AcceptsOneSequencePerLine) {
     DBGSSHash graph(test_input, 21, DeBruijnGraph::BASIC);
     EXPECT_EQ(10u + 2u, graph.num_nodes());
 }
+
+#if ! _PROTEIN_GRAPH
+size_t minimizer_length(const DBGSSHash &graph) {
+    return std::visit([](const auto &dict) -> size_t { return dict.m(); }, graph.data());
+}
+
+// random records of the given lengths
+void write_random_input(const std::vector<size_t> &lengths) {
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<int> base(0, 3);
+    std::string input;
+    for (size_t i = 0; i < lengths.size(); ++i) {
+        input += ">" + std::to_string(i) + "\n";
+        for (size_t j = 0; j < lengths[i]; ++j) {
+            input += "ACGT"[base(gen)];
+        }
+        input += "\n";
+    }
+    write_input(input);
+}
+
+TEST_F(DBGSSHashInput, ChoosesMinimizerLengthFromInputSize) {
+    // m = ceil(log_4(num_chars)) + 1, made odd, which steps from 7 to 9 at 4^6 = 4096
+    write_random_input({ 2000, 2095 });
+    EXPECT_EQ(7u, minimizer_length(DBGSSHash(test_input, 21, DeBruijnGraph::BASIC)));
+
+    write_random_input({ 2000, 2097 });
+    EXPECT_EQ(9u, minimizer_length(DBGSSHash(test_input, 21, DeBruijnGraph::BASIC)));
+
+    // a given number of characters overrides the count: ceil(log_4(1e9)) + 1 = 16, made odd
+    EXPECT_EQ(17u, minimizer_length(DBGSSHash(test_input, 21, DeBruijnGraph::BASIC,
+                                              1'000'000'000)));
+}
+#endif
 
 } // namespace
