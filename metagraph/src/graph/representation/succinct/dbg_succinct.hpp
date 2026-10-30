@@ -106,6 +106,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual size_t outdegree(node_index) const override final;
     virtual bool has_single_outgoing(node_index) const override final;
+    virtual node_index trivial_outgoing(node_index node) const override final;
     virtual bool has_multiple_outgoing(node_index) const override final;
     virtual size_t indegree(node_index) const override final;
     virtual bool has_no_incoming(node_index) const override final;

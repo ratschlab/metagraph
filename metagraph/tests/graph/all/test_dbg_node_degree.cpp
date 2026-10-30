@@ -351,7 +351,8 @@ TYPED_TEST(DeBruijnGraphTest, trivial_outgoing_is_unique_successor) {
         });
     }
 
-    if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>
+                    || std::is_base_of_v<DBGSuccinct, TypeParam>) {
         EXPECT_LT(0u, num_trivial);
     }
 }
