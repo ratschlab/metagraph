@@ -684,7 +684,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         for (const auto &[h, count] : counts) {
             const auto &[col, header] = h;
             auto &coords = coords_map[h];
-            result.emplace_back(coord_to_header_->get_headers(col)[header],
+            result.emplace_back(coord_to_header_->get_header(col, header),
                                 count, std::move(coords),
                                 coord_to_header_->num_kmers_in_sequence(col, header));
         }

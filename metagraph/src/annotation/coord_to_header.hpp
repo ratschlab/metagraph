@@ -93,13 +93,15 @@ class CoordToHeader {
     void map_to_local_coords(std::vector<RowTuples> *rows_tuples) const;
 
     uint64_t num_columns() const { return coord_offsets_.size(); }
-    size_t num_sequences(Column column) const { return headers_[column].size(); }
+    size_t num_sequences(Column column) const {
+        return header_refs_.empty() ? (*headers_)[column].size() : header_refs_[column].size();
+    }
     // Number of k-mers in a sequence.
     uint64_t num_kmers_in_sequence(Column col, size_t seq_id) const;
     // Total number of k-mers / coordinates in a column (across all sequences).
     uint64_t num_kmers(Column column) const { return coord_offsets_[column].size(); }
-    // FASTA headers of the sequences in a column, indexed by seq_id.
-    const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
+    // FASTA header of a record. Taxonomy views share the original immutable strings.
+    const std::string& get_header(Column column, size_t seq_id) const;
 
     /**
      * The (column, seq_id) of a FASTA header: its first occurrence in column order (a
@@ -148,13 +150,20 @@ class CoordToHeader {
     static void find_duplicate_headers(const std::vector<std::string> &headers,
                                        const std::function<bool(size_t, size_t)> &callback);
 
+    void call_duplicate_headers(Column column,
+                                const std::function<bool(size_t, size_t)> &callback) const;
+
     static constexpr auto kExtension = ".seqs";
 
   private:
     struct HeaderIndex;
     void build_header_index_locked() const;
 
-    std::vector<std::vector<std::string>> headers_;
+    using Headers = std::vector<std::vector<std::string>>;
+    // Replaced, never mutated, on load: copies and taxonomy views retain their backing.
+    std::shared_ptr<const Headers> headers_;
+    std::vector<std::vector<const std::string*>> header_refs_;
+    void build_offsets(std::vector<std::vector<uint64_t>> &&num_kmers);
     std::vector<bit_vector_sd> coord_offsets_;
     std::vector<std::vector<uint32_t>> taxids_;
     std::vector<std::vector<uint32_t>> taxonomy_seq_ids_;

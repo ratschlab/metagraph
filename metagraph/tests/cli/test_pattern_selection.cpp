@@ -2556,9 +2556,10 @@ std::pair<Index, Index> taxonomy_twins(DeBruijnGraph::Mode mode = DeBruijnGraph:
     std::ostringstream text;
     text << "METAGRAPH_RECORD_TAXIDS_V1\n";
     for (size_t col = 0; col < actual.cth->num_columns(); ++col) {
-        const auto &headers = actual.cth->get_headers(col);
-        for (size_t seq = 0; seq < headers.size(); ++seq)
-            text << col << '\t' << seq << '\t' << headers[seq] << '\t' << taxa.at(headers[seq]) << '\n';
+        for (size_t seq = 0; seq < actual.cth->num_sequences(col); ++seq) {
+            const auto &header = actual.cth->get_header(col, seq);
+            text << col << '\t' << seq << '\t' << header << '\t' << taxa.at(header) << '\n';
+        }
     }
     std::istringstream in(text.str());
     if (!actual.cth->load_taxids(in))

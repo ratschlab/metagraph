@@ -395,10 +395,10 @@ void print_coord_to_header_stats(const std::string &fname) {
     if (get_verbose()) {
         std::cout << "=================== PER-COLUMN STATS ===================" << '\n';
         auto first_headers = [&](size_t col, size_t num_first = 3) {
-            const auto &labels = coord_to_header.get_headers(col);
-            auto first_labels = std::vector<std::string>(labels.begin(),
-                                                         std::min(labels.begin() + num_first, labels.end()));
-            if (first_labels.size() < labels.size())
+            std::vector<std::string> first_labels;
+            for (size_t i = 0; i < std::min(num_first, coord_to_header.num_sequences(col)); ++i)
+                first_labels.push_back(coord_to_header.get_header(col, i));
+            if (first_labels.size() < coord_to_header.num_sequences(col))
                 first_labels.push_back("...");
             return fmt::format(" ({})", fmt::join(first_labels, "\t"));
         };
@@ -449,18 +449,17 @@ Json::Value index_names_report(const std::vector<std::string> &labels,
     uint64_t duplicates = 0;
     if (mapping) {
         for (uint64_t col = 0; col < mapping->num_columns(); ++col) {
-            const auto &headers = mapping->get_headers(col);
-            num_headers += headers.size();
-            for (size_t s = 0; s < headers.size(); ++s) {
-                if (!utils::valid_utf8(headers[s])) {
+            num_headers += mapping->num_sequences(col);
+            for (size_t s = 0; s < mapping->num_sequences(col); ++s) {
+                if (!utils::valid_utf8(mapping->get_header(col, s))) {
                     ++headers_invalid;
-                    note("header", "invalid_utf8", col, s, headers[s]);
+                    note("header", "invalid_utf8", col, s, mapping->get_header(col, s));
                 }
             }
-            annot::CoordToHeader::find_duplicate_headers(headers,
+            mapping->call_duplicate_headers(col,
                 [&](size_t first_record, size_t repeat) {
                     ++duplicates;
-                    note("header", "duplicate", col, repeat, headers[repeat], first_record);
+                    note("header", "duplicate", col, repeat, mapping->get_header(col, repeat), first_record);
                     return true;
                 }
             );
@@ -538,7 +537,8 @@ int print_stats(Config *config) {
         if (!mapping.load(files.front()))
             return 1;
         for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
-            for (const auto &header : mapping.get_headers(column)) {
+            for (size_t sequence = 0; sequence < mapping.num_sequences(column); ++sequence) {
+                const auto &header = mapping.get_header(column, sequence);
                 if (!utils::valid_utf8(header) || header.find_first_of("\t\r\n") != std::string::npos) {
                     logger->error("Sequence header contains invalid UTF-8 or a TSV delimiter");
                     return 1;
@@ -547,9 +547,8 @@ int print_stats(Config *config) {
         }
         std::cout << "METAGRAPH_SEQUENCE_HEADERS_V1\n";
         for (uint64_t column = 0; column < mapping.num_columns(); ++column) {
-            const auto &headers = mapping.get_headers(column);
-            for (size_t sequence = 0; sequence < headers.size(); ++sequence)
-                std::cout << column << '\t' << sequence << '\t' << headers[sequence] << '\n';
+            for (size_t sequence = 0; sequence < mapping.num_sequences(column); ++sequence)
+                std::cout << column << '\t' << sequence << '\t' << mapping.get_header(column, sequence) << '\n';
         }
         std::cout.flush();
         return std::cout.good() ? 0 : 1;

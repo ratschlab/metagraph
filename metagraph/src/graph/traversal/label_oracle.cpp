@@ -250,7 +250,7 @@ std::optional<LabelRef> LabelOracle::find_header(const std::string &name) const 
 
 const std::string& LabelOracle::header_name(Column column, uint64_t seq_id) const {
     assert(coord_to_header_);
-    return coord_to_header_->get_headers(column).at(seq_id);
+    return coord_to_header_->get_header(column, seq_id);
 }
 
 std::pair<uint64_t, Coord> LabelOracle::map_coord(Column column, Coord coord) const {

@@ -112,7 +112,7 @@ std::string Alignment::format_coords(const annot::CoordToHeader &cth, size_t k) 
         const auto &[col, seq_id] = key;
         uint64_t nt_length = cth.num_kmers_in_sequence(col, seq_id) + k - 1;
         decoded_labels.emplace_back(fmt::format("{}/{}",
-                                                cth.get_headers(col)[seq_id],
+                                                cth.get_header(col, seq_id),
                                                 nt_length));
         for (auto [start, end] : ranges) {
             decoded_labels.back() += fmt::format(":{}-{}", start + 1, end + 1);
@@ -962,7 +962,7 @@ Json::Value Alignment::to_json(size_t node_size,
             for (const auto &[key, ranges] : seq_ranges) {
                 const auto &[col, seq_id] = key;
                 Json::Value entry;
-                entry[LABEL_SAMPLE_FIELD] = cth->get_headers(col)[seq_id];
+                entry[LABEL_SAMPLE_FIELD] = cth->get_header(col, seq_id);
                 entry[NT_LENGTH_FIELD] = static_cast<Json::Int64>(
                         cth->num_kmers_in_sequence(col, seq_id) + node_size - 1);
                 std::vector<std::string> range_strs;
