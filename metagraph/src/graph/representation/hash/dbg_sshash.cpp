@@ -22,7 +22,9 @@
 #include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/unix_tools.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "seq_io/sequence_io.hpp"
 
 
 namespace mtg {
@@ -175,6 +177,23 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
                            has_duplicates.load());
 }
 
+// Total length of the sequences in a FASTA file
+static uint64_t count_input_chars(const std::string& input_filename) {
+    using namespace seq_io;
+
+    compFile input = compFile::open_read(input_filename.c_str(), 1 << 20);
+    if (!input.good())
+        throw std::runtime_error("Cannot read SSHash input " + input_filename);
+
+    std::unique_ptr<kseq_t, decltype(&kseq_destroy)> read_stream(kseq_init(input),
+                                                                 kseq_destroy);
+    uint64_t num_chars = 0;
+    while (kseq_read(read_stream.get()) >= 0) {
+        num_chars += read_stream->seq.l;
+    }
+    return num_chars;
+}
+
 DBGSSHash::DBGSSHash(const std::string& input_filename,
                      size_t k,
                      Mode mode,
@@ -190,9 +209,18 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     sshash::build_configuration build_config;
     build_config.k = k;
 
+    // the minimizer length depends on the input size, so count it if not given
+    bool num_chars_counted = !num_chars;
+    if (num_chars_counted) {
+        Timer timer;
+        num_chars = count_input_chars(input_filename);
+        common::logger->trace("Counted {} characters in {} in {} sec",
+                              num_chars, input_filename, timer.elapsed());
+    }
+
     // use a value of m recommended here:
     // https://twitter.com/giulio_pibiri/status/1803417277213114501
-    // otherwise, use the next odd value greater than or equal to floor(k / 2)
+    // for an empty input, use the next odd value greater than or equal to floor(k / 2)
     build_config.m
             = std::min({ (num_chars > 0
                                   ? uint64_t(ceil(log(static_cast<double>(num_chars))
@@ -207,6 +235,9 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
                                  dict_),
                          uint64_t(k - 2) })
             | 1;
+    common::logger->info("SSHash minimizer length m = {} for {} input characters ({})",
+                         build_config.m, num_chars,
+                         num_chars_counted ? "counted" : "given by --num-chars");
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();

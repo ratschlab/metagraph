@@ -1,4 +1,5 @@
 #include <fstream>
+#include <random>
 #include <stdexcept>
 #include <string>
 
@@ -117,5 +118,33 @@ TEST_F(DBGSSHashInput, AcceptsOneSequencePerLine) {
     DBGSSHash graph(test_input, 21, DeBruijnGraph::BASIC);
     EXPECT_EQ(10u + 2u, graph.num_nodes());
 }
+
+#if ! _PROTEIN_GRAPH
+size_t minimizer_length(const DBGSSHash &graph) {
+    return std::visit([](const auto &dict) -> size_t { return dict.m(); }, graph.data());
+}
+
+TEST_F(DBGSSHashInput, ChoosesMinimizerLengthFromInputSize) {
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<int> base(0, 3);
+    std::string input;
+    for (char name : std::string("abc")) {
+        input += std::string(">") + name + "\n";
+        for (size_t i = 0; i < 1000; ++i) {
+            input += "ACGT"[base(gen)];
+        }
+        input += "\n";
+    }
+    write_input(input);
+
+    // ceil(log_4(3000)) + 1 = 7, already odd
+    DBGSSHash counted(test_input, 21, DeBruijnGraph::BASIC);
+    EXPECT_EQ(7u, minimizer_length(counted));
+
+    // --num-chars overrides the count: ceil(log_4(1e9)) + 1 = 16, made odd
+    DBGSSHash given(test_input, 21, DeBruijnGraph::BASIC, 1'000'000'000);
+    EXPECT_EQ(17u, minimizer_length(given));
+}
+#endif
 
 } // namespace
