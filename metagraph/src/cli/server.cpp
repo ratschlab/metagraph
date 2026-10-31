@@ -460,6 +460,15 @@ Json::Value parse_traversal_body(const std::string &content) {
     return parse_strict_json<RefuseRequest>(content, "Bad json received: ");
 }
 
+// The deadline block of a multi-graph server's /traverse envelope (SPEC-multigraph-envelope.md
+// section 4): the request's not_after_ms, as its attempt holds it. The completion deadline
+// (finish_by_ms, E20), the effective envelope deadline and the work cutoff (E4) are not read
+// by /traverse yet and stated null: this is the one place that fills them in once they are
+Json::Value traverse_envelope_deadline(const Attempt &attempt) {
+    return deadline_json(attempt.ids().not_after_ms, /* finish_by_ms */ std::nullopt,
+                         /* effective_deadline_at */ std::nullopt, /* cutoff_at */ std::nullopt);
+}
+
 } // namespace
 
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
@@ -632,6 +641,8 @@ int run_server(Config *config) {
     // the multi-graph server's per-pair summary of GET /capabilities and whether its pairs'
     // columns are disjoint, computed once its indexes are loaded
     Json::Value graph_summary;
+    // and the identity of the indexes it serves together (GET /capabilities' composite_fp)
+    Json::Value composite_fp;
 
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
@@ -807,6 +818,16 @@ int run_server(Config *config) {
             resident_pairs[index.get()] = pair;
         }
         graph_summary = multi_graph_summary(indexes, graphs_cache, pair_identities);
+        // over each (graph, annotation) pair once, as loaded: a pair listed under several
+        // names is one index
+        std::vector<std::string> index_fps;
+        for (const auto &[pair, index] : graphs_cache) {
+            index_fps.push_back(pair_identities.at(pair).fp);
+        }
+        composite_fp = composite_fp_json(std::move(index_fps));
+        logger->info("[Server] Composite fingerprint of the {} pairs: {}", graphs_cache.size(),
+                     composite_fp.isNull() ? std::string("null (a pair has no manifest)")
+                                           : composite_fp.asString());
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
         // Dynamic per-request loads (in_ram path) should always be in RAM.
@@ -1793,6 +1814,29 @@ int run_server(Config *config) {
         }, /* compact */ true, &writing.control);
     };
 
+    // A multi-graph server's /traverse answer (SPEC-multigraph-envelope.md section 1.1): the
+    // envelope with one entry, the |pair|'s single-graph answer |out| tagged with the pair and
+    // |identity|'s index_fp (the identity its capabilities state), without its usage: the usage
+    // is the attempt's, and the attempt is the request's, so the envelope states it at its top
+    // level (for a ledger-managed request only, as a single-graph answer states it), the
+    // attempt_id as its request_id (null without one) and the attempt registry's
+    // server_instance. Only an answer of HTTP 200 is wrapped: every other status of the route
+    // (409, 503 with usage at the bound, 400) stays HTTP-level and unwrapped, as the service's
+    // attempt ledger reads it
+    auto traverse_envelope = [&](const SelectedPair &pair, const IndexIdentity &identity,
+                                 const Attempt &attempt, Json::Value out) {
+        EnvelopeContext context;
+        out.removeMember("usage", &context.usage);
+        if (attempt.managed())
+            context.request_id = attempt.ids().attempt_id;
+        context.server_instance = attempts.server_instance();
+        context.deadline = traverse_envelope_deadline(attempt);
+        std::vector<Json::Value> entries;
+        entries.push_back(envelope_entry_answered(pair, identity.fp, std::move(out)));
+        return post_envelope("/traverse", { pair.name }, std::move(entries), context,
+                             attempt.elapsed_ms());
+    };
+
     // Extend frozen seeds along consistent annotation labels.
     server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                  shared_ptr<HttpServer::Request> request) {
@@ -1842,15 +1886,18 @@ int run_server(Config *config) {
         // known to the attempt's delivery reserve); the response is assembled from them, byte
         // for byte the text of the whole tree. The texts are moved into the assembly, which
         // frees each once copied: nothing reads them after it, and kept here they would live
-        // until the handler returned, through the compression and the transport's copy
+        // until the handler returned, through the compression and the transport's copy. On a
+        // multi-graph server they are the results of the envelope's one entry
         ResultTexts texts;
-        control.write = [&texts, attempt](const Json::Value &envelope,
-                                          const std::function<void()> &check) {
+        const bool enveloped = !config->fnames.empty();
+        control.write = [&texts, attempt, enveloped](const Json::Value &envelope,
+                                                     const std::function<void()> &check) {
             // the longest stretch between two checks (deadline_check)
             double gap = 0;
-            std::string text = texts.active
-                ? assemble_traverse_response(envelope, std::move(texts.texts), check, &gap)
-                : json_text(envelope, true, check, &gap);
+            std::string text = !texts.active ? json_text(envelope, true, check, &gap)
+                : enveloped
+                    ? assemble_traverse_envelope(envelope, std::move(texts.texts), check, &gap)
+                    : assemble_traverse_response(envelope, std::move(texts.texts), check, &gap);
             attempt->note_delivery_gap_ms(gap);
             return text;
         };
@@ -1959,21 +2006,22 @@ int run_server(Config *config) {
                 const std::optional<bool> in_ram = in_ram_field(json);
                 std::unique_ptr<IndexLease> lease;
                 IndexIdentity identity = single_identity;
+                // the pair a multi-graph server's envelope is answered for
+                std::optional<SelectedPair> selected;
                 if (multi) {
                     // exactly one pair (SPEC-multigraph-envelope.md section 6): `graph` or
                     // `graphs` resolving to one, or one object of `pairs`; several are refused
                     // with the candidates (traverse_single_pair)
-                    const SelectedPair selected
-                            = select_pairs(SelectionRoute::TRAVERSE, json, indexes,
-                                           config->max_graphs_without_selection).front();
-                    const GraphPair &pair = selected.pair;
+                    selected = select_pairs(SelectionRoute::TRAVERSE, json, indexes,
+                                            config->max_graphs_without_selection).front();
+                    const GraphPair &pair = selected->pair;
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
                         parse_traverse_request(json);
                     // GET /requests/{attempt_id} names the pair the attempt ran on
                     if (attempt->managed()) {
                         requests.note_traverse_pair(attempt->ids().attempt_id,
-                                                    pair_ref_json(selected));
+                                                    pair_ref_json(*selected));
                     }
                     // the wait for the memory is abandoned when the client is gone or the server
                     // stops, and not entered or given up once finish_by_ms (less the clock skew
@@ -2009,8 +2057,12 @@ int run_server(Config *config) {
                 limits.labels_not_in_graph_dropped = multi;
                 if (in_ram)
                     limits.load_ms = lease ? lease->load_ms() : 0.0;
-                return process_traverse_request(json, index, config->index_release, limits,
-                                                &identity, attempt.get(), &texts);
+                Json::Value out = process_traverse_request(json, index, config->index_release,
+                                                           limits, &identity, attempt.get(),
+                                                           &texts);
+                if (!selected)
+                    return out;
+                return traverse_envelope(*selected, identity, *attempt, std::move(out));
             } catch (const LoadAbandoned &e) {
                 throw ClientGone(e.what());
             } catch (const LoadExpired &e) {
@@ -2206,27 +2258,6 @@ int run_server(Config *config) {
         return caps;
     };
 
-    // The one pair a GET capabilities probe of a multi-graph server describes: ?graph=<name>
-    // [&graph_path=<path>][&annotation_path=<path>] naming exactly one pair of the name (SPEC-
-    // multigraph-envelope.md section 6, its refusals coded). A probe without ?graph= selects
-    // every pair, which the envelope over them answers (section 1); until a route answers it,
-    // such a probe is refused as before, in the same words (its parameters checked first, the
-    // names cap not: the cap bounds that envelope, not this refusal)
-    auto probe_pair = [&](SelectionRoute route, const SimpleWeb::CaseInsensitiveMultimap &query,
-                          const std::string &path) {
-        const bool named = std::any_of(query.begin(), query.end(),
-                                       [](const auto &p) { return p.first == "graph"; });
-        std::vector<SelectedPair> selected = select_pairs_from_query(
-                route, query, indexes,
-                named ? config->max_graphs_without_selection
-                      : std::numeric_limits<size_t>::max());
-        if (!named) {
-            throw InvalidRequest("Bad request: in multi-graph mode GET " + path + " needs "
-                                 "?graph=<name> (and graph_path=<path> when the name spans "
-                                 "several graphs); GET /capabilities lists the graphs");
-        }
-        return std::move(selected.front());
-    };
     // a single-graph server refuses the parameters that would select a pair (they name what it
     // does not have); any other is ignored, as it always was (annotation_path too: a single-graph
     // server answers as before SPEC-multigraph-envelope.md)
@@ -2250,18 +2281,22 @@ int run_server(Config *config) {
                 refuse_probe_selection(query);
                 return probe_json(*anno_graph.get(), single_identity);
             }
-            // Multi-graph mode: the probe of one (graph, annotation) pair; it states which pair
-            // it describes by graph and graph_path, the tags of the frozen probe (pattern
-            // contract version 1); a pair of a shared graph is named by the request's
-            // annotation_path, which the envelope's entries state (SPEC-multigraph-envelope.md
-            // section 1)
-            const SelectedPair pair = probe_pair(SelectionRoute::TRAVERSE, query,
-                                                 "/traverse/capabilities");
-            const AnnotatedDBG &index = *graphs_cache.at(pair.pair);
-            Json::Value caps = probe_json(index, identity_of(index));
-            caps["graph"] = pair.name;
-            caps["graph_path"] = pair.pair.first;
-            return caps;
+            // Multi-graph mode: the envelope (SPEC-multigraph-envelope.md section 1) of the
+            // pairs the parameters select, each entry the probe of its (graph, annotation) pair
+            // tagged with the pair and its index_fp: one pair, selected by the request fields'
+            // rules (?graph=<name>, and graph_path=<path> when the name spans several graphs),
+            // or without parameters every pair (up to the names cap)
+            std::vector<Json::Value> entries;
+            for (const SelectedPair &selected : select_pairs_from_query(
+                     SelectionRoute::TRAVERSE, query, indexes,
+                     config->max_graphs_without_selection)) {
+                const AnnotatedDBG &index = *graphs_cache.at(selected.pair);
+                const IndexIdentity identity = identity_of_pair(selected.pair, index);
+                entries.push_back(envelope_entry_answered(selected, identity.fp,
+                                                          probe_json(index, identity)));
+            }
+            return get_envelope("/traverse/capabilities", std::move(entries),
+                                attempts.server_instance());
         }, /* compact */ true, &traversal_io);
     };
 
@@ -2269,21 +2304,26 @@ int run_server(Config *config) {
     // loads (available null, the graph fields null), so that a client learns the contract and
     // the caps before the index is ready. The parameters that would select a graph are refused
     // on a single-graph server, as on /traverse/capabilities; any other is ignored. A
-    // multi-graph server answers the block of one pair, selected as /traverse/capabilities
-    // selects it (?graph=<name>[&graph_path=<path>]), naming it (graph, graph_path)
+    // multi-graph server answers the envelope of the pairs selected as /traverse/capabilities
+    // selects them (?graph=<name>[&graph_path=<path>], or every pair without parameters), each
+    // entry the pair's block tagged with the pair and its index_fp
     server.resource["^/pattern/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                            shared_ptr<HttpServer::Request> request) {
         process_request(response, request, num_requests++, [&](const std::string&) {
             const bool multi = !config->fnames.empty();
             const auto query = request->parse_query_string();
             if (multi) {
-                const SelectedPair pair = probe_pair(SelectionRoute::PATTERN, query,
-                                                     "/pattern/capabilities");
-                Json::Value block = pattern_capabilities_json(
-                        graphs_cache.at(pair.pair).get(), pattern_limits(*config), false);
-                block["graph"] = pair.name;
-                block["graph_path"] = pair.pair.first;
-                return block;
+                std::vector<Json::Value> entries;
+                for (const SelectedPair &selected : select_pairs_from_query(
+                         SelectionRoute::PATTERN, query, indexes,
+                         config->max_graphs_without_selection)) {
+                    entries.push_back(envelope_entry_answered(
+                            selected, fp_of_pair(selected.pair),
+                            pattern_capabilities_json(graphs_cache.at(selected.pair).get(),
+                                                      pattern_limits(*config), false)));
+                }
+                return get_envelope("/pattern/capabilities", std::move(entries),
+                                    attempts.server_instance());
             }
             refuse_probe_selection(query);
             const bool ready = anno_graph.wait_for(0s) == std::future_status::ready;
@@ -2383,6 +2423,16 @@ int run_server(Config *config) {
             // client can check it before a request is cut off without a response
             c["max_request_body_mb"] = max_request_body_mb_json(config->max_request_body_mb);
             c["release"] = config->index_release;
+            if (multi) {
+                // the identity of the indexes served together (SPEC-multigraph-envelope.md
+                // section 8), the rule it is computed by, and what the multi-graph routes do
+                // in this release: the routes answering in the envelope, the selectors, the
+                // deadlines and the request registry
+                c["composite_fp"] = composite_fp;
+                c["composite_rule"] = kCompositeRule;
+                c["multigraph"] = multigraph_capabilities_json();
+                routes["requests"] = kRequestsRoute;
+            }
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;
             c["server_instance"] = attempts.server_instance();

@@ -599,13 +599,16 @@ select_pairs_from_parameters(SelectionRoute route,
             throw InvalidRequest("Bad request: " + get + ": graph_path and annotation_path pick "
                                  "a pair of the name ?graph= names: add ?graph=<name>");
         }
-        // every pair: the envelope over them answers the probe (section 1)
+        // A probe without parameters describes every pair (section 1), as a POST request
+        // without a selection runs on every pair: up to the names cap, and refused beyond it
+        // as every probe without ?graph= was refused before, one clause added (a service tells
+        // a multi-graph host by that refusal's words "needs ?graph=<name>")
         if (indexes.size() > max_names_without_selection) {
-            throw std::invalid_argument(
-                    "Bad request: " + get + " needs ?graph=<name> on this server, which hosts "
-                    + std::to_string(indexes.size()) + " graph names (more than "
-                    + std::to_string(max_names_without_selection)
-                    + "; GET /capabilities lists them)");
+            throw InvalidRequest(fmt::format(
+                    "Bad request: in multi-graph mode {} needs ?graph=<name> (and "
+                    "graph_path=<path> when the name spans several graphs) on a list of more "
+                    "than {} graph names ({} here); GET /capabilities lists the graphs",
+                    get, max_names_without_selection, indexes.size()));
         }
         return pairs_of(sorted_names(indexes), indexes);
     }

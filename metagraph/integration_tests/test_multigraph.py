@@ -18,7 +18,9 @@ together (a name spanning two graphs). What such a server serves, as /search doe
   - `in_ram` on /pattern, /traverse and /resolve loads the pair into RAM for the request (a
     server on mmap, the pair within --mem-cap-gb), the budgets after the load, timing.load_ms;
   - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint;
-  - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block.
+  - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block, in
+    the envelope of one entry (SPEC-multigraph-envelope.md section 1), and every pair's without
+    ?graph=; a /traverse answers in the envelope of its one pair.
 
 The answers are checked against oracles of their own: the CLI (`metagraph pattern`) on the same
 files, the k-mers of the chunk's records (the contexts of a pattern, a seed's k-mers present),
@@ -101,6 +103,19 @@ def revcomp(s):
 
 def pair_names(capabilities):
     return [p['graph'] for p in capabilities['graph_summary']['pairs']]
+
+
+def single(out, route=None):
+    """The one entry of a multi-graph server's envelope (SPEC-multigraph-envelope.md section
+    1): an answered pair, the single-graph answer with its tags; on /traverse the attempt's
+    usage is the envelope's, set beside it"""
+    assert out['envelope_version'] == 1 and len(out['answers']) == 1, out
+    assert route is None or out['route'] == route, out['route']
+    entry = dict(out['answers'][0])
+    assert entry['outcome'] == 'answered', entry
+    if 'usage' in out:
+        entry['usage'] = out['usage']
+    return entry
 
 
 def untimed(value):
@@ -288,6 +303,11 @@ class TestMultiGraphServer(TestingBase):
                          caps['routes']['pattern_capabilities'])
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': True,
                           'mem_cap_gb': 1, 'budgets_start': 'after_load'}, caps['in_ram'])
+        # no pair has a manifest: no composite fingerprint (SPEC-multigraph-envelope.md
+        # section 8), the multigraph block stated
+        self.assertIsNone(caps['composite_fp'])
+        self.assertEqual(1, caps['multigraph']['envelope_version'])
+        self.assertEqual('GET /requests/{request_id}', caps['routes']['requests'])
         # the threshold of the selection rule (the default of --max-graphs-without-selection)
         self.assertEqual(10, caps['max_graphs_without_selection'])
         # the server-wide block: the contract and the caps, no graph
@@ -315,13 +335,35 @@ class TestMultiGraphServer(TestingBase):
                                   'has_coordinates': masked, 'has_coord_to_header': masked,
                                   'supports_trace': masked}, p['traversal'])
                 # what the pair's own documents say
-                block = self.server.get(f'pattern/capabilities?graph={chunk}').json()
+                block = single(self.server.get(f'pattern/capabilities?graph={chunk}').json())
                 for key in ('k', 'graph_mode', 'available', 'mask', 'counting'):
                     self.assertEqual(block[key], p[key], key)
-                probe = self.server.get(f'traverse/capabilities?graph={chunk}').json()
+                probe = single(self.server.get(f'traverse/capabilities?graph={chunk}').json())
                 for key in ('regime', 'num_labels', 'has_coordinates', 'has_coord_to_header',
                             'supports_trace'):
                     self.assertEqual(probe[key], p['traversal'][key], key)
+
+    def test_capabilities_probes_without_a_graph(self):
+        """GET /traverse/capabilities and GET /pattern/capabilities without ?graph= answer the
+        envelope over every pair, in graph_summary's order, each entry the block the probe of
+        that pair alone answers (enterics' pairs are ecoli's and kleb's under another name)"""
+        summary = self.server.get('capabilities').json()['graph_summary']['pairs']
+        for route in ('pattern/capabilities', 'traverse/capabilities'):
+            out = self.server.get(route).json()
+            self.assertEqual(('/' + route, ['ecoli', 'enterics', 'kleb', 'pseudo'],
+                              len(summary), 0),
+                             (out['route'], out['graphs'], out['answered'], out['refused']))
+            self.assertEqual([(p['graph'], p['graph_path'], p['annotation_path'], p['index_fp'])
+                              for p in summary],
+                             [(e['graph'], e['graph_path'], e['annotation_path'], e['index_fp'])
+                              for e in out['answers']])
+            for entry in out['answers']:
+                if entry['graph'] == 'enterics':
+                    continue
+                alone = single(self.server.get(f'{route}?graph={entry["graph"]}').json())
+                for key in ('k', 'graph_mode', 'available', 'mask', 'counting', 'regime',
+                            'num_labels', 'has_coordinates', 'index_meta_fp'):
+                    self.assertEqual(alone.get(key), entry.get(key), (route, key))
 
     def test_columns_shared_by_two_pairs(self):
         """A column of two pairs (a FASTA annotated on two graphs): columns_disjoint false, and
@@ -377,7 +419,7 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(available, caps['pattern']['available'])
                 self.assertEqual(None if available else 'representation_unsupported',
                                  caps['pattern']['unavailable_reason'])
-                block = server.get('pattern/capabilities?graph=hashed').json()
+                block = single(server.get('pattern/capabilities?graph=hashed').json())
                 self.assertEqual((False, 'representation_unsupported'),
                                  (block['available'], block['unavailable_reason']))
                 p = {'patterns': [{'dna': 'ACGTTGCAACGTTGCAAG'}], 'mode': 'count'}
@@ -409,18 +451,21 @@ class TestMultiGraphServer(TestingBase):
                          (enterics.json()['code'], enterics.json()['error']))
         self.assertEqual([self.pairs['ecoli'][0], self.pairs['kleb'][0]],
                          [c['graph_path'] for c in enterics.json()['candidates']])
-        kleb = self.server.get('pattern/capabilities?graph=kleb').json()
+        kleb = single(self.server.get('pattern/capabilities?graph=kleb').json(),
+                      '/pattern/capabilities')
         quoted = requests.utils.quote(self.pairs['kleb'][0], safe='')
-        picked = self.server.get(f'pattern/capabilities?graph=enterics&graph_path={quoted}').json()
+        picked = single(self.server.get(f'pattern/capabilities?graph=enterics&graph_path={quoted}')
+                        .json())
         self.assertEqual(('kleb', self.pairs['kleb'][0]), (kleb.pop('graph'), kleb.pop('graph_path')))
         self.assertEqual(('enterics', self.pairs['kleb'][0]),
                          (picked.pop('graph'), picked.pop('graph_path')))
         self.assertEqual(kleb, picked)
-        probe = self.server.get('traverse/capabilities?graph=kleb').json()
+        probe = single(self.server.get('traverse/capabilities?graph=kleb').json())
         # the pair's gate block (SPEC-pattern-search.md §23.2)
         self.assertEqual(gate_block(kleb), probe['pattern'])
         self.assertNotIn('predicate', probe['pattern'])
-        for query, words in (('', 'needs ?graph=<name>'), ('?graph=kleb&x=1', "unknown parameter 'x'"),
+        for query, words in (('?graph_path=x', 'needs ?graph=<name>'),
+                             ('?graph=kleb&x=1', "unknown parameter 'x'"),
                              ('?graph=nope', "unknown graph 'nope'")):
             ret = self.server.get('pattern/capabilities' + query)
             self.assertEqual(400, ret.status_code, query)
@@ -439,7 +484,7 @@ class TestMultiGraphServer(TestingBase):
             sampled = 'Dummy fraction sampled for the pattern search'
             unmasked = [c for c, _, masked, _ in CHUNKS if not masked]
             self.assertEqual(len(unmasked), server.text().count(sampled), server.text()[-3000:])
-            caps = server.get('pattern/capabilities?graph=kleb').json()
+            caps = single(server.get('pattern/capabilities?graph=kleb').json())
             reserve = caps['finalize_reserve_ms']
             kleb = self.records['kleb'][0]
             ret = server.post('pattern', {'patterns': [{'dna': kleb[3000:3020]}],
@@ -1135,8 +1180,8 @@ class TestMultiGraphServer(TestingBase):
         t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed}],
              'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
                           'output': {'detail': 'full'}}}
-        resident = self.post('traverse', t)
-        loaded = self.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-1'))
+        resident = single(self.post('traverse', t), '/traverse')
+        loaded = single(self.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-1')))
         self.assertEqual(untimed(resident['results']), untimed(loaded['results']))
         self.assertGreater(loaded['timing']['load_ms'], 0)
         self.assertNotIn('load_ms', resident['timing'])
@@ -1183,8 +1228,8 @@ class TestMultiGraphServer(TestingBase):
         t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed, 'labels': [header]}],
              'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
                           'output': {'detail': 'full'}}}
-        resident = self.post('traverse', t)
-        loaded = self.post('traverse', dict(t, in_ram=True))
+        resident = single(self.post('traverse', t))
+        loaded = single(self.post('traverse', dict(t, in_ram=True)))
         self.assertEqual([(header, 'header')],
                          [(l['name'], l['kind']) for l in resident['results'][0]['label_dict']])
         self.assertEqual(untimed(resident['results']), untimed(loaded['results']))
@@ -1251,7 +1296,7 @@ class TestMultiGraphServer(TestingBase):
                     self.assertEqual(200, ret.status_code, ret.text[:2000])
                     loaded = ret.json()
                     if route == 'traverse':
-                        resident, loaded = resident['results'], loaded['results']
+                        resident, loaded = single(resident)['results'], single(loaded)['results']
                     self.assertEqual(untimed(resident), untimed(loaded), route)
             log = server.text()
             self.assertEqual(6, log.count('loaded into RAM for it'), log[-3000:])
@@ -1393,7 +1438,7 @@ class TestMultiGraphServer(TestingBase):
             kmers = self.kmers(chunk)
             via_graphs = self.server.post('traverse', dict(request, graphs=[chunk]))
             self.assertEqual(200, via_graphs.status_code, via_graphs.text[:2000])
-            out = via_graphs.json()
+            out = single(via_graphs.json(), '/traverse')
             for result in out['results']:
                 seed = seeds[result['seed']['seed_id']]
                 present = sum(seed[i:i + K] in kmers for i in range(len(seed) - K + 1))
@@ -1407,17 +1452,18 @@ class TestMultiGraphServer(TestingBase):
                         self.assertEqual('not_in_graph', result['outcome']['walks'])
                         self.assertEqual({'kmers': len(seed) - K + 1, 'kmers_present': present},
                                          result['not_in_graph'])
-            # graph, the older spelling: the same bytes, the spelling not echoed (the request
-            # was a 400 on its first absent seed before round D)
+            # graph, the older spelling: the same answer, the spelling not echoed (the request
+            # was a 400 on its first absent seed before round D); the envelopes differ only in
+            # their time
             via_graph = self.server.post('traverse', dict(request, graph=chunk))
             self.assertEqual(200, via_graph.status_code, via_graph.text[:2000])
-            self.assertEqual(via_graphs.content, via_graph.content, chunk)
+            self.assertEqual(untimed(via_graphs.json()), untimed(via_graph.json()), chunk)
         # every case was met: walked, partly present, absent
         self.assertEqual({'walked', 'partly', 'absent'}, seen)
         # the seed of a chunk walks there as in a request that names the graph with graph
         one = dict(request, seeds=[{'seed_id': 'e', 'sequence': seeds['e']}])
-        self.assertEqual(self.post('traverse', dict(one, graphs=['ecoli']))['results'],
-                         self.post('traverse', dict(one, graph='ecoli'))['results'])
+        self.assertEqual(single(self.post('traverse', dict(one, graphs=['ecoli'])))['results'],
+                         single(self.post('traverse', dict(one, graph='ecoli')))['results'])
         # a name over two graphs: graphs selects as graph does (graph_path picks the graph); a
         # traverse runs on one pair, the name's are the candidates
         ret = self.server.post('traverse', dict(one, graphs=['enterics']))
@@ -1426,10 +1472,13 @@ class TestMultiGraphServer(TestingBase):
         self.assertIn("graph 'enterics' holds 2 pairs", ret.json()['error'])
         self.assertEqual([('enterics', self.pairs['ecoli'][0]), ('enterics', self.pairs['kleb'][0])],
                          [(c['graph'], c['graph_path']) for c in ret.json()['candidates']])
-        picked = self.post('traverse', dict(one, graphs=['enterics'],
-                                            graph_path=self.pairs['ecoli'][0]))
-        self.assertEqual(self.post('traverse', dict(one, graph='ecoli'))['results'],
+        picked = single(self.post('traverse', dict(one, graphs=['enterics'],
+                                                   graph_path=self.pairs['ecoli'][0])))
+        self.assertEqual(single(self.post('traverse', dict(one, graph='ecoli')))['results'],
                          picked['results'])
+        # the pair the name and graph_path select is the entry's
+        self.assertEqual(('enterics',) + self.pairs['ecoli'],
+                         (picked['graph'], picked['graph_path'], picked['annotation_path']))
         for payload, words, code in ((dict(one, graphs=['ecoli'], graph='ecoli'), 'not both',
                                       'selection_conflict'),
                                      (dict(one, graphs=['ecoli', 'kleb']), 'graphs name 2 pairs',

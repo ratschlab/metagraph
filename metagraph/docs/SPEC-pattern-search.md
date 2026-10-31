@@ -1279,7 +1279,8 @@ It costs no step.
   (`available: null`), `/capabilities` with `ready: false` and the same block; `/traverse/capabilities` answers
   503.
 - On a multi-graph server (§24): the block of one pair on `/pattern/capabilities?graph=NAME[&graph_path=PATH]`
-  (naming it: `graph`, `graph_path`) and its gate block (§23.2) on `/traverse/capabilities?graph=NAME`; on
+  (in the envelope of one entry since release 10, the entry tagged with its pair: SPEC-multigraph-envelope.md
+  section 1) and its gate block (§23.2) on `/traverse/capabilities?graph=NAME`; on
   `/capabilities` the block without a graph (its graph fields `null`, `available` whether a pair is served),
   beside `graph_summary`, every pair's `available`, `mask`, `counting`, `k`, `graph_mode` and identity. Builds
   before §24 answered `{pattern_contract_version: 1, available: false, unavailable_reason:
@@ -4348,10 +4349,12 @@ the other pairs.
 
 - `GET /pattern/capabilities?graph=NAME[&graph_path=PATH]`: the full block (§10.2) of the pair the parameters
   select, selected as `/traverse/capabilities` selects it (a name over several graphs needs `graph_path`; a graph
-  with several annotations under the name is refused), with the fields of `capabilities_pair`. Without `graph`: 400
-  `{"error": "Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and
-  graph_path=<path> when the name spans several graphs); GET /capabilities lists the graphs"}`; an unknown or
-  repeated parameter: 400.
+  with several annotations under the name is refused). Since release 10 in the envelope of
+  SPEC-multigraph-envelope.md section 1, one entry: the block tagged `graph`, `graph_path`, `annotation_path`,
+  `index_fp`, `outcome` (before: the block with the fields of `capabilities_pair`). Without any parameter the
+  envelope over every pair, up to `max_graphs_without_selection` names; above it, and for parameters without
+  `graph`: 400 `{"error": "Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and
+  graph_path=<path> when the name spans several graphs)..."}`; an unknown or repeated parameter: 400.
 - `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's gate block
   (§23.2) with `details`.
 - `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the

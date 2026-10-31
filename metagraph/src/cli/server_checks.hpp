@@ -177,6 +177,17 @@ std::string assemble_traverse_response(const Json::Value &envelope,
                                        const std::function<void()> &check = nullptr,
                                        double *max_gap_ms = nullptr);
 
+// The same text one level deeper, for a multi-graph server's /traverse, which answers in the
+// envelope (SPEC-multigraph-envelope.md section 1.1): |envelope|'s one entry (answers[0])
+// holds no "results", and the texts are its "results":[t0,t1,...] — byte for byte
+// json_text(envelope with answers[0].results, true), with the same checks, reservation and
+// freeing as assemble_traverse_response. Throws std::logic_error when |envelope| has not
+// exactly one entry, or that entry holds results already
+std::string assemble_traverse_envelope(const Json::Value &envelope,
+                                       std::vector<std::string> results,
+                                       const std::function<void()> &check = nullptr,
+                                       double *max_gap_ms = nullptr);
+
 // |text| compressed by zlib at |level| (1-9), in a gzip container when |gzip|, else a zlib
 // stream; |check| called before each 32 KiB block of output and before each piece of input,
 // its exception (after the stream is released) reaching the caller. zlib counts its input in

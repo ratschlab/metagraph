@@ -2248,6 +2248,89 @@ TEST(GraphletServer, AssemblyReservesTheResponseOnce) {
     }
 }
 
+// A multi-graph server's /traverse answers in the envelope (SPEC-multigraph-envelope.md section
+// 1.1): the seeds' texts are the results of its one entry, one level deeper, assembled without
+// parsing them again. The bytes are those of the whole tree, with and without checks, whatever
+// members the envelope and the entry have on either side of "answers" and "results" (the
+// envelope's usage and work after them, its deadline and graphs before; an entry with or
+// without timing), the response reserved once at its size; an envelope without exactly one
+// entry, or an entry holding results already, is refused
+TEST(GraphletServer, AssemblyInTheEnvelope) {
+    std::mt19937 rng(23);
+    std::vector<std::string> texts;
+    for (size_t i = 0; i < 4; ++i) {
+        Json::Value r;
+        r["seed"]["seed_id"] = "s" + std::to_string(i);
+        r["text"] = std::string(150'000 + rng() % 100'000, static_cast<char>('a' + i));
+        texts.push_back(json_text(r, true));
+    }
+    auto parse = [](const std::string &t) {
+        Json::Value v;
+        std::unique_ptr<Json::CharReader> reader(Json::CharReaderBuilder().newCharReader());
+        std::string errors;
+        EXPECT_TRUE(reader->parse(t.data(), t.data() + t.size(), &v, &errors)) << errors;
+        return v;
+    };
+    Json::Value entry(Json::objectValue);
+    entry["algorithm_version"] = "x";
+    entry["capabilities"]["index_fp"] = "fp";
+    entry["graph"] = "n";
+    entry["outcome"] = "answered";
+    entry["work"]["memory_bytes"] = 7;
+    Json::Value timed = entry;
+    timed["timing"]["elapsed_ms"] = 2.5;
+    Json::Value bare(Json::objectValue);
+    Json::Value full(Json::objectValue);
+    full["answered"] = 1;
+    full["deadline"]["not_after_ms"] = Json::Value();
+    full["envelope_version"] = 1;
+    full["graphs"].append("n");
+    full["usage"]["seeds"]["started"] = 4;
+    full["work"]["memory_bytes"] = 7;
+    Json::Value only(Json::objectValue);
+    for (const Json::Value *outer : { &full, &only }) {
+        for (const Json::Value *inner : { &entry, &timed, &bare }) {
+            Json::Value envelope = *outer;
+            envelope["answers"].append(*inner);
+            for (size_t n : { size_t(0), size_t(1), texts.size() }) {
+                const std::vector<std::string> some(texts.begin(), texts.begin() + n);
+                Json::Value whole = envelope;
+                whole["answers"][0]["results"] = Json::Value(Json::arrayValue);
+                for (const std::string &t : some) {
+                    whole["answers"][0]["results"].append(parse(t));
+                }
+                const std::string expected = json_text(whole, true);
+                for (bool checked : { false, true }) {
+                    std::vector<std::string> moved = some;
+                    size_t checks = 0;
+                    double gap = 0;
+                    const std::string response = checked
+                        ? assemble_traverse_envelope(envelope, std::move(moved),
+                                                     [&]() { checks++; }, &gap)
+                        : assemble_traverse_envelope(envelope, std::move(moved));
+                    EXPECT_EQ(expected, response) << n << " " << checked;
+                    if (n) {
+                        EXPECT_LE(response.capacity(), response.size() + 16) << n;
+                    }
+                    if (checked && n == texts.size()) {
+                        EXPECT_GE(checks, expected.size() / kDeliveryCheckBytes - 1);
+                        EXPECT_GT(gap, 0);
+                    }
+                }
+            }
+        }
+    }
+    Json::Value two = full;
+    two["answers"].append(entry);
+    two["answers"].append(entry);
+    EXPECT_THROW(assemble_traverse_envelope(two, { texts[0] }), std::logic_error);
+    EXPECT_THROW(assemble_traverse_envelope(full, { texts[0] }), std::logic_error);
+    Json::Value held = full;
+    held["answers"].append(entry);
+    held["answers"][0]["results"] = Json::Value(Json::arrayValue);
+    EXPECT_THROW(assemble_traverse_envelope(held, { texts[0] }), std::logic_error);
+}
+
 // zlib counts its input in 32 bits (uInt avail_in): a text of 4 GiB or more handed over whole
 // would be cut to its size modulo 2^32, and the server would answer 200 with a well-formed
 // stream of that prefix. compress_string hands the text over in pieces of at most 2^32 - 1

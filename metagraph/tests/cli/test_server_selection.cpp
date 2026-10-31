@@ -407,11 +407,17 @@ TEST(ServerSelection, CapabilitiesProbes) {
                                                                { "graph", "c" } }));
     // the names cap is not read by a probe of one pair
     EXPECT_EQ(Pairs({ kA }), probe(SelectionRoute::PATTERN, { { "graph", "a" } }, 1));
-    // without ?graph=: every pair (the envelope answers it), up to the names cap
+    // a probe without parameters describes every pair, in the envelope's order (a pair listed
+    // twice under a name once), up to the names cap and refused beyond it in the words of a
+    // probe without ?graph= (the cap and the count added)
     EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), probe(SelectionRoute::TRAVERSE, {}));
-    EXPECT_EQ("Bad request: GET /traverse/capabilities needs ?graph=<name> on this server, "
-              "which hosts 3 graph names (more than 2; GET /capabilities lists them)",
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), probe(SelectionRoute::PATTERN, {}, 3));
+    EXPECT_EQ("Bad request: in multi-graph mode GET /traverse/capabilities needs "
+              "?graph=<name> (and graph_path=<path> when the name spans several graphs) on a "
+              "list of more than 2 graph names (3 here); GET /capabilities lists the graphs",
               refusal_of([] { probe(SelectionRoute::TRAVERSE, {}, 2); }));
+    EXPECT_EQ("(none)", selection_code_of([] { probe(SelectionRoute::TRAVERSE, {}, 2); }));
+    // parameters without ?graph= are refused, however few names the server hosts
     EXPECT_EQ("Bad request: GET /pattern/capabilities: graph_path and annotation_path pick a "
               "pair of the name ?graph= names: add ?graph=<name>",
               refusal_of([] { probe(SelectionRoute::PATTERN, { { "graph_path", "a.dbg" } }); }));

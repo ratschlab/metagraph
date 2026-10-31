@@ -154,12 +154,13 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
  * The pairs a GET capabilities probe selects on a multi-graph server, from its query
  * parameters (section 6): ?graph=<name>[&graph_path=<path>][&annotation_path=<path>] names
  * exactly one pair of the name, as an object of `pairs` does (graph_unknown, pair_not_found,
- * pair_ambiguous, with the candidates); without ?graph=, every pair, when the server hosts at
- * most |max_names_without_selection| names (the names cap's 400 otherwise): the envelope over
- * every pair answers such a probe (section 1). |route| names the route in the messages:
- * TRAVERSE for GET /traverse/capabilities, PATTERN for GET /pattern/capabilities
- * (CAPABILITIES names both). An unknown or a repeated parameter, or graph_path or
- * annotation_path without ?graph=, is an InvalidRequest.
+ * pair_ambiguous, with the candidates); without parameters, every pair in the envelope's
+ * order, when the server hosts at most |max_names_without_selection| names: the envelope over
+ * every pair answers such a probe (section 1); beyond the cap the probe is refused in the
+ * words a probe without ?graph= always had ("needs ?graph=<name> ..."), the cap and the count
+ * added. |route| names the route in the messages: TRAVERSE for GET /traverse/capabilities,
+ * PATTERN for GET /pattern/capabilities (CAPABILITIES names both). An unknown or a repeated
+ * parameter, or graph_path or annotation_path without ?graph=, is an InvalidRequest.
  */
 std::vector<SelectedPair>
 select_pairs_from_parameters(SelectionRoute route,

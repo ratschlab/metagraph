@@ -52,6 +52,11 @@ expect_server_instance that is the first to reach a replaced process cannot be s
 way: an older binary registers its attempt_id before it answers the 400 (the id is
 refused while that server retains it, and runs again after that), and a level-5 one
 refuses it, 409 instance_mismatch, without registering it.
+
+A multi-graph server answers /traverse and the capabilities probe of one pair in the envelope
+(SPEC-multigraph-envelope.md section 1): the client reads its one entry as the single-graph
+answer (single_answer()), with the attempt's usage the envelope states at its top level. Its
+other answers (409, 503, 400) are not wrapped and read as before.
 """
 
 import copy
@@ -185,6 +190,29 @@ def drop_coordinates_note(results, statement):
         if isinstance(stop, dict) and 'drop_coordinates' in (stop.get('actions') or ()):
             n += 1
     return _DROP_COORDINATES_NOTE % n if n else None
+
+
+def single_answer(out):
+    """|out| as a single-graph server answers it: a multi-graph server's envelope of ONE pair
+    (SPEC-multigraph-envelope.md section 1: `envelope_version` and one entry in `answers`) is
+    read as its entry -- the pair's answer with its tags (graph, graph_path, annotation_path,
+    index_fp, outcome) -- plus the envelope's `usage` (on /traverse the attempt's, which the
+    envelope states at its top level); an entry refused raises TraverseError with its
+    refusal's http_status and error. Any other answer (a single-graph server's, an envelope
+    over several pairs) is returned as it is."""
+    if not isinstance(out, dict) or 'envelope_version' not in out:
+        return out
+    answers = out.get('answers')
+    if not isinstance(answers, list) or len(answers) != 1 or not isinstance(answers[0], dict):
+        return out
+    entry = answers[0]
+    if entry.get('outcome') == 'refused':
+        refusal = entry.get('refusal') or {}
+        raise TraverseError(refusal.get('http_status'), refusal.get('error'), refusal)
+    answer = dict(entry)
+    if 'usage' in out:
+        answer['usage'] = out['usage']
+    return answer
 
 
 def _unknown_field(status, message):
@@ -495,8 +523,9 @@ class TraverseClient:
             query.append('graph=' + urllib.parse.quote(graph, safe=''))
         if graph_path:
             query.append('graph_path=' + urllib.parse.quote(graph_path, safe=''))
-        return self._request('GET', '/traverse/capabilities'
-                             + ('?' + '&'.join(query) if query else ''))
+        # a multi-graph server's probe of one pair is an envelope of one entry
+        return single_answer(self._request('GET', '/traverse/capabilities'
+                                           + ('?' + '&'.join(query) if query else '')))
 
     def supports_coordinates(self, graph=None, graph_path=None, refresh=False):
         """Whether the index (|graph|, |graph_path| on a multi-graph server) reports record
@@ -746,6 +775,8 @@ class TraverseClient:
     @staticmethod
     def response(out):
         from .parser import from_response
+        # a multi-graph server's answer: its one entry, the attempt's usage beside it
+        out = single_answer(out)
         envelope = {k: v for k, v in out.items() if k != 'results'}
         graphlets, errors = [], []
         for i, r in enumerate(out.get('results', [])):

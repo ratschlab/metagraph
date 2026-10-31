@@ -3110,7 +3110,19 @@ class TestTraverseMultiGraph(TestTraverseBase):
     graphlet's H record, states its pair's identity; GET
     /traverse/capabilities?graph=<name>[&graph_path=<path>] describes one pair; a graph_path
     naming one graph with several annotations is refused (it cannot choose one). The manifests
-    of the list are written by scripts/traversal/index_manifest.py --server-csv."""
+    of the list are written by scripts/traversal/index_manifest.py --server-csv. A /traverse
+    and the capabilities probes answer in the envelope of SPEC-multigraph-envelope.md
+    section 1 (one entry per pair, tagged with it), GET /capabilities states the composite
+    fingerprint of the pairs and the multigraph block (section 8)."""
+
+    # the members of a /traverse envelope (SPEC-multigraph-envelope.md section 1; usage only
+    # for a ledger-managed request), of a capabilities envelope, and an entry's tags
+    ENVELOPE = {'envelope_version', 'route', 'graphs', 'answered', 'refused', 'not_reached',
+                'unfinished', 'request_id', 'server_instance', 'deadline', 'answers', 'timing',
+                'work'}
+    GET_ENVELOPE = {'envelope_version', 'route', 'graphs', 'answered', 'refused',
+                    'server_instance', 'answers'}
+    TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome')
 
     SCRIPT = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
 
@@ -3167,14 +3179,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
         super().tearDownClass()
 
     class _Server:
-        def __init__(self, test, csv, wait=True):
+        def __init__(self, test, csv, wait=True, flags=()):
             self.port = _free_port()
             self.url = f'http://127.0.0.1:{self.port}'
             self.log_path = f'{test.tempdir.name}/multi-{self.port}.log'
             self.log = open(self.log_path, 'w')
             self.process = subprocess.Popen(
                 shlex.split(METAGRAPH) + ['server_query', csv, '--port', str(self.port),
-                                          '--address', '127.0.0.1', '-p', '2'],
+                                          '--address', '127.0.0.1', '-p', '2'] + list(flags),
                 stdout=self.log, stderr=subprocess.STDOUT)
             self.ready = False
             for _ in range(600 if wait else 0):
@@ -3204,6 +3216,18 @@ class TestTraverseMultiGraph(TestTraverseBase):
     def _caps(self, query=''):
         return requests.get(f'{self.server.url}/traverse/capabilities{query}')
 
+    def _entry(self, ret, graph, route='/traverse'):
+        """The one entry of a multi-graph server's envelope (SPEC-multigraph-envelope.md
+        section 1) answered for |graph| on |route|: HTTP 200, one name, one pair answered"""
+        self.assertEqual(200, ret.status_code, ret.text[:2000])
+        out = ret.json()
+        self.assertEqual((1, route, [graph], 1, 0, 1),
+                         (out['envelope_version'], out['route'], out['graphs'],
+                          out['answered'], out['refused'], len(out['answers'])))
+        entry = out['answers'][0]
+        self.assertEqual((graph, 'answered'), (entry['graph'], entry['outcome']))
+        return entry
+
     def _request(self, graph, graph_path=None, detail='graphlet'):
         req = {'graph': graph, 'seeds': [{'sequence': self.element}],
                'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 20},
@@ -3220,11 +3244,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
         }
         metas = set()
         for (graph, path), ident in expected.items():
-            ret = self._post('traverse', self._request(graph, path))
-            self.assertEqual(200, ret.status_code, ret.text)
-            out = ret.json()
+            out = self._entry(self._post('traverse', self._request(graph, path)), graph)
             caps = out['capabilities']
             self.assertEqual(ident, (caps['index_ns'], caps['index_fp']), (graph, path))
+            # the entry's tag is the identity inside the answer
+            self.assertEqual(caps['index_fp'], out['index_fp'])
             metas.add(caps['index_meta_fp'])
             head = out['results'][0]['graphlet'].split('\n', 1)[0].split(' ')
             self.assertEqual([ident[0] or '*', ident[1] or '*', caps['index_meta_fp']],
@@ -3254,17 +3278,17 @@ class TestTraverseMultiGraph(TestTraverseBase):
 
     def test_multi_probe_describes_one_pair(self):
         ret = self._caps('?graph=A')
-        self.assertEqual(200, ret.status_code, ret.text)
-        caps = ret.json()
-        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 6),
-                         (caps['graph'], caps['graph_path'], caps['index_ns'],
-                          caps['index_fp'], caps['feature_level']))
+        self.assertEqual(self.GET_ENVELOPE, set(ret.json()))
+        caps = self._entry(ret, 'A', '/traverse/capabilities')
+        self.assertEqual(('A', self.graph, self.anno, 'tinyA', self.index_fp, 6),
+                         (caps['graph'], caps['graph_path'], caps['annotation_path'],
+                          caps['index_ns'], caps['index_fp'], caps['feature_level']))
         for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
                     'compression_level', 'content_encodings', 'work_bound', 'coordinates'):
             self.assertIn(key, caps)
         # per pair: whether its index reports record coordinates is whether it supports trace
         self.assertEqual(caps['supports_trace'], caps['coordinates']['supported'])
-        out = self._post('traverse', self._request('A')).json()
+        out = self._entry(self._post('traverse', self._request('A')), 'A')
         for key in ('index_ns', 'index_fp', 'index_meta_fp', 'k', 'num_labels'):
             self.assertEqual(out['capabilities'][key], caps[key], key)
         # a name over several graphs needs graph_path, which must name one of them: the
@@ -3275,11 +3299,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual([self.pairs['two'][0], self.pairs['three'][0]],
                          [c['graph_path'] for c in ret.json()['candidates']])
         quoted = requests.utils.quote(self.pairs['two'][0], safe='')
-        ret = self._caps(f'?graph=B&graph_path={quoted}')
-        self.assertEqual(200, ret.status_code, ret.text)
-        self.assertEqual((self.pairs['two'][0], None, self.fp_two),
-                         (ret.json()['graph_path'], ret.json()['index_ns'],
-                          ret.json()['index_fp']))
+        two = self._entry(self._caps(f'?graph=B&graph_path={quoted}'), 'B',
+                          '/traverse/capabilities')
+        self.assertEqual((self.pairs['two'][0], self.pairs['two'][1], None, self.fp_two),
+                         (two['graph_path'], two['annotation_path'], two['index_ns'],
+                          two['index_fp']))
         # one graph with two annotations is addressed by annotation_path (graph_path cannot
         # choose), and a name listing only that is told so, not to pass graph_path
         quoted = requests.utils.quote(self.graph, safe='')
@@ -3291,18 +3315,17 @@ class TestTraverseMultiGraph(TestTraverseBase):
                              (ret.json()['code'], ret.json()['error']), query)
             self.assertEqual([self.anno, self.pairs['col'][1]],
                              [c['annotation_path'] for c in ret.json()['candidates']])
-        # the probe states its pair by graph and graph_path (the frozen probe's tags): C's two
-        # annotations tell apart by their identities, A's (its manifest) and none (the second)
+        # the entry states its pair by all three tags (the pair's own block keeps graph and
+        # graph_path, the frozen probe's): C's two annotations tell apart by their identities,
+        # A's (its manifest) and none (the second)
         for annotation, fp in ((self.anno, self.index_fp), (self.pairs['col'][1], None)):
             quoted = requests.utils.quote(annotation, safe='')
-            ret = self._caps(f'?graph=C&annotation_path={quoted}')
-            self.assertEqual(200, ret.status_code, ret.text)
-            self.assertEqual(('C', self.graph, fp),
-                             (ret.json()['graph'], ret.json()['graph_path'],
-                              ret.json()['index_fp']))
-            self.assertNotIn('annotation_path', ret.json())
-        for query, needle, code in (('', 'needs ?graph=<name>', None),
-                                    ('?graph=Z', "unknown graph 'Z'", 'graph_unknown'),
+            entry = self._entry(self._caps(f'?graph=C&annotation_path={quoted}'), 'C',
+                                '/traverse/capabilities')
+            self.assertEqual(('C', self.graph, annotation, fp),
+                             (entry['graph'], entry['graph_path'], entry['annotation_path'],
+                              entry['index_fp']))
+        for query, needle, code in (('?graph=Z', "unknown graph 'Z'", 'graph_unknown'),
                                     ('?graph=A&x=1', "unknown parameter 'x'", None),
                                     ('?graph=A&graph=B', 'given twice', None),
                                     ('?graph_path=/nowhere', 'add ?graph=<name>', None),
@@ -3329,15 +3352,6 @@ class TestTraverseMultiGraph(TestTraverseBase):
                          ['index_fp'])
         self.assertEqual(['A', 'B', 'C'], client.server_capabilities()['graphs'])
 
-    @staticmethod
-    def _entry(out):
-        """The pair's answer: the response itself, or its one envelope entry once the route
-        answers in the envelope (SPEC-multigraph-envelope.md section 1)."""
-        if 'answers' in out:
-            assert len(out['answers']) == 1, out
-            return out['answers'][0]
-        return out
-
     def test_multi_pairs_select_one_pair(self):
         """The pair selector (SPEC-multigraph-envelope.md section 6): a traverse names one pair
         with pairs, an annotation of a shared graph by its annotation_path; several pairs,
@@ -3346,17 +3360,15 @@ class TestTraverseMultiGraph(TestTraverseBase):
         refuses pairs."""
         two, three = self.pairs['two'], self.pairs['three']
         by_graph = self._post('traverse', self._request('B', two[0]))
-        self.assertEqual(200, by_graph.status_code, by_graph.text)
         req = self._request(None)
         del req['graph']
         by_pair = self._post('traverse', dict(req, pairs=[{'graph': 'B', 'graph_path': two[0]}]))
-        self.assertEqual(200, by_pair.status_code, by_pair.text)
-        self.assertEqual(by_graph.content, by_pair.content)
+        # the same entry (the envelope's timing.elapsed_ms is the request's own)
+        self.assertEqual(self._entry(by_graph, 'B'), self._entry(by_pair, 'B'))
         # the second annotation of the base graph, under C, by its annotation_path alone
         col = self._post('traverse', dict(req, pairs=[{'graph': 'C',
                                                        'annotation_path': self.pairs['col'][1]}]))
-        self.assertEqual(200, col.status_code, col.text)
-        self.assertEqual(None, self._entry(col.json())['capabilities']['index_fp'])
+        self.assertEqual(None, self._entry(col, 'C')['capabilities']['index_fp'])
         # refusals, before any pair starts
         for payload, code, candidates in (
                 (dict(req, pairs=[{'graph': 'B', 'graph_path': two[0]},
@@ -3403,9 +3415,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
             if extra:
                 req['strategy']['labels'] = {'extra': extra, 'loss_budget': 1,
                                              'change_cost': {'model': 'constant', 'value': 1}}
-            ret = self._post('traverse', req)
-            self.assertEqual(200, ret.status_code, ret.text)
-            return self._entry(ret.json())
+            return self._entry(self._post('traverse', req), 'B')
 
         out = traverse(['acc1', 'acc2'])
         result = out['results'][0]
@@ -3437,21 +3447,278 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual(['acc3'], extra['strategy']['labels']['extra'])
         # /resolve: the answer of the labels the pair holds, the others listed
         resolve = {'graph': 'B', 'graph_path': two[0], 'sequence': self.element}
-        ret = self._post('resolve', dict(resolve, labels=['acc3', 'acc1', 'acc2']))
-        self.assertEqual(200, ret.status_code, ret.text)
-        answer = self._entry(ret.json())
+        answer = self._entry(self._post('resolve', dict(resolve, labels=['acc3', 'acc1', 'acc2'])),
+                             'B', '/resolve')
         self.assertEqual(['acc3', 'acc2'], answer['unknown_labels'])
         self.assertEqual(['acc1'], [l['label'] for l in answer['labels']])
-        ret = self._post('resolve', dict(resolve, labels=['acc2']))
-        self.assertEqual(200, ret.status_code, ret.text)
-        self.assertEqual((['acc2'], [], []), (self._entry(ret.json())['unknown_labels'],
-                                              self._entry(ret.json())['labels'],
-                                              self._entry(ret.json())['candidates']))
+        answer = self._entry(self._post('resolve', dict(resolve, labels=['acc2'])), 'B',
+                             '/resolve')
+        self.assertEqual((['acc2'], [], []), (answer['unknown_labels'], answer['labels'],
+                                              answer['candidates']))
         # the base graph's own pair holds them all as headers
         ret = self._post('resolve', {'graph': 'A', 'sequence': self.element,
                                      'labels': ['acc1', 'acc2']})
-        self.assertEqual(200, ret.status_code, ret.text)
-        self.assertEqual([], self._entry(ret.json())['unknown_labels'])
+        self.assertEqual([], self._entry(ret, 'A', '/resolve')['unknown_labels'])
+
+    # ---- the envelope (SPEC-multigraph-envelope.md sections 1 and 8)
+
+    def _cli_results(self, graph, anno, request, manifest=None):
+        """`metagraph traverse` on one pair's files: the results a single-graph server writes"""
+        path = f'{self.tempdir.name}/envelope-request.json'
+        request = {k: v for k, v in request.items() if k not in ('graph', 'graph_path')}
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '-i', graph, '-a', anno]
+                             + (['--index-manifest', manifest] if manifest else []) + [path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        return json.loads(res.stdout)
+
+    def test_named_traverse_answers_in_the_envelope(self):
+        """Section 1.1 (E2b, E10): a named-graph /traverse answers HTTP 200 in an envelope of
+        one entry, the entry the single-graph answer without usage, tagged with its pair, its
+        index_fp the identity its capabilities state. Unmanaged: request_id null, no usage,
+        the deadline's members null. Managed (attempt_id, not_after_ms): request_id the
+        attempt_id, the attempt's usage at the envelope's top level, not_after_ms in the
+        deadline (finish_by_ms and the effective deadline null: not read by /traverse yet);
+        the attempt records as written exactly the response's bytes."""
+        instance = requests.get(self.server.url + '/capabilities').json()['server_instance']
+        two_graph, two_anno = self.pairs['two']
+        req = self._request('B', two_graph, detail='full')
+        ret = self._post('traverse', req)
+        out = ret.json()
+        self.assertEqual(self.ENVELOPE, set(out))
+        self.assertEqual(('/traverse', ['B'], 1, 0, [], [], None, instance),
+                         (out['route'], out['graphs'], out['answered'], out['refused'],
+                          out['not_reached'], out['unfinished'], out['request_id'],
+                          out['server_instance']))
+        self.assertEqual({'not_after_ms': None, 'finish_by_ms': None,
+                          'effective_deadline_at': None, 'cutoff_at': None}, out['deadline'])
+        entry = self._entry(ret, 'B')
+        self.assertEqual(('B', two_graph, two_anno, self.fp_two, 'answered'),
+                         tuple(entry[k] for k in self.TAGS))
+        self.assertEqual(entry['capabilities']['index_fp'], entry['index_fp'])
+        self.assertNotIn('usage', entry)
+        for key in ('algorithm_version', 'capabilities', 'release', 'results', 'strategy',
+                    'walk_rule', 'work'):
+            self.assertIn(key, entry)
+        # the request's account is its one pair's, its time the request's
+        self.assertEqual(entry['work'], out['work'])
+        self.assertGreater(out['timing']['elapsed_ms'], 0)
+        # the entry's results are the single-graph answer's on the pair's files
+        cli = self._cli_results(two_graph, two_anno, req, f'{self.tempdir.name}/two/two.manifest.json')
+        self.assertEqual(cli['results'], entry['results'])
+        self.assertEqual(cli['capabilities'], entry['capabilities'])
+
+        not_after = int(time.time() * 1000) + 600_000
+        managed = dict(self._request('A', detail='full'), attempt_id='env-managed-1',
+                       not_after_ms=not_after)
+        ret = requests.post(self.server.url + '/traverse', data=json.dumps(managed),
+                            headers={'Accept-Encoding': 'identity'})
+        out = ret.json()
+        self.assertEqual(self.ENVELOPE | {'usage'}, set(out))
+        self.assertEqual(('env-managed-1', instance, not_after),
+                         (out['request_id'], out['server_instance'],
+                          out['deadline']['not_after_ms']))
+        self.assertIsNone(out['deadline']['finish_by_ms'])
+        self.assertEqual(('env-managed-1', instance, not_after),
+                         (out['usage']['attempt_id'], out['usage']['server_instance'],
+                          out['usage']['not_after_ms']))
+        entry = self._entry(ret, 'A')
+        self.assertNotIn('usage', entry)
+        self.assertEqual((self.index_fp, self.index_fp),
+                         (entry['index_fp'], entry['capabilities']['index_fp']))
+        state = requests.get(self.server.url + '/traverse/attempt/env-managed-1').json()
+        self.assertEqual({'status': 200, 'bytes': len(ret.content), 'written': True},
+                         state['response'])
+        self.assertEqual(out['usage']['reason'], state['reason'])
+        # the library reads the entry as the single-graph answer, the usage beside it
+        client = graphlet_lib.TraverseClient('127.0.0.1', self.server.port, graph='A')
+        resp = client.traverse([self.element], {'direction': 'right',
+                                                'bounds': {'max_extension_bp': 20}},
+                               attempt_id='env-managed-lib')
+        self.assertEqual(1, len(resp.graphlets))
+        self.assertEqual('env-managed-lib', resp.usage['attempt_id'])
+        self.assertEqual(self.index_fp, resp.graphlets[0].index_fp)
+
+    def test_attempt_level_answers_stay_unwrapped(self):
+        """Section 1.1 (E10): only HTTP 200 is wrapped. A repeated attempt_id (running or
+        retained, or tombstoned by a cancel) and an expired not_after_ms are the 409s of a
+        single-graph server; a request error is 400 with usage for a managed request and
+        without for an unmanaged one; an attempt at its bound is 503 with usage; the cancel and
+        the attempt's state are unchanged. None of them carries an envelope's member."""
+        def unwrapped(ret, status, members):
+            self.assertEqual(status, ret.status_code, ret.text[:2000])
+            self.assertEqual(members, set(ret.json()), ret.text[:2000])
+            return ret.json()
+
+        managed = dict(self._request('A'), attempt_id='env-dup-1')
+        self._entry(self._post('traverse', managed), 'A')
+        body = unwrapped(self._post('traverse', managed), 409, {'error', 'attempt'})
+        self.assertEqual(('finished', 'env-dup-1'),
+                         (body['attempt']['state'], body['attempt']['attempt_id']))
+        cancel = self._post('traverse/cancel', {'attempt_id': 'env-tomb-1'})
+        self.assertEqual(404, cancel.status_code, cancel.text)
+        self.assertTrue(cancel.json()['tombstone'])
+        unwrapped(self._post('traverse', dict(managed, attempt_id='env-tomb-1')), 409,
+                  {'error', 'attempt'})
+        for fields in ({'attempt_id': 'env-expired-1'}, {}):
+            body = self._post('traverse', dict(self._request('A'), not_after_ms=1, **fields))
+            self.assertEqual(409, body.status_code, body.text)
+            self.assertEqual('expired', body.json()['state'])
+            self.assertNotIn('envelope_version', body.json())
+        bad = self._request('A')
+        bad['strategy']['bounds']['time_budget_ms'] = 'soon'
+        body = unwrapped(self._post('traverse', dict(bad, attempt_id='env-bad-1')), 400,
+                         {'error', 'usage'})
+        self.assertEqual('error', body['usage']['reason'])
+        unwrapped(self._post('traverse', bad), 400, {'error'})
+        self.assertEqual(200, requests.get(self.server.url
+                                           + '/traverse/attempt/env-bad-1').status_code)
+
+        # an attempt bound of about 1 ms (64 seeds of 1 us, allowance 1 ms) that its request's
+        # body alone outlasts (64 seeds of 50 kbp, 3.2 MB to read and parse, tens of ms; the
+        # bound counts from the request's header): no seed is walked, the answer is built, and
+        # it is refused 503 with the usage before it is handed to the transport
+        server = self._Server(self, self.csv, flags=('--traverse-attempt-allowance-ms', '1'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            rng = random.Random(20261031)
+            req = self._request('A', detail='full')
+            req['seeds'] = [{'sequence': ''.join(rng.choice('ACGT') for _ in range(50_000))}
+                            for _ in range(64)]
+            req['strategy']['bounds']['time_budget_ms'] = 0.001
+            ret = requests.post(server.url + '/traverse',
+                                data=json.dumps(dict(req, attempt_id='env-bound-1')))
+            body = unwrapped(ret, 503, {'error', 'usage'})
+            self.assertEqual(('deadline', 'env-bound-1'),
+                             (body['usage']['reason'], body['usage']['attempt_id']))
+            self.assertIn('reached the duration bound', body['error'])
+            state = requests.get(f'{server.url}/traverse/attempt/env-bound-1').json()
+            self.assertEqual(('deadline', 503), (state['reason'], state['response']['status']))
+        finally:
+            server.close()
+
+    def test_a_large_answer_is_assembled_in_the_envelope(self):
+        """The seeds' results are written as text one by one and spliced into the envelope's
+        entry without being parsed again: a large answer of 60 seeds (well past the 64 KiB
+        between two delivery checks) reads, with and without compression, as the single-graph
+        answer on the pair's files, and the attempt records its bytes."""
+        record = self.records['acc1']
+        seeds = [{'seed_id': f's{i}', 'sequence': record[i:i + 40]}
+                 for i in range(0, 60 * 5, 5)]
+        req = {'graph': 'A', 'seeds': seeds,
+               'strategy': {'direction': 'both',
+                            'output': {'detail': 'full', 'timing': False}}}
+        texts = {}
+        for encoding in ('identity', 'gzip'):
+            ret = requests.post(self.server.url + '/traverse',
+                                data=json.dumps(dict(req, attempt_id=f'env-large-{encoding}')),
+                                headers={'Accept-Encoding': encoding})
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual(None if encoding == 'identity' else 'gzip',
+                             ret.headers.get('Content-Encoding'))
+            texts[encoding] = ret.content
+            entry = self._entry(ret, 'A')
+            self.assertEqual([s['seed_id'] for s in seeds],
+                             [r['seed']['seed_id'] for r in entry['results']])
+        self.assertGreater(len(texts['identity']), 4 * 65536)
+        state = requests.get(self.server.url + '/traverse/attempt/env-large-identity').json()
+        self.assertEqual(len(texts['identity']), state['response']['bytes'])
+        out = json.loads(texts['identity'])
+        cli = self._cli_results(self.graph, self.anno, req, self.manifest)
+        self.assertEqual(cli['results'], out['answers'][0]['results'])
+
+    def test_capabilities_answer_in_the_envelope(self):
+        """Sections 1 and 6 (E3): GET /traverse/capabilities and GET /pattern/capabilities
+        without parameters answer the envelope over every pair (in the index's order: the
+        names in byte order, each name's pairs in the list's order, a pair listed twice under a
+        name once), each entry the pair's block tagged with its pair and index_fp; with
+        ?graph= one entry; beyond --max-graphs-without-selection the probe without ?graph= is
+        refused as before."""
+        order = [('A', self.graph, self.anno, self.index_fp),
+                 ('B', self.pairs['two'][0], self.pairs['two'][1], self.fp_two),
+                 ('B', self.pairs['three'][0], self.pairs['three'][1], None),
+                 # C lists A's pair (A's identity: one index) and the second annotation
+                 ('C', self.graph, self.anno, self.index_fp),
+                 ('C', self.pairs['col'][0], self.pairs['col'][1], None)]
+        instance = requests.get(self.server.url + '/capabilities').json()['server_instance']
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            ret = requests.get(f'{self.server.url}/{route}')
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            out = ret.json()
+            self.assertEqual(self.GET_ENVELOPE, set(out))
+            self.assertEqual((1, '/' + route, ['A', 'B', 'C'], 5, 0, instance),
+                             (out['envelope_version'], out['route'], out['graphs'],
+                              out['answered'], out['refused'], out['server_instance']))
+            self.assertEqual(order, [(e['graph'], e['graph_path'], e['annotation_path'],
+                                      e['index_fp']) for e in out['answers']])
+            self.assertEqual({'answered'}, {e['outcome'] for e in out['answers']})
+            one = self._entry(requests.get(f'{self.server.url}/{route}?graph=A'), 'A',
+                              '/' + route)
+            if route == 'traverse/capabilities':
+                for e in out['answers']:
+                    self.assertEqual((K, 6), (e['k'], e['feature_level']))
+                for key in ('index_ns', 'index_fp', 'index_meta_fp', 'k', 'num_labels',
+                            'coordinates', 'pattern', 'budgets'):
+                    self.assertEqual(one[key], out['answers'][0][key], key)
+                # C's second pair is its own index
+                self.assertNotEqual(out['answers'][0]['index_meta_fp'],
+                                    out['answers'][4]['index_meta_fp'])
+            else:
+                self.assertEqual(one, out['answers'][0])
+                self.assertEqual(('basic', K, True),
+                                 (one['graph_mode'], one['k'], one['available']))
+        server = self._Server(self, self.csv, flags=('--max-graphs-without-selection', '2'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            for route in ('traverse/capabilities', 'pattern/capabilities'):
+                ret = requests.get(f'{server.url}/{route}')
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertIn('needs ?graph=<name>', ret.json()['error'])
+                self.assertIn('more than 2 graph names (3 here)', ret.json()['error'])
+                self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
+        finally:
+            server.close()
+
+    def test_capabilities_state_the_composite_fingerprint(self):
+        """Section 8 (E3): GET /capabilities of a multi-graph server states composite_fp, the
+        sha256 over its pairs' index_fp sorted as bytes and joined by a newline (each pair
+        once, whatever names list it), null when a pair has no manifest; composite_rule; the
+        multigraph block of the reference sample 12 and routes.requests."""
+        with open(os.path.join(REPO, 'tests', 'data', 'multigraph_contract',
+                               '12_capabilities_multigraph.json')) as f:
+            sample = json.load(f)['body']
+        c = requests.get(self.server.url + '/capabilities').json()
+        # B's second pair and C's second annotation have no manifest
+        self.assertIsNone(c['composite_fp'])
+        self.assertEqual(sample['composite_rule'], c['composite_rule'])
+        self.assertEqual(sample['multigraph'], c['multigraph'])
+        self.assertEqual('GET /requests/{request_id}', c['routes']['requests'])
+        # a manifest per pair: the composite is a value; A's pair under a second name is the
+        # same pair and changes nothing
+        d = self.tempdir.name
+        composites = []
+        for name, extra in (('full', ''), ('alias', f'Z,{self.graph},{self.anno}\n')):
+            csv = f'{d}/composite_{name}.csv'
+            with open(csv, 'w') as f:
+                f.write(f'A,{self.graph},{self.anno},{self.manifest}\n'
+                        f'B,{self.pairs["two"][0]},{self.pairs["two"][1]},'
+                        f'{d}/two/two.manifest.json\n' + extra)
+            server = self._Server(self, csv)
+            try:
+                self.assertTrue(server.ready, server.text()[-2000:])
+                c = requests.get(server.url + '/capabilities').json()
+                composites.append(c['composite_fp'])
+                self.assertEqual(sample['multigraph'], c['multigraph'])
+                fps = sorted({p['index_fp'] for p in c['graph_summary']['pairs']})
+                self.assertEqual([min(self.index_fp, self.fp_two),
+                                  max(self.index_fp, self.fp_two)], fps)
+            finally:
+                server.close()
+        expected = hashlib.sha256('\n'.join(sorted([self.index_fp, self.fp_two]))
+                                  .encode()).hexdigest()
+        self.assertEqual([expected, expected], composites)
 
     def test_multi_lists_refuse_to_start(self):
         """A graph list the server cannot state one identity per index for refuses to start
@@ -3533,8 +3800,8 @@ class TestTraverseMultiGraph(TestTraverseBase):
         server = self._Server(self, csv)
         try:
             self.assertTrue(server.ready, server.text())
-            out = requests.post(server.url + '/traverse',
-                                data=json.dumps(self._request('B'))).json()
+            out = self._entry(requests.post(server.url + '/traverse',
+                                            data=json.dumps(self._request('B'))), 'B')
             self.assertEqual(self.index_fp, out['capabilities']['index_fp'])
         finally:
             server.close()
@@ -3916,10 +4183,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
         server = self._Server(self, csv)
         try:
             self.assertTrue(server.ready, server.text())
-            out = requests.post(server.url + '/traverse',
-                                data=json.dumps(self._request('P'))).json()
+            out = self._entry(requests.post(server.url + '/traverse',
+                                            data=json.dumps(self._request('P'))), 'P')
             caps = out['capabilities']
             self.assertEqual((None, None), (caps['index_ns'], caps['index_fp']))
+            self.assertIsNone(out['index_fp'])
             self.assertEqual(16, len(caps['index_meta_fp']))
         finally:
             server.close()

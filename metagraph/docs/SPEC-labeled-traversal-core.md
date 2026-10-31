@@ -3191,11 +3191,17 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `{"routes": ["pattern", "resolve", "search", "traverse"], "loads": <a multi-graph server on mmap with
     --mem-cap-gb above 0>, "mem_cap_gb": <--mem-cap-gb>, "budgets_start": "after_load"}`.
   - **`GET /traverse/capabilities?graph=<name>[&graph_path=<path>]`** (feature level 3; a 400 before): the probe of
-    the pair those parameters select by the rules above (percent-decoded values), with `graph` and `graph_path`
-    (the pair's graph) added; without `graph` a 400 (`Bad request: in multi-graph mode GET /traverse/capabilities
-    needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET /capabilities lists the
-    graphs`); an unknown or repeated parameter is a 400. In single-graph mode `graph` and `graph_path` are a 400,
-    any other parameter is ignored, as before.
+    the pair those parameters select by the rules above (percent-decoded values). Since release 10 it answers in
+    the envelope of SPEC-multigraph-envelope.md section 1 (`envelope_version`, `route`, `graphs`, `answered`,
+    `refused`, `server_instance`, `answers`), one entry: the probe tagged `graph`, `graph_path`,
+    `annotation_path`, `index_fp`, `outcome` (before: the probe itself with `graph` and `graph_path` added).
+    Without any parameter the envelope over every pair (in `graph_summary`'s order), up to
+    `max_graphs_without_selection` names; above it, and for parameters without `graph`, a 400 (`Bad request: in
+    multi-graph mode GET /traverse/capabilities needs ?graph=<name> (and graph_path=<path> when the name spans
+    several graphs)...`); an unknown or repeated parameter is a 400. A multi-graph server's `POST /traverse`
+    answers HTTP 200 in that envelope too (section 1.1 there: the attempt's `usage` at its top level); its other
+    statuses are unchanged. In single-graph mode `graph` and `graph_path` are a 400, any other parameter is
+    ignored, as before.
 - Caps: `--traverse-max-time-ms` (default 30 000; also the cap of `/resolve`'s `bounds.time_budget_ms`, which
   it lowers, never sets, and which is never above 899 000 ms on the server, §4.5), `--traverse-max-seeds` (64),
   `--traverse-max-seed-bp` (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
