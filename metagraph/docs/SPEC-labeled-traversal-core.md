@@ -584,7 +584,10 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
    request with `output.coordinates` states `coordinates: null` with its reason, as for a failed seed. On a
    single-graph server (and in the CLI) the seed is the caller's error: the whole request's 400, as for every
    malformed seed.
-3. Every seed label must resolve (else the request is rejected naming the label). Each label must support every
+3. Every seed label must resolve (else the request is rejected naming the label; on a multi-graph server, whose
+   pairs need not hold every label a request names, it is dropped instead with `{reason: not_in_graph}`, listed in
+   the result's `unknown_labels`, and a seed none of whose labels resolves is not walked, `outcome.walks:
+   "labels_not_in_graph"`: SPEC-multigraph-envelope.md section 2). Each label must support every
    seed k-mer under `support`; labels that do not are **dropped** with `{reason: seed_unsupported, runs}`. A seed
    with no remaining label is rejected. `validated_seed_id` is computed over the remaining labels; a supplied
    `seed_id` that differs from the recomputed one yields `seed_id_mismatch: true`.
