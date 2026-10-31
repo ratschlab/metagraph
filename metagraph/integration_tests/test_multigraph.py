@@ -2443,5 +2443,188 @@ class TestMultiGraphServer(TestingBase):
                 self.assertIn(words, ret.json()['error'])
 
 
+@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
+class TestHeadersUnique(TestingBase):
+    """GET /capabilities' headers_unique (SPEC-multigraph-envelope.md, "headers_unique (E22)"):
+    whether a sequence header names one record over the server's pairs. Five pairs of small
+    random records, each with its record mapping (.seqs) except one: `a` (two files) and `b`
+    distinct, `c` repeating a header of `a` (across pairs), `e` repeating a header in its two
+    files (across the columns of one pair), `d` without a .seqs."""
+
+    maxDiff = None
+
+    # pair -> its files -> the headers of their records
+    PAIRS = {
+        'a': {'a1.fa': ['r1', 'r2'], 'a2.fa': ['r3']},
+        'b': {'b1.fa': ['r4', 'r5']},
+        'c': {'c1.fa': ['r6', 'r1']},
+        'd': {'d1.fa': ['r1', 'r7']},
+        'e': {'e1.fa': ['r8', 'r9'], 'e2.fa': ['r9']},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261031)
+        d = cls.tempdir.name
+        cls.pairs = {}
+        cls.files = {}
+        for name, files in cls.PAIRS.items():
+            out = os.path.join(d, name)
+            os.makedirs(out)
+            fastas = []
+            for fname, headers in files.items():
+                path = os.path.join(out, fname)
+                with open(path, 'w') as f:
+                    for h in headers:
+                        f.write(f'>{h}\n{"".join(rng.choice("ACGT") for _ in range(80))}\n')
+                fastas.append(path)
+            cls.files[name] = fastas
+            graph = os.path.join(out, 'graph.dbg')
+            cls._build_graph(fastas, graph, 31, 'succinct', mode='basic')
+            # both passes on one thread: each lists its columns in the order of the files, so
+            # the .seqs's columns are the annotation's (several threads add the files' columns
+            # in the order they finish)
+            cls._annotate_graph(fastas, graph, os.path.join(out, 'anno'), 'column_coord',
+                                anno_type='filename', num_threads=1)
+            if name != 'd':
+                cls._run_command(f'{METAGRAPH} annotate -p 1 -i {graph} --anno-filename '
+                                 f'--index-header-coords -o {out}/anno {" ".join(fastas)}',
+                                 'annotate --index-header-coords')
+                assert os.path.exists(os.path.join(out, 'anno.seqs'))
+            cls.pairs[name] = (graph, os.path.join(out, 'anno.column_coord.annodbg'))
+            assert all(os.path.exists(p) for p in cls.pairs[name]), cls.pairs[name]
+
+    def serve(self, names):
+        """A multi-graph server of |names|' pairs, each under its own name"""
+        csv = os.path.join(self.tempdir.name, '_'.join(names) + '.csv')
+        with open(csv, 'w') as f:
+            for name in names:
+                f.write(f'{name},{self.pairs[name][0]},{self.pairs[name][1]}\n')
+        return Server([csv], os.path.join(self.tempdir.name, '_'.join(names) + '.log'))
+
+    def certificate(self, names):
+        server = self.serve(names)
+        try:
+            caps = server.get('capabilities').json()
+            # a multi-graph server states it in graph_summary only
+            self.assertNotIn('headers_unique', caps)
+            return caps['graph_summary']['headers_unique'], server.text()
+        finally:
+            server.stop()
+
+    def occurrence(self, name, file):
+        return {'graph': name, 'graph_path': self.pairs[name][0],
+                'annotation_path': self.pairs[name][1], 'column': file}
+
+    def test_distinct_headers_are_certified(self):
+        certificate, log = self.certificate(['a', 'b'])
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, certificate)
+        self.assertIn('headers_unique: true', log)
+
+    def test_repeats_across_pairs_and_across_columns(self):
+        certificate, log = self.certificate(['a', 'b', 'c', 'e'])
+        a1, a2 = self.files['a']
+        c1, = self.files['c']
+        e1, e2 = self.files['e']
+        self.assertEqual({'value': False, 'collisions': 2, 'examples': [
+            {'header': 'r1', 'occurrences': 2,
+             'pairs': [self.occurrence('a', a1), self.occurrence('c', c1)]},
+            {'header': 'r9', 'occurrences': 2,
+             'pairs': [self.occurrence('e', e1), self.occurrence('e', e2)]},
+        ]}, certificate)
+        self.assertIn('headers_unique: false, 2 headers occur more than once', log)
+
+    def test_the_reference_sample_states_it_as_a_server_does(self):
+        # sample 12 of the contract (tests/data/multigraph_contract) states
+        # graph_summary.headers_unique in a server's shape: false with one repeat across two
+        # pairs, the same members at every level, the member in graph_summary's sorted order
+        # beside the summary's other members, and no top-level member
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tests', 'data',
+                            'multigraph_contract', '12_capabilities_multigraph.json')
+        with open(path) as f:
+            body = json.load(f)['body']
+        self.assertNotIn('headers_unique', body)
+        sample = body['graph_summary']
+        self.assertEqual(sorted(sample), list(sample))
+        server = self.serve(['a', 'b', 'c'])
+        try:
+            summary = server.get('capabilities').json()['graph_summary']
+        finally:
+            server.stop()
+        self.assertEqual(sorted(summary), sorted(sample))
+        live, stated = summary['headers_unique'], sample['headers_unique']
+        self.assertEqual((False, 1, 1), (live['value'], live['collisions'], len(live['examples'])))
+        self.assertEqual((False, 1, 1),
+                         (stated['value'], stated['collisions'], len(stated['examples'])))
+        self.assertEqual(list(live), list(stated))
+        example, stated_example = live['examples'][0], stated['examples'][0]
+        self.assertEqual(list(example), list(stated_example))
+        self.assertEqual((2, 2), (example['occurrences'], len(example['pairs'])))
+        self.assertEqual((2, 2), (stated_example['occurrences'], len(stated_example['pairs'])))
+        for occurrence, stated_occurrence in zip(example['pairs'], stated_example['pairs']):
+            self.assertEqual(list(occurrence), list(stated_occurrence))
+        # the sample's occurrences name pairs of its graph_summary
+        pairs = {(p['graph'], p['graph_path'], p['annotation_path']) for p in sample['pairs']}
+        for occurrence in stated_example['pairs']:
+            self.assertIn((occurrence['graph'], occurrence['graph_path'],
+                           occurrence['annotation_path']), pairs)
+
+    def test_a_pair_listed_under_two_names_is_counted_once(self):
+        # a's pair also under a second name: its headers are no repeats of themselves, and its
+        # occurrences name the first name in byte order ('a', not 'z_alias')
+        csv = os.path.join(self.tempdir.name, 'alias.csv')
+        with open(csv, 'w') as f:
+            for name, pair in (('z_alias', 'a'), ('a', 'a'), ('c', 'c')):
+                f.write(f'{name},{self.pairs[pair][0]},{self.pairs[pair][1]}\n')
+        server = Server([csv], os.path.join(self.tempdir.name, 'alias.log'))
+        try:
+            certificate = server.get('capabilities').json()['graph_summary']['headers_unique']
+        finally:
+            server.stop()
+        a1, _ = self.files['a']
+        c1, = self.files['c']
+        self.assertEqual({'value': False, 'collisions': 1, 'examples': [
+            {'header': 'r1', 'occurrences': 2,
+             'pairs': [self.occurrence('a', a1), self.occurrence('c', c1)]}]}, certificate)
+
+    def test_a_pair_without_record_mapping_makes_it_unknown(self):
+        # d's r1 is a column label's record, not a header the server knows
+        certificate, log = self.certificate(['a', 'd'])
+        self.assertEqual({'value': None, 'collisions': 0, 'examples': []}, certificate)
+        self.assertIn('headers_unique: null', log)
+        # the pairs with a .seqs are still compared: c repeats a's r1
+        certificate, _ = self.certificate(['a', 'c', 'd'])
+        self.assertIsNone(certificate['value'])
+        self.assertEqual(1, certificate['collisions'])
+        self.assertEqual('r1', certificate['examples'][0]['header'])
+
+    def test_single_graph_server_states_it_at_the_top(self):
+        for name, value in (('a', True), ('e', False), ('d', None)):
+            graph, anno = self.pairs[name]
+            server = Server(['-i', graph, '-a', anno],
+                            os.path.join(self.tempdir.name, f'single_{name}.log'))
+            try:
+                caps = server.get('capabilities').json()
+            finally:
+                server.stop()
+            with self.subTest(pair=name):
+                self.assertTrue(caps['ready'])
+                self.assertIsNone(caps['graph_summary'])
+                certificate = caps['headers_unique']
+                self.assertEqual(value, certificate['value'])
+                if name == 'e':
+                    e1, e2 = self.files['e']
+                    # a single-graph server's pair tags are null, as its /search cuts'
+                    untagged = {'graph': None, 'graph_path': None, 'annotation_path': None}
+                    self.assertEqual({'value': False, 'collisions': 1, 'examples': [
+                        {'header': 'r9', 'occurrences': 2,
+                         'pairs': [dict(untagged, column=e1), dict(untagged, column=e2)]}]},
+                        certificate)
+                else:
+                    self.assertEqual((0, []), (certificate['collisions'],
+                                               certificate['examples']))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -210,6 +210,161 @@ size_t CoordToHeader::header_index_bytes() const {
     return header_index_ ? header_index_->size * sizeof(HeaderIndex::Entry) : 0;
 }
 
+uint64_t CoordToHeader::find_repeated_headers(
+        const std::vector<const CoordToHeader*> &indexes,
+        const std::function<void(std::string_view, uint64_t,
+                                 const std::vector<HeaderOccurrence>&)> &callback,
+        size_t max_listed,
+        size_t num_threads) {
+    using Entry = HeaderIndex::Entry;
+    // each object's array, held for the merge (load() cannot free it meanwhile)
+    std::vector<std::shared_ptr<const HeaderIndex>> arrays(indexes.size());
+    HeaderHash hash = nullptr;
+    for (size_t i = 0; i < indexes.size(); ++i) {
+        if (!indexes[i])
+            continue;
+        arrays[i] = indexes[i]->header_index(num_threads);
+        if (hash && arrays[i]->hash != hash) {
+            throw std::invalid_argument("Cannot merge header indexes sorted by different "
+                                        "hashes");
+        }
+        hash = arrays[i]->hash;
+    }
+
+    // The entries of one hash: a span of entries per array holding it, in index order (each
+    // span in column order). Spans, not a list of entries, so that a header repeated in every
+    // record of a degenerate .seqs costs no copy of its occurrences.
+    struct Span {
+        size_t index;
+        const Entry *first;
+        const Entry *last;
+    };
+    std::vector<Span> group;
+    std::vector<HeaderOccurrence> listed;
+    uint64_t repeated = 0;
+    const auto header_of = [&](size_t index, const Entry &e) -> std::string_view {
+        return indexes[index]->headers_[e.column][e.seq_id];
+    };
+    // the repeats among the entries of one hash: those whose headers compare equal
+    const auto report = [&]() {
+        uint64_t count = 0;
+        for (const Span &span : group) {
+            count += span.last - span.first;
+        }
+        if (count < 2)
+            return;
+        const std::string_view head = header_of(group.front().index, *group.front().first);
+        const bool one_header = std::all_of(group.begin(), group.end(), [&](const Span &span) {
+            return std::all_of(span.first, span.last, [&](const Entry &e) {
+                return header_of(span.index, e) == head;
+            });
+        });
+        if (one_header) {
+            listed.clear();
+            for (const Span &span : group) {
+                for (const Entry *e = span.first; e != span.last && listed.size() < max_listed;
+                        ++e) {
+                    listed.push_back({ span.index, e->column, e->seq_id });
+                }
+            }
+            ++repeated;
+            callback(head, count, listed);
+            return;
+        }
+        // a collision of hashes: the headers sorted, each one's occurrences kept in their order
+        std::vector<std::pair<std::string_view, HeaderOccurrence>> all;
+        for (const Span &span : group) {
+            for (const Entry *e = span.first; e != span.last; ++e) {
+                all.emplace_back(header_of(span.index, *e),
+                                 HeaderOccurrence { span.index, e->column, e->seq_id });
+            }
+        }
+        std::stable_sort(all.begin(), all.end(), [](const auto &a, const auto &b) {
+            return a.first < b.first;
+        });
+        for (size_t a = 0; a < all.size(); ) {
+            size_t b = a + 1;
+            while (b < all.size() && all[b].first == all[a].first) {
+                ++b;
+            }
+            if (b - a > 1) {
+                listed.clear();
+                for (size_t o = a; o < b && listed.size() < max_listed; ++o) {
+                    listed.push_back(all[o].second);
+                }
+                ++repeated;
+                callback(all[a].first, b - a, listed);
+            }
+            a = b;
+        }
+    };
+
+    // the cursor of every non-empty array, in a min-heap by (its hash, its index), so that the
+    // arrays holding one hash are popped in index order
+    std::vector<const Entry*> cursor(indexes.size(), nullptr);
+    using Head = std::pair<uint64_t, size_t>;
+    std::vector<Head> heap;
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        if (arrays[i] && arrays[i]->size) {
+            cursor[i] = arrays[i]->begin();
+            heap.emplace_back(cursor[i]->hash, i);
+        }
+    }
+    const auto greater = std::greater<Head>();
+    std::make_heap(heap.begin(), heap.end(), greater);
+
+    while (!heap.empty()) {
+        std::pop_heap(heap.begin(), heap.end(), greater);
+        const size_t i = heap.back().second;
+        heap.pop_back();
+        // below the next array's hash, array i's entries are merged with no other's, and the
+        // last array left is merged with none: a single array (a single-graph server) is
+        // scanned without heap operations
+        const bool alone = heap.empty();
+        const uint64_t next = alone ? 0 : heap.front().first;
+        const Entry *end = arrays[i]->end();
+        const Entry *&it = cursor[i];
+        while (it != end && (alone || it->hash < next)) {
+            const Entry *run = it;
+            while (++it != end && it->hash == run->hash) {}
+            if (it - run > 1) {
+                group.assign(1, Span { i, run, it });
+                report();
+            }
+        }
+        if (it == end)
+            continue;
+        if (it->hash > next) {
+            heap.emplace_back(it->hash, i);
+            std::push_heap(heap.begin(), heap.end(), greater);
+            continue;
+        }
+        // the hash |next| is held by array i and by others: every array's entries of it,
+        // gathered in index order (the heap orders equal hashes by index)
+        const uint64_t h = next;
+        group.clear();
+        heap.emplace_back(h, i);
+        std::push_heap(heap.begin(), heap.end(), greater);
+        while (!heap.empty() && heap.front().first == h) {
+            std::pop_heap(heap.begin(), heap.end(), greater);
+            const size_t j = heap.back().second;
+            heap.pop_back();
+            const Entry *&jt = cursor[j];
+            const Entry *run = jt;
+            while (jt != arrays[j]->end() && jt->hash == h) {
+                ++jt;
+            }
+            group.push_back(Span { j, run, jt });
+            if (jt != arrays[j]->end()) {
+                heap.emplace_back(jt->hash, j);
+                std::push_heap(heap.begin(), heap.end(), greater);
+            }
+        }
+        report();
+    }
+    return repeated;
+}
+
 namespace {
 
 // a record index hashed and compared by the header it names (two types: the set derives from

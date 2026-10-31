@@ -2,6 +2,7 @@
 #define __COORD_TO_HEADER_HPP__
 
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -145,6 +146,36 @@ class CoordToHeader {
     using HeaderHash = uint64_t (*)(std::string_view header);
     static uint64_t default_header_hash(std::string_view header);
     void set_header_hash(HeaderHash hash);
+
+    // One occurrence of a header among several CoordToHeader objects (find_repeated_headers):
+    // the position of its object in the list passed, its column there and its seq_id
+    struct HeaderOccurrence {
+        size_t index;
+        Column column;
+        size_t seq_id;
+
+        bool operator==(const HeaderOccurrence &other) const {
+            return index == other.index && column == other.column && seq_id == other.seq_id;
+        }
+    };
+    /**
+     * The headers that occur more than once over |indexes|: in two of them, in two columns
+     * of one, or twice in one column. |callback|(header, count, listed) is called once per such
+     * header with its number of occurrences and the first |max_listed| of them, ordered by
+     * (index, column, seq_id); the headers come in the order of their hashes. Returns their
+     * number. Builds each object's reverse index if not built yet (on |num_threads| threads,
+     * as build_header_index), then merges the sorted arrays (a k-way merge over the objects'
+     * hashes): equal hashes are compared on the headers, so a hash collision is never
+     * reported as a repeat. A header repeated many times costs its count, not a list. Null
+     * entries hold no headers. Every object must hash with the same function
+     * (std::invalid_argument).
+     */
+    static uint64_t find_repeated_headers(
+            const std::vector<const CoordToHeader*> &indexes,
+            const std::function<void(std::string_view header, uint64_t count,
+                                     const std::vector<HeaderOccurrence> &listed)> &callback,
+            size_t max_listed = std::numeric_limits<size_t>::max(),
+            size_t num_threads = 0);
 
     /**
      * The records of |headers| whose header repeats an earlier record's, in record order:

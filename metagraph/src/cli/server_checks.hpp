@@ -17,6 +17,10 @@
 
 
 namespace mtg {
+namespace annot {
+class CoordToHeader;
+} // namespace annot
+
 namespace cli {
 
 // The parts of the server's request handling that need no HTTP library (server_utils.cpp),
@@ -422,6 +426,34 @@ struct ColumnOverlap {
 };
 ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &columns,
                              const std::function<size_t(const std::string&)> &hash = nullptr);
+
+// One (graph, annotation) pair of headers_unique_json: the tags its occurrences carry (null on
+// a single-graph server, as its /search cut's), its record mapping (null without a .seqs) and
+// its column names
+struct HeaderPair {
+    Json::Value graph;
+    Json::Value graph_path;
+    Json::Value annotation_path;
+    const annot::CoordToHeader *coord_to_header = nullptr;
+    const std::vector<std::string> *columns = nullptr;
+};
+
+/**
+ * GET /capabilities' `headers_unique` (SPEC-multigraph-envelope.md, "headers_unique (E22)"):
+ * whether every sequence header of the server names one record, so that a header label
+ * selects one sequence of one pair. |pairs| are the server's (graph, annotation) pairs, each
+ * once (a single-graph server's one pair with null tags). A header repeated across pairs,
+ * across the columns of a pair or within a column is a collision
+ * (CoordToHeader::find_repeated_headers, which builds each pair's header index if not built
+ * yet, on |num_threads| threads).
+ *   {"value": true | false | null, "collisions": n, "examples": [{"header", "occurrences",
+ *    "pairs": [{graph, graph_path, annotation_path, column}...]}...]}
+ * value is null when a pair has no .seqs (collisions and examples then count the pairs that
+ * have one); examples are the |max_examples| byte-smallest repeated headers, each listing its
+ * first |max_listed| occurrences in pair, column and record order, its column by name.
+ */
+Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num_threads = 0,
+                                size_t max_examples = 10, size_t max_listed = 10);
 
 } // namespace cli
 } // namespace mtg

@@ -24,7 +24,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list)"
+   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list); headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every header of the .seqs names one record"
   },
   "traverse_capabilities": {
    "server": "masked",
@@ -123,7 +123,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)"
+   "shows": "a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block with the contract and the caps and no graph (available: a pair is served), graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, traversal; columns_disjoint; headers_unique, SPEC-multigraph-envelope.md section 9) and max_graphs_without_selection (the threshold of the selection rule: a request without `graphs` queries every name of a list of at most that many, the server flag, 10 by default)"
   },
   "traverse_capabilities_multi_graph": {
    "server": "multi",
@@ -195,7 +195,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set"
+   "shows": "a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set; headers_unique null (the pair has no .seqs)"
   },
   "traverse_capabilities_representation_unsupported": {
    "server": "hash",

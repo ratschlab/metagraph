@@ -4402,6 +4402,7 @@ chunk's entry); a client caches it:
 |---|---|---|
 | `columns_disjoint` | boolean | no column name is a column of two pairs (each pair counted once, whatever names list it): a label's counts and occurrences summed over the pairs count each column once — the chunks of an index that partition its samples |
 | `shared_columns` | integer | the column names of more than one pair (0 exactly when disjoint); the start-up log names one |
+| `headers_unique` | object | whether every sequence header names one record over the pairs (each pair once): `{value, collisions, examples}`, SPEC-multigraph-envelope.md §9 |
 | `pairs` | list of objects | one per (name, pair), in §24.1's order (a pair under two names twice): `graph_summary_pair` |
 
 <!-- schema: graph_summary_pair -->

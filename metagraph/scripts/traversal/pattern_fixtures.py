@@ -615,6 +615,22 @@ def single_graph_selection(doc):
                                'max_request_body_mb')})
 
 
+def headers_unique(value, multi=False):
+    """GET /capabilities' headers_unique (SPEC-multigraph-envelope.md section 9): whether every
+    sequence header names one record, with no repeat to list -- at the top level of a
+    single-graph server, in graph_summary of a multi-graph server (not at its top level).
+    |value| true where the pairs have their .seqs (the mini's headers each name one record),
+    null where a pair has none"""
+    def run(doc):
+        if multi:
+            check('headers_unique' not in doc, sorted(doc))
+            member = doc['graph_summary']['headers_unique']
+        else:
+            member = doc['headers_unique']
+        check(member == {'value': value, 'collisions': 0, 'examples': []}, member)
+    return run
+
+
 def names_the_pair(doc):
     """The block of one pair of a multi-graph server names it (graph, graph_path)"""
     check(doc['graph'] == MULTI_GRAPH_NAME and doc['graph_path'].endswith(MINI_GRAPH), doc)
@@ -802,9 +818,11 @@ FIXTURES = [
     get('capabilities', 'masked', '/capabilities',
         'GET /capabilities of a single-graph server whose graph has its mask: `pattern` in '
         'features and routes, the block available (basic, mask file, counting exact, placement '
-        'record); graph_summary and max_graphs_without_selection null (no graph list)',
+        'record); graph_summary and max_graphs_without_selection null (no graph list); '
+        'headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every '
+        'header of the .seqs names one record',
         expect_all(features(True), caps_block(True, mask='file', counting='exact'),
-                   single_graph_selection)),
+                   single_graph_selection, headers_unique(True))),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
         'its `pattern` member the gate block (SPEC §23.2): the fields a client gates on, with '
@@ -831,7 +849,7 @@ FIXTURES = [
         'dummy_fraction sampled at load (value, 95% interval, samples, source sampled); it '
         'said available false, mask_required before',
         expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'),
-                   single_graph_selection)),
+                   single_graph_selection, headers_unique(True))),
     get('traverse_capabilities_mask_absent', 'unmasked', '/traverse/capabilities',
         'the same unmasked server on the probe route (the gate block: counting upper_bound, '
         'the dummy_fraction in the full block only)',
@@ -844,7 +862,7 @@ FIXTURES = [
         'built_at_load (the mask built in memory at start-up), counting exact, otherwise as '
         'with the file',
         expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'),
-                   single_graph_selection)),
+                   single_graph_selection, headers_unique(True))),
     get('traverse_capabilities_built_at_load', 'built_at_load', '/traverse/capabilities',
         'the same server on the probe route (the gate block)',
         gate_block(True, mask='built_at_load', counting='exact')),
@@ -855,10 +873,11 @@ FIXTURES = [
         'a multi-graph server: the `pattern` feature, its routes per pair (?graph=), the block '
         'with the contract and the caps and no graph (available: a pair is served), '
         'graph_summary (each pair: available, mask, counting, k, graph_mode, index_fp, '
-        'traversal; columns_disjoint) and max_graphs_without_selection (the threshold of the '
-        'selection rule: a request without `graphs` queries every name of a list of at most '
-        'that many, the server flag, 10 by default)',
-        multi_capabilities),
+        'traversal; columns_disjoint; headers_unique, SPEC-multigraph-envelope.md section 9) '
+        'and max_graphs_without_selection (the threshold of the selection rule: a request '
+        'without `graphs` queries every name of a list of at most that many, the server flag, '
+        '10 by default)',
+        expect_all(multi_capabilities, headers_unique(True, multi=True))),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
         'the multi-graph server probed for one pair: the envelope of one entry '
@@ -903,9 +922,9 @@ FIXTURES = [
     get('capabilities_representation_unsupported', 'hash', '/capabilities',
         'a graph the engine does not recognise (a hash graph): the feature and route listed, '
         'the block available false, unavailable_reason representation_unsupported, graph_mode '
-        'null and only k set',
+        'null and only k set; headers_unique null (the pair has no .seqs)',
         expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k,
-                   single_graph_selection)),
+                   single_graph_selection, headers_unique(None))),
     get('traverse_capabilities_representation_unsupported', 'hash', '/traverse/capabilities',
         'the same hash-graph server on the probe route (the gate block)',
         expect_all(gate_block(False, 'representation_unsupported'), gate_only_k)),
