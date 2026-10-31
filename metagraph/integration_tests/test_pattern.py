@@ -4305,13 +4305,46 @@ class TestPatternFixtures(unittest.TestCase):
                         self.assertEqual(f.read(), g.read())
 
 
+def assert_search_as_before(test, base, new, where):
+    """A 200 /search answer of this build (|new|, its body) against a build's before release 10
+    (|base|): SPEC-multigraph-envelope.md section 3 (E1) adds to each query sequence its `cuts`
+    (one, its pair tags null on a single-graph server), lists the rows in the C5 order (score
+    descending, then label ascending on an annotation without k-mer counts) and breaks the ties
+    at the top N's cut by label where the base broke them by column. The answers are otherwise
+    the same: the rows the same where nothing was cut; where the top N was cut, the rows above
+    the N-th score the same and as many rows at it."""
+    a, b = json.loads(base), json.loads(new)
+    test.assertEqual(len(a), len(b), where)
+    as_key = lambda row: json.dumps(row, sort_keys=True)
+    for x, y in zip(a, b):
+        [cut] = y.pop('cuts')
+        test.assertEqual({'graph': None, 'graph_path': None, 'annotation_path': None,
+                          'index_fp': None},
+                         {k: cut.pop(k) for k in ('graph', 'graph_path', 'annotation_path',
+                                                  'index_fp')}, where)
+        rows_a, rows_b = x.pop('results'), y.pop('results')
+        test.assertEqual(x, y, where)
+        test.assertEqual(len(rows_a), len(rows_b), where)
+        test.assertEqual(cut['returned'], len(rows_b), where)
+        test.assertEqual(sorted(rows_b, key=lambda r: (-r['kmer_count'], r['sample'].encode())),
+                         rows_b, where)
+        if cut['complete']:
+            test.assertEqual(sorted(map(as_key, rows_a)), sorted(map(as_key, rows_b)), where)
+            continue
+        for rows in (rows_a, rows_b):
+            test.assertEqual(cut['nth_score'], min(r['kmer_count'] for r in rows), where)
+        above = lambda rows: sorted(as_key(r) for r in rows if r['kmer_count'] > cut['nth_score'])
+        test.assertEqual(above(rows_a), above(rows_b), where)
+
+
 @unittest.skipIf(PROTEIN_MODE, "the request panel is DNA")
 @guard(bool(BASE_BINARY) and os.path.isfile(BASE_BINARY),
        "$METAGRAPH_BASE_BINARY (the binary before the pattern search) is not set (not in CI)")
 class TestPatternRegression(TestingBase):
     """/search and /align answer byte for byte as a build without the pattern search does
     (§11; $METAGRAPH_BASE_BINARY), on test_api.py's fixture (transcripts_100.fa, k = 6) and
-    requests; /capabilities only gains."""
+    requests, /search's answers apart from what release 10 adds and orders
+    (assert_search_as_before); /capabilities only gains."""
 
     SEQ = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
     SEQ2 = 'AATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA'
@@ -4355,6 +4388,10 @@ class TestPatternRegression(TestingBase):
             raw = isinstance(payload, str)
             a = self.base.post(route, payload, raw=raw)
             b = self.new.post(route, payload, raw=raw)
+            if route == 'search' and a.status_code == 200:
+                self.assertEqual(200, b.status_code, (route, payload))
+                assert_search_as_before(self, a.content, b.content, (route, payload))
+                continue
             self.assertEqual((a.status_code, a.content), (b.status_code, b.content),
                              (route, payload))
         for route in ('column_labels', 'stats'):
@@ -4364,7 +4401,8 @@ class TestPatternRegression(TestingBase):
     def test_a_half_closed_client_is_answered_as_before(self):
         """Only /pattern withholds its answers from a client that half-closed: /search and
         /align answer such a client byte for byte as the base binary does, their errors
-        included."""
+        included (a /search answer apart from what release 10 adds and orders: its
+        Content-Length and the body assert_search_as_before compares)."""
         panel = [
             ('search', {'FASTA': f'>query\n{self.SEQ}', 'top_labels': 5,
                         'min_exact_match': 0.1}),
@@ -4377,6 +4415,13 @@ class TestPatternRegression(TestingBase):
             a = half_closed_request(self.base.port, route, payload)
             b = half_closed_request(self.new.port, route, payload)
             self.assertTrue(a.startswith(b'HTTP/1.1 '), (route, payload, a))
+            if route == 'search' and a.startswith(b'HTTP/1.1 200 '):
+                (head_a, body_a), (head_b, body_b) = (r.split(b'\r\n\r\n', 1) for r in (a, b))
+                without_length = lambda head: [line for line in head.split(b'\r\n')
+                                               if not line.lower().startswith(b'content-length:')]
+                self.assertEqual(without_length(head_a), without_length(head_b), (route, payload))
+                assert_search_as_before(self, body_a, body_b, (route, payload))
+                continue
             self.assertEqual(a, b, (route, payload))
 
     def test_capabilities_only_gain(self):

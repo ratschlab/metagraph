@@ -682,6 +682,83 @@ class TestMultiGraphServer(TestingBase):
                                    "lists the graphs)"},
                          self.post('pattern', dict(p, graphs=['nope']), 400))
 
+    def test_search_tags_rows_and_states_a_cut_per_pair(self):
+        """SPEC-multigraph-envelope.md section 3 (E1): on a multi-graph server every /search
+        row carries its pair (graph, graph_path, annotation_path); the rows of a query sequence
+        come in the index's pair order (the names in byte order, each name's pairs in the
+        list's order); each query sequence states one cut per pair searched, in that order,
+        empty pairs included, index_fp null for a pair without a manifest. The chunks' labels
+        are disjoint, so a query cut from one chunk's record leaves the other pairs empty."""
+        chunks = [name for name, _, _, _ in CHUNKS]
+        cut = {c: self.records[c][0][4000:4100] for c in chunks}
+        s = {'FASTA': ''.join(f'>{c}\n{cut[c]}\n' for c in chunks), 'discovery_fraction': 0.5}
+        pair_tags = ('graph', 'graph_path', 'annotation_path')
+
+        def tags(name, chunk):
+            return dict(zip(pair_tags, (name,) + self.pairs[chunk]))
+
+        # selected in any order: ecoli < enterics < kleb < pseudo, enterics' pairs as listed
+        out = self.post('search', dict(s, graphs=['pseudo', 'enterics', 'ecoli']))
+        order = [('ecoli', 'ecoli'), ('enterics', 'ecoli'), ('enterics', 'kleb'),
+                 ('pseudo', 'pseudo')]
+        self.assertEqual(chunks, [query['seq_description'] for query in out])
+        empty = 0
+        for query in out:
+            chunk = query['seq_description']
+            with self.subTest(query=chunk):
+                rows = query['results']
+                # each pair's rows together, the pairs in the index's order
+                seen, returned = [], {}
+                for row in rows:
+                    pair = next(p for p in order if tags(*p) == {t: row[t] for t in pair_tags})
+                    if not seen or seen[-1] != pair:
+                        seen.append(pair)
+                    returned[pair] = returned.get(pair, 0) + 1
+                self.assertEqual(sorted(set(seen), key=order.index), seen)
+                # the pairs over the query's chunk answer it (the chunks share sequence, so
+                # others may as well)
+                self.assertTrue({p for p in order if p[1] == chunk} <= set(seen), seen)
+                # one cut per pair, the empty ones included
+                self.assertEqual([dict(tags(*pair), index_fp=None, returned=returned.get(pair, 0),
+                                       complete=True, nth_score=None, tied=0, tied_returned=0)
+                                  for pair in order],
+                                 query['cuts'])
+                empty += sum(1 for cut in query['cuts'] if cut['returned'] == 0)
+                # a pair under two names answers alike under each
+                untagged = lambda name: [{k: v for k, v in r.items() if k not in pair_tags}
+                                         for r in rows if r['graph'] == name
+                                         and r['graph_path'] == self.pairs['ecoli'][0]]
+                self.assertEqual(untagged('ecoli'), untagged('enterics'))
+        self.assertTrue(empty)
+
+        # the cut: the two labels of pseudo (its FASTA files) on a query of 100 bp of each,
+        # the windows chosen so that both match as many k-mers (a basic graph: the k-mers as
+        # written); the top 1 is the label first in byte order
+        files = [os.path.join(FASTA, f) for f in CHUNKS[2][1]]
+        longest = [sorted(records_of([f]), key=len, reverse=True)[0] for f in files]
+        texts = ['\n'.join(records_of([f])) for f in files]
+
+        def score(query, text):
+            return sum(query[i:i + K] in text for i in range(len(query) - K + 1))
+
+        for offset in range(4000, 40000, 500):
+            query = ''.join(seq[offset:offset + 100] for seq in longest)
+            scores = [score(query, text) for text in texts]
+            if scores[0] == scores[1] > 0:
+                break
+        else:
+            self.fail('no window of the two files matches as many k-mers of each')
+        q = {'FASTA': f'>q\n{query}\n', 'discovery_fraction': 0.1, 'graphs': ['pseudo']}
+        [complete] = self.post('search', dict(q, top_labels=10))
+        self.assertEqual([{'sample': f, 'kmer_count': scores[0], **tags('pseudo', 'pseudo')}
+                          for f in sorted(files)],
+                         complete['results'])
+        [top] = self.post('search', dict(q, top_labels=1))
+        self.assertEqual(complete['results'][:1], top['results'])
+        self.assertEqual([dict(tags('pseudo', 'pseudo'), index_fp=None, returned=1,
+                               complete=False, nth_score=scores[0], tied=2, tied_returned=1)],
+                         top['cuts'])
+
     def test_a_refused_pair_is_an_entry_of_the_envelope(self):
         """A pair the request cannot be answered on -- here output.labels "all" on a column
         annotation, annotation_unbudgeted -- is a refused entry of the envelope: its tags,

@@ -1,6 +1,7 @@
 #include "annotated_dbg.hpp"
 
 #include <cstdlib>
+#include <numeric>
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
@@ -49,7 +50,19 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            bool force_fast,
                            std::shared_ptr<const annot::CoordToHeader> coord_to_header)
       : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg),
-        coord_to_header_(std::move(coord_to_header)) {}
+        coord_to_header_(std::move(coord_to_header)),
+        kmer_abundances_(holds_kmer_abundances(*annotator_)) {}
+
+bool AnnotatedDBG::holds_kmer_abundances(const Annotator &annotation) {
+    const auto &matrix = annotation.get_matrix();
+    return dynamic_cast<const IntMatrix *>(&matrix)
+            && !dynamic_cast<const MultiIntMatrix *>(&matrix);
+}
+
+const IntMatrix* AnnotatedDBG::abundance_matrix() const {
+    return kmer_abundances_ ? dynamic_cast<const IntMatrix *>(&annotator_->get_matrix())
+                            : nullptr;
+}
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
@@ -304,36 +317,243 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     return annotator_->get_labels(graph_to_anno_index(index));
 }
 
-// Container `code_counts` must have pairs (index, count)
-template <class Container>
-void top_n_sorted(Container& code_counts, size_t num_top_labels) {
-    assert(num_top_labels <= code_counts.size());
-    auto comp = [](const auto &x, const auto &y) {
-        return std::make_pair(y.second, x.first)
-              < std::make_pair(x.second, y.first);
-    };
-    std::nth_element(code_counts.begin(),
-                     code_counts.begin() + num_top_labels,
-                     code_counts.end(),
-                     comp);
-    // leave only the first |num_top_labels| top labels
-    code_counts.resize(num_top_labels);
-    // sort the top labels by counts
-    std::sort(code_counts.begin(), code_counts.end(), comp);
+uint64_t lower_median(std::vector<uint64_t> values) {
+    values.erase(std::remove(values.begin(), values.end(), 0u), values.end());
+    if (values.empty())
+        return 0;
+    auto median = values.begin() + (values.size() - 1) / 2;
+    std::nth_element(values.begin(), median, values.end());
+    return *median;
 }
 
+bool search_row_before(const SearchRow &a, const SearchRow &b) {
+    if (a.score != b.score)
+        return a.score > b.score;
+    if (a.median != b.median)
+        return a.median > b.median;
+    return a.label < b.label;
+}
+
+std::vector<std::pair<size_t, std::string>>
+search_top_n(const std::vector<size_t> &scores,
+             size_t num_top_labels,
+             const std::function<std::string(size_t)> &label,
+             const std::function<std::vector<uint64_t>(const std::vector<size_t> &)> &medians,
+             SearchCut *cut) {
+    SearchCut c;
+    c.abundances = static_cast<bool>(medians);
+
+    struct Row {
+        size_t index;
+        size_t score;
+        uint64_t median;
+        std::string label;
+    };
+    std::vector<size_t> order(scores.size());
+    std::iota(order.begin(), order.end(), 0);
+
+    // [0, above): the rows above the N-th score, every one returned; [above, rows.size()):
+    // the rows of the N-th score (the tie group at the cut), of which |slots| are returned
+    size_t above = order.size();
+    size_t slots = 0;
+    if (order.size() > num_top_labels) {
+        c.complete = false;
+        if (!num_top_labels) {
+            // no row returned, so no N-th row
+            order.clear();
+            above = 0;
+        } else {
+            std::nth_element(order.begin(), order.begin() + num_top_labels - 1, order.end(),
+                             [&](size_t i, size_t j) { return scores[i] > scores[j]; });
+            c.nth_score = scores[order[num_top_labels - 1]];
+            above = std::partition(order.begin(), order.end(),
+                                   [&](size_t i) { return scores[i] > c.nth_score; })
+                    - order.begin();
+            order.erase(std::partition(order.begin() + above, order.end(),
+                                       [&](size_t i) { return scores[i] == c.nth_score; }),
+                        order.end());
+            slots = num_top_labels - above;
+            c.tied = order.size() - above;
+            c.tied_returned = slots;
+        }
+    }
+
+    std::vector<Row> rows;
+    rows.reserve(order.size());
+    for (size_t i : order) {
+        rows.push_back(Row{ i, scores[i], 0, std::string() });
+    }
+
+    // The medians break ties only: they are read at a cut (its tie group, and the N-th row's
+    // median stated) and where two returned rows share a score, which is the only place the
+    // reading of the abundances costs a pass over the query's rows
+    if (medians && rows.size()) {
+        bool shared_score = !c.complete;
+        if (!shared_score) {
+            std::vector<size_t> sorted_scores(rows.size());
+            std::transform(rows.begin(), rows.end(), sorted_scores.begin(),
+                           [](const Row &row) { return row.score; });
+            std::sort(sorted_scores.begin(), sorted_scores.end());
+            shared_score = std::adjacent_find(sorted_scores.begin(), sorted_scores.end())
+                            != sorted_scores.end();
+        }
+        if (shared_score) {
+            std::vector<size_t> indexes(rows.size());
+            std::transform(rows.begin(), rows.end(), indexes.begin(),
+                           [](const Row &row) { return row.index; });
+            std::vector<uint64_t> values = medians(indexes);
+            assert(values.size() == rows.size());
+            for (size_t r = 0; r < rows.size(); ++r) {
+                rows[r].median = values[r];
+            }
+        }
+    }
+
+    auto before = [](const Row &a, const Row &b) {
+        if (search_row_before({ a.score, a.median, a.label }, { b.score, b.median, b.label }))
+            return true;
+        if (search_row_before({ b.score, b.median, b.label }, { a.score, a.median, a.label }))
+            return false;
+        // one label in two candidates (a header in two columns): their order in |scores|
+        return a.index < b.index;
+    };
+
+    if (!c.complete && slots) {
+        // The tie group competes for |slots| places. Only the rows of the N-th row's median
+        // compete by label, so only they are decoded beside the rows returned: a large tie
+        // group (a common k-mer set at the cut) is not decoded entirely where the medians
+        // separate it.
+        auto tie_begin = rows.begin() + above;
+        std::sort(tie_begin, rows.end(),
+                  [](const Row &a, const Row &b) { return a.median > b.median; });
+        c.nth_median = tie_begin[slots - 1].median;
+        auto same_begin = std::partition_point(tie_begin, rows.end(),
+                [&](const Row &row) { return row.median > c.nth_median; });
+        auto same_end = std::partition_point(same_begin, rows.end(),
+                [&](const Row &row) { return row.median == c.nth_median; });
+        c.tied_same_median = same_end - same_begin;
+        for (auto it = tie_begin; it != same_end; ++it) {
+            it->label = label(it->index);
+        }
+        std::sort(same_begin, same_end, before);
+        rows.erase(tie_begin + slots, rows.end());
+    }
+    if (!c.abundances)
+        c.nth_median = c.tied_same_median = 0;
+
+    for (size_t r = 0; r < above; ++r) {
+        rows[r].label = label(rows[r].index);
+    }
+    std::sort(rows.begin(), rows.end(), before);
+
+    c.returned = rows.size();
+    if (cut)
+        *cut = c;
+
+    std::vector<std::pair<size_t, std::string>> result;
+    result.reserve(rows.size());
+    for (auto &row : rows) {
+        result.emplace_back(row.index, std::move(row.label));
+    }
+    return result;
+}
+
+using ColumnMedians = std::function<std::vector<uint64_t>(const std::vector<Column> &)>;
+
+// The lower medians (lower_median) of the abundances of |columns| over the query's k-mer
+// positions: |call_rows| calls its callback with the row of (column, abundance) pairs of each
+// k-mer of the query found in the graph and the number of query positions that row stands for
+// (a k-mer repeated in the query is a position each time)
+template <class CallRows>
+std::vector<uint64_t> abundance_medians(const CallRows &call_rows,
+                                        const std::vector<Column> &columns,
+                                        size_t num_columns) {
+    utils::ValueStore<Column, std::vector<uint64_t>> values(num_columns, columns.size());
+    for (Column j : columns) {
+        values.emplace(j, std::vector<uint64_t>());
+    }
+    call_rows([&](const auto &row, size_t positions) {
+        for (const auto &[j, value] : row) {
+            if (!value)
+                continue;
+            if (std::vector<uint64_t> *v = values.get(j))
+                v->insert(v->end(), positions, value);
+        }
+    });
+    std::vector<uint64_t> medians;
+    medians.reserve(columns.size());
+    for (Column j : columns) {
+        medians.push_back(lower_median(std::move(*values.get(j))));
+    }
+    return medians;
+}
+
+// abundance_medians read from |matrix|: |row_counts| are the query's rows, each with the
+// number of query positions it stands for
+std::vector<uint64_t>
+abundance_medians(const IntMatrix &matrix,
+                  const std::vector<std::pair<AnnotatedDBG::row_index, size_t>> &row_counts,
+                  const std::vector<Column> &columns,
+                  size_t num_columns) {
+    // per-row access is cheap for a CSRMatrix (a batched query's slice); other matrices
+    // decode their rows in a batch
+    if (const auto *csr = dynamic_cast<const CSRMatrix *>(&matrix)) {
+        return abundance_medians([&](const auto &callback) {
+            for (const auto &[row, positions] : row_counts) {
+                callback(csr->get_row_values(row), positions);
+            }
+        }, columns, num_columns);
+    }
+    std::vector<AnnotatedDBG::row_index> rows;
+    rows.reserve(row_counts.size());
+    for (const auto &[row, positions] : row_counts) {
+        rows.push_back(row);
+    }
+    auto row_values = matrix.get_row_values(rows);
+    return abundance_medians([&](const auto &callback) {
+        for (size_t i = 0; i < row_values.size(); ++i) {
+            callback(row_values[i], row_counts[i].second);
+        }
+    }, columns, num_columns);
+}
+
+// The candidates' indexes mapped to the columns |medians| reads: what search_top_n asks of
+// a list of (column, score) pairs
+template <class Container>
+std::function<std::vector<uint64_t>(const std::vector<size_t> &)>
+medians_of_candidates(const Container &code_counts, const ColumnMedians &medians) {
+    if (!medians)
+        return {};
+    return [&code_counts, medians](const std::vector<size_t> &indexes) {
+        std::vector<Column> columns;
+        columns.reserve(indexes.size());
+        for (size_t i : indexes) {
+            columns.push_back(code_counts[i].first);
+        }
+        return medians(columns);
+    };
+}
+
+// The C5 top N of (column, count) pairs (search_top_n), the labels decoded
 template <class Container>
 std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
                                                const annot::LabelEncoder<> &label_encoder,
-                                               size_t num_top_labels) {
-    if (code_counts.size() > num_top_labels)
-        top_n_sorted(code_counts, num_top_labels);
-
-    // TODO: remove this step? (return (code, count) pairs and defer label decoding to the caller)
-    std::vector<StringCountPair> label_counts;
-    label_counts.reserve(code_counts.size());
+                                               size_t num_top_labels,
+                                               const ColumnMedians &medians,
+                                               SearchCut *cut) {
+    std::vector<size_t> scores;
+    scores.reserve(code_counts.size());
     for (const auto &[j, count] : code_counts) {
-        label_counts.emplace_back(label_encoder.decode(j), count);
+        scores.push_back(count);
+    }
+    auto top = search_top_n(scores, num_top_labels,
+                            [&](size_t i) { return label_encoder.decode(code_counts[i].first); },
+                            medians_of_candidates(code_counts, medians), cut);
+
+    std::vector<StringCountPair> label_counts;
+    label_counts.reserve(top.size());
+    for (auto &[i, label] : top) {
+        label_counts.emplace_back(std::move(label), code_counts[i].second);
     }
 
     return label_counts;
@@ -344,19 +564,29 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction,
                              double presence_fraction,
-                             bool with_kmer_counts) const {
+                             bool with_kmer_counts,
+                             SearchCut *cut) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
+    // what a search that returns no row states (complete), replaced by its cut otherwise
+    if (cut) {
+        *cut = SearchCut();
+        cut->abundances = kmer_abundances_;
+    }
+
     if (sequence.size() < dbg_.get_k())
         return {};
 
     if (coord_to_header_) {
-        auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
-                                                   discovery_fraction, presence_fraction);
+        // the records ranked by the score reported: with |with_kmer_counts| the number of
+        // their coordinates matched, which the counts below sum up
+        auto kmer_coord_res = query_kmer_coordinates(sequence, num_top_labels,
+                                                     discovery_fraction, presence_fraction,
+                                                     cut, with_kmer_counts);
         std::vector<StringCountPair> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
@@ -390,15 +620,26 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     if (num_present_kmers < min_count)
         return {};
 
+    // the abundances of the ties, read from the rows matched (each with its multiplicity in
+    // the query) only where a tie needs them; the matrix is captured by value, its pointer
+    // ends with the condition's scope
+    ColumnMedians medians;
+    if (const IntMatrix *abundances = abundance_matrix()) {
+        medians = [&, abundances](const std::vector<Column> &columns) {
+            return abundance_medians(*abundances, index_counts.values_container(), columns,
+                                     annotator_->num_labels());
+        };
+    }
+
     std::vector<StringCountPair> result;
     if (with_kmer_counts) {
         result = filter_and_decode(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                         .sum_row_values(index_counts.values_container(), min_count),
-                                   annotator_->get_label_encoder(), num_top_labels);
+                                   annotator_->get_label_encoder(), num_top_labels, medians, cut);
     } else {
         result = filter_and_decode(annotator_->get_matrix()
                                         .sum_rows(index_counts.values_container(), min_count),
-                                   annotator_->get_label_encoder(), num_top_labels);
+                                   annotator_->get_label_encoder(), num_top_labels, medians, cut);
     }
 
     assert(with_kmer_counts || std::all_of(result.begin(), result.end(),
@@ -408,13 +649,18 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 }
 
 
+// The C5 top N of the labels of the rows |enumerate_rows| calls (the query's k-mers found in
+// the graph, at |kmer_positions|) with at least |min_count| of them, each with its value per
+// query position; |medians| and |cut| as filter_and_decode's
 template <class Result, class RowEnumerator>
 Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
                             const annot::LabelEncoder<Label> &label_encoder,
                             size_t min_count,
                             size_t num_top_labels,
                             const std::vector<size_t> &kmer_positions,
-                            size_t num_kmers) {
+                            size_t num_kmers,
+                            const ColumnMedians &medians,
+                            SearchCut *cut) {
     static_assert(utils::is_one_of_v<Result,
                     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>,
                     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>,
@@ -427,14 +673,27 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
             }
         });
     };
-    std::vector<std::pair<Column, size_t>> counts
+    std::vector<std::pair<Column, size_t>> candidates
             = utils::accumulate_counts(call_bits, label_encoder.size(), min_count);
 
-    if (counts.size() > num_top_labels)
-        top_n_sorted(counts, num_top_labels);
-
-    if (counts.empty())
+    std::vector<size_t> scores;
+    scores.reserve(candidates.size());
+    for (const auto &[j, count] : candidates) {
+        scores.push_back(count);
+    }
+    auto top = search_top_n(scores, num_top_labels,
+                            [&](size_t i) { return label_encoder.decode(candidates[i].first); },
+                            medians_of_candidates(candidates, medians), cut);
+    if (top.empty())
         return {};
+
+    // the rows returned, in the C5 order
+    std::vector<std::pair<Column, size_t>> counts;
+    counts.reserve(top.size());
+    for (const auto &[i, label] : top) {
+        counts.push_back(candidates[i]);
+    }
+    candidates = decltype(candidates)();
 
     using ValueType = std::tuple_element_t<2, typename Result::value_type>;
     utils::ValueStore<Column, ValueType> value_store(label_encoder.size(), counts.size());
@@ -460,8 +719,9 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
 
     Result result;
     result.reserve(counts.size());
-    for (const auto &[j, count] : counts) {
-        result.emplace_back(label_encoder.decode(j), count, std::move(*value_store.get(j)));
+    for (size_t r = 0; r < counts.size(); ++r) {
+        const auto &[j, count] = counts[r];
+        result.emplace_back(std::move(top[r].second), count, std::move(*value_store.get(j)));
     }
     return result;
 }
@@ -515,19 +775,26 @@ std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>
 AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
-                              double presence_fraction) const {
+                              double presence_fraction,
+                              SearchCut *cut) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
+    // what a search that returns no row states (complete), replaced by its cut otherwise
+    if (cut) {
+        *cut = SearchCut();
+        cut->abundances = kmer_abundances_;
+    }
+
     if (sequence.size() < dbg_.get_k())
         return {};
 
     if (coord_to_header_) {
         auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
-                                                   discovery_fraction, presence_fraction);
+                                                   discovery_fraction, presence_fraction, cut);
         std::vector<std::tuple<std::string, size_t, std::vector<size_t>>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
@@ -559,8 +826,18 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
     }
 
     auto get_results = [&](const auto &enumerate_rows) {
+        // the abundances of the ties, from the rows read for the counts (one per position)
+        ColumnMedians medians;
+        if (kmer_abundances_) {
+            medians = [&](const std::vector<Column> &columns) {
+                return abundance_medians([&](const auto &callback) {
+                    enumerate_rows([&](const auto &row) { callback(row, 1); });
+                }, columns, annotator_->num_labels());
+            };
+        }
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, std::vector<size_t>>>>(
-            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
+            medians, cut);
         assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
         return results;
     };
@@ -587,12 +864,31 @@ std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t
 AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
-                                   double presence_fraction) const {
+                                   double presence_fraction,
+                                   SearchCut *cut) const {
+    return query_kmer_coordinates(sequence, num_top_labels, discovery_fraction,
+                                  presence_fraction, cut, false);
+}
+
+std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
+AnnotatedDBG::query_kmer_coordinates(std::string_view sequence,
+                                     size_t num_top_labels,
+                                     double discovery_fraction,
+                                     double presence_fraction,
+                                     SearchCut *cut,
+                                     bool score_by_coordinates) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
+
+    // what a search that returns no row states (complete), replaced by its cut otherwise; a
+    // coordinate annotation holds no abundances
+    if (cut) {
+        *cut = SearchCut();
+        cut->abundances = kmer_abundances_;
+    }
 
     if (sequence.size() < dbg_.get_k())
         return {};
@@ -630,9 +926,11 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         // Before splitting coords across sequences, filter them by the number of k-mer matches
         using Header = std::pair<Column, size_t>; // (column, seq_id)
         using Count = size_t;
-        std::vector<std::pair<Header, Count>> counts;
+        // per record: the query's k-mers it matches, and (|score_by_coordinates|) the number
+        // of its coordinates they match
+        std::vector<std::pair<Header, std::pair<Count, uint64_t>>> candidates;
         {
-            VectorMap<Header, Count> counts_map;
+            VectorMap<Header, std::pair<Count, uint64_t>> counts_map;
             tsl::hopscotch_set<Header> matches;
             for (const auto &row : rows_tuples) {
                 matches.clear();
@@ -640,23 +938,42 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                     for (uint64_t coord : coords) {
                         size_t header = coord % coord_to_header_->num_sequences(col);
                         matches.emplace(col, header);
+                        if (score_by_coordinates)
+                            counts_map[Header(col, header)].second++;
                     }
                 }
                 for (const Header &h : matches) {
-                    counts_map[h]++;
+                    counts_map[h].first++;
                 }
             }
-            counts = to_vector(std::move(counts_map));
+            candidates = to_vector(std::move(counts_map));
         }
 
         // remove sequences with insufficient number of k-mer matches
-        counts.erase(std::remove_if(counts.begin(), counts.end(),
-                                    [&](const auto &pair) { return pair.second < min_count; }),
-                     counts.end());
+        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                        [&](const auto &c) { return c.second.first < min_count; }),
+                         candidates.end());
+        // the records in (column, seq_id) order, so that a header in two columns is
+        // returned in the same order by every request
+        std::sort(candidates.begin(), candidates.end(), utils::LessFirst());
 
-        // keep only top-n sequences
-        if (counts.size() > num_top_labels)
-            top_n_sorted(counts, num_top_labels);
+        // keep only the top-n sequences, by the score reported, ties by their header (C5:
+        // coordinates are positions, not abundances)
+        std::vector<size_t> scores;
+        scores.reserve(candidates.size());
+        for (const auto &[h, c] : candidates) {
+            scores.push_back(score_by_coordinates ? c.second : c.first);
+        }
+        auto top = search_top_n(scores, num_top_labels, [&](size_t i) {
+            const auto &[col, header] = candidates[i].first;
+            return coord_to_header_->get_headers(col)[header];
+        }, {}, cut);
+        std::vector<std::pair<Header, Count>> counts;
+        counts.reserve(top.size());
+        for (const auto &[i, label] : top) {
+            counts.emplace_back(candidates[i].first, candidates[i].second.first);
+        }
+        candidates = decltype(candidates)();
 
         // split coordinates across sequences
         tsl::hopscotch_map<Header, std::vector<Tuple>> coords_map;
@@ -681,10 +998,11 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
 
         std::vector<std::tuple<std::string, Count, std::vector<Tuple>, size_t>> result;
         result.reserve(counts.size());
-        for (const auto &[h, count] : counts) {
+        for (size_t r = 0; r < counts.size(); ++r) {
+            const auto &[h, count] = counts[r];
             const auto &[col, header] = h;
             auto &coords = coords_map[h];
-            result.emplace_back(coord_to_header_->get_headers(col)[header],
+            result.emplace_back(std::move(top[r].second),
                                 count, std::move(coords),
                                 coord_to_header_->num_kmers_in_sequence(col, header));
         }
@@ -696,8 +1014,10 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         std::for_each(rows_tuples.begin(), rows_tuples.end(), callback);
     };
 
+    // ties ordered by label: the coordinates are positions, not abundances
     auto results = filter_and_aggregate<std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>>(
-        call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+        call_rows_tuples, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
+        {}, cut);
     assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
 
     // Without a CoordToHeader mapping, the label refers to a whole annotation
@@ -715,12 +1035,19 @@ std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
                                        double discovery_fraction,
-                                       double presence_fraction) const {
+                                       double presence_fraction,
+                                       SearchCut *cut) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
+
+    // what a search that returns no row states (complete), replaced by its cut otherwise
+    if (cut) {
+        *cut = SearchCut();
+        cut->abundances = kmer_abundances_;
+    }
 
     if (sequence.size() < dbg_.get_k())
         return {};
@@ -728,7 +1055,8 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
     if (discovery_fraction == 1.) {
-        auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction);
+        auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction,
+                                           presence_fraction, false, cut);
         std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> presence_vectors;
         presence_vectors.reserve(label_counts.size());
         for (auto&& [label, count] : label_counts) {
@@ -743,7 +1071,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     if (coord_to_header_) {
         auto kmer_coord_res = get_kmer_coordinates(sequence, num_top_labels,
-                                                   discovery_fraction, presence_fraction);
+                                                   discovery_fraction, presence_fraction, cut);
         std::vector<std::tuple<Label, size_t, sdsl::bit_vector>> result;
         result.reserve(kmer_coord_res.size());
         for (auto &[label, count, coords, num_kmers_in_target] : kmer_coord_res) {
@@ -770,9 +1098,23 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
         return {};
 
     const auto &matrix = annotator_->get_matrix();
+    // the abundances of the ties: the rows enumerated below may be binary, so they are read
+    // from the integer matrix (one value per position), only where a tie needs them
+    ColumnMedians medians;
+    if (const IntMatrix *abundances = abundance_matrix()) {
+        medians = [&, abundances](const std::vector<Column> &columns) {
+            std::vector<std::pair<row_index, size_t>> row_counts;
+            row_counts.reserve(row_indices.size());
+            for (row_index row : row_indices) {
+                row_counts.emplace_back(row, 1);
+            }
+            return abundance_medians(*abundances, row_counts, columns, annotator_->num_labels());
+        };
+    }
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
-            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers);
+            enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
+            medians, cut);
         assert(same_results(results, get_top_labels(sequence, num_top_labels, discovery_fraction, presence_fraction)));
         return results;
     };

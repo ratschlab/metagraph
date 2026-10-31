@@ -295,6 +295,23 @@ Json::Value SeqSearchResult::to_json(bool verbose_output, size_t k) const {
 }
 
 
+Json::Value SeqSearchResult::cut_to_json() const {
+    Json::Value cut(Json::objectValue);
+    // a cut without an N-th row (complete, or N = 0) states its score and median null
+    const bool nth_row = !cut_.complete && cut_.returned;
+    cut["returned"] = Json::UInt64(cut_.returned);
+    cut["complete"] = cut_.complete;
+    cut["nth_score"] = nth_row ? Json::Value(Json::UInt64(cut_.nth_score)) : Json::Value();
+    cut["tied"] = Json::UInt64(cut_.tied);
+    cut["tied_returned"] = Json::UInt64(cut_.tied_returned);
+    if (cut_.abundances) {
+        cut["nth_median"] = nth_row ? Json::Value(Json::UInt64(cut_.nth_median)) : Json::Value();
+        cut["tied_same_median"] = Json::UInt64(cut_.tied_same_median);
+    }
+    return cut;
+}
+
+
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
                                        bool verbose_output,
@@ -396,6 +413,9 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                               const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
+    // the top-N cut each mode's query takes (every mode but LABELS, which returns every label
+    // above the thresholds)
+    graph::SearchCut cut;
 
     switch (query_mode) {
         case SIGNATURE: {
@@ -403,7 +423,8 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_top_label_signatures(sequence.sequence,
                                                          num_top_labels,
                                                          discovery_fraction,
-                                                         presence_fraction);
+                                                         presence_fraction,
+                                                         &cut);
             break;
         }
         case COORDS: {
@@ -411,7 +432,8 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                      num_top_labels,
                                                      discovery_fraction,
-                                                     presence_fraction);
+                                                     presence_fraction,
+                                                     &cut);
             break;
         }
         case COUNTS: {
@@ -419,7 +441,8 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_kmer_counts(sequence.sequence,
                                                 num_top_labels,
                                                 discovery_fraction,
-                                                presence_fraction);
+                                                presence_fraction,
+                                                &cut);
             break;
         }
         case MATCHES: {
@@ -428,7 +451,8 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                num_top_labels,
                                                discovery_fraction,
                                                presence_fraction,
-                                               false);
+                                               false,
+                                               &cut);
             break;
         }
         case COUNTS_SUM: {
@@ -437,7 +461,8 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
                                                num_top_labels,
                                                discovery_fraction,
                                                presence_fraction,
-                                               true);
+                                               true,
+                                               &cut);
             break;
         }
         case LABELS: {
@@ -445,12 +470,14 @@ SeqSearchResult execute_query(QuerySequence&& sequence,
             result = anno_graph.get_labels(sequence.sequence,
                                            discovery_fraction,
                                            presence_fraction);
+            cut.abundances = anno_graph.has_kmer_abundances();
+            cut.returned = std::get<SeqSearchResult::LabelVec>(result).size();
             break;
         }
     }
 
     // Create seq search instance and move sequence into it
-    return SeqSearchResult(std::move(sequence), std::move(result));
+    return SeqSearchResult(std::move(sequence), std::move(result), {}, cut);
 }
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
@@ -614,8 +641,12 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  size_t num_threads,
                  QueryMode query_mode) {
     // NOTE: If a new query mode is added that requires IntMatrix (integer
-    // annotation), it must be added to this condition as well.
-    if (query_mode == COUNTS || query_mode == COUNTS_SUM) {
+    // annotation), it must be added to this condition as well. An annotation with k-mer
+    // counts is sliced with its counts in every mode: the ties of a search's top N are
+    // ordered by their median abundance (graph::search_top_n), which the binary slice
+    // below does not keep.
+    if (query_mode == COUNTS || query_mode == COUNTS_SUM
+            || AnnotatedDBG::holds_kmer_abundances(full_annotation)) {
         const auto &mat = dynamic_cast<const IntMatrix &>(full_annotation.get_matrix());
 
         // don't break the topological order for row-diff annotation
@@ -1122,7 +1153,11 @@ construct_query_graph(const DeBruijnGraph &full_dbg,
                   annotation->num_labels(), annotation->num_relations(), timer.elapsed());
 
     // build annotated graph from the query graph and copied annotations
-    return std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+    auto query_anno_graph = std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
+    // the slice of a coordinate annotation holds its coordinate counts as integers, which are
+    // no abundances: the query graph orders a search's ties as the full annotation does
+    query_anno_graph->set_kmer_abundances(AnnotatedDBG::holds_kmer_abundances(full_annotation));
+    return query_anno_graph;
 }
 
 

@@ -2,8 +2,10 @@
 #define __ANNOTATED_DBG_HPP__
 
 #include <cassert>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <string_view>
 
 #include <sdsl/int_vector.hpp>
 
@@ -15,6 +17,68 @@
 
 namespace mtg {
 namespace graph {
+
+/**
+ * What the top-N cut of one query sequence's search took (SPEC-multigraph-envelope.md section
+ * 3): the rows returned; whether every match above the request's thresholds was returned (no
+ * cut, |complete|); otherwise the score of the N-th returned row, the labels with that score,
+ * returned or not, and how many of them were returned. On an annotation with k-mer counts
+ * (|abundances|) also the N-th returned row's median abundance and the labels with the N-th
+ * score and that median. A complete cut leaves the members after |complete| at 0, which a
+ * writer states as null (the score and the median) or 0 (the counts); so does a cut with no
+ * row returned (N = 0), which has no N-th row.
+ */
+struct SearchCut {
+    size_t returned = 0;
+    bool complete = true;
+    size_t nth_score = 0;
+    size_t tied = 0;
+    size_t tied_returned = 0;
+    bool abundances = false;
+    uint64_t nth_median = 0;
+    size_t tied_same_median = 0;
+};
+
+/**
+ * The lower median of a label's abundances over the query's k-mer positions where it is
+ * present, one value per position: the zeros of |values| excluded, the others sorted
+ * ascending, the element at index floor((n - 1) / 2); 0 when no value is left.
+ */
+uint64_t lower_median(std::vector<uint64_t> values);
+
+// One row of a search in the C5 order (search_row_before), |median| 0 on an annotation
+// without k-mer counts
+struct SearchRow {
+    size_t score;
+    uint64_t median;
+    std::string_view label;
+};
+
+// The C5 order of a search's rows (SPEC-multigraph-envelope.md section 3): score descending;
+// then the median abundance descending (an annotation with k-mer counts; every median is 0 on
+// another annotation); then the label ascending, by the bytes of the decoded label
+bool search_row_before(const SearchRow &a, const SearchRow &b);
+
+/**
+ * The top |num_top_labels| of a search's candidate rows in the C5 order, which every
+ * engine-local cut of a search takes (a row cut away here cannot be recovered by a client).
+ * |scores|: the candidates' scores, every candidate above the request's thresholds. |label|:
+ * a candidate's label, decoded only for the rows returned and for the rows of the N-th score
+ * that compete for the last places (the tie group at the cut, of the N-th row's median where
+ * medians are given), never for every candidate. |medians|: on an annotation with k-mer counts
+ * the lower medians (lower_median) of the candidates it is passed, asked only where two rows
+ * share a score and at a cut; empty otherwise. Candidates with one label (a header in two
+ * columns of one pair) keep their order in |scores|.
+ * Returns the returned candidates (their indexes in |scores|) with their labels in the C5
+ * order, and states the cut in |cut|.
+ */
+std::vector<std::pair<size_t, std::string>>
+search_top_n(const std::vector<size_t> &scores,
+             size_t num_top_labels,
+             const std::function<std::string(size_t)> &label,
+             const std::function<std::vector<uint64_t>(const std::vector<size_t> &)> &medians,
+             SearchCut *cut);
+
 
 class AnnotatedSequenceGraph {
   public:
@@ -94,6 +158,23 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
         return coord_to_header_;
     }
 
+    // Whether |annotation| holds k-mer counts (abundances): its matrix is an integer matrix
+    // and not a coordinate matrix (row_diff_int_brwt, int_row_diff_disk, the integer CSC
+    // forms). The coordinates of a coordinate matrix are positions, not abundances, so a
+    // search's ties there are ordered by label alone (SPEC-multigraph-envelope.md section 3)
+    static bool holds_kmer_abundances(const Annotator &annotation);
+
+    // Whether this index's annotation holds k-mer counts, which order the ties of a search's
+    // top N by median abundance (search_top_n): holds_kmer_abundances of the annotation, or
+    // what set_kmer_abundances stated
+    bool has_kmer_abundances() const { return kmer_abundances_; }
+
+    // A query graph's annotation is sliced from a full one into an integer matrix whenever a
+    // query reads integers, the coordinate counts of a coordinate annotation included: it
+    // states the full annotation's kind here, so that a batched search orders its ties as the
+    // full index does
+    void set_kmer_abundances(bool abundances) { kmer_abundances_ = abundances; }
+
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
@@ -120,6 +201,11 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                                   double discovery_fraction = 0.0,
                                   double presence_fraction = 0.0) const;
 
+    // The top-N queries below return their rows in the C5 order (search_top_n): score
+    // descending, then the median abundance descending on an annotation with k-mer counts,
+    // then the label ascending, the top N taken in that order; |cut|, if given, states the
+    // cut (SearchCut).
+
     // Return top |num_top_labels| labels with their counts.
     // The returned counts are weighted by the annotated relation counts if
     // |with_kmer_counts| is true.
@@ -128,14 +214,16 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t num_top_labels,
                    double discovery_fraction = 0.0,
                    double presence_fraction = 0.0,
-                   bool with_kmer_counts = false) const;
+                   bool with_kmer_counts = false,
+                   SearchCut *cut = nullptr) const;
 
     // returns tuples (label, num_kmer_matches, kmer_abundances)
     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
     get_kmer_counts(std::string_view sequence,
                     size_t num_top_labels,
                     double discovery_fraction,
-                    double presence_fraction) const;
+                    double presence_fraction,
+                    SearchCut *cut = nullptr) const;
 
     // returns tuples (label, num_kmer_matches, kmer_coordinates, num_kmers_in_target).
     // num_kmers_in_target is 0 when no CoordToHeader mapping is loaded (the
@@ -145,17 +233,35 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
                          double discovery_fraction,
-                         double presence_fraction) const;
+                         double presence_fraction,
+                         SearchCut *cut = nullptr) const;
 
     std::vector<std::tuple<Label, size_t, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
                              double discovery_fraction = 0.0,
-                             double presence_fraction = 0.0) const;
+                             double presence_fraction = 0.0,
+                             SearchCut *cut = nullptr) const;
 
   private:
+    // get_kmer_coordinates, with the records of a CoordToHeader mapping ranked by the number
+    // of their coordinates the query's k-mers match if |score_by_coordinates| (the score
+    // get_top_labels reports with |with_kmer_counts|), by the number of k-mers otherwise
+    std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>, size_t>>
+    query_kmer_coordinates(std::string_view sequence,
+                           size_t num_top_labels,
+                           double discovery_fraction,
+                           double presence_fraction,
+                           SearchCut *cut,
+                           bool score_by_coordinates) const;
+
+    // The integer matrix to read the abundances of a search's ties from: the annotation's
+    // matrix when it holds k-mer counts (has_kmer_abundances), null otherwise
+    const annot::matrix::IntMatrix* abundance_matrix() const;
+
     DeBruijnGraph &dbg_;
     std::shared_ptr<const annot::CoordToHeader> coord_to_header_;
+    bool kmer_abundances_;
 };
 
 } // namespace graph

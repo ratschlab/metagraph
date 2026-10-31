@@ -72,8 +72,24 @@ constexpr char kDecodeCacheRule[]
         = "SPEC-labeled-traversal-core.md section 8.4, the row-diff path cache";
 
 
+/**
+ * The pair a /search answer is computed on, as the answer states it
+ * (SPEC-multigraph-envelope.md section 3): on a multi-graph server (|tagged|) its name and
+ * paths, written on every row and on each query sequence's cut; on a single-graph server none,
+ * the rows untagged and the cut's tags null. |index_fp|: the pair's identity (the server's on a
+ * single-graph server), "" for none, stated null.
+ */
+struct SearchSource {
+    bool tagged = false;
+    std::string graph;
+    std::string graph_path;
+    std::string annotation_path;
+    std::string index_fp;
+};
+
 Json::Value process_search_request(const SearchRequest &request,
-                                   const graph::AnnotatedDBG &anno_graph) {
+                                   const graph::AnnotatedDBG &anno_graph,
+                                   const SearchSource &source) {
     const auto &config = request.config;
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
@@ -123,10 +139,29 @@ Json::Value process_search_request(const SearchRequest &request,
                   return lhs.get_sequence().id < rhs.get_sequence().id;
               });
 
-    // Create full JSON object
+    // Create full JSON object: per query sequence its rows, tagged with their pair on a
+    // multi-graph server, and the cut its top N was taken with (one entry, for this pair)
+    auto string_or_null = [](bool stated, const std::string &value) {
+        return stated ? Json::Value(value) : Json::Value();
+    };
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k()));
+        Json::Value json = seq_result.to_json(config.verbose_output, anno_graph.get_graph().get_k());
+        if (source.tagged) {
+            for (Json::Value &row : json["results"]) {
+                row["graph"] = source.graph;
+                row["graph_path"] = source.graph_path;
+                row["annotation_path"] = source.annotation_path;
+            }
+        }
+        Json::Value cut = seq_result.cut_to_json();
+        cut["graph"] = string_or_null(source.tagged, source.graph);
+        cut["graph_path"] = string_or_null(source.tagged, source.graph_path);
+        cut["annotation_path"] = string_or_null(source.tagged, source.annotation_path);
+        cut["index_fp"] = string_or_null(!source.index_fp.empty(), source.index_fp);
+        json["cuts"] = Json::Value(Json::arrayValue);
+        json["cuts"].append(std::move(cut));
+        search_response.append(std::move(json));
     }
 
     return search_response;
@@ -867,35 +902,34 @@ int run_server(Config *config) {
 
                 const auto search_request = parse_search_request(content_json, *config);
                 // Validate fields omitted from the key before returning a cached result.
-                std::vector<std::string> graphs_to_query;
+                // the pairs searched, in the order the answer lists their rows and cuts
+                // (ordered_pairs: the names in byte order, each name's pairs in the list's
+                // order, a pair listed twice under a name once), each with its name
+                std::vector<std::pair<std::string, GraphPair>> targets;
                 bool load_in_ram = false;
                 if (config->fnames.empty()) {
                     if (content_json.isMember("graphs"))
                         throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
                 } else {
-                    // the names of the selection (SPEC-multigraph-envelope.md section 6: `graphs`
-                    // only, `pairs` refused with pairs_unsupported, an unknown name with
-                    // graph_unknown), in byte order; each name's pairs are queried below
-                    for (const SelectedPair &pair : select_pairs(
+                    // the pairs of the selection (SPEC-multigraph-envelope.md section 6:
+                    // `graphs` only, `pairs` refused with pairs_unsupported, an unknown name
+                    // with graph_unknown) in the index's pair order (section 3: the names in byte
+                    // order, each name's pairs in the list's order, a pair listed twice under a
+                    // name once), refused before any pair is queried
+                    for (SelectedPair &selected : select_pairs(
                                 SelectionRoute::SEARCH, content_json, indexes,
                                 config->max_graphs_without_selection)) {
-                        if (graphs_to_query.empty() || graphs_to_query.back() != pair.name)
-                            graphs_to_query.push_back(pair.name);
+                        targets.emplace_back(std::move(selected.name), std::move(selected.pair));
                     }
                     load_in_ram = content_json.get("in_ram", false).asBool() && loaded_with_mmap;
                 }
 
                 if (handle_holder) {
-                    std::string graph_identity = config->infbase;
-                    if (!config->fnames.empty()) {
-                        std::ostringstream oss;
-                        for (const auto &name : graphs_to_query) {
-                            for (const auto &[g, a] : indexes[name]) {
-                                oss << g.size() << ':' << g << a.size() << ':' << a;
-                            }
-                        }
-                        graph_identity = oss.str();
-                    }
+                    // the rows are tagged with the name a pair was selected under, so the key
+                    // holds the names beside their pairs: a pair listed under two names is
+                    // never answered with the other name's rows
+                    const std::string graph_identity = config->fnames.empty()
+                            ? config->infbase : search_pairs_identity(targets);
                     *handle_holder = search_cache.acquire(
                         make_search_cache_key(search_request, graph_identity));
                     if (!handle_holder->is_miss()) {
@@ -919,31 +953,44 @@ int run_server(Config *config) {
                         logger->trace("Request {}: Started querying graph {}, in total graphs being queried at the moment: {}",
                                       request_id, config->infbase, graphs_being_queried.fetch_add(1) + 1);
                         try {
-                            result = process_search_request(search_request, *anno_graph.get());
+                            SearchSource source;
+                            source.index_fp = single_identity.fp;
+                            result = process_search_request(search_request, *anno_graph.get(),
+                                                            source);
                         } catch (...) {
                             graphs_being_queried--;
                             throw;
                         }
                         graphs_being_queried--;
                     } else {
-                        std::mutex mu;
+                        // each pair's answer in its place of |targets|, merged in that order
+                        // once every pair has answered (not in the order the pairs finish)
+                        std::vector<Json::Value> answers(targets.size());
+                        std::vector<SearchSource> sources(targets.size());
+                        for (size_t t = 0; t < targets.size(); ++t) {
+                            const auto &[name, pair] = targets[t];
+                            sources[t].tagged = true;
+                            sources[t].graph = name;
+                            sources[t].graph_path = pair.first;
+                            sources[t].annotation_path = pair.second;
+                            sources[t].index_fp = fp_of_pair(pair);
+                        }
                         struct PendingQueries {
                             std::vector<std::shared_future<std::exception_ptr>> futures;
                             ~PendingQueries() {
-                                // Tasks capture request-local state, including mu and result.
+                                // Tasks capture request-local state, including answers.
                                 for (auto &future : futures)
                                     future.wait();
                             }
                         } pending;
                         auto &futures = pending.futures;
-                        size_t num_queries = 0;
-                        for (const auto &name : graphs_to_query)
-                            num_queries += indexes.at(name).size();
                         // Once a task is launched, recording its future must not allocate.
-                        futures.reserve(num_queries);
-                        for (const auto &name : graphs_to_query) {
-                            for (const auto &[graph_fname, anno_fname] : indexes[name]) {
-                                futures.push_back(graphs_pool.enqueue([&,config,graph_fname=graph_fname,anno_fname=anno_fname]() {
+                        futures.reserve(targets.size());
+                        for (size_t t = 0; t < targets.size(); ++t) {
+                            {
+                                const std::string &graph_fname = targets[t].second.first;
+                                const std::string &anno_fname = targets[t].second.second;
+                                futures.push_back(graphs_pool.enqueue([&,config,t,graph_fname=graph_fname,anno_fname=anno_fname]() {
                                     logger->trace("Request {}: Started querying graph {}. In total graphs being queried at the moment: {}",
                                                   request_id, graph_fname, graphs_being_queried.fetch_add(1) + 1);
                                     size_t index_size_reserved = 0;
@@ -982,29 +1029,14 @@ int run_server(Config *config) {
                                             index = graphs_cache.at({ graph_fname, anno_fname }).get();
                                         }
 
-                                        auto json = process_search_request(search_request, *index);
+                                        answers[t] = process_search_request(search_request, *index,
+                                                                            sources[t]);
                                         logger->trace("Request {}: {} graph {} {} in {} sec",
                                                       request_id, in_ram ? "Loaded and searched" : "Searched",
                                                       graph_fname, anno_fname, timer.elapsed());
 
                                         index_loaded.reset();
                                         release_memory();
-
-                                        std::lock_guard<std::mutex> lock(mu);
-                                        if (result.empty()) {
-                                            result = std::move(json);
-                                        } else {
-                                            assert(json.size() == result.size());
-                                            for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
-                                                if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
-                                                        != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
-                                                    throw std::logic_error("ERROR: Results for different sequences can't be merged");
-                                                }
-                                                for (auto&& value : json[i]["results"]) {
-                                                    result[i]["results"].append(std::move(value));
-                                                }
-                                            }
-                                        }
                                     } catch (...) {
                                         release_memory();
                                         graphs_being_queried--;
@@ -1018,6 +1050,27 @@ int run_server(Config *config) {
                         for (auto &future : futures) {
                             if (auto ex = future.get())
                                 std::rethrow_exception(ex);
+                        }
+                        // the rows and the cuts of every query sequence in the pairs' order
+                        for (Json::Value &json : answers) {
+                            if (result.empty()) {
+                                result = std::move(json);
+                                continue;
+                            }
+                            if (json.size() != result.size())
+                                throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                            for (Json::ArrayIndex i = 0; i < result.size(); ++i) {
+                                if (result[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]
+                                        != json[i][SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD]) {
+                                    throw std::logic_error("ERROR: Results for different sequences can't be merged");
+                                }
+                                for (auto&& value : json[i]["results"]) {
+                                    result[i]["results"].append(std::move(value));
+                                }
+                                for (auto&& value : json[i]["cuts"]) {
+                                    result[i]["cuts"].append(std::move(value));
+                                }
+                            }
                         }
                     }
                 } catch (...) {
