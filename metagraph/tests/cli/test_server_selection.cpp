@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <sstream>
@@ -73,7 +74,8 @@ std::string refusal_of(const F &f) {
     return "";
 }
 
-// |f|'s SelectionRefusal: its code, "" when it throws none
+// |f|'s SelectionRefusal: its code; "(none)" when it throws another std::invalid_argument (a
+// refusal without a code), "" when it throws none
 template <class F>
 std::string selection_code_of(const F &f, Json::Value *body = nullptr) {
     try {
@@ -84,6 +86,8 @@ std::string selection_code_of(const F &f, Json::Value *body = nullptr) {
         if (body)
             *body = e.body();
         return e.code();
+    } catch (const std::invalid_argument &) {
+        return "(none)";
     }
     return "";
 }
@@ -120,7 +124,8 @@ TEST(ServerSelection, OrderedPairs) {
 }
 
 // POST /search: `graphs` deduplicated and sorted, every name of a small list without it; a
-// pair listed twice once; `pairs` refused (it has no re-ask)
+// pair listed twice once; `pairs` refused (it has no re-ask); an unknown name refused with its
+// message and graph_unknown
 TEST(ServerSelection, Search) {
     EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(SelectionRoute::SEARCH, "{}"));
     EXPECT_EQ(Pairs({ kA, kC0, kC1 }),
@@ -128,164 +133,337 @@ TEST(ServerSelection, Search) {
     // `graph` is not /search's
     EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }),
               select(SelectionRoute::SEARCH, R"({"graph": "a"})"));
-    EXPECT_EQ("Request with an uninitialized graph z",
-              refusal_of([] { select(SelectionRoute::SEARCH, R"({"graphs": ["a", "z"]})"); }));
+    Json::Value body;
+    EXPECT_EQ("graph_unknown", selection_code_of([] {
+        select(SelectionRoute::SEARCH, R"({"graphs": ["a", "z"]})");
+    }, &body));
+    EXPECT_EQ(parse(R"({"error": "Request with an uninitialized graph z",
+                        "code": "graph_unknown"})"), body);
     EXPECT_EQ("Bad request: requests without names (no \"graphs\" field) are only supported "
               "for small indexes (<=2 names)",
               refusal_of([] { select(SelectionRoute::SEARCH, "{}", 2); }));
     EXPECT_EQ(Pairs({ kA }), select(SelectionRoute::SEARCH, R"({"graphs": ["a"]})", 2));
-    Json::Value body;
     EXPECT_EQ("pairs_unsupported", selection_code_of([] {
         select(SelectionRoute::SEARCH, R"({"pairs": [{"graph": "a"}]})");
     }, &body));
     EXPECT_EQ(parse(R"({"error": "request: /search selects by graphs only (it has no re-ask): )"
                     R"(pairs is not accepted", "code": "pairs_unsupported"})"), body);
+    // with graphs too: pairs is refused as /search's, not as a conflict
+    EXPECT_EQ("pairs_unsupported", selection_code_of([] {
+        select(SelectionRoute::SEARCH, R"({"graphs": ["a"], "pairs": [{"graph": "a"}]})");
+    }));
 }
 
-// POST /pattern: pattern_graph_names' rule and refusals
+// POST /pattern: `graphs` (pattern_graph_names' rule, an unknown name coded) or `pairs`; `graph`
+// and `graph_path` are not its selectors (its parser refuses them)
 TEST(ServerSelection, Pattern) {
     EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(SelectionRoute::PATTERN, "{}"));
     EXPECT_EQ(Pairs({ kB1, kB2 }), select(SelectionRoute::PATTERN, R"({"graphs": ["b", "b"]})"));
-    EXPECT_EQ("request.graphs: unknown graph 'z' (GET /capabilities lists the graphs)",
-              refusal_of([] { select(SelectionRoute::PATTERN, R"({"graphs": ["z"]})"); }));
+    Json::Value body;
+    EXPECT_EQ("graph_unknown", selection_code_of([] {
+        select(SelectionRoute::PATTERN, R"({"graphs": ["a", "z", "y"]})");
+    }, &body));
+    EXPECT_EQ(parse(R"x({"error": "request.graphs: unknown graph 'z' (GET /capabilities lists )x"
+                    R"x(the graphs)", "code": "graph_unknown"})x"), body);
     EXPECT_EQ("request.graphs: expected a non-empty array of graph names (GET /capabilities "
               "lists them)",
               refusal_of([] { select(SelectionRoute::PATTERN, R"({"graphs": []})"); }));
+    EXPECT_EQ("request.graphs: expected a non-empty array of graph names (GET /capabilities "
+              "lists them)",
+              refusal_of([] { select(SelectionRoute::PATTERN, R"({"graphs": ["a", 1]})"); }));
+    // the names cap keeps its 400, without a code
     EXPECT_EQ("request.graphs: required on this server, which hosts 3 graph names (more than "
               "2; GET /capabilities lists them)",
               refusal_of([] { select(SelectionRoute::PATTERN, "{}", 2); }));
-    EXPECT_EQ("pairs_unsupported", selection_code_of([] {
-        select(SelectionRoute::PATTERN, R"({"pairs": []})");
+    EXPECT_EQ("(none)", selection_code_of([] { select(SelectionRoute::PATTERN, "{}", 2); }));
+    // any number of pairs, in the index's order
+    EXPECT_EQ(Pairs({ kA, kB2, kC1 }), select(SelectionRoute::PATTERN, R"({"pairs": [
+        {"graph": "c", "annotation_path": "c1.anno"}, {"graph": "b", "graph_path": "b2.dbg"},
+        {"graph": "a"}]})"));
+    EXPECT_EQ("", refusal_of([] { select(SelectionRoute::PATTERN, R"({"graph": "zz"})"); }));
+    EXPECT_EQ("selection_conflict", selection_code_of([] {
+        select(SelectionRoute::PATTERN, R"({"graphs": ["a"], "pairs": [{"graph": "a"}]})");
     }));
 }
 
-// POST /traverse: exactly one pair; a name is required, so the names cap does not apply
-TEST(ServerSelection, TraverseOnePair) {
-    for (SelectionRoute route : { SelectionRoute::TRAVERSE }) {
-        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})"));
-        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graphs": ["a"]})"));
-        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})", 1));
-        // a pair listed twice is one: the name's two graphs, picked by graph_path
-        EXPECT_EQ(Pairs({ kB1 }), select(route, R"({"graph": "b", "graph_path": "b1.dbg"})"));
-        EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"graphs": ["b"], "graph_path": "b2.dbg"})"));
-        // graph_path is ignored where the name has one pair, as today
-        EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a", "graph_path": "x.dbg"})"));
-        EXPECT_EQ("Bad request: index 'b' spans several graphs (b1.dbg, b2.dbg); pass "
-                  "'graph_path' to pick one",
-                  refusal_of([&] { select(route, R"({"graph": "b"})"); }));
-        EXPECT_EQ("Bad request: index 'c' lists one graph (c.dbg) with several annotations "
-                  "(c0.anno, c1.anno): a traversal reads one annotation, which graph_path "
-                  "cannot choose; list each annotation under a name of its own",
-                  refusal_of([&] { select(route, R"({"graph": "c"})"); }));
-        EXPECT_EQ("Bad request: graph_path 'c.dbg' names a graph with several annotations "
-                  "under index 'c' (c0.anno, c1.anno): a traversal reads one annotation, which "
-                  "graph_path cannot choose; list each annotation under a name of its own",
-                  refusal_of([&] { select(route, R"({"graph": "c", "graph_path": "c.dbg"})"); }));
-        EXPECT_EQ("Bad request: graph_path 'x.dbg' is not part of index 'b'",
-                  refusal_of([&] { select(route, R"({"graph": "b", "graph_path": "x.dbg"})"); }));
-        EXPECT_EQ("Bad request: 'graphs' names the one graph a traversal reads: expected [name]",
-                  refusal_of([&] { select(route, R"({"graphs": ["a", "b"]})"); }));
-        EXPECT_EQ("Bad request: give the graph as 'graph' or as 'graphs', not both",
-                  refusal_of([&] { select(route, R"({"graph": "a", "graphs": ["a"]})"); }));
-        EXPECT_EQ("Bad request: 'graph' (index name) is required in multi-graph mode",
-                  refusal_of([&] { select(route, R"({"graph": 1})"); }));
-        // the graph-less request stays refused (a later release runs it)
-        EXPECT_EQ("Bad request: 'graph' (index name) is required in multi-graph mode",
-                  refusal_of([&] { select(route, "{}"); }));
-        EXPECT_EQ("Bad request: unknown graph 'z'",
-                  refusal_of([&] { select(route, R"({"graph": "z"})"); }));
-        EXPECT_EQ("pairs_unsupported", selection_code_of([&] {
-            select(route, R"({"pairs": [{"graph": "a"}]})");
-        }));
-    }
-}
-
-// POST /resolve answers the envelope over any number of pairs (SPEC-multigraph-envelope.md
-// section 1): graph_path still picks one pair of a name, `graph` alone selects each pair of
-// its name, `graphs` and no selection read as /pattern reads them (the names cap applies)
-TEST(ServerSelection, ResolveSelectsAnyNumberOfPairs) {
+// POST /resolve: any number of pairs, by graphs, by graph (with graph_path), or by pairs;
+// without a selection every pair, up to the names cap
+TEST(ServerSelection, Resolve) {
     const SelectionRoute route = SelectionRoute::RESOLVE;
     EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})"));
     EXPECT_EQ(Pairs({ kA }), select(route, R"({"graphs": ["a"]})"));
-    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})", 1));
-    EXPECT_EQ(Pairs({ kB1 }), select(route, R"({"graph": "b", "graph_path": "b1.dbg"})"));
-    EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"graphs": ["b"], "graph_path": "b2.dbg"})"));
-    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a", "graph_path": "x.dbg"})"));
-    // a name over several pairs: each of them (a pair listed twice once), in the list's order
     EXPECT_EQ(Pairs({ kB1, kB2 }), select(route, R"({"graph": "b"})"));
-    EXPECT_EQ(Pairs({ kC0, kC1 }), select(route, R"({"graph": "c"})"));
+    EXPECT_EQ(Pairs({ kA, kC0, kC1 }), select(route, R"({"graphs": ["c", "a"]})"));
+    // a name listed twice is read once, in byte order
     EXPECT_EQ(Pairs({ kA, kB1, kB2 }), select(route, R"({"graphs": ["b", "a", "b"]})"));
-    // no selection: every name, up to the cap
+    EXPECT_EQ(Pairs({ kC0, kC1 }), select(route, R"({"graph": "c"})", 1));
+    // graph_path keeps the name's pairs on that graph: the two annotations of c's one graph
+    EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"graph": "b", "graph_path": "b2.dbg"})"));
+    EXPECT_EQ(Pairs({ kC0, kC1 }), select(route, R"({"graphs": ["c"], "graph_path": "c.dbg"})"));
     EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(route, "{}"));
     EXPECT_EQ("request.graphs: required on this server, which hosts 3 graph names (more than "
-              "2; GET /capabilities lists them)",
-              refusal_of([&] { select(route, "{}", 2); }));
-    // with a name the cap plays no part
-    EXPECT_EQ(Pairs({ kB1, kB2 }), select(route, R"({"graph": "b"})", 1));
-    // graph_path still picks within one name
-    EXPECT_EQ("Bad request: graph_path 'c.dbg' names a graph with several annotations "
-              "under index 'c' (c0.anno, c1.anno): a traversal reads one annotation, which "
-              "graph_path cannot choose; list each annotation under a name of its own",
-              refusal_of([&] { select(route, R"({"graph": "c", "graph_path": "c.dbg"})"); }));
-    EXPECT_EQ("Bad request: graph_path 'x.dbg' is not part of index 'b'",
-              refusal_of([&] { select(route, R"({"graph": "b", "graph_path": "x.dbg"})"); }));
-    EXPECT_EQ("Bad request: give the graph as 'graph' or as 'graphs', not both",
-              refusal_of([&] { select(route, R"({"graph": "a", "graphs": ["a"]})"); }));
-    EXPECT_EQ("Bad request: unknown graph 'z'",
-              refusal_of([&] { select(route, R"({"graph": "z"})"); }));
-    EXPECT_EQ("request.graphs: unknown graph 'z' (GET /capabilities lists the graphs)",
-              refusal_of([&] { select(route, R"({"graphs": ["z"]})"); }));
-    EXPECT_EQ("pairs_unsupported", selection_code_of([&] {
-        select(route, R"({"pairs": [{"graph": "a"}]})");
+              "2; GET /capabilities lists them)", refusal_of([&] { select(route, "{}", 2); }));
+    Json::Value body;
+    // a graph_path the name does not have: no pair, the name's pairs to choose from
+    EXPECT_EQ("pair_not_found", selection_code_of([&] {
+        select(route, R"({"graph": "a", "graph_path": "x.dbg"})");
+    }, &body));
+    EXPECT_EQ(parse(R"({"error": "request: no pair of graph 'a' has graph_path 'x.dbg'",
+                        "code": "pair_not_found", "candidates": [
+                        {"graph": "a", "graph_path": "a.dbg", "annotation_path": "a.anno"}]})"),
+              body);
+    EXPECT_EQ("selection_conflict", selection_code_of([&] {
+        select(route, R"({"graph": "a", "graphs": ["a"]})");
+    }, &body));
+    EXPECT_EQ("request: graph and graphs are exclusive: name one graph as graph, or the graphs "
+              "as graphs, not both", body["error"].asString());
+    EXPECT_EQ("selection_conflict", selection_code_of([&] {
+        select(route, R"({"graphs": ["a", "b"], "graph_path": "b1.dbg"})");
     }));
+    EXPECT_EQ("request.graph_path: picks a graph of the name in graph: add graph, or list pairs",
+              refusal_of([&] { select(route, R"({"graph_path": "b1.dbg"})"); }));
+    EXPECT_EQ("graph_unknown", selection_code_of([&] { select(route, R"({"graph": "z"})"); },
+                                                 &body));
+    EXPECT_EQ("request.graph: unknown graph 'z' (GET /capabilities lists the graphs)",
+              body["error"].asString());
+    EXPECT_EQ("request.graph: expected a graph name",
+              refusal_of([&] { select(route, R"({"graph": 1})"); }));
+    EXPECT_EQ("request.graph_path: expected a string",
+              refusal_of([&] { select(route, R"({"graph": "b", "graph_path": 2})"); }));
 }
 
-// The GET probes: ?graph= (and graph_path=) one pair, and the parameters' refusals as GET
-// /traverse/capabilities and GET /pattern/capabilities state them today
+// POST /traverse: exactly one pair, by graph or graphs (with graph_path), or one object of
+// pairs; a selection of several is refused with them as the candidates
+TEST(ServerSelection, TraverseOnePair) {
+    const SelectionRoute route = SelectionRoute::TRAVERSE;
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})"));
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graphs": ["a", "a"]})"));
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})", 1));
+    // a pair listed twice is one: the name's two graphs, picked by graph_path
+    EXPECT_EQ(Pairs({ kB1 }), select(route, R"({"graph": "b", "graph_path": "b1.dbg"})"));
+    EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"graphs": ["b"], "graph_path": "b2.dbg"})"));
+    EXPECT_EQ(Pairs({ kC1 }), select(route, R"({"pairs": [{"graph": "c",
+                                                           "annotation_path": "c1.anno"}]})"));
+    // the same pair named twice is one pair
+    EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"pairs": [{"graph": "b", "graph_path": "b2.dbg"},
+        {"graph": "b", "graph_path": "b2.dbg", "annotation_path": "b2.anno"}]})"));
+
+    Json::Value body;
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select(route, R"({"graph": "b"})");
+    }, &body));
+    EXPECT_EQ(parse(R"x({"error": "request: graph 'b' holds 2 pairs; a traverse runs on exactly )x"
+                    R"x(one pair: name it with pairs (graph, graph_path, annotation_path)",
+                        "code": "traverse_single_pair", "candidates": [
+                        {"graph": "b", "graph_path": "b1.dbg", "annotation_path": "b1.anno"},
+                        {"graph": "b", "graph_path": "b2.dbg", "annotation_path": "b2.anno"}]})x"),
+              body);
+    // one graph with two annotations, by name or by graph_path
+    for (const char *request : { R"({"graph": "c"})", R"({"graph": "c", "graph_path": "c.dbg"})" }) {
+        EXPECT_EQ("traverse_single_pair", selection_code_of([&] { select(route, request); },
+                                                            &body)) << request;
+        EXPECT_EQ(selection_candidates("c", small_indexes()), body["candidates"]) << request;
+    }
+    // several names, several objects, no selector
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select(route, R"({"graphs": ["c", "a"]})");
+    }, &body));
+    EXPECT_EQ("request: graphs name 3 pairs; a traverse runs on exactly one pair: name it with "
+              "pairs (graph, graph_path, annotation_path)", body["error"].asString());
+    EXPECT_EQ(3u, body["candidates"].size());
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select(route, R"({"pairs": [{"graph": "c", "annotation_path": "c1.anno"},
+                                    {"graph": "a"}]})");
+    }, &body));
+    EXPECT_EQ("request: pairs names 2 pairs; a traverse runs on exactly one pair: list one",
+              body["error"].asString());
+    EXPECT_EQ(parse(R"([{"graph": "a", "graph_path": "a.dbg", "annotation_path": "a.anno"},
+                        {"graph": "c", "graph_path": "c.dbg", "annotation_path": "c1.anno"}])"),
+              body["candidates"]);
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] { select(route, "{}"); }, &body));
+    EXPECT_EQ("request: this server holds 5 pairs; a traverse runs on exactly one pair: name it "
+              "with graph, or with pairs (graph, graph_path, annotation_path)",
+              body["error"].asString());
+    EXPECT_EQ(5u, body["candidates"].size());
+    // the names cap comes first, as for every route
+    EXPECT_EQ("request.graphs: required on this server, which hosts 3 graph names (more than "
+              "2; GET /capabilities lists them)", refusal_of([&] { select(route, "{}", 2); }));
+    // a server of one pair runs a request without a selector on it
+    GraphIndexes one;
+    one["a"] = { { "a.dbg", "a.anno" }, { "a.dbg", "a.anno" } };
+    EXPECT_EQ(Pairs({ kA }), select_pairs(route, parse("{}"), one, 10));
+
+    EXPECT_EQ("pair_not_found", selection_code_of([&] {
+        select(route, R"({"graph": "b", "graph_path": "x.dbg"})");
+    }, &body));
+    EXPECT_EQ("request: no pair of graph 'b' has graph_path 'x.dbg'", body["error"].asString());
+    EXPECT_EQ(selection_candidates("b", small_indexes()), body["candidates"]);
+    EXPECT_EQ("selection_conflict", selection_code_of([&] {
+        select(route, R"({"graph": "a", "graphs": ["a"]})");
+    }));
+    EXPECT_EQ("graph_unknown", selection_code_of([&] { select(route, R"({"graphs": ["z"]})"); }));
+}
+
+// The `pairs` selector (POST /resolve, /pattern, /traverse): each object names exactly one pair
+// of its name; graphs, graph and graph_path beside it conflict; a malformed list is a plain 400
+TEST(ServerSelection, PairsSelector) {
+    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::PATTERN,
+                                  SelectionRoute::TRAVERSE }) {
+        SCOPED_TRACE(route == SelectionRoute::RESOLVE ? "resolve"
+                     : route == SelectionRoute::PATTERN ? "pattern" : "traverse");
+        // graph_path may be omitted where the name has one graph, annotation_path where the
+        // graph has one annotation
+        EXPECT_EQ(Pairs({ kA }), select(route, R"({"pairs": [{"graph": "a"}]})"));
+        EXPECT_EQ(Pairs({ kA }), select(route, R"({"pairs": [{"graph": "a", "graph_path":
+                                                   "a.dbg", "annotation_path": "a.anno"}]})"));
+        EXPECT_EQ(Pairs({ kB1 }), select(route, R"({"pairs": [{"graph": "b",
+                                                                "graph_path": "b1.dbg"}]})"));
+        EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"pairs": [{"graph": "b",
+                                                                "annotation_path": "b2.anno"}]})"));
+        EXPECT_EQ(Pairs({ kC0 }), select(route, R"({"pairs": [{"graph": "c", "graph_path":
+                                                   "c.dbg", "annotation_path": "c0.anno"}]})"));
+
+        Json::Value body;
+        EXPECT_EQ("pair_ambiguous", selection_code_of([&] {
+            select(route, R"({"pairs": [{"graph": "a"}, {"graph": "b"}]})");
+        }, &body));
+        EXPECT_EQ(parse(R"({"error": "request.pairs[1]: 'b' has 2 pairs on 2 graphs: add )"
+                        R"(graph_path", "code": "pair_ambiguous", "candidates": [
+                        {"graph": "b", "graph_path": "b1.dbg", "annotation_path": "b1.anno"},
+                        {"graph": "b", "graph_path": "b2.dbg", "annotation_path": "b2.anno"}]})"),
+                  body);
+        for (const char *object : { R"({"graph": "c"})", R"({"graph": "c", "graph_path": "c.dbg"})" }) {
+            EXPECT_EQ("pair_ambiguous", selection_code_of([&] {
+                select(route, std::string(R"({"pairs": [)") + object + "]}");
+            }, &body)) << object;
+            EXPECT_EQ("request.pairs[0]: 'c' has 2 pairs on graph_path 'c.dbg': add "
+                      "annotation_path", body["error"].asString());
+            EXPECT_EQ(selection_candidates("c", small_indexes()), body["candidates"]);
+        }
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            select(route, R"({"pairs": [{"graph": "c", "annotation_path": "c2.anno"}]})");
+        }, &body));
+        EXPECT_EQ("request.pairs[0]: no pair of 'c' has annotation_path 'c2.anno'",
+                  body["error"].asString());
+        EXPECT_EQ(selection_candidates("c", small_indexes()), body["candidates"]);
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            select(route, R"({"pairs": [{"graph": "b", "graph_path": "b1.dbg",
+                                         "annotation_path": "b2.anno"}]})");
+        }, &body));
+        EXPECT_EQ("request.pairs[0]: no pair of 'b' has graph_path 'b1.dbg' and annotation_path "
+                  "'b2.anno'", body["error"].asString());
+        // a name's graph_path does not name another name's pair
+        EXPECT_EQ("pair_not_found", selection_code_of([&] {
+            select(route, R"({"pairs": [{"graph": "a", "graph_path": "b1.dbg"}]})");
+        }));
+        EXPECT_EQ("graph_unknown", selection_code_of([&] {
+            select(route, R"({"pairs": [{"graph": "a"}, {"graph": "z"}]})");
+        }, &body));
+        EXPECT_EQ(parse(R"x({"error": "request.pairs[1]: unknown graph 'z' (GET /capabilities )x"
+                        R"x(lists the graphs)", "code": "graph_unknown"})x"), body);
+        // graphs beside pairs, on every route; graph and graph_path where they are selectors
+        EXPECT_EQ("selection_conflict", selection_code_of([&] {
+            select(route, R"({"graphs": ["a"], "pairs": [{"graph": "a"}]})");
+        }, &body));
+        EXPECT_EQ(parse(R"({"error": "request: graphs and pairs are exclusive: name graphs, or )"
+                        R"(list pairs, not both", "code": "selection_conflict"})"), body);
+        if (route != SelectionRoute::PATTERN) {
+            EXPECT_EQ("selection_conflict", selection_code_of([&] {
+                select(route, R"({"graph": "a", "pairs": [{"graph": "a"}]})");
+            }));
+            EXPECT_EQ("selection_conflict", selection_code_of([&] {
+                select(route, R"({"graph_path": "a.dbg", "pairs": [{"graph": "a"}]})");
+            }));
+        }
+        // malformed: a plain 400, before any name is looked up
+        for (const char *pairs : { "[]", "{}", R"("a")", R"([{"graph": "a"}, "b"])" }) {
+            EXPECT_EQ("(none)", selection_code_of([&] {
+                select(route, std::string(R"({"pairs": )") + pairs + "}");
+            })) << pairs;
+        }
+        EXPECT_EQ("request.pairs[0]: unknown member 'graphs' (graph, graph_path, annotation_path)",
+                  refusal_of([&] { select(route, R"({"pairs": [{"graphs": ["a"]}]})"); }));
+        EXPECT_EQ("request.pairs[0].graph: required (the pair's graph name)",
+                  refusal_of([&] { select(route, R"({"pairs": [{"graph_path": "a.dbg"}]})"); }));
+        EXPECT_EQ("request.pairs[0].graph_path: expected a string",
+                  refusal_of([&] {
+                      select(route, R"({"pairs": [{"graph": "a", "graph_path": 1}]})");
+                  }));
+        EXPECT_EQ("request.pairs[0].graph: expected a graph name",
+                  refusal_of([&] { select(route, R"({"pairs": [{"graph": ["a"]}]})"); }));
+    }
+}
+
+// The GET probes: ?graph= (with graph_path= and annotation_path=) one pair, coded as an object
+// of pairs is; without ?graph= every pair, up to the names cap; the parameters' own refusals
 TEST(ServerSelection, CapabilitiesProbes) {
     EXPECT_EQ(Pairs({ kB2 }), probe(SelectionRoute::TRAVERSE,
                                     { { "graph", "b" }, { "graph_path", "b2.dbg" } }));
     EXPECT_EQ(Pairs({ kA }), probe(SelectionRoute::PATTERN, { { "graph", "a" } }));
+    EXPECT_EQ(Pairs({ kC1 }), probe(SelectionRoute::PATTERN, { { "graph", "c" },
+                                                              { "annotation_path", "c1.anno" } }));
+    EXPECT_EQ(Pairs({ kC0 }), probe(SelectionRoute::TRAVERSE, { { "annotation_path", "c0.anno" },
+                                                               { "graph_path", "c.dbg" },
+                                                               { "graph", "c" } }));
     // the names cap is not read by a probe of one pair
     EXPECT_EQ(Pairs({ kA }), probe(SelectionRoute::PATTERN, { { "graph", "a" } }, 1));
-    // a probe without ?graph= is refused, however few names the server hosts
-    EXPECT_EQ("Bad request: in multi-graph mode GET /traverse/capabilities needs "
-              "?graph=<name> (and graph_path=<path> when the name spans several graphs); GET "
-              "/capabilities lists the graphs",
-              refusal_of([] { probe(SelectionRoute::TRAVERSE, {}); }));
-    EXPECT_EQ("Bad request: in multi-graph mode GET /pattern/capabilities needs "
-              "?graph=<name> (and graph_path=<path> when the name spans several graphs); GET "
-              "/capabilities lists the graphs",
+    // without ?graph=: every pair (the envelope answers it), up to the names cap
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), probe(SelectionRoute::TRAVERSE, {}));
+    EXPECT_EQ("Bad request: GET /traverse/capabilities needs ?graph=<name> on this server, "
+              "which hosts 3 graph names (more than 2; GET /capabilities lists them)",
+              refusal_of([] { probe(SelectionRoute::TRAVERSE, {}, 2); }));
+    EXPECT_EQ("Bad request: GET /pattern/capabilities: graph_path and annotation_path pick a "
+              "pair of the name ?graph= names: add ?graph=<name>",
               refusal_of([] { probe(SelectionRoute::PATTERN, { { "graph_path", "a.dbg" } }); }));
     EXPECT_EQ("Bad request: unknown parameter 'x' of GET /pattern/capabilities (graph, "
-              "graph_path)",
+              "graph_path, annotation_path)",
               refusal_of([] { probe(SelectionRoute::PATTERN, { { "graph", "a" }, { "x", "1" } }); }));
     EXPECT_EQ("Bad request: the parameter 'graph' is given twice",
               refusal_of([] { probe(SelectionRoute::TRAVERSE, { { "graph", "a" },
                                                                 { "graph", "b" } }); }));
-    EXPECT_EQ("Bad request: index 'b' spans several graphs (b1.dbg, b2.dbg); pass "
-              "'graph_path' to pick one",
-              refusal_of([] { probe(SelectionRoute::TRAVERSE, { { "graph", "b" } }); }));
-    EXPECT_EQ("Bad request: unknown graph 'z'",
-              refusal_of([] { probe(SelectionRoute::PATTERN, { { "graph", "z" } }); }));
+    EXPECT_EQ("Bad request: the parameter 'annotation_path' is given twice",
+              refusal_of([] { probe(SelectionRoute::TRAVERSE, { { "graph", "c" },
+                                                                { "annotation_path", "c0.anno" },
+                                                                { "annotation_path", "c1.anno" } }); }));
+    Json::Value body;
+    EXPECT_EQ("pair_ambiguous", selection_code_of([] {
+        probe(SelectionRoute::TRAVERSE, { { "graph", "b" } });
+    }, &body));
+    EXPECT_EQ(parse(R"({"error": "graph 'b' has 2 pairs on 2 graphs: add graph_path",
+                        "code": "pair_ambiguous", "candidates": [
+                        {"graph": "b", "graph_path": "b1.dbg", "annotation_path": "b1.anno"},
+                        {"graph": "b", "graph_path": "b2.dbg", "annotation_path": "b2.anno"}]})"),
+              body);
+    EXPECT_EQ("graph_unknown", selection_code_of([] {
+        probe(SelectionRoute::PATTERN, { { "graph", "z" } });
+    }, &body));
+    EXPECT_EQ("unknown graph 'z' (GET /capabilities lists the graphs)", body["error"].asString());
+    EXPECT_EQ("pair_not_found", selection_code_of([] {
+        probe(SelectionRoute::PATTERN, { { "graph", "a" }, { "graph_path", "x.dbg" } });
+    }, &body));
+    EXPECT_EQ("no pair of graph 'a' has graph_path 'x.dbg'", body["error"].asString());
     // any range of (key, value): the server passes its query multimap
     const GraphIndexes indexes = small_indexes();
     const std::multimap<std::string, std::string> query { { "graph", "c" },
                                                           { "graph_path", "c.dbg" } };
-    EXPECT_EQ("Bad request: graph_path 'c.dbg' names a graph with several annotations under "
-              "index 'c' (c0.anno, c1.anno): a traversal reads one annotation, which "
-              "graph_path cannot choose; list each annotation under a name of its own",
-              refusal_of([&] {
-                  select_pairs_from_query(SelectionRoute::TRAVERSE, query, indexes, 10);
-              }));
+    EXPECT_EQ("pair_ambiguous", selection_code_of([&] {
+        select_pairs_from_query(SelectionRoute::TRAVERSE, query, indexes, 10);
+    }, &body));
+    EXPECT_EQ("graph 'c' has 2 pairs on graph_path 'c.dbg': add annotation_path",
+              body["error"].asString());
     // the JSON spelling of the same probe
     EXPECT_EQ(Pairs({ kB1 }), select(SelectionRoute::CAPABILITIES,
                                      R"({"graph": "b", "graph_path": "b1.dbg"})"));
+    EXPECT_EQ(Pairs({ kC1 }), select(SelectionRoute::CAPABILITIES,
+                                     R"({"graph": "c", "annotation_path": "c1.anno"})"));
     EXPECT_EQ("Bad request: 'graph': expected a string",
               refusal_of([] { select(SelectionRoute::CAPABILITIES, R"({"graph": 1})"); }));
-    EXPECT_NE("", refusal_of([] { select(SelectionRoute::CAPABILITIES, "{}"); }));
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(SelectionRoute::CAPABILITIES, "{}"));
+    EXPECT_EQ("pairs_unsupported", selection_code_of([] {
+        select(SelectionRoute::CAPABILITIES, R"({"pairs": [{"graph": "a"}]})");
+    }));
 
-    // probe_parameters alone, as both GET handlers call it today
+    // probe_parameters alone, the release-9 reading
     EXPECT_EQ("Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> "
               "(and graph_path=<path> when the name spans several graphs); GET /capabilities "
               "lists the graphs",
@@ -331,4 +509,249 @@ TEST(ServerSelection, RefusalBody) {
     EXPECT_EQ(400, answer.status);
     EXPECT_EQ(parse(R"({"error": "request: pairs", "code": "pairs_unsupported"})"),
               parse(answer.body));
+}
+
+namespace {
+
+// The graph lists of the deployed indexes (PLAN-multigraph-implementation.md section 6), small:
+// r237, one name per pair; production RefSeq, one name over several graphs; Logan, names of
+// five pairs; sra-human, one graph with several annotations under one name
+const std::string kR8 = "/scratch/nvme8/refseq_r237/bact_other/";
+const std::string kR10 = "/scratch/nvme10/refseq_r237/bact_pseudomonadota/";
+const std::string kHuman = "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg";
+
+GraphPair r237_pair(const std::string &dir) {
+    return { dir + "graph.dbg", dir + "annotation.row_diff_brwt_coord.annodbg" };
+}
+
+GraphIndexes r237() {
+    GraphIndexes indexes;
+    indexes["bact_pseudomonadota"] = { r237_pair(kR10) };
+    indexes["bact_other"] = { r237_pair(kR8) };
+    indexes["viral"] = { r237_pair("/scratch/nvme9/refseq_r237/viral/") };
+    return indexes;
+}
+
+GraphIndexes production_refseq() {
+    GraphIndexes indexes;
+    indexes["refseq"] = { r237_pair(kR8), r237_pair(kR10),
+                          r237_pair("/scratch/nvme9/refseq_r237/viral/") };
+    return indexes;
+}
+
+GraphIndexes logan() {
+    GraphIndexes indexes;
+    for (const std::string name : { "logan_b", "logan_a" }) {
+        for (int i = 0; i < 5; ++i) {
+            const std::string dir = "/scratch/nvme" + std::to_string(i) + "/" + name + "/";
+            indexes[name].emplace_back(dir + "graph.dbg", dir + "annotation.row_diff_int_brwt.annodbg");
+        }
+    }
+    return indexes;
+}
+
+std::string human_annotation(int nvme, int part) {
+    return "/scratch/nvme" + std::to_string(nvme) + "/human/annotation_" + std::to_string(part)
+         + ".relaxed.renamed.row_diff_brwt.annodbg";
+}
+
+GraphIndexes sra_human() {
+    GraphIndexes indexes;
+    indexes["sra-human-1/3"] = { { kHuman, human_annotation(0, 0) },
+                                 { kHuman, human_annotation(3, 4) },
+                                 { kHuman, human_annotation(4, 8) } };
+    // the shards of every deployed index, beside it
+    indexes["refseq"] = production_refseq().at("refseq");
+    indexes["bact_other"] = { r237_pair(kR8) };
+    return indexes;
+}
+
+std::vector<SelectedPair> select_on(const GraphIndexes &indexes, SelectionRoute route,
+                                    const std::string &request, size_t max = 11) {
+    return select_pairs(route, parse(request), indexes, max);
+}
+
+// |pairs| as {graph, graph_path, annotation_path} references
+Json::Value refs(const std::vector<SelectedPair> &pairs) {
+    Json::Value out(Json::arrayValue);
+    for (const SelectedPair &pair : pairs) {
+        out.append(pair_ref_json(pair));
+    }
+    return out;
+}
+
+} // namespace
+
+// r237 (one name per pair): names select their one pair each, in byte order whatever the
+// request's order; a pair object needs no path; a traverse names one name
+TEST(ServerSelection, DeployedR237) {
+    const GraphIndexes indexes = r237();
+    const std::vector<SelectedPair> all = select_on(indexes, SelectionRoute::RESOLVE, "{}");
+    ASSERT_EQ(3u, all.size());
+    EXPECT_EQ((std::vector<std::string>{ "bact_other", "bact_pseudomonadota", "viral" }),
+              (std::vector<std::string>{ all[0].name, all[1].name, all[2].name }));
+    EXPECT_EQ(all, select_on(indexes, SelectionRoute::PATTERN,
+                             R"({"graphs": ["viral", "bact_other", "bact_pseudomonadota"]})"));
+    EXPECT_EQ(all, select_on(indexes, SelectionRoute::RESOLVE, R"({"pairs": [{"graph": "viral"},
+        {"graph": "bact_pseudomonadota"}, {"graph": "bact_other"}]})"));
+    EXPECT_EQ(std::vector<SelectedPair>({ all[1] }),
+              select_on(indexes, SelectionRoute::TRAVERSE, R"({"graph": "bact_pseudomonadota"})"));
+    // the names cap of mex (11) is not reached; one less than the names is
+    EXPECT_NE("", refusal_of([&] { select_on(indexes, SelectionRoute::RESOLVE, "{}", 2); }));
+    Json::Value body;
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::TRAVERSE, R"({"graphs": ["viral", "bact_other"]})");
+    }, &body));
+    EXPECT_EQ(refs({ all[0], all[2] }), body["candidates"]);
+}
+
+// production RefSeq (one name, several graphs): /resolve and /pattern answer every pair of the
+// name; a traverse and a probe name one graph; a pair object needs its graph_path
+TEST(ServerSelection, DeployedProductionRefSeq) {
+    const GraphIndexes indexes = production_refseq();
+    const std::vector<SelectedPair> all = select_on(indexes, SelectionRoute::PATTERN,
+                                                    R"({"graphs": ["refseq"]})");
+    ASSERT_EQ(3u, all.size());
+    EXPECT_EQ(r237_pair(kR8), all[0].pair);
+    EXPECT_EQ(r237_pair(kR10), all[1].pair);
+    // the list's order, not the request's
+    const std::string two = R"({"pairs": [{"graph": "refseq", "graph_path": ")" + kR10
+                          + R"(graph.dbg"}, {"graph": "refseq", "graph_path": ")" + kR8
+                          + R"(graph.dbg"}]})";
+    EXPECT_EQ(std::vector<SelectedPair>({ all[0], all[1] }),
+              select_on(indexes, SelectionRoute::RESOLVE, two));
+    Json::Value body;
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::TRAVERSE, two);
+    }, &body));
+    EXPECT_EQ(refs({ all[0], all[1] }), body["candidates"]);
+    EXPECT_EQ(std::vector<SelectedPair>({ all[1] }),
+              select_on(indexes, SelectionRoute::TRAVERSE,
+                        R"({"graph": "refseq", "graph_path": ")" + kR10 + R"(graph.dbg"})"));
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::TRAVERSE, R"({"graph": "refseq"})");
+    }, &body));
+    EXPECT_EQ(refs(all), body["candidates"]);
+    EXPECT_EQ("pair_ambiguous", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::RESOLVE, R"({"pairs": [{"graph": "refseq"}]})");
+    }, &body));
+    EXPECT_EQ("request.pairs[0]: 'refseq' has 3 pairs on 3 graphs: add graph_path",
+              body["error"].asString());
+    EXPECT_EQ(refs(all), body["candidates"]);
+    EXPECT_EQ(std::vector<SelectedPair>({ all[2] }),
+              select_pairs_from_parameters(SelectionRoute::TRAVERSE, {
+                      { "graph", "refseq" },
+                      { "graph_path", "/scratch/nvme9/refseq_r237/viral/graph.dbg" } },
+                      indexes, 11));
+}
+
+// Logan (names of five pairs): a re-ask names one unreached pair of a name without its four
+// siblings; a whole name is five pairs, two names ten, in the list's order per name
+TEST(ServerSelection, DeployedLogan) {
+    const GraphIndexes indexes = logan();
+    const std::vector<SelectedPair> all = select_on(indexes, SelectionRoute::PATTERN, "{}");
+    ASSERT_EQ(10u, all.size());
+    for (size_t i = 0; i < all.size(); ++i) {
+        EXPECT_EQ(i < 5 ? "logan_a" : "logan_b", all[i].name) << i;
+        EXPECT_EQ(indexes.at(all[i].name)[i % 5], all[i].pair) << i;
+    }
+    const std::vector<SelectedPair> one = select_on(indexes, SelectionRoute::PATTERN,
+        R"({"pairs": [{"graph": "logan_b", "graph_path": "/scratch/nvme3/logan_b/graph.dbg"}]})");
+    EXPECT_EQ(std::vector<SelectedPair>({ all[8] }), one);
+    const std::vector<SelectedPair> mixed = select_on(indexes, SelectionRoute::RESOLVE, R"({"pairs": [
+        {"graph": "logan_b", "graph_path": "/scratch/nvme0/logan_b/graph.dbg"},
+        {"graph": "logan_a", "annotation_path": "/scratch/nvme4/logan_a/annotation.row_diff_int_brwt.annodbg"},
+        {"graph": "logan_a", "graph_path": "/scratch/nvme1/logan_a/graph.dbg"}]})");
+    EXPECT_EQ(std::vector<SelectedPair>({ all[1], all[4], all[5] }), mixed);
+    // a graph path of the other name's
+    Json::Value body;
+    EXPECT_EQ("pair_not_found", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::RESOLVE, R"({"pairs": [{"graph": "logan_a",
+                  "graph_path": "/scratch/nvme0/logan_b/graph.dbg"}]})");
+    }, &body));
+    EXPECT_EQ(5u, body["candidates"].size());
+    EXPECT_EQ("logan_a", body["candidates"][0]["graph"].asString());
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::TRAVERSE, R"({"graph": "logan_a"})");
+    }, &body));
+    EXPECT_EQ(refs({ all.begin(), all.begin() + 5 }), body["candidates"]);
+    // more names than the cap: the cap's 400 without a selection, none with one
+    EXPECT_NE("", refusal_of([&] { select_on(indexes, SelectionRoute::PATTERN, "{}", 1); }));
+    EXPECT_EQ(5u, select_on(indexes, SelectionRoute::PATTERN, R"({"graphs": ["logan_b"]})", 1)
+                          .size());
+}
+
+// sra-human (one graph, several annotations under one name): only annotation_path tells its
+// pairs apart, in a pair object and in a probe; a traverse names one annotation
+TEST(ServerSelection, DeployedSraHuman) {
+    const GraphIndexes indexes = sra_human();
+    const std::string name = "sra-human-1/3";
+    const std::vector<SelectedPair> human = select_on(indexes, SelectionRoute::RESOLVE,
+                                                      R"({"graph": "sra-human-1/3"})");
+    ASSERT_EQ(3u, human.size());
+    EXPECT_EQ(human, select_on(indexes, SelectionRoute::RESOLVE,
+                               R"({"graph": "sra-human-1/3", "graph_path": ")" + kHuman + R"("})"));
+    const std::string by_annotation = R"({"pairs": [{"graph": "sra-human-1/3", "annotation_path": ")"
+                                    + human_annotation(3, 4) + R"("}]})";
+    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::PATTERN,
+                                  SelectionRoute::TRAVERSE }) {
+        EXPECT_EQ(std::vector<SelectedPair>({ human[1] }),
+                  select_on(indexes, route, by_annotation));
+    }
+    EXPECT_EQ(std::vector<SelectedPair>({ human[2] }),
+              select_pairs_from_parameters(SelectionRoute::PATTERN, {
+                      { "graph", name }, { "annotation_path", human_annotation(4, 8) } },
+                      indexes, 11));
+    Json::Value body;
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        select_on(indexes, SelectionRoute::TRAVERSE,
+                  R"({"graph": "sra-human-1/3", "graph_path": ")" + kHuman + R"("})");
+    }, &body));
+    EXPECT_EQ(refs(human), body["candidates"]);
+    EXPECT_EQ("request: graph 'sra-human-1/3' holds 3 pairs; a traverse runs on exactly one "
+              "pair: name it with pairs (graph, graph_path, annotation_path)",
+              body["error"].asString());
+    // with graph_path or without, a pair object is ambiguous until annotation_path is given
+    for (const std::string &object : { std::string(R"({"graph": "sra-human-1/3"})"),
+                                       R"({"graph": "sra-human-1/3", "graph_path": ")" + kHuman + R"("})" }) {
+        EXPECT_EQ("pair_ambiguous", selection_code_of([&] {
+            select_on(indexes, SelectionRoute::PATTERN, R"({"pairs": [)" + object + "]}");
+        }, &body)) << object;
+        EXPECT_EQ(refs(human), body["candidates"]);
+    }
+    EXPECT_EQ("pair_ambiguous", selection_code_of([&] {
+        select_pairs_from_parameters(SelectionRoute::TRAVERSE, { { "graph", name } }, indexes, 11);
+    }, &body));
+    EXPECT_EQ(refs(human), body["candidates"]);
+}
+
+// The refusals of sample 22, each rebuilt from its case's request on a list holding the
+// sample's pairs (refseq of two): the same bodies, member for member
+TEST(ServerSelection, Sample22Refusals) {
+    GraphIndexes indexes = sra_human();
+    indexes["refseq"] = { r237_pair(kR8), r237_pair(kR10) };
+    const Json::Value cases = sample("22_selector_refusals.json")["body"];
+    const std::vector<std::function<void()>> requests = {
+        [&] { select_on(indexes, SelectionRoute::RESOLVE,
+                        R"({"graphs": ["refseq"], "pairs": [{"graph": "refseq"}]})"); },
+        [&] { select_on(indexes, SelectionRoute::PATTERN, R"({"pairs": [
+                  {"graph": "bact_other"},
+                  {"graph": "refseq", "graph_path": "/scratch/x/graph.dbg"}]})"); },
+        [&] { select_on(indexes, SelectionRoute::RESOLVE, R"({"pairs": [
+                  {"graph": "sra-human-1/3", "graph_path": ")" + kHuman + R"("}]})"); },
+        [&] { select_on(indexes, SelectionRoute::TRAVERSE, R"({"graph": "refseq"})"); },
+        [&] { select_on(indexes, SelectionRoute::RESOLVE, R"({"graphs": ["bact_othr"]})"); },
+        [&] { select_on(indexes, SelectionRoute::SEARCH, R"({"pairs": [{"graph": "refseq"}]})"); },
+        [&] { select_pairs_from_parameters(SelectionRoute::TRAVERSE,
+                                           { { "graph", "sra-human-1/3" } }, indexes, 11); },
+    };
+    ASSERT_EQ(requests.size(), cases.size());
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const Json::Value &c = cases[static_cast<Json::ArrayIndex>(i)];
+        SCOPED_TRACE(c["case"].asString());
+        EXPECT_EQ(400, c["status"].asInt());
+        Json::Value body;
+        EXPECT_EQ(c["body"]["code"].asString(), selection_code_of(requests[i], &body));
+        EXPECT_EQ(c["body"], body);
+    }
 }

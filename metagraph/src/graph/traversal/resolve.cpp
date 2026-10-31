@@ -5,6 +5,8 @@
 #include <cctype>
 #include <map>
 #include <numeric>
+#include <optional>
+#include <string_view>
 #include <tuple>
 
 #include <tsl/hopscotch_map.h>
@@ -467,8 +469,16 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // a discovery's labels, with the support it accumulated while it read the rows
     std::vector<LabelSupport> discovered;
     if (!options.labels.empty()) {
+        // each absent name listed once (a request may repeat a label)
+        tsl::hopscotch_set<std::string_view> unknown;
         for (const auto &name : options.labels) {
-            refs.push_back(oracle.resolve_label(name));
+            if (!options.drop_labels_not_in_graph) {
+                refs.push_back(oracle.resolve_label(name));
+            } else if (std::optional<LabelRef> ref = oracle.find_label(name)) {
+                refs.push_back(std::move(*ref));
+            } else if (unknown.insert(name).second) {
+                profile.unknown_labels.push_back(name);
+            }
         }
     } else {
         if (options.discover_kind == LabelKind::HEADER && !oracle.coord_to_header())
@@ -869,6 +879,9 @@ uint64_t profile_bytes(const SupportProfile &p) {
     for (const SeedCandidate &c : p.candidates) {
         bytes += sizeof(SeedCandidate) + c.labels.size() * sizeof(LabelId);
     }
+    for (const std::string &name : p.unknown_labels) {
+        bytes += sizeof(std::string) + name.size();
+    }
     if (p.stop)
         bytes += p.stop->query_graph_runs.size() * sizeof(KmerInterval);
     return bytes;
@@ -1119,8 +1132,16 @@ SeedSelection select_seeds(const SupportProfile &profile,
                 for (const auto &name : ex.labels) {
                     auto it = std::find_if(profile.labels.begin(), profile.labels.end(),
                                            [&](const LabelProfile &lp) { return lp.label.name == name; });
-                    if (it == profile.labels.end())
+                    if (it == profile.labels.end()) {
+                        // a label this pair does not hold (unknown_labels, a multi-graph
+                        // server's) covers nothing of the seed here
+                        if (std::find(profile.unknown_labels.begin(), profile.unknown_labels.end(),
+                                      name) != profile.unknown_labels.end()) {
+                            p.labels_not_covering.push_back(name);
+                            continue;
+                        }
                         throw std::invalid_argument("Explicit seed label was not profiled: '" + name + "'");
+                    }
                     if (covers(*it, ex.kmers)) {
                         p.labels.push_back(it - profile.labels.begin());
                     } else {

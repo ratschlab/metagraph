@@ -329,6 +329,9 @@ class LabelOracle {
     // Resolve a label name: a column name first, then a header. Throws
     // std::invalid_argument naming the label if neither exists.
     LabelRef resolve_label(const std::string &name) const;
+    // The same lookup, none when neither exists: a multi-graph server drops a label its pair
+    // does not hold and reports it (SPEC-multigraph-envelope.md section 2)
+    std::optional<LabelRef> find_label(const std::string &name) const;
 
     // Raw batched access (rows = annotation key - 1). Updates counters.
     std::vector<annot::matrix::BinaryMatrix::SetBitPositions>
@@ -394,8 +397,8 @@ class LabelOracle {
     // Tests: called with the row count at every annotation read of this oracle (the default
     // and the budget-aware ones), before the read — to make the reads of a small index slow
     std::function<void(size_t rows)> test_read_hook;
-    // Tests: called with the name at every resolve_label — to make resolving a seed's labels
-    // slow on a virtual clock (the seed phase's setup pieces)
+    // Tests: called with the name at every resolve_label and find_label — to make resolving a
+    // seed's labels slow on a virtual clock (the seed phase's setup pieces)
     std::function<void(const std::string &name)> test_resolve_hook;
 
   private:

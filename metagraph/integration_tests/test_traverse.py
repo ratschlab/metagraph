@@ -1748,6 +1748,37 @@ class TestTraverseAPI(TestTraverseBase):
         else:
             self.assertNotIn('page_faults', timing, where)
 
+    def test_api_labels_not_in_graph_refused(self):
+        """A single-graph server keeps the 400 for a label its annotation does not hold, at the
+        three sites (resolve labels, seed labels, extra labels), and states no unknown_labels;
+        it refuses the pair selector (SPEC-multigraph-envelope.md sections 2 and 6)."""
+        seed = {'seed_id': 's0', 'sequence': self.element}
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 20},
+                    'output': {'detail': 'full', 'timing': False}}
+        for route, payload in (
+                ('traverse', {'seeds': [dict(seed, labels=['acc1', 'nope'])], 'strategy': strategy}),
+                ('traverse', {'seeds': [dict(seed, labels=['acc1'])],
+                              'strategy': dict(strategy, labels={
+                                  'extra': ['nope'], 'loss_budget': 1,
+                                  'change_cost': {'model': 'constant', 'value': 1}})}),
+                ('resolve', {'sequence': self.element, 'labels': ['acc1', 'nope']})):
+            ret = self._post(route, payload)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn("Label not found in the annotation: 'nope'", ret.json()['error'])
+        ret = self._post('traverse', {'seeds': [dict(seed, labels=['acc1'])], 'strategy': strategy})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertNotIn('unknown_labels', ret.json())
+        self.assertNotIn('unknown_labels', ret.json()['results'][0])
+        ret = self._post('resolve', {'sequence': self.element, 'labels': ['acc1']})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertNotIn('unknown_labels', ret.json())
+        for route, payload in (('traverse', {'seeds': [seed], 'pairs': [{'graph': 'x'}]}),
+                               ('resolve', {'sequence': self.element, 'labels': ['acc1'],
+                                            'pairs': [{'graph': 'x'}]})):
+            ret = self._post(route, payload)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn("remove the 'pairs' field", ret.json()['error'])
+
     def test_api_task_resources(self):
         """The per-task figures on the server and the CLI (SPEC §7.2.1, SPEC-pattern-search.md
         §8.4): timing.cpu_ms (and timing.page_faults on Linux) on /traverse per request and
@@ -3213,10 +3244,13 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                      entry['capabilities']['index_fp']))
             self.assertEqual(ident[1], entry['index_fp'])
         self.assertEqual(3, len(metas))
-        # C lists the base graph with two annotations: graph_path cannot choose one
+        # C lists the base graph with two annotations: graph_path cannot choose one, a traverse
+        # runs on one pair (pairs names it by its annotation_path)
         ret = self._post('traverse', self._request('C', self.pairs['col'][0]))
         self.assertEqual(400, ret.status_code, ret.text)
-        self.assertIn('several annotations', ret.json()['error'])
+        self.assertEqual('traverse_single_pair', ret.json()['code'])
+        self.assertEqual([self.anno, self.pairs['col'][1]],
+                         [c['annotation_path'] for c in ret.json()['candidates']])
 
     def test_multi_probe_describes_one_pair(self):
         ret = self._caps('?graph=A')
@@ -3233,35 +3267,52 @@ class TestTraverseMultiGraph(TestTraverseBase):
         out = self._post('traverse', self._request('A')).json()
         for key in ('index_ns', 'index_fp', 'index_meta_fp', 'k', 'num_labels'):
             self.assertEqual(out['capabilities'][key], caps[key], key)
-        # a name over several graphs needs graph_path, which must name one of them
+        # a name over several graphs needs graph_path, which must name one of them: the
+        # candidates are its pairs
         ret = self._caps('?graph=B')
         self.assertEqual(400, ret.status_code)
-        self.assertIn(self.pairs['two'][0], ret.json()['error'])
-        self.assertIn(self.pairs['three'][0], ret.json()['error'])
+        self.assertEqual('pair_ambiguous', ret.json()['code'])
+        self.assertEqual([self.pairs['two'][0], self.pairs['three'][0]],
+                         [c['graph_path'] for c in ret.json()['candidates']])
         quoted = requests.utils.quote(self.pairs['two'][0], safe='')
         ret = self._caps(f'?graph=B&graph_path={quoted}')
         self.assertEqual(200, ret.status_code, ret.text)
         self.assertEqual((self.pairs['two'][0], None, self.fp_two),
                          (ret.json()['graph_path'], ret.json()['index_ns'],
                           ret.json()['index_fp']))
-        # one graph with two annotations cannot be addressed by graph_path, and a name listing
-        # only that is refused as such, not told to pass graph_path
+        # one graph with two annotations is addressed by annotation_path (graph_path cannot
+        # choose), and a name listing only that is told so, not to pass graph_path
         quoted = requests.utils.quote(self.graph, safe='')
-        ret = self._caps(f'?graph=C&graph_path={quoted}')
-        self.assertEqual(400, ret.status_code, ret.text)
-        self.assertIn('several annotations', ret.json()['error'])
-        ret = self._caps('?graph=C')
-        self.assertEqual(400, ret.status_code, ret.text)
-        self.assertIn("index 'C' lists one graph", ret.json()['error'])
-        self.assertIn('several annotations', ret.json()['error'])
-        self.assertNotIn('graph_path\' to pick one', ret.json()['error'])
-        for query, needle in (('', 'needs ?graph=<name>'), ('?graph=Z', "unknown graph 'Z'"),
-                              ('?graph=A&x=1', "unknown parameter 'x'"),
-                              ('?graph=A&graph=B', 'given twice'),
-                              ('?graph=B&graph_path=/nowhere', 'is not part of')):
+        for query in (f'?graph=C&graph_path={quoted}', '?graph=C'):
+            ret = self._caps(query)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertEqual(('pair_ambiguous', f"graph 'C' has 2 pairs on graph_path '{self.graph}': "
+                                                'add annotation_path'),
+                             (ret.json()['code'], ret.json()['error']), query)
+            self.assertEqual([self.anno, self.pairs['col'][1]],
+                             [c['annotation_path'] for c in ret.json()['candidates']])
+        # the probe states its pair by graph and graph_path (the frozen probe's tags): C's two
+        # annotations tell apart by their identities, A's (its manifest) and none (the second)
+        for annotation, fp in ((self.anno, self.index_fp), (self.pairs['col'][1], None)):
+            quoted = requests.utils.quote(annotation, safe='')
+            ret = self._caps(f'?graph=C&annotation_path={quoted}')
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertEqual(('C', self.graph, fp),
+                             (ret.json()['graph'], ret.json()['graph_path'],
+                              ret.json()['index_fp']))
+            self.assertNotIn('annotation_path', ret.json())
+        for query, needle, code in (('', 'needs ?graph=<name>', None),
+                                    ('?graph=Z', "unknown graph 'Z'", 'graph_unknown'),
+                                    ('?graph=A&x=1', "unknown parameter 'x'", None),
+                                    ('?graph=A&graph=B', 'given twice', None),
+                                    ('?graph_path=/nowhere', 'add ?graph=<name>', None),
+                                    ('?graph=B&graph_path=/nowhere',
+                                     "no pair of graph 'B' has graph_path '/nowhere'",
+                                     'pair_not_found')):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, query)
             self.assertIn(needle, ret.json()['error'], query)
+            self.assertEqual(code, ret.json().get('code'), query)
         # the server-wide document lists the names; align is not offered here
         c = requests.get(self.server.url + '/capabilities').json()
         self.assertEqual(('multi', ['A', 'B', 'C'], True),
@@ -3277,6 +3328,130 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual(self.fp_two, client.capabilities(graph='B', graph_path=self.pairs['two'][0])
                          ['index_fp'])
         self.assertEqual(['A', 'B', 'C'], client.server_capabilities()['graphs'])
+
+    @staticmethod
+    def _entry(out):
+        """The pair's answer: the response itself, or its one envelope entry once the route
+        answers in the envelope (SPEC-multigraph-envelope.md section 1)."""
+        if 'answers' in out:
+            assert len(out['answers']) == 1, out
+            return out['answers'][0]
+        return out
+
+    def test_multi_pairs_select_one_pair(self):
+        """The pair selector (SPEC-multigraph-envelope.md section 6): a traverse names one pair
+        with pairs, an annotation of a shared graph by its annotation_path; several pairs,
+        graphs beside pairs and a pair object matching none are refused before anything runs
+        (400 {error, code, candidates?}), a ledger-managed request's with its usage; /search
+        refuses pairs."""
+        two, three = self.pairs['two'], self.pairs['three']
+        by_graph = self._post('traverse', self._request('B', two[0]))
+        self.assertEqual(200, by_graph.status_code, by_graph.text)
+        req = self._request(None)
+        del req['graph']
+        by_pair = self._post('traverse', dict(req, pairs=[{'graph': 'B', 'graph_path': two[0]}]))
+        self.assertEqual(200, by_pair.status_code, by_pair.text)
+        self.assertEqual(by_graph.content, by_pair.content)
+        # the second annotation of the base graph, under C, by its annotation_path alone
+        col = self._post('traverse', dict(req, pairs=[{'graph': 'C',
+                                                       'annotation_path': self.pairs['col'][1]}]))
+        self.assertEqual(200, col.status_code, col.text)
+        self.assertEqual(None, self._entry(col.json())['capabilities']['index_fp'])
+        # refusals, before any pair starts
+        for payload, code, candidates in (
+                (dict(req, pairs=[{'graph': 'B', 'graph_path': two[0]},
+                                  {'graph': 'B', 'graph_path': three[0]}]),
+                 'traverse_single_pair', [two[1], three[1]]),
+                (dict(req, pairs=[{'graph': 'C'}]), 'pair_ambiguous',
+                 [self.anno, self.pairs['col'][1]]),
+                (dict(req, pairs=[{'graph': 'B', 'graph_path': '/nowhere'}]), 'pair_not_found',
+                 [two[1], three[1]]),
+                (dict(req, graphs=['B'], pairs=[{'graph': 'B'}]), 'selection_conflict', None),
+                (dict(req, pairs=[{'graph': 'Z'}]), 'graph_unknown', None),
+                (dict(req, graphs=['A', 'B']), 'traverse_single_pair', [self.anno, two[1], three[1]])):
+            with self.subTest(payload={k: v for k, v in payload.items() if k != 'seeds'}):
+                ret = self._post('traverse', payload)
+                self.assertEqual(400, ret.status_code, ret.text)
+                body = ret.json()
+                self.assertEqual(code, body['code'])
+                self.assertEqual(candidates, [c['annotation_path'] for c in body['candidates']]
+                                 if 'candidates' in body else None)
+                self.assertEqual({'error', 'code'} | ({'candidates'} if candidates else set()),
+                                 set(body))
+        # a ledger-managed request: the refusal states the attempt's usage beside its code
+        managed = dict(req, pairs=[{'graph': 'C'}], attempt_id='pairs-refused-1')
+        ret = self._post('traverse', managed)
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertEqual({'error', 'code', 'candidates', 'usage'}, set(ret.json()))
+        self.assertEqual('pair_ambiguous', ret.json()['code'])
+        # /search selects by graphs only
+        ret = self._post('search', {'FASTA': f'>q\n{self.element}\n', 'pairs': [{'graph': 'A'}]})
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertEqual('pairs_unsupported', ret.json()['code'])
+
+    def test_multi_labels_not_in_graph(self):
+        """Labels a pair does not hold (SPEC-multigraph-envelope.md section 2): B's first graph
+        holds acc1 only. A seed label it does not hold is dropped (not_in_graph) and listed in
+        the seed's unknown_labels, in the graphlet as an X record; a seed whose labels are all
+        absent gets no walk (labels_not_in_graph); an absent extra label is listed in the
+        answer's unknown_labels; /resolve lists the absent labels of its answer."""
+        two = self.pairs['two']
+
+        def traverse(labels, detail='full', extra=None):
+            req = self._request('B', two[0], detail=detail)
+            req['seeds'] = [{'seed_id': 's0', 'sequence': self.element, 'labels': labels}]
+            if extra:
+                req['strategy']['labels'] = {'extra': extra, 'loss_budget': 1,
+                                             'change_cost': {'model': 'constant', 'value': 1}}
+            ret = self._post('traverse', req)
+            self.assertEqual(200, ret.status_code, ret.text)
+            return self._entry(ret.json())
+
+        out = traverse(['acc1', 'acc2'])
+        result = out['results'][0]
+        self.assertEqual('complete', result['outcome']['walks'])
+        self.assertEqual(['acc2'], result['unknown_labels'])
+        self.assertEqual(['acc1'], result['seed']['labels'])
+        self.assertEqual([{'label': 'acc2', 'reason': 'not_in_graph', 'runs': [],
+                           'runs_kind': 'presence'}], result['seed']['dropped_labels'])
+        self.assertEqual([], out['unknown_labels'])
+        alone = traverse(['acc1'])['results'][0]
+        self.assertEqual([], alone['unknown_labels'])
+        self.assertEqual(alone['arms'], result['arms'])
+        # the graphlet's X record
+        graphlet = traverse(['acc2', 'acc1'], detail='graphlet')['results'][0]
+        self.assertIn('\nX not_in_graph . acc2\n', graphlet['graphlet'])
+        self.assertEqual(['acc2'], graphlet['unknown_labels'])
+        # every label absent: no walk
+        none = traverse(['acc2', 'acc3'])['results'][0]
+        self.assertEqual('labels_not_in_graph', none['outcome']['walks'])
+        self.assertEqual(['acc2', 'acc3'], none['unknown_labels'])
+        self.assertEqual([{'label': 'acc2', 'reason': 'not_in_graph'},
+                          {'label': 'acc3', 'reason': 'not_in_graph'}], none['dropped_labels'])
+        self.assertEqual("none of the seed's labels is in this graph: acc2, acc3", none['error'])
+        self.assertNotIn('arms', none)
+        # an extra label the pair does not hold
+        extra = traverse(['acc1'], extra=['acc3'])
+        self.assertEqual(['acc3'], extra['unknown_labels'])
+        self.assertEqual('complete', extra['results'][0]['outcome']['walks'])
+        self.assertEqual(['acc3'], extra['strategy']['labels']['extra'])
+        # /resolve: the answer of the labels the pair holds, the others listed
+        resolve = {'graph': 'B', 'graph_path': two[0], 'sequence': self.element}
+        ret = self._post('resolve', dict(resolve, labels=['acc3', 'acc1', 'acc2']))
+        self.assertEqual(200, ret.status_code, ret.text)
+        answer = self._entry(ret.json())
+        self.assertEqual(['acc3', 'acc2'], answer['unknown_labels'])
+        self.assertEqual(['acc1'], [l['label'] for l in answer['labels']])
+        ret = self._post('resolve', dict(resolve, labels=['acc2']))
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual((['acc2'], [], []), (self._entry(ret.json())['unknown_labels'],
+                                              self._entry(ret.json())['labels'],
+                                              self._entry(ret.json())['candidates']))
+        # the base graph's own pair holds them all as headers
+        ret = self._post('resolve', {'graph': 'A', 'sequence': self.element,
+                                     'labels': ['acc1', 'acc2']})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual([], self._entry(ret.json())['unknown_labels'])
 
     def test_multi_lists_refuse_to_start(self):
         """A graph list the server cannot state one identity per index for refuses to start

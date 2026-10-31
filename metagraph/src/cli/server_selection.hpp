@@ -102,7 +102,8 @@ std::vector<std::string> sorted_names(const GraphIndexes &indexes);
 // The parameters of a GET probe of one pair on a multi-graph server (?graph=<name>
 // [&graph_path=<path>]), refused as GET /traverse/capabilities refuses them (|route| names the
 // route in the messages): InvalidRequest for an unknown or a repeated parameter, or a missing
-// graph
+// graph. The release-9 reading: the GET routes select through select_pairs_from_query, which
+// also reads annotation_path and codes its refusals
 std::pair<std::string, std::optional<std::string>>
 probe_parameters(const std::vector<std::pair<std::string, std::string>> &query,
                  const std::string &route);
@@ -116,26 +117,33 @@ probe_parameters(const Query &query, const std::string &route) {
 
 /**
  * The pairs a request on |route| selects on a multi-graph server (|indexes|), in the
- * envelope's order (ordered_pairs), before any pair starts. These are TODAY's rules of each
- * route, so that a handler moved onto this function answers as before, with the refusals'
- * messages and exception types it states today; lane E12 (section 6) replaces the bodies with
- * the `pairs` selector and the coded refusals:
- *  - every route: a `pairs` member is refused, SelectionRefusal pairs_unsupported;
- *  - SEARCH: the names of `graphs` as POST /search reads them (filter_graphs_from_list, its
- *    refusals and the names cap |max_names_without_selection|), each name's pairs. POST
- *    /search itself still queries a pair listed twice under a name twice;
- *  - PATTERN: `graphs` as POST /pattern reads it (pattern_graph_names, its refusals and the
- *    names cap), each name's pairs;
- *  - RESOLVE (the envelope, any number of pairs): `graph` (or `graphs` naming one) with
- *    `graph_path` its one pair, `graph` alone each pair of its name, else `graphs` and no
- *    selection as PATTERN reads them;
- *  - TRAVERSE: the one pair of today's /traverse: `graph`, or
- *    `graphs` ([name]), and `graph_path` where the name spans several graphs
- *    (traverse_graph_selection, select_traverse_pair, their refusals); no names cap, since
- *    the name is required;
- *  - CAPABILITIES: the members `graph` and `graph_path` read as select_pairs_from_parameters
- *    reads the GET probes' parameters.
- * Throws std::invalid_argument (InvalidRequest for the pair rules) or SelectionRefusal.
+ * envelope's order (ordered_pairs: the names in byte order, each name's pairs in the graph
+ * list's order, a pair once), before any pair starts: the selectors of
+ * SPEC-multigraph-envelope.md section 6.
+ *  - `pairs` ([{graph, graph_path?, annotation_path?}], RESOLVE, PATTERN, TRAVERSE): each
+ *    object names exactly one pair of its name (graph_path may be omitted when the name has
+ *    one graph; annotation_path is needed where the name's pairs share a graph), none
+ *    (pair_not_found) or several (pair_ambiguous) refuse the request with the candidates; a
+ *    pair named twice is selected once. `pairs` beside `graphs` (or, on RESOLVE and TRAVERSE,
+ *    beside `graph` or `graph_path`) is a selection_conflict. SEARCH refuses it
+ *    (pairs_unsupported), CAPABILITIES too (a probe selects by graph, graph_path and
+ *    annotation_path).
+ *  - `graphs` (a non-empty array of names; an unknown one graph_unknown, the first in the
+ *    list's order) selects every pair of its names; RESOLVE and TRAVERSE also take `graph`
+ *    (one name; with `graphs`, a selection_conflict) and `graph_path` beside one name, which
+ *    keeps the name's pairs on that graph (pair_not_found when it holds none).
+ *  - without a selector, every pair of every name, when there are at most
+ *    |max_names_without_selection| names (else the names cap's 400, a std::invalid_argument
+ *    without a code, as before).
+ *  - TRAVERSE runs on exactly one pair: a selection of several is refused with
+ *    traverse_single_pair and the selected pairs as the candidates.
+ *  - SEARCH reads `graphs` as POST /search always has (filter_graphs_from_list: a `graphs`
+ *    that is no array selects nothing, every name is then read), an unknown name refused
+ *    with its message and graph_unknown.
+ *  - CAPABILITIES reads the members `graph`, `graph_path` and `annotation_path` as
+ *    select_pairs_from_parameters reads the GET probes' parameters.
+ * Throws SelectionRefusal (HTTP 400 {error, code, candidates?}), InvalidRequest for a
+ * malformed selector, std::invalid_argument for the names cap.
  */
 std::vector<SelectedPair> select_pairs(SelectionRoute route,
                                        const Json::Value &request,
@@ -143,13 +151,15 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
                                        size_t max_names_without_selection);
 
 /**
- * The pair a GET capabilities probe selects on a multi-graph server, by today's rule: one pair
- * per probe, ?graph=<name>[&graph_path=<path>] (probe_parameters, then select_traverse_pair,
- * and their refusals; a probe without ?graph= is refused). |route| names the route in the
- * messages: TRAVERSE for GET /traverse/capabilities, PATTERN for GET /pattern/capabilities
- * (CAPABILITIES names both). |max_names_without_selection| is not read yet: it bounds the
- * envelope over every pair that answers a probe without ?graph= (section 1), which replaces
- * today's refusal. Throws InvalidRequest.
+ * The pairs a GET capabilities probe selects on a multi-graph server, from its query
+ * parameters (section 6): ?graph=<name>[&graph_path=<path>][&annotation_path=<path>] names
+ * exactly one pair of the name, as an object of `pairs` does (graph_unknown, pair_not_found,
+ * pair_ambiguous, with the candidates); without ?graph=, every pair, when the server hosts at
+ * most |max_names_without_selection| names (the names cap's 400 otherwise): the envelope over
+ * every pair answers such a probe (section 1). |route| names the route in the messages:
+ * TRAVERSE for GET /traverse/capabilities, PATTERN for GET /pattern/capabilities
+ * (CAPABILITIES names both). An unknown or a repeated parameter, or graph_path or
+ * annotation_path without ?graph=, is an InvalidRequest.
  */
 std::vector<SelectedPair>
 select_pairs_from_parameters(SelectionRoute route,

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -6,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -850,8 +852,15 @@ int run_server(Config *config) {
                     if (content_json.isMember("graphs"))
                         throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
                 } else {
-                    graphs_to_query = filter_graphs_from_list(indexes, content_json, request_id,
-                                                              config->max_graphs_without_selection);
+                    // the names of the selection (SPEC-multigraph-envelope.md section 6: `graphs`
+                    // only, `pairs` refused with pairs_unsupported, an unknown name with
+                    // graph_unknown), in byte order; each name's pairs are queried below
+                    for (const SelectedPair &pair : select_pairs(
+                                SelectionRoute::SEARCH, content_json, indexes,
+                                config->max_graphs_without_selection)) {
+                        if (graphs_to_query.empty() || graphs_to_query.back() != pair.name)
+                            graphs_to_query.push_back(pair.name);
+                    }
                     load_in_ram = content_json.get("in_ram", false).asBool() && loaded_with_mmap;
                 }
 
@@ -1603,9 +1612,12 @@ int run_server(Config *config) {
                 ResolveDelivery *pair_delivery = control.inline_run() ? &writing->delivery : &own;
                 if (const auto cap = control.deadline_cap())
                     pair_delivery->set_deadline_cap(*cap);
+                // the pair answers for the labels it holds and lists the others
+                // (unknown_labels, SPEC-multigraph-envelope.md section 2)
                 Json::Value out = process_resolve_request(
                         json, lease->index(), config->index_release, config->resolve_max_query_bp,
-                        &identity, control.stop_predicate(), resolve_time, pair_delivery);
+                        &identity, control.stop_predicate(), resolve_time, pair_delivery,
+                        nullptr, /* labels_not_in_graph_dropped */ true);
                 // in_ram: the time before the work began, waiting for and loading its index
                 if (in_ram)
                     out["timing"]["load_ms"] = lease->load_ms();
@@ -1746,11 +1758,14 @@ int run_server(Config *config) {
             if (entry)
                 entry->pair_running(0);
             try {
+                // a single-graph server keeps the 400 for a label it does not hold
+                // (SPEC-multigraph-envelope.md section 2): multi is false here
                 Json::Value out = process_resolve_request(json, *anno_graph.get(),
                                                           config->index_release,
                                                           config->resolve_max_query_bp,
                                                           &identity, gone_of(request),
-                                                          resolve_time, &writing.delivery);
+                                                          resolve_time, &writing.delivery,
+                                                          nullptr, multi);
                 // in_ram: a single-graph server's index is the one it holds, nothing is loaded
                 if (in_ram)
                     out["timing"]["load_ms"] = 0.0;
@@ -1938,21 +1953,27 @@ int run_server(Config *config) {
             }
             try {
                 const bool multi = !config->fnames.empty();
-                const GraphSelection selection = traverse_graph_selection(json, multi);
+                // a single-graph server refuses the selectors
+                if (!multi)
+                    traverse_graph_selection(json, false);
                 const std::optional<bool> in_ram = in_ram_field(json);
                 std::unique_ptr<IndexLease> lease;
                 IndexIdentity identity = single_identity;
                 if (multi) {
-                    const GraphPair &pair = select_traverse_pair(
-                            selection.name,
-                            selection.graph_path ? &*selection.graph_path : nullptr, indexes);
+                    // exactly one pair (SPEC-multigraph-envelope.md section 6): `graph` or
+                    // `graphs` resolving to one, or one object of `pairs`; several are refused
+                    // with the candidates (traverse_single_pair)
+                    const SelectedPair selected
+                            = select_pairs(SelectionRoute::TRAVERSE, json, indexes,
+                                           config->max_graphs_without_selection).front();
+                    const GraphPair &pair = selected.pair;
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
                         parse_traverse_request(json);
                     // GET /requests/{attempt_id} names the pair the attempt ran on
                     if (attempt->managed()) {
                         requests.note_traverse_pair(attempt->ids().attempt_id,
-                                                    pair_ref_json({ selection.name, pair }));
+                                                    pair_ref_json(selected));
                     }
                     // the wait for the memory is abandoned when the client is gone or the server
                     // stops, and not entered or given up once finish_by_ms (less the clock skew
@@ -1983,6 +2004,9 @@ int run_server(Config *config) {
                 // of /search sends each seed to whether or not they hold it: a seed a chunk does
                 // not hold is its result, whichever spelling (`graph`, `graphs`) named the chunk
                 limits.not_in_graph_per_seed = multi;
+                // and its pairs need not hold every label a request names: the absent ones are
+                // dropped and stated (SPEC-multigraph-envelope.md section 2)
+                limits.labels_not_in_graph_dropped = multi;
                 if (in_ram)
                     limits.load_ms = lease ? lease->load_ms() : 0.0;
                 return process_traverse_request(json, index, config->index_release, limits,
@@ -1995,6 +2019,13 @@ int run_server(Config *config) {
                 throw ClientGone(e.what());
             } catch (const AttemptAtBound &e) {
                 throw with_usage(503, e.what(), "deadline");
+            } catch (const SelectionRefusal &e) {
+                // its code and candidates kept, with the usage of a managed request
+                if (!attempt->managed())
+                    throw;
+                Json::Value body = e.body();
+                body["usage"] = attempt->usage_json("error");
+                throw HttpError(400, std::move(body));
             } catch (const std::exception &e) {
                 if (!attempt->managed())
                     throw;
@@ -2175,6 +2206,39 @@ int run_server(Config *config) {
         return caps;
     };
 
+    // The one pair a GET capabilities probe of a multi-graph server describes: ?graph=<name>
+    // [&graph_path=<path>][&annotation_path=<path>] naming exactly one pair of the name (SPEC-
+    // multigraph-envelope.md section 6, its refusals coded). A probe without ?graph= selects
+    // every pair, which the envelope over them answers (section 1); until a route answers it,
+    // such a probe is refused as before, in the same words (its parameters checked first, the
+    // names cap not: the cap bounds that envelope, not this refusal)
+    auto probe_pair = [&](SelectionRoute route, const SimpleWeb::CaseInsensitiveMultimap &query,
+                          const std::string &path) {
+        const bool named = std::any_of(query.begin(), query.end(),
+                                       [](const auto &p) { return p.first == "graph"; });
+        std::vector<SelectedPair> selected = select_pairs_from_query(
+                route, query, indexes,
+                named ? config->max_graphs_without_selection
+                      : std::numeric_limits<size_t>::max());
+        if (!named) {
+            throw InvalidRequest("Bad request: in multi-graph mode GET " + path + " needs "
+                                 "?graph=<name> (and graph_path=<path> when the name spans "
+                                 "several graphs); GET /capabilities lists the graphs");
+        }
+        return std::move(selected.front());
+    };
+    // a single-graph server refuses the parameters that would select a pair (they name what it
+    // does not have); any other is ignored, as it always was (annotation_path too: a single-graph
+    // server answers as before SPEC-multigraph-envelope.md)
+    auto refuse_probe_selection = [](const SimpleWeb::CaseInsensitiveMultimap &query) {
+        for (const auto &[key, value] : query) {
+            if (key == "graph" || key == "graph_path") {
+                throw InvalidRequest("Bad request: this server hosts a single graph; "
+                                     "remove the 'graph' / 'graph_path' parameter");
+            }
+        }
+    };
+
     // What this deployment supports, so a client can pick a strategy before asking.
     server.resource["^/traverse/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                             shared_ptr<HttpServer::Request> request) {
@@ -2183,26 +2247,20 @@ int run_server(Config *config) {
                 throw CurrentlyInitializingError();
             const auto query = request->parse_query_string();
             if (config->fnames.empty()) {
-                // a single index: the parameters that would select one are refused (they name
-                // what this server does not have), any other is ignored, as it always was
-                for (const auto &[key, value] : query) {
-                    if (key == "graph" || key == "graph_path") {
-                        throw InvalidRequest("Bad request: this server hosts a single graph; "
-                                             "remove the 'graph' / 'graph_path' parameter");
-                    }
-                }
+                refuse_probe_selection(query);
                 return probe_json(*anno_graph.get(), single_identity);
             }
-            // Multi-graph mode: the probe of one (graph, annotation) pair, selected by the
-            // request fields' rules (?graph=<name>, and graph_path=<path> when the name spans
-            // several graphs); it states which pair it describes
-            const auto [name, graph_path] = probe_parameters(query, "/traverse/capabilities");
-            const GraphPair &pair = select_traverse_pair(name, graph_path ? &*graph_path : nullptr,
-                                                         indexes);
-            const AnnotatedDBG &index = *graphs_cache.at(pair);
+            // Multi-graph mode: the probe of one (graph, annotation) pair; it states which pair
+            // it describes by graph and graph_path, the tags of the frozen probe (pattern
+            // contract version 1); a pair of a shared graph is named by the request's
+            // annotation_path, which the envelope's entries state (SPEC-multigraph-envelope.md
+            // section 1)
+            const SelectedPair pair = probe_pair(SelectionRoute::TRAVERSE, query,
+                                                 "/traverse/capabilities");
+            const AnnotatedDBG &index = *graphs_cache.at(pair.pair);
             Json::Value caps = probe_json(index, identity_of(index));
-            caps["graph"] = name;
-            caps["graph_path"] = pair.first;
+            caps["graph"] = pair.name;
+            caps["graph_path"] = pair.pair.first;
             return caps;
         }, /* compact */ true, &traversal_io);
     };
@@ -2219,21 +2277,15 @@ int run_server(Config *config) {
             const bool multi = !config->fnames.empty();
             const auto query = request->parse_query_string();
             if (multi) {
-                const auto [name, graph_path] = probe_parameters(query, "/pattern/capabilities");
-                const GraphPair &pair = select_traverse_pair(
-                        name, graph_path ? &*graph_path : nullptr, indexes);
+                const SelectedPair pair = probe_pair(SelectionRoute::PATTERN, query,
+                                                     "/pattern/capabilities");
                 Json::Value block = pattern_capabilities_json(
-                        graphs_cache.at(pair).get(), pattern_limits(*config), false);
-                block["graph"] = name;
-                block["graph_path"] = pair.first;
+                        graphs_cache.at(pair.pair).get(), pattern_limits(*config), false);
+                block["graph"] = pair.name;
+                block["graph_path"] = pair.pair.first;
                 return block;
             }
-            for (const auto &[key, value] : query) {
-                if (key == "graph" || key == "graph_path") {
-                    throw InvalidRequest("Bad request: this server hosts a single graph; "
-                                         "remove the 'graph' / 'graph_path' parameter");
-                }
-            }
+            refuse_probe_selection(query);
             const bool ready = anno_graph.wait_for(0s) == std::future_status::ready;
             return pattern_capabilities_json(ready ? anno_graph.get().get() : nullptr,
                                              pattern_limits(*config), false);

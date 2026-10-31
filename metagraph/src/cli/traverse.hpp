@@ -393,6 +393,14 @@ struct TraverseLimits {
     // each seed to, whether or not they hold it — the seed's result states it (outcome.walks
     // "not_in_graph", not_in_graph {kmers, kmers_present}) and the other seeds are traversed
     bool not_in_graph_per_seed = false;
+    // Not a cap: a label the pair's annotation does not hold fails the whole request (400
+    // "Label not found in the annotation") when false — a single-graph server, the CLI; when
+    // true — a multi-graph server, whose pairs need not hold every label a request names
+    // (SPEC-multigraph-envelope.md section 2) — it is dropped and reported: a seed label in the
+    // seed result's unknown_labels and dropped_labels (reason not_in_graph), a seed whose
+    // labels are all absent not walked (outcome.walks "labels_not_in_graph"), an extra label
+    // in the answer's unknown_labels (Strategy::drop_labels_not_in_graph)
+    bool labels_not_in_graph_dropped = false;
     // Not a cap: the time the request waited for and spent loading its index into RAM
     // (`in_ram`) before its work began; the attempt's bound starts after it (usage.bound.load_ms)
     // and timing.load_ms states it. None without `in_ram`
@@ -523,6 +531,11 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
 // budget less the reserve — the answer then is exactly the resolve of the query's first
 // stop.resolved_kmers k-mers, with the `stop` block —; its finalisation is read against the
 // whole budget, and |delivery|, when given, receives the check for the writing of the answer.
+// |labels_not_in_graph_dropped|: a multi-graph server's pair (SPEC-multigraph-envelope.md
+// section 2) answers for the explicit labels it holds and lists the others in the answer's
+// unknown_labels (present, possibly empty); false (a single-graph server, the CLI): such a
+// label refuses the request (400 "Label not found in the annotation") and the answer has no
+// unknown_labels.
 // Throws ResolveDeadline when the answer could not be built by the deadline.
 Json::Value process_resolve_request(
         const Json::Value &json,
@@ -533,7 +546,8 @@ Json::Value process_resolve_request(
         const std::function<bool()> &client_gone = nullptr,
         const ResolveTimeLimits &time = {},
         ResolveDelivery *delivery = nullptr,
-        const std::function<std::chrono::steady_clock::time_point()> &clock = nullptr);
+        const std::function<std::chrono::steady_clock::time_point()> &clock = nullptr,
+        bool labels_not_in_graph_dropped = false);
 
 // CLI entry point: `metagraph traverse [--resolve] -i GRAPH -a ANNOTATION request.json ...`
 int traverse_graph(Config *config);

@@ -56,6 +56,22 @@ class SeedNotInGraph : public std::invalid_argument {
 };
 
 /**
+ * Every label a seed names is absent from the annotation (Strategy::drop_labels_not_in_graph:
+ * a pair of a multi-graph server that holds none of them), raised after the seed's k-mers are
+ * found in the graph and before any annotation row is read: the seed is not walked, and its
+ * result states the names (|labels|, in the request's order).
+ */
+class SeedLabelsNotInGraph : public std::invalid_argument {
+  public:
+    SeedLabelsNotInGraph(const std::string &what, std::vector<std::string> labels)
+          : std::invalid_argument(what), labels_(std::move(labels)) {}
+    const std::vector<std::string>& labels() const { return labels_; }
+
+  private:
+    std::vector<std::string> labels_;
+};
+
+/**
  * The permitted set could not be DERIVED from a seed (Seed::labels empty): nothing
  * carries every k-mer of it, the derivation ran out of the time budget, the candidate
  * set of the cheapest seed k-mer is too wide to materialise, or the derived names are
@@ -409,6 +425,16 @@ struct Strategy {
 
     // annotation
     size_t batch_kmers = 64;
+
+    // Not a request field: a label the annotation does not hold is dropped and reported
+    // (SPEC-multigraph-envelope.md section 2: a multi-graph server, whose pairs need not hold
+    // every label a request names) instead of failing the request. A seed label is then in
+    // SeedResult::unknown_labels and dropped with reason not_in_graph (a seed whose labels are
+    // all absent is not walked: SeedLabelsNotInGraph); an extra label is left out of the
+    // dictionary, its request index kept for the cost table. False (a single-graph server, the
+    // CLI): such a label fails the request, std::invalid_argument "Label not found in the
+    // annotation"
+    bool drop_labels_not_in_graph = false;
 };
 
 
@@ -1033,7 +1059,13 @@ struct SeedResult {
     size_t labels_supporting_total = 0;
     size_t labels_dropped = 0;
     std::string labels_dropped_digest;
+    // the seed's labels before validation dropped some (seed_unsupported) or found them absent
+    // from the annotation (not_in_graph, Strategy::drop_labels_not_in_graph), in the request's
+    // order
     std::vector<DroppedLabel> dropped_labels;
+    // the names of the seed's labels the annotation does not hold, each once, in the
+    // request's order (Strategy::drop_labels_not_in_graph; empty otherwise)
+    std::vector<std::string> unknown_labels;
     std::array<ArmResult, 2> arms;             // index by Arm
     std::vector<std::array<LabelArmSummary, 2>> label_summary;   // per label_dict entry
     LabelOracle::Counters annotation_counters;

@@ -1185,6 +1185,12 @@ void Walker::validate_seed() {
     std::vector<node_index> keys = oracle_.keys_of_sequence(seed_upper_);
     oracle_.pacer().note_piece("kmer_mapping", key_mapping.elapsed_ms(), keys.size());
     std::vector<LabelRef> seed_refs;
+    // the request index of each of |seed_refs| (seed labels in the given order, then
+    // strategy.extra; LabelChangeCost): a seed label absent from the annotation
+    // (Strategy::drop_labels_not_in_graph) has no ref but keeps its index
+    std::vector<size_t> request_of_ref;
+    // the request indices of the seed labels absent from the annotation, ascending
+    std::vector<size_t> absent;
     std::vector<LabelQuery::NodeHits> hits;
     // A set derived from the seed supports every seed k-mer by construction, so unless
     // `trace` still has to find the coordinates consecutive there is nothing for the
@@ -1207,19 +1213,55 @@ void Walker::validate_seed() {
         // (LabelOracle::resolve_label), so this is also the check on the resolved names
         tsl::hopscotch_set<std::string_view> named;
         named.reserve(seed_.labels.size());
-        for (const auto &name : seed_.labels) {
+        for (size_t i = 0; i < seed_.labels.size(); ++i) {
+            const std::string &name = seed_.labels[i];
             if (!named.insert(name).second)
                 throw std::invalid_argument("Duplicate seed label '" + name + "'");
             Timer resolving;
-            seed_refs.push_back(oracle_.resolve_label(name));
+            if (!strategy_.drop_labels_not_in_graph) {
+                seed_refs.push_back(oracle_.resolve_label(name));
+                request_of_ref.push_back(i);
+            } else if (std::optional<LabelRef> ref = oracle_.find_label(name)) {
+                seed_refs.push_back(std::move(*ref));
+                request_of_ref.push_back(i);
+            } else {
+                // a pair of a multi-graph server that does not hold the label: dropped and
+                // reported, the others validated as given
+                absent.push_back(i);
+                result_.unknown_labels.push_back(name);
+            }
             oracle_.counters().label_resolve_seconds += resolving.elapsed();
+        }
+        if (seed_refs.empty()) {
+            // none of them is in this annotation: nothing to walk under, and nothing of the
+            // annotation was read for the seed
+            // the first eight named, and how many more: the result lists them all
+            constexpr size_t kNamed = 8;
+            const std::vector<std::string> &unknown = result_.unknown_labels;
+            std::string names;
+            for (size_t i = 0; i < std::min(kNamed, unknown.size()); ++i) {
+                names += (i ? ", " : "") + echoed(unknown[i], "seed label");
+            }
+            if (unknown.size() > kNamed)
+                names += " and " + std::to_string(unknown.size() - kNamed) + " more";
+            throw SeedLabelsNotInGraph("none of the seed's labels is in this graph: " + names,
+                                       unknown);
         }
         LabelQuery validation(oracle_, seed_refs, trace_);
         hits = fetch_seed_hits(validation, keys);
     }
+    if (request_of_ref.empty()) {
+        // derived: the derived labels take the given ones' place in the request's order
+        for (size_t l = 0; l < seed_refs.size(); ++l) {
+            request_of_ref.push_back(l);
+        }
+    }
+    // the request's seed labels: the given ones, or the derived ones in their place
+    const size_t num_request_seed = seed_.labels.empty() ? seed_refs.size()
+                                                         : seed_.labels.size();
 
     // request index (seed labels, then extra) -> dictionary id, UINT32_MAX if dropped
-    std::vector<LabelId> dict_of_request(seed_refs.size() + strategy_.extra.size(), UINT32_MAX);
+    std::vector<LabelId> dict_of_request(num_request_seed + strategy_.extra.size(), UINT32_MAX);
     std::vector<std::string> kept_names;
     // Per-label support, gathered in ONE sweep over the k-mers that scatters every hit
     // into its label's run list — O(hits), the size of the data, the shape resolve.cpp
@@ -1259,10 +1301,22 @@ void Walker::validate_seed() {
                 chain_ok[l] = 0;
         }
     }
+    // the labels absent from the annotation are dropped in the request's order among the
+    // others (not_in_graph, no presence runs: nothing of them is in the annotation)
+    size_t next_absent = 0;
+    auto drop_absent_before = [&](size_t request_index) {
+        for (; next_absent < absent.size() && absent[next_absent] < request_index; ++next_absent) {
+            DroppedLabel dropped;
+            dropped.name = seed_.labels[absent[next_absent]];
+            dropped.reason = "not_in_graph";
+            result_.dropped_labels.push_back(std::move(dropped));
+        }
+    };
     for (LabelId l = 0; l < num_refs; ++l) {
+        drop_absent_before(request_of_ref[l]);
         const bool all = all_supported || supported_kmers[l] == keys.size();
         if (all && chain_ok[l]) {
-            dict_of_request[l] = result_.label_dict.size();
+            dict_of_request[request_of_ref[l]] = result_.label_dict.size();
             result_.label_dict.push_back(seed_refs[l]);
             kept_names.push_back(seed_refs[l].name);
             if (trace_) {
@@ -1294,6 +1348,7 @@ void Walker::validate_seed() {
             result_.dropped_labels.push_back(std::move(dropped));
         }
     }
+    drop_absent_before(num_request_seed);
     if (trace_ && mem_limit_) {
         // The validation's peak under trace support: the hits with their coordinates, every
         // label's live coordinate set and both arms' boundary coordinates, all held at once
@@ -1368,14 +1423,21 @@ void Walker::validate_seed() {
         }
         for (size_t i = 0; i < strategy_.extra.size(); ++i) {
             Timer resolving;
-            LabelRef ref = oracle_.resolve_label(strategy_.extra[i]);
+            std::optional<LabelRef> found = strategy_.drop_labels_not_in_graph
+                ? oracle_.find_label(strategy_.extra[i])
+                : std::optional<LabelRef>(oracle_.resolve_label(strategy_.extra[i]));
             oracle_.counters().label_resolve_seconds += resolving.elapsed();
+            // absent from this pair's annotation: not a switch target here, its cost entries
+            // ignored (the request states it once, in its unknown_labels)
+            if (!found)
+                continue;
+            LabelRef &ref = *found;
             if (!targets.insert(target_of(ref)).second) {
                 throw std::invalid_argument("Extra label '" + strategy_.extra[i]
                                             + "' duplicates a seed label");
             }
-            dict_of_request[seed_refs.size() + i] = result_.label_dict.size();
-            result_.label_dict.push_back(ref);
+            dict_of_request[num_request_seed + i] = result_.label_dict.size();
+            result_.label_dict.push_back(std::move(ref));
         }
     }
 
@@ -3362,6 +3424,12 @@ void Walker::init_budgets() {
         base_ += 2 * sizeof(DroppedLabel) + dl.name.size() + dl.reason.size()
                + dl.runs.size() * (2 * sizeof(dl.runs[0]) + d.dropped_run) + d.dropped
                + (d.name ? d.name(dl.name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
+    }
+    // a label absent from the annotation is also listed in the result's unknown_labels, its
+    // name delivered once more beside the dropped label's
+    for (const std::string &name : result_.unknown_labels) {
+        base_ += sizeof(std::string) + name.size() + d.dropped
+               + (d.name ? d.name(name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
     }
     if (mem_limit_) {
         // Fixed allotments of the budget for the caches, which then evict within them:

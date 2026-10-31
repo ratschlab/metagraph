@@ -404,7 +404,11 @@ class TestMultiGraphServer(TestingBase):
     def test_pattern_capabilities_name_a_pair(self):
         enterics = self.server.get('pattern/capabilities?graph=enterics')
         self.assertEqual(400, enterics.status_code)
-        self.assertIn('spans several graphs', enterics.json()['error'])
+        # a name of two pairs: a probe names one (SPEC-multigraph-envelope.md section 6)
+        self.assertEqual(('pair_ambiguous', "graph 'enterics' has 2 pairs on 2 graphs: add graph_path"),
+                         (enterics.json()['code'], enterics.json()['error']))
+        self.assertEqual([self.pairs['ecoli'][0], self.pairs['kleb'][0]],
+                         [c['graph_path'] for c in enterics.json()['candidates']])
         kleb = self.server.get('pattern/capabilities?graph=kleb').json()
         quoted = requests.utils.quote(self.pairs['kleb'][0], safe='')
         picked = self.server.get(f'pattern/capabilities?graph=enterics&graph_path={quoted}').json()
@@ -622,10 +626,11 @@ class TestMultiGraphServer(TestingBase):
         self.assertIsNone(self.post('search', dict(s, graphs=[])))
         self.assertEqual(set(chunks), searched({'graphs': 'ecoli'}))
         self.assertEqual(set(chunks), searched({'graphs': None}))
-        self.assertEqual({'error': 'Request with an uninitialized graph 1'},
+        self.assertEqual({'error': 'Request with an uninitialized graph 1', 'code': 'graph_unknown'},
                          self.post('search', dict(s, graphs=[1]), 400))
-        # an unknown name: 400 on both, each in its own words
-        self.assertEqual({'error': 'Request with an uninitialized graph nope'},
+        # an unknown name: 400 on both, each in its own words (/search's with the selector
+        # refusal's code, SPEC-multigraph-envelope.md section 6)
+        self.assertEqual({'error': 'Request with an uninitialized graph nope', 'code': 'graph_unknown'},
                          self.post('search', dict(s, graphs=['nope']), 400))
         self.assertEqual({'code': 'invalid_request',
                           'error': "request.graphs: unknown graph 'nope' (GET /capabilities "
@@ -1413,19 +1418,26 @@ class TestMultiGraphServer(TestingBase):
         one = dict(request, seeds=[{'seed_id': 'e', 'sequence': seeds['e']}])
         self.assertEqual(self.post('traverse', dict(one, graphs=['ecoli']))['results'],
                          self.post('traverse', dict(one, graph='ecoli'))['results'])
-        # a name over two graphs: graphs selects as graph does (graph_path picks the graph)
+        # a name over two graphs: graphs selects as graph does (graph_path picks the graph); a
+        # traverse runs on one pair, the name's are the candidates
         ret = self.server.post('traverse', dict(one, graphs=['enterics']))
         self.assertEqual(400, ret.status_code)
-        self.assertIn('spans several graphs', ret.json()['error'])
+        self.assertEqual('traverse_single_pair', ret.json()['code'])
+        self.assertIn("graph 'enterics' holds 2 pairs", ret.json()['error'])
+        self.assertEqual([('enterics', self.pairs['ecoli'][0]), ('enterics', self.pairs['kleb'][0])],
+                         [(c['graph'], c['graph_path']) for c in ret.json()['candidates']])
         picked = self.post('traverse', dict(one, graphs=['enterics'],
                                             graph_path=self.pairs['ecoli'][0]))
         self.assertEqual(self.post('traverse', dict(one, graph='ecoli'))['results'],
                          picked['results'])
-        for payload, words in ((dict(one, graphs=['ecoli'], graph='ecoli'), 'not both'),
-                               (dict(one, graphs=['ecoli', 'kleb']), 'expected [name]')):
+        for payload, words, code in ((dict(one, graphs=['ecoli'], graph='ecoli'), 'not both',
+                                      'selection_conflict'),
+                                     (dict(one, graphs=['ecoli', 'kleb']), 'graphs name 2 pairs',
+                                      'traverse_single_pair')):
             ret = self.server.post('traverse', payload)
             self.assertEqual(400, ret.status_code)
             self.assertIn(words, ret.json()['error'])
+            self.assertEqual(code, ret.json()['code'])
 
     # -------------------------------------------------------------------- POST /resolve
 
