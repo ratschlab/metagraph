@@ -516,15 +516,21 @@ Json::Value traverse_envelope_deadline(const Attempt &attempt) {
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
 // index loads rather than by the first request naming a header: on refseq33m (33M headers)
 // that request would spend seconds in it (9.3 s), inside its time budget and outside every
-// read timer
-static void build_header_index(const graph::AnnotatedDBG &index) {
+// read timer. Its sort runs on |num_threads| threads. An index whose columns or records exceed
+// the header index's 32-bit fields is not served: the server exits naming the limit.
+static void build_header_index(const graph::AnnotatedDBG &index, size_t num_threads) {
     const auto *coord_to_header = index.get_coord_to_header();
     if (!coord_to_header)
         return;
     Timer timer;
-    const size_t headers = coord_to_header->build_header_index();
-    logger->info("[Server] Sequence header index built: {} headers in {:.1f} s", headers,
-                 timer.elapsed());
+    try {
+        const size_t headers = coord_to_header->build_header_index(num_threads);
+        logger->info("[Server] Sequence header index built: {} headers in {:.1f} s ({} MiB)",
+                     headers, timer.elapsed(), coord_to_header->header_index_bytes() >> 20);
+    } catch (const std::length_error &e) {
+        logger->error("[Server] {}", e.what());
+        std::exit(1);
+    }
 }
 
 /**
@@ -715,7 +721,7 @@ int run_server(Config *config) {
             logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
             // set before the future is ready, so every request sees it complete
             single_identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(*anno_graph));
-            build_header_index(*anno_graph);
+            build_header_index(*anno_graph, get_num_threads() * num_server_threads);
             return anno_graph;
         });
     } else {
@@ -850,7 +856,7 @@ int run_server(Config *config) {
                                                   config_copy);
         }
         for (const auto &[pair, index] : graphs_cache) {
-            build_header_index(*index);
+            build_header_index(*index, get_num_threads() * num_server_threads);
         }
         // every response computed on a pair states its identity
         for (const auto &[pair, index] : graphs_cache) {

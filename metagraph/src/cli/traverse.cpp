@@ -5950,9 +5950,16 @@ int traverse_graph(Config *config) {
 
     // the reverse index of the sequence headers, built once before the requests (as the
     // server builds it while the index loads): a first header name does not pay it inside
-    // its seed's time budget
-    if (const auto *coord_to_header = anno_graph->get_coord_to_header())
-        coord_to_header->build_header_index();
+    // its seed's time budget. An index whose columns or records exceed the header index's
+    // 32-bit fields is refused here, naming the limit, as the server refuses it.
+    if (const auto *coord_to_header = anno_graph->get_coord_to_header()) {
+        try {
+            coord_to_header->build_header_index();
+        } catch (const std::length_error &e) {
+            logger->error("{}", e.what());
+            return 1;
+        }
+    }
 
     // the index identity every response states (§3.1), computed once for all requests
     IndexIdentity identity;
