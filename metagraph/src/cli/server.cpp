@@ -39,6 +39,7 @@
 #include "cli/json_helpers.hpp"
 #include "server_cache.hpp"
 #include "server_request.hpp"
+#include "server_selection.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -386,114 +387,6 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     });
 }
 
-using GraphPair = std::pair<std::string, std::string>;
-using GraphIndexes = tsl::hopscotch_map<std::string, std::vector<GraphPair>>;
-
-/**
- * Address exactly one physical (graph, annotation) pair for a traversal request or the probe.
- * A traversal must stay inside one graph, so a name covering several shards is rejected
- * unless the request disambiguates it with |graph_path|; a graph_path naming one graph with
- * several annotations under the name is rejected too — a traversal reads ONE annotation, and
- * answering from the first of them would leave the others unread without saying so.
- */
-const GraphPair& select_traverse_pair(const std::string &name, const std::string *graph_path,
-                                      const GraphIndexes &indexes) {
-    auto it = indexes.find(name);
-    if (it == indexes.end())
-        throw InvalidRequest("Bad request: unknown graph '" + name + "'");
-
-    // the same pair listed twice under the name is one index (/search keeps its list as is)
-    std::vector<const GraphPair*> pairs;
-    for (const auto &pair : it->second) {
-        if (std::none_of(pairs.begin(), pairs.end(),
-                         [&](const GraphPair *p) { return *p == pair; })) {
-            pairs.push_back(&pair);
-        }
-    }
-    if (pairs.size() == 1)
-        return *pairs[0];
-
-    // a name whose pairs share one graph has several annotations, which graph_path cannot
-    // choose between
-    auto several_annotations = [&](const std::string &graph) {
-        std::string annotations;
-        for (const GraphPair *pair : pairs) {
-            if (pair->first == graph)
-                annotations += (annotations.empty() ? "" : ", ") + pair->second;
-        }
-        return InvalidRequest("Bad request: " + (graph_path
-                                  ? "graph_path '" + graph + "' names a graph"
-                                  : "index '" + name + "' lists one graph (" + graph + ")")
-                              + " with several annotations" + (graph_path ? " under index '"
-                                  + name + "'" : std::string()) + " (" + annotations
-                              + "): a traversal reads one annotation, which graph_path cannot "
-                              "choose; list each annotation under a name of its own");
-    };
-    if (graph_path) {
-        const GraphPair *found = nullptr;
-        size_t matching = 0;
-        for (const GraphPair *pair : pairs) {
-            if (pair->first != *graph_path)
-                continue;
-            matching++;
-            if (!found)
-                found = pair;
-        }
-        if (!found) {
-            throw InvalidRequest("Bad request: graph_path '" + *graph_path + "' is not part of "
-                                 "index '" + name + "'");
-        }
-        if (matching > 1)
-            throw several_annotations(*graph_path);
-        return *found;
-    }
-    std::vector<std::string> graphs;
-    for (const GraphPair *pair : pairs) {
-        if (std::find(graphs.begin(), graphs.end(), pair->first) == graphs.end())
-            graphs.push_back(pair->first);
-    }
-    if (graphs.size() == 1)
-        throw several_annotations(graphs[0]);
-    std::string candidates;
-    for (const std::string &graph : graphs) {
-        candidates += (candidates.empty() ? "" : ", ") + graph;
-    }
-    throw InvalidRequest("Bad request: index '" + name + "' spans several graphs (" + candidates
-                         + "); pass 'graph_path' to pick one");
-}
-
-std::vector<std::string> filter_graphs_from_list(
-        const GraphIndexes &indexes,
-        const Json::Value &content_json,
-        size_t request_id,
-        size_t max_names_without_filtering = 10) {
-    std::vector<std::string> graphs_to_query;
-
-    if (content_json.isMember("graphs") && content_json["graphs"].isArray()) {
-        for (const auto &item : content_json["graphs"]) {
-            graphs_to_query.push_back(item.asString());
-            if (!indexes.count(graphs_to_query.back()))
-                throw std::invalid_argument("Request with an uninitialized graph " + graphs_to_query.back());
-        }
-        // deduplicate
-        std::sort(graphs_to_query.begin(), graphs_to_query.end());
-        graphs_to_query.erase(std::unique(graphs_to_query.begin(), graphs_to_query.end()), graphs_to_query.end());
-    } else {
-        if (indexes.size() > max_names_without_filtering) {
-            throw std::invalid_argument(
-                fmt::format("Bad request: requests without names (no \"graphs\" field) are "
-                            "only supported for small indexes (<={} names)",
-                            max_names_without_filtering));
-        }
-        // query all graphs from list `config->fnames`
-        for (const auto &[name, _] : indexes) {
-            graphs_to_query.push_back(name);
-        }
-    }
-    return graphs_to_query;
-}
-
-
 namespace {
 
 // A request abandoned while it waited for the memory to load its index (`in_ram`): its client
@@ -540,31 +433,6 @@ class IndexLease {
     double load_ms_ = 0;
 };
 
-// The parameters of a GET probe of one pair on a multi-graph server (?graph=<name>
-// [&graph_path=<path>]), refused as GET /traverse/capabilities refuses them (|route| names the
-// route in the messages)
-std::pair<std::string, std::optional<std::string>>
-probe_parameters(const SimpleWeb::CaseInsensitiveMultimap &query, const std::string &route) {
-    std::optional<std::string> name, graph_path;
-    for (const auto &[key, value] : query) {
-        std::optional<std::string> *slot = key == "graph" ? &name
-                                         : key == "graph_path" ? &graph_path : nullptr;
-        if (!slot) {
-            throw InvalidRequest("Bad request: unknown parameter '" + key + "' of GET "
-                                 + route + " (graph, graph_path)");
-        }
-        if (*slot)
-            throw InvalidRequest("Bad request: the parameter '" + key + "' is given twice");
-        *slot = value;
-    }
-    if (!name) {
-        throw InvalidRequest("Bad request: in multi-graph mode GET " + route + " "
-                             "needs ?graph=<name> (and graph_path=<path> when the name "
-                             "spans several graphs); GET /capabilities lists the graphs");
-    }
-    return { *name, graph_path };
-}
-
 // The body of /resolve, /traverse or /traverse/cancel, read as /pattern reads its body
 // (parse_strict_json: one RFC 8259 JSON text, member names unique); a fault is 400
 // {"error": "Bad json received: ..."} without a code, as /search's reader answers a body that
@@ -587,32 +455,6 @@ static void build_header_index(const graph::AnnotatedDBG &index) {
     const size_t headers = coord_to_header->build_header_index();
     logger->info("[Server] Sequence header index built: {} headers in {:.1f} s", headers,
                  timer.elapsed());
-}
-
-// The pairs of a multi-graph server in the order its answers list them: the names in byte
-// order, each name's pairs in the graph list's order, a pair listed twice under a name once
-static std::vector<std::pair<std::string, GraphPair>>
-ordered_pairs(const GraphIndexes &indexes, const std::vector<std::string> &names) {
-    std::vector<std::pair<std::string, GraphPair>> pairs;
-    for (const std::string &name : names) {
-        const size_t first = pairs.size();
-        for (const GraphPair &pair : indexes.at(name)) {
-            if (std::none_of(pairs.begin() + first, pairs.end(),
-                             [&](const auto &p) { return p.second == pair; })) {
-                pairs.emplace_back(name, pair);
-            }
-        }
-    }
-    return pairs;
-}
-
-static std::vector<std::string> sorted_names(const GraphIndexes &indexes) {
-    std::vector<std::string> names;
-    for (const auto &[name, _] : indexes) {
-        names.push_back(name);
-    }
-    std::sort(names.begin(), names.end());
-    return names;
 }
 
 /**
