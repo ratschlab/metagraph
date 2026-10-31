@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -6,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
@@ -1779,27 +1781,31 @@ int run_server(Config *config) {
     // [&graph_path=<path>][&annotation_path=<path>] naming exactly one pair of the name (SPEC-
     // multigraph-envelope.md section 6, its refusals coded). A probe without ?graph= selects
     // every pair, which the envelope over them answers (section 1); until a route answers it,
-    // such a probe is refused as before
+    // such a probe is refused as before, in the same words (its parameters checked first, the
+    // names cap not: the cap bounds that envelope, not this refusal)
     auto probe_pair = [&](SelectionRoute route, const SimpleWeb::CaseInsensitiveMultimap &query,
                           const std::string &path) {
+        const bool named = std::any_of(query.begin(), query.end(),
+                                       [](const auto &p) { return p.first == "graph"; });
         std::vector<SelectedPair> selected = select_pairs_from_query(
-                route, query, indexes, config->max_graphs_without_selection);
-        if (std::none_of(query.begin(), query.end(),
-                         [](const auto &p) { return p.first == "graph"; })) {
+                route, query, indexes,
+                named ? config->max_graphs_without_selection
+                      : std::numeric_limits<size_t>::max());
+        if (!named) {
             throw InvalidRequest("Bad request: in multi-graph mode GET " + path + " needs "
                                  "?graph=<name> (and graph_path=<path> when the name spans "
-                                 "several graphs, annotation_path=<path> when its pairs share "
-                                 "a graph); GET /capabilities lists the graphs");
+                                 "several graphs); GET /capabilities lists the graphs");
         }
         return std::move(selected.front());
     };
     // a single-graph server refuses the parameters that would select a pair (they name what it
-    // does not have); any other is ignored, as it always was
+    // does not have); any other is ignored, as it always was (annotation_path too: a single-graph
+    // server answers as before SPEC-multigraph-envelope.md)
     auto refuse_probe_selection = [](const SimpleWeb::CaseInsensitiveMultimap &query) {
         for (const auto &[key, value] : query) {
-            if (key == "graph" || key == "graph_path" || key == "annotation_path") {
-                throw InvalidRequest("Bad request: this server hosts a single graph; remove the "
-                                     "'graph' / 'graph_path' / 'annotation_path' parameter");
+            if (key == "graph" || key == "graph_path") {
+                throw InvalidRequest("Bad request: this server hosts a single graph; "
+                                     "remove the 'graph' / 'graph_path' parameter");
             }
         }
     };
@@ -1816,14 +1822,16 @@ int run_server(Config *config) {
                 return probe_json(*anno_graph.get(), single_identity);
             }
             // Multi-graph mode: the probe of one (graph, annotation) pair; it states which pair
-            // it describes
+            // it describes by graph and graph_path, the tags of the frozen probe (pattern
+            // contract version 1); a pair of a shared graph is named by the request's
+            // annotation_path, which the envelope's entries state (SPEC-multigraph-envelope.md
+            // section 1)
             const SelectedPair pair = probe_pair(SelectionRoute::TRAVERSE, query,
                                                  "/traverse/capabilities");
             const AnnotatedDBG &index = *graphs_cache.at(pair.pair);
             Json::Value caps = probe_json(index, identity_of(index));
             caps["graph"] = pair.name;
             caps["graph_path"] = pair.pair.first;
-            caps["annotation_path"] = pair.pair.second;
             return caps;
         }, /* compact */ true, &traversal_io);
     };
@@ -1846,7 +1854,6 @@ int run_server(Config *config) {
                         graphs_cache.at(pair.pair).get(), pattern_limits(*config), false);
                 block["graph"] = pair.name;
                 block["graph_path"] = pair.pair.first;
-                block["annotation_path"] = pair.pair.second;
                 return block;
             }
             refuse_probe_selection(query);

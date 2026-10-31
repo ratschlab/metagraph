@@ -3701,11 +3701,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertIsNone(caps['pattern']['k'])
             self.assertEqual(['G1'], [p['graph'] for p in caps['graph_summary']['pairs']])
             block = server.get('pattern/capabilities?graph=G1').json()
-            # the probe states the pair it describes, annotation_path included (its selector,
-            # SPEC-multigraph-envelope.md section 6)
-            self.assertEqual(('G1', self.graph_basic, self.anno_basic),
-                             (block.pop('graph'), block.pop('graph_path'),
-                              block.pop('annotation_path')))
+            self.assertEqual(('G1', self.graph_basic), (block.pop('graph'), block.pop('graph_path')))
             self.assertEqual(single.get('pattern/capabilities').json(), block)
             probe = server.get('traverse/capabilities?graph=G1').json()
             self.assertEqual(gate_block(block), probe['pattern'])

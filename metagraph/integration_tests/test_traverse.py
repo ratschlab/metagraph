@@ -3259,12 +3259,16 @@ class TestTraverseMultiGraph(TestTraverseBase):
                              (ret.json()['code'], ret.json()['error']), query)
             self.assertEqual([self.anno, self.pairs['col'][1]],
                              [c['annotation_path'] for c in ret.json()['candidates']])
-        col = requests.utils.quote(self.pairs['col'][1], safe='')
-        ret = self._caps(f'?graph=C&annotation_path={col}')
-        self.assertEqual(200, ret.status_code, ret.text)
-        self.assertEqual(('C', self.graph, self.pairs['col'][1]),
-                         (ret.json()['graph'], ret.json()['graph_path'],
-                          ret.json()['annotation_path']))
+        # the probe states its pair by graph and graph_path (the frozen probe's tags): C's two
+        # annotations tell apart by their identities, A's (its manifest) and none (the second)
+        for annotation, fp in ((self.anno, self.index_fp), (self.pairs['col'][1], None)):
+            quoted = requests.utils.quote(annotation, safe='')
+            ret = self._caps(f'?graph=C&annotation_path={quoted}')
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertEqual(('C', self.graph, fp),
+                             (ret.json()['graph'], ret.json()['graph_path'],
+                              ret.json()['index_fp']))
+            self.assertNotIn('annotation_path', ret.json())
         for query, needle, code in (('', 'needs ?graph=<name>', None),
                                     ('?graph=Z', "unknown graph 'Z'", 'graph_unknown'),
                                     ('?graph=A&x=1', "unknown parameter 'x'", None),
