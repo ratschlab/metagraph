@@ -1472,6 +1472,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, trivial_outgoing_is_unique_successor) {
     // even k cover palindromic k-mers (e.g. ACGT, TACGTA, TTACGTAA)
     size_t num_trivial = 0;
     for (size_t k = 3; k < 10; ++k) {
+        // canonical SSHash graphs support only odd k, so they have no palindromes
+        if constexpr(std::is_same_v<TypeParam, DBGSSHash>) {
+            if (k % 2 == 0)
+                continue;
+        }
+
         auto graph = build_graph<TypeParam>(k, {
             "ATGCGATCGATATGCGAGA",
             "ATGCGATCGAGACTACGAG",
