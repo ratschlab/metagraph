@@ -555,4 +555,50 @@ TEST(DBGSuccinct, CallNodesEmptyGraphManyThreads) {
     EXPECT_EQ(0u, num_nodes);
 }
 
+// trivial_outgoing() must resolve exactly the nodes with a single outgoing
+// edge, to the same successor that the row-diff construction picks
+TEST(DBGSuccinct, trivial_outgoing_matches_row_diff_successor) {
+    const std::vector<std::string> sequences {
+        "ATGCGATCGATATGCGAGA",
+        "ATGCGATCGAGACTACGAG",
+        "GTACGATAGACATGACGAG",
+        "ACTGACGAGACACAGATGC"
+    };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
+                       DeBruijnGraph::PRIMARY }) {
+        for (bool mask_dummy : { false, true }) {
+            size_t num_trivial = 0;
+            for (size_t k = 3; k < 10; k += 2) {
+                DBGSuccinct graph(k, mode);
+                for (const auto &sequence : sequences) {
+                    graph.add_sequence(sequence);
+                }
+                if (mask_dummy)
+                    graph.mask_dummy_kmers(1, false);
+
+                const auto &boss = graph.get_boss();
+                graph.call_nodes([&](auto node) {
+                    auto succ = graph.trivial_outgoing(node);
+                    EXPECT_EQ(node != 1 && graph.has_single_outgoing(node),
+                              succ != DeBruijnGraph::npos)
+                        << "k=" << k << ", node: " << node;
+                    if (succ == DeBruijnGraph::npos)
+                        return;
+
+                    ++num_trivial;
+                    std::vector<DeBruijnGraph::node_index> outgoing;
+                    graph.adjacent_outgoing_nodes(node, [&](auto next) {
+                        outgoing.push_back(next);
+                    });
+                    EXPECT_EQ(std::vector<DeBruijnGraph::node_index>{ succ }, outgoing)
+                        << "k=" << k << ", node: " << node;
+                    EXPECT_EQ(boss.row_diff_successor(node, boss.get_last()), succ)
+                        << "k=" << k << ", node: " << node;
+                });
+            }
+            EXPECT_LT(0u, num_trivial) << "mode=" << mode << ", mask=" << mask_dummy;
+        }
+    }
+}
+
 } // namespace

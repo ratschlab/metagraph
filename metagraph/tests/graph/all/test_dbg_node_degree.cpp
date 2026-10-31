@@ -319,4 +319,42 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
     EXPECT_EQ(1u, single_outgoing_counter);
 }
 
+
+// trivial_outgoing() may only shortcut nodes with a single outgoing edge
+TYPED_TEST(DeBruijnGraphTest, trivial_outgoing_is_unique_successor) {
+    // small k give highly branching graphs, so count shortcuts over all k
+    size_t num_trivial = 0;
+    for (size_t k = 3; k < 10; k += 2) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        graph->call_nodes([&](auto node) {
+            auto succ = graph->trivial_outgoing(node);
+            if (succ == DeBruijnGraph::npos)
+                return;
+
+            ++num_trivial;
+            // look up successors by k-mer, independently of any index shortcuts
+            std::string suffix = graph->get_node_sequence(node).substr(1);
+            std::vector<DeBruijnGraph::node_index> outgoing;
+            for (char c : graph->alphabet()) {
+                auto next = graph->kmer_to_node(suffix + c);
+                if (next != DeBruijnGraph::npos)
+                    outgoing.push_back(next);
+            }
+            EXPECT_EQ(std::vector<DeBruijnGraph::node_index>{ succ }, outgoing)
+                << "k=" << k << ", node: " << node;
+        });
+    }
+
+    if constexpr(std::is_same_v<TypeParam, DBGSSHash>
+                    || std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        EXPECT_LT(0u, num_trivial);
+    }
+}
+
 } // namespace

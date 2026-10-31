@@ -606,6 +606,33 @@ bool DBGSuccinct::has_single_outgoing(node_index node) const {
     return boss_graph_->is_single_outgoing(last_target_kmer);
 }
 
+node_index DBGSuccinct::trivial_outgoing(node_index node) const {
+    assert(in_graph(node));
+
+    auto boss_edge = node;
+
+    if (boss_edge == 1)
+        return npos;
+
+    BOSS::TAlphabet d = boss_graph_->get_W(boss_edge) % boss_graph_->alph_size;
+    if (!d) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
+        return npos;
+    }
+
+    // the same step as in BOSS::row_diff_successor, so a node resolved here
+    // always gets the successor that the row-diff construction picked for it
+    auto next = boss_graph_->fwd(boss_edge, d);
+
+    if (!boss_graph_->is_single_outgoing(next))
+        return npos;
+
+    // skip boss dummy sink edges (anchored in row-diff) and masked edges
+    return (valid_edges_ ? (*valid_edges_)[next] : boss_graph_->get_W(next))
+            ? next
+            : npos;
+}
+
 bool DBGSuccinct::has_multiple_outgoing(node_index node) const {
     assert(in_graph(node));
 
