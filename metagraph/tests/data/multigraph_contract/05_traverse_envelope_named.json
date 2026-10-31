@@ -1,0 +1,630 @@
+{
+ "route": "POST /traverse",
+ "status": 200,
+ "note": "E10/E2b: a named-graph traverse answers in the envelope with one entry. The attempt is the request: request_id = attempt_id, server_instance and the attempt usage sit at the envelope top level (usage only for a managed request, as today); the entry is the single-graph answer without usage.",
+ "request": {
+  "seeds": [
+   {
+    "labels": [
+     "NC_000913.3"
+    ],
+    "sequence": "GGAGTAAAGCGTGGCGCGAATACGGTTGATAACATCAGCATCGCCGACCACTGCACCAACACCCTCTGGCCCAAATAGCTTGAAGCAGGAAAATGTCGAG"
+   }
+  ],
+  "strategy": {
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_memory_mb": 512,
+    "max_output_bp": 500000,
+    "max_work_units": 100000000,
+    "time_budget_ms": 70000
+   },
+   "branching": {
+    "max_label_branches": 2
+   },
+   "direction": "both",
+   "exhaustive": false,
+   "labels": {
+    "mode": "constrain"
+   },
+   "output": {
+    "detail": "full",
+    "timing": true
+   }
+  },
+  "graph": "bact_other",
+  "attempt_id": "svc-trv-91aa07-1",
+  "not_after_ms": 1793520010000
+ },
+ "body": {
+  "envelope_version": 1,
+  "route": "/traverse",
+  "graphs": [
+   "bact_other"
+  ],
+  "answered": 1,
+  "refused": 0,
+  "not_reached": [],
+  "unfinished": [],
+  "request_id": "svc-trv-91aa07-1",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": 1793520010000,
+   "finish_by_ms": null,
+   "effective_deadline_at": null,
+   "cutoff_at": null
+  },
+  "usage": {
+   "attempt_id": "svc-trv-91aa07-1",
+   "bound": {
+    "allowance_ms": 10000,
+    "capped_by": null,
+    "enforced": true,
+    "seeds": 1,
+    "time_budget_ms": 15000.0,
+    "walk_until_ms": 20000
+   },
+   "bound_ms": 25000,
+   "elapsed_ms": 698,
+   "memory": {
+    "held_bound_bytes": 536870912,
+    "peak_admitted_bytes": 101404284,
+    "soft_excess_bytes": 0
+   },
+   "observed_max_uninterruptible_ms": 69,
+   "reason": "completed",
+   "received_at": "2026-10-21T09:14:28.688Z",
+   "seeds": {
+    "abandoned": 0,
+    "finished": 1,
+    "requested": 1,
+    "started": 1
+   },
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "stopped_at": "2026-10-21T09:14:29.385Z",
+   "timing": {
+    "cpu_ms": 167.004554,
+    "page_faults": {
+     "major": 6931,
+     "minor": 5123
+    }
+   },
+   "work": {
+    "memory_bytes": 740988
+   },
+   "work_units": 1025295,
+   "not_after_ms": 1793520010000
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "answered",
+    "algorithm_version": "traverse-0.2",
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "index_meta_fp": "409ce1691488f592",
+     "index_ns": "refseq-r237-bact_other",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 95,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "release": "refseq237",
+    "results": [
+     {
+      "annotation": {
+       "access_path": "tuples",
+       "direct_reads": 0,
+       "keys_mapped": 366,
+       "rows_requested": 366
+      },
+      "arms": {
+       "left": {
+        "branch_events": [],
+        "branch_events_truncated": 0,
+        "complete_to_bp": 100,
+        "completeness_scope": "united_history",
+        "counters": {
+         "edge_reuse_probes": 0,
+         "max_reminimisation_rounds": 0,
+         "output_bp": 100,
+         "pair_evaluations": 0,
+         "refusal_scans": 0,
+         "reminimisation_rounds": 0,
+         "steps": 100,
+         "successor_enumerations": 100,
+         "switch_sources_cut": 0,
+         "work_units": 991775
+        },
+        "evidence": {
+         "complete": true,
+         "complete_to_bp": null
+        },
+        "frontier_remaining": {
+         "exact": true,
+         "live_labels": 0,
+         "live_paths": 0
+        },
+        "growth": [
+         {
+          "ambiguous_branches": 0,
+          "blocked_repeat": 0,
+          "bubbles": 0,
+          "distinct_live_labels": 1,
+          "divergences": 0,
+          "exact": true,
+          "from_bp": 0,
+          "label_ends": {},
+          "live_pairs": 1,
+          "max_live_paths": 1,
+          "reconvergences": 0,
+          "splits": 0,
+          "steps": 100,
+          "tips": 0
+         },
+         {
+          "ambiguous_branches": 0,
+          "blocked_repeat": 0,
+          "bubbles": 0,
+          "distinct_live_labels": 1,
+          "divergences": 0,
+          "exact": true,
+          "from_bp": 100,
+          "label_ends": {
+           "max_extension_bp": 1
+          },
+          "live_pairs": 1,
+          "max_live_paths": 1,
+          "reconvergences": 0,
+          "splits": 0,
+          "steps": 0,
+          "tips": 0
+         }
+        ],
+        "labels_per_node": {
+         "cap": 64,
+         "max_seen": 0,
+         "nodes_truncated": 0
+        },
+        "limitations": [
+         {
+          "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
+          "kind": "scope",
+          "knob": "branching.on_reconverge",
+          "limit": "merge",
+          "observed": 0
+         }
+        ],
+        "needed_budgets": [],
+        "paths": [
+         {
+          "continuation": {
+           "branches_used": 0,
+           "labels": [
+            0
+           ],
+           "loss_used": 0.0,
+           "sequence": "ACCGTTCAGATACCCCTGCCTGCACCGCGTGCATCACTGGCGCAAACACCAGACCACGCAATACTTCCAGCGCCTGTGCGCCCTGGATCTGGCTACCGCC"
+          },
+          "end_labels": [
+           {
+            "branches": 0,
+            "label": 0,
+            "loss": 0.0,
+            "route_bp": 0,
+            "run": 0
+           }
+          ],
+          "end_reasons": {
+           "max_extension_bp": 1
+          },
+          "id": 0,
+          "length_bp": 100,
+          "n_labels": 1,
+          "path_reason": "max_extension_bp",
+          "segments": [
+           0
+          ]
+         }
+        ],
+        "runs": [
+         {
+          "branches": 0,
+          "end_reason": "max_extension_bp",
+          "entered_by": "seed",
+          "from_bp": 0,
+          "label": 0,
+          "loss": 0.0,
+          "route_bp": 0,
+          "segment": 0,
+          "to_bp": 100
+         }
+        ],
+        "segments": [
+         {
+          "events": [
+           {
+            "at_bp": 100,
+            "label": 0,
+            "reason": "max_extension_bp",
+            "structural_successors": 0,
+            "type": "label_end"
+           }
+          ],
+          "from_bp": 0,
+          "id": 0,
+          "labels": [
+           0
+          ],
+          "labels_at_end": [
+           0
+          ],
+          "labels_total": 1,
+          "labels_truncated": false,
+          "length_bp": 100,
+          "parents": [],
+          "sequence": "ACCGTTCAGATACCCCTGCCTGCACCGCGTGCATCACTGGCGCAAACACCAGACCACGCAATACTTCCAGCGCCTGTGCGCCCTGGATCTGGCTACCGCC"
+         }
+        ],
+        "splits": [],
+        "status": "complete"
+       },
+       "right": {
+        "branch_events": [],
+        "branch_events_truncated": 0,
+        "complete_to_bp": 100,
+        "completeness_scope": "united_history",
+        "counters": {
+         "edge_reuse_probes": 0,
+         "max_reminimisation_rounds": 0,
+         "output_bp": 100,
+         "pair_evaluations": 0,
+         "refusal_scans": 0,
+         "reminimisation_rounds": 0,
+         "steps": 100,
+         "successor_enumerations": 100,
+         "switch_sources_cut": 0,
+         "work_units": 901994
+        },
+        "evidence": {
+         "complete": true,
+         "complete_to_bp": null
+        },
+        "frontier_remaining": {
+         "exact": true,
+         "live_labels": 0,
+         "live_paths": 0
+        },
+        "growth": [
+         {
+          "ambiguous_branches": 0,
+          "blocked_repeat": 0,
+          "bubbles": 0,
+          "distinct_live_labels": 1,
+          "divergences": 0,
+          "exact": true,
+          "from_bp": 0,
+          "label_ends": {},
+          "live_pairs": 1,
+          "max_live_paths": 1,
+          "reconvergences": 0,
+          "splits": 0,
+          "steps": 100,
+          "tips": 0
+         },
+         {
+          "ambiguous_branches": 0,
+          "blocked_repeat": 0,
+          "bubbles": 0,
+          "distinct_live_labels": 1,
+          "divergences": 0,
+          "exact": true,
+          "from_bp": 100,
+          "label_ends": {
+           "max_extension_bp": 1
+          },
+          "live_pairs": 1,
+          "max_live_paths": 1,
+          "reconvergences": 0,
+          "splits": 0,
+          "steps": 0,
+          "tips": 0
+         }
+        ],
+        "labels_per_node": {
+         "cap": 64,
+         "max_seen": 0,
+         "nodes_truncated": 0
+        },
+        "limitations": [
+         {
+          "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
+          "kind": "scope",
+          "knob": "branching.on_reconverge",
+          "limit": "merge",
+          "observed": 0
+         }
+        ],
+        "needed_budgets": [],
+        "paths": [
+         {
+          "continuation": {
+           "branches_used": 0,
+           "labels": [
+            0
+           ],
+           "loss_used": 0.0,
+           "sequence": "ACATTCGCGCCGCATTCACAGCCGATTCGAGCCACCTTCATCACCGCATAGTTGTCATCGGTTAACGCTGGAACACCTGCCGCGCGCAACGTTGCCAGCA"
+          },
+          "end_labels": [
+           {
+            "branches": 0,
+            "label": 0,
+            "loss": 0.0,
+            "route_bp": 0,
+            "run": 0
+           }
+          ],
+          "end_reasons": {
+           "max_extension_bp": 1
+          },
+          "id": 0,
+          "length_bp": 100,
+          "n_labels": 1,
+          "path_reason": "max_extension_bp",
+          "segments": [
+           0
+          ]
+         }
+        ],
+        "runs": [
+         {
+          "branches": 0,
+          "end_reason": "max_extension_bp",
+          "entered_by": "seed",
+          "from_bp": 0,
+          "label": 0,
+          "loss": 0.0,
+          "route_bp": 0,
+          "segment": 0,
+          "to_bp": 100
+         }
+        ],
+        "segments": [
+         {
+          "events": [
+           {
+            "at_bp": 100,
+            "label": 0,
+            "reason": "max_extension_bp",
+            "structural_successors": 0,
+            "type": "label_end"
+           }
+          ],
+          "from_bp": 0,
+          "id": 0,
+          "labels": [
+           0
+          ],
+          "labels_at_end": [
+           0
+          ],
+          "labels_total": 1,
+          "labels_truncated": false,
+          "length_bp": 100,
+          "parents": [],
+          "sequence": "ACATTCGCGCCGCATTCACAGCCGATTCGAGCCACCTTCATCACCGCATAGTTGTCATCGGTTAACGCTGGAACACCTGCCGCGCGCAACGTTGCCAGCA"
+         }
+        ],
+        "splits": [],
+        "status": "complete"
+       }
+      },
+      "label_dict": [
+       {
+        "column": 41674,
+        "kind": "header",
+        "name": "NC_000913.3",
+        "seq_id": 64
+       }
+      ],
+      "label_mode": "constrain",
+      "label_summary": [
+       {
+        "label": 0,
+        "left": {
+         "direct_bp": 100,
+         "reach_bp": 100,
+         "reentries": 0,
+         "runs": [
+          0
+         ]
+        },
+        "right": {
+         "direct_bp": 100,
+         "reach_bp": 100,
+         "reentries": 0,
+         "runs": [
+          0
+         ]
+        }
+       }
+      ],
+      "limitations": [
+       {
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (dependency rows and coordinate tuples are charged before they are held; a read that does not fit is refused whole); held beyond the admitted account, so able to exceed the budget: a level's keys and fetched rows until its heads are processed, the seed phase's intersection and hits, a failed seed's depth-0 dictionary and a failed result's echo of seed_id (observed: the largest excess seen, MiB, rounded up), and, not observed, an index-wide header lookup and the label dictionary's first table and growth copy (about 1.5 KB)",
+        "kind": "memory_bound_soft",
+        "knob": "bounds.max_memory_mb",
+        "limit": 512,
+        "observed": 0
+       }
+      ],
+      "outcome": {
+       "branch_diagnostics": "complete",
+       "delivery": "inline",
+       "label_evidence": "complete",
+       "walks": "complete"
+      },
+      "seed": {
+       "dropped_labels": [],
+       "labels": [
+        "NC_000913.3"
+       ],
+       "labels_dropped": 0,
+       "labels_dropped_digest": "",
+       "labels_from_seed": false,
+       "labels_supporting_total": 1,
+       "length_bp": 100,
+       "num_kmers": 70,
+       "seed_id": "",
+       "seed_id_mismatch": false,
+       "validated_seed_id": "bb7f6750ae219511"
+      },
+      "timing": {
+       "annotation_fetch_ms": 1192.6785820000002,
+       "cache_hits": 75,
+       "coords_mapped": 2430,
+       "cpu_ms": 452.325207,
+       "deadline": {
+        "longest_piece": {
+         "coordinates": 81,
+         "kind": "read",
+         "ms": 97.16682398319244,
+         "rows": 9
+        }
+       },
+       "elapsed_ms": 1852.8557479381561,
+       "label_resolve_ms": 0.01021,
+       "page_faults": {
+        "major": 18609,
+        "minor": 13988
+       },
+       "path_cache": {
+        "bytes_kept": 13382832,
+        "hits": 168,
+        "peak_bytes": 14543152,
+        "rows_kept": 1813,
+        "stored_rows_read": 2170
+       },
+       "rows_fetched": 0,
+       "seed_fetch_ms": 196.98889200000002,
+       "seed_phase_ms": 265.75487101078033,
+       "serialize_ms": 0.110921,
+       "tuple_rows_fetched": 366
+      },
+      "work": {
+       "memory_bytes": 653252
+      }
+     }
+    ],
+    "strategy": {
+     "annotation": {
+      "batch_kmers": 64
+     },
+     "bounds": {
+      "max_extension_bp": 100,
+      "max_live_paths": 1000,
+      "max_memory_mb": 512,
+      "max_output_bp": 500000,
+      "max_paths": 10000,
+      "max_steps": 1000000,
+      "max_work_units": 100000000,
+      "min_live_labels": 1,
+      "time_budget_ms": 60000.0
+     },
+     "branching": {
+      "bubble_window_bp": 0,
+      "hairpins": "skip",
+      "max_label_branches": 2,
+      "max_splits_per_path": 64,
+      "min_successor_fraction": 0.0,
+      "min_successor_labels": 1,
+      "on_reconverge": "merge",
+      "tip_window_bp": 0
+     },
+     "clamped": [
+      {
+       "effective": 60000.0,
+       "field": "bounds.time_budget_ms",
+       "requested": 70000.0
+      }
+     ],
+     "direction": "both",
+     "exhaustive": false,
+     "frontier": {
+      "on_overflow": "stop",
+      "order": "breadth_first"
+     },
+     "labels": {
+      "change_cost": {
+       "model": "forbid"
+      },
+      "extra": [],
+      "loss_budget": 0.0,
+      "max_labels_per_node": 64,
+      "max_seed_labels": 1000,
+      "max_switch_sources": 64,
+      "mode": "constrain",
+      "seed_label_kind": "auto",
+      "switch_on": "loss"
+     },
+     "output": {
+      "continuation_bp": 1000,
+      "detail": "full",
+      "max_branch_events": 100,
+      "profile_bin_bp": 100,
+      "sequences": true,
+      "timing": true
+     },
+     "schema_version": 1,
+     "support": "kmer"
+    },
+    "timing": {
+     "cpu_ms": 452.625257,
+     "elapsed_ms": 1853.397422,
+     "page_faults": {
+      "major": 18609,
+      "minor": 13989
+     },
+     "serialize_ms": 0.110921
+    },
+    "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
+    "work": {
+     "memory_bytes": 653252
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 711.0
+  },
+  "work": {
+   "memory_bytes": 653252
+  }
+ }
+}

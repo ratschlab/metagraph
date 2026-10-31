@@ -1,0 +1,211 @@
+{
+ "route": "POST /pattern",
+ "status": 200,
+ "note": "The existing /pattern envelope gains envelope_version, route, not_reached, unfinished, request_id, server_instance and deadline (E4); pattern_contract_version stays.",
+ "body": {
+  "envelope_version": 1,
+  "route": "/pattern",
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota"
+  ],
+  "answered": 1,
+  "refused": 1,
+  "not_reached": [
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+   }
+  ],
+  "unfinished": [],
+  "request_id": "svc-pat-0c33d1-1",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": 1793520010000,
+   "finish_by_ms": null,
+   "effective_deadline_at": "2026-10-31T09:22:10.000Z",
+   "cutoff_at": "2026-10-31T09:22:09.750Z"
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "answered",
+    "index": {
+     "alphabet": "$ACGT",
+     "graph_mode": "basic",
+     "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
+     "index_ns": "refseq33m-experimental",
+     "k": 31,
+     "release": "refseq97-90ec1fbcd7666125cb01646a1464d52f21a06406",
+     "strand_stated": true
+    },
+    "limits": {
+     "clamped": [],
+     "finalize_reserve_ms": 250,
+     "max_anchors": 1000,
+     "max_contexts": 10000,
+     "max_mismatches": 1,
+     "max_patterns": 16,
+     "max_steps": 100000000,
+     "min_information_bits": 24,
+     "stop_at_threshold": false,
+     "time_budget_ms": 110000
+    },
+    "mode": "all_or_count",
+    "output": {
+     "labels": "none"
+    },
+    "pattern_contract_version": 1,
+    "patterns": [
+     {
+      "absence_scope": "any_offset",
+      "anchor_information_bits": null,
+      "counts": {
+       "contexts": {
+        "by_mismatches": {
+         "0": {
+          "relation": "exact",
+          "unit": "graph_contexts",
+          "value": 4
+         },
+         "1": {
+          "relation": "at_least",
+          "unit": "graph_contexts",
+          "value": 555
+         }
+        },
+        "by_offset": {
+         "0": {
+          "relation": "at_least",
+          "unit": "graph_contexts",
+          "value": 281
+         },
+         "1": {
+          "relation": "at_least",
+          "unit": "graph_contexts",
+          "value": 278
+         }
+        },
+        "by_strand": {
+         "+": {
+          "relation": "at_least",
+          "unit": "graph_contexts",
+          "value": 559
+         },
+         "-": {
+          "relation": "at_least",
+          "unit": "graph_contexts",
+          "value": 0
+         }
+        },
+        "relation": "at_least",
+        "suffix": {
+         "relation": "at_least",
+         "unit": "graph_contexts",
+         "value": 278
+        },
+        "unit": "graph_contexts",
+        "value": 559
+       },
+       "labels": {
+        "relation": "unknown",
+        "unit": "labels",
+        "value": null
+       },
+       "occurrences": {
+        "relation": "unknown",
+        "unit": "placed_occurrences",
+        "value": null
+       }
+      },
+      "cut": null,
+      "determinism": "time_limited",
+      "genetic_code": 11,
+      "id": "pv",
+      "information_bits": 39.49022499567307,
+      "kind": "protein",
+      "length": 30,
+      "max_mismatches": 1,
+      "min_anchor_information_bits": null,
+      "min_anchor_mismatch_information_bits": null,
+      "mismatch_information_bits": 32.17961221401354,
+      "mode": "all_or_count",
+      "notes": [],
+      "palindromic": false,
+      "pattern": "STSNSQSSSE",
+      "residues": 10,
+      "results": [],
+      "retrieval_complete": false,
+      "returned": 0,
+      "scope": "any_offset",
+      "stop": {
+       "mismatch_level": 1,
+       "phase": "discovery",
+       "reason": "time"
+      },
+      "strands": [
+       "+",
+       "-"
+      ],
+      "timing": {
+       "cpu_ms": 16664.492244,
+       "elapsed_ms": 109835.92932,
+       "page_faults": {
+        "major": 1242488,
+        "minor": 237128
+       }
+      },
+      "withheld": {
+       "reason": "deadline"
+      },
+      "work": {
+       "mask_scans": 0,
+       "memory_bytes": 0,
+       "ranges_visited": 3674111,
+       "steps": 3674111,
+       "steps_by_mismatches": {
+        "0": 86505,
+        "1": 3587606
+       }
+      }
+     }
+    ],
+    "timing": {
+     "cpu_ms": 16664.679554,
+     "elapsed_ms": 109836.051251,
+     "page_faults": {
+      "major": 1242488,
+      "minor": 237160
+     }
+    },
+    "work": {
+     "memory_bytes": 0
+    }
+   },
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+    "outcome": "refused",
+    "refusal": {
+     "code": "not_reached",
+     "reason": "not_after_ms",
+     "error": "pattern: pair (bact_pseudomonadota) was not started: not_after_ms 1793520010000 had passed when a pool thread took it",
+     "http_status": 503
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 2210.4
+  },
+  "work": {
+   "memory_bytes": 1048576
+  },
+  "pattern_contract_version": 1
+ }
+}

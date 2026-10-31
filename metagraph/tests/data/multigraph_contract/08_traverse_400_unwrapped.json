@@ -1,0 +1,49 @@
+{
+ "route": "POST /traverse",
+ "status": 400,
+ "note": "A request-level 400 of a managed request carries usage and stays unwrapped (E10), as today. A 429 exists only on POST /traverse/cancel (an unknown id that could not be tombstoned) and is unchanged.",
+ "body": {
+  "error": "seed 'CTTGTTCTTCTTTTATCGGAGCTTTTGACAAT': strategy.bounds.time_budget_ms: expected a number",
+  "usage": {
+   "attempt_id": "svc-trv-91aa07-1",
+   "bound": {
+    "allowance_ms": 10000,
+    "capped_by": null,
+    "enforced": true,
+    "seeds": 1,
+    "time_budget_ms": 15000.0,
+    "walk_until_ms": 20000
+   },
+   "bound_ms": 25000,
+   "elapsed_ms": 698,
+   "memory": {
+    "held_bound_bytes": 536870912,
+    "peak_admitted_bytes": 101404284,
+    "soft_excess_bytes": 0
+   },
+   "observed_max_uninterruptible_ms": 69,
+   "reason": "error",
+   "received_at": "2026-10-21T09:14:28.688Z",
+   "seeds": {
+    "abandoned": 0,
+    "finished": 1,
+    "requested": 1,
+    "started": 1
+   },
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "stopped_at": "2026-10-21T09:14:29.385Z",
+   "timing": {
+    "cpu_ms": 167.004554,
+    "page_faults": {
+     "major": 6931,
+     "minor": 5123
+    }
+   },
+   "work": {
+    "memory_bytes": 740988
+   },
+   "work_units": 1025295,
+   "not_after_ms": 1793520010000
+  }
+ }
+}

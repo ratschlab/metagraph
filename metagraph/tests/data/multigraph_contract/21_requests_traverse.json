@@ -1,0 +1,96 @@
+{
+ "route": "GET /requests/svc-trv-91aa07-1",
+ "status": 200,
+ "note": "E4: for /traverse the attempt_id is the request handle; GET /requests answers from the attempt registry (attempt = the object GET /traverse/attempt/{id} returns; its usage is the final usage).",
+ "body": {
+  "request_id": "svc-trv-91aa07-1",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "route": "/traverse",
+  "state": "ended",
+  "received_at": "2026-10-21T09:14:28.688Z",
+  "finished_at": "2026-10-21T09:14:29.385Z",
+  "reason": "completed",
+  "response": {
+   "bytes": 3604,
+   "status": 200,
+   "written": true
+  },
+  "retained_until": "2026-10-31T10:14:29.385Z",
+  "pairs": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "state": "ended",
+    "outcome": "answered",
+    "usage": null
+   }
+  ],
+  "attempt": {
+   "attempt_id": "svc-trv-91aa07-1",
+   "bound_ms": 25000,
+   "cancel_requested_at": null,
+   "deadline_at": "2026-10-21T09:14:53.688Z",
+   "elapsed_ms": 698,
+   "finished_at": "2026-10-21T09:14:29.385Z",
+   "reason": "completed",
+   "received_at": "2026-10-21T09:14:28.688Z",
+   "response": {
+    "bytes": 3604,
+    "status": 200,
+    "written": true
+   },
+   "seeds": {
+    "abandoned": 0,
+    "finished": 1,
+    "requested": 1,
+    "started": 1
+   },
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "state": "finished",
+   "stop_requested_at": null,
+   "stop_requested_by": null,
+   "stopped_at": "2026-10-21T09:14:29.385Z",
+   "usage": {
+    "attempt_id": "suite-s1-TTAAATTTACGGCACA-20261021T084452Z_refseq97-90ec1fbc-direct-local",
+    "bound": {
+     "allowance_ms": 10000,
+     "capped_by": null,
+     "enforced": true,
+     "seeds": 1,
+     "time_budget_ms": 15000.0,
+     "walk_until_ms": 20000
+    },
+    "bound_ms": 25000,
+    "elapsed_ms": 698,
+    "memory": {
+     "held_bound_bytes": 536870912,
+     "peak_admitted_bytes": 101404284,
+     "soft_excess_bytes": 0
+    },
+    "observed_max_uninterruptible_ms": 69,
+    "reason": "completed",
+    "received_at": "2026-10-21T09:14:28.688Z",
+    "seeds": {
+     "abandoned": 0,
+     "finished": 1,
+     "requested": 1,
+     "started": 1
+    },
+    "server_instance": "5521aa4bddb78e49",
+    "stopped_at": "2026-10-21T09:14:29.385Z",
+    "timing": {
+     "cpu_ms": 167.004554,
+     "page_faults": {
+      "major": 6931,
+      "minor": 5123
+     }
+    },
+    "work": {
+     "memory_bytes": 740988
+    },
+    "work_units": 1025295
+   }
+  }
+ }
+}

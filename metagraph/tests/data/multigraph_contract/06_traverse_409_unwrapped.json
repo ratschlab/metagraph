@@ -1,0 +1,74 @@
+{
+ "route": "POST /traverse",
+ "status": 409,
+ "note": "Attempt-level answers stay HTTP-level and unwrapped (E10): a repeated attempt_id that is running or retained, as today. The same holds for a tombstoned id and an expired not_after_ms (409 {error, state: \"expired\", ...}).",
+ "body": {
+  "attempt": {
+   "attempt_id": "suite-s1-TTAAATTTACGGCACA-20261021T084452Z_refseq97-90ec1fbc-direct-local",
+   "bound_ms": 25000,
+   "cancel_requested_at": null,
+   "deadline_at": "2026-10-21T09:14:53.688Z",
+   "elapsed_ms": 698,
+   "finished_at": "2026-10-21T09:14:29.385Z",
+   "reason": "completed",
+   "received_at": "2026-10-21T09:14:28.688Z",
+   "response": {
+    "bytes": 3604,
+    "status": 200,
+    "written": true
+   },
+   "seeds": {
+    "abandoned": 0,
+    "finished": 1,
+    "requested": 1,
+    "started": 1
+   },
+   "server_instance": "5521aa4bddb78e49",
+   "state": "finished",
+   "stop_requested_at": null,
+   "stop_requested_by": null,
+   "stopped_at": "2026-10-21T09:14:29.385Z",
+   "usage": {
+    "attempt_id": "suite-s1-TTAAATTTACGGCACA-20261021T084452Z_refseq97-90ec1fbc-direct-local",
+    "bound": {
+     "allowance_ms": 10000,
+     "capped_by": null,
+     "enforced": true,
+     "seeds": 1,
+     "time_budget_ms": 15000.0,
+     "walk_until_ms": 20000
+    },
+    "bound_ms": 25000,
+    "elapsed_ms": 698,
+    "memory": {
+     "held_bound_bytes": 536870912,
+     "peak_admitted_bytes": 101404284,
+     "soft_excess_bytes": 0
+    },
+    "observed_max_uninterruptible_ms": 69,
+    "reason": "completed",
+    "received_at": "2026-10-21T09:14:28.688Z",
+    "seeds": {
+     "abandoned": 0,
+     "finished": 1,
+     "requested": 1,
+     "started": 1
+    },
+    "server_instance": "5521aa4bddb78e49",
+    "stopped_at": "2026-10-21T09:14:29.385Z",
+    "timing": {
+     "cpu_ms": 167.004554,
+     "page_faults": {
+      "major": 6931,
+      "minor": 5123
+     }
+    },
+    "work": {
+     "memory_bytes": 740988
+    },
+    "work_units": 1025295
+   }
+  },
+  "error": "attempt_id 'suite-s1-TTAAATTTACGGCACA-20261021T084452Z_refseq97-90ec1fbc-direct-local' is running, or retained or held after it finished, on this server (attempts are kept 3600 s after they finish, at most the last 10000 (oldest dropped first), and one sent with not_after_ms until that + 2000 ms, at most 86400 s after it finished or after its latest refused copy (held among the tombstones); a cancel of an unknown id tombstones it at least 3600 s, and until the not_after_ms it names + 2000 ms, at most 86400 s, while fewer than 10000 tombstones and held attempts are held (else the cancel is refused, 429)): it is not run while so; its state is in attempt"
+ }
+}

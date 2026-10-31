@@ -1,0 +1,215 @@
+{
+ "route": "POST /resolve",
+ "status": 200,
+ "note": "E4/E20: one pair answered, one never started (not_reached), one started and cut at the work cutoff (unfinished, usage so far). answered + refused = pairs; the lists name the pairs.",
+ "request": {
+  "bounds": {
+   "max_query_bp": 2000,
+   "time_budget_ms": 60000
+  },
+  "labels": [
+   "NC_003279.8"
+  ],
+  "sequence": "AAAAATCGCACCTTTGTTTTTGAACCAAGCGTTTATAGCCGGTAATGGAGCTGGTTCCAGCACAACAGGAATCTCAACTGGTTTCACCTCTTCTGTTGCTCCCTTTTCAGCTGGTTTTTCGGTTTTAGTCTCTCCTCTCGGTTTTCGATCGCCTTTTCTGTTATTACGACGTTTTCCTTTTCCTTCACCTCGTGGTCTTT",
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota",
+   "inv_insecta"
+  ],
+  "request_id": "svc-res-5f0c2a-2",
+  "not_after_ms": 1793520010000,
+  "finish_by_ms": 1793520060000
+ },
+ "body": {
+  "envelope_version": 1,
+  "route": "/resolve",
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota",
+   "inv_insecta"
+  ],
+  "answered": 1,
+  "refused": 2,
+  "not_reached": [
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+   }
+  ],
+  "unfinished": [
+   {
+    "graph": "inv_insecta",
+    "graph_path": "/scratch/nvme8/refseq_r237/inv_insecta/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg"
+   }
+  ],
+  "request_id": "svc-res-5f0c2a-2",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "deadline": {
+   "not_after_ms": 1793520010000,
+   "finish_by_ms": 1793520060000,
+   "effective_deadline_at": "2026-10-31T09:20:58.000Z",
+   "cutoff_at": "2026-10-31T09:20:57.750Z"
+  },
+  "answers": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+    "outcome": "answered",
+    "candidates": [
+     {
+      "bp_interval": [
+       0,
+       100
+      ],
+      "kmer_interval": [
+       0,
+       70
+      ],
+      "labels": [
+       "NC_003279.8"
+      ]
+     },
+     {
+      "bp_interval": [
+       101,
+       200
+      ],
+      "kmer_interval": [
+       101,
+       170
+      ],
+      "labels": [
+       "NC_003279.8"
+      ]
+     }
+    ],
+    "capabilities": {
+     "alphabet": "$ACGT",
+     "cost_models_available": [
+      "forbid",
+      "constant",
+      "table"
+     ],
+     "detail_levels": [
+      "summary",
+      "tree",
+      "full",
+      "graphlet"
+     ],
+     "direct_access": false,
+     "feature_level": 6,
+     "graphlet_format": 1,
+     "has_coord_to_header": true,
+     "has_coordinates": true,
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "index_meta_fp": "409ce1691488f592",
+     "index_ns": "refseq-r237-bact_other",
+     "k": 31,
+     "label_modes": [
+      "constrain",
+      "annotate"
+     ],
+     "num_labels": 95,
+     "regime": "basic",
+     "release": "refseq237",
+     "schema_version": 1,
+     "supports_trace": true
+    },
+    "graph_runs": [
+     [
+      0,
+      70
+     ],
+     [
+      101,
+      170
+     ]
+    ],
+    "k": 31,
+    "labels": [
+     {
+      "kind": "header",
+      "kmers_supported": 139,
+      "label": "NC_003279.8",
+      "runs": [
+       [
+        0,
+        70
+       ],
+       [
+        101,
+        170
+       ]
+      ]
+     }
+    ],
+    "labels_truncated": null,
+    "limits": {
+     "clamped": [],
+     "finalize_reserve_ms": 250,
+     "time_budget_ms": 60000
+    },
+    "num_kmers": 170,
+    "regime": "basic",
+    "release": "refseq237",
+    "stop": null,
+    "support": "kmer",
+    "timing": {
+     "cpu_ms": 2.659762,
+     "elapsed_ms": 2.604605,
+     "page_faults": {
+      "major": 0,
+      "minor": 33
+     }
+    },
+    "work": {
+     "memory_bytes": 19534
+    },
+    "unknown_labels": []
+   },
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+    "outcome": "refused",
+    "refusal": {
+     "code": "not_reached",
+     "reason": "cutoff",
+     "error": "resolve: pair (bact_pseudomonadota) was not started before the request's work cutoff (2026-10-31T09:20:57.750Z): it waited for a pool thread",
+     "http_status": 503
+    }
+   },
+   {
+    "graph": "inv_insecta",
+    "graph_path": "/scratch/nvme8/refseq_r237/inv_insecta/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg",
+    "index_fp": "890518352bcdca6d1d691017e500f006fcbeb96f9b3cda2c1ea9caf09c6e6530",
+    "outcome": "refused",
+    "refusal": {
+     "code": "unfinished",
+     "reason": "cutoff",
+     "error": "resolve: pair (inv_insecta) started at 2026-10-31T09:20:41.512Z and had not finished at the request's work cutoff (2026-10-31T09:20:57.750Z): told to stop; its final usage is in GET /requests/svc-res-5f0c2a-2",
+     "usage": {
+      "state": "stopping",
+      "started_at": "2026-10-31T09:20:41.512Z",
+      "elapsed_ms": 16238,
+      "cpu_ms": 15880.4,
+      "memory_bytes": 18874368
+     },
+     "http_status": 503
+    }
+   }
+  ],
+  "timing": {
+   "elapsed_ms": 58004.2
+  },
+  "work": {
+   "memory_bytes": 19534
+  }
+ }
+}

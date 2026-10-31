@@ -1,0 +1,37 @@
+{
+ "route": "POST /search",
+ "status": 200,
+ "note": "E1 on a counts annotation (single-graph server: rows untagged as today, one cut with null pair tags). Order: score desc, then the LOWER median of the label's abundances over the query positions where it is present (abundance >= 1, zeros excluded; sorted ascending, index floor((n-1)/2)) desc, then label asc. With N = 1, SRR1001 (median 7) beats SRR0999 (12 k-mers, median 1). nth_median and tied_same_median appear on counts annotations only.",
+ "request": {
+  "FASTA": ">q2\nACGT...",
+  "num_labels": 1,
+  "query_mode": "counts"
+ },
+ "body": [
+  {
+   "seq_description": "q2",
+   "results": [
+    {
+     "sample": "SRR1001",
+     "kmer_count": 12,
+     "kmer_abundances": "0:100:100:3:0:0:0:0:0:0:0:0:7:7:7:7:7:7:7:7:7:7:7:7"
+    }
+   ],
+   "cuts": [
+    {
+     "graph": null,
+     "graph_path": null,
+     "annotation_path": null,
+     "index_fp": null,
+     "returned": 1,
+     "complete": false,
+     "nth_score": 12,
+     "tied": 2,
+     "tied_returned": 1,
+     "nth_median": 7,
+     "tied_same_median": 1
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,128 @@
+{
+ "route": "several",
+ "status": 400,
+ "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. The names cap (max_graphs_without_selection) keeps its existing 400.",
+ "body": [
+  {
+   "case": "graphs and pairs together",
+   "route": "POST /resolve",
+   "status": 400,
+   "body": {
+    "error": "request: graphs and pairs are exclusive: name graphs, or list pairs, not both",
+    "code": "selection_conflict"
+   }
+  },
+  {
+   "case": "a pair object matching no pair",
+   "route": "POST /pattern",
+   "status": 400,
+   "body": {
+    "error": "request.pairs[1]: no pair of 'refseq' has graph_path '/scratch/x/graph.dbg'",
+    "code": "pair_not_found",
+    "candidates": [
+     {
+      "graph": "refseq",
+      "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+      "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+     },
+     {
+      "graph": "refseq",
+      "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+      "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+     }
+    ]
+   }
+  },
+  {
+   "case": "a pair object matching several pairs (shared graph, no annotation_path)",
+   "route": "POST /resolve",
+   "status": 400,
+   "body": {
+    "error": "request.pairs[0]: 'sra-human-1/3' has 3 pairs on graph_path '/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg': add annotation_path",
+    "code": "pair_ambiguous",
+    "candidates": [
+     {
+      "graph": "sra-human-1/3",
+      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
+      "annotation_path": "/scratch/nvme0/human/annotation_0.relaxed.renamed.row_diff_brwt.annodbg"
+     },
+     {
+      "graph": "sra-human-1/3",
+      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
+      "annotation_path": "/scratch/nvme3/human/annotation_4.relaxed.renamed.row_diff_brwt.annodbg"
+     },
+     {
+      "graph": "sra-human-1/3",
+      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
+      "annotation_path": "/scratch/nvme4/human/annotation_8.relaxed.renamed.row_diff_brwt.annodbg"
+     }
+    ]
+   }
+  },
+  {
+   "case": "/traverse resolving to more than one pair (until E6)",
+   "route": "POST /traverse",
+   "status": 400,
+   "body": {
+    "error": "request: graph 'refseq' holds 2 pairs; a traverse runs on exactly one pair: name it with pairs (graph, graph_path, annotation_path)",
+    "code": "traverse_single_pair",
+    "candidates": [
+     {
+      "graph": "refseq",
+      "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+      "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+     },
+     {
+      "graph": "refseq",
+      "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+      "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+     }
+    ]
+   }
+  },
+  {
+   "case": "an unknown name",
+   "route": "POST /resolve",
+   "status": 400,
+   "body": {
+    "error": "request.graphs: unknown graph 'bact_othr' (GET /capabilities lists the graphs)",
+    "code": "graph_unknown"
+   }
+  },
+  {
+   "case": "pairs on /search",
+   "route": "POST /search",
+   "status": 400,
+   "body": {
+    "error": "request: /search selects by graphs only (it has no re-ask): pairs is not accepted",
+    "code": "pairs_unsupported"
+   }
+  },
+  {
+   "case": "a GET capabilities probe with an ambiguous pair",
+   "route": "GET /traverse/capabilities",
+   "status": 400,
+   "body": {
+    "error": "graph 'sra-human-1/3' has 3 pairs on graph_path '/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg': add annotation_path",
+    "code": "pair_ambiguous",
+    "candidates": [
+     {
+      "graph": "sra-human-1/3",
+      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
+      "annotation_path": "/scratch/nvme0/human/annotation_0.relaxed.renamed.row_diff_brwt.annodbg"
+     },
+     {
+      "graph": "sra-human-1/3",
+      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
+      "annotation_path": "/scratch/nvme3/human/annotation_4.relaxed.renamed.row_diff_brwt.annodbg"
+     },
+     {
+      "graph": "sra-human-1/3",
+      "graph_path": "/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg",
+      "annotation_path": "/scratch/nvme4/human/annotation_8.relaxed.renamed.row_diff_brwt.annodbg"
+     }
+    ]
+   }
+  }
+ ]
+}

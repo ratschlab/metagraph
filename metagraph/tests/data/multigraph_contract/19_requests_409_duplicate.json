@@ -1,0 +1,59 @@
+{
+ "route": "POST /resolve",
+ "status": 409,
+ "note": "E4: a repeated request_id that is running or retained starts no work; the 409 body is the registry entry (the object GET /requests returns) plus an error member.",
+ "body": {
+  "error": "request_id 'svc-res-5f0c2a-2' is running, or retained after it finished, on this server (requests are kept 3600 s after they finish, at most 10000): it is not run again; its state is this body",
+  "request_id": "svc-res-5f0c2a-2",
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "route": "/resolve",
+  "state": "running",
+  "received_at": "2026-10-31T09:20:00.012Z",
+  "finished_at": null,
+  "reason": null,
+  "response": {
+   "status": 200,
+   "bytes": 4821,
+   "written": true
+  },
+  "retained_until": null,
+  "pairs": [
+   {
+    "graph": "bact_other",
+    "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+    "state": "ended",
+    "outcome": "answered",
+    "usage": {
+     "started_at": "2026-10-31T09:20:00.020Z",
+     "finished_at": "2026-10-31T09:20:00.061Z",
+     "elapsed_ms": 41,
+     "cpu_ms": 39.8,
+     "memory_bytes": 19534
+    }
+   },
+   {
+    "graph": "bact_pseudomonadota",
+    "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+    "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+    "state": "never_started",
+    "outcome": "not_reached",
+    "usage": null
+   },
+   {
+    "graph": "inv_insecta",
+    "graph_path": "/scratch/nvme8/refseq_r237/inv_insecta/graph.dbg",
+    "annotation_path": "/scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg",
+    "state": "running",
+    "outcome": "unfinished",
+    "usage": {
+     "started_at": "2026-10-31T09:20:41.512Z",
+     "finished_at": null,
+     "elapsed_ms": 17020,
+     "cpu_ms": 16511.0,
+     "memory_bytes": 18874368
+    }
+   }
+  ]
+ }
+}

@@ -1,0 +1,629 @@
+{
+ "route": "GET /capabilities",
+ "status": 200,
+ "note": "E3/E4/E9/E12/E20 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route. Clients switch on these, never by date.",
+ "body": {
+  "algorithm_version": "traverse-0.2",
+  "attempts": {
+   "allowance_ms": 10000,
+   "bound": "SPEC-labeled-traversal-core.md section 6.8, the attempt's bound",
+   "cancel": "POST /traverse/cancel",
+   "cancel_fields": [
+    "attempt_id",
+    "wait_ms",
+    "not_after_ms"
+   ],
+   "client_check_ms": 100,
+   "clock_skew_allowance_ms": 2000,
+   "content_timeout_s": 900,
+   "delivery_reserve": {
+    "account_per_text_byte": {
+     "graphlet": 50.0,
+     "json": 30.0
+    },
+    "build_mbps": 10.0,
+    "calibration": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve: calibration",
+    "compress_mbps": 50.0,
+    "coordinate_account_per_text_byte": 12,
+    "margin": 1.25,
+    "measured_account_per_text_byte": {
+     "full": null,
+     "graphlet": null,
+     "summary": null,
+     "tree": null
+    },
+    "measured_build_mbps": null,
+    "measured_compress_mbps": null,
+    "measured_stop_ms": null,
+    "measured_text_bytes": 1048576,
+    "rate_window": 16,
+    "rule": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve",
+    "stop_ms": 1000
+   },
+   "fields": [
+    "attempt_id",
+    "budget_id",
+    "locus_id",
+    "not_after_ms",
+    "expect_server_instance"
+   ],
+   "hard_cap_ms": 899000,
+   "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
+   "instance": "SPEC-labeled-traversal-core.md section 5, expect_server_instance",
+   "not_after": "SPEC-labeled-traversal-core.md section 5, not_after_ms",
+   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
+   "retention_count": 10000,
+   "retention_s": 3600,
+   "server_instance": "1db012cefc639552",
+   "state": "GET /traverse/attempt/{attempt_id}",
+   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
+   "tombstone_max_s": 86400
+  },
+  "compression_level": 1,
+  "content_encodings": [
+   "gzip",
+   "deflate"
+  ],
+  "deadline_check": {
+   "chunk_target_ms": 50,
+   "max_uninterruptible_ms": null,
+   "observed_max_uninterruptible_ms": 0,
+   "observed_window_s": 3600,
+   "poll_stride": 8,
+   "rule": "SPEC-labeled-traversal-core.md section 6.8, chunked deadlines"
+  },
+  "feature_level": 6,
+  "features": [
+   "search",
+   "resolve",
+   "traverse",
+   "attempts",
+   "pattern"
+  ],
+  "graph_summary": {
+   "columns_disjoint": true,
+   "pairs": [
+    {
+     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "bact_other",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "index_ns": "refseq-r237-bact_other",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 95,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "bact_pseudomonadota",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+     "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+     "index_ns": "refseq-r237-bact_pseudomonadota",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 142,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "inv_insecta",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme8/refseq_r237/inv_insecta/graph.dbg",
+     "index_fp": "890518352bcdca6d1d691017e500f006fcbeb96f9b3cda2c1ea9caf09c6e6530",
+     "index_ns": "refseq-r237-inv_insecta",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 36,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme9/refseq_r237/inv_other/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "inv_other",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme9/refseq_r237/inv_other/graph.dbg",
+     "index_fp": "d998676054dbc199c3a43b4b93356b4671698172d1a55e108b44bd422c76c9f6",
+     "index_ns": "refseq-r237-inv_other",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 31,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme8/refseq_r237/plant/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "plant",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme8/refseq_r237/plant/graph.dbg",
+     "index_fp": "cc7bd1407b645235169e6a2ddc426bb32eacbfebc2f812e90b2092dba46fb6db",
+     "index_ns": "refseq-r237-plant",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 45,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme11/refseq_r237/vm_laurasiatheria/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "vm_laurasiatheria",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme11/refseq_r237/vm_laurasiatheria/graph.dbg",
+     "index_fp": "1309fd812d071e2188b98d28498182fc48202f9de69d98cc15d07b599318bb0b",
+     "index_ns": "refseq-r237-vm_laurasiatheria",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 62,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme9/refseq_r237/vm_other/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "vm_other",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme9/refseq_r237/vm_other/graph.dbg",
+     "index_fp": "e25ea61e50d47fc43b6788f59fbf97027f523908ac0a278a711b86f06ce90358",
+     "index_ns": "refseq-r237-vm_other",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 56,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme9/refseq_r237/vo_actinopterygii/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "vo_actinopterygii",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme9/refseq_r237/vo_actinopterygii/graph.dbg",
+     "index_fp": "0c9f2eea9ecdf3534addb0e33d8057f0dbaf5fa0ebed50b07c62c841fda7e20b",
+     "index_ns": "refseq-r237-vo_actinopterygii",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 51,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme11/refseq_r237/vo_amphibia_lobefins/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "vo_amphibia_lobefins",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme11/refseq_r237/vo_amphibia_lobefins/graph.dbg",
+     "index_fp": "8bd75b74a573f80f991b4833052ff61563f59bffc14ba5c4a7adfb7f241b1f21",
+     "index_ns": "refseq-r237-vo_amphibia_lobefins",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 55,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme10/refseq_r237/vo_other/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "vo_other",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme10/refseq_r237/vo_other/graph.dbg",
+     "index_fp": "a22be23c198211bc9316f61812103815ca52b09fd722fb57160391e190056d71",
+     "index_ns": "refseq-r237-vo_other",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 22,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    },
+    {
+     "annotation_path": "/scratch/nvme10/refseq_r237/vo_sauropsida/annotation.row_diff_brwt_coord.annodbg",
+     "available": true,
+     "counting": "upper_bound",
+     "graph": "vo_sauropsida",
+     "graph_mode": "basic",
+     "graph_path": "/scratch/nvme10/refseq_r237/vo_sauropsida/graph.dbg",
+     "index_fp": "436dea8ecde84df4fb8024475ee381a47287712669e43914fce3c54b4f14a930",
+     "index_ns": "refseq-r237-vo_sauropsida",
+     "k": 31,
+     "mask": "absent",
+     "traversal": {
+      "has_coord_to_header": true,
+      "has_coordinates": true,
+      "num_labels": 56,
+      "regime": "basic",
+      "supports_trace": true
+     },
+     "unavailable_reason": null
+    }
+   ],
+   "shared_columns": 0
+  },
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota",
+   "inv_insecta",
+   "inv_other",
+   "plant",
+   "vm_laurasiatheria",
+   "vm_other",
+   "vo_actinopterygii",
+   "vo_amphibia_lobefins",
+   "vo_other",
+   "vo_sauropsida"
+  ],
+  "in_ram": {
+   "budgets_start": "after_load",
+   "loads": false,
+   "mem_cap_gb": 0,
+   "routes": [
+    "pattern",
+    "resolve",
+    "search",
+    "traverse"
+   ]
+  },
+  "max_graphs_without_selection": 11,
+  "max_request_body_mb": 256,
+  "mode": "multi",
+  "pattern": {
+   "alphabet": null,
+   "annotation": null,
+   "available": true,
+   "caps": {
+    "max_anchors": 10000,
+    "max_annotation_work": 100000000,
+    "max_checked_entries": 50,
+    "max_contexts": 10000,
+    "max_labels": 10000,
+    "max_labels_per_anchor": 4096,
+    "max_memory_mb": 256,
+    "max_occurrences_per_label": 16,
+    "max_paths": 1024,
+    "max_patterns": 16,
+    "max_predicate_contexts": 10000,
+    "max_predicate_labels": 100000,
+    "max_predicate_work": 100000000,
+    "max_steps": 100000000,
+    "min_information_bits": 24,
+    "row_cache_mb": 64,
+    "time_budget_ms": 600000
+   },
+   "caps_rule": "SPEC-pattern-search.md section 4.5",
+   "counting": null,
+   "default_genetic_code": 1,
+   "default_long_search": "anchors",
+   "default_max_anchors": 1000,
+   "default_max_labels": 1000,
+   "default_mode": "all_or_count",
+   "default_occurrences": true,
+   "default_projection": "none",
+   "default_scope": "any_offset",
+   "default_strands": "both",
+   "default_time_budget_ms": 60000,
+   "delivery_mbps": {
+    "build": 10,
+    "compress": 50
+   },
+   "dummy_fraction": null,
+   "finalize_reserve_ms": 250,
+   "genetic_codes": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33
+   ],
+   "graph_cleaned": "unknown",
+   "graph_mode": null,
+   "in_ram": "accepted",
+   "k": null,
+   "kinds": [
+    "dna",
+    "iupac",
+    "protein"
+   ],
+   "kinds_later_increment": [],
+   "long_patterns": "anchors_counted",
+   "long_search": [
+    "anchors",
+    "paths",
+    "supported_paths"
+   ],
+   "mask": null,
+   "mismatches": {
+    "default": 0,
+    "edits": [
+     "substitution"
+    ],
+    "later_increment": [
+     "long_patterns",
+     "labels",
+     "predicate",
+     "supported_paths"
+    ],
+    "levels_rule": "SPEC-pattern-search.md section 21.4",
+    "max": {
+     "dna": 3,
+     "iupac": 3,
+     "protein": 1
+    },
+    "order": "mismatches_first",
+    "protein_substitutes": "sense_codons",
+    "unit": {
+     "dna": "base",
+     "iupac": "base",
+     "protein": "residue"
+    }
+   },
+   "modes": [
+    "count",
+    "all_or_count",
+    "partial"
+   ],
+   "pattern_contract_version": 1,
+   "placement": null,
+   "predicate": {
+    "access": null,
+    "operators": [
+     "any",
+     "all",
+     "none",
+     "at_least",
+     "and",
+     "or",
+     "not"
+    ],
+    "scopes": [
+     "context",
+     "motif"
+    ],
+    "strands": [
+     "either",
+     "context"
+    ]
+   },
+   "projections": [
+    "none",
+    "all",
+    "predicate_only"
+   ],
+   "projections_later_increment": [],
+   "protein_residues": [
+    "A",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "K",
+    "L",
+    "M",
+    "N",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "V",
+    "W",
+    "Y",
+    "X",
+    "B",
+    "Z",
+    "J",
+    "*"
+   ],
+   "protein_rule": "SPEC-pattern-search.md section 12.2",
+   "records_shorter_than_k": "not_indexed",
+   "resident_only": false,
+   "scopes": null,
+   "scopes_by_graph_mode": {
+    "basic": [
+     "suffix",
+     "any_offset"
+    ],
+    "canonical": [
+     "suffix",
+     "any_offset"
+    ],
+    "primary": [
+     "any_offset"
+    ]
+   },
+   "strand_stated": null,
+   "strands": [
+    "both",
+    "forward",
+    "reverse"
+   ],
+   "support": null,
+   "unavailable_reason": null
+  },
+  "ready": true,
+  "release": "refseq237",
+  "resolve": {
+   "time_budget": {
+    "accepted": true,
+    "check_kmers": 4096,
+    "check_labels": 4096,
+    "default": null,
+    "finalize_reserve_configurable": false,
+    "finalize_reserve_ms": 250,
+    "knob": "bounds.time_budget_ms",
+    "max_time_ms": 60000,
+    "rule": "SPEC-labeled-traversal-core.md section 4.5",
+    "stop_phases": [
+     "rows",
+     "support"
+    ]
+   }
+  },
+  "routes": {
+   "attempt": "GET /traverse/attempt/{attempt_id}",
+   "cancel": "POST /traverse/cancel",
+   "capabilities": "GET /capabilities",
+   "column_labels": "GET /column_labels",
+   "pattern": "POST /pattern",
+   "pattern_capabilities": "GET /pattern/capabilities?graph={name}[&graph_path={path}]",
+   "resolve": "POST /resolve",
+   "search": "POST /search",
+   "stats": "GET /stats",
+   "traverse": "POST /traverse",
+   "traverse_capabilities": "GET /traverse/capabilities?graph={name}[&graph_path={path}]",
+   "requests": "GET /requests/{request_id}"
+  },
+  "schema_version": 1,
+  "server_instance": "7c1e0f3a9b24d6e8",
+  "composite_fp": "92b237d75da25be01f941aff7fb47737e89978aa6e8f96144d63b2051d6c6c5d",
+  "composite_rule": "sha256 over the pairs' index_fp sorted as bytes, joined by \"\\n\" without a trailing newline; null when any pair has no index_fp",
+  "multigraph": {
+   "envelope_version": 1,
+   "envelope_routes": [
+    "/resolve",
+    "/traverse",
+    "/pattern",
+    "/traverse/capabilities",
+    "/pattern/capabilities"
+   ],
+   "selectors": {
+    "/search": [
+     "graphs"
+    ],
+    "/resolve": [
+     "graphs",
+     "pairs"
+    ],
+    "/pattern": [
+     "graphs",
+     "pairs"
+    ],
+    "/traverse": [
+     "graph",
+     "graphs",
+     "pairs"
+    ],
+    "/traverse/capabilities": [
+     "graph",
+     "graph_path",
+     "annotation_path"
+    ],
+    "/pattern/capabilities": [
+     "graph",
+     "graph_path",
+     "annotation_path"
+    ]
+   },
+   "traverse_pairs_per_request": 1,
+   "not_after_ms": [
+    "/traverse",
+    "/resolve",
+    "/pattern"
+   ],
+   "finish_by_ms": [
+    "/traverse",
+    "/resolve",
+    "/pattern"
+   ],
+   "request_id": [
+    "/resolve",
+    "/pattern"
+   ],
+   "requests_route": "GET /requests/{request_id}",
+   "unknown_labels": true,
+   "search_cuts": true,
+   "resolve_boundary_ties": true
+  }
+ }
+}

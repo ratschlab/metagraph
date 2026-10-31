@@ -1,0 +1,84 @@
+{
+ "route": "POST /search",
+ "status": 200,
+ "note": "E1 on a multi-graph server: the flat list as today, every row tagged with its pair, rows in the index pair order, and one cut per pair and query sequence, empty pairs included. Within a pair: score descending, then label ascending (coordinate and column indexes). complete = every match above the thresholds returned (no cut: nth_score null, tied 0); else nth_score is the N-th returned score, tied the labels with that score (returned or not), tied_returned how many of them were returned.",
+ "request": {
+  "FASTA": ">q1_fwd\nACGT...",
+  "num_labels": 2,
+  "graphs": [
+   "bact_other",
+   "bact_pseudomonadota",
+   "inv_insecta"
+  ]
+ },
+ "body": [
+  {
+   "seq_description": "q1_fwd",
+   "results": [
+    {
+     "sample": "NC_003279.8",
+     "kmer_count": 170,
+     "graph": "bact_other",
+     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+    },
+    {
+     "sample": "NZ_CP009072.1",
+     "kmer_count": 139,
+     "graph": "bact_other",
+     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"
+    },
+    {
+     "sample": "NC_000913.3",
+     "kmer_count": 170,
+     "graph": "bact_pseudomonadota",
+     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+    },
+    {
+     "sample": "NZ_CP011113.1",
+     "kmer_count": 141,
+     "graph": "bact_pseudomonadota",
+     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg"
+    }
+   ],
+   "cuts": [
+    {
+     "graph": "bact_other",
+     "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
+     "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+     "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
+     "returned": 2,
+     "complete": false,
+     "nth_score": 139,
+     "tied": 3,
+     "tied_returned": 1
+    },
+    {
+     "graph": "bact_pseudomonadota",
+     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
+     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+     "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
+     "returned": 2,
+     "complete": true,
+     "nth_score": null,
+     "tied": 0,
+     "tied_returned": 0
+    },
+    {
+     "graph": "inv_insecta",
+     "graph_path": "/scratch/nvme8/refseq_r237/inv_insecta/graph.dbg",
+     "annotation_path": "/scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg",
+     "index_fp": "890518352bcdca6d1d691017e500f006fcbeb96f9b3cda2c1ea9caf09c6e6530",
+     "returned": 0,
+     "complete": true,
+     "nth_score": null,
+     "tied": 0,
+     "tied_returned": 0
+    }
+   ]
+  }
+ ]
+}

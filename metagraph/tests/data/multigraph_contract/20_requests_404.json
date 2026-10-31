@@ -1,0 +1,10 @@
+{
+ "route": "GET /requests/svc-res-0000-9",
+ "status": 404,
+ "note": "E4: an id this server instance does not hold (never received, or past its retention): 404. The service treats it as unresolved (no re-ask) when server_instance is the one it dispatched to.",
+ "body": {
+  "error": "request_id 'svc-res-0000-9' is not known on this server: never received, or no longer retained (requests are kept 3600 s after they finish, at most 10000)",
+  "request_id": "svc-res-0000-9",
+  "server_instance": "7c1e0f3a9b24d6e8"
+ }
+}

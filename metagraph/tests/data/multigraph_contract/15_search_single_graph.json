@@ -1,0 +1,29 @@
+{
+ "route": "POST /search",
+ "status": 200,
+ "note": "E1 on a single-graph server: rows as today (no tags), plus one cut per query sequence whose pair tags are null and whose index_fp is the server's (null without a manifest).",
+ "body": [
+  {
+   "seq_description": "q3",
+   "results": [
+    {
+     "sample": "6239",
+     "kmer_count": 170
+    }
+   ],
+   "cuts": [
+    {
+     "graph": null,
+     "graph_path": null,
+     "annotation_path": null,
+     "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
+     "returned": 1,
+     "complete": true,
+     "nth_score": null,
+     "tied": 0,
+     "tied_returned": 0
+    }
+   ]
+  }
+ ]
+}

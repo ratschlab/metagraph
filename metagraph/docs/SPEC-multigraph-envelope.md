@@ -1,0 +1,162 @@
+# Multi-graph answers: the envelope, the search cuts, deadlines, the request registry and the selectors
+
+Release 10, Phase 1 of the multi-graph plan (ratschlab/metagraph-suite `docs/PLAN-multigraph-implementation.md`,
+section 1 is the contract; items E1 to E4, E9, E10, E12, E18, E20). This document states the engine's shapes and
+rules. The samples in `metagraph/tests/data/multigraph_contract/` are their reference instances: every sample is
+`{route, status, note, request?, body}`, the body as a client receives it. Where this text and a sample differ,
+this text wins and the sample is a bug.
+
+A server is in multi-graph mode when it is started with a graph list (csv); a name of the list may hold several
+(graph, annotation) PAIRS. A single-graph server answers every route as before this document, except the additive
+`/search` cut (section 3) and the new request fields (sections 4 and 5).
+
+## 1. The envelope (resolve, traverse, pattern, and the capabilities routes)
+
+On a multi-graph server `/resolve`, `/traverse` and `/pattern` answer HTTP 200 with the envelope, also for a named
+graph (one entry). Members, in this order:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `envelope_version` | 1 | this document's version of the envelope |
+| `route` | string | `/resolve`, `/traverse`, `/pattern` |
+| `pattern_contract_version` | string | `/pattern` only, as before |
+| `graphs` | [string] | the selected names, in byte order |
+| `answered`, `refused` | int | entries by outcome; `answered + refused` = number of entries = selected pairs |
+| `not_reached` | [pair] | the pairs never started (section 4), `{graph, graph_path, annotation_path}` |
+| `unfinished` | [pair] | the pairs started and cut at the work cutoff (section 4) |
+| `request_id` | string or null | the client's `request_id` (resolve, pattern) or `attempt_id` (traverse); null if none |
+| `server_instance` | string | this server process (the attempt ledger's value) |
+| `deadline` | object | `{not_after_ms, finish_by_ms, effective_deadline_at, cutoff_at}`; nulls where not given or not applicable |
+| `usage` | object | `/traverse` only, for a ledger-managed request (one with `attempt_id`): the attempt's usage, the object a single-graph traverse states at its top level |
+| `answers` | [entry] | one entry per selected pair, in the index's pair order (names in byte order, each name's pairs in list order, a pair listed twice under a name once) |
+| `timing`, `work` | object | the request's (`work.memory_bytes`: the answered pairs' accounts summed) |
+
+An entry is either the pair's single-graph answer with the tags merged in, or a refusal:
+- answered: `{graph, graph_path, annotation_path, index_fp, outcome: "answered", ...the single-graph answer}`.
+  On `/traverse` the single-graph answer's `usage` moves to the envelope (it is the attempt's, and the attempt is
+  the request's). The entry's `index_fp` equals the identity inside the answer (`capabilities.index_fp`).
+- refused: `{graph, graph_path, annotation_path, index_fp, outcome: "refused", refusal: {http_status, error,
+  code?, reason?, usage?}}`: what the pair alone would have been answered, or a `not_reached` / `unfinished`
+  outcome (section 4).
+
+The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
+selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
+`graphs`, `answered`, `refused`, `server_instance`, `answers` (each entry the pair's capabilities block, tagged).
+With a pair selection (section 6) they answer a one-entry envelope.
+
+### 1.1 `/traverse` (E10)
+
+The envelope wraps HTTP 200 answers only. Every other answer of `/traverse` stays HTTP-level and unwrapped,
+exactly as before, because the service's attempt ledger reads those statuses:
+- 409: a repeated `attempt_id` that is running, retained, held or tombstoned (`{error, attempt}`), and an expired
+  `not_after_ms` (`{error, state: "expired", ...}`);
+- 503 with `usage` when the attempt reaches its bound;
+- 400 with `usage` for a managed request (without `usage` for an unmanaged one).
+429 exists only on `POST /traverse/cancel` (an unknown id that could not be tombstoned); that route and
+`GET /traverse/attempt/{attempt_id}` are unchanged and never wrapped.
+
+A `/traverse` request runs on exactly one pair (until the graph-less traverse of a later release): a name with
+several pairs, or several pairs, is refused with the candidates (section 6).
+
+## 2. Labels absent from a pair (E9)
+
+On a multi-graph server a request that names labels a pair does not hold is answered by that pair, not refused:
+- `/resolve` `labels`: the absent ones are dropped and listed in the entry's `unknown_labels`;
+- `/traverse` seed labels: listed in that seed result's `unknown_labels` and in its `dropped_labels`
+  (`{label, reason: "not_in_graph"}`); a seed whose labels are all absent gets no walk, outcome
+  `walks: "labels_not_in_graph"`;
+- `/traverse` `strategy.labels.extra`: listed in the entry's `unknown_labels`.
+A single-graph server keeps the 400 "Label not found in the annotation".
+
+## 3. `/search` (E1)
+
+The answer keeps its upstream shape (a list of `{seq_description, results, ...}`). Added:
+- multi-graph server: every row carries `graph`, `graph_path`, `annotation_path`; the rows of one query sequence
+  come in the index's pair order (not in the order the pairs finish);
+- every server: each query sequence's object has `cuts`, one entry per pair searched (empty pairs included) in pair
+  order: `{graph, graph_path, annotation_path, index_fp, returned, complete, nth_score, tied, tied_returned}`; on a
+  single-graph server one entry with null pair tags.
+  - `returned`: rows of this pair; `complete`: every match above the request's thresholds was returned (no cut):
+    then `nth_score` null and `tied`, `tied_returned` 0;
+  - otherwise `nth_score` is the score of the N-th returned row, `tied` the number of matching labels with that
+    score (returned or not), `tied_returned` how many of them were returned;
+  - on COUNTS annotations also `nth_median` and `tied_same_median` (the labels with the N-th score and median).
+- The order before every engine-local cut (C5): score descending; then, on counts annotations only, the median
+  abundance descending; then label ascending (byte order). The median is the LOWER median of the label's
+  abundances over the query's k-mer positions where the label is present (abundance at least 1, zeros excluded),
+  each position once: sorted ascending, the element at index floor((n - 1) / 2). A counts annotation is an integer
+  matrix that is not a coordinate matrix (row_diff_int_brwt, int_row_diff_disk, the integer CSC forms). On
+  coordinate and binary annotations ties are ordered by label.
+- The result cache key includes the selected names (with their pairs), so a pair listed under two names never
+  returns rows tagged with the other name.
+- `/search` takes `graphs` only (no `pairs`; it has no re-ask).
+
+## 4. Deadlines and the work cutoff (E4, E20)
+
+- `not_after_ms` (integer, ms since the epoch) is the latest START time, as in SPEC-labeled-traversal-core
+  section 5: `/traverse` as before; `/resolve` and `/pattern` read it too. A request whose `not_after_ms` has
+  passed when its handler starts is refused 409 `{error, state: "expired", not_after_ms, server_time_ms}` and nothing
+  runs. In a fan-out, a pair not started by then is `not_reached` with reason `not_after_ms`.
+- `finish_by_ms` (integer, ms since the epoch) is the completion deadline, on `/traverse`, `/resolve`, `/pattern`.
+  Each route's deadline becomes the minimum of its own and `finish_by_ms - clock_skew_allowance_ms`. A `/resolve`
+  without `bounds.time_budget_ms` gets the server maximum as its deadline. The in_ram memory wait is not entered
+  once `finish_by_ms` has passed and is given up when it passes; a load already started is not interrupted.
+- The EFFECTIVE envelope deadline is min(request arrival + the route's request budget, `finish_by_ms` -
+  clock_skew_allowance_ms), the request budget being `/pattern`'s `time_budget_ms`, `/resolve`'s
+  `bounds.time_budget_ms` or the server maximum, the attempt's bound for `/traverse`. The WORK CUTOFF is the
+  effective deadline less the route's finalisation reserve. At the cutoff the fan-out stops admitting and waiting:
+  - a pair not yet started (queued, waiting for memory) is `not_reached`: refusal `{http_status: 503, code:
+    "not_reached", reason: "cutoff" | "not_after_ms" | "transport", error}`;
+  - a pair started and not finished is `unfinished`: refusal `{http_status: 503, code: "unfinished", reason:
+    "cutoff" | "loading", error, usage: {state, started_at, elapsed_ms, cpu_ms, memory_bytes}}`; it is told to stop;
+    a load in progress may run past every deadline;
+  - the completed pairs are written beside them. Each pair keeps its own per-pair budget, which starts when it
+    starts; a pair that starts late can be cut `unfinished` by the cutoff, and the answer says so.
+- The 899 s transport cap bounds every answer.
+
+## 5. The request registry (E4)
+
+- `/resolve` and `/pattern` take an optional `request_id`, the same token rule as `attempt_id`
+  (`[A-Za-z0-9._-]+`, length-capped), checked by the strict parsers before anything is registered. `/traverse`'s
+  `attempt_id` is its request handle; no second id.
+- A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
+  entry (below) plus `error`.
+- `GET /requests/{request_id}` answers the entry: `{request_id, server_instance, route, state: "running" |
+  "ended", received_at, finished_at, reason, response: {status, bytes, written} | null, retained_until, pairs:
+  [{graph, graph_path, annotation_path, state: "queued" | "waiting_memory" | "loading" | "running" | "ended" |
+  "never_started", outcome, usage}]}`; for `/traverse` also `attempt` (the object of
+  `GET /traverse/attempt/{attempt_id}`). An entry is retained for a period and a count set by server flags, then
+  the id is unknown: 404 `{error, request_id, server_instance}`.
+- A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
+  "client_gone"`, with usage). An answer written but lost on the way is recorded `ended` with its status and bytes;
+  results are not retained.
+
+## 6. Selectors (E12)
+
+| Route | `graphs` | `pairs` | Note |
+| --- | --- | --- | --- |
+| `/search` | yes | refused (`pairs_unsupported`) | |
+| `/resolve`, `/pattern` | yes | yes | any number of pairs |
+| `/traverse` | `graph`, or `graphs` resolving to ONE pair | exactly one pair | several pairs: `traverse_single_pair` |
+| `GET /traverse/capabilities`, `GET /pattern/capabilities` | `?graph=` | `?graph=&graph_path=&annotation_path=` | one pair per probe |
+
+`pairs: [{graph, graph_path?, annotation_path?}]`: each object names exactly one pair of that name; `graph_path` may
+be omitted when the name has one graph, `annotation_path` is required when the name's pairs share a graph. `graphs`
+and `pairs` together are refused. Every selector refusal is a 400 before any pair starts, `{error, code,
+candidates?}`, with `code` one of `selection_conflict`, `pair_not_found`, `pair_ambiguous`, `traverse_single_pair`,
+`graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a choice exists. Without a
+selection a request runs on every pair, up to `max_graphs_without_selection` names (that refusal stays).
+
+## 7. Resolve discovery ties (E18)
+
+Discovery ranks labels by k-mers supported (descending), ties by label name (byte order), then truncates at
+`discover_max_labels`. `labels_truncated` gains `tied_at_boundary` (the labels with the last kept label's
+support, kept or dropped) and `tied_kept` (how many of them were kept).
+
+## 8. Capabilities (E3)
+
+`GET /capabilities` on a multi-graph server adds `composite_fp` (sha256 over the pairs' `index_fp` sorted as bytes,
+joined by `\n`, no trailing newline; null when any pair has none), `composite_rule` (that sentence), and a
+`multigraph` block advertising `envelope_version`, the envelope routes, the selectors per route,
+`traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`, the registry route,
+`unknown_labels`, `search_cuts` and `resolve_boundary_ties`. Clients switch on these, never on dates.
