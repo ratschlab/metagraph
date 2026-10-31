@@ -196,7 +196,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `supported_paths_level` | `"best"` \| `"label_intersection"` | `"best"` | increment 5s (§20.1): the support level the supported-path search prunes on; `"best"` is `record_verified` where the index can verify, else `label_intersection`. With `require_support: "record_verified"` under `"supported_paths"`, `"label_intersection"` is 400 `invalid_request`. Accepted with any request; it acts only with `long_search: "supported_paths"` |
 | `predicate_scope` | `"context"` \| `"motif"` | `"context"` | §25: `"motif"` also asks the predicate once of each pattern of at most k bases as a whole, on the union of its contexts' labels (the entry's `motif`); `"context"` is §19's answer. `"motif"` needs a predicate (else 400 `invalid_request`); `"context"` is accepted with any request and acts only with a predicate |
 | `max_mismatches` | integer | `0` | increment 5m-3 (§21.2): the most substitutions an instance may hold, 0 to 3 (the contract's maximum); another integer, a fraction, `null` or another type is 400 `invalid_request`. Each pattern is checked against the cap applied to it (its kind's `mismatches.max` of the capabilities; 0 for a pattern longer than k, §21.16): above it the pattern is answered in its slot with `mismatches_above_cap` (§21.8), never lowered. Above 0 with `output.labels` `"all"` or `"predicate_only"`, a predicate or `long_search: "supported_paths"`: 400 `later_increment` (§21.16). `0` is the field's absence |
-| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, the graphs `/search`'s field selects, read more strictly (§24.1): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request` |
+| `graphs` | list of names | every name, on a server of at most 10 | a multi-graph server's selection, the graphs `/search`'s field selects, read more strictly (§24.1): non-empty, names of its graph list (deduplicated); on a single-graph server 400 `invalid_request`; since release 10 `pairs` (`[{graph, graph_path?, annotation_path?}]`, SPEC-multigraph-envelope.md section 6) selects pairs instead, refused beside `graphs` |
 | `in_ram` | boolean | `false` | as `/search`'s (§24): `true` loads the selected pair into RAM for the request on a multi-graph server that runs on mmap, when it fits `--mem-cap-gb`; the request's budgets start after the load, `timing.load_ms` states it. Accepted on every server (a single-graph server answers from the index it holds) |
 
 - An integer is a JSON number with an integral value (`5.0` is 5). A negative or fractional value is 400
@@ -400,7 +400,8 @@ A request is refused by the first check it fails, in this order:
 
 ## 6. Whole-request refusals
 
-The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`.
+The body is `{"error": <message>, "code": <code>}`, except the 503 during loading, which has no `code`, and a
+selection refusal of a multi-graph server, which may add `candidates` (below).
 
 On a multi-graph server (§24.1) a refusal that one pair alone would be answered -- its graph's support (step 4 of
 §5), its annotation (steps 10 and 11), its 503 `deadline`, a failure while it is processed -- is carried inside the
@@ -429,6 +430,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `alphabet_untested` | the graph's alphabet is `$ACGTN` (a DNA5 build): no DNA5 build has passed the pattern tests yet (the owner's decision of 2026-10-07; §8.2), with its mask or without | none on this build; a later build that passes them serves it |
 | 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none |
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or disk annotation; only the row-diff family has one); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
+| 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
 
@@ -4217,8 +4219,9 @@ how the search service uses it; the route serves any number.
   non-empty array of graph names (GET /capabilities lists them)`), where `/search` answers an empty list with 200
   and the body `null` (it queries nothing), reads a value that is not a list as no `graphs`, and reads a scalar
   item as its text (`1` names the graph `"1"`; an object or list item is 400). An unknown name is 400 on both, in each route's words (`/pattern`:
-  `request.graphs: unknown graph 'X' (GET /capabilities lists the graphs)`, `invalid_request`; `/search`: `Request
-  with an uninitialized graph X`).
+  `request.graphs: unknown graph 'X' (GET /capabilities lists the graphs)`; `/search`: `Request with an
+  uninitialized graph X`), with the selection code `graph_unknown` since release 10 (SPEC-multigraph-envelope.md
+  section 6; `/pattern` answered `invalid_request` before, `/search` no code).
 - The pairs are answered in this order: the names in byte order, each name's pairs in the list's order, a pair
   listed twice under one name once (a pair listed under two names is answered under each).
 - Each pair is answered as a single-graph server answers the request without `graphs` (§3 to §19, the pair's own
@@ -4226,8 +4229,9 @@ how the search service uses it; the route serves any number.
   its own caps, memory account and work budgets — the request's budgets apply per pair, as if each were its own
   request. The pairs run in parallel on the server's graph pool (`-p` threads, shared with `/search`).
 - The order of the checks (§5 step 1): the body is one JSON text (§3) and an object (400 `invalid_request`);
-  `graphs` (400 `invalid_request`: not a non-empty list of names, an unknown name, or absent on a server of more
-  names than `max_graphs_without_selection`); an `in_ram` that is not a boolean (400 `invalid_request`); the
+  `graphs` or `pairs` (400 `invalid_request`: not a non-empty list of names or of pair objects, or no selection on
+  a server of more names than `max_graphs_without_selection`; 400 with a selection code of SPEC-multigraph-envelope.md
+  section 6: an unknown name, `graphs` beside `pairs`, a pair object naming none or several pairs); an `in_ram` that is not a boolean (400 `invalid_request`); the
   request's fields (§5 steps 5 to 9, the same for every pair: 400 `invalid_request`, `later_increment`,
   `genetic_code_unknown`, `predicate_too_large`), checked once before any pair; then each pair from §5 step 4 on,
   on its own.

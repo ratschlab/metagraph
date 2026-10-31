@@ -2109,8 +2109,9 @@ FIXTURES = [
          multi_answers(expect_all(entries(exact(24)), load_ms(0)))),
     post('multi_graph_unknown', 'multi',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': ['nope']}, 400,
-         '400 invalid_request: a name the graph list does not have',
-         refused('invalid_request')),
+         '400 graph_unknown (SPEC-multigraph-envelope.md section 6): a name the graph list does '
+         'not have',
+         refused('graph_unknown')),
     post('multi_graph_refused_pair', 'multi_mixed',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [MULTI_GRAPH_NAME, HASHED_NAME]},
          200,

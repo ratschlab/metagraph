@@ -548,7 +548,8 @@ class TestMultiGraphServer(TestingBase):
     def test_pattern_refusals(self):
         p = {'patterns': [{'dna': 'ACGTTGCAACGTTGCAAG'}], 'mode': 'count'}
         for payload, status, code, words in (
-                (dict(p, graphs=['nope']), 400, 'invalid_request', "unknown graph 'nope'"),
+                # the selection's code (SPEC-multigraph-envelope.md section 6)
+                (dict(p, graphs=['nope']), 400, 'graph_unknown', "unknown graph 'nope'"),
                 (dict(p, graphs=[]), 400, 'invalid_request', 'non-empty array'),
                 (dict(p, graphs='ecoli'), 400, 'invalid_request', 'non-empty array'),
                 (dict(p, graphs=['ecoli'], in_ram='yes'), 400, 'invalid_request', 'in_ram'),
@@ -677,7 +678,7 @@ class TestMultiGraphServer(TestingBase):
         # refusal's code, SPEC-multigraph-envelope.md section 6)
         self.assertEqual({'error': 'Request with an uninitialized graph nope', 'code': 'graph_unknown'},
                          self.post('search', dict(s, graphs=['nope']), 400))
-        self.assertEqual({'code': 'invalid_request',
+        self.assertEqual({'code': 'graph_unknown',
                           'error': "request.graphs: unknown graph 'nope' (GET /capabilities "
                                    "lists the graphs)"},
                          self.post('pattern', dict(p, graphs=['nope']), 400))

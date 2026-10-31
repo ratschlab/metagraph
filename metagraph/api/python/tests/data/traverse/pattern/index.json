@@ -1419,7 +1419,7 @@
    "status": 400,
    "hand_made": false,
    "headers": {},
-   "shows": "400 invalid_request: a name the graph list does not have"
+   "shows": "400 graph_unknown (SPEC-multigraph-envelope.md section 6): a name the graph list does not have"
   },
   "multi_graph_refused_pair": {
    "server": "multi_mixed",

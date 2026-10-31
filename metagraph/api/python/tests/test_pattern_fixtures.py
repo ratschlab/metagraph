@@ -177,6 +177,11 @@ REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_require
             # require_support "record_verified" on an index that cannot verify, genetic_code no
             # NCBI table, and a predicate listing more names than caps.max_predicate_labels
             'support_unavailable', 'genetic_code_unknown', 'predicate_too_large')
+# The selection refusals of a multi-graph server (SPEC §24.1; SPEC-multigraph-envelope.md section
+# 6, release 10): whole-request 400s like REFUSALS, written by the selection (server_selection.cpp,
+# SelectionRefusal) rather than by a PatternRefusal, so kept apart from the codes the route's own
+# sources write
+SELECTION_REFUSALS = ('graph_unknown', 'selection_conflict', 'pair_not_found', 'pair_ambiguous')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment', 'mask_invalid',
                'alphabet_untested')
@@ -3437,7 +3442,8 @@ class TestPatternFixtures(unittest.TestCase):
             self.assertEqual(len(tables[name]), len(set(tables[name])), f'{name}: a field twice')
         # every value an answer may carry is named in the SPEC
         for values in (MODES, SCOPES, RELATIONS, UNITS, GRAPH_MODES, STOP_PHASES, STOP_REASONS,
-                       WITHHELD, CUT, NOTES, SLOT_ERRORS, REFUSALS, UNAVAILABLE, MASKS,
+                       WITHHELD, CUT, NOTES, SLOT_ERRORS, REFUSALS, SELECTION_REFUSALS,
+                       UNAVAILABLE, MASKS,
                        PLACEMENTS, SUPPORTS, ANNOTATIONS, tuple(ABSENCE_SCOPES.values())):
             for v in values:
                 self.assertIn(f'`{v}`', text, f'the SPEC does not name `{v}`')
@@ -3572,8 +3578,13 @@ class TestPatternFixtures(unittest.TestCase):
             check.keys(answer, ['error'], 'answer')
             check.ok(f['headers'].get('Retry-After') == '60', 'headers')
             return
-        check.keys(answer, SCHEMA['refusal'], 'answer')
-        check.one_of(answer['code'], REFUSALS, 'answer.code')
+        if answer.get('code') in SELECTION_REFUSALS:
+            # a selection refusal may name the pairs to choose from
+            check.keys(answer, SCHEMA['refusal'] + (['candidates'] if 'candidates' in answer
+                                                    else []), 'answer')
+        else:
+            check.keys(answer, SCHEMA['refusal'], 'answer')
+        check.one_of(answer['code'], REFUSALS + SELECTION_REFUSALS, 'answer.code')
         check.ok(isinstance(answer['error'], str) and answer['error'], 'answer.error')
         check.ok((f['status'] == 503) is (answer['code'] == 'deadline'), 'status',
                  '503 is the deadline, every other refusal 400')
@@ -4117,10 +4128,14 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(without_fixture, set(NO_FIXTURE))
         self.assertEqual({'mask_required', 'resident_only'}, set(RETIRED))
         unproducible = set(UNPRODUCIBLE) & set(REFUSALS)
+        # the selection refusals of a multi-graph server (SELECTION_REFUSALS) apart: a stored
+        # fixture shows graph_unknown (multi_graph_unknown)
+        self.assertEqual({'graph_unknown'}, seen['refusal'] & set(SELECTION_REFUSALS))
+        refusals_seen = seen['refusal'] - set(SELECTION_REFUSALS)
         self.assertEqual((set(REFUSALS) | {'initializing'}) - unproducible
-                         - without_fixture - set(RETIRED), seen['refusal'])
+                         - without_fixture - set(RETIRED), refusals_seen)
         self.assertEqual(without_fixture | unproducible | set(RETIRED),
-                         set(REFUSALS) - seen['refusal'], 'the refusal codes without a fixture')
+                         set(REFUSALS) - refusals_seen, 'the refusal codes without a fixture')
         self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
         # the extension's stops
         self.assertLessEqual({('extension', 'max_paths'), ('extension', 'max_steps')},

@@ -1328,8 +1328,9 @@ int run_server(Config *config) {
 
     /**
      * POST /pattern on a multi-graph server: the pairs the request selects (select_pairs:
-     * `graphs`, every name when there are at most --max-graphs-without-selection and it names
-     * none), each answered as one single-graph request would be (its own deadline, caps and
+     * `graphs` or `pairs` with the coded refusals of SPEC-multigraph-envelope.md section 6,
+     * every name when there are at most --max-graphs-without-selection and it names none),
+     * each answered as one single-graph request would be (its own deadline, caps and
      * memory account, starting after its index is loaded for it with `in_ram`) by the fan-out
      * (run_fanout: one pair on this thread, two or more on the graphs' pool); the envelope
      * (post_envelope, SPEC-multigraph-envelope.md section 1) carries one entry per pair in the
@@ -1365,9 +1366,11 @@ int run_server(Config *config) {
             throw PatternRefusal(400, "invalid_request", e.what());
         }
         const std::vector<std::string> names = names_of(pairs);
-        // each pair's request: the body without the selection, its fields checked once here
-        // (the same for every pair), so that their refusal is the request's and not a pair's
+        // each pair's request: the body without the selection (`graphs` or `pairs`, SPEC-
+        // multigraph-envelope.md section 6), its fields checked once here (the same for every
+        // pair), so that their refusal is the request's and not a pair's
         json.removeMember("graphs");
+        json.removeMember("pairs");
         const PatternLimits limits = pattern_limits(*config);
         const double budget_ms = validate_pattern_request(json, limits);
         const RequestDeadlines deadlines = deadlines_of(

@@ -3185,8 +3185,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     without `graphs` queries every name while the list has at most that many names and is refused (400, naming
     the threshold) once it has more (`SPEC-pattern-search.md` §24.1: `/search`'s rule, the one flag for both
     routes), stated so that a client can check it before an added name takes the list over it; `null` on a
-    single-graph server. `/traverse` and `/resolve` select one graph (`graph`, or `graphs: [name]`) and are not
-    bound by it. In both modes `GET /capabilities` states `max_request_body_mb` beside it (integer MiB,
+    single-graph server. Since release 10 it bounds `/resolve` and `/traverse` without a selector too
+    (SPEC-multigraph-envelope.md section 6: `/resolve` then runs on every pair, `/traverse` on the one pair of a
+    server that holds one); a request that names its graphs or pairs is not bound by it. In both modes `GET /capabilities` states `max_request_body_mb` beside it (integer MiB,
     `--max-request-body-mb`, below; `null` when unlimited, the default): a client that may send a large body
     reads the limit here, since the refusal of a longer body has no status (the connection is closed). Both GET
     routes state `in_ram`:
