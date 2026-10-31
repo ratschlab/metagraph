@@ -14,7 +14,8 @@ together (a name spanning two graphs). What such a server serves, as /search doe
   - `in_ram` on /pattern, /traverse and /resolve loads the pair into RAM for the request (a
     server on mmap, the pair within --mem-cap-gb), the budgets after the load, timing.load_ms;
   - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint;
-  - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block.
+  - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block;
+  - a /traverse answers in the envelope of its one pair (SPEC-multigraph-envelope.md section 1).
 
 The answers are checked against oracles of their own: the CLI (`metagraph pattern`) on the same
 files, the k-mers of the chunk's records (the contexts of a pattern, a seed's k-mers present),
@@ -89,6 +90,19 @@ def revcomp(s):
 
 def pair_names(capabilities):
     return [p['graph'] for p in capabilities['graph_summary']['pairs']]
+
+
+def single(out, route=None):
+    """The one entry of a multi-graph server's envelope (SPEC-multigraph-envelope.md section
+    1): an answered pair, the single-graph answer with its tags; on /traverse the attempt's
+    usage is the envelope's, set beside it"""
+    assert out['envelope_version'] == 1 and len(out['answers']) == 1, out
+    assert route is None or out['route'] == route, out['route']
+    entry = dict(out['answers'][0])
+    assert entry['outcome'] == 'answered', entry
+    if 'usage' in out:
+        entry['usage'] = out['usage']
+    return entry
 
 
 def untimed(value):
@@ -750,8 +764,8 @@ class TestMultiGraphServer(TestingBase):
         t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed}],
              'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
                           'output': {'detail': 'full'}}}
-        resident = self.post('traverse', t)
-        loaded = self.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-1'))
+        resident = single(self.post('traverse', t), '/traverse')
+        loaded = single(self.post('traverse', dict(t, in_ram=True, attempt_id='in-ram-1')))
         self.assertEqual(untimed(resident['results']), untimed(loaded['results']))
         self.assertGreater(loaded['timing']['load_ms'], 0)
         self.assertNotIn('load_ms', resident['timing'])
@@ -796,8 +810,8 @@ class TestMultiGraphServer(TestingBase):
         t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed, 'labels': [header]}],
              'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
                           'output': {'detail': 'full'}}}
-        resident = self.post('traverse', t)
-        loaded = self.post('traverse', dict(t, in_ram=True))
+        resident = single(self.post('traverse', t))
+        loaded = single(self.post('traverse', dict(t, in_ram=True)))
         self.assertEqual([(header, 'header')],
                          [(l['name'], l['kind']) for l in resident['results'][0]['label_dict']])
         self.assertEqual(untimed(resident['results']), untimed(loaded['results']))
@@ -864,7 +878,7 @@ class TestMultiGraphServer(TestingBase):
                     self.assertEqual(200, ret.status_code, ret.text[:2000])
                     loaded = ret.json()
                     if route == 'traverse':
-                        resident, loaded = resident['results'], loaded['results']
+                        resident, loaded = single(resident)['results'], single(loaded)['results']
                     self.assertEqual(untimed(resident), untimed(loaded), route)
             log = server.text()
             self.assertEqual(6, log.count('loaded into RAM for it'), log[-3000:])
@@ -1000,7 +1014,7 @@ class TestMultiGraphServer(TestingBase):
             kmers = self.kmers(chunk)
             via_graphs = self.server.post('traverse', dict(request, graphs=[chunk]))
             self.assertEqual(200, via_graphs.status_code, via_graphs.text[:2000])
-            out = via_graphs.json()
+            out = single(via_graphs.json(), '/traverse')
             for result in out['results']:
                 seed = seeds[result['seed']['seed_id']]
                 present = sum(seed[i:i + K] in kmers for i in range(len(seed) - K + 1))
@@ -1014,25 +1028,29 @@ class TestMultiGraphServer(TestingBase):
                         self.assertEqual('not_in_graph', result['outcome']['walks'])
                         self.assertEqual({'kmers': len(seed) - K + 1, 'kmers_present': present},
                                          result['not_in_graph'])
-            # graph, the older spelling: the same bytes, the spelling not echoed (the request
-            # was a 400 on its first absent seed before round D)
+            # graph, the older spelling: the same answer, the spelling not echoed (the request
+            # was a 400 on its first absent seed before round D); the envelopes differ only in
+            # their time
             via_graph = self.server.post('traverse', dict(request, graph=chunk))
             self.assertEqual(200, via_graph.status_code, via_graph.text[:2000])
-            self.assertEqual(via_graphs.content, via_graph.content, chunk)
+            self.assertEqual(untimed(via_graphs.json()), untimed(via_graph.json()), chunk)
         # every case was met: walked, partly present, absent
         self.assertEqual({'walked', 'partly', 'absent'}, seen)
         # the seed of a chunk walks there as in a request that names the graph with graph
         one = dict(request, seeds=[{'seed_id': 'e', 'sequence': seeds['e']}])
-        self.assertEqual(self.post('traverse', dict(one, graphs=['ecoli']))['results'],
-                         self.post('traverse', dict(one, graph='ecoli'))['results'])
+        self.assertEqual(single(self.post('traverse', dict(one, graphs=['ecoli'])))['results'],
+                         single(self.post('traverse', dict(one, graph='ecoli')))['results'])
         # a name over two graphs: graphs selects as graph does (graph_path picks the graph)
         ret = self.server.post('traverse', dict(one, graphs=['enterics']))
         self.assertEqual(400, ret.status_code)
         self.assertIn('spans several graphs', ret.json()['error'])
-        picked = self.post('traverse', dict(one, graphs=['enterics'],
-                                            graph_path=self.pairs['ecoli'][0]))
-        self.assertEqual(self.post('traverse', dict(one, graph='ecoli'))['results'],
+        picked = single(self.post('traverse', dict(one, graphs=['enterics'],
+                                                   graph_path=self.pairs['ecoli'][0])))
+        self.assertEqual(single(self.post('traverse', dict(one, graph='ecoli')))['results'],
                          picked['results'])
+        # the pair the name and graph_path select is the entry's
+        self.assertEqual(('enterics',) + self.pairs['ecoli'],
+                         (picked['graph'], picked['graph_path'], picked['annotation_path']))
         for payload, words in ((dict(one, graphs=['ecoli'], graph='ecoli'), 'not both'),
                                (dict(one, graphs=['ecoli', 'kleb']), 'expected [name]')):
             ret = self.server.post('traverse', payload)

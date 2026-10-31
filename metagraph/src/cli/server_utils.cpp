@@ -396,44 +396,56 @@ std::string json_text(const Json::Value &value, bool compact, const std::functio
     return out;
 }
 
-std::string assemble_traverse_response(const Json::Value &envelope,
-                                       std::vector<std::string> results,
-                                       const std::function<void()> &check,
-                                       double *max_gap_ms) {
+namespace {
+
+// The compact text of |object| cut at its member |key|, which it does not hold: |*head| gets
+// `{`, the members before |key| (jsoncpp writes an object's members in byte order of their
+// names) and their comma when there are any, then `"key":`; |*tail| the members after |key|,
+// each after a comma, and the closing `}`. Together around |key|'s value they are byte for
+// byte json_text of |object| holding it. |check| and |max_gap_ms| as json_text's
+void split_object_text(const Json::Value &object, const std::string &key,
+                       const std::function<void()> &check, double *max_gap_ms,
+                       std::string *head, std::string *tail) {
     Json::Value before(Json::objectValue);
     Json::Value after(Json::objectValue);
-    for (const std::string &name : envelope.getMemberNames()) {
-        if (name == "results")
-            throw std::logic_error("assemble_traverse_response: the envelope holds results");
-        (name < "results" ? before : after)[name] = envelope[name];
+    for (const std::string &name : object.getMemberNames()) {
+        if (name == key) {
+            throw std::logic_error("assemble_traverse_response: the envelope holds " + key
+                                   + " already");
+        }
+        (name < key ? before : after)[name] = object[name];
     }
-    std::string head = json_text(before, true, check, max_gap_ms);     // {...}
-    // the envelope's members after "results" are written first (the usage, the timing: a few
-    // KiB), so that the whole response's size is known before a byte of the results is copied
-    const std::string tail = json_text(after, true, check, max_gap_ms);  // {...}
-    head.pop_back();
-    const bool head_members = head.size() > 1;
-    const bool tail_members = tail.size() > 2;
-    static const std::string kResults = "\"results\":[";
-    // the exact size: `{` and the members before, a comma, "results":[, the texts and their
-    // commas, `]`, then a comma and the members after with their `}`, or the `}` alone. Reserved
-    // at once, the text never grows by doubling, whose last step held an old and a new buffer
-    // of up to its size beside the texts
-    size_t size = head.size() + head_members + kResults.size() + 1
-                + (tail_members ? tail.size() : 1);
+    *head = json_text(before, true, check, max_gap_ms);         // {...}
+    const std::string after_text = json_text(after, true, check, max_gap_ms);  // {...}
+    head->pop_back();
+    if (head->size() > 1)
+        *head += ',';
+    *head += '"' + key + "\":";
+    // `{}` without members after |key|, `{...}` with them: the first `{` becomes a comma
+    *tail = after_text.size() > 2 ? ',' + after_text.substr(1) : std::string("}");
+}
+
+/**
+ * |prefix|, the texts of |results| separated by commas, then |suffix|: the text of a /traverse
+ * response whose results (each seed's, written once built) are an array's elements between
+ * the two. The exact size is reserved at once, so the text never grows by doubling, whose last
+ * step held an old and a new buffer of up to its size beside the texts; and each text is freed
+ * once copied: what was copied and what is left to copy are the response once, where texts
+ * kept alive beside it until the handler returned would stay through the compression and the
+ * transport's copy (2.5x the text held with gzip, 3.5x without). |check| and |max_gap_ms| as
+ * json_text's, the texts copied in pieces up to the next check
+ */
+std::string splice_results(std::string prefix, std::vector<std::string> results,
+                           const std::string &suffix, const std::function<void()> &check,
+                           double *max_gap_ms) {
+    size_t size = prefix.size() + suffix.size();
     for (size_t i = 0; i < results.size(); ++i) {
         size += results[i].size() + (i > 0);
     }
     std::string out;
     out.reserve(size);
-    out += head;
-    std::string().swap(head);
-    if (head_members)
-        out += ',';
-    out += kResults;
-    // each text is freed once copied: what was copied and what is left to copy are the
-    // response once; texts kept alive beside it until the handler returns would stay through
-    // the compression and the transport's copy (2.5x the text held with gzip, 3.5x without)
+    out += prefix;
+    std::string().swap(prefix);
     if (!check) {
         for (size_t i = 0; i < results.size(); ++i) {
             if (i)
@@ -442,7 +454,6 @@ std::string assemble_traverse_response(const Json::Value &envelope,
             std::string().swap(results[i]);
         }
     } else {
-        // each text copied in pieces up to the next check
         DeliveryChecks checks(out, check, kDeliveryCheckBytes, max_gap_ms);
         for (size_t i = 0; i < results.size(); ++i) {
             if (i)
@@ -458,17 +469,50 @@ std::string assemble_traverse_response(const Json::Value &envelope,
         }
         checks.finish();
     }
-    out += ']';
-    if (tail_members) {
-        out += ',';
-        out.append(tail, 1, std::string::npos);
-    } else {
-        out += '}';
-    }
+    out += suffix;
     // the size computed is the size written: a mismatch would only cost a reallocation, never
     // a byte, so it is asserted where tests run unoptimised
     assert(out.size() == size);
     return out;
+}
+
+} // namespace
+
+std::string assemble_traverse_envelope(const Json::Value &envelope,
+                                       std::vector<std::string> results,
+                                       const std::function<void()> &check,
+                                       double *max_gap_ms) {
+    const Json::Value &answers = envelope["answers"];
+    if (!answers.isArray() || answers.size() != 1 || !answers[0].isObject()) {
+        throw std::logic_error("assemble_traverse_envelope: the envelope has no single entry "
+                               "to hold the results");
+    }
+    // the envelope around its one entry, then the entry around its results: the members after
+    // either (the usage, the timing, a few KiB) are written before a byte of the results is
+    // copied, so that the whole response's size is known first
+    Json::Value outer(Json::objectValue);
+    for (const std::string &name : envelope.getMemberNames()) {
+        if (name != "answers")
+            outer[name] = envelope[name];
+    }
+    std::string outer_head, outer_tail, entry_head, entry_tail;
+    split_object_text(outer, "answers", check, max_gap_ms, &outer_head, &outer_tail);
+    split_object_text(answers[0], "results", check, max_gap_ms, &entry_head, &entry_tail);
+    // {...,"answers":[{...,"results":[ the texts ]...}]...}
+    return splice_results(outer_head + '[' + entry_head + '[', std::move(results),
+                          ']' + entry_tail + ']' + outer_tail, check, max_gap_ms);
+}
+
+std::string assemble_traverse_response(const Json::Value &envelope,
+                                       std::vector<std::string> results,
+                                       const std::function<void()> &check,
+                                       double *max_gap_ms) {
+    // the envelope's members after "results" are written first (the usage, the timing: a few
+    // KiB), so that the whole response's size is known before a byte of the results is copied
+    std::string head, tail;
+    split_object_text(envelope, "results", check, max_gap_ms, &head, &tail);
+    // {...,"results":[ the texts ]...}
+    return splice_results(head + '[', std::move(results), ']' + tail, check, max_gap_ms);
 }
 
 GraphListEntry parse_graph_list_line(const std::string &text, size_t line) {

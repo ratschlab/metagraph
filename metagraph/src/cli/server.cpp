@@ -40,6 +40,7 @@
 #include "server_cache.hpp"
 #include "server_request.hpp"
 #include "server_selection.hpp"
+#include "server_envelope.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -439,6 +440,15 @@ class IndexLease {
 // is no JSON
 Json::Value parse_traversal_body(const std::string &content) {
     return parse_strict_json<RefuseRequest>(content, "Bad json received: ");
+}
+
+// The deadline block of a multi-graph server's /traverse envelope (SPEC-multigraph-envelope.md
+// section 4): the request's not_after_ms, as its attempt holds it. The completion deadline
+// (finish_by_ms, E20), the effective envelope deadline and the work cutoff (E4) are not read
+// by /traverse yet and stated null: this is the one place that fills them in once they are
+Json::Value traverse_envelope_deadline(const Attempt &attempt) {
+    return deadline_json(attempt.ids().not_after_ms, /* finish_by_ms */ std::nullopt,
+                         /* effective_deadline_at */ std::nullopt, /* cutoff_at */ std::nullopt);
 }
 
 } // namespace
@@ -1405,6 +1415,29 @@ int run_server(Config *config) {
         }, /* compact */ true, &writing.control);
     };
 
+    // A multi-graph server's /traverse answer (SPEC-multigraph-envelope.md section 1.1): the
+    // envelope with one entry, the |pair|'s single-graph answer |out| tagged with the pair and
+    // |identity|'s index_fp (the identity its capabilities state), without its usage: the usage
+    // is the attempt's, and the attempt is the request's, so the envelope states it at its top
+    // level (for a ledger-managed request only, as a single-graph answer states it), the
+    // attempt_id as its request_id (null without one) and the attempt registry's
+    // server_instance. Only an answer of HTTP 200 is wrapped: every other status of the route
+    // (409, 503 with usage at the bound, 400) stays HTTP-level and unwrapped, as the service's
+    // attempt ledger reads it
+    auto traverse_envelope = [&](const SelectedPair &pair, const IndexIdentity &identity,
+                                 const Attempt &attempt, Json::Value out) {
+        EnvelopeContext context;
+        out.removeMember("usage", &context.usage);
+        if (attempt.managed())
+            context.request_id = attempt.ids().attempt_id;
+        context.server_instance = attempts.server_instance();
+        context.deadline = traverse_envelope_deadline(attempt);
+        std::vector<Json::Value> entries;
+        entries.push_back(envelope_entry_answered(pair, identity.fp, std::move(out)));
+        return post_envelope("/traverse", { pair.name }, std::move(entries), context,
+                             attempt.elapsed_ms());
+    };
+
     // Extend frozen seeds along consistent annotation labels.
     server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                  shared_ptr<HttpServer::Request> request) {
@@ -1448,15 +1481,18 @@ int run_server(Config *config) {
         // known to the attempt's delivery reserve); the response is assembled from them, byte
         // for byte the text of the whole tree. The texts are moved into the assembly, which
         // frees each once copied: nothing reads them after it, and kept here they would live
-        // until the handler returned, through the compression and the transport's copy
+        // until the handler returned, through the compression and the transport's copy. On a
+        // multi-graph server they are the results of the envelope's one entry
         ResultTexts texts;
-        control.write = [&texts, attempt](const Json::Value &envelope,
-                                          const std::function<void()> &check) {
+        const bool enveloped = !config->fnames.empty();
+        control.write = [&texts, attempt, enveloped](const Json::Value &envelope,
+                                                     const std::function<void()> &check) {
             // the longest stretch between two checks (deadline_check)
             double gap = 0;
-            std::string text = texts.active
-                ? assemble_traverse_response(envelope, std::move(texts.texts), check, &gap)
-                : json_text(envelope, true, check, &gap);
+            std::string text = !texts.active ? json_text(envelope, true, check, &gap)
+                : enveloped
+                    ? assemble_traverse_envelope(envelope, std::move(texts.texts), check, &gap)
+                    : assemble_traverse_response(envelope, std::move(texts.texts), check, &gap);
             attempt->note_delivery_gap_ms(gap);
             return text;
         };
@@ -1559,10 +1595,13 @@ int run_server(Config *config) {
                 const std::optional<bool> in_ram = in_ram_field(json);
                 std::unique_ptr<IndexLease> lease;
                 IndexIdentity identity = single_identity;
+                // the pair a multi-graph server's envelope is answered for
+                std::optional<SelectedPair> selected;
                 if (multi) {
                     const GraphPair &pair = select_traverse_pair(
                             selection.name,
                             selection.graph_path ? &*selection.graph_path : nullptr, indexes);
+                    selected = SelectedPair { selection.name, pair };
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
                         parse_traverse_request(json);
@@ -1588,8 +1627,12 @@ int run_server(Config *config) {
                 limits.not_in_graph_per_seed = multi;
                 if (in_ram)
                     limits.load_ms = lease ? lease->load_ms() : 0.0;
-                return process_traverse_request(json, index, config->index_release, limits,
-                                                &identity, attempt.get(), &texts);
+                Json::Value out = process_traverse_request(json, index, config->index_release,
+                                                           limits, &identity, attempt.get(),
+                                                           &texts);
+                if (!selected)
+                    return out;
+                return traverse_envelope(*selected, identity, *attempt, std::move(out));
             } catch (const LoadAbandoned &e) {
                 throw ClientGone(e.what());
             } catch (const graph::traversal::AttemptAborted &e) {
