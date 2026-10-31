@@ -91,7 +91,11 @@ split_coords_by_target(const Alignment::Columns &label_columns,
                 uint64_t span = std::min(remaining, nt_len - cur_local);
                 seq_ranges[{ col, cur_seq_id }]
                     .emplace_back(cur_local, cur_local + span - 1);
-                remaining -= span;
+                if (remaining == span)
+                    break;
+                // Coordinates advance by k-mers. The shared k-1 bases
+                // contribute to the covered range of both sequences.
+                remaining -= span - (k - 1);
                 ++cur_seq_id;
                 cur_local = 0;
             }
