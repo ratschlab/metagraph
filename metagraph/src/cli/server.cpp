@@ -40,6 +40,8 @@
 #include "server_cache.hpp"
 #include "server_request.hpp"
 #include "server_selection.hpp"
+#include "server_envelope.hpp"
+#include "server_fanout.hpp"
 #include "cli/load/load_annotation.hpp"
 
 
@@ -394,6 +396,21 @@ namespace {
 class LoadAbandoned : public std::runtime_error {
   public:
     using std::runtime_error::runtime_error;
+};
+
+// A request whose completion deadline (finish_by_ms less the clock skew allowance) passed
+// before, or while, it waited for the memory to load its index (SPEC-multigraph-envelope.md
+// section 4: the wait is not entered then, and given up when it passes); nothing was loaded
+class LoadExpired : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
+
+// A pair of a multi-graph fan-out that was not started (PairControl refused its start: the
+// request's work cutoff or its not_after_ms passed while it waited); nothing was loaded
+class PairNotStarted : public std::runtime_error {
+  public:
+    PairNotStarted() : std::runtime_error("the pair was not started") {}
 };
 
 /**
@@ -1035,8 +1052,17 @@ int run_server(Config *config) {
     // is the resident pair's own object: the copy is of the same files, the same .seqs, so a
     // mapping loaded and indexed again would be identical, for seconds and gigabytes per
     // request on a chunk with millions of records
+    //
+    // A pair of a fan-out (|control|) states where it is: waiting for the memory (not started),
+    // loading, running; it starts only when its control lets it (else PairNotStarted, nothing
+    // held), and its wait polls the control's predicate (the request's stop, its not_after_ms,
+    // its wait limit). The lease, and the reservation in it, belong to the caller: a fan-out's
+    // worker holds them until it ends, whenever its request was answered. |expired| (/traverse
+    // with finish_by_ms): the wait is not entered once it answers true and given up when it
+    // does (LoadExpired)
     auto lease_index = [&](const GraphPair &pair, bool in_ram, size_t request_id,
-                           const std::function<bool()> &gone, bool for_pattern) {
+                           const std::function<bool()> &gone, bool for_pattern,
+                           PairControl *control, const std::function<bool()> &expired) {
         const AnnotatedDBG &resident = *graphs_cache.at(pair);
         const size_t bytes = in_ram && loaded_with_mmap
                 ? std::filesystem::file_size(pair.first) + std::filesystem::file_size(pair.second)
@@ -1047,12 +1073,33 @@ int run_server(Config *config) {
                          "memory: {} GB). It will be queried with mmap", request_id,
                          bytes / 1e9, memory_all / 1e9);
         }
-        if (plan != InRamPlan::LOAD)
+        if (plan != InRamPlan::LOAD) {
+            if (control && !control->start_running())
+                throw PairNotStarted();
             return std::make_unique<IndexLease>(resident, plan);
+        }
+        const char *expired_text = "the request's finish_by_ms (less the clock skew allowance) "
+                                   "passed while it waited for the memory to load its index";
+        if (expired && expired())
+            throw LoadExpired(expired_text);
         Timer timer;
-        if (!reservations.reserve(bytes, gone)) {
+        if (control)
+            control->waiting_memory();
+        const std::function<bool()> wait
+                = control ? control->wait_predicate()
+                : expired ? std::function<bool()>([&]() { return gone() || expired(); })
+                : gone;
+        if (!reservations.reserve(bytes, wait)) {
+            if (control)
+                throw PairNotStarted();
+            if (expired && expired())
+                throw LoadExpired(expired_text);
             throw LoadAbandoned("the client closed its connection (or the server stops) while "
                                 "the request waited for the memory to load its index");
+        }
+        if (control && !control->start_loading(bytes)) {
+            reservations.release(bytes);
+            throw PairNotStarted();
         }
         std::unique_ptr<AnnotatedDBG> loaded;
         try {
@@ -1082,165 +1129,276 @@ int run_server(Config *config) {
         logger->info("[Server] Request {}: ({}, {}) loaded into RAM for it in {:.0f} ms (the "
                      "wait for its {:.3f} GB included)", request_id, pair.first, pair.second,
                      load_ms, bytes / 1e9);
-        return std::make_unique<IndexLease>(std::move(loaded), &reservations, bytes, load_ms);
+        auto lease = std::make_unique<IndexLease>(std::move(loaded), &reservations, bytes,
+                                                  load_ms);
+        // the load ended: the pair's work begins
+        if (control)
+            control->start_running();
+        return lease;
+    };
+
+    // The ledger-managed /traverse attempts of this process (requests with attempt_id): the
+    // backend half of the attempt ledger of DESIGN-traverse-graphlet.md §14
+    // (traverse_attempts.hpp)
+    AttemptSettings attempt_settings;
+    attempt_settings.allowance_ms = config->traverse_attempt_allowance_ms;
+    attempt_settings.hard_cap_ms = kContentTimeoutS * 1000.0 - 1000;
+    attempt_settings.retention_s = config->traverse_attempt_retention_s;
+    attempt_settings.retention_count = config->traverse_attempt_retention;
+    attempt_settings.tombstone_max_s = config->traverse_attempt_tombstone_max_s;
+    attempt_settings.clock_skew_ms = config->traverse_clock_skew_ms;
+    attempt_settings.content_timeout_s = kContentTimeoutS;
+    attempt_settings.observed_window_s = config->traverse_observed_window_s;
+    attempt_settings.delivery_compress_mbps = config->traverse_delivery_compress_mbps;
+    attempt_settings.delivery_build_mbps = config->traverse_delivery_build_mbps;
+    // until measured longer, the walk is taken to end at most a chunk of a read and 950 ms (the
+    // heads between two readings of the clock, the stopped seed's finalisation) after its
+    // walk-until (calibrated: 352-1,001 ms measured on SRA, 1,699 once under load)
+    attempt_settings.delivery_stop_ms = static_cast<double>(config->traverse_chunk_target_ms) + 950;
+    AttemptRegistry attempts(attempt_settings);
+    logger->info("[Server] Traverse attempts: server_instance {}, allowance {} ms, {}",
+                 attempts.server_instance(), attempt_settings.allowance_ms,
+                 attempts.retention_text());
+
+    // The requests of /resolve and /pattern by request_id (SPEC-multigraph-envelope.md section
+    // 5): running, and ended ones for the retention period, answered by GET /requests/{id}
+    RequestSettings request_settings;
+    request_settings.retention_s = config->request_retention_s;
+    request_settings.retention_count = config->request_retention;
+    request_settings.server_instance = attempts.server_instance();
+    RequestRegistry requests(request_settings);
+    logger->info("[Server] Requests by request_id: {}", requests.retention_text());
+
+    // The deadlines of a /resolve or /pattern request whose handler starts now (section 4):
+    // |budget_ms| the route's request budget, |reserve_ms| its finalisation reserve
+    auto deadlines_of = [&](const shared_ptr<HttpServer::Request> &request, double budget_ms,
+                            const RequestHandles &handles, double reserve_ms) {
+        return request_deadlines(request->header_read_time, std::chrono::system_clock::now(),
+                                 std::chrono::steady_clock::now(), budget_ms, handles,
+                                 attempt_settings.clock_skew_ms, reserve_ms,
+                                 static_cast<double>(kServerMaxDeadlineMs));
     };
 
     /**
-     * POST /pattern on a multi-graph server, as /search: the request's `graphs` (every name
-     * when there are at most 10 and it names none), each pair of each name answered as one
-     * single-graph request would be (its own deadline, caps and memory account, starting after
-     * its index is loaded for it with `in_ram`), in parallel on the graphs' pool; the envelope
-     * (pattern_envelope) carries one entry per pair in ordered_pairs' order, tagged with its
-     * pair (graph, graph_path, annotation_path) and its index_fp: the pair's answer, or the
-     * refusal the pair alone would have been answered (SPEC §24.1) -- its graph's support,
-     * its annotation, its deadline, a failure while it was processed. What no pair decides
-     * (the body, `graphs`, `in_ram`, the request's fields) is checked before any pair and
-     * refuses the whole request as before. The envelope is written by the latest deadline of
-     * the pairs that answered, past it 503 deadline (|delivery|); a refused pair binds
-     * nothing (one refused for its deadline has passed it).
+     * The admission of a /resolve or /pattern request (sections 4 and 5), before anything of it
+     * runs: a request_id that is running or retained here is refused (409, its entry and an
+     * error: no second worker), then one whose not_after_ms has passed (409 expired, as
+     * /traverse refuses it); otherwise |entry| is registered under its request_id (a request
+     * without one is not registered). A malformed field was refused before (400), so that
+     * nothing a client must correct holds its id
+     */
+    auto admit = [&](const std::shared_ptr<RequestEntry> &entry, const RequestHandles &handles,
+                     size_t request_id) {
+        auto expired = [&]() -> std::optional<Json::Value> {
+            AttemptIds ids;
+            ids.not_after_ms = handles.not_after_ms;
+            const uint64_t now = attempts.now_ms();
+            if (!not_after_passed(ids, now))
+                return std::nullopt;
+            Json::Value body = expired_json(ids, now, attempts.server_instance());
+            if (handles.request_id)
+                body["request_id"] = *handles.request_id;
+            return body;
+        };
+        std::optional<Json::Value> refused = handles.request_id ? requests.start(entry, expired)
+                                                                : expired();
+        if (refused) {
+            logger->info("[Server] Request {}: not started, {}", request_id,
+                         refused->get("error", "").asString());
+            throw HttpError(409, std::move(*refused));
+        }
+    };
+
+    // The pairs' refs of a request's registry entry: the selected pairs, or on a single-graph
+    // server one pair with null tags
+    auto pair_refs = [](const std::vector<SelectedPair> &pairs) {
+        std::vector<Json::Value> refs;
+        for (const SelectedPair &pair : pairs) {
+            refs.push_back(envelope_pair_ref(pair));
+        }
+        if (refs.empty()) {
+            Json::Value ref(Json::objectValue);
+            for (const char *key : { "graph", "graph_path", "annotation_path" }) {
+                ref[key] = Json::Value();
+            }
+            refs.push_back(std::move(ref));
+        }
+        return refs;
+    };
+
+    // The selected names of |pairs| (in byte order, each once): the envelope's `graphs`
+    auto names_of = [](const std::vector<SelectedPair> &pairs) {
+        std::vector<std::string> names;
+        for (const SelectedPair &pair : pairs) {
+            if (names.empty() || names.back() != pair.name)
+                names.push_back(pair.name);
+        }
+        std::sort(names.begin(), names.end());
+        names.erase(std::unique(names.begin(), names.end()), names.end());
+        return names;
+    };
+
+    // two or more pairs run on the graphs' pool (one runs on its handler's thread)
+    const Launch on_pool = [&graphs_pool](std::function<void()> task) {
+        graphs_pool.enqueue(std::move(task));
+    };
+
+    /**
+     * POST /pattern on a multi-graph server: the pairs the request selects (select_pairs:
+     * `graphs`, every name when there are at most --max-graphs-without-selection and it names
+     * none), each answered as one single-graph request would be (its own deadline, caps and
+     * memory account, starting after its index is loaded for it with `in_ram`) by the fan-out
+     * (run_fanout: one pair on this thread, two or more on the graphs' pool); the envelope
+     * (post_envelope, SPEC-multigraph-envelope.md section 1) carries one entry per pair in the
+     * index's pair order: the pair's answer, or the refusal the pair alone would have been
+     * answered (SPEC §24.1), or its not_reached / unfinished outcome at the work cutoff
+     * (section 4). What no pair decides (the body, the selection, `in_ram`, the request's
+     * fields) is checked before any pair and refuses the whole request as before. Each pair
+     * keeps its own deadline (from its start, capped by finish_by_ms only); two or more pairs
+     * are written by the request's effective deadline, one pair by its own deadline, as a
+     * single-graph request
      */
     auto multi_graph_pattern = [&](const std::string &content, size_t request_id,
+                                   const shared_ptr<HttpServer::Request> &request,
                                    const std::function<bool()> &gone,
-                                   PatternDelivery *delivery) {
+                                   PatternDelivery *delivery,
+                                   std::shared_ptr<RequestEntry> *tracked) {
         Timer timer;
         // the request's CPU time and page faults: this thread's own part (the parse, the
-        // checks, the envelope) and each pair's work on its pool thread (Slot::usage)
+        // checks, the envelope, an inline pair) and each pooled pair's work on its thread
         const common::ThreadUsageMeter own_usage;
         Json::Value json = parse_pattern_body(content);
         if (!json.isObject())
             throw PatternRefusal(400, "invalid_request", "request: expected an object");
-        std::vector<std::string> names;
+        std::vector<SelectedPair> pairs;
         std::optional<bool> in_ram;
+        RequestHandles handles;
         try {
-            names = pattern_graph_names(json, sorted_names(indexes),
-                                        config->max_graphs_without_selection);
+            handles = read_request_handles(json);
+            pairs = select_pairs(SelectionRoute::PATTERN, json, indexes,
+                                 config->max_graphs_without_selection);
             in_ram = in_ram_field(json);
         } catch (const std::invalid_argument &e) {
             throw PatternRefusal(400, "invalid_request", e.what());
         }
+        const std::vector<std::string> names = names_of(pairs);
         // each pair's request: the body without the selection, its fields checked once here
         // (the same for every pair), so that their refusal is the request's and not a pair's
         json.removeMember("graphs");
-        validate_pattern_request(json, pattern_limits(*config));
-        const auto targets = ordered_pairs(indexes, names);
-        logger->info("[Server] Request {}: /pattern on {} pair(s) of {} graph name(s){}",
-                     request_id, targets.size(), names.size(),
-                     in_ram.value_or(false) ? ", in_ram" : "");
+        const PatternLimits limits = pattern_limits(*config);
+        const double budget_ms = validate_pattern_request(json, limits);
+        const RequestDeadlines deadlines = deadlines_of(
+                request, budget_ms, handles, static_cast<double>(config->pattern_finalize_ms));
+        auto entry = std::make_shared<RequestEntry>(handles.request_id, "/pattern",
+                                                    attempts.server_instance(),
+                                                    deadlines.arrival_wall, pair_refs(pairs));
+        admit(entry, handles, request_id);
+        *tracked = entry;
+        logger->info("[Server] Request {}: /pattern on {} pair(s) of {} graph name(s){}{}",
+                     request_id, pairs.size(), names.size(),
+                     in_ram.value_or(false) ? ", in_ram" : "",
+                     handles.request_id ? ", request_id " + *handles.request_id : std::string());
 
-        struct Slot {
-            Json::Value entry;
-            bool answered = false;
-            bool aborted = false;
-            // when answered: the pair's deadline, from which the envelope's is taken
-            graph::pattern::Deadline::Clock::time_point start;
-            double budget_ms = 0;
-            // the pair's work on its pool thread, from its index lease to its entry (an
-            // answer, or a refusal after the lease)
-            common::ThreadUsage usage = common::ThreadUsage::zero();
-        };
-        std::vector<Slot> slots(targets.size());
-        std::vector<std::shared_future<void>> futures;
-        for (size_t i = 0; i < targets.size(); ++i) {
-            futures.push_back(graphs_pool.enqueue([&, i]() {
-                Slot &slot = slots[i];
-                const std::string &name = targets[i].first;
-                const GraphPair &pair = targets[i].second;
-                // the pair's entry when it is refused: what it alone would have been answered
-                auto refused = [&](int http_status, const Json::Value &body) {
-                    slot.entry = pattern_pair_refused(name, pair.first, pair.second,
-                                                      fp_of_pair(pair), http_status, body);
-                };
-                try {
-                    if (gone()) {
-                        slot.aborted = true;
-                        return;
-                    }
-                    const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                                   gone, /* for_pattern */ true);
-                    const IndexIdentity identity = identity_of_pair(pair, lease->index());
-                    const common::ThreadUsageMeter work_usage;
-                    // what the pair's work used, however it ends
-                    struct Measured {
-                        const common::ThreadUsageMeter &meter;
-                        common::ThreadUsage &into;
-                        ~Measured() { into = meter.elapsed(); }
-                    } measured { work_usage, slot.usage };
-                    PatternDelivery own;
-                    own.set_abort(gone);
-                    slot.start = graph::pattern::Deadline::Clock::now();
-                    Json::Value answer = process_pattern_request(json, lease->index(), *config,
-                                                                 &identity, &own);
-                    slot.budget_ms = answer["limits"]["time_budget_ms"].asDouble();
-                    if (in_ram)
-                        answer["timing"]["load_ms"] = lease->load_ms();
-                    slot.entry = pattern_pair_answered(name, pair.first, pair.second,
-                                                       identity.fp, std::move(answer));
-                    slot.answered = true;
-                } catch (const PatternRefusal &e) {
-                    logger->warn("[Server] Request {}: pair ({}, {}) of '{}' refused ({} {}): {}",
-                                 request_id, pair.first, pair.second, name, e.status(),
-                                 e.code(), e.what());
-                    refused(e.status(), e.body());
-                } catch (const graph::pattern::Aborted &) {
-                    slot.aborted = true;
-                } catch (const LoadAbandoned &) {
-                    slot.aborted = true;
-                } catch (const std::exception &e) {
-                    // a failure of this pair, as the route answers one for a single graph
-                    // (answer_request): 400 with its text, no code
-                    logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed: {}",
-                                 request_id, pair.first, pair.second, name, e.what());
-                    Json::Value body;
-                    body["error"] = e.what();
-                    refused(400, body);
-                } catch (...) {
-                    logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed",
-                                 request_id, pair.first, pair.second, name);
-                    Json::Value body;
-                    body["error"] = "Internal server error";
-                    refused(500, body);
-                }
-            }));
-        }
-        for (auto &future : futures) {
-            future.wait();
-        }
-        for (const Slot &slot : slots) {
-            if (slot.aborted)
-                throw graph::pattern::Aborted();
-        }
-        // the deadline of the writing: the latest of the answered pairs'
-        const Slot *latest = nullptr;
-        for (const Slot &slot : slots) {
-            if (!slot.answered)
-                continue;
-            if (!latest || slot.start + std::chrono::duration<double, std::milli>(slot.budget_ms)
-                    > latest->start + std::chrono::duration<double, std::milli>(latest->budget_ms)) {
-                latest = &slot;
+        // A pair's work, on the thread that took it. It holds what it reads (the request's
+        // body, in_ram, the request's number) and run_server's state, which lives as long as
+        // the process; |delivery| and |gone| are this handler's and read by an inline pair only
+        PairJob job = [&, json, in_ram, request_id, delivery](PairControl &control) {
+            PairResult result;
+            const SelectedPair &selected = control.pair();
+            const GraphPair &pair = selected.pair;
+            // the pair's entry when it is refused: what it alone would have been answered
+            auto refused = [&](int http_status, const Json::Value &body) {
+                result.entry = envelope_entry_refused(selected, fp_of_pair(pair), http_status,
+                                                      body);
+            };
+            try {
+                const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
+                                               control.stop_predicate(), /* for_pattern */ true,
+                                               &control, nullptr);
+                const IndexIdentity identity = identity_of_pair(pair, lease->index());
+                // an inline pair is written under this handler's delivery (its own deadline,
+                // as a single-graph request); a pooled one under its own, the envelope's
+                // writing being the request's
+                PatternDelivery own;
+                PatternDelivery *pair_delivery = control.inline_run() ? delivery : &own;
+                if (!control.inline_run())
+                    own.set_abort(control.stop_predicate());
+                if (const auto cap = control.deadline_cap())
+                    pair_delivery->set_deadline_cap(*cap);
+                Json::Value answer = process_pattern_request(json, lease->index(), *config,
+                                                             &identity, pair_delivery);
+                if (in_ram)
+                    answer["timing"]["load_ms"] = lease->load_ms();
+                result.memory_bytes = answer["work"]["memory_bytes"].asUInt64();
+                result.entry = envelope_entry_answered(selected, identity.fp, std::move(answer));
+                result.answered = true;
+            } catch (const PairNotStarted &) {
+                result.not_started = true;
+            } catch (const PatternRefusal &e) {
+                logger->warn("[Server] Request {}: pair ({}, {}) of '{}' refused ({} {}): {}",
+                             request_id, pair.first, pair.second, selected.name, e.status(),
+                             e.code(), e.what());
+                refused(e.status(), e.body());
+            } catch (const graph::pattern::Aborted &) {
+                result.aborted = true;
+            } catch (const LoadAbandoned &) {
+                result.aborted = true;
+            } catch (const std::exception &e) {
+                // a failure of this pair, as the route answers one for a single graph
+                // (answer_request): 400 with its text, no code
+                logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed: {}",
+                             request_id, pair.first, pair.second, selected.name, e.what());
+                Json::Value body;
+                body["error"] = e.what();
+                refused(400, body);
+            } catch (...) {
+                logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed",
+                             request_id, pair.first, pair.second, selected.name);
+                Json::Value body;
+                body["error"] = "Internal server error";
+                refused(500, body);
             }
+            return result;
+        };
+        FanoutSettings settings;
+        settings.route = "/pattern";
+        settings.pairs = pairs;
+        for (const SelectedPair &pair : pairs) {
+            settings.index_fps.push_back(fp_of_pair(pair.pair));
         }
-        if (latest) {
-            delivery->set_deadline(graph::pattern::Deadline(
-                    latest->start, latest->budget_ms,
-                    static_cast<double>(config->pattern_finalize_ms)));
+        settings.deadlines = deadlines;
+        settings.gone = gone;
+        FanoutOutcome outcome = run_fanout(settings, entry, std::move(job), on_pool);
+        if (outcome.client_gone)
+            throw graph::pattern::Aborted();
+        const bool answered_inline = pairs.size() == 1
+                && outcome.entries[0]["outcome"].asString() == "answered";
+        if (!answered_inline) {
+            // the writing's deadline: the request's effective one (an inline pair that answered
+            // is written by its own, as a single-graph request); a refused inline pair binds
+            // nothing beyond the transport
+            delivery->set_deadline(pairs.size() > 1
+                ? graph::pattern::Deadline(deadlines.arrival,
+                                           std::chrono::duration<double, std::milli>(
+                                                   deadlines.effective - deadlines.arrival).count(),
+                                           static_cast<double>(config->pattern_finalize_ms))
+                : graph::pattern::Deadline(deadlines.arrival,
+                                           static_cast<double>(kServerMaxDeadlineMs),
+                                           static_cast<double>(config->pattern_finalize_ms)));
         }
-        std::vector<Json::Value> entries;
-        entries.reserve(slots.size());
-        common::ThreadUsage pairs = common::ThreadUsage::zero();
-        // the answered pairs' accounts together (each pair's own work.memory_bytes): the pairs
-        // run at once on the pool, so at most what they held together
-        uint64_t memory_bytes = 0;
-        for (Slot &slot : slots) {
-            pairs.add(slot.usage);
-            if (slot.answered)
-                memory_bytes += slot.entry["work"]["memory_bytes"].asUInt64();
-            entries.push_back(std::move(slot.entry));
-        }
-        Json::Value out = pattern_envelope(names, std::move(entries), timer.elapsed() * 1000);
-        out["work"]["memory_bytes"] = Json::Value(Json::UInt64(memory_bytes));
-        put_thread_usage(&out["timing"], own_usage.elapsed().add(pairs));
-        logger->info("[Server] Request {}: /pattern envelope: {} pair(s) answered, {} refused",
-                     request_id, out["answered"].asUInt(), out["refused"].asUInt());
+        EnvelopeContext context;
+        context.request_id = handles.request_id;
+        context.server_instance = attempts.server_instance();
+        context.deadline = deadlines.json();
+        Json::Value out = post_envelope("/pattern", names, std::move(outcome.entries), context,
+                                        timer.elapsed() * 1000);
+        put_thread_usage(&out["timing"], pairs.size() > 1
+                                             ? own_usage.elapsed().add(outcome.pairs_usage)
+                                             : own_usage.elapsed());
+        logger->info("[Server] Request {}: /pattern envelope: {} pair(s) answered, {} refused "
+                     "({} not reached, {} unfinished)", request_id, out["answered"].asUInt(),
+                     out["refused"].asUInt(), out["not_reached"].size(),
+                     out["unfinished"].size());
         delivery->check();
         return out;
     };
@@ -1281,17 +1439,68 @@ int run_server(Config *config) {
         // the time to compress is inside the reserve: the traversal routes' faster level
         control.compression_level = config->traverse_compression_level;
         const size_t request_id = num_requests++;
+        // the request's registry entry once it was admitted (every request on a multi-graph
+        // server, one with request_id on a single-graph one): its response is recorded when
+        // written, or that nothing was (SPEC-multigraph-envelope.md section 5)
+        std::shared_ptr<RequestEntry> tracked;
+        control.on_written = [&tracked](int status, std::optional<size_t> bytes) {
+            if (tracked)
+                tracked->response(status, bytes);
+        };
         process_request(response, request, request_id, [&](const std::string &content) {
             return translated([&]() {
-                if (config->fnames.size())
-                    return multi_graph_pattern(content, request_id, gone, &delivery);
+                if (config->fnames.size()) {
+                    return multi_graph_pattern(content, request_id, request, gone, &delivery,
+                                               &tracked);
+                }
                 if (anno_graph.wait_for(0s) != std::future_status::ready)
                     throw CurrentlyInitializingError();
                 const AnnotatedDBG &index = *anno_graph.get();
                 const IndexIdentity identity = identity_of(index);
                 const Json::Value json = parse_pattern_body(content);
-                Json::Value answer = process_pattern_request(json, index, *config, &identity,
-                                                             &delivery);
+                // the request's handles (sections 4 and 5): its not_after_ms admits it, its
+                // finish_by_ms caps its deadline, its request_id registers it — once its
+                // fields are valid, so that a request refused 400 holds no id
+                RequestHandles handles;
+                try {
+                    handles = read_request_handles(json);
+                } catch (const std::invalid_argument &e) {
+                    throw PatternRefusal(400, "invalid_request", e.what());
+                }
+                std::shared_ptr<RequestEntry> entry;
+                if (handles.request_id) {
+                    validate_pattern_request(json, pattern_limits(*config));
+                    entry = std::make_shared<RequestEntry>(
+                            handles.request_id, "/pattern", attempts.server_instance(),
+                            request->header_read_time, pair_refs({}));
+                }
+                admit(entry, handles, request_id);
+                tracked = entry;
+                if (handles.finish_by_ms) {
+                    const RequestDeadlines d = deadlines_of(
+                            request, 0, handles, static_cast<double>(config->pattern_finalize_ms));
+                    delivery.set_deadline_cap(*d.finish);
+                }
+                if (entry)
+                    entry->pair_running(0);
+                Json::Value answer;
+                try {
+                    answer = process_pattern_request(json, index, *config, &identity, &delivery);
+                } catch (...) {
+                    if (entry) {
+                        entry->pair_outcome(0, "refused");
+                        entry->pair_ended(0);
+                    }
+                    throw;
+                }
+                if (entry) {
+                    entry->pair_outcome(0, "answered");
+                    entry->pair_ended(0, answer["work"]["memory_bytes"].asUInt64(),
+                                      answer["timing"].get("cpu_ms", Json::Value()).isNumeric()
+                                          ? std::optional<double>(
+                                                  answer["timing"]["cpu_ms"].asDouble())
+                                          : std::nullopt);
+                }
                 // in_ram: a single-graph server's index is the one it holds, nothing is loaded
                 if (json.isObject() && json.isMember("in_ram"))
                     answer["timing"]["load_ms"] = 0.0;
@@ -1299,29 +1508,6 @@ int run_server(Config *config) {
             });
         }, /* compact */ true, &control);
     };
-
-    // The ledger-managed /traverse attempts of this process (requests with attempt_id): the
-    // backend half of the attempt ledger of DESIGN-traverse-graphlet.md §14
-    // (traverse_attempts.hpp)
-    AttemptSettings attempt_settings;
-    attempt_settings.allowance_ms = config->traverse_attempt_allowance_ms;
-    attempt_settings.hard_cap_ms = kContentTimeoutS * 1000.0 - 1000;
-    attempt_settings.retention_s = config->traverse_attempt_retention_s;
-    attempt_settings.retention_count = config->traverse_attempt_retention;
-    attempt_settings.tombstone_max_s = config->traverse_attempt_tombstone_max_s;
-    attempt_settings.clock_skew_ms = config->traverse_clock_skew_ms;
-    attempt_settings.content_timeout_s = kContentTimeoutS;
-    attempt_settings.observed_window_s = config->traverse_observed_window_s;
-    attempt_settings.delivery_compress_mbps = config->traverse_delivery_compress_mbps;
-    attempt_settings.delivery_build_mbps = config->traverse_delivery_build_mbps;
-    // until measured longer, the walk is taken to end at most a chunk of a read and 950 ms (the
-    // heads between two readings of the clock, the stopped seed's finalisation) after its
-    // walk-until (calibrated: 352-1,001 ms measured on SRA, 1,699 once under load)
-    attempt_settings.delivery_stop_ms = static_cast<double>(config->traverse_chunk_target_ms) + 950;
-    AttemptRegistry attempts(attempt_settings);
-    logger->info("[Server] Traverse attempts: server_instance {}, allowance {} ms, {}",
-                 attempts.server_instance(), attempt_settings.allowance_ms,
-                 attempts.retention_text());
 
     // The traversal routes' transport: compact JSON, compressed (when the client accepts it)
     // at a faster zlib level than the other routes' 9 — the time to build a response is what
@@ -1345,6 +1531,157 @@ int run_server(Config *config) {
                 && config->traverse_max_time_ms < static_cast<double>(kServerMaxDeadlineMs)
             ? config->traverse_max_time_ms : static_cast<double>(kServerMaxDeadlineMs),
         kResolveFinalizeMs };
+
+    /**
+     * POST /resolve on a multi-graph server (SPEC-multigraph-envelope.md section 1, E2): the
+     * pairs the request selects (select_pairs), each answered as one single-graph /resolve
+     * would be (its own caps and deadline, its identity, its in_ram load) by the fan-out, in
+     * the envelope; a named graph answers one entry, on this thread. The request's own fields
+     * (the body, the selection, in_ram, the query's length and budget) are checked before any
+     * pair and refuse the whole request, as on a single-graph server
+     */
+    auto multi_graph_resolve = [&](Json::Value json, const RequestHandles &handles,
+                                   size_t request_id,
+                                   const shared_ptr<HttpServer::Request> &request,
+                                   ResolveWriting *writing,
+                                   std::shared_ptr<RequestEntry> *tracked) {
+        Timer timer;
+        const common::ThreadUsageMeter own_usage;
+        const std::vector<SelectedPair> pairs = select_pairs(
+                SelectionRoute::RESOLVE, json, indexes, config->max_graphs_without_selection);
+        const std::optional<bool> in_ram = in_ram_field(json);
+        const std::vector<std::string> names = names_of(pairs);
+        // what no pair decides refuses the whole request: its fields, the query's length (the
+        // server's limit and bounds.max_query_bp), a budget not above the reserve
+        const ResolveRequest req = parse_resolve_request(json);
+        if (config->resolve_max_query_bp && req.sequence.size() > config->resolve_max_query_bp)
+            throw InvalidRequest("request.sequence: longer than the server limit of "
+                                 + std::to_string(config->resolve_max_query_bp) + " bp");
+        if (req.sequence.size() > req.max_query_bp)
+            throw InvalidRequest("request.sequence: longer than bounds.max_query_bp");
+        if (req.time_budget_ms && !(*req.time_budget_ms > resolve_time.finalize_ms)) {
+            throw InvalidRequest("request.bounds.time_budget_ms: expected more than the "
+                                 "finalisation reserve of " + ms_text(resolve_time.finalize_ms)
+                                 + " ms");
+        }
+        // the request budget: bounds.time_budget_ms (lowered to the server's cap), else the
+        // server's maximum
+        const double budget_ms = req.time_budget_ms
+                ? std::min(*req.time_budget_ms, resolve_time.max_time_ms)
+                : resolve_time.max_time_ms;
+        const RequestDeadlines deadlines = deadlines_of(request, budget_ms, handles,
+                                                        resolve_time.finalize_ms);
+        auto entry = std::make_shared<RequestEntry>(handles.request_id, "/resolve",
+                                                    attempts.server_instance(),
+                                                    deadlines.arrival_wall, pair_refs(pairs));
+        admit(entry, handles, request_id);
+        *tracked = entry;
+        logger->info("[Server] Request {}: /resolve on {} pair(s) of {} graph name(s){}{}",
+                     request_id, pairs.size(), names.size(),
+                     in_ram.value_or(false) ? ", in_ram" : "",
+                     handles.request_id ? ", request_id " + *handles.request_id : std::string());
+        // A pair's own deadline is capped by finish_by_ms alone (a budget-less pair then gets
+        // the server's maximum, process_resolve_request); without it the pair's answer is the
+        // single-graph one, and a pair without a budget is told to stop at the cutoff (at the
+        // server's maximum)
+        PairJob job = [&, json, in_ram, request_id, writing](PairControl &control) {
+            PairResult result;
+            const SelectedPair &selected = control.pair();
+            const GraphPair &pair = selected.pair;
+            auto refused = [&](int http_status, const Json::Value &body) {
+                result.entry = envelope_entry_refused(selected, fp_of_pair(pair), http_status,
+                                                      body);
+            };
+            try {
+                const auto lease = lease_index(pair, in_ram.value_or(false), request_id,
+                                               control.stop_predicate(), /* for_pattern */ false,
+                                               &control, nullptr);
+                const IndexIdentity identity = identity_of_pair(pair, lease->index());
+                // an inline pair is written under this handler's delivery (its own deadline);
+                // a pooled one's check is its own, the envelope's writing the request's
+                ResolveDelivery own;
+                ResolveDelivery *pair_delivery = control.inline_run() ? &writing->delivery : &own;
+                if (const auto cap = control.deadline_cap())
+                    pair_delivery->set_deadline_cap(*cap);
+                Json::Value out = process_resolve_request(
+                        json, lease->index(), config->index_release, config->resolve_max_query_bp,
+                        &identity, control.stop_predicate(), resolve_time, pair_delivery);
+                // in_ram: the time before the work began, waiting for and loading its index
+                if (in_ram)
+                    out["timing"]["load_ms"] = lease->load_ms();
+                result.memory_bytes = out["work"]["memory_bytes"].asUInt64();
+                result.entry = envelope_entry_answered(selected, identity.fp, std::move(out));
+                result.answered = true;
+            } catch (const PairNotStarted &) {
+                result.not_started = true;
+            } catch (const LoadAbandoned &) {
+                result.aborted = true;
+            } catch (const graph::traversal::AttemptAborted &) {
+                result.aborted = true;
+            } catch (const ResolveDeadline &e) {
+                refused(503, resolve_deadline_body(e));
+            } catch (const HttpError &e) {
+                refused(e.status(), e.body());
+            } catch (const std::exception &e) {
+                // what the pair alone would have been answered (answer_request): 400 with its
+                // text, no code
+                logger->warn("[Server] Request {}: pair ({}, {}) of '{}' failed: {}",
+                             request_id, pair.first, pair.second, selected.name, e.what());
+                Json::Value body;
+                body["error"] = e.what();
+                refused(400, body);
+            } catch (...) {
+                Json::Value body;
+                body["error"] = "Internal server error";
+                refused(500, body);
+            }
+            return result;
+        };
+        FanoutSettings settings;
+        settings.route = "/resolve";
+        settings.pairs = pairs;
+        for (const SelectedPair &pair : pairs) {
+            settings.index_fps.push_back(fp_of_pair(pair.pair));
+        }
+        settings.deadlines = deadlines;
+        settings.gone = gone_of(request);
+        FanoutOutcome outcome = run_fanout(settings, entry, std::move(job), on_pool);
+        if (outcome.client_gone) {
+            throw ClientGone("the client closed its connection (or the server stops) before "
+                             "the answer was built");
+        }
+        const bool answered_inline = pairs.size() == 1
+                && outcome.entries[0]["outcome"].asString() == "answered";
+        if (pairs.size() > 1) {
+            // the writing's deadline: the request's effective one
+            const auto effective = deadlines.effective;
+            const std::string late = "resolve: the envelope could not be written by the "
+                    "request's effective deadline (" + iso_utc(deadlines.effective_wall)
+                    + "): nothing partial is sent";
+            writing->delivery.set_check([effective, late]() {
+                if (std::chrono::steady_clock::now() > effective)
+                    throw ResolveDeadline(late);
+            });
+        } else if (!answered_inline) {
+            // a refused inline pair binds nothing beyond the transport
+            writing->delivery.set_check(nullptr);
+        }
+        EnvelopeContext context;
+        context.request_id = handles.request_id;
+        context.server_instance = attempts.server_instance();
+        context.deadline = deadlines.json();
+        Json::Value out = post_envelope("/resolve", names, std::move(outcome.entries), context,
+                                        timer.elapsed() * 1000);
+        put_thread_usage(&out["timing"], pairs.size() > 1
+                                             ? own_usage.elapsed().add(outcome.pairs_usage)
+                                             : own_usage.elapsed());
+        logger->info("[Server] Request {}: /resolve envelope: {} pair(s) answered, {} refused "
+                     "({} not reached, {} unfinished)", request_id, out["answered"].asUInt(),
+                     out["refused"].asUInt(), out["not_reached"].size(),
+                     out["unfinished"].size());
+        return out;
+    };
+
     server.resource["^/resolve$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> request) {
         auto as_http = [](const ResolveDeadline &e) {
@@ -1361,46 +1698,82 @@ int run_server(Config *config) {
                                std::chrono::milliseconds(attempt_settings.client_check_ms),
                                traversal_io.compression_level);
         const size_t request_id = num_requests++;
+        // the request's registry entry once it was admitted (every request on a multi-graph
+        // server, one with request_id on a single-graph one): its response is recorded when
+        // written, or that nothing was (SPEC-multigraph-envelope.md section 5)
+        std::shared_ptr<RequestEntry> tracked;
+        writing.control.on_written = [&tracked](int status, std::optional<size_t> bytes) {
+            if (tracked)
+                tracked->response(status, bytes);
+        };
         process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
             Json::Value json = parse_traversal_body(content);
             const bool multi = !config->fnames.empty();
-            const GraphSelection selection = traverse_graph_selection(json, multi);
-            const std::optional<bool> in_ram = in_ram_field(json);
-            std::unique_ptr<IndexLease> lease;
-            IndexIdentity identity = single_identity;
+            // the request's handles (sections 4 and 5), checked before anything is registered
+            const RequestHandles handles = read_request_handles(json);
             if (multi) {
-                const GraphPair &pair = select_traverse_pair(
-                        selection.name, selection.graph_path ? &*selection.graph_path : nullptr,
-                        indexes);
-                // a malformed request is refused before its index is loaded for it
-                if (in_ram.value_or(false) && loaded_with_mmap)
-                    parse_resolve_request(json);
                 try {
-                    lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                        gone_of(request), /* for_pattern */ false);
-                } catch (const LoadAbandoned &e) {
-                    throw ClientGone(e.what());
+                    return multi_graph_resolve(std::move(json), handles, request_id, request,
+                                               &writing, &tracked);
+                } catch (const ResolveDeadline &e) {
+                    throw as_http(e);
                 }
-                identity = identity_of_pair(pair, lease->index());
             }
-            const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
+            traverse_graph_selection(json, multi);
+            const std::optional<bool> in_ram = in_ram_field(json);
+            // its not_after_ms admits it, its finish_by_ms caps its deadline (a request without
+            // bounds.time_budget_ms then gets the server's maximum), its request_id registers
+            // it — once its fields are valid, so that a request refused 400 holds no id
+            std::shared_ptr<RequestEntry> entry;
+            if (handles.request_id) {
+                parse_resolve_request(json);
+                entry = std::make_shared<RequestEntry>(handles.request_id, "/resolve",
+                                                       attempts.server_instance(),
+                                                       request->header_read_time,
+                                                       pair_refs({}));
+            }
+            admit(entry, handles, request_id);
+            tracked = entry;
+            if (handles.finish_by_ms) {
+                writing.delivery.set_deadline_cap(
+                        *deadlines_of(request, 0, handles, resolve_time.finalize_ms).finish);
+            }
+            const IndexIdentity identity = single_identity;
             // a client that is gone is not answered: abandoned between the request's phases
+            if (entry)
+                entry->pair_running(0);
             try {
-                Json::Value out = process_resolve_request(json, index, config->index_release,
+                Json::Value out = process_resolve_request(json, *anno_graph.get(),
+                                                          config->index_release,
                                                           config->resolve_max_query_bp,
                                                           &identity, gone_of(request),
                                                           resolve_time, &writing.delivery);
-                // in_ram: the time before the work began, waiting for and loading its index
+                // in_ram: a single-graph server's index is the one it holds, nothing is loaded
                 if (in_ram)
-                    out["timing"]["load_ms"] = lease ? lease->load_ms() : 0.0;
+                    out["timing"]["load_ms"] = 0.0;
+                if (entry) {
+                    entry->pair_outcome(0, "answered");
+                    entry->pair_ended(0, out["work"]["memory_bytes"].asUInt64(),
+                                      out["timing"]["cpu_ms"].isNumeric()
+                                          ? std::optional<double>(out["timing"]["cpu_ms"].asDouble())
+                                          : std::nullopt);
+                }
                 return out;
-            } catch (const graph::traversal::AttemptAborted &e) {
-                throw ClientGone(e.what());
-            } catch (const ResolveDeadline &e) {
-                throw as_http(e);
+            } catch (...) {
+                if (entry) {
+                    entry->pair_outcome(0, "refused");
+                    entry->pair_ended(0);
+                }
+                try {
+                    throw;
+                } catch (const graph::traversal::AttemptAborted &e) {
+                    throw ClientGone(e.what());
+                } catch (const ResolveDeadline &e) {
+                    throw as_http(e);
+                }
             }
         }, /* compact */ true, &writing.control);
     };
@@ -1432,10 +1805,16 @@ int run_server(Config *config) {
         attempt->set_measured(attempts.measured());
         bool registered = false;
         // what an error states besides its message once the attempt is registered: its usage
+        // (a request without attempt_id states none: a 503 of its finish_by_ms is its message
+        // and code alone)
         auto with_usage = [&](int status, const std::string &what, const std::string &reason) {
             Json::Value body;
             body["error"] = what;
-            body["usage"] = attempt->usage_json(reason);
+            if (attempt->managed()) {
+                body["usage"] = attempt->usage_json(reason);
+            } else if (status == 503) {
+                body["code"] = "deadline";
+            }
             return HttpError(status, std::move(body));
         };
         ResponseControl control;
@@ -1507,6 +1886,10 @@ int run_server(Config *config) {
             // a malformed id or not_after_ms is refused before anything is registered (400, no
             // usage)
             attempt->set_ids(attempt_ids(json));
+            // finish_by_ms, the completion deadline (SPEC-multigraph-envelope.md section 4):
+            // the attempt's bound and walk-until become the minimum of their own and it less
+            // the clock skew allowance
+            attempt->set_finish_by(read_finish_by_ms(json, "request"));
             if (attempt->managed()) {
                 // an id does not run twice at once, nor again while it is retained or held, on
                 // this server process: a second request with a running, retained, held or
@@ -1566,10 +1949,24 @@ int run_server(Config *config) {
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
                         parse_traverse_request(json);
+                    // GET /requests/{attempt_id} names the pair the attempt ran on
+                    if (attempt->managed()) {
+                        requests.note_traverse_pair(attempt->ids().attempt_id,
+                                                    pair_ref_json({ selection.name, pair }));
+                    }
                     // the wait for the memory is abandoned when the client is gone or the server
-                    // stops; a cancel takes effect when the work begins (its seeds not started)
+                    // stops, and not entered or given up once finish_by_ms (less the clock skew
+                    // allowance) has passed; a cancel takes effect when the work begins (its
+                    // seeds not started)
+                    std::function<bool()> expired;
+                    if (const auto finish_by = attempt->finish_by_ms()) {
+                        const uint64_t limit = *finish_by > attempt_settings.clock_skew_ms
+                                ? *finish_by - attempt_settings.clock_skew_ms : 0;
+                        expired = [&attempts, limit]() { return attempts.now_ms() > limit; };
+                    }
                     lease = lease_index(pair, in_ram.value_or(false), request_id,
-                                        gone_of(request), /* for_pattern */ false);
+                                        gone_of(request), /* for_pattern */ false, nullptr,
+                                        expired);
                     identity = identity_of_pair(pair, lease->index());
                 }
                 const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
@@ -1592,6 +1989,8 @@ int run_server(Config *config) {
                                                 &identity, attempt.get(), &texts);
             } catch (const LoadAbandoned &e) {
                 throw ClientGone(e.what());
+            } catch (const LoadExpired &e) {
+                throw with_usage(503, e.what(), "deadline");
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             } catch (const AttemptAtBound &e) {
@@ -1643,6 +2042,32 @@ int run_server(Config *config) {
             if (status != 200)
                 throw HttpError(status, std::move(body));
             return body;
+        }, /* compact */ true, &traversal_io);
+    };
+
+    // The state of a request by its handle (SPEC-multigraph-envelope.md section 5): a /resolve
+    // or /pattern request's request_id (its pairs' states and usage, its response), kept for
+    // the retention period after it ended, then 404; for /traverse the attempt_id is the handle
+    // and the attempt registry answers (attempt: the object of GET /traverse/attempt/{id}), one
+    // polling path for every route
+    server.resource["^/requests/([^/]+)$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                                       shared_ptr<HttpServer::Request> request) {
+        const std::string id = request->path_match[1].str();
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!valid_attempt_id(id)) {
+                throw InvalidRequest("request_id: expected 1 to 128 characters from "
+                                     "[A-Za-z0-9._:-]");
+            }
+            auto [status, body] = requests.state(id);
+            if (status == 200)
+                return body;
+            auto [attempt_status, attempt] = attempts.state(id);
+            if (attempt_status == 200 && attempt.get("state", "").asString() != "unknown") {
+                return traverse_request_json(attempt,
+                                             requests.traverse_pair(id).value_or(Json::Value()),
+                                             attempts.settings().retention_s);
+            }
+            throw HttpError(404, std::move(body));
         }, /* compact */ true, &traversal_io);
     };
 

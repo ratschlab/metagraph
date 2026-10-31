@@ -257,9 +257,22 @@ class PatternDelivery {
     void set_abort(std::function<bool()> aborted) { abort_ = std::move(aborted); }
     const std::function<bool()>& abort() const { return abort_; }
 
+    /**
+     * The latest instant the request's deadline may reach (SPEC-multigraph-envelope.md
+     * section 4: finish_by_ms less the clock skew allowance; a multi-graph fan-out's work
+     * cutoff caps nothing): process_pattern_request lowers time_budget_ms to the time left at
+     * its start when that is less, and states it in limits.clamped. Unset: the request's own
+     * budget
+     */
+    void set_deadline_cap(graph::pattern::Deadline::Clock::time_point cap) { cap_ = cap; }
+    const std::optional<graph::pattern::Deadline::Clock::time_point>& deadline_cap() const {
+        return cap_;
+    }
+
   private:
     std::optional<graph::pattern::Deadline> deadline_;
     std::function<bool()> abort_;
+    std::optional<graph::pattern::Deadline::Clock::time_point> cap_;
 };
 
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after
@@ -274,9 +287,11 @@ Json::Value parse_pattern_body(const std::string &content);
  * throws them (400 invalid_request, later_increment, genetic_code_unknown,
  * predicate_too_large); nothing else is done. A multi-graph server asks it once before its
  * pairs (SPEC §24.1), so that such a refusal is the request's and not every pair's; each pair
- * then starts from its graph's support (step 4) and refuses on its own.
+ * then starts from its graph's support (step 4) and refuses on its own. Returns the request's
+ * time_budget_ms as parsed (its default, or lowered to the cap): the request budget of the
+ * multi-graph envelope's deadline (SPEC-multigraph-envelope.md section 4).
  */
-void validate_pattern_request(const Json::Value &json, const PatternLimits &limits);
+double validate_pattern_request(const Json::Value &json, const PatternLimits &limits);
 
 /**
  * Answers one /pattern request (the JSON contract of pattern_contract_version 1) on the

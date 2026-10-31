@@ -2361,10 +2361,38 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertIn('not_after_ms', ret.json()['error'])
             self.assertNotIn('usage', ret.json())
         self.assertEqual(404, requests.get(url + '/traverse/attempt/na-bad').status_code)
-        # /resolve does not take it
-        ret = self._post('resolve', {'sequence': self.element, 'labels': ['acc1'],
-                                     'not_after_ms': future})
-        self.assertEqual(400, ret.status_code, ret.text)
+        # /resolve reads it too (SPEC-multigraph-envelope.md section 4, E20): admission only,
+        # the single-graph answer as before; passed, 409 expired and nothing runs
+        resolve = {'sequence': self.element, 'labels': ['acc1']}
+        ret = self._post('resolve', dict(resolve, not_after_ms=future))
+        self.assertEqual(200, ret.status_code, ret.text)
+        plain = self._post('resolve', resolve)
+        self.assertEqual({k: v for k, v in plain.json().items() if k != 'timing'},
+                         {k: v for k, v in ret.json().items() if k != 'timing'})
+        ret = self._post('resolve', dict(resolve, not_after_ms=now - 1000))
+        self.assertEqual(409, ret.status_code, ret.text)
+        self.assertEqual(('expired', now - 1000), (ret.json()['state'],
+                                                   ret.json()['not_after_ms']))
+        # and request_id (section 5): the answer as before, the request registered (one pair
+        # with null tags), a repeat refused with its entry
+        ret = self._post('resolve', dict(resolve, request_id='sg-resolve-1'))
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual({k: v for k, v in plain.json().items() if k != 'timing'},
+                         {k: v for k, v in ret.json().items() if k != 'timing'})
+        for _ in range(100):
+            entry = requests.get(url + '/requests/sg-resolve-1').json()
+            if entry['state'] == 'ended':
+                break
+            time.sleep(0.05)
+        self.assertEqual(('/resolve', 'ended', 'answered', 200),
+                         (entry['route'], entry['state'], entry['reason'],
+                          entry['response']['status']))
+        self.assertEqual([(None, None, None, 'ended', 'answered')],
+                         [(p['graph'], p['graph_path'], p['annotation_path'], p['state'],
+                           p['outcome']) for p in entry['pairs']])
+        ret = self._post('resolve', dict(resolve, request_id='sg-resolve-1'))
+        self.assertEqual(409, ret.status_code, ret.text)
+        self.assertEqual('sg-resolve-1', ret.json()['request_id'])
         # the library passes it through and tells the expired 409 apart from a duplicate
         client = graphlet_lib.TraverseClient(self.host, self.port)
         with self.assertRaises(graphlet_lib.AttemptExpired) as cm:
@@ -3178,8 +3206,12 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 req['graph_path'] = path
             res = self._post('resolve', req)
             self.assertEqual(200, res.status_code, res.text)
-            self.assertEqual(ident, (res.json()['capabilities']['index_ns'],
-                                     res.json()['capabilities']['index_fp']))
+            # the envelope's one entry (SPEC-multigraph-envelope.md section 1): the entry's
+            # index_fp is the answer's
+            (entry,) = res.json()['answers']
+            self.assertEqual(ident, (entry['capabilities']['index_ns'],
+                                     entry['capabilities']['index_fp']))
+            self.assertEqual(ident[1], entry['index_fp'])
         self.assertEqual(3, len(metas))
         # C lists the base graph with two annotations: graph_path cannot choose one
         ret = self._post('traverse', self._request('C', self.pairs['col'][0]))
@@ -3511,7 +3543,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
             for side in 'AB':
                 out = requests.post(server.url + '/resolve', data=json.dumps(
                     {'graph': side, 'sequence': seq,
-                     'discover': {'kind': 'header', 'max_labels': 10}})).json()
+                     'discover': {'kind': 'header', 'max_labels': 10}})).json()['answers'][0]
                 fps.append(out['capabilities']['index_fp'])
                 names.append([l['label'] for l in out['labels']])
             self.assertNotEqual(fps[0], fps[1])
@@ -3650,7 +3682,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         try:
             self.assertTrue(server.ready, server.text()[-2000:])
             out = requests.post(server.url + '/resolve', data=json.dumps(
-                {'graph': 'A', 'sequence': seq, 'labels': ['A']})).json()
+                {'graph': 'A', 'sequence': seq, 'labels': ['A']})).json()['answers'][0]
             self.assertEqual([[0, 36]], out['graph_runs'])
             self.assertEqual(before['index_fp'], out['capabilities']['index_fp'])
             self.assertIn(f'Derived data of {d}/graph.dbg loaded beside it, not part of '

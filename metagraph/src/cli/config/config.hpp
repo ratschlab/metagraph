@@ -162,6 +162,11 @@ class Config {
     // the request) names, plus the clock skew allowance (s; never less than retention_s, which
     // every tombstone is held at least): what bounds how long one cancel can keep an id refused
     uint64_t traverse_attempt_tombstone_max_s = 86'400;
+    // The request registry of /resolve and /pattern (requests with request_id,
+    // SPEC-multigraph-envelope.md section 5): how long, and how many, ended requests stay
+    // queryable (GET /requests/{request_id}) and their ids refused
+    uint64_t request_retention_s = 3600;
+    size_t request_retention = 10'000;
     // the accepted ranges of the retention settings (refused at start-up beyond them): a year,
     // ten million attempts
     static constexpr uint64_t kMaxAttemptRetentionS = 31'536'000;

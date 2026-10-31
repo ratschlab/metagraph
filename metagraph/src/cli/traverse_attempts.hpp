@@ -81,6 +81,8 @@ AttemptIds attempt_ids(const Json::Value &request);
 // not_after_ms as /traverse and POST /traverse/cancel read it: absent (nullopt), or an integer
 // in [0, kMaxNotAfterMs]; throws InvalidRequest naming |where| otherwise
 std::optional<uint64_t> read_not_after_ms(const Json::Value &request, const std::string &where);
+// finish_by_ms (the completion deadline of /traverse, /resolve and /pattern), by the same rule
+std::optional<uint64_t> read_finish_by_ms(const Json::Value &request, const std::string &where);
 
 // The request fields of POST /traverse/cancel, in the order the capabilities list them
 // (cancel_fields)
@@ -278,6 +280,12 @@ class Attempt {
     // ---- identity (set before the attempt is registered, then fixed)
     void set_ids(AttemptIds ids) { ids_ = std::move(ids); }
     const AttemptIds& ids() const { return ids_; }
+    // The completion deadline (SPEC-multigraph-envelope.md section 4; Unix epoch ms, the
+    // server's clock; read_finish_by_ms): the attempt's bound, and with it its walk-until, is
+    // from now on at most finish_by_ms less the clock skew allowance, enforced with or without
+    // attempt_id (usage.bound.capped_by "finish_by_ms" when it is the lower)
+    void set_finish_by(std::optional<uint64_t> finish_by_ms);
+    const std::optional<uint64_t>& finish_by_ms() const { return finish_by_ms_; }
     // the request carries an attempt_id: it is registered, its bound enforced (by the server)
     // and every response to it carries usage
     bool managed() const { return !ids_.attempt_id.empty(); }
@@ -301,7 +309,9 @@ class Attempt {
                    std::optional<double> load_ms = std::nullopt);
     double bound_ms() const { return bound_ms_; }
     double walk_until_ms() const { return walk_until_ms_; }
-    bool enforced() const { return enforced_ && managed(); }
+    // enforced for a ledger-managed attempt, and for any request with finish_by_ms (the
+    // completion deadline binds the request whether or not a ledger tracks it)
+    bool enforced() const { return enforced_ && (managed() || finish_cap_ms_.has_value()); }
     // the time left before the seeds stop being walked (ms; infinity when the bound is not
     // enforced): what sizes the chunks of the walk's annotation reads (the handler's thread)
     double ms_left() const;
@@ -444,6 +454,13 @@ class Attempt {
     double walk_until_ms_ = 0;
     bool bound_set_ = false;
     bool capped_ = false;
+    // finish_by_ms less the clock skew allowance, in ms since the request was received (none
+    // without finish_by_ms), and whether it is the bound now
+    std::optional<uint64_t> finish_by_ms_;
+    std::optional<double> finish_cap_ms_;
+    bool finish_capped_ = false;
+    // the bound at most the finish cap (under |mutex_|)
+    void apply_finish_cap_locked();
     std::optional<double> bound_load_ms_;
     uint64_t memory_budget_ = 0;
 

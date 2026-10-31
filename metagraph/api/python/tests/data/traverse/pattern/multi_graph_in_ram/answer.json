@@ -148,8 +148,8 @@
       "-"
      ],
      "timing": {
-      "cpu_ms": 0.048583,
-      "elapsed_ms": 0.046792
+      "cpu_ms": 0.092209,
+      "elapsed_ms": 0.088333
      },
      "work": {
       "mask_scans": 0,
@@ -160,8 +160,8 @@
     }
    ],
    "timing": {
-    "cpu_ms": 0.091833,
-    "elapsed_ms": 0.080667,
+    "cpu_ms": 0.140041,
+    "elapsed_ms": 0.111417,
     "load_ms": 0.0
    },
    "work": {
@@ -169,15 +169,27 @@
    }
   }
  ],
+ "deadline": {
+  "cutoff_at": null,
+  "effective_deadline_at": null,
+  "finish_by_ms": null,
+  "not_after_ms": null
+ },
+ "envelope_version": 1,
  "graphs": [
   "mini_refseq"
  ],
+ "not_reached": [],
  "pattern_contract_version": 1,
  "refused": 0,
+ "request_id": null,
+ "route": "/pattern",
+ "server_instance": "99be1176409642f1",
  "timing": {
-  "cpu_ms": 0.128249,
-  "elapsed_ms": 0.16120800000000002
+  "cpu_ms": 0.233625,
+  "elapsed_ms": 0.227291
  },
+ "unfinished": [],
  "work": {
   "memory_bytes": 0
  }

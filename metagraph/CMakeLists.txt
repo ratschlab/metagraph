@@ -267,6 +267,12 @@ set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
+# Address sanitizer build type (-DCMAKE_BUILD_TYPE=Address): use after free, overflows and
+# leaks, e.g. a worker of a multi-graph request that outlives its handler
+set(CMAKE_CXX_FLAGS_ADDRESS "-O1 -g -fsanitize=address -fno-omit-frame-pointer")
+set(CMAKE_EXE_LINKER_FLAGS_ADDRESS "-g -fsanitize=address")
+set(CMAKE_SHARED_LINKER_FLAGS_ADDRESS "-g -fsanitize=address")
+
 # Build sdsl-lite out-of-tree and install locally to avoid target clashes
 include(ExternalProject)
 set(SDSL_INSTALL ${PROJECT_BINARY_DIR}/external-libraries/sdsl)

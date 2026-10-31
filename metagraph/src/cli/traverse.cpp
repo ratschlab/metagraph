@@ -23,6 +23,7 @@
 #include "cli/json_helpers.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/server_checks.hpp"
+#include "cli/server_fanout.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
@@ -228,11 +229,14 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     s.boolean("in_ram", false);
     // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
-    // the same rule); declared here so that strict parsing accepts them
+    // the same rule); declared here so that strict parsing accepts them. finish_by_ms, the
+    // completion deadline (SPEC-multigraph-envelope.md section 4), is read with them
     const AttemptIds ids = attempt_ids(json);
     for (const char *field : kAttemptFields) {
         s.has(field);
     }
+    read_finish_by_ms(json, "request");
+    s.has("finish_by_ms");
     req.attempt_id = ids.attempt_id;
     req.budget_id = ids.budget_id;
     req.locus_id = ids.locus_id;
@@ -474,6 +478,14 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     s.str("graph_path", "");
     s.strings("graphs");
     s.boolean("in_ram", false);
+    // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
+    // not_after_ms, finish_by_ms): the server reads them before the request runs, by the same
+    // rule (read_request_handles); declared here so that strict parsing accepts them, and
+    // checked here so that the CLI refuses what the server refuses
+    read_request_handles(json);
+    for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
+        s.has(field);
+    }
     req.sequence = s.str("sequence", "");
     if (req.sequence.empty()) throw InvalidRequest("request.sequence is required");
     req.options.labels = s.strings("labels");
@@ -5470,14 +5482,24 @@ Json::Value process_resolve_request(
     std::optional<Deadline> deadline;
     Json::Value clamped(Json::arrayValue);
     std::string late;
-    if (req.time_budget_ms) {
-        double budget = *req.time_budget_ms;
+    // the cap of the request's deadline (finish_by_ms less the clock skew allowance), held as
+    // a flag and an instant initialised either way rather than an optional, whose copy GCC 13
+    // takes for maybe-uninitialized
+    const bool capped = delivery && delivery->deadline_cap().has_value();
+    const Deadline::Clock::time_point cap_at
+            = capped ? *delivery->deadline_cap() : Deadline::Clock::time_point();
+    if (req.time_budget_ms || capped) {
+        // without bounds.time_budget_ms, a request under a cap (finish_by_ms) gets the server's
+        // maximum as its own deadline (SPEC-multigraph-envelope.md section 4)
+        double budget = req.time_budget_ms ? *req.time_budget_ms
+                      : time.max_time_ms > 0 ? time.max_time_ms
+                      : std::numeric_limits<double>::infinity();
         // the reserve is inside the budget: a budget not above it leaves no time to work
-        if (!(budget > time.finalize_ms)) {
+        if (req.time_budget_ms && !(budget > time.finalize_ms)) {
             throw InvalidRequest("request.bounds.time_budget_ms: expected more than the "
                                  "finalisation reserve of " + ms_text(time.finalize_ms) + " ms");
         }
-        if (time.max_time_ms > 0 && budget > time.max_time_ms) {
+        if (req.time_budget_ms && time.max_time_ms > 0 && budget > time.max_time_ms) {
             // lowered to the server's cap and stated, as /traverse states its clamps
             note_clamped(&clamped, "bounds.time_budget_ms", req.time_budget_given,
                          number_json(time.max_time_ms));
@@ -5486,6 +5508,19 @@ Json::Value process_resolve_request(
         // (the parse admits the field only where the peek above saw it)
         if (!start)
             start = now();
+        if (capped) {
+            // the request's deadline is the minimum of its own and the cap (finish_by_ms less
+            // the clock skew allowance), stated as a clamp of the budget: the time left at its
+            // start
+            const double left = std::max(0.0, std::chrono::duration<double, std::milli>(
+                                                      cap_at - *start).count());
+            if (left < budget) {
+                note_clamped(&clamped, "bounds.time_budget_ms",
+                             req.time_budget_ms ? req.time_budget_given : Json::Value(),
+                             number_json(left));
+                budget = left;
+            }
+        }
         deadline.emplace(*start, budget, time.finalize_ms, now);
         late = "resolve: the answer could not be built and written within "
                "bounds.time_budget_ms (" + ms_text(budget) + " ms, the finalisation reserve of "

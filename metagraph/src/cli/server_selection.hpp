@@ -126,7 +126,10 @@ probe_parameters(const Query &query, const std::string &route) {
  *    /search itself still queries a pair listed twice under a name twice;
  *  - PATTERN: `graphs` as POST /pattern reads it (pattern_graph_names, its refusals and the
  *    names cap), each name's pairs;
- *  - RESOLVE and TRAVERSE: the one pair of today's /resolve and /traverse: `graph`, or
+ *  - RESOLVE (the envelope, any number of pairs): `graph` (or `graphs` naming one) with
+ *    `graph_path` its one pair, `graph` alone each pair of its name, else `graphs` and no
+ *    selection as PATTERN reads them;
+ *  - TRAVERSE: the one pair of today's /traverse: `graph`, or
  *    `graphs` ([name]), and `graph_path` where the name spans several graphs
  *    (traverse_graph_selection, select_traverse_pair, their refusals); no names cap, since
  *    the name is required;

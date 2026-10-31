@@ -159,11 +159,9 @@ TEST(ServerSelection, Pattern) {
     }));
 }
 
-// POST /resolve and POST /traverse: today both read exactly one pair, by the same rules and
-// with the same refusals; a name is required, so the names cap does not apply
-TEST(ServerSelection, ResolveAndTraverseOnePair) {
-    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::TRAVERSE }) {
-        SCOPED_TRACE(route == SelectionRoute::RESOLVE ? "resolve" : "traverse");
+// POST /traverse: exactly one pair; a name is required, so the names cap does not apply
+TEST(ServerSelection, TraverseOnePair) {
+    for (SelectionRoute route : { SelectionRoute::TRAVERSE }) {
         EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})"));
         EXPECT_EQ(Pairs({ kA }), select(route, R"({"graphs": ["a"]})"));
         EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})", 1));
@@ -200,6 +198,46 @@ TEST(ServerSelection, ResolveAndTraverseOnePair) {
             select(route, R"({"pairs": [{"graph": "a"}]})");
         }));
     }
+}
+
+// POST /resolve answers the envelope over any number of pairs (SPEC-multigraph-envelope.md
+// section 1): graph_path still picks one pair of a name, `graph` alone selects each pair of
+// its name, `graphs` and no selection read as /pattern reads them (the names cap applies)
+TEST(ServerSelection, ResolveSelectsAnyNumberOfPairs) {
+    const SelectionRoute route = SelectionRoute::RESOLVE;
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})"));
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graphs": ["a"]})"));
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a"})", 1));
+    EXPECT_EQ(Pairs({ kB1 }), select(route, R"({"graph": "b", "graph_path": "b1.dbg"})"));
+    EXPECT_EQ(Pairs({ kB2 }), select(route, R"({"graphs": ["b"], "graph_path": "b2.dbg"})"));
+    EXPECT_EQ(Pairs({ kA }), select(route, R"({"graph": "a", "graph_path": "x.dbg"})"));
+    // a name over several pairs: each of them (a pair listed twice once), in the list's order
+    EXPECT_EQ(Pairs({ kB1, kB2 }), select(route, R"({"graph": "b"})"));
+    EXPECT_EQ(Pairs({ kC0, kC1 }), select(route, R"({"graph": "c"})"));
+    EXPECT_EQ(Pairs({ kA, kB1, kB2 }), select(route, R"({"graphs": ["b", "a", "b"]})"));
+    // no selection: every name, up to the cap
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(route, "{}"));
+    EXPECT_EQ("request.graphs: required on this server, which hosts 3 graph names (more than "
+              "2; GET /capabilities lists them)",
+              refusal_of([&] { select(route, "{}", 2); }));
+    // with a name the cap plays no part
+    EXPECT_EQ(Pairs({ kB1, kB2 }), select(route, R"({"graph": "b"})", 1));
+    // graph_path still picks within one name
+    EXPECT_EQ("Bad request: graph_path 'c.dbg' names a graph with several annotations "
+              "under index 'c' (c0.anno, c1.anno): a traversal reads one annotation, which "
+              "graph_path cannot choose; list each annotation under a name of its own",
+              refusal_of([&] { select(route, R"({"graph": "c", "graph_path": "c.dbg"})"); }));
+    EXPECT_EQ("Bad request: graph_path 'x.dbg' is not part of index 'b'",
+              refusal_of([&] { select(route, R"({"graph": "b", "graph_path": "x.dbg"})"); }));
+    EXPECT_EQ("Bad request: give the graph as 'graph' or as 'graphs', not both",
+              refusal_of([&] { select(route, R"({"graph": "a", "graphs": ["a"]})"); }));
+    EXPECT_EQ("Bad request: unknown graph 'z'",
+              refusal_of([&] { select(route, R"({"graph": "z"})"); }));
+    EXPECT_EQ("request.graphs: unknown graph 'z' (GET /capabilities lists the graphs)",
+              refusal_of([&] { select(route, R"({"graphs": ["z"]})"); }));
+    EXPECT_EQ("pairs_unsupported", selection_code_of([&] {
+        select(route, R"({"pairs": [{"graph": "a"}]})");
+    }));
 }
 
 // The GET probes: ?graph= (and graph_path=) one pair, and the parameters' refusals as GET
