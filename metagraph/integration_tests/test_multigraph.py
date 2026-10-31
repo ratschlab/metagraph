@@ -8,9 +8,13 @@ together (a name spanning two graphs). What such a server serves, as /search doe
     server answers it, tagged with its pair, the answers concatenated in an envelope; a pair
     the request is refused on is a refused entry of the envelope (the pair's own body under
     `refusal`), the other pairs answered, while what no pair decides stays the request's 400;
-  - POST /traverse and /resolve take `graphs: [name]` beside `graph`, two spellings of one
-    request; a seed the graph does not hold is a per-seed result (outcome.walks not_in_graph,
-    its k-mers present), whichever spelling named the graph;
+  - POST /resolve answers the envelope too (SPEC-multigraph-envelope.md section 1): a named
+    graph one entry, `graphs` and a request without a selection every selected pair; both
+    envelopes state request_id, server_instance and the deadline block, and a request is cut at
+    its work cutoff (not_reached, unfinished), its request_id answered by GET /requests;
+  - POST /traverse takes `graphs: [name]` beside `graph`, two spellings of one request; a seed
+    the graph does not hold is a per-seed result (outcome.walks not_in_graph, its k-mers
+    present), whichever spelling named the graph;
   - `in_ram` on /pattern, /traverse and /resolve loads the pair into RAM for the request (a
     server on mmap, the pair within --mem-cap-gb), the budgets after the load, timing.load_ms;
   - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint;
@@ -53,6 +57,14 @@ CHUNKS = [
 SPLIT = ('enterics', ['ecoli', 'kleb'])
 # what an envelope entry carries beside the pair's own answer (SPEC §24.1)
 TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome')
+# the members of every POST envelope (SPEC-multigraph-envelope.md section 1); /pattern adds
+# pattern_contract_version
+ENVELOPE = {'envelope_version', 'route', 'graphs', 'answered', 'refused', 'not_reached',
+            'unfinished', 'request_id', 'server_instance', 'deadline', 'answers', 'timing',
+            'work'}
+# the deadline block of a request that gives neither not_after_ms nor finish_by_ms
+NO_DEADLINE = {'not_after_ms': None, 'finish_by_ms': None, 'effective_deadline_at': None,
+               'cutoff_at': None}
 
 
 def free_port():
@@ -448,8 +460,13 @@ class TestMultiGraphServer(TestingBase):
         out = self.post('pattern', dict(request, graphs=['pseudo', 'ecoli', 'ecoli']))
         self.assertEqual(['ecoli', 'pseudo'], out['graphs'])
         self.assertEqual(1, out['pattern_contract_version'])
-        self.assertEqual({'pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
-                          'timing', 'work'}, set(out))
+        self.assertEqual(ENVELOPE | {'pattern_contract_version'}, set(out))
+        # the members of SPEC-multigraph-envelope.md section 1 (E4): no request_id, no
+        # deadline given, every pair reached and finished
+        self.assertEqual((1, '/pattern', [], [], None, NO_DEADLINE),
+                         (out['envelope_version'], out['route'], out['not_reached'],
+                          out['unfinished'], out['request_id'], out['deadline']))
+        self.assertRegex(out['server_instance'], '^[0-9a-f]{16}$')
         self.assertEqual((2, 0), (out['answered'], out['refused']))
         self.assertEqual(['ecoli', 'pseudo'], [a['graph'] for a in out['answers']])
         for answer in out['answers']:
@@ -531,6 +548,17 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual({'error': 'Bad request: requests without names (no "graphs" field) '
                                        'are only supported for small indexes (<=1 names)'},
                              ret.json())
+            # /resolve reads the selection as /pattern does (SPEC-multigraph-envelope.md
+            # section 6)
+            ret = server.post('resolve', {'sequence': kleb[3000:3100]})
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error': 'request.graphs: required on this server, which hosts 4 '
+                                       'graph names (more than 1; GET /capabilities lists them)'},
+                             ret.json())
+            ret = server.post('resolve', {'sequence': kleb[3000:3100], 'graph': 'kleb',
+                                          'discover': {'max_labels': 2}})
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual(['kleb'], ret.json()['graphs'])
             # with `graphs` the threshold plays no part
             ret = server.post('pattern', dict(p, graphs=['kleb']))
             self.assertEqual(200, ret.status_code, ret.text[:2000])
@@ -649,18 +677,27 @@ class TestMultiGraphServer(TestingBase):
                          [(a['graph'], a['outcome'], a['refusal']['http_status'],
                            a['refusal']['code']) for a in none['answers']])
 
-    def test_a_pair_past_its_deadline_is_refused_while_the_others_answer(self):
-        """A pair whose answer could not be written by its time_budget_ms is a refused entry
-        (503 deadline) while the other pairs answer. Each pair's deadline starts with its own
-        work, and the envelope is written by the latest deadline of the pairs that answered:
-        on a server with one pool thread the pairs run one after the other in the answers'
-        order, so the later pair's deadline is still ahead when the first has overrun its own.
-        The first pair is the largest chunk with a short pattern asked sixteen times (hundreds
-        of thousands of contexts to release, never within the budget); with a finalisation
-        reserve of 0 ms and the delivery estimate made negligible its work stops at its
-        deadline, which the writing of its answer is then past (SPEC §7.6: nothing partial is
-        sent); the second a graph of 2 kbp, answered in milliseconds."""
+    # -------------------------------------------------------------------- deadlines, the registry
+
+    def _cutoff_csv(self):
+        """A list of three names in byte order: a_kleb, a chunk of 0.7 Mbp on which the slow
+        pattern below completes in about a tenth of a second (and the query of the slow resolve
+        below, absent from it, is resolved fast); b_big, the whole mini index (its coordinate
+        annotation), on which that pattern works for over a second, and the query, 2 Mbp of
+        one of its records, takes over a second to resolve (its k-mers' rows decoded, an
+        uninterruptible step of /resolve); c_tiny, a graph of 2 kbp. On a server with one pool
+        thread the pairs run one after the other in that order, so b_big starts a tenth of a
+        second after the request."""
+        mini = (os.path.join(MINI_DIR, 'graph_k31.dbg'),
+                os.path.join(MINI_DIR, 'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg'))
+        if not all(os.path.exists(p) for p in mini):
+            if REQUIRE_GUARDS:
+                self.fail(f'$METAGRAPH_REQUIRE_GUARDS=1: the mini index is missing: {mini}')
+            self.skipTest(f'the mini index is not built: {mini}')
         d = self.tempdir.name
+        csv = os.path.join(d, 'cutoff.csv')
+        if os.path.exists(csv):
+            return csv
         tiny = os.path.join(d, 'tiny')
         os.makedirs(tiny, exist_ok=True)
         fasta = os.path.join(tiny, 'tiny.fa')
@@ -671,39 +708,382 @@ class TestMultiGraphServer(TestingBase):
                           f'-k {K} -o {tiny}/graph {fasta}', 'build tiny')
         self._annotate_graph([fasta], f'{tiny}/graph.dbg', f'{tiny}/anno', 'column',
                              anno_type='filename')
-        csv = os.path.join(d, 'deadline.csv')
         with open(csv, 'w') as f:
-            f.write(f'big,{self.pairs["pseudo"][0]},{self.pairs["pseudo"][1]}\n'
-                    f'tiny,{tiny}/graph.dbg,{tiny}/anno.column.annodbg\n')
-        server = Server([csv, '--pattern-finalize-ms', '0', '--pattern-delivery-build-mbps',
-                         '1e9', '--pattern-delivery-compress-mbps', '1e9',
-                         '--pattern-max-contexts', '1000000'],
-                        os.path.join(d, 'server_deadline.log'), threads=1)
+            f.write(f'a_kleb,{self.pairs["kleb"][0]},{self.pairs["kleb"][1]}\n'
+                    f'b_big,{mini[0]},{mini[1]}\n'
+                    f'c_tiny,{tiny}/graph.dbg,{tiny}/anno.column.annodbg\n')
+        return csv
+
+    # the request whose b_big pair works for over a second (see _cutoff_csv)
+    SLOW_PATTERN = {'patterns': [{'dna': 'ACGT'}] * 16, 'mode': 'partial', 'scope': 'suffix',
+                    'strands': 'both', 'max_contexts': 1000000, 'output': {'labels': 'none'}}
+
+    def _slow_resolve(self, bp=2000000):
+        seq = self.records['pseudo'][0][:bp]
+        return {'sequence': seq, 'discover': {'max_labels': 2},
+                'bounds': {'max_query_bp': len(seq)}}
+
+    def _cutoff_server(self, name, *args):
+        """A server on _cutoff_csv with one pool thread, a finalisation reserve of 500 ms on
+        /pattern (250 ms on /resolve) and the delivery estimate made negligible"""
+        return Server([self._cutoff_csv(), '--pattern-finalize-ms', '500',
+                       '--pattern-delivery-build-mbps', '1e9',
+                       '--pattern-delivery-compress-mbps', '1e9',
+                       '--pattern-max-contexts', '1000000'] + list(args),
+                      os.path.join(self.tempdir.name, f'server_cutoff_{name}.log'),
+                      threads=1)
+
+    def _wait_ended(self, server, request_id, timeout=120):
+        """GET /requests/{request_id} until it states the request ended"""
+        deadline = time.time() + timeout
+        while True:
+            ret = server.get(f'requests/{request_id}')
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            if ret.json()['state'] == 'ended' or time.time() > deadline:
+                return ret.json()
+            time.sleep(0.05)
+
+    def post_to(self, server, route, payload, status=200):
+        """POST to |server| (self.post posts to the class's server)"""
+        ret = server.post(route, payload)
+        self.assertEqual(status, ret.status_code, ret.text[:2000])
+        return ret.json()
+
+    @staticmethod
+    def _ref(entry):
+        return {k: entry[k] for k in ('graph', 'graph_path', 'annotation_path')}
+
+    def test_the_work_cutoff_keeps_the_completed_pair(self):
+        """SPEC-multigraph-envelope.md section 4 (E4): the request's work cutoff is its
+        effective deadline (arrival + time_budget_ms, 1500 ms, without finish_by_ms) less the
+        finalisation reserve (500 ms). On one pool thread a_kleb completes; b_big starts after
+        it with its own budget, which ends after the cutoff: it is still working there, so it
+        is unfinished, with its usage so far, and told to stop; c_tiny never started:
+        not_reached. The completed answer is written beside them, by the effective deadline,
+        as a single-graph server answers it (each pair keeps its own budget)."""
+        server = self._cutoff_server('cutoff')
         try:
-            request = {'patterns': [{'dna': 'ACGT'}] * 16, 'mode': 'partial', 'scope': 'suffix',
-                       'strands': 'both', 'max_contexts': 1000000, 'time_budget_ms': 50,
-                       'output': {'labels': 'none'}}
-            ret = server.post('pattern', request)
+            started = time.time()
+            ret = server.post('pattern', dict(self.SLOW_PATTERN, time_budget_ms=1500))
+            took = time.time() - started
             self.assertEqual(200, ret.status_code, ret.text[:2000])
             out = ret.json()
-            self.assertEqual((['big', 'tiny'], 1, 1),
-                             (out['graphs'], out['answered'], out['refused']))
-            big, small = out['answers']
-            self.assertEqual(('big', 'refused'), (big['graph'], big['outcome']))
-            self.assertEqual({'http_status': 503, 'code': 'deadline'},
-                             {k: v for k, v in big['refusal'].items() if k != 'error'})
-            self.assertIn('could not be written within time_budget_ms (50 ms, the finalisation '
-                          'reserve of 0 ms included)', big['refusal']['error'])
-            self.assertEqual(('tiny', 'answered'), (small['graph'], small['outcome']))
-            self.assertEqual(50, small['limits']['time_budget_ms'])
-            self.assertEqual(16, len(small['patterns']))
-            for e in small['patterns']:
-                self.assertNotIn('error', e)
-                self.assertEqual('exact', e['counts']['contexts']['relation'])
-                self.assertEqual(e['counts']['contexts']['value'], len(e['results']))
-            self.assertIn('refused (503 deadline)', server.text())
+            self.assertEqual((['a_kleb', 'b_big', 'c_tiny'], 1, 2),
+                             (out['graphs'], out['answered'], out['refused']),
+                             [(a['graph'], a['outcome'], a.get('refusal', {}).get('code'))
+                              for a in out['answers']])
+            kleb, big, tiny = out['answers']
+            self.assertEqual(('a_kleb', 'answered'), (kleb['graph'], kleb['outcome']))
+            self.assertEqual(16, len(kleb['patterns']))
+            self.assertEqual((1500, []), (kleb['limits']['time_budget_ms'],
+                                          kleb['limits']['clamped']))
+            self.assertEqual(('b_big', 'refused'), (big['graph'], big['outcome']))
+            self.assertEqual({'http_status': 503, 'code': 'unfinished', 'reason': 'cutoff'},
+                             {k: big['refusal'][k] for k in ('http_status', 'code', 'reason')})
+            self.assertIn("had not finished at the request's work cutoff",
+                          big['refusal']['error'])
+            self.assertIn('the request has no request_id', big['refusal']['error'])
+            usage = big['refusal']['usage']
+            self.assertEqual({'state', 'started_at', 'elapsed_ms', 'cpu_ms', 'memory_bytes'},
+                             set(usage))
+            self.assertEqual('stopping', usage['state'])
+            self.assertGreater(usage['elapsed_ms'], 100)
+            self.assertEqual(('c_tiny', 'refused'), (tiny['graph'], tiny['outcome']))
+            self.assertEqual({'http_status': 503, 'code': 'not_reached', 'reason': 'cutoff',
+                              'error': tiny['refusal']['error']}, tiny['refusal'])
+            self.assertIn('waited for a pool thread', tiny['refusal']['error'])
+            # the top-level lists name the pairs
+            self.assertEqual([self._ref(big)], out['unfinished'])
+            self.assertEqual([self._ref(tiny)], out['not_reached'])
+            # no deadline field given: the block states none (the cutoff applies all the same)
+            self.assertEqual(NO_DEADLINE, out['deadline'])
+            self.assertLess(took, 30)
+            # work.memory_bytes: the answered pair's account
+            self.assertEqual(kleb['work']['memory_bytes'], out['work']['memory_bytes'])
         finally:
             server.stop()
+
+    def test_finish_by_ms_cuts_a_pair_and_the_registry_states_its_end(self):
+        """finish_by_ms (E20) on /resolve without a budget: the effective deadline is
+        finish_by_ms less the clock skew allowance (--traverse-clock-skew-ms 500), the cutoff
+        250 ms (the reserve) before it; the deadline block states all four, and a pair's
+        deadline is the minimum of its own (the server's maximum) and finish_by_ms - the skew.
+        On one pool thread b_big resolves the query (over a second of work) under that
+        deadline: it is told to stop at the cutoff, so it is cut there (unfinished) or, when
+        its own stop by time wins the race to the cutoff, answered with what it found, its
+        clamped budget stated; c_tiny, queued behind it, is cut at the cutoff. (A pair cut
+        for certain: test_the_work_cutoff_keeps_the_completed_pair, under a budget.) The
+        request's request_id (E4): GET /requests/{request_id} states it ended
+        once the cut worker ended, each pair with its state, outcome and final usage, the
+        response written (status, bytes); a repeat of the id starts no work (409, the entry
+        with an error); an id never sent, or past the retention count (--request-retention
+        1), is 404."""
+        server = self._cutoff_server('finish', '--traverse-clock-skew-ms', '500',
+                                     '--request-retention', '1')
+        try:
+            # effective = finish_by - 500 (skew), the cutoff 250 ms (reserve) before it
+            finish_by = int(time.time() * 1000) + 1300
+            body = dict(self._slow_resolve(), graphs=['b_big', 'c_tiny'], finish_by_ms=finish_by,
+                        request_id='it-finish-1')
+            started = time.time()
+            ret = server.post('resolve', body)
+            took = time.time() - started
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            out = ret.json()
+            # by the effective deadline (the writer refuses a later envelope, 503), not after
+            # b_big's whole work
+            self.assertLess(took, 3)
+            outcomes = [(a['graph'], a['outcome'], a.get('refusal', {}).get('code'))
+                        for a in out['answers']]
+            self.assertEqual(('/resolve', 'it-finish-1', 2), (out['route'], out['request_id'],
+                                                              out['answered'] + out['refused']))
+            big, tiny = out['answers']
+            # c_tiny is cut: never started, or started a moment before the cutoff
+            self.assertEqual(('c_tiny', 'refused', 'cutoff'),
+                             (tiny['graph'], tiny['outcome'], tiny['refusal']['reason']),
+                             outcomes)
+            self.assertIn(tiny['refusal']['code'], ('not_reached', 'unfinished'))
+            if big['outcome'] == 'refused':
+                self.assertEqual(('unfinished', 'cutoff'), (big['refusal']['code'],
+                                                            big['refusal']['reason']), outcomes)
+                self.assertIn('GET /requests/it-finish-1', big['refusal']['error'])
+            else:
+                # its deadline: finish_by_ms - the skew, stated as a clamp of its budget (none
+                # requested: the server's maximum)
+                clamped = {c['field']: c for c in big['limits']['clamped']}
+                self.assertIsNone(clamped['bounds.time_budget_ms']['requested'])
+                self.assertLess(clamped['bounds.time_budget_ms']['effective'], 800)
+            for field in ('not_reached', 'unfinished'):
+                self.assertEqual([self._ref(a) for a in out['answers']
+                                  if a.get('refusal', {}).get('code') == field], out[field])
+            iso = lambda ms: time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(ms // 1000)) \
+                + f'.{ms % 1000:03d}Z'
+            self.assertEqual({'not_after_ms': None, 'finish_by_ms': finish_by,
+                              'effective_deadline_at': iso(finish_by - 500),
+                              'cutoff_at': iso(finish_by - 750)}, out['deadline'])
+            # the registry: the request ends when the cut worker ends
+            entry = self._wait_ended(server, 'it-finish-1')
+            self.assertEqual(('it-finish-1', '/resolve', 'ended', 'answered'),
+                             (entry['request_id'], entry['route'], entry['state'],
+                              entry['reason']))
+            self.assertEqual(out['server_instance'], entry['server_instance'])
+            # the bytes written: the body as sent (compressed, the client accepting gzip)
+            self.assertEqual({'status': 200, 'bytes': int(ret.headers['Content-Length']),
+                              'written': True}, entry['response'])
+            self.assertIsNotNone(entry['retained_until'])
+            p_big, p_tiny = entry['pairs']
+            self.assertEqual(('b_big', 'ended', big.get('refusal', {}).get('code', 'answered')),
+                             (p_big['graph'], p_big['state'], p_big['outcome']))
+            self.assertEqual({'started_at', 'finished_at', 'elapsed_ms', 'cpu_ms',
+                              'memory_bytes'}, set(p_big['usage']))
+            self.assertIsNotNone(p_big['usage']['finished_at'])
+            if big['outcome'] == 'refused':
+                # the cut worker's final usage: at least what the envelope stated
+                self.assertGreaterEqual(p_big['usage']['elapsed_ms'],
+                                        big['refusal']['usage']['elapsed_ms'])
+            self.assertEqual(('c_tiny', tiny['refusal']['code']),
+                             (p_tiny['graph'], p_tiny['outcome']))
+            if tiny['refusal']['code'] == 'not_reached':
+                self.assertEqual(('never_started', None), (p_tiny['state'], p_tiny['usage']))
+            else:
+                self.assertEqual('ended', p_tiny['state'])
+            # a repeat starts no work: 409, the entry and an error
+            ret = server.post('resolve', body)
+            self.assertEqual(409, ret.status_code, ret.text[:2000])
+            repeat = ret.json()
+            self.assertIn("request_id 'it-finish-1' is running, or retained", repeat['error'])
+            self.assertEqual(entry, {k: v for k, v in repeat.items() if k != 'error'})
+            self.assertEqual(1, server.text().count('graph name(s), request_id it-finish-1'))
+            # an id never sent
+            ret = server.get('requests/it-never-sent')
+            self.assertEqual(404, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error', 'request_id', 'server_instance'}, set(ret.json()))
+            self.assertEqual(('it-never-sent', out['server_instance']),
+                             (ret.json()['request_id'], ret.json()['server_instance']))
+            self.assertIn('not known on this server', ret.json()['error'])
+            # retention by count (1): the next request with an id drops this one. One pair
+            # (inline) under a finish_by_ms 10 s ahead: its deadline is finish_by_ms - the skew,
+            # below the server's maximum (--traverse-max-time-ms, 30 s), which a budget-less
+            # request gets under finish_by_ms, stated as a clamp of its budget
+            out = self.post_to(server, 'resolve', dict(
+                    body, graphs=['c_tiny'], request_id='it-finish-2',
+                    finish_by_ms=int(time.time() * 1000) + 10000))
+            self.assertEqual((1, 0), (out['answered'], out['refused']))
+            clamped = {c['field']: c for c in out['answers'][0]['limits']['clamped']}
+            self.assertIsNone(clamped['bounds.time_budget_ms']['requested'])
+            self.assertLess(clamped['bounds.time_budget_ms']['effective'], 9500)
+            self.assertEqual('ended', self._wait_ended(server, 'it-finish-2')['state'])
+            ret = server.get('requests/it-finish-1')
+            self.assertEqual(404, ret.status_code, ret.text[:2000])
+            self.assertIn('at most 1', ret.json()['error'])
+            # a malformed request_id is the request's 400 (nothing registered)
+            ret = server.post('resolve', dict(body, request_id='a b'))
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertIn('request.request_id', ret.json()['error'])
+        finally:
+            server.stop()
+
+    def test_a_short_budget_bounds_the_cutoff_before_a_later_finish_by_ms(self):
+        """The cutoff comes from the EFFECTIVE deadline, never from finish_by_ms alone: a short
+        time_budget_ms (1500 ms) under a finish_by_ms a minute later cuts b_big at arrival +
+        1000 ms, the completed a_kleb written beside it within the budget"""
+        server = self._cutoff_server('short')
+        try:
+            finish_by = int(time.time() * 1000) + 60000
+            started = time.time()
+            out = self.post_to(server, 'pattern', dict(self.SLOW_PATTERN, time_budget_ms=1500,
+                                                       finish_by_ms=finish_by))
+            self.assertLess(time.time() - started, 5)
+            self.assertEqual([('a_kleb', 'answered'), ('b_big', 'unfinished'),
+                              ('c_tiny', 'not_reached')],
+                             [(a['graph'], a.get('refusal', {}).get('code', a['outcome']))
+                              for a in out['answers']])
+            self.assertEqual(finish_by, out['deadline']['finish_by_ms'])
+            effective = out['deadline']['effective_deadline_at']
+            cutoff = out['deadline']['cutoff_at']
+            self.assertLess(cutoff, effective)
+            # the effective deadline is the budget's, a minute before finish_by_ms
+            self.assertLess(effective, time.strftime('%Y-%m-%dT%H:%M:%S',
+                                                     time.gmtime(finish_by / 1000 - 30)))
+        finally:
+            server.stop()
+
+    def test_a_client_gone_is_recorded_ended(self):
+        """A request with a request_id whose client leaves before the answer (it half-closes
+        its connection right after the request): the work stops as before, nothing is
+        written, and GET /requests states the end: reason client_gone, response not written,
+        the started pair with its usage. A repeat of the id starts no work (409)."""
+        server = self._cutoff_server('gone')
+        try:
+            from test_pattern import half_closed_request
+            body = dict(self.SLOW_PATTERN, time_budget_ms=60000, graphs=['b_big'],
+                        request_id='it-gone-1')
+            self.assertEqual(b'', half_closed_request(server.port, 'pattern', body))
+            entry = self._wait_ended(server, 'it-gone-1')
+            self.assertEqual(('ended', 'client_gone'), (entry['state'], entry['reason']))
+            self.assertEqual({'status': None, 'bytes': None, 'written': False},
+                             entry['response'])
+            (pair,) = entry['pairs']
+            self.assertEqual(('b_big', 'ended'), (pair['graph'], pair['state']))
+            self.assertIsNotNone(pair['usage']['finished_at'])
+            ret = server.post('pattern', body)
+            self.assertEqual(409, ret.status_code, ret.text[:2000])
+            self.assertEqual('client_gone', ret.json()['reason'])
+        finally:
+            server.stop()
+
+    def test_not_after_ms_admits_resolve_and_pattern(self):
+        """not_after_ms (the latest START, E20) on /resolve and /pattern: passed when the
+        handler starts, 409 {error, state: expired, not_after_ms, server_time_ms} and nothing
+        runs (nothing registered under its request_id); not passed, the request runs (one
+        that runs past it: test_an_admitted_request_runs_past_not_after_ms). A malformed
+        request_id, not_after_ms or finish_by_ms is the request's 400."""
+        past = int(time.time() * 1000) - 1000
+        kleb = self.records['kleb'][0]
+        for route, body in (
+                ('resolve', {'graph': 'kleb', 'sequence': kleb[3000:3100],
+                             'discover': {'max_labels': 2}}),
+                ('pattern', {'patterns': [{'dna': kleb[3000:3020]}], 'mode': 'count',
+                             'graphs': ['kleb', 'pseudo']})):
+            with self.subTest(route=route):
+                ret = self.server.post(route, dict(body, not_after_ms=past,
+                                                   request_id=f'it-expired-{route}'))
+                self.assertEqual(409, ret.status_code, ret.text[:2000])
+                out = ret.json()
+                self.assertEqual(('expired', past, f'it-expired-{route}'),
+                                 (out['state'], out['not_after_ms'], out['request_id']))
+                self.assertGreater(out['server_time_ms'], past)
+                self.assertIn('has passed on this server\'s clock', out['error'])
+                self.assertEqual(404, self.server.get(f'requests/it-expired-{route}').status_code)
+        # not passed: the request runs, the deadline block stating it
+        later = int(time.time() * 1000) + 60000
+        for route, body in (
+                ('resolve', {'graphs': ['kleb', 'pseudo'], 'sequence': kleb[3000:3100],
+                             'discover': {'max_labels': 2}}),
+                ('pattern', {'patterns': [{'dna': kleb[3000:3020]}], 'mode': 'count',
+                             'graphs': ['kleb', 'pseudo']})):
+            out = self.post(route, dict(body, not_after_ms=later))
+            self.assertEqual((2, 0, later), (out['answered'], out['refused'],
+                                             out['deadline']['not_after_ms']))
+        # malformed: the request's 400
+        for field, value in (('not_after_ms', -1), ('not_after_ms', 1.5),
+                             ('finish_by_ms', 'soon'), ('request_id', '')):
+            with self.subTest(field=field, value=value):
+                ret = self.server.post('resolve', {'graph': 'kleb', 'sequence': kleb[:100],
+                                                   'discover': {'max_labels': 2}, field: value})
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertIn(f'request.{field}', ret.json()['error'])
+                ret = self.server.post('pattern', {'patterns': [{'dna': kleb[:20]}],
+                                                   'graphs': ['kleb'], field: value})
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertIn(f'request.{field}', ret.json()['error'])
+
+    def test_an_admitted_request_runs_past_not_after_ms(self):
+        """not_after_ms is admission only (E20): a request admitted before it runs past it and
+        finishes -- b_big's resolve of 3 Mbp, over two seconds, admitted 800 ms before
+        not_after_ms, alone (inline) and beside c_tiny; c_tiny, queued behind b_big on the one
+        pool thread, was not started by not_after_ms: not_reached, reason not_after_ms (decided
+        when not_after_ms passed, not at the cutoff)."""
+        server = self._cutoff_server('admission')
+        try:
+            request = self._slow_resolve(3000000)
+            for graphs in (['b_big'], ['b_big', 'c_tiny']):
+                with self.subTest(graphs=graphs):
+                    not_after = int(time.time() * 1000) + 800
+                    out = self.post_to(server, 'resolve', dict(request, graphs=graphs,
+                                                               not_after_ms=not_after))
+                    self.assertGreater(time.time() * 1000, not_after + 500)
+                    big = out['answers'][0]
+                    self.assertEqual(('b_big', 'answered'), (big['graph'], big['outcome']))
+                    self.assertGreater(big['timing']['elapsed_ms'], 1000)
+                    self.assertEqual((not_after, None),
+                                     (out['deadline']['not_after_ms'],
+                                      out['deadline']['finish_by_ms']))
+                    self.assertIsNotNone(out['deadline']['effective_deadline_at'])
+                    self.assertEqual([], out['unfinished'])
+                    if len(graphs) == 1:
+                        self.assertEqual((1, 0, []), (out['answered'], out['refused'],
+                                                      out['not_reached']))
+                        continue
+                    tiny = out['answers'][1]
+                    self.assertEqual((1, 1, [self._ref(tiny)]),
+                                     (out['answered'], out['refused'], out['not_reached']))
+                    self.assertEqual({'http_status': 503, 'code': 'not_reached',
+                                      'reason': 'not_after_ms', 'error': tiny['refusal']['error']},
+                                     tiny['refusal'])
+                    self.assertIn(f'not_after_ms {not_after} had passed', tiny['refusal']['error'])
+        finally:
+            server.stop()
+
+    def test_traverse_takes_finish_by_ms_and_answers_get_requests(self):
+        """/traverse reads finish_by_ms (E20): the attempt's bound is at most finish_by_ms less
+        the clock skew allowance (usage.bound.capped_by "finish_by_ms"); its attempt_id is
+        the request's handle: GET /requests/{attempt_id} answers from the attempt registry
+        (route /traverse, attempt: GET /traverse/attempt/{attempt_id}'s object, the pair)."""
+        seed = self.records['ecoli'][0][20000:20100]
+        t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed}], 'attempt_id': 'it-trv-1',
+             'finish_by_ms': int(time.time() * 1000) + 30000,
+             'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                          'output': {'detail': 'summary'}}}
+        out = self.post('traverse', t)
+        self.assertEqual('finish_by_ms', out['usage']['bound']['capped_by'])
+        self.assertLessEqual(out['usage']['bound_ms'], 30000)
+        deadline = time.time() + 30
+        while True:
+            entry = self.server.get('requests/it-trv-1').json()
+            if entry['state'] == 'ended' or time.time() > deadline:
+                break
+            time.sleep(0.05)
+        self.assertEqual(('it-trv-1', '/traverse', 'ended'),
+                         (entry['request_id'], entry['route'], entry['state']))
+        self.assertEqual('it-trv-1', entry['attempt']['attempt_id'])
+        self.assertEqual(self.server.get('traverse/attempt/it-trv-1').json()['usage'],
+                         entry['attempt']['usage'])
+        self.assertEqual([('ecoli', self.pairs['ecoli'][0], self.pairs['ecoli'][1], 'answered')],
+                         [(p['graph'], p['graph_path'], p['annotation_path'], p['outcome'])
+                          for p in entry['pairs']])
+        self.assertEqual({'status': 200, 'written': True},
+                         {k: entry['response'][k] for k in ('status', 'written')})
 
     # -------------------------------------------------------------------- per-task figures
 
@@ -761,7 +1141,9 @@ class TestMultiGraphServer(TestingBase):
         resident = self.post('resolve', r)
         loaded = self.post('resolve', dict(r, in_ram=True))
         self.assertEqual(untimed(resident), untimed(loaded))
-        self.assertGreater(loaded['timing']['load_ms'], 0)
+        # the envelope's one entry (SPEC-multigraph-envelope.md section 1)
+        self.assertNotIn('load_ms', resident['answers'][0]['timing'])
+        self.assertGreater(loaded['answers'][0]['timing']['load_ms'], 0)
         self.assertIn('loaded into RAM for it', self.server.text())
         # /search as it always was
         query = {'FASTA': f'>q\n{seed}', 'graphs': ['ecoli'], 'discovery_fraction': 0.5}
@@ -784,13 +1166,13 @@ class TestMultiGraphServer(TestingBase):
         resident = self.post('resolve', r)
         loaded = self.post('resolve', dict(r, in_ram=True))
         self.assertEqual([(header, 'header')],
-                         [(l['label'], l['kind']) for l in resident['labels']])
+                         [(l['label'], l['kind']) for l in resident['answers'][0]['labels']])
         self.assertEqual(untimed(resident), untimed(loaded))
-        self.assertGreater(loaded['timing']['load_ms'], 0)
+        self.assertGreater(loaded['answers'][0]['timing']['load_ms'], 0)
         d = {'graphs': ['ecoli'], 'sequence': seed,
              'discover': {'max_labels': 10, 'kind': 'header'}}
         resident = self.post('resolve', d)
-        self.assertIn(header, [l['label'] for l in resident['labels']])
+        self.assertIn(header, [l['label'] for l in resident['answers'][0]['labels']])
         self.assertEqual(untimed(resident), untimed(self.post('resolve', dict(d, in_ram=True))))
 
         t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed, 'labels': [header]}],
@@ -878,7 +1260,7 @@ class TestMultiGraphServer(TestingBase):
         """A pair whose annotation cannot be read any more after start-up (chmod 000; the resident
         index, mapped at start-up, still answers): an `in_ram` request on it is answered, not the
         process ended -- /pattern's pair refused with the loader's message (400, no code, the
-        request 200), /traverse and /resolve 400 with it --, its memory released, and the server
+        request 200, and so /resolve's), /traverse 400 with it --, its memory released, and the server
         lives: the pair without in_ram, the other pair with it (above the cap: served resident)
         and, once readable again, the pair with in_ram answer, the last proving the release (the
         cap holds one copy of it: a reservation a failed load kept would make it wait). A malformed
@@ -936,11 +1318,17 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual({'error', 'usage'}, set(ret.json()))
             self.assertIn(failed, ret.json()['error'])
             self.assertEqual('error', ret.json()['usage']['reason'])
-            # /resolve: 400 with the message
+            # /resolve: the pair refused with the message (400, no code), the envelope 200
             ret = server.post('resolve', dict(r, in_ram=True))
-            self.assertEqual(400, ret.status_code, ret.text[:2000])
-            self.assertEqual({'error'}, set(ret.json()))
-            self.assertIn(failed, ret.json()['error'])
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            body = ret.json()
+            self.assertEqual((0, 1, '/resolve'), (body['answered'], body['refused'],
+                                                  body['route']), body)
+            entry = body['answers'][0]
+            self.assertEqual(('kleb', 'refused'), (entry['graph'], entry['outcome']), entry)
+            self.assertEqual({'http_status', 'error'}, set(entry['refusal']), entry)
+            self.assertEqual(400, entry['refusal']['http_status'])
+            self.assertIn(failed, entry['refusal']['error'])
             log = server.text()
             # one line per load attempt: the server's, with the message (the annotation
             # does not open, so the load fails before any loader or the graph's load starts)
@@ -1039,11 +1427,85 @@ class TestMultiGraphServer(TestingBase):
             self.assertEqual(400, ret.status_code)
             self.assertIn(words, ret.json()['error'])
 
-    def test_resolve_takes_graphs(self):
+    # -------------------------------------------------------------------- POST /resolve
+
+    def cli_resolve(self, chunk, request):
+        """`metagraph traverse --resolve` on the chunk's files: the answer a single-graph server
+        gives"""
+        path = os.path.join(self.tempdir.name, f'resolve_{chunk}.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        graph, anno = self.pairs[chunk]
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--resolve', '--json', '-i',
+                                                       graph, '-a', anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        return json.loads(res.stdout.decode().strip().split('\n')[-1])
+
+    def test_resolve_answers_the_envelope(self):
+        """POST /resolve on a multi-graph server (SPEC-multigraph-envelope.md section 1, E2):
+        the envelope, also for a named graph (one entry, `graph` and `graphs: [name]` one
+        request); `graphs` naming several, their pairs in the index's order; a name over two
+        graphs each pair (graph_path still picks one); a request without a selection every
+        name of this small server (no 'graph required' refusal any more). Each entry is the
+        pair's single-graph answer (the CLI's on the pair's files), tagged; work.memory_bytes
+        the answered entries' together; request_id stated and its request registered."""
         seed = self.records['kleb'][0][10000:10200]
         r = {'sequence': seed, 'discover': {'max_labels': 10}}
-        self.assertEqual(untimed(self.post('resolve', dict(r, graph='kleb'))),
-                         untimed(self.post('resolve', dict(r, graphs=['kleb']))))
+        named = self.post('resolve', dict(r, graph='kleb'))
+        self.assertEqual(untimed(named), untimed(self.post('resolve', dict(r, graphs=['kleb']))))
+        self.assertEqual(ENVELOPE, set(named))
+        self.assertEqual((1, '/resolve', ['kleb'], 1, 0, [], [], None, NO_DEADLINE),
+                         (named['envelope_version'], named['route'], named['graphs'],
+                          named['answered'], named['refused'], named['not_reached'],
+                          named['unfinished'], named['request_id'], named['deadline']))
+        self.assertRegex(named['server_instance'], '^[0-9a-f]{16}$')
+        (entry,) = named['answers']
+        self.assertEqual(('kleb', *self.pairs['kleb'], None, 'answered'),
+                         tuple(entry[k] for k in TAGS))
+        self.assertTrue(entry['labels'], entry)
+        self.assertEqual(entry['work']['memory_bytes'], named['work']['memory_bytes'])
+        tagless = {k: v for k, v in entry.items() if k not in TAGS}
+        self.assertEqual(untimed(self.cli_resolve('kleb', r)), untimed(tagless))
+        # several names: their pairs in byte order, each its named request's entry
+        several = self.post('resolve', dict(r, graphs=['kleb', 'ecoli'],
+                                            request_id='it-resolve-1'))
+        self.assertEqual((['ecoli', 'kleb'], 2, 0, 'it-resolve-1'),
+                         (several['graphs'], several['answered'], several['refused'],
+                          several['request_id']))
+        self.assertEqual(untimed(self.post('resolve', dict(r, graph='ecoli'))['answers']),
+                         untimed(several['answers'][:1]))
+        self.assertEqual(untimed(entry), untimed(several['answers'][1]))
+        self.assertEqual(sum(a['work']['memory_bytes'] for a in several['answers']),
+                         several['work']['memory_bytes'])
+        self.assertGreater(several['timing']['cpu_ms'], 0)
+        state = self.server.get('requests/it-resolve-1').json()
+        self.assertEqual(('/resolve', [('ecoli', 'answered'), ('kleb', 'answered')]),
+                         (state['route'], [(p['graph'], p['outcome']) for p in state['pairs']]))
+        # a name over two graphs: each pair; graph_path picks one
+        both = self.post('resolve', dict(r, graph='enterics'))
+        self.assertEqual([('enterics', self.pairs['ecoli'][0]),
+                          ('enterics', self.pairs['kleb'][0])],
+                         [(a['graph'], a['graph_path']) for a in both['answers']])
+        self.assertEqual(untimed(tagless),
+                         untimed({k: v for k, v in both['answers'][1].items() if k not in TAGS}))
+        picked = self.post('resolve', dict(r, graph='enterics', graph_path=self.pairs['kleb'][0]))
+        self.assertEqual([self.pairs['kleb'][0]], [a['graph_path'] for a in picked['answers']])
+        # no selection: every name of this small server, each name's pairs
+        every = self.post('resolve', r)
+        self.assertEqual(['ecoli', 'enterics', 'kleb', 'pseudo'], every['graphs'])
+        self.assertEqual(['ecoli', 'enterics', 'enterics', 'kleb', 'pseudo'],
+                         [a['graph'] for a in every['answers']])
+        self.assertEqual((5, 0), (every['answered'], every['refused']))
+        # what no pair decides is the request's 400
+        for payload, words in ((dict(r, graphs=['nope']), "unknown graph 'nope'"),
+                               (dict(r, graph='nope'), "unknown graph 'nope'"),
+                               (dict(r, sequence=''), 'request.sequence'),
+                               (dict(r, bounds={'time_budget_ms': 1}), 'time_budget_ms')):
+            with self.subTest(payload=payload):
+                ret = self.server.post('resolve', payload)
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertIn(words, ret.json()['error'])
 
 
 if __name__ == '__main__':
