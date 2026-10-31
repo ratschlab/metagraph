@@ -2354,9 +2354,11 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     c["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
     // A count annotation (row_diff_int_brwt) is read as presence: a label carries a k-mer
     // where its count is non-zero, and the walks, their label consistency and the supports
-    // are those of that presence; counts are neither reported nor weighed. null: the
-    // annotation has no counts (SPEC-labeled-traversal-core.md §10.3)
-    c["counts"] = oracle.has_counts() ? Json::Value("presence_only") : Json::Value();
+    // are those of that presence; counts are neither reported nor weighed. Stated only where
+    // the annotation has counts, so that every other index's capabilities keep their bytes
+    // (SPEC-labeled-traversal-core.md §10.3)
+    if (oracle.has_counts())
+        c["counts"] = "presence_only";
     c["supports_trace"] = oracle.has_coordinates() && oracle.regime() == Regime::BASIC;
     // the scale a discovery under support "trace" ranks, truncates and states its cut by
     // (labels_truncated): the traced k-mers, the number it reports as kmers_supported

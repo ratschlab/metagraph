@@ -640,7 +640,8 @@ DecodeStatus decode_rows_alone(const std::vector<Row> &rows, DecodeBudget &budge
     std::vector<uint64_t> result_held(n);
     std::vector<uint32_t> order(n);
     std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return rows[a] < rows[b]; });
+    std::sort(order.begin(), order.end(),
+              [&](uint32_t a, uint32_t b) { return rows[a] < rows[b]; });
     for (uint32_t i : order) {
         if (!fetcher.fetch(rows[i], &result_rows[i], &result_held[i], budget))
             return refuse();

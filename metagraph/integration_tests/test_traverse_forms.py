@@ -213,17 +213,18 @@ class TestTraverseRowDiffForms(FormsBase):
                              dict({'max_extension_bp': self.L}, **bounds), mode)
 
     def test_the_counts_are_stated_as_presence_only(self):
-        """capabilities.counts (SPEC §10.3): "presence_only" on the count annotation, null on the
-        others, in the probe and in every /traverse and /resolve response"""
+        """capabilities.counts (SPEC §10.3): "presence_only" on the count annotation, in the
+        probe and in every /traverse and /resolve response; absent on the others"""
         for form, server in self.servers.items():
             expected = 'presence_only' if form == 'row_diff_int_brwt' else None
             with self.subTest(form=form):
-                self.assertIn('counts', server.capabilities())
-                self.assertEqual(expected, server.capabilities()['counts'])
                 out, _ = self.left_walk(form, {'max_extension_bp': 10})
-                self.assertEqual(expected, out['capabilities']['counts'])
-                out = server.post('resolve', {'sequence': self.long[:100], 'labels': ['long']})
-                self.assertEqual(expected, out['capabilities']['counts'])
+                resolved = server.post('resolve', {'sequence': self.long[:100],
+                                                   'labels': ['long']})
+                for caps in (server.capabilities(), out['capabilities'],
+                             resolved['capabilities']):
+                    self.assertEqual(expected is not None, 'counts' in caps)
+                    self.assertEqual(expected, caps.get('counts'))
 
     def test_every_form_walks_as_the_control(self):
         """Without a budget (the default reads), under a memory budget large enough (the
@@ -373,7 +374,7 @@ class TestTraversePlainForms(FormsBase):
     def test_no_counts(self):
         for form, server in self.servers.items():
             with self.subTest(form=form):
-                self.assertIsNone(server.capabilities()['counts'])
+                self.assertNotIn('counts', server.capabilities())
 
     def test_every_form_walks_alike_where_it_fits(self):
         """Without a budget, under a memory budget the wide row fits and under a work budget

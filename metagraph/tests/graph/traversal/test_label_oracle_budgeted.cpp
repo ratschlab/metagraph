@@ -263,8 +263,9 @@ TEST(LabelOracleBudgetedQuery, PlainAnnotationsReadEachRowAlone) {
             for (size_t i = 0; i < lists.size(); ++i) {
                 EXPECT_EQ(expected_labels[i].labels, lists[i].labels);
                 EXPECT_EQ(expected_labels[i].total, lists[i].total);
-                if (batch[i] != npos)
+                if (batch[i] != npos) {
                     EXPECT_EQ(0u, list_costs[i].dependency_units);
+                }
             }
             ASSERT_EQ(plain_recorder.labels().size(), recorder.labels().size());
             for (size_t l = 0; l < recorder.labels().size(); ++l) {

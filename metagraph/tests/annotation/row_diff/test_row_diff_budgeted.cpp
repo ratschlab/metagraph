@@ -708,8 +708,9 @@ TEST(RowDiffBudgetedDecode, RowMajorFormsChargeAsTheColumnForm) {
                 EXPECT_LE(b1.peak(), b2.peak()) << a.name << " batch of " << rows.size();
                 EXPECT_LE(b2.peak(), b1.peak() + reader)
                         << a.name << " batch of " << rows.size();
-                if (!reader)
+                if (!reader) {
                     EXPECT_EQ(b1.peak(), b2.peak()) << a.name << " batch of " << rows.size();
+                }
             }
             if (reader && !rows.empty()) {
                 DecodeBudget small(reader - 1);
@@ -783,7 +784,8 @@ TEST(BudgetedRowsAlone, PlainBrwtAndColumnMajor) {
         RowFlat<> flat(rows_in_order(column_major), 23, num_rows, column_major.num_relations());
         // a row-major or row-diff matrix has none (a row-diff one has IRowDiff::decode_rows)
         EXPECT_FALSE(budgeted_rows(flat));
-        for (const BinaryMatrix *m : { (const BinaryMatrix*)&column_major, (const BinaryMatrix*)&brwt }) {
+        for (const BinaryMatrix *m : { (const BinaryMatrix*)&column_major,
+                                       (const BinaryMatrix*)&brwt }) {
             const auto reader = budgeted_rows(*m);
             ASSERT_TRUE(reader);
             std::vector<Row> all(num_rows);
@@ -818,7 +820,8 @@ TEST(BudgetedRowsAlone, PlainBrwtAndColumnMajor) {
                 EXPECT_EQ(DecodeStatus::OK, reader->decode_rows({ r }, exact, &o, &c, &h));
                 DecodeBudget less(alone.peak() - 1);
                 std::vector<SetBits> sentinel(1);
-                EXPECT_EQ(DecodeStatus::REFUSED, reader->decode_rows({ r }, less, &sentinel, &c, &h));
+                EXPECT_EQ(DecodeStatus::REFUSED,
+                          reader->decode_rows({ r }, less, &sentinel, &c, &h));
                 EXPECT_EQ(1u, sentinel.size());
                 EXPECT_EQ(0u, less.held());
                 refused++;
