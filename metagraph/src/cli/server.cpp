@@ -1396,10 +1396,13 @@ int run_server(Config *config) {
             const AnnotatedDBG &index = lease ? lease->index() : *anno_graph.get();
             // a client that is gone is not answered: abandoned between the request's phases
             try {
+                // a multi-graph server's pair answers for the labels it holds and lists the
+                // others (unknown_labels, SPEC-multigraph-envelope.md section 2)
                 Json::Value out = process_resolve_request(json, index, config->index_release,
                                                           config->resolve_max_query_bp,
                                                           &identity, gone_of(request),
-                                                          resolve_time, &writing.delivery);
+                                                          resolve_time, &writing.delivery,
+                                                          nullptr, multi);
                 // in_ram: the time before the work began, waiting for and loading its index
                 if (in_ram)
                     out["timing"]["load_ms"] = lease ? lease->load_ms() : 0.0;
@@ -1598,6 +1601,9 @@ int run_server(Config *config) {
                 // of /search sends each seed to whether or not they hold it: a seed a chunk does
                 // not hold is its result, whichever spelling (`graph`, `graphs`) named the chunk
                 limits.not_in_graph_per_seed = multi;
+                // and its pairs need not hold every label a request names: the absent ones are
+                // dropped and stated (SPEC-multigraph-envelope.md section 2)
+                limits.labels_not_in_graph_dropped = multi;
                 if (in_ram)
                     limits.load_ms = lease ? lease->load_ms() : 0.0;
                 return process_traverse_request(json, index, config->index_release, limits,

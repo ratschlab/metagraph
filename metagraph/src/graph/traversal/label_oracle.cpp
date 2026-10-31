@@ -312,7 +312,7 @@ uint64_t LabelOracle::num_kmers_in_sequence(Column column, uint64_t seq_id) cons
     return coord_to_header_->num_kmers_in_sequence(column, seq_id);
 }
 
-LabelRef LabelOracle::resolve_label(const std::string &name) const {
+std::optional<LabelRef> LabelOracle::find_label(const std::string &name) const {
     if (test_resolve_hook)
         test_resolve_hook(name);
     if (auto column = find_column(name)) {
@@ -322,8 +322,12 @@ LabelRef LabelOracle::resolve_label(const std::string &name) const {
         ref.name = name;
         return ref;
     }
-    if (auto header = find_header(name))
-        return *header;
+    return find_header(name);
+}
+
+LabelRef LabelOracle::resolve_label(const std::string &name) const {
+    if (std::optional<LabelRef> ref = find_label(name))
+        return std::move(*ref);
     throw std::invalid_argument("Label not found in the annotation: '" + name + "'"
                                 + (coord_to_header_ ? "" : " (no sequence header index loaded)"));
 }

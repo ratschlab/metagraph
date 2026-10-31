@@ -17,7 +17,9 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <tuple>
+#include <unordered_set>
 
 #include "cli/config/config.hpp"
 #include "cli/json_helpers.hpp"
@@ -962,6 +964,16 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
                               "losses"));
     }
     return out;
+}
+
+// |names| as a JSON array, in their order: the labels a pair of a multi-graph server does not
+// hold (unknown_labels, SPEC-multigraph-envelope.md section 2)
+static Json::Value names_json(const std::vector<std::string> &names) {
+    Json::Value a(Json::arrayValue);
+    for (const std::string &name : names) {
+        a.append(name);
+    }
+    return a;
 }
 
 // The per-seed outcome (spec §7.0), one axis per guarantee, read off the stated limitations
@@ -1911,6 +1923,10 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     const bool graphlet = detail == "graphlet";
     const ResourceStop *stop = stated_stop(r, st);
     Json::Value j;
+    // a multi-graph server's pair states the seed's labels it does not hold (in every detail:
+    // the graphlet's X records carry them as dropped labels)
+    if (st.drop_labels_not_in_graph)
+        j["unknown_labels"] = names_json(r.unknown_labels);
     Json::Value seed;
     seed["seed_id"] = r.seed_id;
     seed["validated_seed_id"] = r.validated_seed_id;
@@ -4806,6 +4822,34 @@ static Json::Value not_in_graph_seed_to_json(const Seed &seed, const SeedNotInGr
     return rj;
 }
 
+// A seed whose labels a multi-graph server's pair holds none of (SeedLabelsNotInGraph,
+// TraverseLimits::labels_not_in_graph_dropped): no walk, outcome.walks "labels_not_in_graph",
+// the walker's message as `error`, the names in unknown_labels and in dropped_labels with
+// reason not_in_graph (no presence runs: nothing of them is in the annotation), in the shape
+// of a seed not in the graph
+static Json::Value labels_not_in_graph_seed_to_json(const Seed &seed,
+                                                    const SeedLabelsNotInGraph &e,
+                                                    const Strategy &st, bool decode_charged,
+                                                    const char *coordinates_reason) {
+    Json::Value rj = failed_seed_head(seed, false, e.what());
+    rj["unknown_labels"] = names_json(e.labels());
+    Json::Value dropped(Json::arrayValue);
+    for (const std::string &name : e.labels()) {
+        Json::Value d;
+        d["label"] = name;
+        d["reason"] = "not_in_graph";
+        dropped.append(std::move(d));
+    }
+    rj["dropped_labels"] = std::move(dropped);
+    Json::Value lims(Json::arrayValue);
+    append_failed_memory(&lims, st, seed, 0, decode_charged);
+    rj["limitations"] = std::move(lims);
+    rj["outcome"] = outcome_of(rj, true);
+    rj["outcome"]["walks"] = "labels_not_in_graph";
+    state_no_coordinates(&rj, coordinates_reason);
+    return rj;
+}
+
 // A request with attempt_id outside the server (the CLI, a test): its usage is stated as the
 // server states it, with the bound computed but not enforced (no lease to protect)
 static const std::string& local_instance() {
@@ -4842,6 +4886,8 @@ Json::Value process_traverse_request(const Json::Value &json,
     if (!req.release.empty() && !release.empty() && req.release != release)
         throw InvalidRequest("request.release '" + req.release + "' does not match the loaded index release '"
                              + release + "'");
+    // a multi-graph server's pair answers for the labels it holds and states the others
+    req.strategy.drop_labels_not_in_graph = limits.labels_not_in_graph_dropped;
     if (limits.max_seeds && req.seeds.size() > limits.max_seeds) {
         throw InvalidRequest("request.seeds: at most " + std::to_string(limits.max_seeds)
                              + " seeds per request");
@@ -4971,6 +5017,20 @@ Json::Value process_traverse_request(const Json::Value &json,
     // what makes "all walks" a finite set in a graph with cycles
     out["walk_rule"] = walk_rule_statement(req.strategy, oracle);
     out["algorithm_version"] = kTraverseAlgorithmVersion;
+    // the extra labels this pair does not hold, each once in the request's order: no seed's
+    // walk switches to them here (Walker), and the request states them once, whether or not a
+    // seed is walked
+    if (limits.labels_not_in_graph_dropped) {
+        std::vector<std::string> unknown;
+        std::unordered_set<std::string_view> listed;
+        for (const std::string &name : req.strategy.extra) {
+            if (!listed.count(name) && !oracle.find_label(name)) {
+                listed.insert(name);
+                unknown.push_back(name);
+            }
+        }
+        out["unknown_labels"] = names_json(unknown);
+    }
 
     Json::Value results(Json::arrayValue);
     std::set<std::string> seen_ids;
@@ -5074,9 +5134,35 @@ Json::Value process_traverse_request(const Json::Value &json,
         if (attempt)
             attempt->note_memory_bytes(request_memory);
     };
-    // a result without a walk holds its fixed part and its echo of seed_id, as priced
+    // A result without a walk on a multi-graph server's pair states the seed's labels the pair
+    // does not hold, as a walked one does (labels_not_in_graph's states them already): looked
+    // up here, since the walker may not have reached them. Nothing on another server
+    auto state_unknown_labels = [&](Json::Value *rj, const Seed &s) {
+        if (!limits.labels_not_in_graph_dropped || rj->isMember("unknown_labels"))
+            return;
+        std::vector<std::string> unknown;
+        std::unordered_set<std::string_view> listed;
+        for (const std::string &name : s.labels) {
+            if (!listed.count(name) && !oracle.find_label(name)) {
+                listed.insert(name);
+                unknown.push_back(name);
+            }
+        }
+        (*rj)["unknown_labels"] = names_json(unknown);
+    };
+    // a result without a walk holds its fixed part and its echo of seed_id, as priced, and the
+    // names it lists as unknown or dropped labels (a multi-graph server's pair), each priced
+    // as the walker prices a dropped label
     auto put_failed_memory = [&](Json::Value *rj, const Seed &s) {
-        const uint64_t holds = failed_result_bytes(req.strategy, s);
+        uint64_t holds = failed_result_bytes(req.strategy, s);
+        const DeliveryCosts &d = req.strategy.delivery;
+        for (const char *list : { "unknown_labels", "dropped_labels" }) {
+            for (const Json::Value &v : rj->get(list, Json::Value(Json::arrayValue))) {
+                const std::string name = v.isString() ? v.asString() : v["label"].asString();
+                holds += sizeof(std::string) + name.size() + d.dropped
+                       + (d.name ? d.name(name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
+            }
+        }
         put_memory(rj, holds, holds);
     };
     for (size_t i = 0; i < req.seeds.size(); ++i) {
@@ -5095,6 +5181,7 @@ Json::Value process_traverse_request(const Json::Value &json,
                     Json::Value never = not_started_seed_to_json(
                             req.seeds[j], stop, attempt->bound_ms(), attempt->elapsed_ms(),
                             req.strategy, decode_charged, no_coordinates);
+                    state_unknown_labels(&never, req.seeds[j]);
                     put_failed_memory(&never, req.seeds[j]);
                     append(std::move(never), 0);
                     // its usage is what its result states and holds
@@ -5191,6 +5278,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                 throw e;
             }
             if (!refused.isNull()) {
+                if (req.strategy.drop_labels_not_in_graph)
+                    refused["unknown_labels"] = names_json(r.unknown_labels);
                 if (req.strategy.max_memory_bytes) {
                     // every response under a memory budget states it (§7.0), with what
                     // this result's echo of the request holds beyond it (failed_soft)
@@ -5246,6 +5335,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value failed = failed_seed_to_json(seed, e, req.strategy, clamped,
                                                      oracle.decode_charged(), no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
+            state_unknown_labels(&failed, seed);
             // the seed phase holds no modelled account (its rows are observed, not charged)
             put_failed_memory(&failed, seed);
             append(std::move(failed), 0);
@@ -5260,6 +5350,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy, clamped,
                                                             no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
+            state_unknown_labels(&failed, seed);
             // what the account held when the budget failed the seed
             put_memory(&failed, without_allotments(e.account().memory_peak, e.account()),
                        failed_result_bytes(req.strategy, seed));
@@ -5286,9 +5377,23 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value absent = not_in_graph_seed_to_json(seed, e, req.strategy,
                                                            oracle.decode_charged(),
                                                            no_coordinates);
+            state_unknown_labels(&absent, seed);
             put_failed_memory(&absent, seed);
             append(std::move(absent), 0);
             delivered("not_in_graph");
+            oracle.sync_path_cache_counters();
+            per_seed(oracle.counters());
+        } catch (const SeedLabelsNotInGraph &e) {
+            // raised only on a multi-graph server's pair (Strategy::drop_labels_not_in_graph):
+            // the pair holds none of the seed's labels, which is its result; the other seeds
+            // are traversed
+            walked("labels_not_in_graph", "", true);
+            Json::Value absent = labels_not_in_graph_seed_to_json(seed, e, req.strategy,
+                                                                  oracle.decode_charged(),
+                                                                  no_coordinates);
+            put_failed_memory(&absent, seed);
+            append(std::move(absent), 0);
+            delivered("labels_not_in_graph");
             oracle.sync_path_cache_counters();
             per_seed(oracle.counters());
         } catch (const std::invalid_argument &e) {
@@ -5437,7 +5542,8 @@ Json::Value process_resolve_request(
         const std::function<bool()> &client_gone,
         const ResolveTimeLimits &time,
         ResolveDelivery *delivery,
-        const std::function<std::chrono::steady_clock::time_point()> &clock) {
+        const std::function<std::chrono::steady_clock::time_point()> &clock,
+        bool labels_not_in_graph_dropped) {
     // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
     // on this thread from here to its timing block (the answer's text and compression after it)
     const common::ThreadUsageMeter request_usage;
@@ -5453,6 +5559,7 @@ Json::Value process_resolve_request(
         start = now();
     }
     ResolveRequest req = parse_resolve_request(json);
+    req.options.drop_labels_not_in_graph = labels_not_in_graph_dropped;
     // a client that is gone is not answered: the request is abandoned at the next phase
     auto abandon = []() {
         throw AttemptAborted("the client closed its connection: the resolve request was abandoned");
@@ -5538,6 +5645,10 @@ Json::Value process_resolve_request(
                                       req.options.finish_check);
     if (!not_made.empty())
         out["selection"] = Json::Value();
+    // the labels this pair does not hold (a multi-graph server's): its answer is that of the
+    // others, and none of these is in it
+    if (labels_not_in_graph_dropped)
+        out["unknown_labels"] = names_json(profile.unknown_labels);
     out["release"] = release;
     out["capabilities"] = capabilities_to_json(oracle, release, identity);
     if (deadline) {

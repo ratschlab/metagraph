@@ -43,6 +43,12 @@ constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
 struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set
     std::vector<std::string> labels;
+    // Not a request field: an explicit label the annotation does not hold is dropped and
+    // listed in SupportProfile::unknown_labels (a multi-graph server, whose pairs need not hold
+    // every label a request names: SPEC-multigraph-envelope.md section 2) instead of refusing
+    // the request (std::invalid_argument "Label not found in the annotation"; a single-graph
+    // server, the CLI). With every label absent the profile has no label
+    bool drop_labels_not_in_graph = false;
     bool discover = false;
     size_t discover_max_labels = 1000;
     LabelKind discover_kind = LabelKind::COLUMN;
@@ -133,6 +139,9 @@ struct SupportProfile {
     Support support = Support::KMER;
     std::vector<KmerInterval> graph_runs;    // runs of k-mers present in the graph
     std::vector<LabelProfile> labels;
+    // the explicit labels the annotation does not hold, each once, in the request's order
+    // (ResolveOptions::drop_labels_not_in_graph; empty otherwise)
+    std::vector<std::string> unknown_labels;
     std::optional<LabelTruncation> labels_truncated;
     std::vector<SeedCandidate> candidates;   // ordered: longer, more labels, smaller begin
     // set when the deadline ended the work: every field above is then exactly the resolve of

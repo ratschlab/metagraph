@@ -1748,6 +1748,37 @@ class TestTraverseAPI(TestTraverseBase):
         else:
             self.assertNotIn('page_faults', timing, where)
 
+    def test_api_labels_not_in_graph_refused(self):
+        """A single-graph server keeps the 400 for a label its annotation does not hold, at the
+        three sites (resolve labels, seed labels, extra labels), and states no unknown_labels;
+        it refuses the pair selector (SPEC-multigraph-envelope.md sections 2 and 6)."""
+        seed = {'seed_id': 's0', 'sequence': self.element}
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 20},
+                    'output': {'detail': 'full', 'timing': False}}
+        for route, payload in (
+                ('traverse', {'seeds': [dict(seed, labels=['acc1', 'nope'])], 'strategy': strategy}),
+                ('traverse', {'seeds': [dict(seed, labels=['acc1'])],
+                              'strategy': dict(strategy, labels={
+                                  'extra': ['nope'], 'loss_budget': 1,
+                                  'change_cost': {'model': 'constant', 'value': 1}})}),
+                ('resolve', {'sequence': self.element, 'labels': ['acc1', 'nope']})):
+            ret = self._post(route, payload)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn("Label not found in the annotation: 'nope'", ret.json()['error'])
+        ret = self._post('traverse', {'seeds': [dict(seed, labels=['acc1'])], 'strategy': strategy})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertNotIn('unknown_labels', ret.json())
+        self.assertNotIn('unknown_labels', ret.json()['results'][0])
+        ret = self._post('resolve', {'sequence': self.element, 'labels': ['acc1']})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertNotIn('unknown_labels', ret.json())
+        for route, payload in (('traverse', {'seeds': [seed], 'pairs': [{'graph': 'x'}]}),
+                               ('resolve', {'sequence': self.element, 'labels': ['acc1'],
+                                            'pairs': [{'graph': 'x'}]})):
+            ret = self._post(route, payload)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn("remove the 'pairs' field", ret.json()['error'])
+
     def test_api_task_resources(self):
         """The per-task figures on the server and the CLI (SPEC §7.2.1, SPEC-pattern-search.md
         §8.4): timing.cpu_ms (and timing.page_faults on Linux) on /traverse per request and
@@ -3321,6 +3352,70 @@ class TestTraverseMultiGraph(TestTraverseBase):
         ret = self._post('search', {'FASTA': f'>q\n{self.element}\n', 'pairs': [{'graph': 'A'}]})
         self.assertEqual(400, ret.status_code, ret.text)
         self.assertEqual('pairs_unsupported', ret.json()['code'])
+
+    def test_multi_labels_not_in_graph(self):
+        """Labels a pair does not hold (SPEC-multigraph-envelope.md section 2): B's first graph
+        holds acc1 only. A seed label it does not hold is dropped (not_in_graph) and listed in
+        the seed's unknown_labels, in the graphlet as an X record; a seed whose labels are all
+        absent gets no walk (labels_not_in_graph); an absent extra label is listed in the
+        answer's unknown_labels; /resolve lists the absent labels of its answer."""
+        two = self.pairs['two']
+
+        def traverse(labels, detail='full', extra=None):
+            req = self._request('B', two[0], detail=detail)
+            req['seeds'] = [{'seed_id': 's0', 'sequence': self.element, 'labels': labels}]
+            if extra:
+                req['strategy']['labels'] = {'extra': extra, 'loss_budget': 1,
+                                             'change_cost': {'model': 'constant', 'value': 1}}
+            ret = self._post('traverse', req)
+            self.assertEqual(200, ret.status_code, ret.text)
+            return self._entry(ret.json())
+
+        out = traverse(['acc1', 'acc2'])
+        result = out['results'][0]
+        self.assertEqual('complete', result['outcome']['walks'])
+        self.assertEqual(['acc2'], result['unknown_labels'])
+        self.assertEqual(['acc1'], result['seed']['labels'])
+        self.assertEqual([{'label': 'acc2', 'reason': 'not_in_graph', 'runs': [],
+                           'runs_kind': 'presence'}], result['seed']['dropped_labels'])
+        self.assertEqual([], out['unknown_labels'])
+        alone = traverse(['acc1'])['results'][0]
+        self.assertEqual([], alone['unknown_labels'])
+        self.assertEqual(alone['arms'], result['arms'])
+        # the graphlet's X record
+        graphlet = traverse(['acc2', 'acc1'], detail='graphlet')['results'][0]
+        self.assertIn('\nX not_in_graph . acc2\n', graphlet['graphlet'])
+        self.assertEqual(['acc2'], graphlet['unknown_labels'])
+        # every label absent: no walk
+        none = traverse(['acc2', 'acc3'])['results'][0]
+        self.assertEqual('labels_not_in_graph', none['outcome']['walks'])
+        self.assertEqual(['acc2', 'acc3'], none['unknown_labels'])
+        self.assertEqual([{'label': 'acc2', 'reason': 'not_in_graph'},
+                          {'label': 'acc3', 'reason': 'not_in_graph'}], none['dropped_labels'])
+        self.assertEqual("none of the seed's labels is in this graph: acc2, acc3", none['error'])
+        self.assertNotIn('arms', none)
+        # an extra label the pair does not hold
+        extra = traverse(['acc1'], extra=['acc3'])
+        self.assertEqual(['acc3'], extra['unknown_labels'])
+        self.assertEqual('complete', extra['results'][0]['outcome']['walks'])
+        self.assertEqual(['acc3'], extra['strategy']['labels']['extra'])
+        # /resolve: the answer of the labels the pair holds, the others listed
+        resolve = {'graph': 'B', 'graph_path': two[0], 'sequence': self.element}
+        ret = self._post('resolve', dict(resolve, labels=['acc3', 'acc1', 'acc2']))
+        self.assertEqual(200, ret.status_code, ret.text)
+        answer = self._entry(ret.json())
+        self.assertEqual(['acc3', 'acc2'], answer['unknown_labels'])
+        self.assertEqual(['acc1'], [l['label'] for l in answer['labels']])
+        ret = self._post('resolve', dict(resolve, labels=['acc2']))
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual((['acc2'], [], []), (self._entry(ret.json())['unknown_labels'],
+                                              self._entry(ret.json())['labels'],
+                                              self._entry(ret.json())['candidates']))
+        # the base graph's own pair holds them all as headers
+        ret = self._post('resolve', {'graph': 'A', 'sequence': self.element,
+                                     'labels': ['acc1', 'acc2']})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual([], self._entry(ret.json())['unknown_labels'])
 
     def test_multi_lists_refuse_to_start(self):
         """A graph list the server cannot state one identity per index for refuses to start
