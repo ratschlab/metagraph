@@ -28,6 +28,9 @@ SPEC_NAME = 'SPEC-labeled-traversal-core.md'
 # the longest string a capabilities document may hold: a reference, an id pattern, a route, a
 # path of a fixture server
 LONGEST_TEXT = 100
+# the one sentence a capabilities document states in full: a multi-graph server's composite_rule,
+# the rule of composite_fp as SPEC-multigraph-envelope.md section 8 words it ("that sentence")
+SPEC_SENTENCES = ('composite_rule',)
 
 # What each referenced section states, phrase by phrase (normalised as normalise() does)
 SUBSTANCE = {
@@ -217,7 +220,12 @@ class TestTraverseCapabilitiesReferences(unittest.TestCase):
             if f['method'] == 'GET' and f['status'] == 200 \
                     and route in ('/traverse/capabilities', '/capabilities'):
                 with open(os.path.join(DATA, name, 'answer.json'), encoding='utf-8') as fh:
-                    cls.documents[name] = (route, json.load(fh))
+                    doc = json.load(fh)
+                # a multi-graph server's probe answers the envelope of its pair
+                # (SPEC-multigraph-envelope.md section 1): the entry is the pair's probe, tagged
+                if 'envelope_version' in doc:
+                    (doc,) = doc['answers']
+                cls.documents[name] = (route, doc)
         cls.spec = None
         if os.path.isfile(SPEC):
             with open(SPEC, encoding='utf-8') as f:
@@ -236,7 +244,7 @@ class TestTraverseCapabilitiesReferences(unittest.TestCase):
                     self.assertIsNone(value, f'{name}: {field} only on the probe')
                     continue
                 self.assertEqual(reference(number, part), value, f'{name}: {field}')
-            for text in strings(doc):
+            for text in strings({k: v for k, v in doc.items() if k not in SPEC_SENTENCES}):
                 self.assertLessEqual(len(text), LONGEST_TEXT, f'{name}: {text[:80]!r}...')
 
     def check_sections(self, table, by_number):

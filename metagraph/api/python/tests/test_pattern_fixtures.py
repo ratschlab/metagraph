@@ -3349,6 +3349,24 @@ class Checker:
             self.ok(b['placement'] == 'none_canonical', path + '.placement')
 
 
+# The members of a GET capabilities envelope (SPEC-multigraph-envelope.md section 1, release
+# 10): a multi-graph server's probes answer it, one entry per pair the probe selects, each the
+# pair's document tagged with ENVELOPE_TAGS
+GET_ENVELOPE = ['envelope_version', 'route', 'graphs', 'answered', 'refused', 'server_instance',
+                'answers']
+ENVELOPE_TAGS = ['graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome']
+
+
+def probe_document(entry, route):
+    """A probe's envelope entry as the probe of contract version 1 states the pair's document:
+    without the tags the envelope adds (annotation_path, outcome; on /pattern/capabilities also
+    index_fp, which the full block has not), its graph and graph_path kept (capabilities_pair)"""
+    drop = {'annotation_path', 'outcome'}
+    if route == '/pattern/capabilities':
+        drop.add('index_fp')
+    return {k: v for k, v in entry.items() if k not in drop}
+
+
 class Raising:
     """The Checker's test case for the mutation tests: a rule that fails raises."""
 
@@ -3377,6 +3395,17 @@ class TestPatternFixtures(unittest.TestCase):
                 assert len(answered) == 1, name
                 pair = {k: v for k, v in answered[0].items() if k not in SCHEMA['answer_pair']}
                 cls.bodies[name] = (request, pair)
+        # a multi-graph server's capabilities probes as stored: the envelope of their one pair
+        # (SPEC-multigraph-envelope.md section 1); the checks of every document see the entry
+        # as version 1 states it (probe_document), test_probe_envelopes checks the envelope
+        cls.probe_envelopes = {}
+        for name, f in cls.fixtures.items():
+            request, answer = cls.bodies[name]
+            if f['method'] == 'GET' and f['status'] == 200 and 'envelope_version' in answer:
+                cls.probe_envelopes[name] = answer
+                assert len(answer['answers']) == 1, name
+                cls.bodies[name] = (request, probe_document(answer['answers'][0],
+                                                            f['path'].split('?')[0]))
 
     def pattern_block(self, name):
         """The pattern block GET fixture |name| serves (SPEC §23): the document of
@@ -3615,7 +3644,8 @@ class TestPatternFixtures(unittest.TestCase):
                 # the pair ?graph= selected, named (SPEC §24)
                 check.ok(set(SCHEMA['capabilities_pair']) <= set(doc), 'answer',
                          'the pair named')
-                check.ok(re.search(r'[?&]graph=([^&]+)', f['path']).group(1) == doc['graph'],
+                named = re.search(r'[?&]graph=([^&]+)', f['path'])
+                check.ok(named is None or named.group(1) == doc['graph'],
                          'graph', 'the name ?graph= gave')
                 doc = {k: v for k, v in doc.items() if k not in SCHEMA['capabilities_pair']}
             check.block(doc, 'pattern')
@@ -3900,11 +3930,67 @@ class TestPatternFixtures(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'only \\?graph='):
             self.capabilities_document(Checker(Raising(), 'multi'), f,
                                        self.bodies['pattern_capabilities_graph_param'][1])
-        f = dict(self.fixtures['pattern_capabilities_multi_graph_no_graph'], server='masked')
+        # (a multi-graph server's probe without ?graph= answers the envelope over every pair up
+        # to max_graphs_without_selection names, and is refused beyond: that 400 on a
+        # single-graph server breaks the rule)
+        f = dict(self.fixtures['pattern_capabilities_multi_graph_no_graph'], server='masked',
+                 status=400)
         with self.assertRaisesRegex(AssertionError, 'only \\?graph='):
             self.capabilities_document(
                 Checker(Raising(), 'single'), f,
-                self.bodies['pattern_capabilities_multi_graph_no_graph'][1])
+                {'error': 'Bad request: in multi-graph mode GET /pattern/capabilities needs '
+                          '?graph=<name> (and graph_path=<path> when the name spans several '
+                          'graphs) on a list of more than 1 graph names (2 here); GET '
+                          '/capabilities lists the graphs'})
+
+    def test_probe_envelopes(self):
+        """SPEC-multigraph-envelope.md section 1 (release 10): a multi-graph server's GET
+        /traverse/capabilities and GET /pattern/capabilities answer the envelope: its members,
+        the route, one entry per selected pair (with ?graph= one, of that name), each tagged
+        with its pair and outcome answered, the names its entries' in byte order; each rule
+        refuses an envelope that breaks it."""
+        def check_envelope(name, doc):
+            f = self.fixtures[name]
+            route = f['path'].split('?')[0]
+            self.assertEqual(sorted(GET_ENVELOPE), sorted(doc), 'members')
+            self.assertEqual((1, route), (doc['envelope_version'], doc['route']), 'route')
+            self.assertEqual((len(doc['answers']), 0), (doc['answered'], doc['refused']),
+                             'outcomes')
+            self.assertEqual(sorted({e['graph'] for e in doc['answers']}), doc['graphs'],
+                             'graphs')
+            for e in doc['answers']:
+                self.assertLessEqual(set(ENVELOPE_TAGS), set(e), 'tags')
+                self.assertEqual('answered', e['outcome'], 'outcome')
+            named = re.search(r'[?&]graph=([^&]+)', f['path'])
+            if named:
+                self.assertEqual([named.group(1)], [e['graph'] for e in doc['answers']],
+                                 'the pair ?graph= names')
+
+        self.assertEqual({'traverse_capabilities_multi_graph', 'pattern_capabilities_multi_graph',
+                          'pattern_capabilities_multi_graph_no_graph'}, set(self.probe_envelopes))
+        for name, doc in self.probe_envelopes.items():
+            with self.subTest(fixture=name):
+                check_envelope(name, doc)
+        cases = [
+            ('pattern_capabilities_multi_graph', lambda d: d.pop('server_instance'), 'members'),
+            ('traverse_capabilities_multi_graph', lambda d: d.update(route='/pattern'), 'route'),
+            ('pattern_capabilities_multi_graph', lambda d: d.update(answered=2), 'outcomes'),
+            ('pattern_capabilities_multi_graph_no_graph', lambda d: d.update(graphs=[]),
+             'graphs'),
+            ('traverse_capabilities_multi_graph', lambda d: d['answers'][0].pop('annotation_path'),
+             'tags'),
+            ('pattern_capabilities_multi_graph',
+             lambda d: d['answers'][0].update(outcome='refused'), 'outcome'),
+            ('pattern_capabilities_multi_graph',
+             lambda d: (d['answers'][0].update(graph='x'), d.update(graphs=['x'])),
+             'the pair'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                doc = copy.deepcopy(self.probe_envelopes[name])
+                mutate(doc)
+                with self.assertRaisesRegex(AssertionError, says):
+                    check_envelope(name, doc)
 
     def test_multi_graph_answers(self):
         """SPEC §24.1: a multi-graph server's answers are the pair answers, tagged, each with
@@ -4003,8 +4089,8 @@ class TestPatternFixtures(unittest.TestCase):
             ('capabilities', lambda d: d.update(graph_summary={}), 'null on one graph'),
             ('pattern_capabilities_multi_graph', lambda d: d.pop('graph'), 'the pair named'),
             ('pattern_capabilities_multi_graph', lambda d: d.update(graph='x'), 'the name'),
-            ('pattern_capabilities_multi_graph_no_graph',
-             lambda d: d.update(code='invalid_request'), 'fields'),
+            ('pattern_capabilities_multi_graph_no_graph', lambda d: d.pop('graph'),
+             'the pair named'),
         ]
         for name, mutate, says in cases:
             with self.subTest(fixture=name, says=says):

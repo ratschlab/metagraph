@@ -50,11 +50,13 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "52035ca1bce2f620",
+  "server_instance": "6c1d6301978d37e4",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
  },
+ "composite_fp": null,
+ "composite_rule": "sha256 over the pairs' index_fp sorted as bytes, joined by \"\\n\" without a trailing newline; null when any pair has no index_fp",
  "compression_level": 1,
  "content_encodings": [
   "gzip",
@@ -119,6 +121,63 @@
  "max_graphs_without_selection": 10,
  "max_request_body_mb": null,
  "mode": "multi",
+ "multigraph": {
+  "envelope_routes": [
+   "/resolve",
+   "/traverse",
+   "/pattern",
+   "/traverse/capabilities",
+   "/pattern/capabilities"
+  ],
+  "envelope_version": 1,
+  "finish_by_ms": [
+   "/traverse",
+   "/resolve",
+   "/pattern"
+  ],
+  "not_after_ms": [
+   "/traverse",
+   "/resolve",
+   "/pattern"
+  ],
+  "request_id": [
+   "/resolve",
+   "/pattern"
+  ],
+  "requests_route": "GET /requests/{request_id}",
+  "resolve_boundary_ties": true,
+  "search_cuts": true,
+  "selectors": {
+   "/pattern": [
+    "graphs",
+    "pairs"
+   ],
+   "/pattern/capabilities": [
+    "graph",
+    "graph_path",
+    "annotation_path"
+   ],
+   "/resolve": [
+    "graphs",
+    "pairs"
+   ],
+   "/search": [
+    "graphs"
+   ],
+   "/traverse": [
+    "graph",
+    "graphs",
+    "pairs"
+   ],
+   "/traverse/capabilities": [
+    "graph",
+    "graph_path",
+    "annotation_path"
+   ]
+  },
+  "traverse_pairs_per_request": 1,
+  "unknown_labels": true
+ },
  "pattern": {
   "alphabet": null,
   "annotation": null,
@@ -343,6 +402,7 @@
   "column_labels": "GET /column_labels",
   "pattern": "POST /pattern",
   "pattern_capabilities": "GET /pattern/capabilities?graph={name}[&graph_path={path}]",
+  "requests": "GET /requests/{request_id}",
   "resolve": "POST /resolve",
   "search": "POST /search",
   "stats": "GET /stats",
@@ -350,5 +410,5 @@
   "traverse_capabilities": "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
  },
  "schema_version": 1,
- "server_instance": "52035ca1bce2f620"
+ "server_instance": "6c1d6301978d37e4"
 }

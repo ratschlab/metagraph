@@ -132,7 +132,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the multi-graph server probed for one pair: that pair's gate block, with `details`"
+   "shows": "the multi-graph server probed for one pair: the envelope of one entry (SPEC-multigraph-envelope.md section 1), the pair's probe with its gate block and `details`, tagged with the pair"
   },
   "pattern_capabilities_multi_graph": {
    "server": "multi",
@@ -141,16 +141,16 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the multi-graph server on the route of the full block: the block of the pair ?graph= selects, naming it (graph, graph_path)"
+   "shows": "the multi-graph server on the route of the full block: the envelope of one entry, the block of the pair ?graph= selects, tagged with the pair (graph, graph_path as version 1 names it, annotation_path, index_fp, outcome)"
   },
   "pattern_capabilities_multi_graph_no_graph": {
    "server": "multi",
    "method": "GET",
    "path": "/pattern/capabilities",
-   "status": 400,
+   "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)"
+   "shows": "the same route without ?graph=: the envelope over every pair (here its one), up to max_graphs_without_selection names (SPEC-multigraph-envelope.md section 1; a 400 before release 10)"
   },
   "traverse_capabilities_utf8_labels": {
    "server": "utf8_labels",

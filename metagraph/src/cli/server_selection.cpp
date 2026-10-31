@@ -595,9 +595,12 @@ select_pairs_from_parameters(SelectionRoute route,
         *slot = value;
     }
     if (!name) {
+        // in the words of a probe without ?graph= (a service tells a multi-graph host by
+        // "needs ?graph=<name>")
         if (spec.graph_path || spec.annotation_path) {
-            throw InvalidRequest("Bad request: " + get + ": graph_path and annotation_path pick "
-                                 "a pair of the name ?graph= names: add ?graph=<name>");
+            throw InvalidRequest("Bad request: in multi-graph mode " + get + " needs "
+                                 "?graph=<name>: graph_path and annotation_path pick a pair of "
+                                 "the name ?graph= names; add ?graph=<name>");
         }
         // A probe without parameters describes every pair (section 1), as a POST request
         // without a selection runs on every pair: up to the names cap, and refused beyond it

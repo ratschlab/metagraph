@@ -4351,14 +4351,17 @@ the other pairs.
 
 ### 24.3 The block per pair
 
-- `GET /pattern/capabilities?graph=NAME[&graph_path=PATH]`: the full block (§10.2) of the pair the parameters
-  select, selected as `/traverse/capabilities` selects it (a name over several graphs needs `graph_path`; a graph
-  with several annotations under the name is refused). Since release 10 in the envelope of
+- `GET /pattern/capabilities?graph=NAME[&graph_path=PATH][&annotation_path=PATH]`: the full block (§10.2) of the
+  pair the parameters select, selected as `/traverse/capabilities` selects it (SPEC-multigraph-envelope.md section
+  6: a name over several graphs needs `graph_path`, a graph with several annotations under the name
+  `annotation_path`; a selection of none or several is a coded 400 with the candidates). Since release 10 in the
+  envelope of
   SPEC-multigraph-envelope.md section 1, one entry: the block tagged `graph`, `graph_path`, `annotation_path`,
   `index_fp`, `outcome` (before: the block with the fields of `capabilities_pair`). Without any parameter the
-  envelope over every pair, up to `max_graphs_without_selection` names; above it, and for parameters without
-  `graph`: 400 `{"error": "Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and
-  graph_path=<path> when the name spans several graphs)..."}`; an unknown or repeated parameter: 400.
+  envelope over every pair, up to `max_graphs_without_selection` names; above it 400 `{"error": "Bad request: in
+  multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and graph_path=<path> when the name spans
+  several graphs) on a list of more than N graph names (M here); ..."}`, and for parameters without `graph` a 400
+  that also says `needs ?graph=<name>`; an unknown or repeated parameter: 400.
 - `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's gate block
   (§23.2) with `details`.
 - `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the

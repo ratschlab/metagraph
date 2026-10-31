@@ -418,8 +418,9 @@ TEST(ServerSelection, CapabilitiesProbes) {
               refusal_of([] { probe(SelectionRoute::TRAVERSE, {}, 2); }));
     EXPECT_EQ("(none)", selection_code_of([] { probe(SelectionRoute::TRAVERSE, {}, 2); }));
     // parameters without ?graph= are refused, however few names the server hosts
-    EXPECT_EQ("Bad request: GET /pattern/capabilities: graph_path and annotation_path pick a "
-              "pair of the name ?graph= names: add ?graph=<name>",
+    EXPECT_EQ("Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name>: "
+              "graph_path and annotation_path pick a pair of the name ?graph= names; add "
+              "?graph=<name>",
               refusal_of([] { probe(SelectionRoute::PATTERN, { { "graph_path", "a.dbg" } }); }));
     EXPECT_EQ("Bad request: unknown parameter 'x' of GET /pattern/capabilities (graph, "
               "graph_path, annotation_path)",

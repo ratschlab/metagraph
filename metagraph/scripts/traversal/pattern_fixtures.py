@@ -619,6 +619,40 @@ def names_the_pair(doc):
     check(doc['graph'] == MULTI_GRAPH_NAME and doc['graph_path'].endswith(MINI_GRAPH), doc)
 
 
+# The members of a GET capabilities envelope (SPEC-multigraph-envelope.md section 1, release 10:
+# a multi-graph server's probes answer it, one entry per pair the probe selects)
+GET_ENVELOPE = ['envelope_version', 'route', 'graphs', 'answered', 'refused', 'server_instance',
+                'answers']
+
+
+def probe_document(entry, route):
+    """A probe's envelope entry as the probe of pattern contract version 1 states the pair's
+    document: without the tags the envelope adds (annotation_path, outcome; on
+    /pattern/capabilities also index_fp, which the full block has not), its graph and graph_path
+    kept (the entry's tags, the names version 1 adds)"""
+    drop = {'annotation_path', 'outcome'}
+    if route == '/pattern/capabilities':
+        drop.add('index_fp')
+    return {k: v for k, v in entry.items() if k not in drop}
+
+
+def probe_envelope(route, inner):
+    """A GET capabilities probe of the multi-graph server (its one pair, by ?graph= or without
+    it): the envelope of one entry, tagged with the pair and its outcome, the entry's document
+    checked by |inner| as version 1 states it (probe_document)"""
+    def run(doc):
+        check(sorted(doc) == sorted(GET_ENVELOPE), sorted(doc))
+        check((doc['envelope_version'], doc['route'], doc['graphs']) == (1, route,
+                                                                        [MULTI_GRAPH_NAME]), doc)
+        check((doc['answered'], doc['refused'], len(doc['answers'])) == (1, 0, 1), doc)
+        e = doc['answers'][0]
+        check(e['graph'] == MULTI_GRAPH_NAME and e['graph_path'].endswith(MINI_GRAPH)
+              and e['annotation_path'].endswith(MINI_ANNO) and e['index_fp'] is None
+              and e['outcome'] == 'answered', e)
+        inner(probe_document(e, route))
+    return run
+
+
 def multi_answers(*per_answer):
     """POST /pattern on a multi-graph server: one answer per selected pair, each tagged with
     its pair, outcome answered, and checked by its own check; the counts of the outcomes"""
@@ -826,17 +860,25 @@ FIXTURES = [
         multi_capabilities),
     get('traverse_capabilities_multi_graph', 'multi',
         '/traverse/capabilities?graph=' + MULTI_GRAPH_NAME,
-        'the multi-graph server probed for one pair: that pair\'s gate block, with `details`',
-        gate_block(True, mask='file', counting='exact')),
+        'the multi-graph server probed for one pair: the envelope of one entry '
+        '(SPEC-multigraph-envelope.md section 1), the pair\'s probe with its gate block and '
+        '`details`, tagged with the pair',
+        probe_envelope('/traverse/capabilities', gate_block(True, mask='file', counting='exact'))),
     get('pattern_capabilities_multi_graph', 'multi',
         '/pattern/capabilities?graph=' + MULTI_GRAPH_NAME,
-        'the multi-graph server on the route of the full block: the block of the pair '
-        '?graph= selects, naming it (graph, graph_path)',
-        expect_all(full_block(True, mask='file', counting='exact'), names_the_pair)),
+        'the multi-graph server on the route of the full block: the envelope of one entry, the '
+        'block of the pair ?graph= selects, tagged with the pair (graph, graph_path as version '
+        '1 names it, annotation_path, index_fp, outcome)',
+        probe_envelope('/pattern/capabilities',
+                       expect_all(full_block(True, mask='file', counting='exact'),
+                                  names_the_pair))),
     get('pattern_capabilities_multi_graph_no_graph', 'multi', '/pattern/capabilities',
-        'the same route without ?graph=: 400, as on /traverse/capabilities (the pair is named)',
-        lambda doc: check(set(doc) == {'error'} and 'needs ?graph=' in doc['error'], doc),
-        status=400),
+        'the same route without ?graph=: the envelope over every pair (here its one), up to '
+        'max_graphs_without_selection names (SPEC-multigraph-envelope.md section 1; a 400 '
+        'before release 10)',
+        probe_envelope('/pattern/capabilities',
+                       expect_all(full_block(True, mask='file', counting='exact'),
+                                  names_the_pair))),
     get('traverse_capabilities_utf8_labels', 'utf8_labels', '/traverse/capabilities',
         'GET /traverse/capabilities of the utf8_labels server (a BASIC graph with its mask file, '
         'counting exact, an unbudgeted column annotation by header): the block of a server one '
