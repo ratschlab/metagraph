@@ -6181,38 +6181,44 @@ class TestTraversePrimary(TestingBase):
             cls._annotate_graph(fasta, graph, base, anno, anno_type='header')
             cls.indexes[name] = (graph, f'{base}.{anno}.annodbg')
 
-        # the deployed way: row_diff_brwt on a primary graph, memory-mapped
-        cls.port = None
+        # served the deployed way, memory-mapped: row_diff_brwt (the Logan chunks) and
+        # row_diff_disk (metagut, metasub41) on a primary graph
+        cls.servers = {}
+        for index in ('primary', 'primary_disk'):
+            cls.servers[index] = cls._start_server(*cls.indexes[index])
+        cls.url = cls.servers['primary'][0]
+
+    @classmethod
+    def _start_server(cls, graph, anno):
+        """server_query on |graph| and |anno| under --mmap -> (url, process, log)."""
         for _ in range(20):
             port = _free_port()
-            cls.server_log = open(f'{d}/server-{port}.log', 'w')
-            cls.server = subprocess.Popen(
-                [METAGRAPH, 'server_query', '-i', primary, '-a', cls.indexes['primary'][1],
-                 '--mmap', '--address', '127.0.0.1', '--port', str(port), '-p', '2'],
-                stdout=cls.server_log, stderr=subprocess.STDOUT)
-            cls.url = f'http://127.0.0.1:{port}'
+            log = open(f'{cls.tempdir.name}/server-{port}.log', 'w')
+            process = subprocess.Popen(
+                [METAGRAPH, 'server_query', '-i', graph, '-a', anno, '--mmap',
+                 '--address', '127.0.0.1', '--port', str(port), '-p', '2'],
+                stdout=log, stderr=subprocess.STDOUT)
+            url = f'http://127.0.0.1:{port}'
             for _ in range(600):
-                if cls.server.poll() is not None:
+                if process.poll() is not None:
                     break
                 try:
-                    if requests.get(cls.url + '/traverse/capabilities', timeout=2).ok:
-                        cls.port = port
-                        break
+                    if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                        return url, process, log
                 except requests.exceptions.RequestException:
                     pass
                 time.sleep(0.1)
-            if cls.port:
-                break
-            cls.server.kill()
-            cls.server.wait()
-            cls.server_log.close()
-        assert cls.port, 'the server on the primary graph did not start'
+            process.kill()
+            process.wait()
+            log.close()
+        raise AssertionError(f'the server on {anno} did not start')
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.kill()
-        cls.server.wait()
-        cls.server_log.close()
+        for _, process, log in cls.servers.values():
+            process.kill()
+            process.wait()
+            log.close()
         super().tearDownClass()
 
     @classmethod
@@ -6419,7 +6425,7 @@ class TestTraversePrimary(TestingBase):
     def test_resolve_presence_and_discovery(self):
         """/resolve reads a k-mer's labels on either strand: the profile of a query and of its
         reverse complement are each other's mirror, every run what the records say, the same on
-        every primary annotation and on the canonical graph, through the CLI and the server (the
+        every primary annotation and on the canonical graph, through the CLI and the servers (the
         same bytes). The frozen seeds of both orientations carry the same canonical seed ids.
         The basic graph reads the forward strand only: inv's reversed E is not E there."""
         query = self.L1[-40:] + self.E + self.R1[:40]
@@ -6445,11 +6451,12 @@ class TestTraversePrimary(TestingBase):
                     self.assertEqual('canonical' if index == 'canonical' else 'primary',
                                      out['regime'])
                 # the server's body is the CLI's, but for the per-task figures
-                ret = requests.post(self.url + '/resolve', data=json.dumps(request))
-                self.assertEqual(200, ret.status_code, ret.text)
-                _, _, text = self._cli('primary', request, resolve=True)
-                self.assertEqual(TestTraverseResolveRegression._untimed(text),
-                                 TestTraverseResolveRegression._untimed(ret.text))
+                for index, (url, _, _) in self.servers.items():
+                    ret = requests.post(url + '/resolve', data=json.dumps(request))
+                    self.assertEqual(200, ret.status_code, ret.text)
+                    _, _, text = self._cli(index, request, resolve=True)
+                    self.assertEqual(TestTraverseResolveRegression._untimed(text),
+                                     TestTraverseResolveRegression._untimed(ret.text), index)
 
         def seeds(sequence):
             out = self._ok('primary', {'sequence': sequence, 'discover': {'max_labels': 10},
@@ -6508,8 +6515,8 @@ class TestTraversePrimary(TestingBase):
         """Every request walks the same on every annotation of the primary graph and on
         the canonical graph of the same records: the same walks, labels, events, counters
         and graphlets, only the access path, what reads cost, the regime and the index's meta
-        fingerprint differ (and with the last two the graphlet's H record). The server under
-        --mmap answers each request with the CLI's bytes."""
+        fingerprint differ (and with the last two the graphlet's H record). The servers under
+        --mmap (row_diff_brwt and row_diff_disk) answer each request with the CLI's bytes."""
         for name, request in self._requests().items():
             with self.subTest(request=name):
                 outs = {index: self._ok(index, request)
@@ -6524,10 +6531,11 @@ class TestTraversePrimary(TestingBase):
                     regime = 'canonical' if index == 'canonical' else 'primary'
                     got = self._graphlet_body(self._without_access(out), regime)
                     self.assertEqual(ref, got, index)
-                ret = requests.post(self.url + '/traverse', data=json.dumps(request))
-                self.assertEqual(200, ret.status_code, ret.text[:500])
-                _, _, text = self._cli('primary', request)
-                self.assertEqual(text, ret.text)
+                for index, (url, _, _) in self.servers.items():
+                    ret = requests.post(url + '/traverse', data=json.dumps(request))
+                    self.assertEqual(200, ret.status_code, ret.text[:500])
+                    _, _, text = self._cli(index, request)
+                    self.assertEqual(text, ret.text, index)
 
     def test_traverse_agrees_with_the_basic_graph_up_to_orientation(self):
         """From a seed of the forward records, under their labels, a primary walk is the basic
