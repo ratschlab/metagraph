@@ -313,12 +313,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         for (const auto &file : files) {
             using Seq = std::tuple<std::string, std::vector<std::string>, uint64_t>;
             BatchAccumulator<Seq> batcher(
-                [&anno_graph](std::vector<Seq>&& data) {
+                [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                     auto *data_p = new std::vector<Seq>(std::move(data));
-                    #pragma omp task firstprivate(data_p) shared(anno_graph)
+                    // The task can outlive the batcher's callback at a file boundary.
+                    #pragma omp task firstprivate(data_p, graph_p)
                     {
                         std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
-                        anno_graph->annotate_kmer_coords(*data_ptr);
+                        graph_p->annotate_kmer_coords(*data_ptr);
                     }
                 },
                 BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
@@ -374,12 +375,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     for (const auto &file : files) {
         using Seq = std::pair<std::string, std::vector<std::string>>;
         BatchAccumulator<Seq> batcher(
-            [&anno_graph](std::vector<Seq>&& data) {
+            [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                 auto *data_p = new std::vector<Seq>(std::move(data));
-                #pragma omp task firstprivate(data_p) shared(anno_graph)
+                // The task can outlive the batcher's callback at a file boundary.
+                #pragma omp task firstprivate(data_p, graph_p)
                 {
                     std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
-                    anno_graph->annotate_sequences(*data_ptr);
+                    graph_p->annotate_sequences(*data_ptr);
                 }
             },
             BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
@@ -415,13 +417,14 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
             using Seq = std::tuple<std::string, std::vector<std::string>, std::vector<uint64_t>>;
             BatchAccumulator<Seq> batcher(
-                [&anno_graph](std::vector<Seq>&& data) {
+                [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                     auto *data_p = new std::vector<Seq>(std::move(data));
-                    #pragma omp task firstprivate(data_p) shared(anno_graph)
+                    // The task can outlive the batcher's callback at a file boundary.
+                    #pragma omp task firstprivate(data_p, graph_p)
                     {
                         std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
                         for (auto &[seq, labels, kmer_counts] : *data_ptr) {
-                            anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
+                            graph_p->add_kmer_counts(seq, labels, std::move(kmer_counts));
                         }
                     }
                 },
