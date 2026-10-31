@@ -1581,6 +1581,28 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
         return json.loads(res.stdout.decode().strip().split('\n')[-1])
 
+    def test_resolve_entry_states_the_boundary_tie(self):
+        """A pair's discovery cut passes through the envelope unchanged (SPEC-multigraph-
+        envelope.md section 7, E18): labels_truncated with its boundary tie members, as the
+        single-graph answer on the pair's files states it."""
+        fastas = self.columns['pseudo']
+        # 100 bp of one file's record and 160 bp of the other's: two labels of unequal support
+        seq = (max(records_of(fastas[:1]), key=len)[5000:5100]
+               + max(records_of(fastas[1:]), key=len)[5000:5160])
+        r = {'sequence': seq, 'discover': {'max_labels': 1}}
+        (entry,) = self.post('resolve', dict(r, graph='pseudo'))['answers']
+        self.assertEqual('answered', entry['outcome'])
+        cut = entry['labels_truncated']
+        # the members of the reference sample 04
+        self.assertEqual({'total', 'kept', 'min_kept_kmers', 'max_dropped_kmers',
+                          'dropped_full_length', 'tied_at_boundary', 'tied_kept'}, set(cut))
+        self.assertEqual((2, 1, 1, 1), (cut['total'], cut['kept'], cut['tied_at_boundary'],
+                                        cut['tied_kept']), cut)
+        # the single-graph answer, with the unknown_labels of a multi-graph server's pair
+        # (section 2: present, possibly empty)
+        self.assertEqual(untimed(dict(self.cli_resolve('pseudo', r), unknown_labels=[])),
+                         untimed({k: v for k, v in entry.items() if k not in TAGS}))
+
     def test_resolve_answers_the_envelope(self):
         """POST /resolve on a multi-graph server (SPEC-multigraph-envelope.md section 1, E2):
         the envelope, also for a named graph (one entry, `graph` and `graphs: [name]` one
