@@ -251,8 +251,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
             size_t calls = 0;
-            size_t last_record = 0;
-            std::vector<size_t> records;
+            // the header of every record, and the records that have k-mers
+            std::vector<std::string> record_headers;
+            std::vector<size_t> stored;
             call_annotations(
                 files[i],
                 config.refpath,
@@ -267,33 +268,37 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.fasta_header_delimiter,
                 {}, // config.anno_labels
                 [&](std::string sequence, auto labels, uint64_t) {
-                    const size_t record = calls++ / (forward_and_reverse ? 2 : 1) + 1;
+                    // A record's reverse complement shares its coordinates
+                    const size_t record = calls++ / (forward_and_reverse ? 2 : 1);
                     if (labels.size() != 1 || labels[0].empty() || !utils::valid_utf8(labels[0])) {
                         logger->error("Record {} in '{}' needs one non-empty UTF-8 header for "
                                       "the record mapping; do not split it with --header-delimiter",
-                                      record, files[i]);
+                                      record + 1, files[i]);
                         exit(1);
                     }
+                    if (record == record_headers.size())
+                        record_headers.push_back(labels[0]);
                     if (sequence.size() < k)
                         return;
-                    // A record's reverse complement shares its coordinates. Distinct
-                    // records must remain distinct even when their header text repeats.
-                    if (headers[i].empty() || record != last_record) {
-                        headers[i].push_back(labels[0]);
+                    if (stored.empty() || stored.back() != record) {
+                        stored.push_back(record);
                         num_kmers[i].push_back(0);
-                        records.push_back(record);
                     }
                     num_kmers[i].back() += sequence.size() - k + 1;
-                    last_record = record;
                 }
             );
-            annot::CoordToHeader::find_duplicate_headers(headers[i], [&](size_t first, size_t repeat) {
+            // Check every record, including those too short to have k-mers
+            annot::CoordToHeader::find_duplicate_headers(record_headers, [&](size_t first, size_t repeat) {
                 logger->error("Header of record {} in '{}' repeats record {}: record headers "
                               "must be distinct within a file for the record mapping",
-                              records[repeat], files[i], records[first]);
+                              repeat + 1, files[i], first + 1);
                 exit(1);
                 return false;
             });
+            headers[i].reserve(stored.size());
+            for (size_t record : stored) {
+                headers[i].push_back(std::move(record_headers[record]));
+            }
         }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
         auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);

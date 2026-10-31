@@ -449,6 +449,7 @@ class TestAnnotate(TestingBase):
         for name, content in [
             ('consecutive', '>A\nGGCTTACGTAAGCATG\n>A\nCCTGGACGTACCTAGG\n'),
             ('apart', '>A\nGGCTTACGTAAGCATG\n>B\nCCTGGACGTACCTAGG\n>A\nGGCTTACGTA\n'),
+            ('short', '>A\nGGCTTACGTAAGCATG\n>A\nGGC\n'),
         ]:
             res, written = index(name, content)
             self.assertNotEqual(res.returncode, 0, name)
