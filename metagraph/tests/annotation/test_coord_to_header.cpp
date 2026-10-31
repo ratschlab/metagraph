@@ -343,9 +343,21 @@ TEST(AlignmentFormatCoords, CrossSequenceBoundaryWithK) {
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
-    aln.label_coordinates = { { 7 } };  // seqA local 7; 7 nt fit + 1 spills
+    aln.label_coordinates = { { 7 } };  // Three k-mers in seqA, one in seqB.
 
-    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/14:8-14;seqB/14:1-1");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/14:8-14;seqB/14:1-5");
+}
+
+TEST(AlignmentFormatCoords, PartialLastKmer) {
+    using namespace mtg::graph::align;
+    CoordToHeader cth({ { "seqA", "seqB" } }, { { 5, 5 } });
+    for (size_t length = 0; length <= 5; ++length) {
+        Alignment aln(std::string_view{}, {}, std::string(length, 'A'), 0, {}, 0, false, 0);
+        aln.label_columns = { 0 };
+        aln.label_coordinates = { { 4 } };
+        EXPECT_EQ(aln.format_coords(cth, 5),
+                  length ? "seqA/9:5-" + std::to_string(4 + length) : "");
+    }
 }
 
 TEST(AlignmentFormatCoords, CrossThreeSequences) {
@@ -359,7 +371,7 @@ TEST(AlignmentFormatCoords, CrossThreeSequences) {
 
     Alignment aln(
         std::string_view{}, {},
-        std::string("ACGTACGTACGTACGT"),  // 16 nt, crosses both boundaries
+        std::string("ACGTACGTACGT"),  // 12 nt, crosses both boundaries
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
@@ -387,17 +399,17 @@ TEST(AlignmentFormatCoords, TwoCoordsBothCrossIntoSameNextSequence) {
     );
     aln.label_columns = { 0 };
     // Both coords are in seqA; both produce 8 nt ranges that cross into seqB.
-    //   coord 6 -> seqA local 6, avail=6, spills 2 nt into seqB
-    //   coord 7 -> seqA local 7, avail=5, spills 3 nt into seqB
+    //   coord 6 -> two k-mers in seqA, two in seqB
+    //   coord 7 -> one k-mer in seqA, three in seqB
     aln.label_coordinates = { { 6, 7 } };
 
-    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/12:7-12:8-12;seqB/12:1-2:1-3");
+    EXPECT_EQ(aln.format_coords(cth, 5), "seqA/12:7-12:8-12;seqB/12:1-6:1-7");
 }
 
 TEST(AlignmentFormatCoords, OverflowPastLastHeader) {
     using namespace mtg::graph::align;
 
-    // Total column capacity = 14 nt; alignment of 20 nt overruns by 6 nt,
+    // The ten k-mers spell 12 nt; alignment of 20 nt overruns by 8 nt,
     // exercising the warn+truncate branch.
     CoordToHeader cth(
         { { "seqA", "seqB" } },
@@ -438,16 +450,16 @@ TEST(AlignmentFormatCoords, ExactlyFillsStartingHeader) {
 TEST(AlignmentFormatCoords, SpansEntireColumn) {
     using namespace mtg::graph::align;
 
-    // L == total nt of the column; the walk must land on zero remaining
-    // after emitting every header exactly once.
+    // The nine k-mers spell 11 nt with k=3. Each header's covered range
+    // includes the shared boundary bases.
     CoordToHeader cth(
         { { "seqA", "seqB", "seqC" } },
-        { { 3, 4, 2 } }  // 5 + 6 + 4 = 15 nt with k=3
+        { { 3, 4, 2 } }
     );
 
     Alignment aln(
         std::string_view{}, {},
-        std::string("ACGTACGTACGTACG"),  // 15 nt
+        std::string("ACGTACGTACG"),  // 11 nt
         0, {}, 0, false, 0
     );
     aln.label_columns = { 0 };
