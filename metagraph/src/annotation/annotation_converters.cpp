@@ -300,6 +300,84 @@ std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::strin
     return std::make_pair(anchors_file, fork_succ_file);
 }
 
+std::pair<bit_vector_small, sdsl::int_vector<>>
+compute_rd_succ_char(const graph::DeBruijnGraph &graph,
+                     const bit_vector &fork_succ) {
+    using node_index = graph::DeBruijnGraph::node_index;
+
+    const auto &alphabet = graph.alphabet();
+    // skip sentinel '$' if present at position 0
+    size_t offset = (alphabet[0] == '$') ? 1 : 0;
+    size_t alpha_size = alphabet.size() - offset;
+
+    // bits per character: ceil(log2(alpha_size))
+    uint8_t bits_per_char = 0;
+    for (size_t s = alpha_size - 1; s > 0; s >>= 1)
+        ++bits_per_char;
+
+    // build char-to-index map for the non-sentinel alphabet
+    std::array<uint8_t, 256> char_to_idx{};
+    for (size_t i = 0; i < alpha_size; ++i) {
+        char_to_idx[static_cast<unsigned char>(alphabet[i + offset])] = i;
+    }
+
+    // Nodes are processed in blocks in parallel. The block size is a multiple of 64,
+    // so no two threads write to the same word of |needs_char_bv|. Each block keeps
+    // its chars packed until all blocks are concatenated in node order.
+    const uint64_t num_rows = graph.max_index() + 1;
+    constexpr uint64_t kBlockSize = 64 << 14;
+    const uint64_t num_blocks = (num_rows + kBlockSize - 1) / kBlockSize;
+    sdsl::bit_vector needs_char_bv(num_rows, 0);
+    std::vector<sdsl::int_vector<>> block_chars(num_blocks);
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (uint64_t b = 0; b < num_blocks; ++b) {
+        std::vector<uint8_t> chars;
+        const uint64_t end = std::min(num_rows, (b + 1) * kBlockSize);
+        for (node_index node = std::max<uint64_t>(b * kBlockSize, 1); node < end; ++node) {
+            // If the graph can trivially determine the successor, no need to store
+            if (!graph.in_graph(node) || graph.has_no_outgoing(node)
+                    || graph.trivial_outgoing(node) != graph::DeBruijnGraph::npos)
+                continue;
+
+            // Need to store the character for this node
+            node_index succ = row_diff_successor(graph, node, fork_succ);
+            int idx = -1;
+            graph.call_outgoing_kmers(node, [&](node_index adj, char c) {
+                if (adj == succ)
+                    idx = char_to_idx[static_cast<unsigned char>(c)];
+            });
+            if (idx < 0) {
+                logger->error("No outgoing edge of node {} leads to its row-diff "
+                              "successor {}", node, succ);
+                std::exit(1);
+            }
+            needs_char_bv[node] = true;
+            chars.push_back(idx);
+        }
+        block_chars[b] = sdsl::int_vector<>(chars.size(), 0, bits_per_char);
+        std::copy(chars.begin(), chars.end(), block_chars[b].begin());
+    }
+
+    size_t count = 0;
+    for (const auto &chars : block_chars) {
+        count += chars.size();
+    }
+    sdsl::int_vector<> rd_succ_char(count, 0, bits_per_char);
+    auto it = rd_succ_char.begin();
+    for (auto &chars : block_chars) {
+        it = std::copy(chars.begin(), chars.end(), it);
+        chars = sdsl::int_vector<>();
+    }
+
+    logger->trace("Computed rd_succ_char: {} nodes total, {} need stored char ({:.1f}%), "
+                  "{} bits/char",
+                  graph.max_index(), count,
+                  100.0 * count / std::max<size_t>(graph.max_index(), 1),
+                  bits_per_char);
+    return { bit_vector_small(std::move(needs_char_bv)), std::move(rd_succ_char) };
+}
+
 std::tuple<std::vector<std::unique_ptr<bit_vector>>, LabelEncoder<std::string>, uint64_t>
 load_row_diff_columns(const std::vector<std::string> &files) {
     std::vector<std::unique_ptr<bit_vector>> columns;
