@@ -178,6 +178,18 @@ std::optional<uint64_t> read_not_after_ms(const Json::Value &request, const std:
     return v.asUInt64();
 }
 
+std::optional<uint64_t> read_finish_by_ms(const Json::Value &request, const std::string &where) {
+    if (!request.isObject() || !request.isMember("finish_by_ms"))
+        return std::nullopt;
+    // not_after_ms's rule: an instant is never rounded into one the client did not mean
+    const Json::Value &v = request["finish_by_ms"];
+    if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0) || v.asUInt64() > kMaxNotAfterMs) {
+        throw InvalidRequest(where + ".finish_by_ms: expected an integer in [0, "
+                             + std::to_string(kMaxNotAfterMs) + "] (Unix epoch, ms)");
+    }
+    return v.asUInt64();
+}
+
 bool instance_mismatch(const AttemptIds &ids, const std::string &instance) {
     return !ids.expect_server_instance.empty() && ids.expect_server_instance != instance;
 }
@@ -270,6 +282,29 @@ Attempt::Attempt(size_t request_id, std::chrono::system_clock::time_point header
 
 Clock::time_point Attempt::now() const { return settings_.clock(); }
 
+void Attempt::set_finish_by(std::optional<uint64_t> finish_by_ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    finish_by_ms_ = finish_by_ms;
+    finish_cap_ms_.reset();
+    if (finish_by_ms) {
+        // finish_by_ms less the clock skew allowance, on the attempt's clock (ms since the
+        // request's header was read): an instant already passed bounds the attempt at once
+        const auto received_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                received_wall_.time_since_epoch()).count();
+        finish_cap_ms_ = std::max(0.0, static_cast<double>(*finish_by_ms)
+                                       - static_cast<double>(settings_.clock_skew_ms)
+                                       - static_cast<double>(received_ms));
+    }
+    apply_finish_cap_locked();
+    update_walk_until_locked();
+}
+
+void Attempt::apply_finish_cap_locked() {
+    finish_capped_ = finish_cap_ms_ && *finish_cap_ms_ < bound_ms_;
+    if (finish_capped_)
+        bound_ms_ = *finish_cap_ms_;
+}
+
 double Attempt::ms_since_received(Clock::time_point t) const {
     return std::chrono::duration<double, std::milli>(t - received_).count();
 }
@@ -296,6 +331,7 @@ void Attempt::set_bound(size_t seeds, double time_budget_ms, uint64_t memory_bud
     bound_load_ms_ = load_ms;
     capped_ = settings_.hard_cap_ms > 0 && !(raw <= settings_.hard_cap_ms);
     bound_ms_ = capped_ ? settings_.hard_cap_ms : raw;
+    apply_finish_cap_locked();
     bound_set_ = true;
     checked_walk_until_ms_.store(std::numeric_limits<double>::infinity(),
                                  std::memory_order_relaxed);
@@ -633,7 +669,8 @@ Json::Value Attempt::bound_json() const {
     const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
     b["walk_until_ms"] = ceil_ms_json(tripped_walk_until_ms_ ? *tripped_walk_until_ms_
                                : std::isfinite(checked) ? checked : walk_until_ms_);
-    b["capped_by"] = capped_ ? Json::Value("content_timeout") : Json::Value();
+    b["capped_by"] = finish_capped_ ? Json::Value("finish_by_ms")
+                   : capped_ ? Json::Value("content_timeout") : Json::Value();
     b["enforced"] = enforced();
     return b;
 }

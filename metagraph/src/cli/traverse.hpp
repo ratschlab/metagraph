@@ -464,8 +464,20 @@ class ResolveDelivery {
             check_();
     }
 
+    // The latest instant the request's deadline may reach (SPEC-multigraph-envelope.md section
+    // 4: finish_by_ms less the clock skew allowance, and in a multi-graph fan-out the work
+    // cutoff): process_resolve_request makes its deadline the minimum of its own and this,
+    // stated in limits.clamped; a request without bounds.time_budget_ms then gets the server's
+    // maximum (ResolveTimeLimits::max_time_ms) as its own. Unset: the request's own deadline
+    // alone (none without the field)
+    void set_deadline_cap(std::chrono::steady_clock::time_point cap) { cap_ = cap; }
+    const std::optional<std::chrono::steady_clock::time_point>& deadline_cap() const {
+        return cap_;
+    }
+
   private:
     std::function<void()> check_;
+    std::optional<std::chrono::steady_clock::time_point> cap_;
 };
 
 // What POST /resolve writes its answer under: |control| (process_request's ResponseControl),

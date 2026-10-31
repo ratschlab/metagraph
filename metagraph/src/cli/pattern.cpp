@@ -24,6 +24,7 @@
 #include "pattern_predicate.hpp"
 #include "pattern_support.hpp"
 #include "pattern_supported.hpp"
+#include "server_fanout.hpp"
 #include "traverse.hpp"
 
 
@@ -306,6 +307,17 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     Fields f(json, "request");
     ParsedRequest req;
     f.has("in_ram");
+    // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
+    // not_after_ms, finish_by_ms), read by the server before the request runs by the same rule
+    // (read_request_handles), checked here too, so that the CLI refuses what the server refuses
+    try {
+        read_request_handles(json);
+    } catch (const std::invalid_argument &e) {
+        throw invalid(e.what());
+    }
+    for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
+        f.has(field);
+    }
 
     if (!f.has("patterns"))
         throw invalid("request.patterns: required: a list of 1 to "
@@ -1516,8 +1528,8 @@ Json::Value parse_pattern_body(const std::string &content) {
     return parse_strict_json<InvalidPatternRequest>(content, "request: not JSON: ");
 }
 
-void validate_pattern_request(const Json::Value &json, const PatternLimits &limits) {
-    parse_request(json, limits);
+double validate_pattern_request(const Json::Value &json, const PatternLimits &limits) {
+    return parse_request(json, limits).time_budget_ms;
 }
 
 Json::Value process_pattern_request(const Json::Value &json,
@@ -1557,6 +1569,21 @@ Json::Value process_pattern_request(
     ParsedRequest req = parse_request(json, limits);
     const Mode mode = req.request.mode;
 
+    if (delivery && delivery->deadline_cap()) {
+        // the request's deadline is the minimum of its own and the cap (finish_by_ms less the
+        // clock skew allowance; in a multi-graph fan-out also the work cutoff,
+        // SPEC-multigraph-envelope.md section 4), stated as a clamp of the budget: the time
+        // left at its start
+        const double left = std::max(0.0, std::chrono::duration<double, std::milli>(
+                                                  *delivery->deadline_cap() - start).count());
+        if (left < req.time_budget_ms) {
+            note_clamped(&req.clamped, "time_budget_ms",
+                         json.isMember("time_budget_ms") ? json["time_budget_ms"]
+                                                         : number_json(req.time_budget_ms),
+                         number_json(left));
+            req.time_budget_ms = left;
+        }
+    }
     const Deadline deadline(start, req.time_budget_ms, limits.finalize_ms, now);
     if (delivery)
         delivery->set_deadline(deadline);
