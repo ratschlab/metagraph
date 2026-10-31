@@ -4241,14 +4241,19 @@ how the search service uses it; the route serves any number.
   while the other pairs run on and are answered. The request answers 200 whenever its own checks passed and the
   envelope is written, every pair refused included (`answered: 0`). The refusals that no pair decides stay the
   request's 400.
-- The envelope is written by the latest deadline of the pairs that answered; past it, 503 `deadline` (§7.6). A
-  refused pair binds nothing: one refused for its deadline has passed it, one refused before its work has none;
-  with no pair answered the envelope has no deadline. With one graph that answered this is the single-graph rule
-  exactly. The texts of several pairs are written together, each pair's work having kept back the time for its
-  own text only, so a request naming many graphs can reach the 503 where each alone would not: name one graph
-  per request where the answer is large. Each pair's deadline starts with its own work (after its load, §24.2;
-  after its turn on the pool when the pool has fewer threads than the request has pairs), so a pair past its
-  deadline is answered as a refused entry beside pairs whose later deadlines the envelope still met.
+- Deadlines (release 10, `SPEC-multigraph-envelope.md` section 4, which this bullet follows): the request's
+  EFFECTIVE deadline is its arrival plus `time_budget_ms`, or `finish_by_ms` less the clock skew allowance when
+  that is earlier; its WORK CUTOFF is that less the finalisation reserve. Each pair keeps its own deadline, which
+  starts with its own work (after its load, §24.2; after its turn on the pool when the pool has fewer threads than
+  the request has pairs) and is capped by `finish_by_ms` alone. At the cutoff the request stops waiting: a pair
+  never started is a refused entry `{http_status: 503, code: "not_reached", reason, error}`, a pair started and
+  not finished one `{http_status: 503, code: "unfinished", reason, error, usage}` (told to stop), and the
+  answered pairs are written beside them by the effective deadline; past it, 503 `deadline` (§7.6). A pair's
+  `time_budget_ms` equals the request's, so a pair that runs to its own budget ends at about the cutoff, answered
+  or cut by a narrow margin. With one pair the pair runs on the handler's thread and the envelope is written by
+  its own deadline: the single-graph rule exactly. The texts of several pairs are written together, each pair's
+  work having kept back the time for its own text only, so a request naming many graphs can reach the 503 where
+  each alone would not: name one graph per request where the answer is large.
 - A client that left is not answered (§3), at any point: while a load waits for memory, during the work, while
   the answer is written.
 
@@ -4262,6 +4267,13 @@ how the search service uses it; the route serves any number.
 | `answers` | list of objects | one per pair, in the order above: the answer of §8 on that pair with the fields of `answer_pair`, or, for a refused pair, the fields of `answer_pair` alone (`refusal` among them) |
 | `work` | object | `memory_bytes`: the answered pairs' `work.memory_bytes` together — each pair's account is its own and the pairs run at once on the graph pool, so at most what they held at the same time (2026-10-21) |
 | `timing` | object | `elapsed_ms`: the whole request, the loads and the pairs' work included; `cpu_ms` (and `page_faults` on Linux, §8.4): the request's own thread (the parse, the checks, the envelope) plus every pair's work on its pool thread, from its index lease to its entry — an answered pair's top-level `cpu_ms` and the work of a pair refused after its lease (the loads' own threads not counted). Varies between runs |
+| `envelope_version` | integer | 1: the multi-graph envelope of `SPEC-multigraph-envelope.md` section 1 |
+| `route` | string | `/pattern` |
+| `not_reached` | list of objects | the pairs never started (refusal `code: "not_reached"`), each `{graph, graph_path, annotation_path}`, in the order of `answers` |
+| `unfinished` | list of objects | the pairs started and cut at the work cutoff (refusal `code: "unfinished"`), likewise |
+| `request_id` | string \| null | the request's `request_id` (`SPEC-multigraph-envelope.md` section 5); `null` without one |
+| `server_instance` | string | this server process (the attempt ledger's value). Varies between runs |
+| `deadline` | object | `{not_after_ms, finish_by_ms, effective_deadline_at, cutoff_at}`: the first two as the request gave them, the instants stated when it gave either; `null` where not given |
 
 <!-- schema: answer_pair -->
 | field | type | meaning |
@@ -4278,7 +4290,9 @@ how the search service uses it; the route serves any number.
 |---|---|---|
 | `http_status` | integer | the status the pair alone would have been answered: 400 for every refusal of §6 but the deadline, 503 for `deadline`; a failure while the pair was processed 400 (a standard exception, its text) or 500 (`Internal server error`), as §6 states them for a request |
 | `error` | string | §6's `error`: for people; may change |
-| `code` | string | §6's `code`, the one a single-graph server would have answered; absent for a failure, as its body has none |
+| `code` | string | §6's `code`, the one a single-graph server would have answered; absent for a failure, as its body has none; `not_reached` or `unfinished` for a pair cut at the work cutoff (503, `SPEC-multigraph-envelope.md` section 4) |
+| `reason` | string | a cut pair only: `cutoff`, `not_after_ms` or `transport` (`not_reached`); `cutoff` or `loading` (`unfinished`) |
+| `usage` | object | an `unfinished` pair only: `{state, started_at, elapsed_ms, cpu_ms, memory_bytes}`, its work so far; its final usage is in `GET /requests/{request_id}` |
 
 A requester merges the answers (`PROMPT-search-service-pattern.md` §3.1 item 2): counts of different pairs are
 counts of different graphs. A label's counts and occurrences summed over pairs are each column's once only when

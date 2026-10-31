@@ -383,12 +383,14 @@ SCHEMA = {
     'motif_label': ['column', 'contexts', 'strands'],
     # a multi-graph server (SPEC §24): its answer, the tags of each pair's answer, the block of
     # one pair (GET /pattern/capabilities?graph=), and GET /capabilities' graph_summary
+    # (with the members of the multi-graph envelope, SPEC-multigraph-envelope.md section 1)
     'answer_multi': ['pattern_contract_version', 'graphs', 'answered', 'refused', 'answers',
-                     'timing', 'work'],
+                     'timing', 'work', 'envelope_version', 'route', 'not_reached',
+                     'unfinished', 'request_id', 'server_instance', 'deadline'],
     'answer_pair': ['graph', 'graph_path', 'annotation_path', 'index_fp', 'outcome', 'refusal'],
     # a refused entry's `refusal`: the body the pair alone would have been answered, with its
     # HTTP status (no code for an unexpected failure)
-    'pair_refusal': ['http_status', 'error', 'code'],
+    'pair_refusal': ['http_status', 'error', 'code', 'reason', 'usage'],
     'capabilities_pair': ['graph', 'graph_path'],
     'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs'],
     'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
@@ -548,6 +550,12 @@ def spec_table_rows(text):
         assert m.group(1) not in out, f'schema {m.group(1)} twice'
         out[m.group(1)] = rows
     return out
+
+
+# The multi-graph envelope's deadline block, and the usage so far of a pair cut at the work
+# cutoff (SPEC-multigraph-envelope.md sections 1 and 4; not tables of SPEC-pattern-search.md)
+ENVELOPE_DEADLINE = ['not_after_ms', 'finish_by_ms', 'effective_deadline_at', 'cutoff_at']
+CUT_USAGE = ['state', 'started_at', 'elapsed_ms', 'cpu_ms', 'memory_bytes']
 
 
 def spec_tables(text):
@@ -1633,6 +1641,24 @@ class Checker:
         answer) -- the counts of the outcomes, and the request's time"""
         self.keys(a, SCHEMA['answer_multi'], 'answer')
         self.ok(a['pattern_contract_version'] == 1, 'pattern_contract_version')
+        # the envelope (SPEC-multigraph-envelope.md sections 1 and 4): its version and route,
+        # the client's request_id, the server process, the deadlines, and the pairs never
+        # started (not_reached) or cut at the work cutoff (unfinished), named by their tags
+        self.ok(a['envelope_version'] == 1, 'envelope_version')
+        self.ok(a['route'] == '/pattern', 'route')
+        self.ok(a['request_id'] == request.get('request_id'), 'request_id',
+                'the request\'s request_id, null without one')
+        self.ok(isinstance(a['server_instance'], str) and a['server_instance'],
+                'server_instance')
+        self.keys(a['deadline'], ENVELOPE_DEADLINE, 'deadline')
+        for field in ('not_after_ms', 'finish_by_ms'):
+            self.ok(a['deadline'][field] == request.get(field), 'deadline.' + field,
+                    'as the request gave it')
+        for field in ('not_reached', 'unfinished'):
+            cut = [{k: x[k] for k in ('graph', 'graph_path', 'annotation_path')}
+                   for x in a['answers'] if x.get('outcome') == 'refused'
+                   and x['refusal'].get('code') == field]
+            self.ok(a[field] == cut, field, 'the pairs whose refusal says so, in order')
         asked = request.get('graphs')
         self.ok(a['graphs'] == sorted(set(asked)) if asked is not None
                 else a['graphs'] == sorted(a['graphs']), 'graphs',
@@ -1678,6 +1704,20 @@ class Checker:
         self.ok(isinstance(r, dict) and set(r) <= set(SCHEMA['pair_refusal'])
                 and {'http_status', 'error'} <= set(r), path, 'http_status, error[, code]')
         self.ok(isinstance(r['error'], str) and r['error'], path + '.error')
+        if r.get('code') in ('not_reached', 'unfinished'):
+            # cut at the work cutoff (SPEC-multigraph-envelope.md section 4): 503 with its
+            # reason; a started pair states its usage so far
+            self.ok(r['http_status'] == 503, path + '.http_status')
+            reasons = (('cutoff', 'not_after_ms', 'transport') if r['code'] == 'not_reached'
+                       else ('cutoff', 'loading'))
+            self.one_of(r.get('reason'), reasons, path + '.reason')
+            if r['code'] == 'unfinished':
+                self.keys(r.get('usage'), CUT_USAGE, path + '.usage')
+            else:
+                self.ok('usage' not in r, path, 'a pair never started has no usage')
+            return
+        self.ok('reason' not in r and 'usage' not in r, path,
+                'reason and usage belong to a pair cut at the work cutoff')
         if 'code' in r:
             self.one_of(r['code'], REFUSALS, path + '.code')
             self.ok((r['http_status'] == 503) is (r['code'] == 'deadline'), path + '.http_status',
