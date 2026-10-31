@@ -266,10 +266,25 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
             return pairs_of(pattern_graph_names(object_or_empty(request), sorted_names(indexes),
                                                 max_names_without_selection), indexes);
         }
-        case SelectionRoute::RESOLVE:
+        case SelectionRoute::RESOLVE: {
+            // /resolve answers the envelope over any number of pairs (section 1, E2): `graph`
+            // (or `graphs` naming one graph) with `graph_path` selects its one pair, as before;
+            // `graph` alone every pair of its name; `graphs` and no selection as /pattern reads
+            // them (every name up to the cap), so that a graph-less request is no longer
+            // refused. Lane E12 adds `pairs` and the coded refusals
+            const Json::Value &object = object_or_empty(request);
+            if (object.isMember("graph") || object.isMember("graph_path")) {
+                const GraphSelection selection = traverse_graph_selection(object, true);
+                if (selection.graph_path)
+                    return one_pair(selection.name, &*selection.graph_path, indexes);
+                if (!indexes.count(selection.name))
+                    throw InvalidRequest("Bad request: unknown graph '" + selection.name + "'");
+                return pairs_of({ selection.name }, indexes);
+            }
+            return pairs_of(pattern_graph_names(object, sorted_names(indexes),
+                                                max_names_without_selection), indexes);
+        }
         case SelectionRoute::TRAVERSE: {
-            // today /resolve reads one pair as /traverse does; its fan-out over the names of
-            // `graphs` (section 6) comes with its envelope
             const GraphSelection selection = traverse_graph_selection(request, true);
             return one_pair(selection.name,
                             selection.graph_path ? &*selection.graph_path : nullptr, indexes);
