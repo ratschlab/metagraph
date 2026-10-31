@@ -288,5 +288,17 @@ std::string make_search_cache_key(const SearchRequest &request,
     return oss.str();
 }
 
+std::string search_pairs_identity(
+        const std::vector<std::pair<std::string, std::pair<std::string, std::string>>> &named_pairs) {
+    // every string length-prefixed, so that no two selections spell one identity
+    std::ostringstream oss;
+    for (const auto &[name, pair] : named_pairs) {
+        const auto &[graph, annotation] = pair;
+        oss << name.size() << ':' << name << graph.size() << ':' << graph
+            << annotation.size() << ':' << annotation;
+    }
+    return oss.str();
+}
+
 } // namespace cli
 } // namespace mtg

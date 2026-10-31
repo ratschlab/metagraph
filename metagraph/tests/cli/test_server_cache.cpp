@@ -662,4 +662,23 @@ TEST(ServerCacheConfig, AcceptsZeroAndFractionalSizes) {
 }
 
 
+// A multi-graph /search tags its rows with the name a pair was selected under: the cache
+// identity holds the names beside the pairs, so a pair listed under two names is two entries
+TEST(ServerSearchRequest, PairsIdentityHoldsTheNames) {
+    const std::pair<std::string, std::string> pair { "graph.dbg", "anno.annodbg" };
+    const std::string left = search_pairs_identity({ { "left", pair } });
+    const std::string right = search_pairs_identity({ { "right", pair } });
+    EXPECT_NE(left, right);
+    EXPECT_EQ(left, search_pairs_identity({ { "left", pair } }));
+    // the pairs searched, in their order
+    const std::pair<std::string, std::string> other { "other.dbg", "anno.annodbg" };
+    EXPECT_NE(search_pairs_identity({ { "a", pair }, { "a", other } }),
+              search_pairs_identity({ { "a", other }, { "a", pair } }));
+    // every string length-prefixed: no two selections spell one identity
+    EXPECT_NE(search_pairs_identity({ { "ab", { "c", "d" } } }),
+              search_pairs_identity({ { "a", { "bc", "d" } } }));
+    EXPECT_NE(search_pairs_identity({ { "a", { "b", "cd" } } }),
+              search_pairs_identity({ { "a", { "bc", "d" } } }));
+}
+
 } // namespace

@@ -18,6 +18,56 @@ from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 
+# what a /search cut states beside the pair's tags (SPEC-multigraph-envelope.md section 3)
+CUT_TAGS = ('graph', 'graph_path', 'annotation_path', 'index_fp')
+CUT_FIELDS = ('returned', 'complete', 'nth_score', 'tied', 'tied_returned')
+CUT_MEDIAN_FIELDS = ('nth_median', 'tied_same_median')
+
+
+def abundances_of(text):
+    """The per-position abundances of a /search row's kmer_abundances: "a:b:c" (verbose) or
+    the runs "i=v" / "i-j=v" of its non-zero values"""
+    values = {}
+    position = 0
+    for token in text.split(':'):
+        if '=' in token:
+            span, value = token.split('=')
+            lo, _, hi = span.partition('-')
+            for i in range(int(lo), int(hi or lo) + 1):
+                values[i] = int(value)
+        elif token:
+            values[position] = int(token)
+        position += 1
+    return [v for v in values.values() if v]
+
+
+def lower_median(values):
+    values = sorted(v for v in values if v)
+    return values[(len(values) - 1) // 2] if values else 0
+
+
+def c5_top_n(rows, n, counts=False):
+    """The C5 top |n| of the rows of a complete /search answer of one pair and the cut it
+    states (SPEC-multigraph-envelope.md section 3): score descending; on a counts annotation the
+    lower median abundance descending; the label ascending, by its bytes."""
+    def median(row):
+        return lower_median(abundances_of(row['kmer_abundances'])) if counts else 0
+    ranked = sorted(rows, key=lambda r: (-r['kmer_count'], -median(r), r['sample'].encode()))
+    top = ranked[:n]
+    cut = {'returned': len(top), 'complete': len(ranked) <= n, 'nth_score': None, 'tied': 0,
+           'tied_returned': 0}
+    if counts:
+        cut.update(nth_median=None, tied_same_median=0)
+    if not cut['complete'] and top:
+        nth = top[-1]
+        tied = [r for r in ranked if r['kmer_count'] == nth['kmer_count']]
+        cut.update(nth_score=nth['kmer_count'], tied=len(tied),
+                   tied_returned=sum(r['kmer_count'] == nth['kmer_count'] for r in top))
+        if counts:
+            cut.update(nth_median=median(nth),
+                       tied_same_median=sum(median(r) == median(nth) for r in tied))
+    return top, cut
+
 
 class TestAPIBase(TestingBase):
     @classmethod
@@ -410,14 +460,27 @@ class TestAPIClientMultiple(TestingBase):
 
         cls.mult = 1 if cls.threads_each < 2 else 200  # duplicate graphs so that there are more to query
 
+        # A pair listed twice under one name is searched once (SPEC-multigraph-envelope.md
+        # section 3: G2 answers as G1 does), so each duplicate is a pair of its own: the
+        # annotation under another path
+        def annotation(i, copy):
+            path = f'{annotation_path_bases[i]}.{anno_repr}.annodbg'
+            if not copy:
+                return path
+            alias = f'{annotation_path_bases[i]}_copy{copy}.{anno_repr}.annodbg'
+            os.symlink(path, alias)
+            return alias
+
         graphs_file = cls.tempdir.name + '/graphs.txt'
         with open(graphs_file, 'w') as f:
-            f.write('\n'.join([
-                f'G1,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
-                f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
-                f'G2,{graph_paths[0]},{annotation_path_bases[0]}.{anno_repr}.annodbg',
-                f'G3,{graph_paths[1]},{annotation_path_bases[1]}.{anno_repr}.annodbg',
-            ] * cls.mult))
+            lines = []
+            for copy in range(cls.mult):
+                first, second = annotation(0, copy), annotation(1, copy)
+                lines += [f'G1,{graph_paths[0]},{first}',
+                          f'G2,{graph_paths[0]},{first}',
+                          f'G2,{graph_paths[0]},{first}',
+                          f'G3,{graph_paths[1]},{second}']
+            f.write('\n'.join(lines))
 
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
@@ -453,8 +516,8 @@ class TestAPIClientMultiple(TestingBase):
         cls.expected_rows_1 = (98 if cls.mode == 'basic' else 99) * cls.mult
         cls.expected_matches_1 = (840 if cls.mode == 'basic' else 1381) * cls.mult
 
-        cls.expected_rows_2 = cls.expected_rows_1 * 2
-        cls.expected_matches_2 = cls.expected_matches_1 * 2
+        cls.expected_rows_2 = cls.expected_rows_1
+        cls.expected_matches_2 = cls.expected_matches_1
 
         cls.expected_rows_3 = (100) * cls.mult
         cls.expected_matches_3 = (2843 if cls.mode == 'basic' else 3496) * cls.mult
@@ -474,28 +537,28 @@ class TestAPIClientMultiple(TestingBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G1'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1, 3), df.shape)
+        self.assertEqual((self.expected_rows_1, 6), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches_1)
 
     def test_api_query_df_multiple_2(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G2'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_2, 3), df.shape)
+        self.assertEqual((self.expected_rows_2, 6), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches_2)
 
     def test_api_query_df_multiple_3(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G3'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_3, 3), df.shape)
+        self.assertEqual((self.expected_rows_3, 6), df.shape)
         self.assertEqual(df['kmer_count'].sum(), self.expected_matches_3)
 
     def test_api_query_df_multiple_12(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G1', 'G2'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1 + self.expected_rows_2, 3), df.shape)
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2, 6), df.shape)
         self.assertEqual(df['kmer_count'].sum(),
                          self.expected_matches_1 + self.expected_matches_2)
 
@@ -503,7 +566,7 @@ class TestAPIClientMultiple(TestingBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, graphs=['G1', 'G2', 'G3'])
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 3), df.shape)
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 6), df.shape)
         self.assertEqual(df['kmer_count'].sum(),
                          self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
 
@@ -511,9 +574,60 @@ class TestAPIClientMultiple(TestingBase):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01)
         df = ret[self.graph_name]
-        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 3), df.shape)
+        self.assertEqual((self.expected_rows_1 + self.expected_rows_2 + self.expected_rows_3, 6), df.shape)
         self.assertEqual(df['kmer_count'].sum(),
                          self.expected_matches_1 + self.expected_matches_2 + self.expected_matches_3)
+
+    def test_api_search_tags_rows_in_pair_order(self):
+        """SPEC-multigraph-envelope.md section 3 (E1) on a multi-graph server: every row carries
+        its pair (graph, graph_path, annotation_path); the rows come in the index's pair order
+        (the names in byte order, each name's pairs in the list's order, a pair listed twice
+        under one name once), not in the order the pairs finish; each query sequence states one
+        cut per pair searched, in that order, each pair's top N taken in the C5 order."""
+        url = f'http://{self.host}:{self.port}/search'
+        pair_tags = ('graph', 'graph_path', 'annotation_path')
+
+        def search(top_labels):
+            ret = requests.post(url, json={'FASTA': f'>q\n{self.sample_query}\n',
+                                           'discovery_fraction': 0.01,
+                                           'top_labels': top_labels,
+                                           'graphs': ['G3', 'G2', 'G1']}, timeout=120)
+            self.assertEqual(200, ret.status_code, ret.text)
+            [answer] = ret.json()
+            return answer
+
+        complete = search(1000)
+        cuts = complete['cuts']
+        self.assertEqual(['G1'] * self.mult + ['G2'] * self.mult + ['G3'] * self.mult,
+                         [cut['graph'] for cut in cuts])
+        pairs = [tuple(cut[t] for t in pair_tags) for cut in cuts]
+        self.assertEqual(len(pairs), len(set(pairs)))
+        # each pair's rows together, the pairs in the order of the cuts
+        rows_of = {pair: [] for pair in pairs}
+        order = []
+        for row in complete['results']:
+            pair = tuple(row[t] for t in pair_tags)
+            if not order or order[-1] != pair:
+                order.append(pair)
+            rows_of[pair].append({k: v for k, v in row.items() if k not in pair_tags})
+        self.assertEqual(pairs, order)
+        for cut, pair in zip(cuts, pairs):
+            self.assertEqual(dict(zip(pair_tags, pair), index_fp=None, returned=len(rows_of[pair]),
+                                  complete=True, nth_score=None, tied=0, tied_returned=0), cut)
+            # G2 lists G1's pairs: under each name a pair answers alike
+            if pair[0] == 'G2':
+                self.assertEqual(rows_of[('G1',) + pair[1:]], rows_of[pair])
+
+        # each pair's own top N, cut per pair
+        answer = search(3)
+        expected_rows, expected_cuts = [], []
+        for pair in pairs:
+            top, cut = c5_top_n(rows_of[pair], 3)
+            expected_rows += [dict(row, **dict(zip(pair_tags, pair))) for row in top]
+            expected_cuts.append(dict(zip(pair_tags, pair), index_fp=None, **cut))
+        self.assertEqual(expected_rows, answer['results'])
+        self.assertEqual(expected_cuts, answer['cuts'])
+        self.assertTrue(all(not cut['complete'] for cut in answer['cuts']))
 
     @unittest.expectedFailure
     def test_api_query_df_multiple_bad(self):
@@ -583,6 +697,39 @@ class TestAPIJson(TestAPIBase):
 
         self.assertTrue(first_res['sample'].startswith('ENST00000456328.2|ENSG00000223972.5|'))
         self.assertTrue('properties' not in first_res.keys()) # doesn't have properties, so don't sent them
+
+    def test_api_search_states_its_cut(self):
+        """SPEC-multigraph-envelope.md section 3 (E1) on a single-graph server: the rows stay
+        untagged, and each query sequence states one cut, its pair tags null and the server's
+        index_fp (null without --index-manifest). The top N is taken in the C5 order: score
+        descending, then the label ascending on an annotation without k-mer counts."""
+        url = f'http://{self.host}:{self.port}/search'
+
+        def search(top_labels):
+            ret = requests.post(url, json={'FASTA': f'>q\n{self.sample_query}\n',
+                                           'discovery_fraction': 0.01,
+                                           'top_labels': top_labels})
+            self.assertEqual(200, ret.status_code, ret.text)
+            [answer] = ret.json()
+            return answer
+
+        everything = search(1000)
+        rows = everything['results']
+        self.assertEqual(self.sample_query_expected_rows, len(rows))
+        for row in rows:
+            self.assertFalse(set(CUT_TAGS) & set(row), row)
+        self.assertEqual(c5_top_n(rows, len(rows))[0], rows)
+        self.assertEqual([dict({t: None for t in CUT_TAGS}, returned=len(rows), complete=True,
+                               nth_score=None, tied=0, tied_returned=0)],
+                         everything['cuts'])
+
+        # cuts within and between the scores of the complete answer
+        for n in (1, 2, 5, 13, len(rows) - 1, len(rows)):
+            with self.subTest(top_labels=n):
+                answer = search(n)
+                top, cut = c5_top_n(rows, n)
+                self.assertEqual(top, answer['results'])
+                self.assertEqual([dict({t: None for t in CUT_TAGS}, **cut)], answer['cuts'])
 
     def test_api_multiple_queries(self):
         repetitions = 4
@@ -747,6 +894,50 @@ class TestAPIClientWithCounts(TestAPIBase):
     def test_api_search_no_coordinate_support(self):
         ret = self.graph_client.search(self.sample_query, discovery_fraction=0.01,
                                        parallel=False, query_coords=True)
+
+    def test_api_search_counts_cut(self):
+        """SPEC-multigraph-envelope.md section 3 (E1) on a counts annotation: the ties of the
+        top N are ordered by the lower median of the label's abundances over the query's
+        positions where it is present, then by label; the cut states nth_median and
+        tied_same_median, in every query mode that cuts."""
+        url = f'http://{self.host}:{self.port}/search'
+
+        def search(top_labels, **mode):
+            ret = requests.post(url, json=dict({'FASTA': f'>q\n{self.sample_query}\n',
+                                                'discovery_fraction': 0.01,
+                                                'top_labels': top_labels}, **mode))
+            self.assertEqual(200, ret.status_code, ret.text)
+            [answer] = ret.json()
+            self.assertEqual(1, len(answer['cuts']))
+            self.assertEqual({t: None for t in CUT_TAGS},
+                             {t: answer['cuts'][0][t] for t in CUT_TAGS})
+            return answer['results'], {k: v for k, v in answer['cuts'][0].items()
+                                       if k not in CUT_TAGS}
+
+        rows, cut = search(1000, query_counts=True)
+        self.assertEqual(self.sample_query_expected_rows, len(rows))
+        self.assertEqual(c5_top_n(rows, len(rows), counts=True), (rows, cut))
+        median_of = {r['sample']: lower_median(abundances_of(r['kmer_abundances']))
+                     for r in rows}
+        # the cuts that split a tie group (the server is started with its output on a pipe
+        # nobody reads, so the requests are few): each first one of a score
+        straddling = {}
+        for n in range(1, len(rows)):
+            expected = c5_top_n(rows, n, counts=True)[1]
+            if expected['tied'] > expected['tied_returned']:
+                straddling.setdefault(expected['nth_score'], n)
+        self.assertTrue(straddling)
+        for n in [1] + sorted(straddling.values())[:6]:
+            with self.subTest(top_labels=n):
+                top, expected = c5_top_n(rows, n, counts=True)
+                self.assertEqual((top, expected), search(n, query_counts=True))
+                # the k-mer matches cut alike, without the abundances
+                matches, cut = search(n)
+                self.assertEqual([(r['sample'], r['kmer_count']) for r in top],
+                                 [(r['sample'], r['kmer_count']) for r in matches])
+                self.assertEqual(expected, cut)
+                self.assertEqual([median_of[r['sample']] for r in top],
+                                 [median_of[r['sample']] for r in matches])
 
 
 # No canonical mode for Protein alphabets

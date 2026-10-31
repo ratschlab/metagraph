@@ -9,6 +9,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 
 namespace mtg {
@@ -181,6 +183,12 @@ class ServerQueryCache {
 // and graph-loading strategy do not change the result and are excluded.
 std::string make_search_cache_key(const SearchRequest &request,
                                   const std::string &graph_identity);
+
+// The graph identity of a multi-graph /search's cache key: every pair searched, (graph path,
+// annotation path), with the name it was selected under, in the order the answer lists them.
+// The answer tags its rows with the names, so a pair listed under two names is two entries.
+std::string search_pairs_identity(
+        const std::vector<std::pair<std::string, std::pair<std::string, std::string>>> &named_pairs);
 
 } // namespace cli
 } // namespace mtg

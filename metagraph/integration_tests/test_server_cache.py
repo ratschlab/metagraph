@@ -1,6 +1,8 @@
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import hashlib
+import json
 import threading
 import re
 import subprocess
@@ -135,17 +137,87 @@ class TestServerCache(TestingBase):
         bad = graph.with_name('bad.dbg')
         bad.symlink_to(graph)
         indexes = graph.with_name('indexes.csv')
-        indexes.write_text(f'bad,{bad},{annotation}\n' + f'slow,{graph},{annotation}\n' * 20)
+        # twenty names of one pair: a pair listed twice under one name is searched once
+        slow = [f'slow{i:02}' for i in range(20)]
+        indexes.write_text(f'bad,{bad},{annotation}\n'
+                           + ''.join(f'{name},{graph},{annotation}\n' for name in slow))
         with self.running_server(indexes, '--mmap', '--mem-cap-gb', '1') as (client, url, log):
             bad.unlink()  # Already mmap-loaded; only this request's in_ram reload fails.
             response = client.post(url, json={
                 'FASTA': ''.join(f'>q{i}\nACGTACGTACGT\n' for i in range(100)),
-                'graphs': ['bad', 'slow'], 'in_ram': True}, timeout=30)
+                'graphs': ['bad'] + slow, 'in_ram': True}, timeout=30)
             self.assertEqual(response.status_code, 400)
             text = log.read_text()
             completed = re.findall(r'Loaded and searched graph .* in [0-9.e+-]+ sec', text)
             self.assertEqual(len(completed), 20, text[-3000:])
             self.assertLess(text.rfind('Loaded and searched graph'), text.rfind('Error on request'))
+
+    def test_a_pair_under_two_names_is_answered_with_each_name(self):
+        """SPEC-multigraph-envelope.md section 3 (E1): a multi-graph /search tags every row and
+        every cut with the name its pair was selected under, so the result cache keys the names
+        beside their pairs: one pair listed under two names is answered with each name, never
+        with the other name's cached rows."""
+        graph, annotation = self.tiny_index()
+        indexes = graph.with_name('indexes.csv')
+        indexes.write_text(f'right,{graph},{annotation}\nleft,{graph},{annotation}\n'
+                           f'left,{graph},{annotation}\n')
+        payload = {'FASTA': '>q\nACGTACGTACGT\n', 'top_labels': 1}
+        tags = {'graph_path': str(graph), 'annotation_path': str(annotation)}
+
+        def cut(name):
+            return dict(tags, graph=name, index_fp=None, returned=1, complete=True,
+                        nth_score=None, tied=0, tied_returned=0)
+
+        with self.running_server(indexes, '--cache-size', '0.01') as (client, url, log):
+            for names in (['left'], ['right'], ['left'], ['right', 'left']):
+                with self.subTest(graphs=names):
+                    response = client.post(url, json=dict(payload, graphs=names), timeout=30)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    [answer] = response.json()
+                    # in the index's pair order: the names in byte order, a pair listed twice
+                    # under one name once
+                    self.assertEqual([dict(tags, sample='sample', kmer_count=7, graph=name)
+                                      for name in sorted(names)], answer['results'])
+                    self.assertEqual([cut(name) for name in sorted(names)], answer['cuts'])
+            text = log.read_text()
+            self.assertEqual(text.count('cache STORE'), 3, text[-3000:])
+            self.assertEqual(text.count('cache HIT'), 1, text[-3000:])
+
+    def test_single_graph_search_states_one_cut(self):
+        """SPEC-multigraph-envelope.md section 3 (E1): a single-graph server leaves its rows
+        untagged and states one cut per query sequence, its pair tags null and its index_fp the
+        server's: null without --index-manifest, the manifest's digest with it."""
+        graph, annotation = self.tiny_index()
+        payload = {'FASTA': '>q\nACGTACGTACGT\n>none\nTTTTTTTTTTTT\n', 'top_labels': 1}
+
+        def cut(index_fp, returned):
+            return {'graph': None, 'graph_path': None, 'annotation_path': None,
+                    'index_fp': index_fp, 'returned': returned, 'complete': True,
+                    'nth_score': None, 'tied': 0, 'tied_returned': 0}
+
+        # the bundle's manifest, as scripts/traversal/build_mini_refseq.sh writes it
+        files = []
+        for path in sorted(graph.parent.iterdir()):
+            if path.is_file() and path.name.startswith(('graph', 'annotation')):
+                data = path.read_bytes()
+                files.append({'path': path.name, 'size': len(data),
+                              'sha256': hashlib.sha256(data).hexdigest()})
+        index_fp = hashlib.sha256(''.join('%s\t%d\t%s\n' % (f['path'], f['size'], f['sha256'])
+                                          for f in files).encode()).hexdigest()
+        manifest = graph.with_name('index.manifest.json')
+        manifest.write_text(json.dumps({'format': 'metagraph-index-manifest', 'version': 1,
+                                        'index_fp': index_fp, 'files': files}))
+
+        for flags, fp in (([], None), (['--index-manifest', manifest], index_fp)):
+            with self.subTest(flags=flags), \
+                    self.running_server('-i', graph, '-a', annotation, *flags) as (client, url, _):
+                response = client.post(url, json=payload, timeout=30)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual([{'seq_description': 'q', 'cuts': [cut(fp, 1)],
+                                   'results': [{'sample': 'sample', 'kmer_count': 7}]},
+                                  {'seq_description': 'none', 'cuts': [cut(fp, 0)],
+                                   'results': []}],
+                                 response.json())
 
     def test_graph_paths_with_delimiters_have_distinct_cache_entries(self):
         root = Path(self.tempdir.name)
