@@ -1605,7 +1605,10 @@ class TestMultiGraphServer(TestingBase):
         self.assertTrue(entry['labels'], entry)
         self.assertEqual(entry['work']['memory_bytes'], named['work']['memory_bytes'])
         tagless = {k: v for k, v in entry.items() if k not in TAGS}
-        self.assertEqual(untimed(self.cli_resolve('kleb', r)), untimed(tagless))
+        # the single-graph answer, with the unknown_labels of a multi-graph server's pair
+        # (SPEC-multigraph-envelope.md section 2: present, possibly empty)
+        self.assertEqual(untimed(dict(self.cli_resolve('kleb', r), unknown_labels=[])),
+                         untimed(tagless))
         # several names: their pairs in byte order, each its named request's entry
         several = self.post('resolve', dict(r, graphs=['kleb', 'ecoli'],
                                             request_id='it-resolve-1'))

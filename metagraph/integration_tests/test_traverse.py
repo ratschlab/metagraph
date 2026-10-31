@@ -3517,6 +3517,13 @@ class TestTraverseMultiGraph(TestTraverseBase):
 
     # ---- the envelope (SPEC-multigraph-envelope.md sections 1 and 8)
 
+    @staticmethod
+    def _multi_results(results):
+        """A single-graph answer's seed results as a multi-graph server's pair states them:
+        each with its unknown_labels, present and here empty (SPEC-multigraph-envelope.md
+        section 2: every seed result of a multi-graph server)"""
+        return [dict(r, unknown_labels=r.get('unknown_labels', [])) for r in results]
+
     def _cli_results(self, graph, anno, request, manifest=None):
         """`metagraph traverse` on one pair's files: the results a single-graph server writes"""
         path = f'{self.tempdir.name}/envelope-request.json'
@@ -3564,7 +3571,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertGreater(out['timing']['elapsed_ms'], 0)
         # the entry's results are the single-graph answer's on the pair's files
         cli = self._cli_results(two_graph, two_anno, req, f'{self.tempdir.name}/two/two.manifest.json')
-        self.assertEqual(cli['results'], entry['results'])
+        self.assertEqual(self._multi_results(cli['results']), entry['results'])
         self.assertEqual(cli['capabilities'], entry['capabilities'])
 
         not_after = int(time.time() * 1000) + 600_000
@@ -3716,7 +3723,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual(len(texts['identity']), state['response']['bytes'])
         out = json.loads(texts['identity'])
         cli = self._cli_results(self.graph, self.anno, req, self.manifest)
-        self.assertEqual(cli['results'], out['answers'][0]['results'])
+        self.assertEqual(self._multi_results(cli['results']), out['answers'][0]['results'])
 
     def test_capabilities_answer_in_the_envelope(self):
         """Sections 1 and 6 (E3): GET /traverse/capabilities and GET /pattern/capabilities
