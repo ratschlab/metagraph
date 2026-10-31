@@ -44,6 +44,7 @@ struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set
     std::vector<std::string> labels;
     bool discover = false;
+    // at least 1: a discovery keeps the top labels by k-mers supported, ties by name (bytes)
     size_t discover_max_labels = 1000;
     LabelKind discover_kind = LabelKind::COLUMN;
 
@@ -90,12 +91,19 @@ struct SeedCandidate {
     std::vector<LabelId> labels;             // indices into SupportProfile::labels, sorted
 };
 
+// A discovery's cut at ResolveOptions::discover_max_labels: the labels ranked by k-mers
+// supported (more first), ties by name (bytes), the first |kept| of them kept
 struct LabelTruncation {
     size_t kept = 0;
     size_t total = 0;
     uint64_t min_kept_kmers = 0;
     uint64_t max_dropped_kmers = 0;
     size_t dropped_full_length = 0;          // dropped labels supporting every in-graph k-mer
+    // The labels with the last kept label's support (min_kept_kmers), kept or dropped, and how
+    // many of them were kept: the tie group the cut went through (tied_kept < tied_at_boundary,
+    // the kept ones the first by name) or ended with (tied_kept == tied_at_boundary)
+    size_t tied_at_boundary = 0;
+    size_t tied_kept = 0;
 };
 
 // The k-mers between two checkpoints of the explicit labels' support pass: a hit list per

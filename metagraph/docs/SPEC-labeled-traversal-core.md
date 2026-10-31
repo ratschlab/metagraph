@@ -130,9 +130,11 @@ Let L = |sequence|, k = graph k, k-mer starts i ∈ [0, L−k+1).
 - **Runs** are 0-based half-open intervals of k-mer starts `[a, b)`; base interval `[a, b + k − 1)`.
 - **Discovery**: labels are collected from full rows (column kind) or row tuples (header kind) of all in-graph
   k-mers. If more than `max_labels` distinct labels occur, the top `max_labels` by supported k-mer count are kept
-  (tie: column id, then seq_id) and `labels_truncated: {kept, total, min_kept_kmers, max_dropped_kmers,
-  dropped_full_length}` is reported. *(Efficiency pass, the same answers byte for byte: the rows are decoded
-  once — the support profile took its hits from the discovery's rows (tuple rows when the profile needs
+  (ties by label name, byte order; before release 10 by column id, then seq_id) and `labels_truncated: {kept,
+  total, min_kept_kmers, max_dropped_kmers, dropped_full_length, tied_at_boundary, tied_kept}` is reported
+  (`tied_at_boundary`: the labels with the last kept label's support, kept or dropped; `tied_kept`: how many of
+  them were kept; SPEC-multigraph-envelope.md §7). *(Efficiency pass, the same answers byte for byte: the rows
+  are decoded once — the support profile took its hits from the discovery's rows (tuple rows when the profile needs
   coordinates: header labels or `trace`; their columns are those of the whole rows) instead of decoding every row
   again, which made a column discover cost 1.6–2.1 times the profile of explicit labels on refseq33m —, the
   sequences' labels go into one flat hash table instead of a `std::map` node per label (0.8–1.7 µs a pair, 1.83 s
@@ -163,10 +165,10 @@ labels 3–17% faster and header presence from 7% faster to 14% slower, at 144�
 genome repeating the locus three times column presence faster (1.20 → 0.91 s) and explicit labels within 8%, at
 165–236 MB instead of 1.7–1.8 GB, and header and trace discovery 24% and 48% slower (5.72 → 7.10 s, 3.04 →
 4.50 s) at about 370 MB instead of 4.8 GB — its repeats beyond the 256 MiB kept are decoded again. Every answer
-was the same. The ranking (more k-mers first, ties by column, then sequence) and the profiles do not depend on
-the batches or on what is kept (tested with batches of 1 to 4,096 rows, byte targets of 1 B to 64 MiB, 0 to
-256 MiB kept, on a query and on one repeating two thirds of it, column and header labels, presence and trace;
-a discovery's profiles equal those of the same labels given explicitly).
+was the same. The ranking (more k-mers first, ties by column, then sequence; by name since release 10) and the
+profiles do not depend on the batches or on what is kept (tested with batches of 1 to 4,096 rows, byte targets of
+1 B to 64 MiB, 0 to 256 MiB kept, on a query and on one repeating two thirds of it, column and header labels,
+presence and trace; a discovery's profiles equal those of the same labels given explicitly).
 
 ### 4.3 `select`
 

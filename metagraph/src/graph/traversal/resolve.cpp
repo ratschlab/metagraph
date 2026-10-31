@@ -353,6 +353,10 @@ SupportProfile resolve_support(LabelOracle &oracle,
     if (options.labels.empty() == !options.discover) {
         throw std::invalid_argument("Specify either an explicit label list or discovery, not both");
     }
+    // A discovery keeps at least one label, as the request parser requires: a cut keeping none
+    // would have no last kept label to state its boundary by (LabelTruncation)
+    if (options.discover && !options.discover_max_labels)
+        throw std::invalid_argument("Discovery must keep at least one label");
     if (options.support == Support::TRACE) {
         if (!oracle.has_coordinates())
             throw std::invalid_argument("Trace support requires an annotation with k-mer coordinates");
@@ -585,43 +589,96 @@ SupportProfile resolve_support(LabelOracle &oracle,
             num_present = used;
         }
         checkpoint();
-        std::vector<std::tuple<std::pair<Column, uint64_t>, uint64_t, uint64_t>> ranked;
+        // A label found, as the ranking orders it: its k-mers, where its accumulator and id
+        // are (found, found_ids), and its name once it is looked up (null until then)
+        struct Ranked {
+            uint64_t kmers;
+            uint64_t at;
+            const std::string *name;
+        };
+        std::vector<Ranked> ranked;
         ranked.reserve(found.size());
         for (uint64_t at = 0; at < found.size(); ++at) {
             finishing(at);
-            ranked.emplace_back(found_ids[at], found[at].kmers, at);
+            ranked.push_back({ found[at].kmers, at, nullptr });
         }
         std::vector<uint32_t>().swap(slot);
         tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash>().swap(index);
-        // more k-mers first; ties by column id, then seq_id (the order the std::map gave)
-        std::sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) {
-            return std::get<1>(a) != std::get<1>(b) ? std::get<1>(a) > std::get<1>(b)
-                                                    : std::get<0>(a) < std::get<0>(b);
-        });
-        if (ranked.size() > options.discover_max_labels) {
+        // More k-mers first, ties by the name the answer states (bytes: the column's name, or
+        // the sequence's header), then by (column, seq_id) for a header that two columns hold.
+        // A tie by column id let the index's numbering of its columns decide which of the
+        // tied labels a cut keeps; by name the same labels rank the same in every index that
+        // holds them, so that a client can merge the discoveries of several graphs by
+        // (support, name), and each cut states the tie group it went through
+        // (LabelTruncation::tied_at_boundary, SPEC-multigraph-envelope.md §7).
+        std::sort(ranked.begin(), ranked.end(),
+                  [](const Ranked &a, const Ranked &b) { return a.kmers > b.kmers; });
+        const size_t kept = std::min(ranked.size(), options.discover_max_labels);
+        // The labels named: the kept ones and the rest of the last kept label's tie group.
+        // A name is a reference into the label encoder or the headers (no decoding), but
+        // ordering every label found by name would read a name per comparison, scattered
+        // over the headers, where the k-mer counts are adjacent integers — and a header
+        // discovery can find far more sequences than it keeps. So only the labels the order
+        // needs are named: the kept ones, which the answer names anyway (the order of their
+        // equal-support runs is the order it states), and the dropped part of the boundary's
+        // tie group, to choose which of the group are kept. The labels dropped below the
+        // boundary's support are never named.
+        size_t named = kept;
+        while (named < ranked.size() && ranked[named].kmers == ranked[kept - 1].kmers) {
+            named++;
+        }
+        for (size_t i = 0; i < named; ++i) {
+            finishing(i);
+            const auto &[column, seq_id] = found_ids[ranked[i].at];
+            ranked[i].name = by_column ? &oracle.column_name(column)
+                                       : &oracle.header_name(column, seq_id);
+        }
+        auto by_name = [&](const Ranked &a, const Ranked &b) {
+            const int order = a.name->compare(*b.name);
+            return order ? order < 0 : found_ids[a.at] < found_ids[b.at];
+        };
+        // each run of equal support in name order; the boundary's run only as far as it is
+        // kept (its dropped part needs no order)
+        size_t boundary = 0;
+        for (size_t begin = 0; begin < kept; ) {
+            size_t end = begin + 1;
+            while (end < named && ranked[end].kmers == ranked[begin].kmers) {
+                end++;
+            }
+            if (end <= kept) {
+                std::sort(ranked.begin() + begin, ranked.begin() + end, by_name);
+            } else {
+                std::partial_sort(ranked.begin() + begin, ranked.begin() + kept,
+                                  ranked.begin() + end, by_name);
+            }
+            boundary = begin;
+            begin = end;
+        }
+        if (ranked.size() > kept) {
             LabelTruncation trunc;
             trunc.total = ranked.size();
-            trunc.kept = options.discover_max_labels;
-            trunc.min_kept_kmers = std::get<1>(ranked[trunc.kept - 1]);
-            trunc.max_dropped_kmers = std::get<1>(ranked[trunc.kept]);
-            for (size_t i = trunc.kept; i < ranked.size(); ++i) {
-                if (std::get<1>(ranked[i]) == num_present)
+            trunc.kept = kept;
+            trunc.min_kept_kmers = ranked[kept - 1].kmers;
+            trunc.max_dropped_kmers = ranked[kept].kmers;
+            for (size_t i = kept; i < ranked.size(); ++i) {
+                if (ranked[i].kmers == num_present)
                     trunc.dropped_full_length++;
             }
-            ranked.resize(trunc.kept);
+            trunc.tied_at_boundary = named - boundary;
+            trunc.tied_kept = kept - boundary;
+            ranked.resize(kept);
             profile.labels_truncated = trunc;
         }
         discovered.reserve(ranked.size());
-        for (const auto &[id, count, at] : ranked) {
+        for (const Ranked &label : ranked) {
             finishing(refs.size());
             LabelRef ref;
             ref.kind = options.discover_kind;
-            ref.column = id.first;
-            ref.seq_id = id.second;
-            ref.name = ref.kind == LabelKind::COLUMN ? oracle.column_name(ref.column)
-                                                     : oracle.header_name(ref.column, ref.seq_id);
-            refs.push_back(ref);
-            discovered.push_back(std::move(found[at]));
+            ref.column = found_ids[label.at].first;
+            ref.seq_id = found_ids[label.at].second;
+            ref.name = *label.name;
+            refs.push_back(std::move(ref));
+            discovered.push_back(std::move(found[label.at]));
         }
     }
 
