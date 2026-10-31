@@ -2649,6 +2649,7 @@ class TestTraverseAPI(TestTraverseBase):
                           'cancel': 'POST /traverse/cancel', 'capabilities': 'GET /capabilities',
                           'column_labels': 'GET /column_labels', 'pattern': 'POST /pattern',
                           'pattern_capabilities': 'GET /pattern/capabilities',
+                          'requests': 'GET /requests/{request_id}',
                           'resolve': 'POST /resolve', 'search': 'POST /search',
                           'stats': 'GET /stats', 'traverse': 'POST /traverse',
                           'traverse_capabilities': 'GET /traverse/capabilities'}, c['routes'])

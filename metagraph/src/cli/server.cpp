@@ -2496,8 +2496,11 @@ int run_server(Config *config) {
                 c["composite_fp"] = composite_fp;
                 c["composite_rule"] = kCompositeRule;
                 c["multigraph"] = multigraph_capabilities_json();
-                routes["requests"] = kRequestsRoute;
             }
+            // the request registry (section 5) on every server: a single-graph /resolve or
+            // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a
+            // /traverse attempt
+            routes["requests"] = kRequestsRoute;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;
             c["server_instance"] = attempts.server_instance();

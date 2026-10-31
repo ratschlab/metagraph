@@ -3720,7 +3720,8 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             ret = server.get('pattern/capabilities?graph_path=x')
             self.assertEqual(400, ret.status_code)
             self.assertIn('needs ?graph=<name>', ret.json()['error'])
-            # the multi-graph members of /capabilities, and not on a single-graph server
+            # the multi-graph members of /capabilities, and not on a single-graph server (the
+            # request registry's route is on both)
             self.assertIsNone(caps['composite_fp'])
             self.assertIn('composite_rule', caps)
             self.assertEqual(['/resolve', '/traverse', '/pattern', '/traverse/capabilities',
@@ -3729,7 +3730,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             alone = single.get('capabilities').json()
             for key in ('composite_fp', 'composite_rule', 'multigraph'):
                 self.assertNotIn(key, alone)
-            self.assertNotIn('requests', alone['routes'])
+            self.assertEqual('GET /requests/{request_id}', alone['routes']['requests'])
         finally:
             server.stop()
             single.stop()
@@ -4464,7 +4465,8 @@ class TestPatternRegression(TestingBase):
         self.assertIn('pattern', b)
         self.assertEqual(a['features'] + ['pattern'], b['features'])
         self.assertEqual(dict(a['routes'], pattern='POST /pattern',
-                              pattern_capabilities='GET /pattern/capabilities'), b['routes'])
+                              pattern_capabilities='GET /pattern/capabilities',
+                              requests='GET /requests/{request_id}'), b['routes'])
         for key in a:
             if key not in ('features', 'routes'):
                 self.assertEqual(a[key], b[key], key)
