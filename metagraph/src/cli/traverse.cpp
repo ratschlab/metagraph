@@ -2225,6 +2225,10 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
         t["min_kept_kmers"] = uint_json(p.labels_truncated->min_kept_kmers);
         t["max_dropped_kmers"] = uint_json(p.labels_truncated->max_dropped_kmers);
         t["dropped_full_length"] = uint_json(p.labels_truncated->dropped_full_length);
+        // the tie group at the cut (SPEC-multigraph-envelope.md §7): the labels with the last
+        // kept label's support and how many of them were kept (the first by name)
+        t["tied_at_boundary"] = uint_json(p.labels_truncated->tied_at_boundary);
+        t["tied_kept"] = uint_json(p.labels_truncated->tied_kept);
         j["labels_truncated"] = std::move(t);
     } else {
         j["labels_truncated"] = Json::Value::null;

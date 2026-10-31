@@ -181,7 +181,7 @@ TYPED_TEST(ResolveTest, ThreeStatesAndRuns) {
     }
 }
 
-// T4c: discovery with truncation keeps the top labels by k-mers, ties by column id
+// T4c: discovery with truncation keeps the top labels by k-mers, ties by name
 TYPED_TEST(ResolveTest, DiscoverTruncation) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -200,11 +200,16 @@ TYPED_TEST(ResolveTest, DiscoverTruncation) {
     EXPECT_EQ(90u, profile.labels_truncated->min_kept_kmers);
     EXPECT_EQ(90u, profile.labels_truncated->max_dropped_kmers);
     EXPECT_EQ(1u, profile.labels_truncated->dropped_full_length);  // Z dropped, W is not full-length
+    // X, Y and Z tie at the boundary, the first two by name kept
+    EXPECT_EQ(3u, profile.labels_truncated->tied_at_boundary);
+    EXPECT_EQ(2u, profile.labels_truncated->tied_kept);
     ASSERT_EQ(2u, profile.labels.size());
+    EXPECT_EQ("X", profile.labels[0].label.name);
+    EXPECT_EQ("Y", profile.labels[1].label.name);
     Column cx = anno->get_annotator().get_label_encoder().encode("X");
     Column cy = anno->get_annotator().get_label_encoder().encode("Y");
-    EXPECT_EQ(std::min(cx, cy), profile.labels[0].label.column);
-    EXPECT_EQ(std::max(cx, cy), profile.labels[1].label.column);
+    EXPECT_EQ(cx, profile.labels[0].label.column);
+    EXPECT_EQ(cy, profile.labels[1].label.column);
 
     opts.discover_max_labels = 10;
     profile = resolve_support(oracle, q, opts);
@@ -218,10 +223,96 @@ TYPED_TEST(ResolveTest, DiscoverTruncation) {
     EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
     bad.labels = { "nope" };
     EXPECT_THROW(resolve_support(oracle, q, bad), std::invalid_argument);
+    ResolveOptions none;
+    none.discover = true;
+    none.discover_max_labels = 0;
+    EXPECT_THROW(resolve_support(oracle, q, none), std::invalid_argument);
     ResolveOptions trace;
     trace.labels = { "X" };
     trace.support = Support::TRACE;
     EXPECT_THROW(resolve_support(oracle, q, trace), std::invalid_argument);  // no coordinates
+}
+
+// what a discovery kept, by name, in its order
+std::vector<std::string> names_of(const SupportProfile &profile) {
+    std::vector<std::string> names;
+    for (const LabelProfile &lp : profile.labels) {
+        names.push_back(lp.label.name);
+    }
+    return names;
+}
+
+// (total, kept, min_kept_kmers, max_dropped_kmers, dropped_full_length, tied_at_boundary,
+// tied_kept) of a discovery's cut
+using Cut = std::tuple<size_t, size_t, uint64_t, uint64_t, size_t, size_t, size_t>;
+Cut cut_of(const SupportProfile &profile) {
+    const LabelTruncation &t = profile.labels_truncated.value();
+    return { t.total, t.kept, t.min_kept_kmers, t.max_dropped_kmers, t.dropped_full_length,
+             t.tied_at_boundary, t.tied_kept };
+}
+
+// SPEC-multigraph-envelope.md §7 (E18): a discovery ranks by k-mers supported, ties by label
+// name (bytes), never by the index's column numbering. The columns here are numbered in the
+// reverse of their names' order within each support (c, b, a carry the whole query; y, x half
+// of it each): the cut keeps the names first, states the tie group it went through
+// (tied_at_boundary, tied_kept), and without a cut the equal-support labels are in name order
+TYPED_TEST(ResolveTest, DiscoveryTiesByNameNotColumn) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const std::string q = random_seq(100, 7);
+    auto anno = build_anno_graph<Graph, Annotation>(
+            kK, { q.substr(0, 50), q, q.substr(50), q, q }, { "y", "c", "x", "b", "a" },
+            DeBruijnGraph::BASIC);
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    // the premise: the columns' order is the reverse of the names' within each support
+    ASSERT_LT(encoder.encode("c"), encoder.encode("b"));
+    ASSERT_LT(encoder.encode("b"), encoder.encode("a"));
+    ASSERT_LT(encoder.encode("y"), encoder.encode("x"));
+    LabelOracle oracle(*anno);
+    ResolveOptions opts;
+    opts.discover = true;
+
+    // no cut: more k-mers first, each support's labels by name
+    opts.discover_max_labels = 10;
+    SupportProfile profile = resolve_support(oracle, q, opts);
+    EXPECT_FALSE(profile.labels_truncated.has_value());
+    EXPECT_EQ((std::vector<std::string>{ "a", "b", "c", "x", "y" }), names_of(profile));
+    ASSERT_EQ(5u, profile.labels.size());
+    EXPECT_EQ(90u, profile.labels[2].kmers_supported);
+    EXPECT_EQ(40u, profile.labels[3].kmers_supported);
+    EXPECT_EQ(40u, profile.labels[4].kmers_supported);
+    // exactly as many labels as found: no cut either
+    opts.discover_max_labels = 5;
+    EXPECT_EQ(names_of(profile), names_of(resolve_support(oracle, q, opts)));
+    EXPECT_FALSE(resolve_support(oracle, q, opts).labels_truncated.has_value());
+
+    // a cut through the full-length group keeps its first names: the column-first label (c)
+    // is the one dropped first
+    opts.discover_max_labels = 1;
+    profile = resolve_support(oracle, q, opts);
+    EXPECT_EQ((std::vector<std::string>{ "a" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 1, 90, 90, 2, 3, 1 }), cut_of(profile));
+
+    opts.discover_max_labels = 2;
+    profile = resolve_support(oracle, q, opts);
+    EXPECT_EQ((std::vector<std::string>{ "a", "b" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 2, 90, 90, 1, 3, 2 }), cut_of(profile));
+
+    // a cut ending with the group: all of it kept
+    opts.discover_max_labels = 3;
+    profile = resolve_support(oracle, q, opts);
+    EXPECT_EQ((std::vector<std::string>{ "a", "b", "c" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 3, 90, 40, 0, 3, 3 }), cut_of(profile));
+
+    // a cut through the half-length group: x before y, the group before it whole and by name
+    opts.discover_max_labels = 4;
+    profile = resolve_support(oracle, q, opts);
+    EXPECT_EQ((std::vector<std::string>{ "a", "b", "c", "x" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 4, 40, 40, 0, 2, 1 }), cut_of(profile));
+    // the kept labels' columns are theirs
+    for (const LabelProfile &lp : profile.labels) {
+        EXPECT_EQ(encoder.encode(lp.label.name), lp.label.column) << lp.label.name;
+    }
 }
 
 // max_support at the label counts this is meant for: a synthetic profile (no graph
@@ -415,6 +506,70 @@ TYPED_TEST(ResolveCoordTest, TraceRunsAndHeaderDiscovery) {
 #endif
 }
 
+// A header discovery ties by the headers (SPEC-multigraph-envelope.md §7), never by (column,
+// seq_id): four sequences carry the whole query, numbered in the reverse of their headers'
+// order (column F holds hd, hc; column E holds hb, ha), and a fifth (aa, first by name) carries
+// part of it, so ranks last whatever its name. Under presence and trace alike
+TYPED_TEST(ResolveCoordTest, HeaderDiscoveryTiesByName) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const std::string q = random_seq(100, 8);
+    const std::string part = q.substr(0, 50);
+    const uint64_t n = q.size() - kK + 1, m = part.size() - kK + 1;
+    auto anno = build_anno_graph<Graph, Annotation>(kK, { q, q, q, q, part },
+                                                    { "F", "F", "E", "E", "E" },
+                                                    DeBruijnGraph::BASIC, true,
+                                                    { 0, n, 0, n, 2 * n });
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    ASSERT_EQ(0u, encoder.encode("F"));
+    ASSERT_EQ(1u, encoder.encode("E"));
+    std::vector<std::vector<std::string>> headers { { "hd", "hc" }, { "hb", "ha", "aa" } };
+    std::vector<std::vector<uint64_t>> num_kmers { { n, n }, { n, n, m } };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*anno, &cth);
+    for (Support support : { Support::KMER, Support::TRACE }) {
+        const std::string what = support == Support::TRACE ? "trace" : "kmer";
+        ResolveOptions opts;
+        opts.discover = true;
+        opts.discover_kind = LabelKind::HEADER;
+        opts.support = support;
+
+        opts.discover_max_labels = 10;
+        SupportProfile profile = resolve_support(oracle, q, opts);
+        EXPECT_FALSE(profile.labels_truncated.has_value()) << what;
+        EXPECT_EQ((std::vector<std::string>{ "ha", "hb", "hc", "hd", "aa" }), names_of(profile))
+            << what;
+        ASSERT_EQ(5u, profile.labels.size()) << what;
+        EXPECT_EQ(n, profile.labels[3].kmers_supported) << what;
+        EXPECT_EQ(m, profile.labels[4].kmers_supported) << what;
+        // each name's sequence: ha is (E, 1), hd (F, 0)
+        const std::vector<std::pair<Column, uint64_t>> ids { { 1, 1 }, { 1, 0 }, { 0, 1 },
+                                                             { 0, 0 }, { 1, 2 } };
+        for (size_t i = 0; i < ids.size(); ++i) {
+            EXPECT_EQ(LabelKind::HEADER, profile.labels[i].label.kind) << what;
+            EXPECT_EQ(ids[i], std::make_pair(profile.labels[i].label.column,
+                                             profile.labels[i].label.seq_id)) << what << " " << i;
+        }
+
+        // the cut through the four full-length sequences keeps the first headers
+        opts.discover_max_labels = 1;
+        profile = resolve_support(oracle, q, opts);
+        EXPECT_EQ((std::vector<std::string>{ "ha" }), names_of(profile)) << what;
+        EXPECT_EQ((Cut{ 5, 1, n, n, 3, 4, 1 }), cut_of(profile)) << what;
+
+        opts.discover_max_labels = 3;
+        profile = resolve_support(oracle, q, opts);
+        EXPECT_EQ((std::vector<std::string>{ "ha", "hb", "hc" }), names_of(profile)) << what;
+        EXPECT_EQ((Cut{ 5, 3, n, n, 1, 4, 3 }), cut_of(profile)) << what;
+
+        opts.discover_max_labels = 4;
+        profile = resolve_support(oracle, q, opts);
+        EXPECT_EQ((std::vector<std::string>{ "ha", "hb", "hc", "hd" }), names_of(profile))
+            << what;
+        EXPECT_EQ((Cut{ 5, 4, n, m, 0, 4, 4 }), cut_of(profile)) << what;
+    }
+}
+
 // Explicit labels with trace hand each hit to its label's accumulator in one pass, the calls
 // a per-label scan would make in the same order: scanning every k-mer's hit list once per
 // label is O(labels x k-mers x hits) (2,000 labels: 5.9 s where the discovery returning the
@@ -501,9 +656,9 @@ void expect_same_profile(const SupportProfile &expected, const SupportProfile &g
     if (expected.labels_truncated) {
         const LabelTruncation &e = *expected.labels_truncated, &g = *got.labels_truncated;
         EXPECT_EQ(std::make_tuple(e.kept, e.total, e.min_kept_kmers, e.max_dropped_kmers,
-                                  e.dropped_full_length),
+                                  e.dropped_full_length, e.tied_at_boundary, e.tied_kept),
                   std::make_tuple(g.kept, g.total, g.min_kept_kmers, g.max_dropped_kmers,
-                                  g.dropped_full_length)) << where;
+                                  g.dropped_full_length, g.tied_at_boundary, g.tied_kept)) << where;
     }
     ASSERT_EQ(expected.candidates.size(), got.candidates.size()) << where;
     for (size_t i = 0; i < expected.candidates.size(); ++i) {
@@ -703,7 +858,8 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
 // kResolveCheckLabels labels, and what it throws abandons the request. The reads are counted
 // exactly (a lower bound would let one of a discovery's loops lose its check unseen): a loop
 // over n labels reads it at the labels kResolveCheckLabels, 2 kResolveCheckLabels, ... below
-// n; a discovery has four such loops (the ranking, the naming, the profiles, the candidates'
+// n; a discovery has five such loops (the ranking, the names of the labels the order needs —
+// here every label, nothing is cut —, the kept labels, the profiles, the candidates'
 // grouping), explicit labels two (the profiles, the grouping)
 TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
     const std::string q = random_seq(200, 51);
@@ -729,7 +885,7 @@ TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
             opts.finish_check = [&reads]() { reads++; };
             const SupportProfile profile = resolve_support(oracle, q, opts);
             EXPECT_EQ(labels.size(), profile.labels.size());
-            EXPECT_EQ((discover ? 4 : 2) * per_loop, reads) << discover << " " << n;
+            EXPECT_EQ((discover ? 5 : 2) * per_loop, reads) << discover << " " << n;
             if (!per_loop)
                 continue;
             opts.finish_check = []() { throw std::runtime_error("late"); };
