@@ -6087,7 +6087,7 @@ class TestTraversePrimary(TestingBase):
     then `build --mode primary`), annotated as row_diff_brwt (the deployed form), column and
     row_diff, through the CLI and through server_query under --mmap.
 
-    The records (k = 31, header labels, random blocks):
+    The records (k = 31 here, header labels, random blocks):
         acc1 = L1 + E + R1, acc2 = L1 + E + R2, acc3 = L2 + E + R1   (forward)
         inv  = W + rc(E) + V                                         (carries E reversed)
         hp   = A + X + B, X a 30-bp reverse-complement palindrome    (a hairpin at a·X)
@@ -6110,6 +6110,8 @@ class TestTraversePrimary(TestingBase):
         basic one goes on: a branch into the other strand, a step into the reverse complement
         of a seed k-mer (`rejoined_seed`, strand-agnostic, §6.6)."""
 
+    k = K
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -6121,7 +6123,7 @@ class TestTraversePrimary(TestingBase):
 
         cls.L1, cls.L2, cls.E, cls.R1, cls.R2, cls.W, cls.V, cls.A, cls.B = (
             seq(BLOCK) for _ in range(9))
-        half = seq((K - 1) // 2)
+        half = seq((cls.k - 1) // 2)
         cls.X = half + _rc(half)
         # the record's own step out of a·X must not be the hairpin step itself
         while cls.B[0] == _rc(cls.A[-1]):
@@ -6147,28 +6149,30 @@ class TestTraversePrimary(TestingBase):
         # with them the stored orientation of every k-mer, are the same in every run.
         canonical = d + '/canonical.dbg'
         cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode canonical --graph succinct '
-                         f'-k {K} -o {canonical} {fasta}', 'Build canonical')
+                         f'-k {cls.k} -o {canonical} {fasta}', 'Build canonical')
         cls._run_command(f'{METAGRAPH} transform -p 1 --to-fasta --primary-kmers '
                          f'-o {d}/contigs {canonical}', 'Primary contigs')
         primary = d + '/primary.dbg'
         cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode primary --graph succinct '
-                         f'-k {K} -o {primary} {d}/contigs.fasta.gz', 'Build primary')
+                         f'-k {cls.k} -o {primary} {d}/contigs.fasta.gz', 'Build primary')
         cls.stored = set()
         with gzip.open(d + '/contigs.fasta.gz', 'rt') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('>'):
-                    cls.stored.update(line[i:i + K] for i in range(len(line) - K + 1))
+                    cls.stored.update(line[i:i + cls.k] for i in range(len(line) - cls.k + 1))
         basic = d + '/basic.dbg'
-        cls._build_graph(fasta, basic, K, 'succinct', mode='basic')
+        cls._build_graph(fasta, basic, cls.k, 'succinct', mode='basic')
 
         # the primary graph's annotations: every form a primary index is deployed with
         # (row_diff_brwt: Logan chunks, metazoa, plants, human; row_diff_flat: human;
-        # row_diff_disk: metagut, metasub41; row_diff_int_brwt with counts: kingsford) and the
-        # plain column and row_diff forms
+        # row_diff_disk: metagut, metasub41; row_diff_int_brwt with counts: kingsford), the
+        # plain column and row_diff forms, and one with coordinates (presence only: they carry
+        # no strand on a primary graph)
         cls.primaries = {'primary': 'row_diff_brwt', 'primary_flat': 'row_diff_flat',
                          'primary_disk': 'row_diff_disk', 'primary_counts': 'row_diff_int_brwt',
-                         'primary_column': 'column', 'primary_row_diff': 'row_diff'}
+                         'primary_column': 'column', 'primary_row_diff': 'row_diff',
+                         'primary_coord': 'column_coord'}
         cls.indexes = {}
         for name, graph, anno in ([(name, primary, anno) for name, anno in cls.primaries.items()]
                                   + [('canonical', canonical, 'column'),
@@ -6258,6 +6262,22 @@ class TestTraversePrimary(TestingBase):
                     limitation.pop('effect')
         return out
 
+    def _graphlet_body(self, out, regime):
+        """|out| with each graphlet's H record less what names the index, the regime (checked
+        to be |regime|) and the index's meta fingerprint (which the annotation's coordinates
+        move), and without graphlet_bytes (checked to be the graphlet's size), which move
+        with them (SPEC §7.5.2)."""
+        for result in out['results']:
+            if 'graphlet' in result:
+                text = result['graphlet']
+                self.assertEqual(len(text), result.pop('graphlet_bytes'))
+                head, body = text.split('\n', 1)
+                fields = head.split(' ')
+                self.assertEqual(['H', 'mgt', '1', str(self.k), regime],
+                                 fields[:5], head)
+                result['graphlet'] = ' '.join(fields[:4] + fields[5:-1]) + '\n' + body
+        return out
+
     @staticmethod
     def _walk_view(result):
         """arm -> sorted [(flank in natural orientation, labels at its leaf, end reasons)]. A
@@ -6295,8 +6315,8 @@ class TestTraversePrimary(TestingBase):
     def _expected_runs(self, query, labels, stranded=False):
         """label -> its support runs over |query| as the records define them: a k-mer carries
         a label when the record holds it, on either strand unless |stranded|."""
-        n = len(query) - K + 1
-        carriers = [self._carriers(query[i:i + K], stranded) for i in range(n)]
+        n = len(query) - self.k + 1
+        carriers = [self._carriers(query[i:i + self.k], stranded) for i in range(n)]
         runs = {}
         for label in labels:
             spans, start = [], None
@@ -6314,8 +6334,8 @@ class TestTraversePrimary(TestingBase):
     def _orientation(self, sequence):
         """'F' per k-mer stored as read, 'R' per k-mer stored as its reverse complement."""
         out = ''
-        for i in range(len(sequence) - K + 1):
-            kmer = sequence[i:i + K]
+        for i in range(len(sequence) - self.k + 1):
+            kmer = sequence[i:i + self.k]
             self.assertTrue(kmer in self.stored or _rc(kmer) in self.stored, kmer)
             out += 'F' if kmer in self.stored else 'R'
         return out
@@ -6331,7 +6351,7 @@ class TestTraversePrimary(TestingBase):
         of the reversed records and seed read back: reversal keeps the pairs {s, rc(s)}, so the
         same rules apply there."""
         def kmers(s):
-            return {s[i:i + K] for i in range(len(s) - K + 1)}
+            return {s[i:i + self.k] for i in range(len(s) - self.k + 1)}
 
         def both(ks):
             return set(ks) if stranded else set(ks) | {_rc(x) for x in ks}
@@ -6340,7 +6360,7 @@ class TestTraversePrimary(TestingBase):
             graph = both(set().union(*(kmers(s) for s in records.values())))
             carried = both(kmers(records[label]))
             seed_nodes = both(kmers(seed))
-            u, flank, used = seed[-K:], '', set()
+            u, flank, used = seed[-self.k:], '', set()
             while len(flank) < max_bp:
                 # a hairpin step u -> rc(u) is skipped and never makes a branch (§6.5)
                 steps = [u + c for c in 'ACGT' if u[1:] + c in graph and u + c != _rc(u + c)]
@@ -6371,21 +6391,30 @@ class TestTraversePrimary(TestingBase):
         """Every response names the regime the index is served in: `primary` for every
         annotation of the primary graph (CLI and server), `canonical` and `basic` for the
         others; trace support is never offered off the basic regime (coordinates carry no
-        strand there), and these indexes have no coordinates anyway."""
+        strand there): a request for it is refused, with coordinates and without."""
         request = {'seeds': [{'sequence': self.E}], 'strategy': self._strategy()}
         for index, regime in ([(index, 'primary') for index in self.primaries]
                               + [('canonical', 'canonical'), ('basic', 'basic')]):
             caps = self._ok(index, request)['capabilities']
-            self.assertEqual((regime, K, False), (caps['regime'], caps['k'],
+            self.assertEqual((regime, self.k, False), (caps['regime'], caps['k'],
                                                   caps['supports_trace']), index)
         caps = requests.get(self.url + '/traverse/capabilities').json()
-        self.assertEqual(('primary', K, False, len(self.records)),
+        self.assertEqual(('primary', self.k, False, len(self.records)),
                          (caps['regime'], caps['k'], caps['supports_trace'],
                           caps['num_labels']))
         ret = requests.post(self.url + '/resolve', data=json.dumps(
             {'sequence': self.E, 'labels': ['acc1']}))
         self.assertEqual(200, ret.status_code, ret.text)
         self.assertEqual('primary', ret.json()['regime'])
+
+        self.assertTrue(self._ok('primary_coord', request)['capabilities']['has_coordinates'])
+        trace = {'sequence': self.E, 'labels': ['acc1'], 'support': 'trace'}
+        for index, refusal in (('primary_coord', 'Trace support is only defined for BASIC'),
+                               ('primary', 'Trace support requires an annotation with k-mer '
+                                           'coordinates')):
+            out, rc, _ = self._cli(index, trace, resolve=True)
+            self.assertNotEqual(0, rc, index)
+            self.assertIn(refusal, out['error'], index)
 
     def test_resolve_presence_and_discovery(self):
         """/resolve reads a k-mer's labels on either strand: the profile of a query and of its
@@ -6394,7 +6423,7 @@ class TestTraversePrimary(TestingBase):
         same bytes). The frozen seeds of both orientations carry the same canonical seed ids.
         The basic graph reads the forward strand only: inv's reversed E is not E there."""
         query = self.L1[-40:] + self.E + self.R1[:40]
-        n = len(query) - K + 1
+        n = len(query) - self.k + 1
         everyone = sorted(self.records)
         select = {'policy': 'max_support', 'max_seeds': 3}
         for sequence in (query, _rc(query)):
@@ -6452,10 +6481,10 @@ class TestTraversePrimary(TestingBase):
             'rc_derived': {'seeds': [{'sequence': _rc(e)}]},
             'rc_explicit': {'seeds': [{'sequence': _rc(e), 'labels': ['acc2', 'inv']}]},
             'junction': {'seeds': [{'sequence': j}]},
-            'hairpin_skip': {'seeds': [{'sequence': self.A[:40]}],
+            'hairpin_skip': {'seeds': [{'sequence': self.A[:60]}],
                              'strategy': self._strategy(direction='right',
                                                         bounds={'max_extension_bp': 300})},
-            'hairpin_follow': {'seeds': [{'sequence': self.A[:40]}],
+            'hairpin_follow': {'seeds': [{'sequence': self.A[:60]}],
                                'strategy': self._strategy(direction='right',
                                                           bounds={'max_extension_bp': 300},
                                                           branching={'hairpins': 'follow'})},
@@ -6478,9 +6507,9 @@ class TestTraversePrimary(TestingBase):
     def test_traverse_answers_as_on_the_canonical_graph(self):
         """Every request walks the same on every annotation of the primary graph and on
         the canonical graph of the same records: the same walks, labels, events, counters
-        and graphlet bodies, only the access path, the regime and the index's meta fingerprint
-        differ (and with them the graphlet's H record). The server under --mmap answers each
-        request with the CLI's bytes."""
+        and graphlets, only the access path, what reads cost, the regime and the index's meta
+        fingerprint differ (and with the last two the graphlet's H record). The server under
+        --mmap answers each request with the CLI's bytes."""
         for name, request in self._requests().items():
             with self.subTest(request=name):
                 outs = {index: self._ok(index, request)
@@ -6490,19 +6519,10 @@ class TestTraversePrimary(TestingBase):
                     self.assertEqual(('complete', 'complete'),
                                      (result['outcome']['walks'],
                                       result['outcome']['label_evidence']))
-                ref = self._without_access(outs['primary'])
+                ref = self._graphlet_body(self._without_access(outs['primary']), 'primary')
                 for index, out in outs.items():
-                    got = self._without_access(out)
-                    if index == 'canonical':
-                        # the graphlet's H record names the regime and the meta fingerprint,
-                        # and its size with them
-                        ref = copy.deepcopy(ref)
-                        for r in ref['results'] + got['results']:
-                            if 'graphlet' in r:
-                                head, r['graphlet'] = r['graphlet'].split('\n', 1)
-                                self.assertTrue(head.startswith('H '), head)
-                                self.assertEqual(len(head) + 1 + len(r['graphlet']),
-                                                 r.pop('graphlet_bytes'))
+                    regime = 'canonical' if index == 'canonical' else 'primary'
+                    got = self._graphlet_body(self._without_access(out), regime)
                     self.assertEqual(ref, got, index)
                 ret = requests.post(self.url + '/traverse', data=json.dumps(request))
                 self.assertEqual(200, ret.status_code, ret.text[:500])
@@ -6551,9 +6571,10 @@ class TestTraversePrimary(TestingBase):
         (b) Seeds whose k-mers are stored as read, stored reversed, and switch from one to the
         other within the seed (where two primary contigs of opposite orientation meet: the
         first switch of ir, forced by its inverted repeat; hp across its palindrome; windows of
-        every record): each walks as the records define it on two strands (`_oracle`), the same
-        on the canonical graph, and the basic graph as they define it on one strand, which is
-        the same walk but on ir, where the primary walk stops at the strands' meeting."""
+        every record), and a seed of ir next to its inverted copy: each walks as the records
+        define it on two strands (`_oracle`), the same on the canonical graph, and the basic
+        graph as they define it on one strand, which is the same walk but on ir, where the
+        primary walk stops at the strands' meeting."""
         j = self.E[-40:] + _rc(self.W)[:40]
         request = {'seeds': [{'sequence': j}], 'strategy': self._strategy()}
         primary = self._ok('primary', request)['results'][0]
@@ -6577,20 +6598,21 @@ class TestTraversePrimary(TestingBase):
                 window = orientation[i:i + 60]
                 kind = ('as read' if set(window) == {'F'} else 'reversed'
                         if set(window) == {'R'} else 'switching')
-                kinds.setdefault(kind, []).append((name, record[i:i + 60 + K - 1]))
+                kinds.setdefault(kind, []).append((name, record[i:i + 60 + self.k - 1]))
         # ir reads Y once forward and once reversed, and the graph stores each k-mer of Y once:
         # whatever the extraction does, ir switches somewhere; seed across its first switch
-        orientation = self._orientation(self.records['ir'])
+        ir = self.records['ir']
+        orientation = self._orientation(ir)
         switch = orientation.index('RF'[orientation[0] == 'R'])
-        # the seed below starts in Y and holds a k-mer of Y (choose another rng seed otherwise)
-        self.assertTrue(len(self.P) <= switch - 30 <= len(self.P) + BLOCK - K, switch)
-        across = [('ir', self.records['ir'][switch - 30:switch + K + 30])]
+        across = [('ir', ir[max(0, switch - 30):switch + self.k + 30])]
         # hp's own strands meet at X; whether its k-mers switch there is the extraction's choice
         across.append(('hp', self.A[-40:] + self.X + self.B[:40]))
+        # where ir meets its own reverse complement, whatever the stored orientation
+        meets = ('ir', self.Y[60:] + self.Q[:40])
         # with the contigs of one thread, windows of all three kinds occur; should a change of
         # the contig extraction ever make one disappear, choose another rng seed
         self.assertEqual({'as read', 'reversed', 'switching'}, set(kinds))
-        cases = across + [case for kind in sorted(kinds) for case in kinds[kind][:2]]
+        cases = across + [meets] + [case for kind in sorted(kinds) for case in kinds[kind][:2]]
         strategy = self._strategy(bounds={'max_extension_bp': 1000})
         for name, seed in cases:
             request = {'seeds': [{'sequence': seed, 'labels': [name]}], 'strategy': strategy}
@@ -6606,27 +6628,28 @@ class TestTraversePrimary(TestingBase):
                 self.assertEqual(one_strand, two_strand, (name, seed))
         # on ir, the primary walk is the basic one cut where ir meets its own reverse
         # complement: the left arm at Y's first k-mer (preceded by P and by rc(S)), the right
-        # one where it would step into the reverse complement of a seed k-mer
-        seed = across[0][1]
-        primary, basic = self._oracle(seed, 'ir'), self._oracle(seed, 'ir', stranded=True)
-        (left, _, left_end), = primary['left']
+        # one where it would step into the reverse complement of a seed k-mer (at the latest
+        # rc(Y)'s first k-mer, the reverse complement of the seed's last k-mer in Y)
+        primary = self._oracle(meets[1], 'ir')
+        self.assertEqual([(self.Y[:60], ('ir',), (('branch', 1),))], primary['left'])
         (right, _, right_end), = primary['right']
-        self.assertEqual((self.Y[:switch - 30 - len(self.P)], (('branch', 1),)),
-                         (left, left_end))
         self.assertEqual((('rejoined_seed', 1),), right_end)
-        self.assertEqual([(self.P + left, ('ir',), (('dead_end', 1),))], basic['left'])
-        self.assertTrue(basic['right'][0][0].startswith(right), right)
+        self.assertTrue((self.Q[40:] + _rc(self.Y)).startswith(right), right)
+        self.assertEqual({'left': [(self.P + self.Y[:60], ('ir',), (('dead_end', 1),))],
+                          'right': [(self.Q[40:] + _rc(self.Y) + self.S, ('ir',),
+                                     (('dead_end', 1),))]},
+                         self._oracle(meets[1], 'ir', stranded=True))
 
     def test_hairpin_step(self):
-        """A step through a self-reverse-complementary (k+1)-mer (k = 31 is odd, so no k-mer is
-        its own reverse complement; here a·X's (k-1)-suffix X is an RC palindrome, and every
+        """A step through a self-reverse-complementary (k+1)-mer (k is odd, so no k-mer is its
+        own reverse complement; here a·X's (k-1)-suffix X is an RC palindrome, and every
         such node has a hairpin successor carrying its own labels on a two-strand graph). Skipped
         by default: one `hairpin` event, no split, and the walk the record's, as on the basic
         graph, which has no hairpins. Followed: the hairpin step is a second leaf whose retrace
         is blocked as edge_reuse_rc."""
-        seed = self.A[:40]
-        record = self.A[40:] + self.X + self.B
-        at_bp = len(self.A) - 40 + K - 1
+        seed = self.A[:60]
+        record = self.A[60:] + self.X + self.B
+        at_bp = len(self.A) - 60 + self.k - 1
         requests_ = self._requests()
         skip = self._ok('primary', requests_['hairpin_skip'])['results'][0]
         self.assertEqual({'right': [(record, ('hp',), (('dead_end', 1),))]},
@@ -6687,6 +6710,8 @@ class TestTraversePrimary(TestingBase):
         one `hairpin` event, as SPEC §6.5 and the unit test EvenKPalindromicNode state. The
         deployed indexes are odd-k (19, 21, 31, 41); this pins the rule for the wrapper's
         palindromic nodes end to end."""
+        if self.k != K:
+            self.skipTest('the even-k graph is the same for every k of the class')
         k = 20
         d = self.tempdir.name + '/even'
         os.makedirs(d)
@@ -6718,6 +6743,13 @@ class TestTraversePrimary(TestingBase):
         self.assertEqual({'right': [(left[30:] + x[:k - 1], ('pal',), (('dead_end', 1),))]},
                          self._walk_view(result))
         self.assertEqual(1, len(self._events(result, 'hairpin')))
+
+
+class TestTraversePrimaryK41(TestTraversePrimary):
+    """The same at k = 41, metasub41's: a (k+1)-mer no longer fits 64 bits there, so the edge
+    identity of SPEC §6.6 (edge reuse, the strand-agnostic edge_reuse_rc) is a hash of the
+    canonical (k+1)-mer with a comparison of the whole string instead of its 2-bit packing."""
+    k = 41
 
 
 if __name__ == '__main__':
