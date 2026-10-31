@@ -843,6 +843,10 @@ GraphSelection traverse_graph_selection(const Json::Value &request, bool multi_g
             throw std::invalid_argument("Bad request: this server hosts a single graph; "
                                         "remove the 'graphs' field");
         }
+        if (request.isMember("pairs")) {
+            throw std::invalid_argument("Bad request: this server hosts a single graph; "
+                                        "remove the 'pairs' field");
+        }
         return selection;
     }
     if (request.isMember("graphs")) {

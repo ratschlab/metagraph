@@ -220,11 +220,13 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     req.release = s.str("release", "");
     // Routing fields: consumed by the server before parsing (resolve_traverse_index). They
     // are still checked and declared here, or the unknown-field check would reject every
-    // multi-graph request. `graphs` ([name], /search's form of `graph`) and `in_ram` (load the
-    // index into RAM for the request, as /search does) likewise
+    // multi-graph request. `graphs` ([name], /search's form of `graph`), `pairs` (the pair
+    // selector, read by select_pairs, SPEC-multigraph-envelope.md section 6) and `in_ram`
+    // (load the index into RAM for the request, as /search does) likewise
     s.str("graph", "");
     s.str("graph_path", "");
     s.strings("graphs");
+    s.has("pairs");
     s.boolean("in_ram", false);
     // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
@@ -473,6 +475,7 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     s.str("graph", "");
     s.str("graph_path", "");
     s.strings("graphs");
+    s.has("pairs");
     s.boolean("in_ram", false);
     req.sequence = s.str("sequence", "");
     if (req.sequence.empty()) throw InvalidRequest("request.sequence is required");

@@ -833,8 +833,15 @@ int run_server(Config *config) {
                     if (content_json.isMember("graphs"))
                         throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
                 } else {
-                    graphs_to_query = filter_graphs_from_list(indexes, content_json, request_id,
-                                                              config->max_graphs_without_selection);
+                    // the names of the selection (SPEC-multigraph-envelope.md section 6: `graphs`
+                    // only, `pairs` refused with pairs_unsupported, an unknown name with
+                    // graph_unknown), in byte order; each name's pairs are queried below
+                    for (const SelectedPair &pair : select_pairs(
+                                SelectionRoute::SEARCH, content_json, indexes,
+                                config->max_graphs_without_selection)) {
+                        if (graphs_to_query.empty() || graphs_to_query.back() != pair.name)
+                            graphs_to_query.push_back(pair.name);
+                    }
                     load_in_ram = content_json.get("in_ram", false).asBool() && loaded_with_mmap;
                 }
 
@@ -1555,14 +1562,19 @@ int run_server(Config *config) {
             }
             try {
                 const bool multi = !config->fnames.empty();
-                const GraphSelection selection = traverse_graph_selection(json, multi);
+                // a single-graph server refuses the selectors
+                if (!multi)
+                    traverse_graph_selection(json, false);
                 const std::optional<bool> in_ram = in_ram_field(json);
                 std::unique_ptr<IndexLease> lease;
                 IndexIdentity identity = single_identity;
                 if (multi) {
-                    const GraphPair &pair = select_traverse_pair(
-                            selection.name,
-                            selection.graph_path ? &*selection.graph_path : nullptr, indexes);
+                    // exactly one pair (SPEC-multigraph-envelope.md section 6): `graph` or
+                    // `graphs` resolving to one, or one object of `pairs`; several are refused
+                    // with the candidates (traverse_single_pair)
+                    const GraphPair pair = select_pairs(SelectionRoute::TRAVERSE, json, indexes,
+                                                        config->max_graphs_without_selection)
+                                                   .front().pair;
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
                         parse_traverse_request(json);
@@ -1596,6 +1608,13 @@ int run_server(Config *config) {
                 throw ClientGone(e.what());
             } catch (const AttemptAtBound &e) {
                 throw with_usage(503, e.what(), "deadline");
+            } catch (const SelectionRefusal &e) {
+                // its code and candidates kept, with the usage of a managed request
+                if (!attempt->managed())
+                    throw;
+                Json::Value body = e.body();
+                body["usage"] = attempt->usage_json("error");
+                throw HttpError(400, std::move(body));
             } catch (const std::exception &e) {
                 if (!attempt->managed())
                     throw;
@@ -1750,6 +1769,35 @@ int run_server(Config *config) {
         return caps;
     };
 
+    // The one pair a GET capabilities probe of a multi-graph server describes: ?graph=<name>
+    // [&graph_path=<path>][&annotation_path=<path>] naming exactly one pair of the name (SPEC-
+    // multigraph-envelope.md section 6, its refusals coded). A probe without ?graph= selects
+    // every pair, which the envelope over them answers (section 1); until a route answers it,
+    // such a probe is refused as before
+    auto probe_pair = [&](SelectionRoute route, const SimpleWeb::CaseInsensitiveMultimap &query,
+                          const std::string &path) {
+        std::vector<SelectedPair> selected = select_pairs_from_query(
+                route, query, indexes, config->max_graphs_without_selection);
+        if (std::none_of(query.begin(), query.end(),
+                         [](const auto &p) { return p.first == "graph"; })) {
+            throw InvalidRequest("Bad request: in multi-graph mode GET " + path + " needs "
+                                 "?graph=<name> (and graph_path=<path> when the name spans "
+                                 "several graphs, annotation_path=<path> when its pairs share "
+                                 "a graph); GET /capabilities lists the graphs");
+        }
+        return std::move(selected.front());
+    };
+    // a single-graph server refuses the parameters that would select a pair (they name what it
+    // does not have); any other is ignored, as it always was
+    auto refuse_probe_selection = [](const SimpleWeb::CaseInsensitiveMultimap &query) {
+        for (const auto &[key, value] : query) {
+            if (key == "graph" || key == "graph_path" || key == "annotation_path") {
+                throw InvalidRequest("Bad request: this server hosts a single graph; remove the "
+                                     "'graph' / 'graph_path' / 'annotation_path' parameter");
+            }
+        }
+    };
+
     // What this deployment supports, so a client can pick a strategy before asking.
     server.resource["^/traverse/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
                                                             shared_ptr<HttpServer::Request> request) {
@@ -1758,26 +1806,18 @@ int run_server(Config *config) {
                 throw CurrentlyInitializingError();
             const auto query = request->parse_query_string();
             if (config->fnames.empty()) {
-                // a single index: the parameters that would select one are refused (they name
-                // what this server does not have), any other is ignored, as it always was
-                for (const auto &[key, value] : query) {
-                    if (key == "graph" || key == "graph_path") {
-                        throw InvalidRequest("Bad request: this server hosts a single graph; "
-                                             "remove the 'graph' / 'graph_path' parameter");
-                    }
-                }
+                refuse_probe_selection(query);
                 return probe_json(*anno_graph.get(), single_identity);
             }
-            // Multi-graph mode: the probe of one (graph, annotation) pair, selected by the
-            // request fields' rules (?graph=<name>, and graph_path=<path> when the name spans
-            // several graphs); it states which pair it describes
-            const auto [name, graph_path] = probe_parameters(query, "/traverse/capabilities");
-            const GraphPair &pair = select_traverse_pair(name, graph_path ? &*graph_path : nullptr,
-                                                         indexes);
-            const AnnotatedDBG &index = *graphs_cache.at(pair);
+            // Multi-graph mode: the probe of one (graph, annotation) pair; it states which pair
+            // it describes
+            const SelectedPair pair = probe_pair(SelectionRoute::TRAVERSE, query,
+                                                 "/traverse/capabilities");
+            const AnnotatedDBG &index = *graphs_cache.at(pair.pair);
             Json::Value caps = probe_json(index, identity_of(index));
-            caps["graph"] = name;
-            caps["graph_path"] = pair.first;
+            caps["graph"] = pair.name;
+            caps["graph_path"] = pair.pair.first;
+            caps["annotation_path"] = pair.pair.second;
             return caps;
         }, /* compact */ true, &traversal_io);
     };
@@ -1794,21 +1834,16 @@ int run_server(Config *config) {
             const bool multi = !config->fnames.empty();
             const auto query = request->parse_query_string();
             if (multi) {
-                const auto [name, graph_path] = probe_parameters(query, "/pattern/capabilities");
-                const GraphPair &pair = select_traverse_pair(
-                        name, graph_path ? &*graph_path : nullptr, indexes);
+                const SelectedPair pair = probe_pair(SelectionRoute::PATTERN, query,
+                                                     "/pattern/capabilities");
                 Json::Value block = pattern_capabilities_json(
-                        graphs_cache.at(pair).get(), pattern_limits(*config), false);
-                block["graph"] = name;
-                block["graph_path"] = pair.first;
+                        graphs_cache.at(pair.pair).get(), pattern_limits(*config), false);
+                block["graph"] = pair.name;
+                block["graph_path"] = pair.pair.first;
+                block["annotation_path"] = pair.pair.second;
                 return block;
             }
-            for (const auto &[key, value] : query) {
-                if (key == "graph" || key == "graph_path") {
-                    throw InvalidRequest("Bad request: this server hosts a single graph; "
-                                         "remove the 'graph' / 'graph_path' parameter");
-                }
-            }
+            refuse_probe_selection(query);
             const bool ready = anno_graph.wait_for(0s) == std::future_status::ready;
             return pattern_capabilities_json(ready ? anno_graph.get().get() : nullptr,
                                              pattern_limits(*config), false);

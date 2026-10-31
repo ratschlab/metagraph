@@ -285,9 +285,10 @@ std::optional<bool> in_ram_field(const Json::Value &request);
  * then chosen by the graph list's rules, select_traverse_pair): |name| and |graph_path|
  * (when given as a string). The name is `graph`, or `graphs` ([name], the form /search takes):
  * two spellings of one selection, which nothing downstream tells apart. On a single-graph
- * server (|multi_graph| false) `graph` and `graph_path`, then `graphs`, are refused, and
- * nothing is selected (|name| empty). Throws std::invalid_argument with the message a 400
- * states.
+ * server (|multi_graph| false) `graph` and `graph_path`, then `graphs`, then `pairs`, are
+ * refused, and nothing is selected (|name| empty). Throws std::invalid_argument with the
+ * message a 400 states. (A multi-graph POST /traverse selects through select_pairs,
+ * server_selection.hpp, with the selectors of SPEC-multigraph-envelope.md section 6.)
  */
 struct GraphSelection {
     std::string name;
