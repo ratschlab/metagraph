@@ -28,6 +28,7 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "graph/alignment/pattern_search.hpp"
+#include "server_envelope.hpp"
 #include "server_utils.hpp"
 #include "traverse.hpp"
 
@@ -919,30 +920,15 @@ Json::Value max_request_body_mb_json(uint64_t mb) {
     return mb ? Json::Value(Json::UInt64(mb)) : Json::Value();
 }
 
-namespace {
-
-// the tags of a pair's entry in the envelope, set on |entry|
-void tag_pattern_pair(Json::Value *entry,
-                      const std::string &name,
-                      const std::string &graph_path,
-                      const std::string &annotation_path,
-                      const std::string &index_fp) {
-    (*entry)["graph"] = name;
-    (*entry)["graph_path"] = graph_path;
-    (*entry)["annotation_path"] = annotation_path;
-    (*entry)["index_fp"] = index_fp.empty() ? Json::Value() : Json::Value(index_fp);
-}
-
-} // namespace
-
+// The entries of /pattern's envelope are the shared envelope's (server_envelope.hpp), which
+// tags a pair and its refusal the same way on every route
 Json::Value pattern_pair_answered(const std::string &name,
                                   const std::string &graph_path,
                                   const std::string &annotation_path,
                                   const std::string &index_fp,
                                   Json::Value answer) {
-    tag_pattern_pair(&answer, name, graph_path, annotation_path, index_fp);
-    answer["outcome"] = "answered";
-    return answer;
+    return envelope_entry_answered({ name, { graph_path, annotation_path } }, index_fp,
+                                   std::move(answer));
 }
 
 Json::Value pattern_pair_refused(const std::string &name,
@@ -951,13 +937,8 @@ Json::Value pattern_pair_refused(const std::string &name,
                                  const std::string &index_fp,
                                  int http_status,
                                  const Json::Value &body) {
-    Json::Value entry;
-    tag_pattern_pair(&entry, name, graph_path, annotation_path, index_fp);
-    entry["outcome"] = "refused";
-    Json::Value refusal = body;
-    refusal["http_status"] = http_status;
-    entry["refusal"] = std::move(refusal);
-    return entry;
+    return envelope_entry_refused({ name, { graph_path, annotation_path } }, index_fp,
+                                  http_status, body);
 }
 
 Json::Value pattern_envelope(const std::vector<std::string> &names,
