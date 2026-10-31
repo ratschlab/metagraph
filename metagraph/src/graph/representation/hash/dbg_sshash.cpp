@@ -398,9 +398,11 @@ DBGSSHash::node_index DBGSSHash::trivial_outgoing(node_index node) const {
             return node + 1;
     } else {
         // RC node v: forward counterpart is v - dict_size()
-        // pred_is_prev_[fwd] means successor of RC node is node - 1
-        if (pred_is_prev_[node - dict_size()])
-            return node - 1;
+        // pred_is_prev_[fwd] means the successor of v is the RC of fwd - 1,
+        // which is fwd - 1 itself if that k-mer is a palindrome (even k only)
+        node_index rev_comp = reverse_complement(node);
+        if (pred_is_prev_[rev_comp])
+            return reverse_complement(rev_comp - 1);
     }
     return npos;
 }

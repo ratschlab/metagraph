@@ -321,46 +321,53 @@ compute_rd_succ_char(const graph::DeBruijnGraph &graph,
         char_to_idx[static_cast<unsigned char>(alphabet[i + offset])] = i;
     }
 
-    // Use a byte-per-element buffer for parallel writes.
-    // High bit (0x80) marks nodes that need a stored character.
-    // Lower bits store the character index.
-    std::vector<uint8_t> rd_succ_buf(graph.max_index() + 1, 0);
+    // Nodes are processed in blocks in parallel. The block size is a multiple of 64,
+    // so no two threads write to the same word of |needs_char_bv|. Each block keeps
+    // its chars packed until all blocks are concatenated in node order.
+    const uint64_t num_rows = graph.max_index() + 1;
+    constexpr uint64_t kBlockSize = 64 << 14;
+    const uint64_t num_blocks = (num_rows + kBlockSize - 1) / kBlockSize;
+    sdsl::bit_vector needs_char_bv(num_rows, 0);
+    std::vector<sdsl::int_vector<>> block_chars(num_blocks);
 
-    graph.call_nodes([&](node_index node) {
-        if (graph.has_no_outgoing(node))
-            return;
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (uint64_t b = 0; b < num_blocks; ++b) {
+        std::vector<uint8_t> chars;
+        const uint64_t end = std::min(num_rows, (b + 1) * kBlockSize);
+        for (node_index node = std::max<uint64_t>(b * kBlockSize, 1); node < end; ++node) {
+            // If the graph can trivially determine the successor, no need to store
+            if (!graph.in_graph(node) || graph.has_no_outgoing(node)
+                    || graph.trivial_outgoing(node) != graph::DeBruijnGraph::npos)
+                continue;
 
-        // If the graph can trivially determine the successor, no need to store
-        if (graph.trivial_outgoing(node) != graph::DeBruijnGraph::npos)
-            return;
-
-        // Need to store the character for this node
-        node_index succ = row_diff_successor(graph, node, fork_succ);
-        assert(graph.in_graph(succ));
-
-        graph.call_outgoing_kmers(node, [&](node_index adj, char c) {
-            if (adj == succ) {
-                rd_succ_buf[node] = char_to_idx[static_cast<unsigned char>(c)] | 0x80;
+            // Need to store the character for this node
+            node_index succ = row_diff_successor(graph, node, fork_succ);
+            int idx = -1;
+            graph.call_outgoing_kmers(node, [&](node_index adj, char c) {
+                if (adj == succ)
+                    idx = char_to_idx[static_cast<unsigned char>(c)];
+            });
+            if (idx < 0) {
+                logger->error("No outgoing edge of node {} leads to its row-diff "
+                              "successor {}", node, succ);
+                std::exit(1);
             }
-        });
-    }, []() { return false; }, get_num_threads());
-
-    // Build the needs_char bitvector and compact char array
-    sdsl::bit_vector needs_char_bv(rd_succ_buf.size(), 0);
-    size_t count = 0;
-    for (size_t i = 0; i < rd_succ_buf.size(); ++i) {
-        if (rd_succ_buf[i] & 0x80) {
-            needs_char_bv[i] = 1;
-            ++count;
+            needs_char_bv[node] = true;
+            chars.push_back(idx);
         }
+        block_chars[b] = sdsl::int_vector<>(chars.size(), 0, bits_per_char);
+        std::copy(chars.begin(), chars.end(), block_chars[b].begin());
     }
 
+    size_t count = 0;
+    for (const auto &chars : block_chars) {
+        count += chars.size();
+    }
     sdsl::int_vector<> rd_succ_char(count, 0, bits_per_char);
-    size_t j = 0;
-    for (size_t i = 0; i < rd_succ_buf.size(); ++i) {
-        if (rd_succ_buf[i] & 0x80) {
-            rd_succ_char[j++] = rd_succ_buf[i] & 0x7F;
-        }
+    auto it = rd_succ_char.begin();
+    for (auto &chars : block_chars) {
+        it = std::copy(chars.begin(), chars.end(), it);
+        chars = sdsl::int_vector<>();
     }
 
     logger->trace("Computed rd_succ_char: {} nodes total, {} need stored char ({:.1f}%), "

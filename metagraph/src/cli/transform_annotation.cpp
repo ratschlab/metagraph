@@ -950,25 +950,25 @@ int transform_annotation(Config *config) {
 
         logger->trace("Loading annotation...");
         RowDiffBRWTAnnotator annotator;
-        annotator.load(files[0]);
+        if (!annotator.load(files[0])) {
+            logger->error("Cannot load annotations from file '{}'", files[0]);
+            exit(1);
+        }
 
         logger->trace("Loading graph...");
         auto graph = load_critical_dbg(config->infbase);
 
         logger->trace("Computing rd_succ_char from fork_succ...");
-        auto [needs_char, rd_succ_char] = compute_rd_succ_char(*graph, annotator.get_matrix().fork_succ());
+        auto matrix = annotator.release_matrix();
+        auto [needs_char, rd_succ_char] = compute_rd_succ_char(*graph, matrix->fork_succ());
+        matrix->set_successor_chars(std::move(needs_char), std::move(rd_succ_char));
 
-        // Serialize as RowDiffCharBRWT (v3.0 format: anchor + needs_char + rd_succ_char + diffs)
+        // BRWT diffs are identical to the original, RowDiff::serialize writes the v3.0 layout
         const auto &fname = utils::make_suffix(config->outfbase,
                                                RowDiffCharBRWTAnnotator::kExtension);
         std::ofstream out = utils::open_new_ofstream(fname);
         annotator.get_label_encoder().serialize(out);
-        out.write("v3.0", 4);
-        annotator.get_matrix().anchor().serialize(out);
-        needs_char.serialize(out);
-        rd_succ_char.serialize(out);
-        // BRWT diffs are identical to the original
-        annotator.get_matrix().diffs().serialize(out);
+        matrix->serialize(out);
         out.close();
 
         logger->trace("Serialized to {}", config->outfbase);

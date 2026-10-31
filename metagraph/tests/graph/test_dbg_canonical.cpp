@@ -1468,14 +1468,16 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCross) {
 
 // trivial_outgoing() must also resolve reverse-complement nodes correctly
 TYPED_TEST(DeBruijnGraphCanonicalTest, trivial_outgoing_is_unique_successor) {
-    // small k give highly branching graphs, so count shortcuts over all k
+    // small k give highly branching graphs, so count shortcuts over all k;
+    // even k cover palindromic k-mers (e.g. ACGT, TACGTA, TTACGTAA)
     size_t num_trivial = 0;
-    for (size_t k = 3; k < 10; k += 2) {
+    for (size_t k = 3; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             "ATGCGATCGATATGCGAGA",
             "ATGCGATCGAGACTACGAG",
             "GTACGATAGACATGACGAG",
-            "ACTGACGAGACACAGATGC"
+            "ACTGACGAGACACAGATGC",
+            "GCAATTACGTAATTGCC"
         }, DeBruijnGraph::CANONICAL);
 
         graph->call_nodes([&](auto node) {

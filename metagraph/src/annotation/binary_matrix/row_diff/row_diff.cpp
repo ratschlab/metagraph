@@ -61,8 +61,9 @@ node_index row_diff_successor_char(
     char c = alphabet[idx + offset];
     node_index succ = graph.traverse(node, c);
     if (succ == graph::DeBruijnGraph::npos) {
-        common::logger->error("row_diff_successor_char: traverse({}, '{}') returned npos", node, c);
-        throw std::runtime_error("corrupt rd_succ_char: no valid successor");
+        // called in parallel regions, where an exception would terminate anyway
+        common::logger->error("Corrupt rd_succ_char: traverse({}, '{}') returned npos", node, c);
+        std::exit(1);
     }
     return succ;
 }

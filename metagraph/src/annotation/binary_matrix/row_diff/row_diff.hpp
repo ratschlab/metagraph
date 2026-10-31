@@ -43,7 +43,7 @@ namespace matrix {
 
 enum class RowDiffMode : uint8_t {
     Standard = 0,  // original fork_succ bitvector
-    CharSucc = 1,  // sparse 2-bit successor character (SSHash only)
+    CharSucc = 1,  // successor chars, stored only where trivial_outgoing() fails
 };
 
 const std::string kRowDiffAnchorExt = ".anchors";
@@ -71,7 +71,14 @@ class IRowDiff {
     const sdsl::int_vector<>& rd_succ_char() const { return rd_succ_char_; }
 
     RowDiffMode mode() const { return rd_mode_; }
-    void set_mode(RowDiffMode mode) { rd_mode_ = mode; }
+
+    // Switch to CharSucc mode: the successor chars replace fork_succ
+    void set_successor_chars(bit_vector_small&& needs_char, sdsl::int_vector<>&& succ_char) {
+        rd_succ_needs_char_ = std::move(needs_char);
+        rd_succ_char_ = std::move(succ_char);
+        fork_succ_ = fork_succ_bv_type();
+        rd_mode_ = RowDiffMode::CharSucc;
+    }
 
   protected:
     template <std::derived_from<BinaryMatrix> Matrix>
@@ -175,8 +182,9 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 
 
 /**
- * RowDiffChar: RowDiff variant that stores a 2-bit successor character per node
- * instead of the 1-bit fork_succ bitvector. Enables single-lookup traversal
+ * RowDiffChar: RowDiff variant that stores successor characters only for nodes
+ * whose successor trivial_outgoing() cannot resolve, instead of the 1-bit
+ * fork_succ bitvector. Enables single-lookup traversal
  * via graph.traverse(node, char) instead of enumerating all outgoing neighbors.
  */
 template <class BaseMatrix>
