@@ -6687,6 +6687,89 @@ class TestTraversePrimary(TestingBase):
         self.assertEqual(self._mirror(self._walk_view(skip)), self._walk_view(mirrored))
         self.assertEqual(1, len(self._events(mirrored, 'hairpin')))
 
+    def test_random_records_walk_as_on_the_canonical_graph(self):
+        """A differential check on random records: thirty records cut from twenty-five random
+        blocks and three reverse-complement palindromes, each piece forward or reversed, so that
+        records share sequence on both strands, meet their own reverse complements and cross
+        hairpins in many places. Sixty random seeds (windows of the records on either strand,
+        half under their record's label, half deriving their labels) walk the same on the
+        primary graph (row_diff_brwt) and on the canonical graph of the same records under the
+        defaults, two label branches, one branch with hairpins followed and no merging, the
+        exhaustive preset and annotate mode."""
+        d = f'{self.tempdir.name}/random'
+        os.makedirs(d)
+        rng = random.Random(20261101)
+
+        def seq(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+        pieces = [seq(rng.randint(self.k + 5, 150)) for _ in range(25)]
+        for _ in range(3):
+            half = seq((self.k - 1) // 2)
+            pieces.append(half + _rc(half))
+        records = {}
+        for i in range(30):
+            parts = [rng.choice(pieces) for _ in range(rng.randint(2, 6))]
+            records[f'r{i}'] = ''.join(p if rng.random() < 0.6 else _rc(p) for p in parts)
+        fasta = d + '/records.fa'
+        with open(fasta, 'w') as f:
+            for name, s in records.items():
+                f.write(f'>{name}\n{s}\n')
+        canonical, primary = d + '/canonical.dbg', d + '/primary.dbg'
+        self._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode canonical --graph succinct '
+                          f'-k {self.k} -o {canonical} {fasta}', 'Build canonical')
+        self._run_command(f'{METAGRAPH} transform -p 1 --to-fasta --primary-kmers '
+                          f'-o {d}/contigs {canonical}', 'Primary contigs')
+        self._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode primary --graph succinct '
+                          f'-k {self.k} -o {primary} {d}/contigs.fasta.gz', 'Build primary')
+        self._annotate_graph(fasta, canonical, d + '/canonical', 'column', anno_type='header')
+        self._annotate_graph(fasta, primary, d + '/primary', 'row_diff_brwt', anno_type='header')
+
+        seeds = []
+        for _ in range(60):
+            name = rng.choice(sorted(records))
+            record = records[name]
+            length = rng.randint(self.k, min(len(record), self.k + 60))
+            start = rng.randint(0, len(record) - length)
+            window = record[start:start + length]
+            seed = {'sequence': window if rng.random() < 0.5 else _rc(window)}
+            if rng.random() < 0.5:
+                seed['labels'] = [name]
+            seeds.append(seed)
+        untimed = {'timing': False}
+        strategies = [
+            {'bounds': {'max_extension_bp': 400}},
+            {'bounds': {'max_extension_bp': 400}, 'branching': {'max_label_branches': 2}},
+            {'bounds': {'max_extension_bp': 300},
+             'branching': {'max_label_branches': 1, 'hairpins': 'follow',
+                           'on_reconverge': 'keep'}},
+            {'bounds': {'max_extension_bp': 300}, 'exhaustive': True},
+            {'bounds': {'max_extension_bp': 100}, 'labels': {'mode': 'annotate'}},
+        ]
+        events = set()
+        for strategy in strategies:
+            annotate = strategy.get('labels', {}).get('mode') == 'annotate'
+            request = {'seeds': [{'sequence': s['sequence']} for s in seeds] if annotate
+                       else seeds, 'strategy': dict(strategy, output=untimed)}
+            path = d + '/request.json'
+            with open(path, 'w') as f:
+                json.dump(request, f)
+            outs = []
+            for graph, anno in ((primary, d + '/primary.row_diff_brwt.annodbg'),
+                                (canonical, d + '/canonical.column.annodbg')):
+                res = subprocess.run([METAGRAPH, 'traverse', '--json', '-i', graph, '-a', anno,
+                                      path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(0, res.returncode, res.stderr.decode()[-500:])
+                outs.append(self._without_access(json.loads(res.stdout)))
+            self.assertEqual(len(seeds), len(outs[0]['results']))
+            for i, (got, want) in enumerate(zip(*(out['results'] for out in outs))):
+                self.assertNotIn('error', got, (strategy, request['seeds'][i]))
+                self.assertEqual(want, got, (strategy, request['seeds'][i]))
+                events.update(e['type'] for arm in got['arms'].values()
+                              for s in arm['segments'] for e in s['events'])
+            self.assertEqual(outs[1], outs[0], strategy)
+        # the records did what they are for
+        self.assertTrue({'hairpin', 'blocked', 'reconverge'} <= events, events)
+
     def test_graphlet_round_trip(self):
         """The graphlet of a primary walk (MGT v1) names the regime in its H record, parses and
         dumps back byte for byte, and reproduces the detail: full result through the library,
