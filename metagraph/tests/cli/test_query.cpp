@@ -179,4 +179,64 @@ TEST(encode_presence_mask, empty) {
     EXPECT_EQ("", cli::encode_presence_mask(sdsl::bit_vector(0)));
 }
 
+// The cut of a sequence's search as /search states it (SPEC-multigraph-envelope.md section 3)
+cli::SeqSearchResult with_cut(const graph::SearchCut &cut) {
+    return cli::SeqSearchResult(cli::QuerySequence { 0, "q", "ACGT" },
+                                cli::SeqSearchResult::LabelCountVec(), {}, cut);
+}
+
+TEST(SeqSearchResult, cut_to_json_complete) {
+    graph::SearchCut cut;
+    cut.returned = 2;
+    Json::Value json = with_cut(cut).cut_to_json();
+    EXPECT_EQ(2u, json["returned"].asUInt64());
+    EXPECT_TRUE(json["complete"].asBool());
+    EXPECT_TRUE(json.isMember("nth_score"));
+    EXPECT_TRUE(json["nth_score"].isNull());
+    EXPECT_EQ(0u, json["tied"].asUInt64());
+    EXPECT_EQ(0u, json["tied_returned"].asUInt64());
+    // the median members on counts annotations only
+    EXPECT_FALSE(json.isMember("nth_median"));
+    EXPECT_FALSE(json.isMember("tied_same_median"));
+
+    cut.abundances = true;
+    json = with_cut(cut).cut_to_json();
+    EXPECT_TRUE(json.isMember("nth_median"));
+    EXPECT_TRUE(json["nth_median"].isNull());
+    EXPECT_EQ(0u, json["tied_same_median"].asUInt64());
+
+    // an empty result: nothing returned, complete
+    json = with_cut(graph::SearchCut()).cut_to_json();
+    EXPECT_EQ(0u, json["returned"].asUInt64());
+    EXPECT_TRUE(json["complete"].asBool());
+    EXPECT_TRUE(json["nth_score"].isNull());
+}
+
+TEST(SeqSearchResult, cut_to_json_cut) {
+    graph::SearchCut cut;
+    cut.returned = 1;
+    cut.complete = false;
+    cut.nth_score = 12;
+    cut.tied = 2;
+    cut.tied_returned = 1;
+    cut.abundances = true;
+    cut.nth_median = 7;
+    cut.tied_same_median = 1;
+    Json::Value json = with_cut(cut).cut_to_json();
+    EXPECT_EQ(1u, json["returned"].asUInt64());
+    EXPECT_FALSE(json["complete"].asBool());
+    EXPECT_EQ(12u, json["nth_score"].asUInt64());
+    EXPECT_EQ(2u, json["tied"].asUInt64());
+    EXPECT_EQ(1u, json["tied_returned"].asUInt64());
+    EXPECT_EQ(7u, json["nth_median"].asUInt64());
+    EXPECT_EQ(1u, json["tied_same_median"].asUInt64());
+    EXPECT_EQ(7u, json.size());
+
+    cut.abundances = false;
+    json = with_cut(cut).cut_to_json();
+    EXPECT_EQ(12u, json["nth_score"].asUInt64());
+    EXPECT_FALSE(json.isMember("nth_median"));
+    EXPECT_EQ(5u, json.size());
+}
+
 } // namespace

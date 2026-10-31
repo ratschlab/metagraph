@@ -15,6 +15,7 @@
 
 #include "common/vector.hpp"
 #include "graph/alignment/alignment.hpp"
+#include "graph/annotated_dbg.hpp"
 
 namespace mtg {
 
@@ -113,19 +114,23 @@ class SeqSearchResult {
      * @param sequence rvalue reference to QuerySequence
      * @param result rvalue reference to result_type
      * @param alignment alignment to graph (how the query was transformed)
+     * @param cut the top-N cut the result was taken with
      */
     SeqSearchResult(QuerySequence&& sequence,
                     result_type&& result,
-                    std::optional<Alignment>&& alignment = {})
+                    std::optional<Alignment>&& alignment = {},
+                    const graph::SearchCut &cut = {})
           : sequence_(std::move(sequence)),
             alignment_(std::move(alignment)),
-            result_(std::move(result)) {}
+            result_(std::move(result)),
+            cut_(cut) {}
 
     /** Const reference getters */
     const QuerySequence& get_sequence() const { return sequence_; }
     const std::optional<Alignment>& get_alignment() const { return alignment_; }
     std::optional<Alignment>& get_alignment() { return alignment_; }
     const result_type& get_result() const { return result_; }
+    const graph::SearchCut& get_cut() const { return cut_; }
 
     /**
      * Returns a Json object representing the individual query result for the
@@ -136,6 +141,15 @@ class SeqSearchResult {
      * @return  Json::Value instance representing sequence result
      */
     Json::Value to_json(bool verbose_output, size_t k) const;
+
+    /**
+     * Returns the cut of this sequence's search as a /search answer states it per pair
+     * (SPEC-multigraph-envelope.md section 3), without the pair's tags: returned, complete,
+     * nth_score, tied, tied_returned, and on an annotation with k-mer counts nth_median and
+     * tied_same_median. A complete cut states nth_score (and nth_median) null and its counts
+     * 0.
+     */
+    Json::Value cut_to_json() const;
 
     /**
      * Returns a string representing the individual query result for the represented sequence.
@@ -157,6 +171,7 @@ class SeqSearchResult {
     QuerySequence sequence_;             // query sequence this result represents
     std::optional<Alignment> alignment_; // optional wrapper for alignment struct
     result_type result_;                 // result vector of labels and additional info
+    graph::SearchCut cut_;               // the top-N cut the result was taken with
 };
 
 
