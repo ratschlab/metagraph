@@ -513,6 +513,14 @@ Config::Config(int argc, char *argv[]) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionCount, &count);
             traverse_attempt_retention = count;
             i++;
+        } else if (!strcmp(argv[i], "--request-retention-s")) {
+            bounded(argv[i], get_value(i), kMaxAttemptRetentionS, &request_retention_s);
+            i++;
+        } else if (!strcmp(argv[i], "--request-retention")) {
+            uint64_t count = 0;
+            bounded(argv[i], get_value(i), kMaxAttemptRetentionCount, &count);
+            request_retention = count;
+            i++;
         } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-max-s")) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionS,
                     &traverse_attempt_tombstone_max_s);
@@ -1955,6 +1963,8 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long (and their ids refused; one sent with not_after_ms is held until not_after_ms + the clock skew allowance, within the tombstone cap), and a cancel of an unknown id tombstones it at least this long, in [0, 31536000]; 0 = nothing kept, no tombstones (such a cancel is refused, 429) [3600]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones and held attempts are held (else it is refused, 429), in [0, 10000000] [10000]\n");
+            fprintf(stderr, "\t   --request-retention-s [INT] \tended /resolve and /pattern requests with a request_id stay queryable (GET /requests/{request_id}) this long, their ids refused (409), in [0, 31536000]; 0 = nothing kept [3600]\n");
+            fprintf(stderr, "\t   --request-retention [INT] \tat most this many ended requests are kept (oldest dropped first), in [0, 10000000] [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT] \tthe longest a tombstone, or a finished attempt's id, is held to cover a not_after_ms (+ the clock skew allowance), from the latest cancel, finish or refused copy of the request, in [0, 31536000]; never less than --traverse-attempt-retention-s [86400]\n");
             fprintf(stderr, "\t   --traverse-clock-skew-ms [INT] \tclock skew a ledger adds to not_after_ms, stated in the capabilities [2000]\n");
             fprintf(stderr, "\t   --traverse-observed-window-s [INT] \tthe capabilities state the longest uninterruptible piece of a /traverse seen within the last this many seconds, in [1, 31536000] [3600]\n");
