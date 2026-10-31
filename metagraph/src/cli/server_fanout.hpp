@@ -328,9 +328,8 @@ class PairControl {
     bool start_running();
 
     // The cap of the pair's own deadline (its route's deadline, which starts when it starts,
-    // becomes the minimum of its own and this): finish_by_ms - the skew allowance, and in a
-    // pooled fan-out the work cutoff, so that a pair stopped by its own deadline is answered by
-    // the cutoff; none without either
+    // becomes the minimum of its own and this): finish_by_ms - the skew allowance, none
+    // without it. The work cutoff caps nothing: a pair still working there is unfinished
     std::optional<SteadyClock::time_point> deadline_cap() const;
 
   private:

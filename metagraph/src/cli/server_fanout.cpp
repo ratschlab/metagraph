@@ -899,11 +899,10 @@ bool PairControl::start_loading(uint64_t bytes) { return state_->start(index_, t
 bool PairControl::start_running() { return state_->start(index_, false, 0); }
 
 std::optional<SteadyClock::time_point> PairControl::deadline_cap() const {
-    const RequestDeadlines &d = state_->settings.deadlines;
-    std::optional<SteadyClock::time_point> cap = d.finish;
-    if (!state_->inline_run)
-        cap = cap ? std::min(*cap, d.cutoff) : d.cutoff;
-    return cap;
+    // finish_by_ms alone: each pair keeps its own budget, which starts when it starts (section
+    // 4), so that its answer is the single-graph one; a pair still working at the cutoff is
+    // cut unfinished there rather than given a shorter budget
+    return state_->settings.deadlines.finish;
 }
 
 FanoutOutcome run_fanout(const FanoutSettings &settings,

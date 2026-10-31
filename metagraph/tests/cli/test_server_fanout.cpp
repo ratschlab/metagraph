@@ -382,8 +382,8 @@ TEST(ServerFanout, StartedPairCutAtTheCutoffEndsLater) {
             return r;
         }
         EXPECT_TRUE(control.start_running());
-        // a pooled pair's own deadline is capped at the cutoff
-        EXPECT_EQ(d.cutoff, control.deadline_cap());
+        // a pooled pair keeps its own deadline: the cutoff caps nothing (no finish_by_ms)
+        EXPECT_FALSE(control.deadline_cap());
         // some CPU time to state, then uninterruptible until the gate opens
         const auto until = std::chrono::steady_clock::now() + 30ms;
         volatile uint64_t x = 0;
