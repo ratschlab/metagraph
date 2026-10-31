@@ -202,8 +202,9 @@ TEST(LabelsNotInGraph, ASeedOfAbsentLabelsIsNotWalked) {
             multi_graph())["results"][0];
     ASSERT_EQ("not_in_graph", absent_seed["outcome"]["walks"].asString()) << absent_seed;
     for (const std::string &member : absent_seed.getMemberNames()) {
-        if (member != "not_in_graph")
+        if (member != "not_in_graph") {
             EXPECT_TRUE(r.isMember(member)) << member;
+        }
     }
     EXPECT_EQ(absent_seed["outcome"].getMemberNames(), r["outcome"].getMemberNames());
     // the other seed is walked as alone
