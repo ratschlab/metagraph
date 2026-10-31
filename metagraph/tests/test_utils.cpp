@@ -230,6 +230,7 @@ TEST(get_filetype, VCF) {
     EXPECT_EQ("VCF", file_format("file.vcf"));
     EXPECT_EQ("VCF", file_format("file.VCF.gz"));
     EXPECT_EQ("VCF", file_format("file.vcf.gz"));
+    EXPECT_EQ("VCF", file_format("file.vcf.zst"));
 }
 
 TEST(get_filetype, FASTA) {
@@ -237,6 +238,7 @@ TEST(get_filetype, FASTA) {
     EXPECT_EQ("FASTA", file_format("file.fasta"));
     EXPECT_EQ("FASTA", file_format("file.FASTA.gz"));
     EXPECT_EQ("FASTA", file_format("file.fasta.gz"));
+    EXPECT_EQ("FASTA", file_format("file.fasta.zst"));
 }
 
 TEST(get_filetype, FASTQ) {
@@ -245,6 +247,7 @@ TEST(get_filetype, FASTQ) {
     EXPECT_EQ("FASTQ", file_format("file.fastq"));
     EXPECT_EQ("FASTQ", file_format("file.fq.gz"));
     EXPECT_EQ("FASTQ", file_format("file.FQ.gz"));
+    EXPECT_EQ("FASTQ", file_format("file.fq.zst"));
 }
 
 TEST(get_filetype, IncorrectFiletype) {
@@ -253,6 +256,7 @@ TEST(get_filetype, IncorrectFiletype) {
     EXPECT_EQ("", file_format("bz2"));
     EXPECT_EQ("", file_format("file.gz"));
     EXPECT_EQ("", file_format("fasta.gz"));
+    EXPECT_EQ("", file_format("file.zst"));
 }
 
 bool colexicographically_greater(const std::string &s1, const std::string &s2) {
