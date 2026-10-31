@@ -288,10 +288,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         for (const auto &file : files) {
             using Seq = std::tuple<std::string, std::vector<std::string>, uint64_t>;
             BatchAccumulator<Seq> batcher(
-                [&anno_graph](std::vector<Seq>&& data) {
+                [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                     auto *data_p = new std::vector<Seq>(std::move(data));
                     // The task can outlive the batcher's callback at a file boundary.
-                    auto *graph_p = anno_graph.get();
                     #pragma omp task firstprivate(data_p, graph_p)
                     {
                         std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
@@ -351,9 +350,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     for (const auto &file : files) {
         using Seq = std::pair<std::string, std::vector<std::string>>;
         BatchAccumulator<Seq> batcher(
-            [&anno_graph](std::vector<Seq>&& data) {
+            [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                 auto *data_p = new std::vector<Seq>(std::move(data));
-                auto *graph_p = anno_graph.get();
+                // The task can outlive the batcher's callback at a file boundary.
                 #pragma omp task firstprivate(data_p, graph_p)
                 {
                     std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
@@ -393,9 +392,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
             using Seq = std::tuple<std::string, std::vector<std::string>, std::vector<uint64_t>>;
             BatchAccumulator<Seq> batcher(
-                [&anno_graph](std::vector<Seq>&& data) {
+                [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                     auto *data_p = new std::vector<Seq>(std::move(data));
-                    auto *graph_p = anno_graph.get();
+                    // The task can outlive the batcher's callback at a file boundary.
                     #pragma omp task firstprivate(data_p, graph_p)
                     {
                         std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
