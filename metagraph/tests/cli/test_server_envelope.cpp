@@ -164,6 +164,42 @@ TEST(ServerEnvelope, Sample01ResolveTwoPairs) {
     EXPECT_EQ(39068u, built["work"]["memory_bytes"].asUInt64());
 }
 
+// Sample 02: a named graph, one entry, no request_id
+TEST(ServerEnvelope, Sample02ResolveNamed) {
+    const Json::Value body = sample("02_resolve_envelope_named.json")["body"];
+    const Json::Value built = rebuilt_post_envelope(body);
+    EXPECT_EQ(text(body), text(built));
+    EXPECT_EQ(parse(R"(["bact_other"])"), built["graphs"]);
+    EXPECT_TRUE(built["request_id"].isNull());
+}
+
+// Sample 04: the discovery cut's boundary tie (section 7) passes through the entry; the
+// envelope's work.memory_bytes is the answered entry's
+TEST(ServerEnvelope, Sample04ResolveTruncatedTie) {
+    const Json::Value body = sample("04_resolve_labels_truncated_tie.json")["body"];
+    const Json::Value built = rebuilt_post_envelope(body);
+    EXPECT_EQ(text(body), text(built));
+    const Json::Value &cut = built["answers"][0]["labels_truncated"];
+    EXPECT_EQ((std::vector<std::string> { "dropped_full_length", "kept", "max_dropped_kmers",
+                                          "min_kept_kmers", "tied_at_boundary", "tied_kept",
+                                          "total" }), cut.getMemberNames());
+    EXPECT_EQ(built["answers"][0]["work"]["memory_bytes"].asUInt64(),
+              built["work"]["memory_bytes"].asUInt64());
+}
+
+// Sample 09: a /traverse entry whose seed result is labels_not_in_graph (section 2); the
+// envelope's work.memory_bytes is the answered entry's (the seed result's shape is the
+// engine's: LabelsNotInGraph.TheSampleStatesTheSeedResultsShape)
+TEST(ServerEnvelope, Sample09TraverseLabelsNotInGraph) {
+    const Json::Value body = sample("09_traverse_entry_labels_not_in_graph.json")["body"];
+    const Json::Value built = rebuilt_post_envelope(body);
+    EXPECT_EQ(text(body), text(built));
+    EXPECT_EQ("labels_not_in_graph",
+              built["answers"][0]["results"][0]["outcome"]["walks"].asString());
+    EXPECT_EQ(built["answers"][0]["work"]["memory_bytes"].asUInt64(),
+              built["work"]["memory_bytes"].asUInt64());
+}
+
 // Sample 03: one pair answered, one not reached, one unfinished; the lists name the pairs
 // from the refusals' codes, and the deadline's instants are written as the sample states them
 TEST(ServerEnvelope, Sample03ResolveCutoff) {
@@ -194,13 +230,11 @@ TEST(ServerEnvelope, Sample05TraverseNamed) {
 }
 
 // Sample 16: /pattern keeps pattern_contract_version beside the envelope's members; a pair
-// not started by not_after_ms is not_reached
+// not started by not_after_ms is not_reached; work.memory_bytes the answered entry's (0)
 TEST(ServerEnvelope, Sample16PatternNotReached) {
     const Json::Value body = sample("16_pattern_envelope_not_reached.json")["body"];
     const Json::Value built = rebuilt_post_envelope(body);
-    // the sample's work.memory_bytes (1048576) is not the answered entries' sum (0) that
-    // section 1 defines, and the text wins over a sample (reported with the contract)
-    EXPECT_EQ(text(without(body, { "work" })), text(without(built, { "work" })));
+    EXPECT_EQ(text(body), text(built));
     EXPECT_EQ(0u, built["work"]["memory_bytes"].asUInt64());
     EXPECT_EQ(1, built["pattern_contract_version"].asInt());
     EXPECT_EQ(1u, built["answered"].asUInt());

@@ -63,21 +63,35 @@
     "release": "refseq237",
     "results": [
      {
-      "seed_id": "s0",
-      "labels_from_seed": false,
-      "error": "none of the seed's labels is in this graph: NC_003279.8",
-      "unknown_labels": [
-       "NC_003279.8"
-      ],
-      "outcome": {
-       "walks": "labels_not_in_graph",
-       "complete": false
-      },
       "dropped_labels": [
        {
         "label": "NC_003279.8",
         "reason": "not_in_graph"
        }
+      ],
+      "error": "none of the seed's labels is in this graph: NC_003279.8",
+      "limitations": [
+       {
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (dependency rows and coordinate tuples are charged before they are held; a read that does not fit is refused whole); held beyond the admitted account, so able to exceed the budget: a level's keys and fetched rows until its heads are processed, the seed phase's intersection and hits, a failed seed's depth-0 dictionary and a failed result's echo of seed_id (observed: the largest excess seen, MiB, rounded up), and, not observed, an index-wide header lookup and the label dictionary's first table and growth copy (about 1.5 KB)",
+        "kind": "memory_bound_soft",
+        "knob": "bounds.max_memory_mb",
+        "limit": 512,
+        "observed": 0
+       }
+      ],
+      "outcome": {
+       "branch_diagnostics": "complete",
+       "delivery": "inline",
+       "label_evidence": "complete",
+       "walks": "labels_not_in_graph"
+      },
+      "seed": {
+       "labels_from_seed": false,
+       "length_bp": 100,
+       "seed_id": "s0"
+      },
+      "unknown_labels": [
+       "NC_003279.8"
       ],
       "work": {
        "memory_bytes": 312
@@ -166,7 +180,7 @@
    "elapsed_ms": 2.2
   },
   "work": {
-   "memory_bytes": 312
+   "memory_bytes": 653252
   }
  }
 }

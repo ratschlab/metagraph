@@ -4,7 +4,7 @@
  "note": "E1 on a multi-graph server: the flat list as today, every row tagged with its pair, rows in the index pair order, and one cut per pair and query sequence, empty pairs included. Within a pair: score descending, then label ascending (coordinate and column indexes). complete = every match above the thresholds returned (no cut: nth_score null, tied 0); else nth_score is the N-th returned score, tied the labels with that score (returned or not), tied_returned how many of them were returned.",
  "request": {
   "FASTA": ">q1_fwd\nACGT...",
-  "num_labels": 2,
+  "top_labels": 2,
   "graphs": [
    "bact_other",
    "bact_pseudomonadota",

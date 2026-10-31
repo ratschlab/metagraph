@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 
+#include <fstream>
+#include <iterator>
 #include <random>
 #include <set>
 #include <sstream>
@@ -247,6 +249,36 @@ TEST(LabelsNotInGraph, ASeedOfAbsentLabelsIsNotWalked) {
             multi_graph())["results"][0];
     EXPECT_EQ("not_in_graph", both["outcome"]["walks"].asString());
     EXPECT_EQ(strings({ "Z" }), both["unknown_labels"]);
+}
+
+// The reference sample 09 (tests/data/multigraph_contract, SPEC-multigraph-envelope.md) states
+// the seed result of labels_not_in_graph in the engine's shape: the members of the result, of
+// its seed, outcome and limitations, under the sample request's memory budget and without
+// coordinates asked for
+TEST(LabelsNotInGraph, TheSampleStatesTheSeedResultsShape) {
+    // run from the build directory, like every test reading ../tests/data
+    std::ifstream in("../tests/data/multigraph_contract/09_traverse_entry_labels_not_in_graph.json",
+                     std::ios::binary);
+    ASSERT_TRUE(in.good()) << "sample 09 not found (run from the build directory)";
+    const std::string text { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+    const Json::Value sample = parse(text)["body"]["answers"][0]["results"][0];
+    const Pair pair;
+    Json::Value request = traverse_request({ { pair.seed(), { "Z" } } });
+    request["strategy"]["bounds"]["max_memory_mb"] = 512;
+    const Json::Value r = process_traverse_request(request, *pair.index, "",
+                                                   multi_graph())["results"][0];
+    ASSERT_EQ("labels_not_in_graph", r["outcome"]["walks"].asString()) << r;
+    EXPECT_EQ(sample.getMemberNames(), r.getMemberNames());
+    for (const char *member : { "seed", "outcome" }) {
+        EXPECT_EQ(sample[member].getMemberNames(), r[member].getMemberNames()) << member;
+    }
+    EXPECT_EQ(sample["outcome"], r["outcome"]);
+    ASSERT_EQ(1u, r["limitations"].size());
+    EXPECT_EQ(sample["limitations"][0].getMemberNames(), r["limitations"][0].getMemberNames());
+    // (its effect's words depend on the annotation: a column one here, row-diff in the sample)
+    EXPECT_EQ(sample["limitations"][0]["kind"], r["limitations"][0]["kind"]);
+    EXPECT_EQ(sample["dropped_labels"][0].getMemberNames(),
+              r["dropped_labels"][0].getMemberNames());
 }
 
 // The graphlet states a dropped label as it states every dropped seed label: an X record with

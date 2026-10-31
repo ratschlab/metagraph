@@ -29,7 +29,7 @@ graph (one entry). Members, in this order:
 | `deadline` | object | `{not_after_ms, finish_by_ms, effective_deadline_at, cutoff_at}`; nulls where not given or not applicable |
 | `usage` | object | `/traverse` only, for a ledger-managed request (one with `attempt_id`): the attempt's usage, the object a single-graph traverse states at its top level |
 | `answers` | [entry] | one entry per selected pair, in the index's pair order (names in byte order, each name's pairs in list order, a pair listed twice under a name once) |
-| `timing`, `work` | object | the request's (`work.memory_bytes`: the answered pairs' accounts summed) |
+| `timing`, `work` | object | the request's (`work.memory_bytes`: the answered pairs' accounts summed); `timing.elapsed_ms` is always present, an entry's own `timing` follows its request's `output.timing` |
 
 An entry is either the pair's single-graph answer with the tags merged in, or a refusal:
 - answered: `{graph, graph_path, annotation_path, index_fp, outcome: "answered", ...the single-graph answer}`.
@@ -42,7 +42,8 @@ An entry is either the pair's single-graph answer with the tags merged in, or a 
 The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilities`) answer without a pair
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
 `graphs`, `answered`, `refused`, `server_instance`, `answers` (each entry the pair's capabilities block, tagged).
-With a pair selection (section 6) they answer a one-entry envelope.
+With a pair selection (section 6) they answer a one-entry envelope. Beyond the cap a probe without `?graph=` keeps
+its 400 wording ("needs ?graph=<name> ...") with one clause added, the cap and the count.
 
 ### 1.1 `/traverse` (E10)
 
@@ -77,7 +78,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   order: `{graph, graph_path, annotation_path, index_fp, returned, complete, nth_score, tied, tied_returned}`; on a
   single-graph server one entry with null pair tags.
   - `returned`: rows of this pair; `complete`: every match above the request's thresholds was returned (no cut):
-    then `nth_score` null and `tied`, `tied_returned` 0;
+    then `nth_score` null and `tied`, `tied_returned` 0; `complete: true` with nothing returned means nothing
+    matched, and N = 0 with matches states `returned 0, complete false, nth_score null, tied 0`;
   - otherwise `nth_score` is the score of the N-th returned row, `tied` the number of matching labels with that
     score (returned or not), `tied_returned` how many of them were returned;
   - on COUNTS annotations also `nth_median` and `tied_same_median` (the labels with the N-th score and median).
@@ -115,6 +117,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     a load in progress may run past every deadline;
   - the completed pairs are written beside them. Each pair keeps its own per-pair budget, which starts when it
     starts; a pair that starts late can be cut `unfinished` by the cutoff, and the answer says so.
+- `deadline.effective_deadline_at` and `deadline.cutoff_at` are stated only when the request gives `not_after_ms`
+  or `finish_by_ms` (samples 01 and 02 give neither); otherwise they are null, the cutoff applying all the same.
 - The 899 s transport cap bounds every answer.
 
 ## 5. The request registry (E4)
@@ -122,6 +126,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `/resolve` and `/pattern` take an optional `request_id`, the same token rule as `attempt_id`
   (`[A-Za-z0-9._-]+`, length-capped), checked by the strict parsers before anything is registered. `/traverse`'s
   `attempt_id` is its request handle; no second id.
+- On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields) come before the
+  registry's 409 and the expired 409: a malformed request with an expired `not_after_ms` gets 400, and a 400 never
+  registers a `request_id`. `/traverse` keeps checking expiry before it parses the body.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `GET /requests/{request_id}` answers the entry: `{request_id, server_instance, route, state: "running" |
@@ -129,7 +136,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   [{graph, graph_path, annotation_path, state: "queued" | "waiting_memory" | "loading" | "running" | "ended" |
   "never_started", outcome, usage}]}`; for `/traverse` also `attempt` (the object of
   `GET /traverse/attempt/{attempt_id}`). An entry is retained for a period and a count set by server flags, then
-  the id is unknown: 404 `{error, request_id, server_instance}`.
+  the id is unknown: 404 `{error, request_id, server_instance}`. An id that breaks the token rule is 400. `reason`
+  on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
+  `error` (any other status).
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
   "client_gone"`, with usage). An answer written but lost on the way is recorded `ended` with its status and bytes;
   results are not retained.
@@ -147,8 +156,11 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 be omitted when the name has one graph, `annotation_path` is required when the name's pairs share a graph. `graphs`
 and `pairs` together are refused. Every selector refusal is a 400 before any pair starts, `{error, code,
 candidates?}`, with `code` one of `selection_conflict`, `pair_not_found`, `pair_ambiguous`, `traverse_single_pair`,
-`graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a choice exists. Without a
-selection a request runs on every pair, up to `max_graphs_without_selection` names (that refusal stays).
+`graph_unknown`, `pairs_unsupported`; `candidates` lists the pairs to choose from where a choice exists. The codes
+are for selection outcomes only: a malformed selector (`pairs` not a non-empty array of objects, an unknown member,
+a missing `graph`, a path that is no string, `graph_path` without `graph`) is a plain 400 without a section 6 code
+(on `/pattern` the route's own `invalid_request`, as every `/pattern` 400). Without a selection a request runs on
+every pair, up to `max_graphs_without_selection` names (that refusal stays).
 
 ## 7. Resolve discovery ties (E18)
 
@@ -159,7 +171,8 @@ support, kept or dropped) and `tied_kept` (how many of them were kept).
 ## 8. Capabilities (E3)
 
 `GET /capabilities` on a multi-graph server adds `composite_fp` (sha256 over the pairs' `index_fp` sorted as bytes,
-joined by `\n`, no trailing newline; null when any pair has none), `composite_rule` (that sentence), and a
+joined by `\n`, no trailing newline; null when any pair has none; each loaded (graph_path, annotation_path) pair
+counted once, so a pair listed under two names counts once), `composite_rule` (that sentence), and a
 `multigraph` block advertising `envelope_version`, the envelope routes, the selectors per route,
 `traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`, the registry route,
 `unknown_labels`, `search_cuts` and `resolve_boundary_ties`. Clients switch on these, never on dates.

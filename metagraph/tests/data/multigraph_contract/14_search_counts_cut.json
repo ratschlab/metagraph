@@ -13,7 +13,7 @@
    "results": [
     {
      "sample": "SRR1001",
-     "kmer_count": 12,
+     "kmer_count": 15,
      "kmer_abundances": "0:100:100:3:0:0:0:0:0:0:0:0:7:7:7:7:7:7:7:7:7:7:7:7"
     }
    ],
