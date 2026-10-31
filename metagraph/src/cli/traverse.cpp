@@ -2352,6 +2352,11 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     c["num_labels"] = uint_json(oracle.num_columns());
     c["has_coordinates"] = oracle.has_coordinates();
     c["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
+    // A count annotation (row_diff_int_brwt) is read as presence: a label carries a k-mer
+    // where its count is non-zero, and the walks, their label consistency and the supports
+    // are those of that presence; counts are neither reported nor weighed. null: the
+    // annotation has no counts (SPEC-labeled-traversal-core.md §10.3)
+    c["counts"] = oracle.has_counts() ? Json::Value("presence_only") : Json::Value();
     c["supports_trace"] = oracle.has_coordinates() && oracle.regime() == Regime::BASIC;
     // the scale a discovery under support "trace" ranks, truncates and states its cut by
     // (labels_truncated): the traced k-mers, the number it reports as kmers_supported
@@ -5240,8 +5245,8 @@ Json::Value process_traverse_request(const Json::Value &json,
         }
     };
     // a seed never started reads its annotation as one started would have
-    const bool decode_charged = (req.strategy.max_memory_bytes || req.strategy.max_work_units)
-                              && oracle.decode_charged();
+    const bool decode_charged = oracle.reads_charged(req.strategy.max_memory_bytes,
+                                                     req.strategy.max_work_units);
     // work.memory_bytes (SPEC §7.2.2), whether or not a budget is set: each result states its
     // seed's own peak (the walk's modelled account without the budget's cache allotments, and
     // at least what the result holds), and the request its own: the seeds run one after

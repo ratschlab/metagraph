@@ -26,6 +26,7 @@ namespace annot {
 class CoordToHeader;
 namespace matrix {
 class IRowDiff;
+class BudgetedRows;
 }
 }
 
@@ -239,6 +240,9 @@ class LabelOracle {
     const NodeFirstCache* node_first_cache() const { return node_first_cache_.get(); }
 
     bool has_coordinates() const { return tuples_; }
+    // The annotation stores a count per k-mer and label (row_diff_int_brwt, int_brwt, ...).
+    // Every read here is presence only: a label carries a k-mer where its count is non-zero.
+    bool has_counts() const { return counts_; }
     const annot::CoordToHeader* coord_to_header() const { return coord_to_header_; }
     bool supports_direct() const { return get_entry_; }
     uint64_t num_columns() const;
@@ -341,14 +345,28 @@ class LabelOracle {
     bool get(Row row, Column column) const;
 
     // The budget-aware reads (DESIGN-traverse-graphlet.md §14): whether
-    // this index has them — a row-diff annotation over BRWT or ColumnMajor, with or
-    // without coordinates — and the reads themselves (IRowDiff::decode_rows /
-    // decode_row_tuples: every buffer charged to |budget| before it is allocated, a read
-    // that does not fit refused whole). The physical counters (timing) count the rows a read
-    // returns and the time of every read, a refused one's included — also when the
-    // LabelQuery / LabelRecorder fetch that issued it is refused afterwards: the decoding
-    // was done. The unbudgeted reads above are untouched by these.
+    // this index has them — a row-diff annotation over BRWT, ColumnMajor, RowFlat, RowSparse
+    // or RowDisk (row_diff_brwt, row_diff, row_diff_flat, row_diff_sparse, row_diff_disk), a
+    // coordinate row-diff annotation over BRWT or ColumnMajor, a count row-diff annotation
+    // over BRWT (row_diff_int_brwt, read as presence), or a plain BRWT or ColumnMajor (brwt,
+    // column: each row read alone) — and the reads themselves (IRowDiff::decode_rows /
+    // decode_row_tuples, annot::matrix::BudgetedRows: every buffer charged to |budget| before
+    // it is allocated, a read that does not fit refused whole). A caller reading budget-aware
+    // asks LabelQuery for whole rows (Access::ROWS): a plain BRWT or ColumnMajor also has
+    // direct access, which AUTO would pick for at most 16 labels. The physical counters
+    // (timing) count the rows a read returns and the time of every read, a refused one's
+    // included — also when the LabelQuery / LabelRecorder fetch that issued it is refused
+    // afterwards: the decoding was done. The unbudgeted reads above are untouched by these.
     bool decode_charged() const;
+    // Whether a walk under these budgets reads its annotation budget-aware: under a memory
+    // budget wherever the index has the reads (decode_charged()); under a work budget alone
+    // only on a row-diff annotation, whose budget-aware reads charge a row's dependency rows
+    // as work. A plain matrix's row has none, so its work is that of the default read, which
+    // is faster (rows in batches, a few labels read cell by cell): work-only budgets keep the
+    // default read there (DESIGN-traverse-graphlet.md §14.3).
+    bool reads_charged(bool memory_budget, bool work_budget) const {
+        return decode_charged() && (memory_budget || (work_budget && rd_));
+    }
     // a row-diff annotation (whatever its index matrix)
     bool row_diff() const { return rd_; }
     annot::matrix::DecodeStatus
@@ -415,6 +433,9 @@ class LabelOracle {
     const annot::matrix::GetEntrySupport *get_entry_ = nullptr;
     const annot::matrix::MultiIntMatrix *tuples_ = nullptr;
     const annot::matrix::IRowDiff *rd_ = nullptr;
+    // the budget-aware read of a matrix without a row-diff (BRWT, ColumnMajor), else null
+    std::unique_ptr<const annot::matrix::BudgetedRows> plain_rows_;
+    bool counts_ = false;
     const annot::CoordToHeader *coord_to_header_ = nullptr;
 
     mutable Counters counters_;

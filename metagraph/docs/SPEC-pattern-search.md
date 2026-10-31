@@ -429,7 +429,7 @@ answered; the refusals that no pair decides (the body, `graphs`, `in_ram`, the r
 | 400 | `primary_unwrapped` | a PRIMARY graph not wrapped in `CanonicalDBG` (the server always wraps; CLI or embedding misuse) | none |
 | 400 | `alphabet_untested` | the graph's alphabet is `$ACGTN` (a DNA5 build): no DNA5 build has passed the pattern tests yet (the owner's decision of 2026-10-07; §8.2), with its mask or without | none on this build; a later build that passes them serves it |
 | 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none |
-| 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or disk annotation; only the row-diff family has one); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
+| 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or other annotation without row-diff, or `row_diff_int_disk` / `row_diff_disk_coord`; only the row-diff family has one, since E14 every deployed row-diff form); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows); increment 5s: a request with `long_search: "supported_paths"`, in every mode (its search reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
 | 400 | `graph_unknown`, `selection_conflict`, `pair_not_found`, `pair_ambiguous` | a multi-graph server's selection (§24.1; SPEC-multigraph-envelope.md section 6, its codes): an unknown name in `graphs` or `pairs`, `graphs` beside `pairs`, a pair object naming none or several pairs of its name; the body adds `candidates` (`[{graph, graph_path, annotation_path}]`) where a choice exists | fix the selection: GET /capabilities lists the pairs |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
@@ -2027,13 +2027,17 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
 
 ### 14.4 Budgets, the memory account and the deadline
 
-- **Access.** `annotation: "budgeted"` when the annotation has the budget-aware decode
-  (`LabelOracle::decode_charged()`: the row-diff family, e.g. `row_diff_brwt_coord` of refseq33m and the mini
-  index): every read takes a `DecodeBudget` of what the memory account has left and admits each row against its
+- **Access.** `annotation: "budgeted"` when the annotation is a row-diff annotation with the budget-aware decode
+  (`LabelOracle::decode_charged()` on the row-diff family, e.g. `row_diff_brwt_coord` of refseq33m and the mini
+  index; since E14 also `row_diff_disk`, `row_diff_flat`, `row_diff_sparse` and `row_diff_int_brwt`, read as
+  presence): every read takes a `DecodeBudget` of what the memory account has left and admits each row against its
   demand, one row per read (outside review GPT-2, findings 1-2). A row that does not
   fit alone is **refused**: listed once in `rows_refused`, `labels_status: "refused"`; `partial` reads on,
   `all_or_count` stops reading and withholds (`annotation_budget`). `annotation: "unbudgeted"` (column, BRWT, row
-  and disk annotations): refused (400 `annotation_unbudgeted`) unless `allow_unbudgeted_annotation: true`; then
+  and the other annotations without row-diff, and `row_diff_int_disk`, `row_diff_disk_coord`; a plain column or
+  BRWT annotation stays unbudgeted here although the traversal routes read it budget-aware since E14,
+  SPEC-labeled-traversal-core.md §6.8, because this route's fixtures name a column annotation as the unbudgeted
+  example, §11): refused (400 `annotation_unbudgeted`) unless `allow_unbudgeted_annotation: true`; then
   the reads run without a memory bound of their own, what they return is charged to the account afterwards (a
   read it cannot hold stops the reads: `stop {phase, max_memory}`), and every entry carries the note
   `annotation_unbudgeted`. The label names such a read returns stay with the dictionary even when the rest does

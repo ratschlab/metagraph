@@ -1189,9 +1189,18 @@ delivered, and state the limiting resource and the useful next action — the st
 - **Stops.** A refused read in a level stops the seed in phase `annotation_decode` (actions `more_selective_seed`,
   `label_constrained_query`); in the seed phase, derivation or an annotate root it fails the seed. Labels that do not
   fit, and level lists that leave nothing for the read, are `traversal`-phase stops (§14.5).
-- **Not covered:** the formats without row-diff (BRWT, ColumnMajor and TupleCSC alone, the disk and flat row formats,
-  `IntRowDiff`) read through the default path, stated; `/resolve` has no memory budget; a level's rows and lists are
-  not charged in the account. Agreed for when this is built: every format except the four legacy ones (rbfish,
+- **E14, every deployed form.** The row-major index matrices read one row as one range (RowFlat, RowSparse) or
+  through a view of the file opened once per decode call and charged before it is opened (RowDisk: its block buffer
+  in the model's size classes plus 12 KiB for its streams, a modelled upper bound rather than a measurement), so
+  `row_diff_flat`, `row_diff_sparse` and `row_diff_disk` decode charged; `row_diff_int_brwt` decodes its stored rows
+  with their counts (the BRWT's row ranks and the count vectors), sums them along the path as `IntRowDiff` does, and
+  returns the columns whose sum is not zero (presence only, stated in capabilities as `counts: "presence_only"`);
+  a plain BRWT or ColumnMajor (`brwt`, `column`) reads each row alone under the budget, no dependency rows, and only
+  under a memory budget (a work budget alone keeps the default read there, as agreed below).
+- **Not covered:** the formats without row-diff other than BRWT and ColumnMajor (TupleCSC alone, the flat and
+  sparse row formats, counts without row-diff), `row_diff_int_disk` and `row_diff_disk_coord` read through the
+  default path, stated; `/resolve` has no memory budget; a level's rows and lists are not charged in the account.
+  Agreed for when this is built: every format except the four legacy ones (rbfish,
   rb_brwt, bin_rel_wt, row/EigenSpMat), which stay stated as uncovered; ColumnMajor read as column-wise charged pairs;
   work-only budgets keep the default decode on formats without row-diff; each head's rows released once it is
   processed; a head stop caused by a level's rows states the bytes, without the `more_selective_seed` action; the disk

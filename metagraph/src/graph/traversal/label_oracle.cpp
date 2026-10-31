@@ -47,21 +47,24 @@ constexpr uint64_t kLooseEntryBytes = 64;
 // labels of a row), compared with the one byte bound the walker gives both caches under a
 // memory budget (its cache allotment), by the annotation's format (SPEC-labeled-traversal-
 // core.md §6.8, §7.0 memory_bound_soft (i) and (ii)):
-//   charged_entry_bytes  the formats whose reads are budget-aware (decode_charged: the row-diff
-//                        family with budgeted reads, production's row_diff_brwt_coord among
-//                        them): kCacheEntryBytes + kCostEntryBytes + the value's buffers in
-//                        decode_budget.hpp's model, checked with the entries a read adds, so
-//                        the cache never passes its bound;
-//   loose_entry_bytes    every other format (column, brwt, row_diff_disk, row_flat, ..., whose
-//                        reads are observed only): kLooseEntryBytes + the value's flat sizes,
-//                        checked before an insertion only, so the cache holds about four times
-//                        the entries in the same bound and may pass it by one call's rows
-//                        (held before it can be charged: memory_bound_soft (ii)).
+//   charged_entry_bytes  the reads that are budget-aware (LabelOracle::reads_charged: the
+//                        row-diff family over every index matrix with a single-row read,
+//                        production's row_diff_brwt_coord and row_diff_disk among them, and the
+//                        plain brwt and column under a memory budget): kCacheEntryBytes +
+//                        kCostEntryBytes + the value's buffers in decode_budget.hpp's model,
+//                        checked with the entries a read adds, so the cache never passes its
+//                        bound;
+//   loose_entry_bytes    every other read (flat, row_sparse, rbfish, int_brwt, ..., and brwt and
+//                        column under a work budget alone, whose reads are observed only):
+//                        kLooseEntryBytes + the value's flat sizes, checked before an insertion
+//                        only, so the cache holds about four times the entries in the same bound
+//                        and may pass it by one call's rows (held before it can be charged:
+//                        memory_bound_soft (ii)).
 // Two prices on purpose: the strict one on the other formats would make them evict earlier,
-// decode more rows again and move memory_bound_soft's observed value — and on row_diff_disk
-// leave less of the bound to the path cache, which once read 2.5 times the stored rows when the
-// label cache left it less (SPEC §6.8). Taken only after a benchmark of such a format served
-// under a memory budget.
+// decode more rows again and move memory_bound_soft's observed value — and on a row-diff form
+// (row_diff_disk before E14) leave less of the bound to the path cache, which once read 2.5
+// times the stored rows when the label cache left it less (SPEC §6.8). Taken only after a
+// benchmark of such a format served under a memory budget.
 static uint64_t charged_entry_bytes(uint64_t value_bytes) {
     return kCacheEntryBytes + kCostEntryBytes + value_bytes;
 }
@@ -125,6 +128,10 @@ LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
     get_entry_ = dynamic_cast<const annot::matrix::GetEntrySupport*>(matrix_);
     tuples_ = dynamic_cast<const MultiIntMatrix*>(matrix_);
     rd_ = dynamic_cast<const annot::matrix::IRowDiff*>(matrix_);
+    if (!rd_)
+        plain_rows_ = annot::matrix::budgeted_rows(*matrix_);
+    // counts, not coordinates (a coordinate matrix is an IntMatrix of tuple sizes)
+    counts_ = dynamic_cast<const annot::matrix::IntMatrix*>(matrix_) && !tuples_;
     coord_to_header_ = coord_to_header_override ? coord_to_header_override
                                                 : anno_graph_.get_coord_to_header();
     if (coord_to_header_ && !tuples_) {
@@ -452,19 +459,22 @@ bool LabelOracle::get(Row row, Column column) const {
 }
 
 bool LabelOracle::decode_charged() const {
-    return rd_ && rd_->supports_budgeted_decode();
+    return (rd_ && rd_->supports_budgeted_decode()) || plain_rows_;
 }
 
 DecodeStatus LabelOracle::get_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                                    std::vector<BinaryMatrix::SetBitPositions> *out,
                                    std::vector<RowCost> *costs, std::vector<uint64_t> *held) const {
-    if (!rd_)
+    if (!rd_ && !plain_rows_)
         return DecodeStatus::UNSUPPORTED;
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
-    const DecodeStatus status = rd_->decode_rows(rows, budget, out, costs, held,
-                                                 path_cache_.enabled() ? &path_cache_ : nullptr);
+    // a matrix without a row-diff has no paths to cache: each row is read alone
+    const DecodeStatus status = rd_
+        ? rd_->decode_rows(rows, budget, out, costs, held,
+                           path_cache_.enabled() ? &path_cache_ : nullptr)
+        : plain_rows_->decode_rows(rows, budget, out, costs, held);
     // physical counters (timing): the rows a decode returned, and the time of every decode,
     // a refused one's included — also when the fetch that asked is refused afterwards
     if (status == DecodeStatus::OK)
@@ -559,9 +569,10 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
             // a few single-cell reads beat reconstructing the whole row. A trap for the
             // budget-aware fetch, which reads whole rows only (decode_run asserts the path is
             // not DIRECT): AUTO picks DIRECT for <= 16 columns wherever the annotation has
-            // direct access, so a budgeted caller asks for ROWS explicitly. Unreachable:
-            // no annotation the budget-aware reads serve (LabelOracle::decode_charged(), the
-            // row-diff family) has direct access, so AUTO is ROWS there (the test
+            // direct access, so a budgeted caller asks for ROWS explicitly. Reachable: the
+            // plain brwt and column annotations are read budget-aware
+            // (LabelOracle::decode_charged()) and have direct access, while the row-diff
+            // family has none, so AUTO is ROWS there (the test
             // LabelOracleAccess.AutoPicksDirectForAtMost16Columns pins both)
             path_ = oracle_.supports_direct() && direct_columns_.size() <= 16 ? Path::DIRECT
                                                                               : Path::ROWS;

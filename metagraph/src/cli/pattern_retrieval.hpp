@@ -177,7 +177,8 @@ struct RetrievalLimits {
  *  placement  record (BASIC, coordinates, .seqs) | global (BASIC, coordinates, no .seqs) |
  *             none (no coordinates) | none_canonical (CANONICAL or PRIMARY)
  *  support    record_verified | label_intersection (the best per-label support, for L > k)
- *  budgeted   LabelOracle::decode_charged()
+ *  budgeted   LabelOracle::decode_charged() on a row-diff annotation (a plain brwt or column
+ *             annotation stays unbudgeted on this route: describe_annotation says why)
  */
 struct AnnotationDescription {
     const char *placement = "none";

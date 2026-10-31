@@ -506,7 +506,13 @@ AnnotationDescription describe_annotation(const LabelOracle &oracle, GraphMode m
     const bool records = coords && oracle.coord_to_header();
     d.placement = !basic ? "none_canonical" : records ? "record" : coords ? "global" : "none";
     d.support = basic && records ? "record_verified" : "label_intersection";
-    d.budgeted = oracle.decode_charged();
+    // The row-diff family with the budget-aware decode, every deployed row-diff form since E14.
+    // A plain brwt or column annotation, which the traversal routes read budget-aware too (each
+    // row alone), stays unbudgeted here: this route's frozen contract names a column annotation
+    // as its unbudgeted example (the 400 annotation_unbudgeted, SPEC-pattern-search.md §11's
+    // fixtures, which the search service tests against), so serving it budgeted is a contract
+    // change of its own, not part of making the reads charged.
+    d.budgeted = oracle.row_diff() && oracle.decode_charged();
     return d;
 }
 

@@ -1247,7 +1247,11 @@ void Walker::validate_seed() {
             throw SeedLabelsNotInGraph("none of the seed's labels is in this graph: " + names,
                                        unknown);
         }
-        LabelQuery validation(oracle_, seed_refs, trace_);
+        // read by whole rows under the budget-aware reads (fetch_seed_hits): a plain brwt or
+        // column annotation has direct access, which AUTO would pick for at most 16 labels
+        LabelQuery validation(oracle_, seed_refs, trace_,
+                              decode_charged_ ? LabelOracle::Access::ROWS
+                                              : LabelOracle::Access::AUTO);
         hits = fetch_seed_hits(validation, keys);
     }
     if (request_of_ref.empty()) {
@@ -6375,7 +6379,11 @@ void Walker::seed_phase() {
                 oracle_.coord_to_header() ? LabelKind::HEADER : LabelKind::COLUMN);
         recorder_ = std::make_unique<LabelRecorder>(oracle_, kind, strategy_.max_labels_per_node);
     } else {
-        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_);
+        // the budget-aware fetch reads whole rows (never AUTO's DIRECT, which a plain brwt or
+        // column annotation would get for at most 16 labels)
+        query_ = std::make_unique<LabelQuery>(oracle_, result_.label_dict, trace_,
+                                              decode_charged_ ? LabelOracle::Access::ROWS
+                                                              : LabelOracle::Access::AUTO);
     }
     scratch_.init(result_.label_dict.size());
     label_stamp_.assign(result_.label_dict.size(), 0);
@@ -6457,8 +6465,10 @@ SeedResult Walker::run() {
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
     // under a request budget the annotation is read by the budget-aware decode path when the
-    // index has it (DESIGN-traverse-graphlet.md §14.1), from the seed phase on
-    decode_charged_ = budgeted_ && oracle_.decode_charged();
+    // index has it (DESIGN-traverse-graphlet.md §14.1), from the seed phase on; under a work
+    // budget alone only where it charges dependency rows (LabelOracle::reads_charged)
+    decode_charged_ = oracle_.reads_charged(strategy_.max_memory_bytes,
+                                            strategy_.max_work_units);
     // record coordinates (§18.1): only under support trace on an index with coordinates —
     // validate_seed refuses trace without them, and drops the recording for a set derived from
     // part of the seed; every other request says why none are

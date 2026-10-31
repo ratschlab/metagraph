@@ -4736,8 +4736,12 @@ struct NamesCase {
     std::string P;
     size_t v = 30;
 };
-// |row_diff| false: a column annotation, whose reads are not budget-aware (format (ii))
-NamesCase names_case(size_t n = 300, size_t name_bytes = 4000, bool row_diff = true) {
+// |kind|: a row-diff annotation (budget-aware reads), a column annotation (read budget-aware
+// under a memory budget, each row alone, since E14) or a flat one, whose reads are not
+// budget-aware (format (ii))
+enum class NamesKind { ROW_DIFF, COLUMN, FLAT };
+NamesCase names_case(size_t n = 300, size_t name_bytes = 4000,
+                     NamesKind kind = NamesKind::ROW_DIFF) {
     NamesCase c;
     c.P = random_seq(80, 8100);
     std::vector<std::string> seqs { c.P }, labels { "A" };
@@ -4745,11 +4749,14 @@ NamesCase names_case(size_t n = 300, size_t name_bytes = 4000, bool row_diff = t
         seqs.push_back(c.P.substr(c.v + 1, 11) + random_seq(15, 8200 + i));
         labels.push_back("B" + std::to_string(i) + std::string(name_bytes, 'x'));
     }
-    if (row_diff) {
+    if (kind == NamesKind::ROW_DIFF) {
         c.anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
                 11, seqs, labels, DeBruijnGraph::BASIC);
-    } else {
+    } else if (kind == NamesKind::COLUMN) {
         c.anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                11, seqs, labels, DeBruijnGraph::BASIC);
+    } else {
+        c.anno = test::build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(
                 11, seqs, labels, DeBruijnGraph::BASIC);
     }
     return c;
@@ -4781,15 +4788,17 @@ std::set<std::string> actions_of(const Json::Value &q) {
 // In annotate mode a level's key whose row fits but whose new dictionary labels do not is a
 // stop by those labels -- phase traversal, with the levers that name fewer or cheaper labels --
 // not a row that "needs more than the walk had left"; with fewer labels per node the same budget
-// walks on. On a format whose reads are not budget-aware (a column annotation) a level's rows
-// are read whole and the labels they name are charged after the read: the stop is theirs as
-// well (LABEL_NAMES), its message names the labels and their bytes, and the need is a lower
-// bound ("at least")
+// walks on — on a row-diff annotation and on a column annotation, both read budget-aware. On a
+// format whose reads are not budget-aware (a flat annotation) a level's rows are read whole and
+// the labels they name are charged after the read: the stop is theirs as well (LABEL_NAMES),
+// its message names the labels and their bytes, and the need is a lower bound ("at least")
 TEST(GraphletStage3Review, LabelsThatDoNotFitAreNotARowStop) {
-    for (bool row_diff : { true, false }) {
-        const std::string what = row_diff ? "row-diff" : "column";
-        const NamesCase c = names_case(300, 4000, row_diff);
-        EXPECT_EQ(row_diff, LabelOracle(*c.anno).decode_charged()) << what;
+    for (NamesKind kind : { NamesKind::ROW_DIFF, NamesKind::COLUMN, NamesKind::FLAT }) {
+        const bool charged = kind != NamesKind::FLAT;
+        const std::string what = kind == NamesKind::ROW_DIFF ? "row-diff"
+                               : kind == NamesKind::COLUMN ? "column" : "flat";
+        const NamesCase c = names_case(300, 4000, kind);
+        EXPECT_EQ(charged, LabelOracle(*c.anno).decode_charged()) << what;
         const Json::Value out = names_request(c, c.P.substr(0, 20), "right", 2, 1000);
         const Json::Value &res = out["results"][0];
         ASSERT_TRUE(res.isMember("resource_stop")) << what << res.toStyledString().substr(0, 2000);
@@ -4807,7 +4816,7 @@ TEST(GraphletStage3Review, LabelsThatDoNotFitAreNotARowStop) {
         EXPECT_FALSE(actions.count("more_selective_seed")) << what;
         const uint64_t stopped_at = res["arms"]["right"]["complete_to_bp"].asUInt64();
         EXPECT_GT(stopped_at, 0u) << what;
-        if (!row_diff) {
+        if (!charged) {
             EXPECT_NE(std::string::npos, message.find("after reading the next level's annotation: "
                                                       "its rows named 300 new dictionary label(s)"))
                 << message;

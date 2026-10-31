@@ -575,9 +575,11 @@ Outcome run_support(const Index &idx, const std::string &text, bool peptide, con
     limits.max_occurrences_per_label = ask.max_occurrences;
     const DeBruijnGraph &graph = idx.anno->get_graph();
     oracle.test_read_hook = [&](size_t) { out.units_before_reads.push_back(units); };
-    PathSupportEnv env { oracle, budget, account, units, limits,
-                         PatternSearch::support(graph).mode, oracle.decode_charged(), nullptr,
-                         ask.deny };
+    // budgeted as the route reads it (describe_annotation: the row-diff family's budget-aware
+    // reads; a column annotation is unbudgeted on /pattern)
+    const GraphMode mode = PatternSearch::support(graph).mode;
+    PathSupportEnv env { oracle, budget, account, units, limits, mode,
+                         describe_annotation(oracle, mode).budgeted, nullptr, ask.deny };
     PathSupportOptions options;
     options.level = ask.level;
     options.labels = ask.labels;
@@ -1289,9 +1291,9 @@ TEST(PatternSupport, TheTrackerHoldsNoMoreThanTheAccount) {
         limits.max_annotation_work = std::numeric_limits<uint64_t>::max() / 4;
         limits.max_memory_bytes = uint64_t(1) << 30;
         limits.row_cache_bytes = row_cache;
-        PathSupportEnv env { oracle, budget, account, units, limits,
-                             PatternSearch::support(graph).mode, oracle.decode_charged(),
-                             nullptr, {} };
+        const GraphMode mode = PatternSearch::support(graph).mode;
+        PathSupportEnv env { oracle, budget, account, units, limits, mode,
+                             describe_annotation(oracle, mode).budgeted, nullptr, {} };
         PathSupportOptions options;
         options.level = Support::TRACE;
         PathTracker tracker(env, options);

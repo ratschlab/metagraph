@@ -22,6 +22,7 @@
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 
 #if USE_JEMALLOC
 extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
@@ -133,6 +134,24 @@ std::vector<LabelRef> refs(const LabelOracle &oracle, const std::vector<std::str
     return out;
 }
 
+// A plain BRWT annotation (the matrix of a relaxed .brwt.annodbg, no row-diff) of the columns
+// of the column annotation |column|, on its graph
+std::unique_ptr<AnnotatedDBG> brwt_of(const AnnotatedDBG &column) {
+    const auto &matrix = dynamic_cast<const annot::matrix::ColumnMajor&>(
+            column.get_annotator().get_matrix());
+    std::vector<std::unique_ptr<bit_vector>> cols;
+    for (const auto &c : matrix.data()) {
+        cols.push_back(c->copy());
+    }
+    auto brwt = std::make_unique<annot::matrix::BRWT>(
+            annot::matrix::BRWTBottomUpBuilder::build(std::move(cols)));
+    auto annotator = std::make_unique<annot::MultiBRWTAnnotator>(
+            std::move(brwt), column.get_annotator().get_label_encoder());
+    auto graph = std::const_pointer_cast<DeBruijnGraph>(
+            std::dynamic_pointer_cast<const DeBruijnGraph>(column.get_graph_ptr()));
+    return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+}
+
 // The budget-aware fetch and warm return the unbudgeted hits, and a key's costs are the same
 // whether a fetch decoded it or found it cached
 TEST(LabelOracleBudgetedQuery, SameHitsAsTheUnbudgetedFetch) {
@@ -179,6 +198,91 @@ TEST(LabelOracleBudgetedQuery, SameHitsAsTheUnbudgetedFetch) {
             }
             EXPECT_GT(from_cache, 10u);
         }
+    }
+}
+
+// The plain annotations (no row-diff) are read budget-aware too, each row alone: a column
+// annotation (ColumnMajor) and a plain BRWT give the fetch, the recorder and the warm the hits
+// and labels of their unbudgeted reads (DIRECT for the query: at most 16 labels on an index
+// with direct access), with no dependency units, through whole rows (ROWS)
+TEST(LabelOracleBudgetedQuery, PlainAnnotationsReadEachRowAlone) {
+    Fixture fx(false);
+    auto column = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, fx.seqs, fx.labels, DeBruijnGraph::BASIC);
+    auto brwt = brwt_of(*column);
+    for (const AnnotatedDBG *anno : { column.get(), brwt.get() }) {
+        LabelOracle oracle(*anno);
+        ASSERT_TRUE(oracle.decode_charged());
+        EXPECT_FALSE(oracle.row_diff());
+        EXPECT_TRUE(oracle.supports_direct());
+        const std::vector<std::string> names { "F", "L3", "L5" };
+        LabelQuery direct(oracle, refs(oracle, names), false);
+        ASSERT_STREQ("direct", direct.access_path());
+        LabelQuery budgeted(oracle, refs(oracle, names), false, LabelOracle::Access::ROWS);
+        budgeted.set_max_cache_bytes(1 << 20);
+        LabelRecorder plain_recorder(oracle, LabelKind::COLUMN, 64);
+        LabelRecorder recorder(oracle, LabelKind::COLUMN, 64);
+        recorder.set_max_cache_bytes(1 << 20);
+        auto name_bytes = [](std::string_view n) { return 100 + n.size(); };
+        size_t checked = 0;
+        for (const auto &batch : fx.batches(oracle)) {
+            const auto expected = direct.fetch(batch);
+            std::vector<LabelQuery::NodeHits> hits;
+            std::vector<KeyCost> costs;
+            hits.reserve(batch.size());
+            costs.reserve(batch.size());
+            DecodeBudget budget;
+            size_t refused = 0;
+            ASSERT_TRUE(budgeted.fetch(batch.data(), batch.size(), budget, &hits, &costs,
+                                       &refused));
+            ASSERT_EQ(expected, hits);
+            uint64_t held = 0;
+            for (size_t i = 0; i < batch.size(); ++i) {
+                held += LabelQuery::held_bytes(hits[i]);
+                if (batch[i] == npos)
+                    continue;
+                EXPECT_EQ(0u, costs[i].dependency_units);
+                EXPECT_GE(costs[i].demand, LabelQuery::held_bytes(hits[i]));
+                checked++;
+            }
+            EXPECT_EQ(held, budget.held());
+            DecodeBudget warm_budget;
+            budgeted.warm(batch, warm_budget);
+            EXPECT_EQ(0u, warm_budget.held());
+            // the recorder: the labels of its unbudgeted fetch (both name them in key order,
+            // so with the same ids)
+            const auto expected_labels = plain_recorder.fetch(batch);
+            std::vector<LabelRecorder::NodeLabels> lists;
+            std::vector<KeyCost> list_costs;
+            lists.reserve(batch.size());
+            list_costs.reserve(batch.size());
+            DecodeBudget recorder_budget;
+            ASSERT_TRUE(recorder.fetch(batch.data(), batch.size(), recorder_budget, &lists,
+                                       &list_costs, &refused, name_bytes));
+            ASSERT_EQ(expected_labels.size(), lists.size());
+            for (size_t i = 0; i < lists.size(); ++i) {
+                EXPECT_EQ(expected_labels[i].labels, lists[i].labels);
+                EXPECT_EQ(expected_labels[i].total, lists[i].total);
+                if (batch[i] != npos)
+                    EXPECT_EQ(0u, list_costs[i].dependency_units);
+            }
+            ASSERT_EQ(plain_recorder.labels().size(), recorder.labels().size());
+            for (size_t l = 0; l < recorder.labels().size(); ++l) {
+                EXPECT_EQ(plain_recorder.labels()[l].name, recorder.labels()[l].name);
+            }
+        }
+        EXPECT_GT(checked, 400u);
+        // a budget that holds no row refuses the fetch whole
+        const std::vector<node_index> keys = oracle.keys_of_sequence(fx.seqs[0]);
+        std::vector<LabelQuery::NodeHits> hits;
+        std::vector<KeyCost> costs;
+        hits.reserve(keys.size());
+        costs.reserve(keys.size());
+        LabelQuery cold(oracle, refs(oracle, names), false, LabelOracle::Access::ROWS);
+        DecodeBudget none(16);
+        size_t refused = 0;
+        EXPECT_FALSE(cold.fetch(keys.data(), keys.size(), none, &hits, &costs, &refused));
+        EXPECT_EQ(0u, none.held());
     }
 }
 
@@ -339,8 +443,9 @@ TEST(LabelOracleBudgeted, KeyCostUnitsSaturate) {
 // The trap of Access::AUTO, pinned as it is: AUTO picks DIRECT for at most 16 distinct
 // columns wherever the annotation has direct access, and ROWS above (TUPLES with coordinates
 // or header labels) — while the budget-aware fetch reads whole rows only, so a budgeted
-// caller must ask for ROWS. None of the annotations the budget-aware reads serve
-// (decode_charged()) has direct access, so there AUTO is ROWS.
+// caller must ask for ROWS. The row-diff annotations have no direct access, so there AUTO is
+// ROWS; the plain column and brwt annotations are read budget-aware (decode_charged()) and
+// have direct access, so the walker asks for ROWS under a budget.
 TEST(LabelOracleAccess, AutoPicksDirectForAtMost16Columns) {
     auto seqs = sequences(17, 40, 23);
     std::vector<std::string> names;
@@ -353,7 +458,9 @@ TEST(LabelOracleAccess, AutoPicksDirectForAtMost16Columns) {
     for (const auto *anno : { column.get(), row_flat.get() }) {
         LabelOracle oracle(*anno);
         ASSERT_TRUE(oracle.supports_direct());
-        EXPECT_FALSE(oracle.decode_charged());
+        // the column annotation is read budget-aware (each row alone) and has direct access:
+        // the trap is live there, so a budgeted caller asks for ROWS
+        EXPECT_EQ(anno == column.get(), oracle.decode_charged());
         EXPECT_STREQ("direct", LabelQuery(oracle, refs(oracle, prefix(1)), false).access_path());
         EXPECT_STREQ("direct", LabelQuery(oracle, refs(oracle, prefix(16)), false).access_path());
         EXPECT_STREQ("rows", LabelQuery(oracle, refs(oracle, prefix(17)), false).access_path());
@@ -800,7 +907,10 @@ TEST(LabelOracleBudgetedRecorder, NamingWithinTheAllocatorsPeak) {
 #endif
 }
 
-// Which indexes have the budget-aware reads
+// Which indexes have the budget-aware reads: every row-diff form over an index matrix with a
+// single-row read (row_diff_disk among them; the others are in the annotation tests,
+// RowDiffBudgetedDecode.EveryDeployedForm*), the plain column and brwt (each row alone), not
+// the plain row-major forms; and none of these has counts
 TEST(LabelOracleBudgeted, DecodeChargedTruthTable) {
     auto seqs = sequences(3, 60, 9);
     std::vector<std::string> labels { "A", "B", "C" };
@@ -809,13 +919,32 @@ TEST(LabelOracleBudgeted, DecodeChargedTruthTable) {
     auto row_diff_coord = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
     auto row_disk = test::build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC);
     auto row_flat = test::build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC);
-    EXPECT_FALSE(LabelOracle(*column).decode_charged());
+    auto brwt = brwt_of(*column);
+    EXPECT_TRUE(LabelOracle(*column).decode_charged());
     EXPECT_FALSE(LabelOracle(*column).row_diff());
+    EXPECT_TRUE(LabelOracle(*brwt).decode_charged());
+    EXPECT_FALSE(LabelOracle(*brwt).row_diff());
     EXPECT_TRUE(LabelOracle(*row_diff).decode_charged());
     EXPECT_TRUE(LabelOracle(*row_diff_coord).decode_charged());
-    EXPECT_FALSE(LabelOracle(*row_disk).decode_charged());
+    EXPECT_TRUE(LabelOracle(*row_disk).decode_charged());
     EXPECT_TRUE(LabelOracle(*row_disk).row_diff());
     EXPECT_FALSE(LabelOracle(*row_flat).decode_charged());
+    for (const AnnotatedDBG *anno : { column.get(), brwt.get(), row_diff.get(),
+                                      row_diff_coord.get(), row_disk.get(), row_flat.get() }) {
+        EXPECT_FALSE(LabelOracle(*anno).has_counts());
+        // a request reads budget-aware under a memory budget wherever the index can, and under
+        // a work budget alone only on a row-diff annotation (a plain row has no dependency
+        // rows to charge as work); never without a budget
+        const LabelOracle oracle(*anno);
+        EXPECT_EQ(oracle.decode_charged(), oracle.reads_charged(true, false));
+        EXPECT_EQ(oracle.decode_charged(), oracle.reads_charged(true, true));
+        EXPECT_EQ(oracle.decode_charged() && oracle.row_diff(),
+                  oracle.reads_charged(false, true));
+        EXPECT_FALSE(oracle.reads_charged(false, false));
+    }
+    EXPECT_FALSE(LabelOracle(*column).reads_charged(false, true));
+    EXPECT_FALSE(LabelOracle(*brwt).reads_charged(false, true));
+    EXPECT_TRUE(LabelOracle(*row_disk).reads_charged(false, true));
 }
 
 // Runs |body| on a thread of its own and fails if it has not returned within |seconds|: a
