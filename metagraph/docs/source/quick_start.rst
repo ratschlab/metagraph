@@ -542,6 +542,11 @@ Pass these files in an order that is consistent with the final transformed annot
 During query, MetaGraph loads ``annotation.*.annodbg.seqs`` (where ``*`` is the final transformed annotation type)
 automatically and reports sequence-based hits (header + local coordinate) instead of file-based coordinates.
 
+Each record is named by its whole header, so every header must be non-empty, valid UTF-8 and distinct within
+its file; the same header may appear in different files. A file that breaks this is refused, and no ``.seqs``
+file is written. ``--header-delimiter`` cannot be combined with ``--index-header-coords``.
+Earlier versions accepted repeated headers and merged consecutive records with the same header into one entry.
+
 The ``--index-header-coords`` step is a one-shot run against the final merged annotation. If the annotation
 was built in multiple chunks (multiple ``metagraph annotate`` invocations with disjoint FASTA subsets) or
 with ``--separately``, run ``--index-header-coords`` once after all annotation/transform steps are complete,
