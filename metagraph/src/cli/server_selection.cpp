@@ -299,9 +299,21 @@ std::vector<SelectedPair>
 select_pairs_from_parameters(SelectionRoute route,
                              const std::vector<std::pair<std::string, std::string>> &query,
                              const GraphIndexes &indexes,
-                             size_t /* max_names_without_selection */) {
-    // Today a probe describes one pair and needs ?graph=. The names cap is not read until a
-    // probe without ?graph= answers the envelope over every pair (section 1).
+                             size_t max_names_without_selection) {
+    // A probe without parameters describes every pair (section 1), as a POST request without
+    // a selection runs on every pair: up to the names cap, and refused beyond it as every
+    // probe without ?graph= was refused before (a service tells a multi-graph host by that
+    // refusal's words)
+    if (query.empty()) {
+        if (indexes.size() > max_names_without_selection) {
+            throw InvalidRequest(fmt::format(
+                    "Bad request: in multi-graph mode GET {} needs ?graph=<name> (and "
+                    "graph_path=<path> when the name spans several graphs) on a list of more "
+                    "than {} graph names ({} here); GET /capabilities lists the graphs",
+                    probe_route(route), max_names_without_selection, indexes.size()));
+        }
+        return pairs_of(sorted_names(indexes), indexes);
+    }
     const auto [name, graph_path] = probe_parameters(query, probe_route(route));
     return one_pair(name, graph_path ? &*graph_path : nullptr, indexes);
 }

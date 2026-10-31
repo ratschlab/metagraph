@@ -14,8 +14,9 @@ together (a name spanning two graphs). What such a server serves, as /search doe
   - `in_ram` on /pattern, /traverse and /resolve loads the pair into RAM for the request (a
     server on mmap, the pair within --mem-cap-gb), the budgets after the load, timing.load_ms;
   - GET /capabilities: the per-pair summary (graph_summary) and columns_disjoint;
-  - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block;
-  - a /traverse answers in the envelope of its one pair (SPEC-multigraph-envelope.md section 1).
+  - GET /pattern/capabilities?graph= and /traverse/capabilities?graph=: the pair's block, in
+    the envelope of one entry (SPEC-multigraph-envelope.md section 1), and every pair's without
+    ?graph=; a /traverse answers in the envelope of its one pair.
 
 The answers are checked against oracles of their own: the CLI (`metagraph pattern`) on the same
 files, the k-mers of the chunk's records (the contexts of a pattern, a seed's k-mers present),
@@ -290,6 +291,11 @@ class TestMultiGraphServer(TestingBase):
                          caps['routes']['pattern_capabilities'])
         self.assertEqual({'routes': ['pattern', 'resolve', 'search', 'traverse'], 'loads': True,
                           'mem_cap_gb': 1, 'budgets_start': 'after_load'}, caps['in_ram'])
+        # no pair has a manifest: no composite fingerprint (SPEC-multigraph-envelope.md
+        # section 8), the multigraph block stated
+        self.assertIsNone(caps['composite_fp'])
+        self.assertEqual(1, caps['multigraph']['envelope_version'])
+        self.assertEqual('GET /requests/{request_id}', caps['routes']['requests'])
         # the threshold of the selection rule (the default of --max-graphs-without-selection)
         self.assertEqual(10, caps['max_graphs_without_selection'])
         # the server-wide block: the contract and the caps, no graph
@@ -317,13 +323,35 @@ class TestMultiGraphServer(TestingBase):
                                   'has_coordinates': masked, 'has_coord_to_header': masked,
                                   'supports_trace': masked}, p['traversal'])
                 # what the pair's own documents say
-                block = self.server.get(f'pattern/capabilities?graph={chunk}').json()
+                block = single(self.server.get(f'pattern/capabilities?graph={chunk}').json())
                 for key in ('k', 'graph_mode', 'available', 'mask', 'counting'):
                     self.assertEqual(block[key], p[key], key)
-                probe = self.server.get(f'traverse/capabilities?graph={chunk}').json()
+                probe = single(self.server.get(f'traverse/capabilities?graph={chunk}').json())
                 for key in ('regime', 'num_labels', 'has_coordinates', 'has_coord_to_header',
                             'supports_trace'):
                     self.assertEqual(probe[key], p['traversal'][key], key)
+
+    def test_capabilities_probes_without_a_graph(self):
+        """GET /traverse/capabilities and GET /pattern/capabilities without ?graph= answer the
+        envelope over every pair, in graph_summary's order, each entry the block the probe of
+        that pair alone answers (enterics' pairs are ecoli's and kleb's under another name)"""
+        summary = self.server.get('capabilities').json()['graph_summary']['pairs']
+        for route in ('pattern/capabilities', 'traverse/capabilities'):
+            out = self.server.get(route).json()
+            self.assertEqual(('/' + route, ['ecoli', 'enterics', 'kleb', 'pseudo'],
+                              len(summary), 0),
+                             (out['route'], out['graphs'], out['answered'], out['refused']))
+            self.assertEqual([(p['graph'], p['graph_path'], p['annotation_path'], p['index_fp'])
+                              for p in summary],
+                             [(e['graph'], e['graph_path'], e['annotation_path'], e['index_fp'])
+                              for e in out['answers']])
+            for entry in out['answers']:
+                if entry['graph'] == 'enterics':
+                    continue
+                alone = single(self.server.get(f'{route}?graph={entry["graph"]}').json())
+                for key in ('k', 'graph_mode', 'available', 'mask', 'counting', 'regime',
+                            'num_labels', 'has_coordinates', 'index_meta_fp'):
+                    self.assertEqual(alone.get(key), entry.get(key), (route, key))
 
     def test_columns_shared_by_two_pairs(self):
         """A column of two pairs (a FASTA annotated on two graphs): columns_disjoint false, and
@@ -379,7 +407,7 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(available, caps['pattern']['available'])
                 self.assertEqual(None if available else 'representation_unsupported',
                                  caps['pattern']['unavailable_reason'])
-                block = server.get('pattern/capabilities?graph=hashed').json()
+                block = single(server.get('pattern/capabilities?graph=hashed').json())
                 self.assertEqual((False, 'representation_unsupported'),
                                  (block['available'], block['unavailable_reason']))
                 p = {'patterns': [{'dna': 'ACGTTGCAACGTTGCAAG'}], 'mode': 'count'}
@@ -407,18 +435,21 @@ class TestMultiGraphServer(TestingBase):
         enterics = self.server.get('pattern/capabilities?graph=enterics')
         self.assertEqual(400, enterics.status_code)
         self.assertIn('spans several graphs', enterics.json()['error'])
-        kleb = self.server.get('pattern/capabilities?graph=kleb').json()
+        kleb = single(self.server.get('pattern/capabilities?graph=kleb').json(),
+                      '/pattern/capabilities')
         quoted = requests.utils.quote(self.pairs['kleb'][0], safe='')
-        picked = self.server.get(f'pattern/capabilities?graph=enterics&graph_path={quoted}').json()
+        picked = single(self.server.get(f'pattern/capabilities?graph=enterics&graph_path={quoted}')
+                        .json())
         self.assertEqual(('kleb', self.pairs['kleb'][0]), (kleb.pop('graph'), kleb.pop('graph_path')))
         self.assertEqual(('enterics', self.pairs['kleb'][0]),
                          (picked.pop('graph'), picked.pop('graph_path')))
         self.assertEqual(kleb, picked)
-        probe = self.server.get('traverse/capabilities?graph=kleb').json()
+        probe = single(self.server.get('traverse/capabilities?graph=kleb').json())
         # the pair's gate block (SPEC-pattern-search.md §23.2)
         self.assertEqual(gate_block(kleb), probe['pattern'])
         self.assertNotIn('predicate', probe['pattern'])
-        for query, words in (('', 'needs ?graph=<name>'), ('?graph=kleb&x=1', "unknown parameter 'x'"),
+        for query, words in (('?graph_path=x', 'needs ?graph=<name>'),
+                             ('?graph=kleb&x=1', "unknown parameter 'x'"),
                              ('?graph=nope', "unknown graph 'nope'")):
             ret = self.server.get('pattern/capabilities' + query)
             self.assertEqual(400, ret.status_code, query)
@@ -437,7 +468,7 @@ class TestMultiGraphServer(TestingBase):
             sampled = 'Dummy fraction sampled for the pattern search'
             unmasked = [c for c, _, masked, _ in CHUNKS if not masked]
             self.assertEqual(len(unmasked), server.text().count(sampled), server.text()[-3000:])
-            caps = server.get('pattern/capabilities?graph=kleb').json()
+            caps = single(server.get('pattern/capabilities?graph=kleb').json())
             reserve = caps['finalize_reserve_ms']
             kleb = self.records['kleb'][0]
             ret = server.post('pattern', {'patterns': [{'dna': kleb[3000:3020]}],

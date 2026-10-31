@@ -3660,8 +3660,11 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
     def test_multi_graph_server(self):
         """A multi-graph server answers /pattern as /search: the graphs a request names, each
         pair answered as on a single-graph server and tagged with its pair; the full block per
-        pair on /pattern/capabilities?graph= and in the probe; the server-wide block on
-        /capabilities with the per-pair summary (test_multigraph.py covers the rest)."""
+        pair on /pattern/capabilities?graph= (in the envelope of one entry, SPEC-multigraph-
+        envelope.md section 1; every pair's without ?graph=) and in the probe; the server-wide
+        block on /capabilities with the per-pair summary, and there only the composite
+        fingerprint and the multigraph block (section 8) (test_multigraph.py covers the
+        rest)."""
         d = self.tempdir.name
         csv = os.path.join(d, 'graphs.csv')
         with open(csv, 'w') as f:
@@ -3700,14 +3703,33 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertTrue(caps['pattern']['available'])
             self.assertIsNone(caps['pattern']['k'])
             self.assertEqual(['G1'], [p['graph'] for p in caps['graph_summary']['pairs']])
-            block = server.get('pattern/capabilities?graph=G1').json()
-            self.assertEqual(('G1', self.graph_basic), (block.pop('graph'), block.pop('graph_path')))
+            envelope = server.get('pattern/capabilities?graph=G1').json()
+            # without ?graph=: every pair (the one here)
+            self.assertEqual(envelope, server.get('pattern/capabilities').json())
+            self.assertEqual(('/pattern/capabilities', ['G1'], 1, 0, caps['server_instance']),
+                             (envelope['route'], envelope['graphs'], envelope['answered'],
+                              envelope['refused'], envelope['server_instance']))
+            block = envelope['answers'][0]
+            self.assertEqual(('G1', self.graph_basic, self.anno_basic, None, 'answered'),
+                             tuple(block.pop(key) for key in ('graph', 'graph_path',
+                                                              'annotation_path', 'index_fp',
+                                                              'outcome')))
             self.assertEqual(single.get('pattern/capabilities').json(), block)
-            probe = server.get('traverse/capabilities?graph=G1').json()
+            probe = server.get('traverse/capabilities?graph=G1').json()['answers'][0]
             self.assertEqual(gate_block(block), probe['pattern'])
-            ret = server.get('pattern/capabilities')
+            ret = server.get('pattern/capabilities?graph_path=x')
             self.assertEqual(400, ret.status_code)
             self.assertIn('needs ?graph=<name>', ret.json()['error'])
+            # the multi-graph members of /capabilities, and not on a single-graph server
+            self.assertIsNone(caps['composite_fp'])
+            self.assertIn('composite_rule', caps)
+            self.assertEqual(['/resolve', '/traverse', '/pattern', '/traverse/capabilities',
+                              '/pattern/capabilities'], caps['multigraph']['envelope_routes'])
+            self.assertEqual('GET /requests/{request_id}', caps['routes']['requests'])
+            alone = single.get('capabilities').json()
+            for key in ('composite_fp', 'composite_rule', 'multigraph'):
+                self.assertNotIn(key, alone)
+            self.assertNotIn('requests', alone['routes'])
         finally:
             server.stop()
             single.stop()

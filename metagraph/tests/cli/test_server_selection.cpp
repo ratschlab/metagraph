@@ -210,11 +210,16 @@ TEST(ServerSelection, CapabilitiesProbes) {
     EXPECT_EQ(Pairs({ kA }), probe(SelectionRoute::PATTERN, { { "graph", "a" } }));
     // the names cap is not read by a probe of one pair
     EXPECT_EQ(Pairs({ kA }), probe(SelectionRoute::PATTERN, { { "graph", "a" } }, 1));
-    // a probe without ?graph= is refused, however few names the server hosts
+    // a probe without parameters describes every pair, in the envelope's order (a pair listed
+    // twice under a name once), up to the names cap and refused beyond it in the words of a
+    // probe without ?graph=
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), probe(SelectionRoute::TRAVERSE, {}));
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), probe(SelectionRoute::PATTERN, {}, 3));
     EXPECT_EQ("Bad request: in multi-graph mode GET /traverse/capabilities needs "
-              "?graph=<name> (and graph_path=<path> when the name spans several graphs); GET "
-              "/capabilities lists the graphs",
-              refusal_of([] { probe(SelectionRoute::TRAVERSE, {}); }));
+              "?graph=<name> (and graph_path=<path> when the name spans several graphs) on a "
+              "list of more than 2 graph names (3 here); GET /capabilities lists the graphs",
+              refusal_of([] { probe(SelectionRoute::TRAVERSE, {}, 2); }));
+    // parameters without ?graph= are refused, however few names the server hosts
     EXPECT_EQ("Bad request: in multi-graph mode GET /pattern/capabilities needs "
               "?graph=<name> (and graph_path=<path> when the name spans several graphs); GET "
               "/capabilities lists the graphs",
@@ -245,7 +250,7 @@ TEST(ServerSelection, CapabilitiesProbes) {
                                      R"({"graph": "b", "graph_path": "b1.dbg"})"));
     EXPECT_EQ("Bad request: 'graph': expected a string",
               refusal_of([] { select(SelectionRoute::CAPABILITIES, R"({"graph": 1})"); }));
-    EXPECT_NE("", refusal_of([] { select(SelectionRoute::CAPABILITIES, "{}"); }));
+    EXPECT_EQ(Pairs({ kA, kB1, kB2, kC0, kC1 }), select(SelectionRoute::CAPABILITIES, "{}"));
 
     // probe_parameters alone, as both GET handlers call it today
     EXPECT_EQ("Bad request: in multi-graph mode GET /pattern/capabilities needs ?graph=<name> "

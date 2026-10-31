@@ -14,6 +14,7 @@
 
 #include "cli/server_checks.hpp"
 #include "cli/server_envelope.hpp"
+#include "cli/traverse.hpp"
 
 
 // The multi-graph envelope's builders (server_envelope.hpp) against the reference samples of
@@ -304,4 +305,51 @@ TEST(ServerEnvelope, PatternEntriesAreTheEnvelopes) {
             { "n" }, { pattern_pair_answered("n", "g.dbg", "g.anno", "fp", answer) }, 2.0);
     EXPECT_FALSE(out.isMember("envelope_version"));
     EXPECT_EQ(1u, out["answered"].asUInt());
+}
+
+// Sample 11: the pattern capabilities in the envelope, two pairs
+TEST(ServerEnvelope, Sample11PatternCapabilities) {
+    const Json::Value body = sample("11_pattern_capabilities_envelope.json")["body"];
+    const Json::Value built = get_envelope(body["route"].asString(), rebuilt_entries(body),
+                                           body["server_instance"].asString());
+    EXPECT_EQ(text(body), text(built));
+    EXPECT_EQ(2u, built["answered"].asUInt());
+}
+
+
+// ---------------------------------------------------------------- GET /capabilities (section 8)
+
+// composite_fp: sha256 over the pairs' index_fp sorted as bytes, joined by "\n" without a
+// trailing newline; null when any pair has none
+TEST(ServerEnvelope, CompositeRule) {
+    // the sha256 of "a\nb" (`printf 'a\nb' | sha256sum`), whichever order the pairs come in
+    EXPECT_EQ("7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78",
+              composite_fp_json({ "b", "a" }).asString());
+    EXPECT_EQ(composite_fp_json({ "a", "b" }), composite_fp_json({ "b", "a" }));
+    // one pair: its index_fp hashed alone, no separator
+    EXPECT_EQ(sha256_hex("x"), composite_fp_json({ "x" }).asString());
+    // sorted as bytes: "B" (0x42) before "a" (0x61)
+    EXPECT_EQ("52958ed70d5d066708f7e77ec157d5df490e3f1a597fa14d0d41b513824564b6",
+              composite_fp_json({ "a", "B" }).asString());
+    // a pair without a manifest, or none at all: null
+    EXPECT_TRUE(composite_fp_json({ "a", "" }).isNull());
+    EXPECT_TRUE(composite_fp_json({}).isNull());
+
+    // sample 12: the composite of its eleven pairs (graph_summary), with the rule beside it
+    const Json::Value body = sample("12_capabilities_multigraph.json")["body"];
+    std::vector<std::string> fps;
+    for (const Json::Value &pair : body["graph_summary"]["pairs"]) {
+        fps.push_back(pair["index_fp"].asString());
+    }
+    EXPECT_EQ(11u, fps.size());
+    EXPECT_EQ(body["composite_fp"].asString(), composite_fp_json(fps).asString());
+    EXPECT_EQ(body["composite_rule"].asString(), std::string(kCompositeRule));
+}
+
+// The multigraph block and routes.requests are sample 12's
+TEST(ServerEnvelope, Sample12MultigraphBlock) {
+    const Json::Value body = sample("12_capabilities_multigraph.json")["body"];
+    EXPECT_EQ(text(body["multigraph"]), text(multigraph_capabilities_json()));
+    EXPECT_EQ(body["routes"]["requests"].asString(), std::string(kRequestsRoute));
+    EXPECT_EQ(body["multigraph"]["requests_route"].asString(), std::string(kRequestsRoute));
 }

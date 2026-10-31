@@ -3212,11 +3212,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
 
     def test_multi_probe_describes_one_pair(self):
         ret = self._caps('?graph=A')
-        self.assertEqual(200, ret.status_code, ret.text)
-        caps = ret.json()
-        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 6),
-                         (caps['graph'], caps['graph_path'], caps['index_ns'],
-                          caps['index_fp'], caps['feature_level']))
+        self.assertEqual(self.GET_ENVELOPE, set(ret.json()))
+        caps = self._entry(ret, 'A', '/traverse/capabilities')
+        self.assertEqual(('A', self.graph, self.anno, 'tinyA', self.index_fp, 6),
+                         (caps['graph'], caps['graph_path'], caps['annotation_path'],
+                          caps['index_ns'], caps['index_fp'], caps['feature_level']))
         for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
                     'compression_level', 'content_encodings', 'work_bound', 'coordinates'):
             self.assertIn(key, caps)
@@ -3231,11 +3231,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertIn(self.pairs['two'][0], ret.json()['error'])
         self.assertIn(self.pairs['three'][0], ret.json()['error'])
         quoted = requests.utils.quote(self.pairs['two'][0], safe='')
-        ret = self._caps(f'?graph=B&graph_path={quoted}')
-        self.assertEqual(200, ret.status_code, ret.text)
-        self.assertEqual((self.pairs['two'][0], None, self.fp_two),
-                         (ret.json()['graph_path'], ret.json()['index_ns'],
-                          ret.json()['index_fp']))
+        two = self._entry(self._caps(f'?graph=B&graph_path={quoted}'), 'B',
+                          '/traverse/capabilities')
+        self.assertEqual((self.pairs['two'][0], self.pairs['two'][1], None, self.fp_two),
+                         (two['graph_path'], two['annotation_path'], two['index_ns'],
+                          two['index_fp']))
         # one graph with two annotations cannot be addressed by graph_path, and a name listing
         # only that is refused as such, not told to pass graph_path
         quoted = requests.utils.quote(self.graph, safe='')
@@ -3247,7 +3247,8 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertIn("index 'C' lists one graph", ret.json()['error'])
         self.assertIn('several annotations', ret.json()['error'])
         self.assertNotIn('graph_path\' to pick one', ret.json()['error'])
-        for query, needle in (('', 'needs ?graph=<name>'), ('?graph=Z', "unknown graph 'Z'"),
+        for query, needle in (('?graph_path=/nowhere', 'needs ?graph=<name>'),
+                              ('?graph=Z', "unknown graph 'Z'"),
                               ('?graph=A&x=1', "unknown parameter 'x'"),
                               ('?graph=A&graph=B', 'given twice'),
                               ('?graph=B&graph_path=/nowhere', 'is not part of')):
@@ -3438,6 +3439,97 @@ class TestTraverseMultiGraph(TestTraverseBase):
         out = json.loads(texts['identity'])
         cli = self._cli_results(self.graph, self.anno, req, self.manifest)
         self.assertEqual(cli['results'], out['answers'][0]['results'])
+
+    def test_capabilities_answer_in_the_envelope(self):
+        """Sections 1 and 6 (E3): GET /traverse/capabilities and GET /pattern/capabilities
+        without parameters answer the envelope over every pair (in the index's order: the
+        names in byte order, each name's pairs in the list's order, a pair listed twice under a
+        name once), each entry the pair's block tagged with its pair and index_fp; with
+        ?graph= one entry; beyond --max-graphs-without-selection the probe without ?graph= is
+        refused as before."""
+        order = [('A', self.graph, self.anno, self.index_fp),
+                 ('B', self.pairs['two'][0], self.pairs['two'][1], self.fp_two),
+                 ('B', self.pairs['three'][0], self.pairs['three'][1], None),
+                 # C lists A's pair (A's identity: one index) and the second annotation
+                 ('C', self.graph, self.anno, self.index_fp),
+                 ('C', self.pairs['col'][0], self.pairs['col'][1], None)]
+        instance = requests.get(self.server.url + '/capabilities').json()['server_instance']
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            ret = requests.get(f'{self.server.url}/{route}')
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            out = ret.json()
+            self.assertEqual(self.GET_ENVELOPE, set(out))
+            self.assertEqual((1, '/' + route, ['A', 'B', 'C'], 5, 0, instance),
+                             (out['envelope_version'], out['route'], out['graphs'],
+                              out['answered'], out['refused'], out['server_instance']))
+            self.assertEqual(order, [(e['graph'], e['graph_path'], e['annotation_path'],
+                                      e['index_fp']) for e in out['answers']])
+            self.assertEqual({'answered'}, {e['outcome'] for e in out['answers']})
+            one = self._entry(requests.get(f'{self.server.url}/{route}?graph=A'), 'A',
+                              '/' + route)
+            if route == 'traverse/capabilities':
+                for e in out['answers']:
+                    self.assertEqual((K, 6), (e['k'], e['feature_level']))
+                for key in ('index_ns', 'index_fp', 'index_meta_fp', 'k', 'num_labels',
+                            'coordinates', 'pattern', 'budgets'):
+                    self.assertEqual(one[key], out['answers'][0][key], key)
+                # C's second pair is its own index
+                self.assertNotEqual(out['answers'][0]['index_meta_fp'],
+                                    out['answers'][4]['index_meta_fp'])
+            else:
+                self.assertEqual(one, out['answers'][0])
+                self.assertEqual(('basic', K, True),
+                                 (one['graph_mode'], one['k'], one['available']))
+        server = self._Server(self, self.csv, flags=('--max-graphs-without-selection', '2'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            for route in ('traverse/capabilities', 'pattern/capabilities'):
+                ret = requests.get(f'{server.url}/{route}')
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertIn('needs ?graph=<name>', ret.json()['error'])
+                self.assertIn('more than 2 graph names (3 here)', ret.json()['error'])
+                self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
+        finally:
+            server.close()
+
+    def test_capabilities_state_the_composite_fingerprint(self):
+        """Section 8 (E3): GET /capabilities of a multi-graph server states composite_fp, the
+        sha256 over its pairs' index_fp sorted as bytes and joined by a newline (each pair
+        once, whatever names list it), null when a pair has no manifest; composite_rule; the
+        multigraph block of the reference sample 12 and routes.requests."""
+        with open(os.path.join(REPO, 'tests', 'data', 'multigraph_contract',
+                               '12_capabilities_multigraph.json')) as f:
+            sample = json.load(f)['body']
+        c = requests.get(self.server.url + '/capabilities').json()
+        # B's second pair and C's second annotation have no manifest
+        self.assertIsNone(c['composite_fp'])
+        self.assertEqual(sample['composite_rule'], c['composite_rule'])
+        self.assertEqual(sample['multigraph'], c['multigraph'])
+        self.assertEqual('GET /requests/{request_id}', c['routes']['requests'])
+        # a manifest per pair: the composite is a value; A's pair under a second name is the
+        # same pair and changes nothing
+        d = self.tempdir.name
+        composites = []
+        for name, extra in (('full', ''), ('alias', f'Z,{self.graph},{self.anno}\n')):
+            csv = f'{d}/composite_{name}.csv'
+            with open(csv, 'w') as f:
+                f.write(f'A,{self.graph},{self.anno},{self.manifest}\n'
+                        f'B,{self.pairs["two"][0]},{self.pairs["two"][1]},'
+                        f'{d}/two/two.manifest.json\n' + extra)
+            server = self._Server(self, csv)
+            try:
+                self.assertTrue(server.ready, server.text()[-2000:])
+                c = requests.get(server.url + '/capabilities').json()
+                composites.append(c['composite_fp'])
+                self.assertEqual(sample['multigraph'], c['multigraph'])
+                fps = sorted({p['index_fp'] for p in c['graph_summary']['pairs']})
+                self.assertEqual([min(self.index_fp, self.fp_two),
+                                  max(self.index_fp, self.fp_two)], fps)
+            finally:
+                server.close()
+        expected = hashlib.sha256('\n'.join(sorted([self.index_fp, self.fp_two]))
+                                  .encode()).hexdigest()
+        self.assertEqual([expected, expected], composites)
 
     def test_multi_lists_refuse_to_start(self):
         """A graph list the server cannot state one identity per index for refuses to start

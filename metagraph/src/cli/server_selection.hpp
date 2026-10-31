@@ -140,13 +140,13 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
                                        size_t max_names_without_selection);
 
 /**
- * The pair a GET capabilities probe selects on a multi-graph server, by today's rule: one pair
- * per probe, ?graph=<name>[&graph_path=<path>] (probe_parameters, then select_traverse_pair,
- * and their refusals; a probe without ?graph= is refused). |route| names the route in the
- * messages: TRAVERSE for GET /traverse/capabilities, PATTERN for GET /pattern/capabilities
- * (CAPABILITIES names both). |max_names_without_selection| is not read yet: it bounds the
- * envelope over every pair that answers a probe without ?graph= (section 1), which replaces
- * today's refusal. Throws InvalidRequest.
+ * The pairs a GET capabilities probe selects on a multi-graph server: without parameters
+ * every pair, in the envelope's order (section 1), when the list has at most
+ * |max_names_without_selection| names (refused beyond, the refusal naming ?graph= as before);
+ * otherwise one pair, ?graph=<name>[&graph_path=<path>] (probe_parameters, then
+ * select_traverse_pair, and their refusals; parameters without ?graph= are refused). |route|
+ * names the route in the messages: TRAVERSE for GET /traverse/capabilities, PATTERN for GET
+ * /pattern/capabilities (CAPABILITIES names both). Throws InvalidRequest.
  */
 std::vector<SelectedPair>
 select_pairs_from_parameters(SelectionRoute route,

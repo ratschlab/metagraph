@@ -1,9 +1,12 @@
 #include "server_envelope.hpp"
 
+#include <algorithm>
+#include <initializer_list>
 #include <unordered_set>
 #include <utility>
 
 #include "graph/alignment/pattern_search.hpp"
+#include "traverse.hpp"
 #include "traverse_attempts.hpp"
 
 
@@ -167,6 +170,62 @@ Json::Value get_envelope(const std::string &route,
     }
     out["answers"] = std::move(answers);
     return out;
+}
+
+Json::Value composite_fp_json(std::vector<std::string> index_fps) {
+    // one pair without a manifest leaves the set of indexes unidentified: no composite
+    if (index_fps.empty()
+            || std::any_of(index_fps.begin(), index_fps.end(),
+                           [](const std::string &fp) { return fp.empty(); })) {
+        return Json::Value();
+    }
+    // the order of the list's lines and names does not enter it: the same indexes served in
+    // another order, or under other names, state the same composite (the names are the list
+    // beside it, `graphs` and graph_summary)
+    std::sort(index_fps.begin(), index_fps.end());
+    std::string joined;
+    for (size_t i = 0; i < index_fps.size(); ++i) {
+        if (i)
+            joined += '\n';
+        joined += index_fps[i];
+    }
+    return Json::Value(sha256_hex(joined));
+}
+
+Json::Value multigraph_capabilities_json() {
+    auto strings = [](std::initializer_list<const char *> values) {
+        Json::Value out(Json::arrayValue);
+        for (const char *value : values) {
+            out.append(value);
+        }
+        return out;
+    };
+    Json::Value m(Json::objectValue);
+    m["envelope_version"] = kEnvelopeVersion;
+    m["envelope_routes"] = strings({ "/resolve", "/traverse", "/pattern",
+                                     "/traverse/capabilities", "/pattern/capabilities" });
+    // the selectors of section 6, as this release serves them: /search has no re-ask, so no
+    // pairs; a /traverse request runs on one pair however it is named; a capabilities probe
+    // names its one pair by its parameters
+    Json::Value selectors(Json::objectValue);
+    selectors["/search"] = strings({ "graphs" });
+    selectors["/resolve"] = strings({ "graphs", "pairs" });
+    selectors["/pattern"] = strings({ "graphs", "pairs" });
+    selectors["/traverse"] = strings({ "graph", "graphs", "pairs" });
+    selectors["/traverse/capabilities"] = strings({ "graph", "graph_path", "annotation_path" });
+    selectors["/pattern/capabilities"] = strings({ "graph", "graph_path", "annotation_path" });
+    m["selectors"] = std::move(selectors);
+    m["traverse_pairs_per_request"] = 1;
+    // the deadlines (section 4) and the request handle (section 5) by route: /traverse's
+    // handle is its attempt_id
+    m["not_after_ms"] = strings({ "/traverse", "/resolve", "/pattern" });
+    m["finish_by_ms"] = strings({ "/traverse", "/resolve", "/pattern" });
+    m["request_id"] = strings({ "/resolve", "/pattern" });
+    m["requests_route"] = kRequestsRoute;
+    m["unknown_labels"] = true;
+    m["search_cuts"] = true;
+    m["resolve_boundary_ties"] = true;
+    return m;
 }
 
 } // namespace cli

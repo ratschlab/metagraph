@@ -90,6 +90,33 @@ Json::Value get_envelope(const std::string &route,
                          std::vector<Json::Value> entries,
                          const std::string &server_instance);
 
+// The request registry's route (section 5), as GET /capabilities names it (routes.requests
+// and multigraph.requests_route)
+constexpr char kRequestsRoute[] = "GET /requests/{request_id}";
+
+// How composite_fp is computed, stated beside it in GET /capabilities (composite_rule)
+constexpr char kCompositeRule[] = "sha256 over the pairs' index_fp sorted as bytes, joined by "
+                                  "\"\\n\" without a trailing newline; null when any pair has "
+                                  "no index_fp";
+
+/**
+ * GET /capabilities' composite_fp on a multi-graph server (section 8, kCompositeRule): the
+ * lowercase hex sha256 over |index_fps|, the index_fp of each of the server's pairs, sorted
+ * as bytes and joined by "\n" without a trailing newline; null when any of them is empty (a
+ * pair listed without a manifest) or there is none. The caller passes each pair once
+ */
+Json::Value composite_fp_json(std::vector<std::string> index_fps);
+
+/**
+ * GET /capabilities' `multigraph` block on a multi-graph server (section 8): what this
+ * release's multi-graph routes do, for clients to switch on (never on dates):
+ * envelope_version, the routes that answer in the envelope (envelope_routes), the selectors
+ * of each route (section 6), traverse_pairs_per_request, the routes that read not_after_ms,
+ * finish_by_ms and request_id, the registry's route (requests_route), and the flags
+ * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7)
+ */
+Json::Value multigraph_capabilities_json();
+
 } // namespace cli
 } // namespace mtg
 
