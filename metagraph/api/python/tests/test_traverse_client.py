@@ -54,6 +54,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # a multi-graph server's probe of one pair
             from urllib.parse import parse_qs, urlsplit
             q = parse_qs(urlsplit(self.path).query)
+            if q['graph'][0] in ('E', 'R'):
+                # a release-10 server: the probe in the envelope of one pair (SPEC-multigraph-
+                # envelope.md section 1), refused for R
+                entry = {'graph': q['graph'][0], 'graph_path': '/g/E', 'annotation_path': '/a/E',
+                         'index_fp': None}
+                if q['graph'][0] == 'E':
+                    entry.update(outcome='answered', k=5, graphlet_format=1)
+                else:
+                    entry.update(outcome='refused',
+                                 refusal={'http_status': 400, 'error': 'not served'})
+                return self._send(200, {'envelope_version': 1,
+                                        'route': '/traverse/capabilities',
+                                        'graphs': [q['graph'][0]], 'answered': 1, 'refused': 0,
+                                        'server_instance': 'f' * 16, 'answers': [entry]})
             return self._send(200, {'graph': q['graph'][0],
                                     'graph_path': q.get('graph_path', ['/g/' + q['graph'][0]])[0]})
         if self.path == '/api/capabilities':
@@ -104,6 +118,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                                         'error': 'no label carries every k-mer'})
             else:
                 resp['results'].append(result)
+        if body.get('graph') == 'E':
+            # a release-10 multi-graph server: the answer in the envelope of one pair, the
+            # attempt's usage at its top level
+            usage = resp.pop('usage', None)
+            resp.update(graph='E', graph_path='/g/E', annotation_path='/a/E', index_fp=None,
+                        outcome='answered')
+            resp = {'envelope_version': 1, 'route': '/traverse', 'graphs': ['E'],
+                    'answered': 1, 'refused': 0, 'not_reached': [], 'unfinished': [],
+                    'request_id': body.get('attempt_id'), 'server_instance': 'f' * 16,
+                    'deadline': {'not_after_ms': None, 'finish_by_ms': None,
+                                 'effective_deadline_at': None, 'cutoff_at': None},
+                    'answers': [resp], 'timing': {'elapsed_ms': 1.0},
+                    'work': {'memory_bytes': 0}}
+            if body.get('attempt_id'):
+                resp['usage'] = usage or {'attempt_id': body['attempt_id']}
         self._send(200, resp)
 
 
@@ -157,6 +186,29 @@ class TestClient(unittest.TestCase):
             self.client.traverse(['AAAAACCCCC'], {'direction': 'right'}, attempt_id='dup')
         self.assertNotIsInstance(cm.exception, AttemptExpired)
         self.assertEqual(409, cm.exception.status)
+
+    def test_multi_graph_envelope_of_one_pair(self):
+        """A release-10 multi-graph server answers the probe of one pair and /traverse in the
+        envelope of one entry: read as the single-graph answer (the entry, its tags kept, the
+        attempt's usage beside it); a refused entry raises; an envelope over several pairs
+        (the probe without a graph) is returned as it is"""
+        from metagraph.traverse.client import single_answer
+        caps = self.client.capabilities(graph='E')
+        self.assertEqual((5, 'E', '/a/E'), (caps['k'], caps['graph'], caps['annotation_path']))
+        with self.assertRaises(TraverseError) as cm:
+            self.client.capabilities(graph='R')
+        self.assertEqual((400, 'not served'), (cm.exception.status, cm.exception.message))
+        resp = self.client.traverse(['AAAAACCCCC'], {'direction': 'right'}, graph='E',
+                                    attempt_id='env-1')
+        self.assertEqual(1, len(resp.graphlets))
+        self.assertIsNotNone(resp.graphlets[0])
+        self.assertEqual('env-1', resp.raw['usage']['attempt_id'])
+        self.assertEqual('E', resp.raw['graph'])
+        resp = self.client.traverse(['AAAAACCCCC'], {'direction': 'right'}, graph='E')
+        self.assertNotIn('usage', resp.raw)
+        several = {'envelope_version': 1, 'answers': [{'graph': 'A'}, {'graph': 'B'}]}
+        self.assertIs(several, single_answer(several))
+        self.assertEqual({'k': 5}, single_answer({'k': 5}))
 
     def test_traverse_builds_a_graphlet_request(self):
         resp = self.client.traverse(['AAAAACCCCC'], {'direction': 'right'})
