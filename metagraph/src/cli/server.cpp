@@ -496,12 +496,21 @@ Json::Value parse_traversal_body(const std::string &content) {
 }
 
 // The deadline block of a multi-graph server's /traverse envelope (SPEC-multigraph-envelope.md
-// section 4): the request's not_after_ms, as its attempt holds it. The completion deadline
-// (finish_by_ms, E20), the effective envelope deadline and the work cutoff (E4) are not read
-// by /traverse yet and stated null: this is the one place that fills them in once they are
+// section 4): the request's not_after_ms and finish_by_ms, as its attempt holds them, and when
+// the request gave either of them (null otherwise, as on /resolve and /pattern: RequestDeadlines
+// ::json) the effective deadline and the work cutoff. /traverse's request budget is its
+// attempt's bound, which finish_by_ms less the clock skew allowance and the transport's cap
+// already bound, and its finalisation reserve the delivery reserve: the effective deadline is
+// the receipt plus the bound, the cutoff the walk-until (Attempt::envelope_deadlines)
 Json::Value traverse_envelope_deadline(const Attempt &attempt) {
-    return deadline_json(attempt.ids().not_after_ms, /* finish_by_ms */ std::nullopt,
-                         /* effective_deadline_at */ std::nullopt, /* cutoff_at */ std::nullopt);
+    std::optional<std::chrono::system_clock::time_point> effective, cutoff;
+    if (attempt.ids().not_after_ms || attempt.finish_by_ms()) {
+        if (const auto deadlines = attempt.envelope_deadlines()) {
+            effective = deadlines->effective;
+            cutoff = deadlines->cutoff;
+        }
+    }
+    return deadline_json(attempt.ids().not_after_ms, attempt.finish_by_ms(), effective, cutoff);
 }
 
 } // namespace

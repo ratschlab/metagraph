@@ -104,7 +104,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - The EFFECTIVE envelope deadline is min(request arrival + the route's request budget, `finish_by_ms` -
   clock_skew_allowance_ms), the request budget being `/pattern`'s `time_budget_ms`, `/resolve`'s
   `bounds.time_budget_ms` or the server maximum, the attempt's bound for `/traverse`. The WORK CUTOFF is the
-  effective deadline less the route's finalisation reserve. At the cutoff the fan-out stops admitting and waiting:
+  effective deadline less the route's finalisation reserve. On `/traverse` the bound already holds `finish_by_ms`
+  and the transport cap, and the reserve is the delivery reserve: `effective_deadline_at` is the request's receipt
+  plus `usage.bound_ms`, `cutoff_at` its receipt plus `usage.bound.walk_until_ms`. At the cutoff the fan-out stops
+  admitting and waiting:
   - a pair not yet started (queued, waiting for memory) is `not_reached`: refusal `{http_status: 503, code:
     "not_reached", reason: "cutoff" | "not_after_ms" | "transport", error}`;
   - a pair started and not finished is `unfinished`: refusal `{http_status: 503, code: "unfinished", reason:

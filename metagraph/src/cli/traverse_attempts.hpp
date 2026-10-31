@@ -309,6 +309,18 @@ class Attempt {
                    std::optional<double> load_ms = std::nullopt);
     double bound_ms() const { return bound_ms_; }
     double walk_until_ms() const { return walk_until_ms_; }
+    // The deadlines of a multi-graph server's /traverse envelope (SPEC-multigraph-envelope.md
+    // section 4: /traverse's request budget is the attempt's bound): the effective deadline,
+    // the request's receipt plus the bound (already the minimum of the seeds' budgets with the
+    // allowance, finish_by_ms less the clock skew allowance and the transport's hard cap), and
+    // the work cutoff, the receipt plus the walk-until usage.bound.walk_until_ms states (the
+    // bound less the delivery reserve, the route's finalisation reserve). None while the bound
+    // is not finite (no hard cap)
+    struct EnvelopeDeadlines {
+        std::chrono::system_clock::time_point effective;
+        std::chrono::system_clock::time_point cutoff;
+    };
+    std::optional<EnvelopeDeadlines> envelope_deadlines() const;
     // enforced for a ledger-managed attempt, and for any request with finish_by_ms (the
     // completion deadline binds the request whether or not a ledger tracks it)
     bool enforced() const { return enforced_ && (managed() || finish_cap_ms_.has_value()); }
@@ -506,6 +518,9 @@ class Attempt {
     double ratio_locked() const;
     // bound - max(allowance / 2, reserve), under |mutex_|
     void update_walk_until_locked();
+    // the walk-until usage.bound.walk_until_ms states (under |mutex_|): the one in force when
+    // it stopped the walk, else the lowest a poll checked, else the current one
+    double stated_walk_until_ms_locked() const;
     std::string reason_;                              // set by finish()
     int status_ = 0;
     std::optional<size_t> bytes_;

@@ -1,4 +1,5 @@
 import copy
+import datetime
 import filecmp
 import hashlib
 import json
@@ -3533,8 +3534,10 @@ class TestTraverseMultiGraph(TestTraverseBase):
         index_fp the identity its capabilities state. Unmanaged: request_id null, no usage,
         the deadline's members null. Managed (attempt_id, not_after_ms): request_id the
         attempt_id, the attempt's usage at the envelope's top level, not_after_ms in the
-        deadline (finish_by_ms and the effective deadline null: not read by /traverse yet);
-        the attempt records as written exactly the response's bytes."""
+        deadline with the effective deadline (the receipt plus the attempt's bound, /traverse's
+        request budget) and the work cutoff (the receipt plus the walk-until usage.bound
+        states); finish_by_ms caps both; the attempt records as written exactly the response's
+        bytes."""
         instance = requests.get(self.server.url + '/capabilities').json()['server_instance']
         two_graph, two_anno = self.pairs['two']
         req = self._request('B', two_graph, detail='full')
@@ -3577,6 +3580,38 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual(('env-managed-1', instance, not_after),
                          (out['usage']['attempt_id'], out['usage']['server_instance'],
                           out['usage']['not_after_ms']))
+
+        def ms(iso):
+            return datetime.datetime.fromisoformat(iso).timestamp() * 1000
+
+        def check_deadline(out):
+            # SPEC-multigraph-envelope.md section 4 (E4, E20): /traverse's request budget is the
+            # attempt's bound, its finalisation reserve the delivery reserve (both rounded to
+            # ms where they are stated)
+            usage, deadline = out['usage'], out['deadline']
+            received = ms(usage['received_at'])
+            self.assertAlmostEqual(received + usage['bound_ms'],
+                                   ms(deadline['effective_deadline_at']), delta=2)
+            self.assertAlmostEqual(received + usage['bound']['walk_until_ms'],
+                                   ms(deadline['cutoff_at']), delta=2)
+            self.assertLess(ms(deadline['cutoff_at']), ms(deadline['effective_deadline_at']))
+
+        check_deadline(out)
+        # finish_by_ms caps the bound (at least the 10 s allowance here), and with it both
+        # instants
+        finish_by = int(time.time() * 1000) + 12_000
+        by = self._post('traverse', dict(self._request('A', detail='full'),
+                                         attempt_id='env-managed-2', finish_by_ms=finish_by))
+        self.assertEqual(200, by.status_code, by.text[:2000])
+        capped = by.json()
+        self.assertEqual((None, finish_by, 'finish_by_ms'),
+                         (capped['deadline']['not_after_ms'], capped['deadline']['finish_by_ms'],
+                          capped['usage']['bound']['capped_by']))
+        check_deadline(capped)
+        skew = requests.get(self.server.url + '/capabilities').json()['attempts'][
+            'clock_skew_allowance_ms']
+        self.assertAlmostEqual(finish_by - skew, ms(capped['deadline']['effective_deadline_at']),
+                               delta=2)
         entry = self._entry(ret, 'A')
         self.assertNotIn('usage', entry)
         self.assertEqual((self.index_fp, self.index_fp),

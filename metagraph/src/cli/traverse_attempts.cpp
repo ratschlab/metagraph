@@ -651,6 +651,24 @@ void Attempt::seed_delivered(size_t index, const std::string &outcome, double el
     seeds_[index].elapsed_ms = elapsed_ms;
 }
 
+double Attempt::stated_walk_until_ms_locked() const {
+    const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
+    return tripped_walk_until_ms_ ? *tripped_walk_until_ms_
+         : std::isfinite(checked) ? checked : walk_until_ms_;
+}
+
+std::optional<Attempt::EnvelopeDeadlines> Attempt::envelope_deadlines() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const double walk_until_ms = stated_walk_until_ms_locked();
+    if (!std::isfinite(bound_ms_) || !std::isfinite(walk_until_ms))
+        return std::nullopt;
+    auto at = [&](double ms) {
+        return received_wall_ + std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                                        std::chrono::duration<double, std::milli>(ms));
+    };
+    return EnvelopeDeadlines { at(bound_ms_), at(std::min(walk_until_ms, bound_ms_)) };
+}
+
 Json::Value Attempt::bound_json() const {
     Json::Value b;
     b["seeds"] = uint_json(bound_seeds_);
@@ -666,9 +684,7 @@ Json::Value Attempt::bound_json() const {
     // 2) unless the delivery reserve moved it before a check. A value no poll read bounds no
     // walk: the lowest computed would read 14905 ms for walks stopped near 16000, and 20174 ms
     // (from the last seed's text, written after its walk) for a walk its own 30 s budget ended
-    const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
-    b["walk_until_ms"] = ceil_ms_json(tripped_walk_until_ms_ ? *tripped_walk_until_ms_
-                               : std::isfinite(checked) ? checked : walk_until_ms_);
+    b["walk_until_ms"] = ceil_ms_json(stated_walk_until_ms_locked());
     b["capped_by"] = finish_capped_ ? Json::Value("finish_by_ms")
                    : capped_ ? Json::Value("content_timeout") : Json::Value();
     b["enforced"] = enforced();
