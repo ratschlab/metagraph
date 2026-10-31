@@ -1,6 +1,7 @@
 import copy
 import datetime
 import filecmp
+import gzip
 import hashlib
 import json
 import os
@@ -20,7 +21,7 @@ import unittest
 
 import requests
 
-from base import PROTEIN_MODE, TestingBase, METAGRAPH
+from base import NUM_THREADS, PROTEIN_MODE, TestingBase, METAGRAPH
 
 # The graphlet library (api/python, metagraph.traverse) reads what the writer produces
 # (DESIGN-traverse-graphlet.md §9, T37-T40). The test venv installs api/python editable;
@@ -6066,6 +6067,657 @@ class TestTraverseSeedRefusal(TestingBase):
         self.assertIn('at least: its read alone was refused', domain['effect'], plain)
         for name in ('attempt', 'plain again', 'attempt again'):
             self.assertEqual(plain, got[name], name)
+
+
+_RC = str.maketrans('ACGT', 'TGCA')
+
+
+def _rc(sequence):
+    return sequence[::-1].translate(_RC)
+
+
+@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
+@unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
+class TestTraversePrimary(TestingBase):
+    """Traversal on PRIMARY graphs (E13): the graph of every SRA-side deployed index (Logan
+    chunks, metazoa, plants, human, metagut, metasub, kingsford) is a DBGSuccinct built with
+    --mode primary and served wrapped in a CanonicalDBG, the `primary` regime of SPEC §2. The
+    unit tests (tests/graph/traversal) run that regime on graphs built in memory; these run it
+    end to end on graphs built by the CLI the way such indexes are (`transform --primary-kmers`,
+    then `build --mode primary`), annotated as row_diff_brwt (the deployed form), column and
+    row_diff, through the CLI and through server_query under --mmap.
+
+    The records (k = 31, header labels, random blocks):
+        acc1 = L1 + E + R1, acc2 = L1 + E + R2, acc3 = L2 + E + R1   (forward)
+        inv  = W + rc(E) + V                                         (carries E reversed)
+        hp   = A + X + B, X a 30-bp reverse-complement palindrome    (a hairpin at a·X)
+        ir   = P + Y + Q + rc(Y) + S                                 (an inverted repeat)
+    The same records are also built as a CANONICAL graph (both strands stored natively) and as
+    a BASIC one (forward only). What the spec makes of the regimes:
+      - primary and canonical answer alike: the key of a k-mer is strand-agnostic in both (§4.2,
+        §8.1), edges are canonical (k+1)-mers (§6.6), hairpins are skipped by default (§6.5), so
+        every walk, label and event is the same; only the annotation's access path, the index's
+        meta fingerprint and the regime's name differ;
+      - a primary walk agrees with a basic one up to orientation: from a seed S, labels of the
+        forward records, the walks are the basic graph's (the basic graph lacks only inv's
+        reversed copy of E), and from rc(S) they are its mirror, each arm the reverse complement
+        of the other arm of S; the seed id is the canonical one (§4.3, canon(sequence));
+      - a seed may be read on either strand of the stored graph, and on both within one seed:
+        the primary contigs store each k-mer once, in the orientation the contig extraction
+        chose, so a record's k-mers switch between stored and reverse-complement nodes where
+        two contigs meet (ir must switch: it reads Y both ways);
+      - where a record meets its own reverse complement (ir) a primary walk is cut where the
+        basic one goes on: a branch into the other strand, a step into the reverse complement
+        of a seed k-mer (`rejoined_seed`, strand-agnostic, §6.6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        rng = random.Random(20261031)
+
+        def seq(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+
+        cls.L1, cls.L2, cls.E, cls.R1, cls.R2, cls.W, cls.V, cls.A, cls.B = (
+            seq(BLOCK) for _ in range(9))
+        half = seq((K - 1) // 2)
+        cls.X = half + _rc(half)
+        # the record's own step out of a·X must not be the hairpin step itself
+        while cls.B[0] == _rc(cls.A[-1]):
+            cls.B = seq(BLOCK)
+        cls.P, cls.Y, cls.Q, cls.S = (seq(BLOCK) for _ in range(4))
+        cls.records = {
+            'acc1': cls.L1 + cls.E + cls.R1,
+            'acc2': cls.L1 + cls.E + cls.R2,
+            'acc3': cls.L2 + cls.E + cls.R1,
+            'inv': cls.W + _rc(cls.E) + cls.V,
+            'hp': cls.A + cls.X + cls.B,
+            'ir': cls.P + cls.Y + cls.Q + _rc(cls.Y) + cls.S,
+        }
+        cls.forward = ['acc1', 'acc2', 'acc3']
+        fasta = d + '/records.fa'
+        with open(fasta, 'w') as f:
+            for name, s in cls.records.items():
+                f.write(f'>{name}\n{s}\n')
+
+        # The primary graph as a deployed index is made: the canonical graph, its primary
+        # contigs (each k-mer once, in the orientation the extraction met it first), and a
+        # graph of those contigs. The extraction runs on one thread so that the contigs, and
+        # with them the stored orientation of every k-mer, are the same in every run.
+        canonical = d + '/canonical.dbg'
+        cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode canonical --graph succinct '
+                         f'-k {K} -o {canonical} {fasta}', 'Build canonical')
+        cls._run_command(f'{METAGRAPH} transform -p 1 --to-fasta --primary-kmers '
+                         f'-o {d}/contigs {canonical}', 'Primary contigs')
+        primary = d + '/primary.dbg'
+        cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode primary --graph succinct '
+                         f'-k {K} -o {primary} {d}/contigs.fasta.gz', 'Build primary')
+        cls.stored = set()
+        with gzip.open(d + '/contigs.fasta.gz', 'rt') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('>'):
+                    cls.stored.update(line[i:i + K] for i in range(len(line) - K + 1))
+        basic = d + '/basic.dbg'
+        cls._build_graph(fasta, basic, K, 'succinct', mode='basic')
+
+        # the primary graph's annotations: every form a primary index is deployed with
+        # (row_diff_brwt: Logan chunks, metazoa, plants, human; row_diff_flat: human;
+        # row_diff_disk: metagut, metasub41; row_diff_int_brwt with counts: kingsford) and the
+        # plain column and row_diff forms
+        cls.primaries = {'primary': 'row_diff_brwt', 'primary_flat': 'row_diff_flat',
+                         'primary_disk': 'row_diff_disk', 'primary_counts': 'row_diff_int_brwt',
+                         'primary_column': 'column', 'primary_row_diff': 'row_diff'}
+        cls.indexes = {}
+        for name, graph, anno in ([(name, primary, anno) for name, anno in cls.primaries.items()]
+                                  + [('canonical', canonical, 'column'),
+                                     ('basic', basic, 'column')]):
+            base = f'{d}/{name}'
+            cls._annotate_graph(fasta, graph, base, anno, anno_type='header')
+            cls.indexes[name] = (graph, f'{base}.{anno}.annodbg')
+
+        # the deployed way: row_diff_brwt on a primary graph, memory-mapped
+        cls.port = None
+        for _ in range(20):
+            port = _free_port()
+            cls.server_log = open(f'{d}/server-{port}.log', 'w')
+            cls.server = subprocess.Popen(
+                [METAGRAPH, 'server_query', '-i', primary, '-a', cls.indexes['primary'][1],
+                 '--mmap', '--address', '127.0.0.1', '--port', str(port), '-p', '2'],
+                stdout=cls.server_log, stderr=subprocess.STDOUT)
+            cls.url = f'http://127.0.0.1:{port}'
+            for _ in range(600):
+                if cls.server.poll() is not None:
+                    break
+                try:
+                    if requests.get(cls.url + '/traverse/capabilities', timeout=2).ok:
+                        cls.port = port
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            if cls.port:
+                break
+            cls.server.kill()
+            cls.server.wait()
+            cls.server_log.close()
+        assert cls.port, 'the server on the primary graph did not start'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.kill()
+        cls.server.wait()
+        cls.server_log.close()
+        super().tearDownClass()
+
+    @classmethod
+    def _cli(cls, index, request, resolve=False):
+        """`metagraph traverse [--resolve] --json` on one index -> (parsed, return code, text)."""
+        graph, anno = cls.indexes[index]
+        path = f'{cls.tempdir.name}/request-{index}.json'
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run([METAGRAPH, 'traverse'] + (['--resolve'] if resolve else [])
+                             + ['--json', '-i', graph, '-a', anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        text = res.stdout.decode().rstrip('\n')
+        assert text, f'no output\nstderr: {res.stderr.decode()}'
+        return json.loads(text), res.returncode, text
+
+    def _ok(self, index, request, resolve=False):
+        out, rc, _ = self._cli(index, request, resolve)
+        self.assertEqual(0, rc, (index, out.get('error')))
+        return out
+
+    @staticmethod
+    def _strategy(**fields):
+        strategy = {'direction': 'both', 'bounds': {'max_extension_bp': BLOCK + 10},
+                    'output': {'timing': False}}
+        strategy.update(fields)
+        return strategy
+
+    @staticmethod
+    def _without_access(out):
+        """The response less what names the index rather than the walk: the annotation's access
+        path and its read counters, the capabilities (regime, direct access, the index's meta
+        fingerprint), the regime /resolve states beside them, the time it took, and what the
+        response is priced at: the memory it held and the work units of its reads (row-diff and
+        column reads hold and decode different rows), with the statement of the memory bound
+        (row-diff reads are charged inside the decoder, column reads are not, §6.8)."""
+        out = copy.deepcopy(out)
+        for key in ('capabilities', 'work', 'regime', 'timing'):
+            out.pop(key, None)
+        for result in out.get('results', []):
+            result.pop('annotation', None)
+            result.pop('work', None)
+            for arm in result.get('arms', {}).values():
+                arm.get('counters', {}).pop('work_units', None)
+            for limitation in result.get('limitations', []):
+                if limitation['kind'] == 'memory_bound_soft':
+                    limitation.pop('effect')
+        return out
+
+    @staticmethod
+    def _walk_view(result):
+        """arm -> sorted [(flank in natural orientation, labels at its leaf, end reasons)]. A
+        path lists its segments root first, each in natural orientation, so a right flank is
+        their concatenation and a left flank that of the reversed list (SPEC §7.1)."""
+        names = [entry['name'] for entry in result['label_dict']]
+        view = {}
+        for side, arm in result['arms'].items():
+            segments = {s['id']: s for s in arm['segments']}
+            order = (lambda ids: ids) if side == 'right' else (lambda ids: ids[::-1])
+            view[side] = sorted(
+                (''.join(segments[i]['sequence'] for i in order(path['segments'])),
+                 tuple(sorted(names[e['label']] for e in path['end_labels'])),
+                 tuple(sorted(path['end_reasons'].items())))
+                for path in arm['paths'])
+        return view
+
+    @staticmethod
+    def _mirror(view):
+        """The walk view of the reverse-complement seed: each arm is the other arm reversed."""
+        other = {'left': 'right', 'right': 'left'}
+        return {other[side]: sorted((_rc(flank), labels, reasons)
+                                    for flank, labels, reasons in walks)
+                for side, walks in view.items()}
+
+    @staticmethod
+    def _events(result, kind):
+        return [e for arm in result['arms'].values() for s in arm['segments']
+                for e in s['events'] if e['type'] == kind]
+
+    def _carriers(self, kmer, stranded):
+        forms = {kmer} if stranded else {kmer, _rc(kmer)}
+        return {name for name, s in self.records.items() if any(f in s for f in forms)}
+
+    def _expected_runs(self, query, labels, stranded=False):
+        """label -> its support runs over |query| as the records define them: a k-mer carries
+        a label when the record holds it, on either strand unless |stranded|."""
+        n = len(query) - K + 1
+        carriers = [self._carriers(query[i:i + K], stranded) for i in range(n)]
+        runs = {}
+        for label in labels:
+            spans, start = [], None
+            for i in range(n + 1):
+                inside = i < n and label in carriers[i]
+                if inside and start is None:
+                    start = i
+                elif not inside and start is not None:
+                    spans.append([start, i])
+                    start = None
+            if spans:
+                runs[label] = spans
+        return runs
+
+    def _orientation(self, sequence):
+        """'F' per k-mer stored as read, 'R' per k-mer stored as its reverse complement."""
+        out = ''
+        for i in range(len(sequence) - K + 1):
+            kmer = sequence[i:i + K]
+            self.assertTrue(kmer in self.stored or _rc(kmer) in self.stored, kmer)
+            out += 'F' if kmer in self.stored else 'R'
+        return out
+
+    def _oracle(self, seed, label, stranded=False, max_bp=1000):
+        """The walk view of one label from |seed| as the records define it, written from the
+        records and not from a graph (constrain mode, max_label_branches 0, hairpins skipped,
+        SPEC §6.4-§6.7): the graph holds every k-mer of the records and the label every k-mer
+        of its own record, on both strands unless |stranded|; the label ends with `branch` where
+        it is on two successors, with `rejoined_seed` at a step into a seed k-mer and with
+        `edge_reuse` (`edge_reuse_rc` the other way round) at a step through a used edge, edges
+        and seed k-mers being strand-agnostic unless |stranded|. The left arm is the right arm
+        of the reversed records and seed read back: reversal keeps the pairs {s, rc(s)}, so the
+        same rules apply there."""
+        def kmers(s):
+            return {s[i:i + K] for i in range(len(s) - K + 1)}
+
+        def both(ks):
+            return set(ks) if stranded else set(ks) | {_rc(x) for x in ks}
+
+        def right(records, seed):
+            graph = both(set().union(*(kmers(s) for s in records.values())))
+            carried = both(kmers(records[label]))
+            seed_nodes = both(kmers(seed))
+            u, flank, used = seed[-K:], '', set()
+            while len(flank) < max_bp:
+                # a hairpin step u -> rc(u) is skipped and never makes a branch (§6.5)
+                steps = [u + c for c in 'ACGT' if u[1:] + c in graph and u + c != _rc(u + c)]
+                if not steps:
+                    return flank, 'dead_end'
+                ours = [e for e in steps if e[1:] in carried]
+                if len(ours) != 1:
+                    return flank, 'branch' if ours else 'label_lost'
+                (e,) = ours
+                if e[1:] in seed_nodes:
+                    return flank, 'rejoined_seed'
+                if not stranded and _rc(e) in used:
+                    return flank, 'edge_reuse_rc'
+                if e in used:
+                    return flank, 'edge_reuse'
+                used.add(e)
+                flank += e[-1]
+                u = e[1:]
+            return flank, 'max_extension_bp'
+
+        view = {}
+        for side, flip in (('right', lambda s: s), ('left', lambda s: s[::-1])):
+            flank, reason = right({n: flip(s) for n, s in self.records.items()}, flip(seed))
+            view[side] = [(flip(flank), (label,), ((reason, 1),))]
+        return view
+
+    def test_regime_is_stated(self):
+        """Every response names the regime the index is served in: `primary` for every
+        annotation of the primary graph (CLI and server), `canonical` and `basic` for the
+        others; trace support is never offered off the basic regime (coordinates carry no
+        strand there), and these indexes have no coordinates anyway."""
+        request = {'seeds': [{'sequence': self.E}], 'strategy': self._strategy()}
+        for index, regime in ([(index, 'primary') for index in self.primaries]
+                              + [('canonical', 'canonical'), ('basic', 'basic')]):
+            caps = self._ok(index, request)['capabilities']
+            self.assertEqual((regime, K, False), (caps['regime'], caps['k'],
+                                                  caps['supports_trace']), index)
+        caps = requests.get(self.url + '/traverse/capabilities').json()
+        self.assertEqual(('primary', K, False, len(self.records)),
+                         (caps['regime'], caps['k'], caps['supports_trace'],
+                          caps['num_labels']))
+        ret = requests.post(self.url + '/resolve', data=json.dumps(
+            {'sequence': self.E, 'labels': ['acc1']}))
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual('primary', ret.json()['regime'])
+
+    def test_resolve_presence_and_discovery(self):
+        """/resolve reads a k-mer's labels on either strand: the profile of a query and of its
+        reverse complement are each other's mirror, every run what the records say, the same on
+        every primary annotation and on the canonical graph, through the CLI and the server (the
+        same bytes). The frozen seeds of both orientations carry the same canonical seed ids.
+        The basic graph reads the forward strand only: inv's reversed E is not E there."""
+        query = self.L1[-40:] + self.E + self.R1[:40]
+        n = len(query) - K + 1
+        everyone = sorted(self.records)
+        select = {'policy': 'max_support', 'max_seeds': 3}
+        for sequence in (query, _rc(query)):
+            expected = self._expected_runs(sequence, everyone)
+            self.assertEqual(['acc1', 'acc2', 'acc3', 'inv'], sorted(expected))
+            requests_ = [{'sequence': sequence, 'discover': {'max_labels': 10}, 'select': select},
+                         {'sequence': sequence, 'labels': ['acc1', 'inv', 'hp']}]
+            for request in requests_:
+                outs = {index: self._ok(index, request, resolve=True)
+                        for index in list(self.primaries) + ['canonical']}
+                for index, out in outs.items():
+                    self.assertEqual((n, [[0, n]]), (out['num_kmers'], out['graph_runs']), index)
+                    got = {l['label']: l['runs'] for l in out['labels'] if l['runs']}
+                    want = {l: r for l, r in expected.items()
+                            if 'discover' in request or l in request['labels']}
+                    self.assertEqual(want, got, index)
+                    self.assertEqual(self._without_access(outs['primary']),
+                                     self._without_access(out), index)
+                    self.assertEqual('canonical' if index == 'canonical' else 'primary',
+                                     out['regime'])
+                # the server's body is the CLI's, but for the per-task figures
+                ret = requests.post(self.url + '/resolve', data=json.dumps(request))
+                self.assertEqual(200, ret.status_code, ret.text)
+                _, _, text = self._cli('primary', request, resolve=True)
+                self.assertEqual(TestTraverseResolveRegression._untimed(text),
+                                 TestTraverseResolveRegression._untimed(ret.text))
+
+        def seeds(sequence):
+            out = self._ok('primary', {'sequence': sequence, 'discover': {'max_labels': 10},
+                                       'select': select}, resolve=True)
+            return sorted((s['seed_id'], tuple(sorted(s['labels'])), min(s['sequence'],
+                                                                         _rc(s['sequence'])))
+                          for s in out['selection']['seeds'])
+        forward = seeds(query)
+        self.assertEqual(3, len(forward))
+        self.assertEqual(forward, seeds(_rc(query)))
+
+        # the basic graph: forward-strand support only, so inv carries none of the query
+        basic = self._ok('basic', {'sequence': query, 'discover': {'max_labels': 10}},
+                         resolve=True)
+        self.assertEqual('basic', basic['regime'])
+        self.assertEqual(self._expected_runs(query, everyone, stranded=True),
+                         {l['label']: l['runs'] for l in basic['labels'] if l['runs']})
+        self.assertNotIn('inv', [l['label'] for l in basic['labels']])
+
+    def _requests(self):
+        """name -> request: both arms with derived and explicit labels, reverse-complement
+        seeds, the strand junction of inv, a hairpin skipped and followed, annotate mode,
+        the exhaustive preset, a graphlet, and budgeted reads (the charged decode of row_diff
+        over BRWT, the deployed form)."""
+        e, j = self.E, self.E[-40:] + _rc(self.W)[:40]
+        out = {
+            'derived': {'seeds': [{'sequence': e}]},
+            'explicit': {'seeds': [{'sequence': e, 'labels': self.forward}]},
+            'rc_derived': {'seeds': [{'sequence': _rc(e)}]},
+            'rc_explicit': {'seeds': [{'sequence': _rc(e), 'labels': ['acc2', 'inv']}]},
+            'junction': {'seeds': [{'sequence': j}]},
+            'hairpin_skip': {'seeds': [{'sequence': self.A[:40]}],
+                             'strategy': self._strategy(direction='right',
+                                                        bounds={'max_extension_bp': 300})},
+            'hairpin_follow': {'seeds': [{'sequence': self.A[:40]}],
+                               'strategy': self._strategy(direction='right',
+                                                          bounds={'max_extension_bp': 300},
+                                                          branching={'hairpins': 'follow'})},
+            'annotate': {'seeds': [{'sequence': e[:60]}],
+                         'strategy': self._strategy(labels={'mode': 'annotate'})},
+            'exhaustive': {'seeds': [{'sequence': e, 'labels': ['acc1', 'acc3', 'inv']}],
+                           'strategy': self._strategy(exhaustive=True)},
+            'graphlet': {'seeds': [{'sequence': e}, {'sequence': _rc(j)}],
+                         'strategy': self._strategy(output={'detail': 'graphlet',
+                                                            'timing': False})},
+            'budgets': {'seeds': [{'sequence': e}, {'sequence': self.L1[:50]}],
+                        'strategy': self._strategy(bounds={'max_extension_bp': BLOCK + 10,
+                                                           'max_memory_mb': 64,
+                                                           'max_work_units': 10 ** 9})},
+        }
+        for request in out.values():
+            request.setdefault('strategy', self._strategy())
+        return out
+
+    def test_traverse_answers_as_on_the_canonical_graph(self):
+        """Every request walks the same on every annotation of the primary graph and on
+        the canonical graph of the same records: the same walks, labels, events, counters
+        and graphlet bodies, only the access path, the regime and the index's meta fingerprint
+        differ (and with them the graphlet's H record). The server under --mmap answers each
+        request with the CLI's bytes."""
+        for name, request in self._requests().items():
+            with self.subTest(request=name):
+                outs = {index: self._ok(index, request)
+                        for index in list(self.primaries) + ['canonical']}
+                for result in outs['primary']['results']:
+                    self.assertNotIn('error', result)
+                    self.assertEqual(('complete', 'complete'),
+                                     (result['outcome']['walks'],
+                                      result['outcome']['label_evidence']))
+                ref = self._without_access(outs['primary'])
+                for index, out in outs.items():
+                    got = self._without_access(out)
+                    if index == 'canonical':
+                        # the graphlet's H record names the regime and the meta fingerprint,
+                        # and its size with them
+                        ref = copy.deepcopy(ref)
+                        for r in ref['results'] + got['results']:
+                            if 'graphlet' in r:
+                                head, r['graphlet'] = r['graphlet'].split('\n', 1)
+                                self.assertTrue(head.startswith('H '), head)
+                                self.assertEqual(len(head) + 1 + len(r['graphlet']),
+                                                 r.pop('graphlet_bytes'))
+                    self.assertEqual(ref, got, index)
+                ret = requests.post(self.url + '/traverse', data=json.dumps(request))
+                self.assertEqual(200, ret.status_code, ret.text[:500])
+                _, _, text = self._cli('primary', request)
+                self.assertEqual(text, ret.text)
+
+    def test_traverse_agrees_with_the_basic_graph_up_to_orientation(self):
+        """From a seed of the forward records, under their labels, a primary walk is the basic
+        graph's walk; from the reverse complement of the seed it is that walk's mirror (the
+        right arm the reverse complement of the left one and the other way round), with the
+        canonical seed id. inv's reversed E, absent from the basic graph, carries none of the
+        permitted labels, so it changes nothing but the rows read."""
+        cases = [(self.E, self.forward), (self.L1[:50], ['acc1', 'acc2']),
+                 (self.L2[30:] + self.E[:40], ['acc3']), (self.E[50:] + self.R2[:20], ['acc2'])]
+        for seed, labels in cases:
+            request = {'seeds': [{'sequence': seed, 'labels': labels}],
+                       'strategy': self._strategy()}
+            basic = self._ok('basic', request)['results'][0]
+            primary = self._ok('primary', request)['results'][0]
+            self.assertEqual(self._walk_view(basic), self._walk_view(primary))
+            # the whole walk is the same, the events and splits included
+            self.assertEqual(basic['arms'], primary['arms'])
+            mirrored = self._ok('primary', {'seeds': [{'sequence': _rc(seed), 'labels': labels}],
+                                            'strategy': self._strategy()})['results'][0]
+            self.assertEqual(self._mirror(self._walk_view(basic)), self._walk_view(mirrored))
+            # the id hashes canon(sequence): the lesser of the seed and its reverse complement
+            # on the primary graph, the seed as given on the basic one (§4.3)
+            self.assertEqual(primary['seed']['validated_seed_id'],
+                             mirrored['seed']['validated_seed_id'])
+            self.assertEqual(seed < _rc(seed), basic['seed']['validated_seed_id']
+                             == primary['seed']['validated_seed_id'], seed)
+
+        # with the labels derived from the seed, the primary graph adds inv: E reversed
+        derived = {'seeds': [{'sequence': self.E}], 'strategy': self._strategy()}
+        self.assertEqual(self.forward, self._ok('basic', derived)['results'][0]['seed']['labels'])
+        primary = self._ok('primary', derived)['results'][0]
+        self.assertEqual(self.forward + ['inv'], primary['seed']['labels'])
+        view = self._walk_view(primary)
+        self.assertIn((_rc(self.W)[:BLOCK], ('inv',), (('dead_end', 1),)), view['right'])
+        self.assertIn((_rc(self.V), ('inv',), (('dead_end', 1),)), view['left'])
+
+    def test_seed_across_a_strand_junction(self):
+        """Seeds read on both strands of the stored graph. (a) E's end joined to the reverse
+        complement of W is inv read backwards: only the primary (and canonical) graph has it, it
+        derives inv, and its walks mirror the basic graph's walks from inv's own orientation.
+        (b) Seeds whose k-mers are stored as read, stored reversed, and switch from one to the
+        other within the seed (where two primary contigs of opposite orientation meet: the
+        first switch of ir, forced by its inverted repeat; hp across its palindrome; windows of
+        every record): each walks as the records define it on two strands (`_oracle`), the same
+        on the canonical graph, and the basic graph as they define it on one strand, which is
+        the same walk but on ir, where the primary walk stops at the strands' meeting."""
+        j = self.E[-40:] + _rc(self.W)[:40]
+        request = {'seeds': [{'sequence': j}], 'strategy': self._strategy()}
+        primary = self._ok('primary', request)['results'][0]
+        self.assertEqual(['inv'], primary['seed']['labels'])
+        self.assertEqual({'right': [(_rc(self.W)[40:], ('inv',), (('dead_end', 1),))],
+                          'left': [((_rc(self.V) + self.E[:-40])[-(BLOCK + 10):], ('inv',),
+                                    (('max_extension_bp', 1),))]},
+                         self._walk_view(primary))
+        out, rc, _ = self._cli('basic', request)
+        self.assertNotEqual(0, rc)
+        self.assertIn('Seed is not fully present in the graph', out['error'])
+        basic = self._ok('basic', {'seeds': [{'sequence': _rc(j)}],
+                                   'strategy': self._strategy()})['results'][0]
+        self.assertEqual(self._mirror(self._walk_view(basic)), self._walk_view(primary))
+
+        # (b) the stored orientation of every record's k-mers, in windows of 60
+        kinds = {}
+        for name, record in self.records.items():
+            orientation = self._orientation(record)
+            for i in range(0, len(orientation) - 60, 10):
+                window = orientation[i:i + 60]
+                kind = ('as read' if set(window) == {'F'} else 'reversed'
+                        if set(window) == {'R'} else 'switching')
+                kinds.setdefault(kind, []).append((name, record[i:i + 60 + K - 1]))
+        # ir reads Y once forward and once reversed, and the graph stores each k-mer of Y once:
+        # whatever the extraction does, ir switches somewhere; seed across its first switch
+        orientation = self._orientation(self.records['ir'])
+        switch = orientation.index('RF'[orientation[0] == 'R'])
+        # the seed below starts in Y and holds a k-mer of Y (choose another rng seed otherwise)
+        self.assertTrue(len(self.P) <= switch - 30 <= len(self.P) + BLOCK - K, switch)
+        across = [('ir', self.records['ir'][switch - 30:switch + K + 30])]
+        # hp's own strands meet at X; whether its k-mers switch there is the extraction's choice
+        across.append(('hp', self.A[-40:] + self.X + self.B[:40]))
+        # with the contigs of one thread, windows of all three kinds occur; should a change of
+        # the contig extraction ever make one disappear, choose another rng seed
+        self.assertEqual({'as read', 'reversed', 'switching'}, set(kinds))
+        cases = across + [case for kind in sorted(kinds) for case in kinds[kind][:2]]
+        strategy = self._strategy(bounds={'max_extension_bp': 1000})
+        for name, seed in cases:
+            request = {'seeds': [{'sequence': seed, 'labels': [name]}], 'strategy': strategy}
+            out = {index: self._ok(index, request)['results'][0]
+                   for index in ('primary', 'canonical', 'basic')}
+            two_strand = self._oracle(seed, name)
+            self.assertEqual(two_strand, self._walk_view(out['primary']), (name, seed))
+            self.assertEqual(out['canonical']['arms'], out['primary']['arms'], (name, seed))
+            one_strand = self._oracle(seed, name, stranded=True)
+            self.assertEqual(one_strand, self._walk_view(out['basic']), (name, seed))
+            if name != 'ir':
+                # no record but ir holds a sequence and its reverse complement both
+                self.assertEqual(one_strand, two_strand, (name, seed))
+        # on ir, the primary walk is the basic one cut where ir meets its own reverse
+        # complement: the left arm at Y's first k-mer (preceded by P and by rc(S)), the right
+        # one where it would step into the reverse complement of a seed k-mer
+        seed = across[0][1]
+        primary, basic = self._oracle(seed, 'ir'), self._oracle(seed, 'ir', stranded=True)
+        (left, _, left_end), = primary['left']
+        (right, _, right_end), = primary['right']
+        self.assertEqual((self.Y[:switch - 30 - len(self.P)], (('branch', 1),)),
+                         (left, left_end))
+        self.assertEqual((('rejoined_seed', 1),), right_end)
+        self.assertEqual([(self.P + left, ('ir',), (('dead_end', 1),))], basic['left'])
+        self.assertTrue(basic['right'][0][0].startswith(right), right)
+
+    def test_hairpin_step(self):
+        """A step through a self-reverse-complementary (k+1)-mer (k = 31 is odd, so no k-mer is
+        its own reverse complement; here a·X's (k-1)-suffix X is an RC palindrome, and every
+        such node has a hairpin successor carrying its own labels on a two-strand graph). Skipped
+        by default: one `hairpin` event, no split, and the walk the record's, as on the basic
+        graph, which has no hairpins. Followed: the hairpin step is a second leaf whose retrace
+        is blocked as edge_reuse_rc."""
+        seed = self.A[:40]
+        record = self.A[40:] + self.X + self.B
+        at_bp = len(self.A) - 40 + K - 1
+        requests_ = self._requests()
+        skip = self._ok('primary', requests_['hairpin_skip'])['results'][0]
+        self.assertEqual({'right': [(record, ('hp',), (('dead_end', 1),))]},
+                         self._walk_view(skip))
+        (hairpin,) = self._events(skip, 'hairpin')
+        self.assertEqual((at_bp, _rc(self.A[-1]), False), (hairpin['at_bp'], hairpin['char'],
+                                                           hairpin['followed']))
+        self.assertEqual([], skip['arms']['right']['splits'])
+        basic = self._ok('basic', requests_['hairpin_skip'])['results'][0]
+        self.assertEqual(self._walk_view(basic), self._walk_view(skip))
+        self.assertEqual([], self._events(basic, 'hairpin'))
+
+        follow = self._ok('primary', requests_['hairpin_follow'])['results'][0]
+        view = self._walk_view(follow)['right']
+        self.assertEqual(2, len(view))
+        self.assertIn((record, ('hp',), (('dead_end', 1),)), view)
+        (retrace,) = [w for w in view if w[0] != record]
+        self.assertEqual((record[:at_bp] + _rc(self.A[-1]), (('edge_reuse_rc', 1),)),
+                         (retrace[0][:at_bp + 1], retrace[2]))
+        (hairpin,) = self._events(follow, 'hairpin')
+        self.assertTrue(hairpin['followed'])
+        # the same from the other strand: the mirror seed walks left through the hairpin
+        mirrored = self._ok('primary', {'seeds': [{'sequence': _rc(seed)}],
+                                        'strategy': self._strategy(
+                                            direction='left',
+                                            bounds={'max_extension_bp': 300})})['results'][0]
+        self.assertEqual(self._mirror(self._walk_view(skip)), self._walk_view(mirrored))
+        self.assertEqual(1, len(self._events(mirrored, 'hairpin')))
+
+    def test_graphlet_round_trip(self):
+        """The graphlet of a primary walk (MGT v1) names the regime in its H record, parses and
+        dumps back byte for byte, and reproduces the detail: full result through the library,
+        CLI and server alike."""
+        request = self._requests()['graphlet']
+        full = copy.deepcopy(request)
+        full['strategy']['output']['detail'] = 'full'
+        outs = {'cli': (self._ok('primary', full), self._ok('primary', request))}
+        ret = requests.post(self.url + '/traverse', data=json.dumps(request),
+                            headers={'Accept-Encoding': 'gzip'})
+        self.assertEqual(200, ret.status_code, ret.text[:500])
+        outs['server'] = (requests.post(self.url + '/traverse', data=json.dumps(full)).json(),
+                          ret.json())
+        for where, (rf_all, rg_all) in outs.items():
+            self.assertEqual(2, len(rg_all['results']), where)
+            for rf, rg in zip(rf_all['results'], rg_all['results']):
+                text = rg['graphlet']
+                self.assertIn(' primary ', text.split('\n')[0], where)
+                g = graphlet_lib.parse(text)
+                self.assertEqual(text, g.dump(), where)
+                self.assertTrue(graphlet_lib.is_canonical(text), where)
+                gg = graphlet_lib.from_response(rg, rg_all)
+                self.assertEqual(normalize_result(rf), normalize_result(gg.to_json()), where)
+                self.assertEqual([], gg.check_rules(rf), where)
+
+    def test_palindromic_kmer_at_even_k(self):
+        """At even k a k-mer can be its own reverse complement; on a primary graph (k = 20) the
+        step into such a node is a hairpin, skipped: the walk stops one base short of it with
+        one `hairpin` event, as SPEC §6.5 and the unit test EvenKPalindromicNode state. The
+        deployed indexes are odd-k (19, 21, 31, 41); this pins the rule for the wrapper's
+        palindromic nodes end to end."""
+        k = 20
+        d = self.tempdir.name + '/even'
+        os.makedirs(d)
+        rng = random.Random(2026103120)
+
+        def seq(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+        half = seq(k // 2)
+        x = half + _rc(half)
+        left, right = seq(BLOCK), seq(BLOCK)
+        fasta = d + '/pal.fa'
+        with open(fasta, 'w') as f:
+            f.write(f'>pal\n{left + x + right}\n')
+        self._build_graph(fasta, d + '/graph.dbg', k, 'succinct', mode='primary')
+        self._annotate_graph(fasta, d + '/graph.dbg', d + '/anno', 'row_diff_brwt',
+                             anno_type='header')
+        path = d + '/request.json'
+        with open(path, 'w') as f:
+            json.dump({'seeds': [{'sequence': left[:30]}],
+                       'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 300},
+                                    'output': {'timing': False}}}, f)
+        res = subprocess.run([METAGRAPH, 'traverse', '-i', d + '/graph.dbg', '-a',
+                              d + '/anno.row_diff_brwt.annodbg', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-500:])
+        out = json.loads(res.stdout)
+        self.assertEqual('primary', out['capabilities']['regime'])
+        (result,) = out['results']
+        self.assertEqual({'right': [(left[30:] + x[:k - 1], ('pal',), (('dead_end', 1),))]},
+                         self._walk_view(result))
+        self.assertEqual(1, len(self._events(result, 'hairpin')))
 
 
 if __name__ == '__main__':
