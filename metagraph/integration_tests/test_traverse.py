@@ -6269,10 +6269,10 @@ class TestTraversePrimary(TestingBase):
         return out
 
     def _graphlet_body(self, out, regime):
-        """|out| with each graphlet's H record less what names the index, the regime (checked
-        to be |regime|) and the index's meta fingerprint (which the annotation's coordinates
-        move), and without graphlet_bytes (checked to be the graphlet's size), which move
-        with them (SPEC §7.5.2)."""
+        """|out| with what each graphlet's H record says of the index taken out: the regime
+        (checked to be |regime|) and the index's meta fingerprint, which the canonical graph
+        and the annotation's coordinates move; graphlet_bytes moves with them and is dropped
+        once checked to be the graphlet's size (SPEC §7.5.2)."""
         for result in out['results']:
             if 'graphlet' in result:
                 text = result['graphlet']
@@ -6303,7 +6303,8 @@ class TestTraversePrimary(TestingBase):
 
     @staticmethod
     def _mirror(view):
-        """The walk view of the reverse-complement seed: each arm is the other arm reversed."""
+        """The walk view of the reverse-complement seed: each arm the reverse complement of the
+        other arm."""
         other = {'left': 'right', 'right': 'left'}
         return {other[side]: sorted((_rc(flank), labels, reasons)
                                     for flank, labels, reasons in walks)
