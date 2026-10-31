@@ -1571,9 +1571,8 @@ Json::Value process_pattern_request(
 
     if (delivery && delivery->deadline_cap()) {
         // the request's deadline is the minimum of its own and the cap (finish_by_ms less the
-        // clock skew allowance; in a multi-graph fan-out also the work cutoff,
-        // SPEC-multigraph-envelope.md section 4), stated as a clamp of the budget: the time
-        // left at its start
+        // clock skew allowance, SPEC-multigraph-envelope.md section 4), stated as a clamp of
+        // the budget: the time left at its start
         const double left = std::max(0.0, std::chrono::duration<double, std::milli>(
                                                   *delivery->deadline_cap() - start).count());
         if (left < req.time_budget_ms) {

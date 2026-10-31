@@ -5482,10 +5482,13 @@ Json::Value process_resolve_request(
     std::optional<Deadline> deadline;
     Json::Value clamped(Json::arrayValue);
     std::string late;
-    // the cap of the request's deadline (finish_by_ms; in a fan-out the work cutoff)
-    const std::optional<Deadline::Clock::time_point> cap
-            = delivery ? delivery->deadline_cap() : std::nullopt;
-    if (req.time_budget_ms || cap) {
+    // the cap of the request's deadline (finish_by_ms less the clock skew allowance), held as
+    // a flag and an instant initialised either way rather than an optional, whose copy GCC 13
+    // takes for maybe-uninitialized
+    const bool capped = delivery && delivery->deadline_cap().has_value();
+    const Deadline::Clock::time_point cap_at
+            = capped ? *delivery->deadline_cap() : Deadline::Clock::time_point();
+    if (req.time_budget_ms || capped) {
         // without bounds.time_budget_ms, a request under a cap (finish_by_ms) gets the server's
         // maximum as its own deadline (SPEC-multigraph-envelope.md section 4)
         double budget = req.time_budget_ms ? *req.time_budget_ms
@@ -5505,12 +5508,12 @@ Json::Value process_resolve_request(
         // (the parse admits the field only where the peek above saw it)
         if (!start)
             start = now();
-        if (cap) {
+        if (capped) {
             // the request's deadline is the minimum of its own and the cap (finish_by_ms less
-            // the clock skew allowance; in a multi-graph fan-out also the work cutoff), stated
-            // as a clamp of the budget: the time left at its start
+            // the clock skew allowance), stated as a clamp of the budget: the time left at its
+            // start
             const double left = std::max(0.0, std::chrono::duration<double, std::milli>(
-                                                      *cap - *start).count());
+                                                      cap_at - *start).count());
             if (left < budget) {
                 note_clamped(&clamped, "bounds.time_budget_ms",
                              req.time_budget_ms ? req.time_budget_given : Json::Value(),

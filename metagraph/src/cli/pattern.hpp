@@ -259,9 +259,10 @@ class PatternDelivery {
 
     /**
      * The latest instant the request's deadline may reach (SPEC-multigraph-envelope.md
-     * section 4: finish_by_ms less the clock skew allowance, and in a multi-graph fan-out the
-     * work cutoff): process_pattern_request lowers time_budget_ms to the time left at its start
-     * when that is less, and states it in limits.clamped. Unset: the request's own budget
+     * section 4: finish_by_ms less the clock skew allowance; a multi-graph fan-out's work
+     * cutoff caps nothing): process_pattern_request lowers time_budget_ms to the time left at
+     * its start when that is less, and states it in limits.clamped. Unset: the request's own
+     * budget
      */
     void set_deadline_cap(graph::pattern::Deadline::Clock::time_point cap) { cap_ = cap; }
     const std::optional<graph::pattern::Deadline::Clock::time_point>& deadline_cap() const {

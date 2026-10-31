@@ -465,8 +465,8 @@ class ResolveDelivery {
     }
 
     // The latest instant the request's deadline may reach (SPEC-multigraph-envelope.md section
-    // 4: finish_by_ms less the clock skew allowance, and in a multi-graph fan-out the work
-    // cutoff): process_resolve_request makes its deadline the minimum of its own and this,
+    // 4: finish_by_ms less the clock skew allowance; a multi-graph fan-out's work cutoff caps
+    // nothing): process_resolve_request makes its deadline the minimum of its own and this,
     // stated in limits.clamped; a request without bounds.time_budget_ms then gets the server's
     // maximum (ResolveTimeLimits::max_time_ms) as its own. Unset: the request's own deadline
     // alone (none without the field)
