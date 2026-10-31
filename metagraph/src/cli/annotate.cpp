@@ -110,7 +110,7 @@ void call_annotations(const std::string &file,
                     for (const auto &label
                             : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                                                     ? utils::join_strings(
-                                                        { read_stream->name.s, read_stream->comment.s },
+                                                        { read_stream->name.s, read_stream->comment.l ? read_stream->comment.s : "" },
                                                         fasta_anno_comment_delim,
                                                         true)
                                                     : read_stream->name.s,
@@ -200,7 +200,7 @@ void add_kmer_counts(const std::string &file,
                 for (const auto &label
                         : utils::split_string(fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                                                 ? utils::join_strings(
-                                                    { read_stream->name.s, read_stream->comment.s },
+                                                    { read_stream->name.s, read_stream->comment.l ? read_stream->comment.s : "" },
                                                     fasta_anno_comment_delim,
                                                     true)
                                                 : read_stream->name.s,
@@ -250,6 +250,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
+            size_t calls = 0;
+            size_t last_record = 0;
+            std::vector<size_t> records;
             call_annotations(
                 files[i],
                 config.refpath,
@@ -264,16 +267,33 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 config.fasta_header_delimiter,
                 {}, // config.anno_labels
                 [&](std::string sequence, auto labels, uint64_t) {
-                    assert(labels.size() == 1 && "each sequence has a single label (header)");
-                    if (sequence.size() >= k) {
-                        if (headers[i].empty() || headers[i].back() != labels[0]) {
-                            headers[i].push_back(labels[0]);
-                            num_kmers[i].push_back(0);
-                        }
-                        num_kmers[i].back() += sequence.size() - k + 1;
+                    const size_t record = calls++ / (forward_and_reverse ? 2 : 1) + 1;
+                    if (labels.size() != 1 || labels[0].empty() || !utils::valid_utf8(labels[0])) {
+                        logger->error("Record {} in '{}' needs one non-empty UTF-8 header for "
+                                      "the record mapping; do not split it with --header-delimiter",
+                                      record, files[i]);
+                        exit(1);
                     }
+                    if (sequence.size() < k)
+                        return;
+                    // A record's reverse complement shares its coordinates. Distinct
+                    // records must remain distinct even when their header text repeats.
+                    if (headers[i].empty() || record != last_record) {
+                        headers[i].push_back(labels[0]);
+                        num_kmers[i].push_back(0);
+                        records.push_back(record);
+                    }
+                    num_kmers[i].back() += sequence.size() - k + 1;
+                    last_record = record;
                 }
             );
+            annot::CoordToHeader::find_duplicate_headers(headers[i], [&](size_t first, size_t repeat) {
+                logger->error("Header of record {} in '{}' repeats record {}: record headers "
+                              "must be distinct within a file for the record mapping",
+                              records[repeat], files[i], records[first]);
+                exit(1);
+                return false;
+            });
         }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
         auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
@@ -467,6 +487,17 @@ int annotate_graph(Config *config) {
     assert(config->infbase_annotators.size() <= 1);
 
     if (config->index_header_coords) {
+        for (const auto &file : files) {
+            if (file_format(file) != "FASTA" && file_format(file) != "FASTQ") {
+                logger->error("--index-header-coords requires FASTA or FASTQ input: {}", file);
+                exit(1);
+            }
+        }
+        if (!config->fasta_header_delimiter.empty()) {
+            logger->error("--index-header-coords requires whole record headers; "
+                          "do not use --header-delimiter");
+            exit(1);
+        }
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
             logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
                           "only be constructed for annotated filenames (use flag `--anno-filename`)");

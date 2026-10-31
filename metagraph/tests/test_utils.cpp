@@ -80,6 +80,28 @@ TEST(Utils, call_rows) {
     ASSERT_EQ(7u, i);
 }
 
+TEST(Utils, ValidUtf8) {
+    const std::vector<std::pair<std::string, bool>> cases = {
+        { "abc", true },
+        { "caf\xC3\xA9", true },
+        { "\xF0\x9F\x98\x80" "z", true },
+        { "bad\xEF\xBF\xBD", true },          // U+FFFD itself is valid
+        { "", true },
+        { "\xC0" "abc", false },                 // C0: never a lead byte
+        { "\xE9" "ab", false },                  // Latin-1: a lead without its tail
+        { "\xED\xA0\x80", false },              // a surrogate
+        { "\xE0\x80\x80", false },              // overlong
+        { "\xF4\x90\x80\x80", false },          // beyond U+10FFFF
+        { "\xF0\x9F\x98", false },              // truncated
+        { "\xE2\x82" "x", false },
+        { "bad\xFF", false },
+        { "\x80\x80", false },
+    };
+    for (const auto &[raw, valid] : cases) {
+        EXPECT_EQ(valid, utils::valid_utf8(raw)) << raw;
+    }
+}
+
 TEST(Utils, TempFileInitialize) {
     utils::TempFile tmp;
 }

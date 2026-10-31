@@ -420,6 +420,53 @@ class TestAnnotate(TestingBase):
         self.assertNotIn('To enable per-sequence coordinate reporting',
                          res.stdout.decode())
 
+    def test_index_header_coords_requires_distinct_headers(self):
+        graph_input = f'{self.tempdir.name}/graph_input.fa'
+        with open(graph_input, 'w') as f:
+            f.write('>A\nGGCTTACGTAAGCATG\n>B\nCCTGGACGTACCTAGG\n')
+        res = subprocess.run([METAGRAPH, 'build', '-k', '5',
+                              '-o', f'{self.tempdir.name}/graph', graph_input],
+                             stdout=PIPE, stderr=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        def index(name, content, *flags):
+            fasta = f'{self.tempdir.name}/{name}.fa'
+            with open(fasta, 'w') as f:
+                f.write(content)
+            out = f'{self.tempdir.name}/{name}'
+            res = subprocess.run([METAGRAPH, 'annotate', '-i', f'{self.tempdir.name}/graph.dbg',
+                                  '--anno-filename', '--index-header-coords', *flags,
+                                  '-o', out, fasta],
+                                 stdout=PIPE, stderr=PIPE)
+            return res, os.path.exists(out + '.seqs')
+
+        # distinct headers
+        res, written = index('distinct', '>A\nGGCTTACGTAAGCATG\n>B\nCCTGGACGTACCTAGG\n')
+        self.assertEqual(res.returncode, 0, res.stderr.decode())
+        self.assertTrue(written)
+
+        # a repeated header, consecutive or not
+        for name, content in [
+            ('consecutive', '>A\nGGCTTACGTAAGCATG\n>A\nCCTGGACGTACCTAGG\n'),
+            ('apart', '>A\nGGCTTACGTAAGCATG\n>B\nCCTGGACGTACCTAGG\n>A\nGGCTTACGTA\n'),
+        ]:
+            res, written = index(name, content)
+            self.assertNotEqual(res.returncode, 0, name)
+            self.assertIn('repeats record', res.stderr.decode() + res.stdout.decode())
+            self.assertFalse(written, name)
+
+        # an empty header
+        res, written = index('empty', '>\nGGCTTACGTAAGCATG\n')
+        self.assertNotEqual(res.returncode, 0)
+        self.assertFalse(written)
+
+        # the whole header names a record
+        res, written = index('delimiter', '>A|x\nGGCTTACGTAAGCATG\n>A|y\nCCTGGACGTACCTAGG\n',
+                             '--header-delimiter', '|')
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('--header-delimiter', res.stderr.decode() + res.stdout.decode())
+        self.assertFalse(written)
+
 
 if __name__ == '__main__':
     unittest.main()
