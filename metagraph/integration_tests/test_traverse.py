@@ -194,6 +194,54 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(1, len(out['candidates']))
         self.assertEqual(3, len(out['candidates'][0]['labels']))
 
+    def test_resolve_discovery_cut_states_the_boundary_tie(self):
+        """A discovery's cut (SPEC-multigraph-envelope.md §7): the labels ranked by k-mers
+        supported, ties by name, and labels_truncated states the tie group at the boundary —
+        the labels with the last kept label's support, kept or dropped (tied_at_boundary), and
+        how many of them were kept (tied_kept). The element is carried whole by all three
+        records; left1 + element whole by acc1 and acc2 only. The members are those of the
+        contract's reference sample."""
+        with open(os.path.join(REPO, 'tests', 'data', 'multigraph_contract',
+                               '04_resolve_labels_truncated_tie.json')) as f:
+            sample = json.load(f)['body']['answers'][0]['labels_truncated']
+        n = BLOCK - K + 1
+        for max_labels, names, cut in (
+                (1, ['acc1'], (3, 1, n, n, 2, 3, 1)),
+                (2, ['acc1', 'acc2'], (3, 2, n, n, 1, 3, 2))):
+            out, rc = self._traverse({
+                'sequence': self.element,
+                'discover': {'max_labels': max_labels, 'kind': 'header'},
+            }, resolve=True)
+            self.assertEqual(0, rc)
+            self.assertEqual(names, [l['label'] for l in out['labels']])
+            t = out['labels_truncated']
+            self.assertEqual({'total', 'kept', 'min_kept_kmers', 'max_dropped_kmers',
+                              'dropped_full_length', 'tied_at_boundary', 'tied_kept'}, set(t))
+            self.assertEqual(set(sample), set(t))
+            self.assertTrue(all(isinstance(v, int) for v in t.values()), t)
+            self.assertEqual(cut, (t['total'], t['kept'], t['min_kept_kmers'],
+                                   t['max_dropped_kmers'], t['dropped_full_length'],
+                                   t['tied_at_boundary'], t['tied_kept']))
+        # a cut ending with its tie group: the group kept whole
+        out, rc = self._traverse({
+            'sequence': self.left1 + self.element,
+            'discover': {'max_labels': 2, 'kind': 'header'},
+        }, resolve=True)
+        self.assertEqual(0, rc)
+        self.assertEqual(['acc1', 'acc2'], [l['label'] for l in out['labels']])
+        t = out['labels_truncated']
+        self.assertEqual((3, 2, 2 * BLOCK - K + 1, n, 0, 2, 2),
+                         (t['total'], t['kept'], t['min_kept_kmers'], t['max_dropped_kmers'],
+                          t['dropped_full_length'], t['tied_at_boundary'], t['tied_kept']))
+        # without a cut, none stated
+        out, rc = self._traverse({
+            'sequence': self.element,
+            'discover': {'max_labels': 3, 'kind': 'header'},
+        }, resolve=True)
+        self.assertEqual(0, rc)
+        self.assertEqual(['acc1', 'acc2', 'acc3'], [l['label'] for l in out['labels']])
+        self.assertIsNone(out['labels_truncated'])
+
     def test_resolve_select_freezes_seeds(self):
         out, rc = self._traverse({
             'sequence': self.left1 + self.element,
@@ -2892,7 +2940,8 @@ class TestTraverseResolveRegression(TestTraverseBase):
     §7.2.2: timing.cpu_ms, timing.page_faults, work.memory_bytes) are additions that change
     nothing else: removed where they stand, a /resolve and a /traverse — unbudgeted, under
     budgets that do not bind and under one that stops the walk, in every detail — are the
-    base binary's answers byte for byte (with a base binary before them)."""
+    base binary's answers byte for byte (with a base binary before them). So are a
+    discovery cut's tied_at_boundary and tied_kept (release 10)."""
 
     @classmethod
     def setUpClass(cls):
@@ -2970,6 +3019,10 @@ class TestTraverseResolveRegression(TestTraverseBase):
         text = re.sub(r'"cpu_ms":[-+0-9.eE]+,', '', text)
         text = re.sub(r',"page_faults":\{"major":\d+,"minor":\d+\}', '', text)
         text = re.sub(r',"work":\{"memory_bytes":\d+\}', '', text)
+        # and the members a discovery's cut states since release 10 (its boundary tie,
+        # SPEC-multigraph-envelope.md §7; this fixture's headers are numbered in their names'
+        # order, so a base binary's tie by column id and seq_id keeps the same labels)
+        text = re.sub(r'"tied_at_boundary":\d+,"tied_kept":\d+,', '', text)
         return re.sub(r'"elapsed_ms":[-+0-9.eE]+', '"elapsed_ms":0', text)
 
     def _traverse_requests(self):
