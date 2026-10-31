@@ -17,8 +17,14 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/binary_matrix/row_disk/row_disk.hpp"
+#include "annotation/binary_matrix/row_flat/flat_matrix.hpp"
+#include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
+#include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
+#include "annotation/int_matrix/row_disk/int_row_disk.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
@@ -132,6 +138,7 @@ struct Annotation {
     const IRowDiff *rd = nullptr;
     const BinaryMatrix *binary = nullptr;
     const MultiIntMatrix *tuples = nullptr;
+    std::shared_ptr<utils::TempFile> file;          // the file a RowDisk reads its rows from
 };
 
 void copy_support(const IRowDiff &from, IRowDiff *to) {
@@ -442,19 +449,412 @@ TEST(RowDiffBudgetedDecode, RefusalsHaveNoSideEffects) {
     }
 }
 
-// Formats without the budget-aware path say so, charge nothing and touch nothing
-TEST(RowDiffBudgetedDecode, UnsupportedFormatsChargeNothing) {
-    std::vector<std::string> seqs { random_seq(60, 5), random_seq(60, 6) };
-    auto anno = test::build_anno_graph<graph::DBGSuccinct, RowDiffDiskAnnotator>(
-            7, seqs, { "A", "B" }, graph::DeBruijnGraph::BASIC);
-    const auto *rd = dynamic_cast<const IRowDiff*>(&anno->get_annotator().get_matrix());
-    ASSERT_TRUE(rd);
-    EXPECT_FALSE(rd->supports_budgeted_decode());
+// ---- The deployed forms beyond BRWT and ColumnMajor (E14): the row-major index matrices
+// (row_diff_flat, row_diff_sparse, row_diff_disk) and the counts (row_diff_int_brwt)
+
+// every row of |m| in row order, sorted, as the row-major constructors take them
+std::function<void(const BinaryMatrix::RowCallback&)> rows_in_order(const BinaryMatrix &m) {
+    return [&m](const BinaryMatrix::RowCallback &callback) {
+        std::vector<Row> all(m.num_rows());
+        std::iota(all.begin(), all.end(), 0);
+        for (const auto &row : m.get_rows(all)) {
+            callback(sorted(row));
+        }
+    };
+}
+
+// |m| written as a RowDisk into |file| and loaded from it into |disk| (in place: a RowDisk
+// reads its rows from the file, which must outlive it, and maps its boundary)
+void load_row_disk(const BinaryMatrix &m, const utils::TempFile &file, RowDisk *disk) {
+    RowDisk::serialize(file.name(), rows_in_order(m), m.num_columns(), m.num_rows(),
+                       m.num_relations());
+    utils::named_ifstream in(file.name());
+    ASSERT_TRUE(disk->load(in));
+}
+
+// The single-row reads of the row-major forms return each row's set bits, ascending, as the
+// batched reads do, for random matrices including empty and full rows; the scratch is all
+// they keep charged (RowDisk's read alone opens a reader, charged around the read)
+TEST(RowDiffBudgetedDecode, RowMajorReadsEqualTheBatchedRead) {
+    std::mt19937 rng(43);
+    for (double density : { 0.0, 0.05, 0.5, 1.0 }) {
+        const uint64_t num_rows = 300;
+        std::vector<std::unique_ptr<bit_vector>> cols;
+        for (size_t j = 0; j < 37; ++j) {
+            cols.push_back(random_column(num_rows, density, rng));
+        }
+        ColumnMajor column_major(std::move(cols));
+        const uint64_t set_bits = column_major.num_relations();
+        RowFlat<> flat(rows_in_order(column_major), 37, num_rows, set_bits);
+        RowSparse sparse(rows_in_order(column_major), 37, num_rows, set_bits);
+        utils::TempFile file;
+        RowDisk disk;
+        load_row_disk(column_major, file, &disk);
+        std::vector<Row> all(num_rows);
+        std::iota(all.begin(), all.end(), 0);
+        const auto rows = column_major.get_rows(all);
+        ASSERT_EQ(rows, disk.get_rows(all));
+        for (const BinaryMatrix *m : { (const BinaryMatrix*)&flat, (const BinaryMatrix*)&sparse,
+                                       (const BinaryMatrix*)&disk }) {
+            DecodeBudget budget;
+            ChargedBuffer<Column> scratch;
+            for (Row r = 0; r < num_rows; ++r) {
+                const std::string what = "density " + std::to_string(density) + " row "
+                        + std::to_string(r);
+                scratch.data.clear();
+                bool ok = false;
+                if (m == &flat) {
+                    ok = flat.row_columns(r, &scratch, budget);
+                } else if (m == &sparse) {
+                    ok = sparse.row_columns(r, &scratch, budget);
+                } else {
+                    ok = disk.row_columns(r, &scratch, budget);
+                }
+                ASSERT_TRUE(ok) << what;
+                EXPECT_EQ(std::vector<Column>(rows[r].begin(), rows[r].end()),
+                          std::vector<Column>(scratch.data.begin(), scratch.data.end())) << what;
+            }
+            // the scratch is all that was charged, and only as it grew
+            EXPECT_EQ(scratch.charged(), budget.held());
+            if (m == &disk && density > 0) {
+                // the reader was charged while it was open
+                EXPECT_GE(budget.peak(), disk.reader_bytes() + scratch.charged());
+            }
+        }
+        // a budget below what a reader holds refuses RowDisk's read alone, keeping nothing
+        DecodeBudget small(disk.reader_bytes() - 1);
+        ChargedBuffer<Column> scratch;
+        EXPECT_FALSE(disk.row_columns(0, &scratch, small));
+        EXPECT_EQ(0u, small.held());
+        EXPECT_TRUE(scratch.data.empty());
+        // and a growth that does not fit refuses a row-major read
+        if (density == 1.0) {
+            DecodeBudget none(0);
+            EXPECT_FALSE(flat.row_columns(0, &scratch, none));
+            EXPECT_FALSE(sparse.row_columns(0, &scratch, none));
+            EXPECT_EQ(0u, none.held());
+        }
+    }
+}
+
+// The count annotation over the row-diff annotation |base|'s graph, anchors and fork
+// successors: column j of row r counts 1 + (r * 31 + j * 7) % 5 where |base| has the bit, so
+// that counts change along the row-diff paths where the labels do not. Its stored rows as
+// IntRowDiff stores them: an anchor its counts, any other row the non-zero changes from its
+// row-diff successor (row(r) = row(succ) + diff(r)), each encoded (encode_diff)
+Annotation count_annotation(const Annotation &base) {
+    const graph::DeBruijnGraph &graph = *base.rd->graph();
+    const uint64_t num_rows = base.binary->num_rows();
+    const uint64_t num_columns = base.binary->num_columns();
+    const auto presence = base.binary->get_rows(rows_of(base));
+    std::vector<std::vector<std::pair<Column, int64_t>>> counts(num_rows);
+    {
+        const std::vector<Row> valid = rows_of(base);
+        for (size_t i = 0; i < valid.size(); ++i) {
+            for (Column j : presence[i]) {
+                counts[valid[i]].emplace_back(j, 1 + (valid[i] * 31 + j * 7) % 5);
+            }
+        }
+    }
+    std::vector<std::vector<std::pair<Row, uint64_t>>> stored(num_columns);
+    for (Row r : rows_of(base)) {
+        std::map<Column, int64_t> diff;
+        for (const auto &[j, c] : counts[r]) {
+            diff[j] += c;
+        }
+        if (!base.rd->anchor()[r]) {
+            const Row succ = graph::AnnotatedDBG::graph_to_anno_index(row_diff_successor(
+                    graph, graph::AnnotatedDBG::anno_to_graph_index(r), base.rd->fork_succ()));
+            for (const auto &[j, c] : counts[succ]) {
+                diff[j] -= c;
+            }
+        }
+        for (const auto &[j, d] : diff) {
+            if (d)
+                stored[j].emplace_back(r, encode_diff(d));
+        }
+    }
+    std::vector<std::unique_ptr<bit_vector>> cols;
+    std::vector<CountsVector> values;
+    for (Column j = 0; j < num_columns; ++j) {
+        std::sort(stored[j].begin(), stored[j].end());
+        sdsl::bit_vector bv(num_rows, 0);
+        sdsl::int_vector<> v(stored[j].size(), 0, 64);
+        for (size_t i = 0; i < stored[j].size(); ++i) {
+            bv[stored[j][i].first] = 1;
+            v[i] = stored[j][i].second;
+        }
+        cols.push_back(std::make_unique<bit_vector_sd>(bv));
+        values.emplace_back(std::move(v));
+    }
+    using Counts = CSCMatrix<BRWT, CountsVector>;
+    auto rd = std::make_unique<IntRowDiff<Counts>>(
+            &graph, Counts(BRWTBottomUpBuilder::build(std::move(cols),
+                                                      BRWTBottomUpBuilder::get_basic_partitioner(2)),
+                           std::move(values)));
+    copy_support(*base.rd, rd.get());
+    Annotation a;
+    a.name = "row_diff_int_brwt";
+    a.anno = base.anno;
+    a.rd = rd.get();
+    a.binary = rd.get();
+    a.owned = std::move(rd);
+    return a;
+}
+
+// The forms of this section, over the diffs of the binary row_diff annotation of annotations()
+// (the same stored rows, so the same rows, dependencies and, for flat and sparse, the same
+// demands as row_diff; row_diff_disk's demands add its reader), and the counts
+std::vector<Annotation> deployed_forms() {
+    std::vector<Annotation> base = annotations();
+    const Annotation &rd = base[0];
+    EXPECT_EQ("row_diff", rd.name);
+    const auto &diffs = dynamic_cast<const RowDiff<ColumnMajor>&>(*rd.binary).diffs();
+    const graph::DeBruijnGraph *graph = rd.rd->graph();
+    std::vector<Annotation> out;
+    {
+        auto flat = std::make_unique<RowDiff<RowFlat<>>>(graph, rows_in_order(diffs),
+                diffs.num_columns(), diffs.num_rows(), diffs.num_relations());
+        copy_support(*rd.rd, flat.get());
+        Annotation a;
+        a.name = "row_diff_flat";
+        a.anno = rd.anno;
+        a.rd = flat.get();
+        a.binary = flat.get();
+        a.owned = std::move(flat);
+        out.push_back(std::move(a));
+    }
+    {
+        auto sparse = std::make_unique<RowDiff<RowSparse>>(graph, rows_in_order(diffs),
+                diffs.num_columns(), diffs.num_rows(), diffs.num_relations());
+        copy_support(*rd.rd, sparse.get());
+        Annotation a;
+        a.name = "row_diff_sparse";
+        a.anno = rd.anno;
+        a.rd = sparse.get();
+        a.binary = sparse.get();
+        a.owned = std::move(sparse);
+        out.push_back(std::move(a));
+    }
+    {
+        Annotation a;
+        a.file = std::make_shared<utils::TempFile>();
+        auto disk = std::make_unique<RowDiff<RowDisk>>(graph);
+        load_row_disk(diffs, *a.file, &disk->diffs());
+        copy_support(*rd.rd, disk.get());
+        a.name = "row_diff_disk";
+        a.anno = rd.anno;
+        a.rd = disk.get();
+        a.binary = disk.get();
+        a.owned = std::move(disk);
+        out.push_back(std::move(a));
+    }
+    out.push_back(count_annotation(rd));
+    for (const Annotation &a : out) {
+        EXPECT_TRUE(a.rd->supports_budgeted_decode()) << a.name;
+    }
+    return out;
+}
+
+TEST(RowDiffBudgetedDecode, EveryDeployedFormEqualsTheDefaultDecode) {
+    for (const Annotation &a : deployed_forms()) {
+        check_equivalence<SetBits>(a);
+    }
+}
+
+TEST(RowDiffBudgetedDecode, EveryDeployedFormCostsAreBatchIndependent) {
+    for (const Annotation &a : deployed_forms()) {
+        check_batch_independence<SetBits>(a);
+    }
+}
+
+TEST(RowDiffBudgetedDecode, EveryDeployedFormRefusalsHaveNoSideEffects) {
+    for (const Annotation &a : deployed_forms()) {
+        check_denials<SetBits>(a);
+    }
+}
+
+// The row-major forms decode the stored rows row_diff (ColumnMajor) decodes: the same rows and
+// costs, row_diff_disk's demand that of row_diff plus its reader (opened once per call, in
+// every row's demand), which a budget below it refuses whole. Its peak is row_diff's at most
+// plus the reader, which is held from the first stored row on: where row_diff's peak is the
+// trace's growth (before any stored row is read: the old and new tables of a growing
+// container, which a call of narrow rows may never reach again), less than that
+TEST(RowDiffBudgetedDecode, RowMajorFormsChargeAsTheColumnForm) {
+    std::vector<Annotation> base = annotations();
+    const Annotation &column = base[0];
+    for (const Annotation &a : deployed_forms()) {
+        if (a.name == "row_diff_int_brwt")
+            continue;
+        const uint64_t reader = a.name == "row_diff_disk"
+            ? dynamic_cast<const RowDiff<RowDisk>&>(*a.binary).diffs().reader_bytes() : 0;
+        for (const auto &rows : batches(a, 17)) {
+            DecodeBudget b1, b2;
+            std::vector<SetBits> o1, o2;
+            std::vector<RowCost> c1, c2;
+            std::vector<uint64_t> h1, h2;
+            ASSERT_EQ(DecodeStatus::OK, decode<SetBits>(column, rows, b1, &o1, &c1, &h1));
+            ASSERT_EQ(DecodeStatus::OK, decode<SetBits>(a, rows, b2, &o2, &c2, &h2));
+            EXPECT_EQ(o1, o2) << a.name;
+            EXPECT_EQ(h1, h2) << a.name;
+            ASSERT_EQ(c1.size(), c2.size());
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(c1[i].dependency_rows, c2[i].dependency_rows) << a.name;
+                EXPECT_EQ(c1[i].dependency_entries, c2[i].dependency_entries) << a.name;
+                EXPECT_EQ(c1[i].demand + reader, c2[i].demand) << a.name;
+            }
+            EXPECT_EQ(b1.held(), b2.held()) << a.name;
+            if (!rows.empty()) {
+                EXPECT_LE(b1.peak(), b2.peak()) << a.name << " batch of " << rows.size();
+                EXPECT_LE(b2.peak(), b1.peak() + reader)
+                        << a.name << " batch of " << rows.size();
+                if (!reader)
+                    EXPECT_EQ(b1.peak(), b2.peak()) << a.name << " batch of " << rows.size();
+            }
+            if (reader && !rows.empty()) {
+                DecodeBudget small(reader - 1);
+                std::vector<SetBits> o;
+                std::vector<RowCost> c;
+                std::vector<uint64_t> h;
+                EXPECT_EQ(DecodeStatus::REFUSED, decode<SetBits>(a, rows, small, &o, &c, &h));
+                EXPECT_EQ(0u, small.held());
+            }
+        }
+    }
+}
+
+// Counts are read as presence, and presence needs the counts: a column stays in a row when a
+// diff changes its count without cancelling it. Decoded as bits (a RowDiff over the same
+// binary diff matrix, symmetric differences), those rows would lose the column; the
+// budget-aware decode of the counts returns what get_rows() returns
+TEST(RowDiffBudgetedDecode, CountsAreReadAsPresence) {
+    std::vector<Annotation> base = annotations();
+    const Annotation counts = count_annotation(base[0]);
+    const auto &rd = dynamic_cast<const IntRowDiff<CSCMatrix<BRWT, CountsVector>>&>(*counts.binary);
+    const std::vector<Row> valid = rows_of(counts);
+    // the counts annotation's labels are those of the base (the fixture is right)
+    EXPECT_EQ(base[0].binary->get_rows(valid), counts.binary->get_rows(valid));
+    // the same stored entries decoded as bits
+    std::vector<std::unique_ptr<bit_vector>> cols;
+    for (Column j = 0; j < rd.num_columns(); ++j) {
+        sdsl::bit_vector bv(rd.num_rows(), 0);
+        for (Row r : rd.diffs().get_column(j)) {
+            bv[r] = 1;
+        }
+        cols.push_back(std::make_unique<bit_vector_sd>(bv));
+    }
+    RowDiff<ColumnMajor> as_bits(rd.graph(), ColumnMajor(std::move(cols)));
+    copy_support(rd, &as_bits);
+    size_t differ = 0;
+    const auto bits = as_bits.get_rows(valid);
+    const auto presence = counts.binary->get_rows(valid);
+    for (size_t i = 0; i < valid.size(); ++i) {
+        differ += bits[i] != presence[i];
+    }
+    EXPECT_GT(differ, valid.size() / 10);
     DecodeBudget budget;
     std::vector<SetBits> out;
     std::vector<RowCost> costs;
     std::vector<uint64_t> held;
-    EXPECT_EQ(DecodeStatus::UNSUPPORTED, rd->decode_rows({ 0, 1 }, budget, &out, &costs, &held));
+    ASSERT_EQ(DecodeStatus::OK, rd.decode_rows(valid, budget, &out, &costs, &held));
+    EXPECT_EQ(presence, out);
+    // decode_row_tuples is not a count annotation's
+    std::vector<RowTuples> tuples;
+    EXPECT_EQ(DecodeStatus::UNSUPPORTED,
+              rd.decode_row_tuples(valid, budget, &tuples, &costs, &held));
+}
+
+// ---- Index matrices read without a row-diff (BudgetedRows): a plain BRWT, a plain ColumnMajor
+
+// The rows of a plain matrix, each read alone: what get_rows() returns, no dependency rows, a
+// demand that a row read alone stays within and that a budget of exactly its peak admits while
+// one byte less refuses it; costs independent of the batch; a refused call keeps nothing
+TEST(BudgetedRowsAlone, PlainBrwtAndColumnMajor) {
+    std::mt19937 rng(44);
+    for (double density : { 0.0, 0.05, 0.5, 1.0 }) {
+        const uint64_t num_rows = 200;
+        std::vector<std::unique_ptr<bit_vector>> cols;
+        for (size_t j = 0; j < 23; ++j) {
+            cols.push_back(random_column(num_rows, density, rng));
+        }
+        ColumnMajor column_major(copy_columns(cols));
+        BRWT brwt = BRWTBottomUpBuilder::build(std::move(cols),
+                                               BRWTBottomUpBuilder::get_basic_partitioner(3));
+        RowFlat<> flat(rows_in_order(column_major), 23, num_rows, column_major.num_relations());
+        // a row-major or row-diff matrix has none (a row-diff one has IRowDiff::decode_rows)
+        EXPECT_FALSE(budgeted_rows(flat));
+        for (const BinaryMatrix *m : { (const BinaryMatrix*)&column_major, (const BinaryMatrix*)&brwt }) {
+            const auto reader = budgeted_rows(*m);
+            ASSERT_TRUE(reader);
+            std::vector<Row> all(num_rows);
+            std::iota(all.begin(), all.end(), 0);
+            std::vector<Row> rows(all.rbegin(), all.rend());
+            rows.push_back(5);      // a duplicate
+            DecodeBudget budget;
+            budget.charge(100);     // something held on entry
+            std::vector<SetBits> out;
+            std::vector<RowCost> costs;
+            std::vector<uint64_t> held;
+            ASSERT_EQ(DecodeStatus::OK, reader->decode_rows(rows, budget, &out, &costs, &held));
+            EXPECT_EQ(m->get_rows(rows), out);
+            uint64_t kept = 100 + IRowDiff::output_bytes<SetBits>(rows.size());
+            for (size_t i = 0; i < rows.size(); ++i) {
+                kept += held[i];
+                EXPECT_EQ(0u, costs[i].dependency_rows);
+                EXPECT_EQ(0u, costs[i].dependency_entries);
+                EXPECT_EQ(small_vector_bytes(out[i].size(), sizeof(Column)), held[i]);
+            }
+            EXPECT_EQ(kept, budget.held());
+            size_t refused = 0;
+            for (Row r = 0; r < num_rows; r += 7) {
+                DecodeBudget alone;
+                std::vector<SetBits> o;
+                std::vector<RowCost> c;
+                std::vector<uint64_t> h;
+                ASSERT_EQ(DecodeStatus::OK, reader->decode_rows({ r }, alone, &o, &c, &h));
+                EXPECT_LE(alone.peak(), c[0].demand) << r;
+                EXPECT_EQ(costs[num_rows - 1 - r].demand, c[0].demand) << r;
+                DecodeBudget exact(alone.peak());
+                EXPECT_EQ(DecodeStatus::OK, reader->decode_rows({ r }, exact, &o, &c, &h));
+                DecodeBudget less(alone.peak() - 1);
+                std::vector<SetBits> sentinel(1);
+                EXPECT_EQ(DecodeStatus::REFUSED, reader->decode_rows({ r }, less, &sentinel, &c, &h));
+                EXPECT_EQ(1u, sentinel.size());
+                EXPECT_EQ(0u, less.held());
+                refused++;
+            }
+            EXPECT_GT(refused, 20u);
+            // a refusal at any charge keeps nothing, and the same budget then succeeds
+            const uint64_t charges = budget.charges() - 1;
+            for (uint64_t n = 0; n < charges; n += std::max<uint64_t>(1, charges / 40)) {
+                DecodeBudget b(budget.peak() + 1000);
+                b.charge(100);
+                b.deny = [&](uint64_t ordinal) { return ordinal == n + 1; };
+                std::vector<SetBits> sentinel(1);
+                std::vector<RowCost> c;
+                std::vector<uint64_t> h;
+                EXPECT_EQ(DecodeStatus::REFUSED, reader->decode_rows(rows, b, &sentinel, &c, &h));
+                EXPECT_EQ(1u, sentinel.size());
+                EXPECT_EQ(100u, b.held());
+                b.deny = nullptr;
+                std::vector<SetBits> again;
+                ASSERT_EQ(DecodeStatus::OK, reader->decode_rows(rows, b, &again, &c, &h));
+                EXPECT_EQ(out, again);
+            }
+        }
+    }
+}
+
+// Formats without the budget-aware path say so, charge nothing and touch nothing (a count
+// row-diff annotation on disk, row_diff_int_disk: not a deployed form)
+TEST(RowDiffBudgetedDecode, UnsupportedFormatsChargeNothing) {
+    IntRowDiff<IntRowDisk> rd;
+    EXPECT_FALSE(rd.supports_budgeted_decode());
+    DecodeBudget budget;
+    std::vector<SetBits> out;
+    std::vector<RowCost> costs;
+    std::vector<uint64_t> held;
+    EXPECT_EQ(DecodeStatus::UNSUPPORTED, rd.decode_rows({ 0, 1 }, budget, &out, &costs, &held));
     EXPECT_TRUE(out.empty());
     EXPECT_EQ(0u, budget.held());
     EXPECT_EQ(0u, budget.charges());
@@ -623,7 +1023,11 @@ TEST(RowDiffBudgetedDecode, ModelBoundsTheAllocator) {
 #if USE_JEMALLOC
     size_t measured = 0;
     double worst = 0;
-    for (const Annotation &a : annotations()) {
+    std::vector<Annotation> all = annotations();
+    for (Annotation &a : deployed_forms()) {
+        all.push_back(std::move(a));
+    }
+    for (const Annotation &a : all) {
         for (const auto &rows : batches(a, 13)) {
             for (bool tuples : { false, true }) {
                 if (tuples && !a.tuples)
@@ -723,6 +1127,15 @@ TEST(RowDiffPathCache, CachedDecodeEqualsTheDefaultDecode) {
         check_cached_rows<SetBits>(a);
         if (a.tuples)
             check_cached_rows<RowTuples>(a);
+    }
+    // the row-major forms (the counts have no path cache)
+    for (const Annotation &a : deployed_forms()) {
+        if (a.name == "row_diff_int_brwt") {
+            EXPECT_FALSE(a.rd->supports_path_cache());
+            continue;
+        }
+        ASSERT_TRUE(a.rd->supports_path_cache()) << a.name;
+        check_cached_rows<SetBits>(a);
     }
 }
 
@@ -830,6 +1243,10 @@ TEST(RowDiffPathCache, BudgetedCostsDoNotDependOnTheCache) {
         check_budgeted_with_cache<SetBits>(a);
         if (a.tuples)
             check_budgeted_with_cache<RowTuples>(a);
+    }
+    for (const Annotation &a : deployed_forms()) {
+        if (a.name != "row_diff_int_brwt")
+            check_budgeted_with_cache<SetBits>(a);
     }
 }
 

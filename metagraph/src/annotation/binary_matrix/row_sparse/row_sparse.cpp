@@ -62,6 +62,21 @@ BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
     return result;
 }
 
+bool RowSparse::row_columns(Row row, ChargedBuffer<Column> *scratch,
+                            DecodeBudget &budget) const {
+    assert(boundary_[boundary_.size() - 1] == 1);
+    uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
+    uint64_t end_idx = boundary_.next1(start_idx);
+    // the first value stores the first set bit, the next ones the deltas (as get_row)
+    uint64_t last = 0;
+    for (uint64_t i = start_idx; i != end_idx; ++i) {
+        if (!scratch->reserve_one(budget))
+            return false;
+        scratch->data.push_back(last += set_bits_[i - row]);
+    }
+    return true;
+}
+
 bool RowSparse::load(std::istream &f) {
     try {
         if (!f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t)))

@@ -4,9 +4,11 @@
 #include "row_diff.hpp"
 
 #include <algorithm>
+#include <numeric>
 #include <tuple>
 #include <iterator>
 
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "graph/annotated_dbg.hpp"
 
 
@@ -20,6 +22,7 @@ using Row = BinaryMatrix::Row;
 using Column = BinaryMatrix::Column;
 using SetBitPositions = BinaryMatrix::SetBitPositions;
 using RowTuples = MultiIntMatrix::RowTuples;
+using RowValues = IntMatrix::RowValues;
 using Tuple = MultiIntMatrix::Tuple;
 using node_index = graph::DeBruijnGraph::node_index;
 
@@ -124,6 +127,45 @@ uint64_t xor_into(const RowTuples &diff, RowTuples *row) {
         }
     }
     return freed;
+}
+
+// The reconstruction step of IntRowDiff::add_diff (the same result: the counts of a column in
+// both summed, a column whose sum is zero dropped), into a buffer reserved for |row| + |diff|
+// (none for an empty diff, which changes nothing). A count row's presence is whether that sum
+// is non-zero, which the columns of the stored rows alone do not tell (a diff may change a
+// count without removing it), so the budget-aware decode of a count annotation reconstructs
+// the counts and keeps their columns. xor_bound() is what it allocates, the new row's bytes;
+// a column dropped frees nothing (the buffer keeps its capacity).
+uint64_t xor_bound(const RowValues &row, const RowValues &diff) {
+    return diff.empty() ? 0 : buffer_bytes(row.size() + diff.size(), sizeof(row[0]));
+}
+uint64_t xor_into(const RowValues &diff, RowValues *row) {
+    assert(std::is_sorted(row->begin(), row->end()));
+    assert(std::is_sorted(diff.begin(), diff.end()));
+    if (diff.empty())
+        return 0;
+    RowValues result;
+    result.reserve(row->size() + diff.size());
+    auto it = row->begin();
+    auto it2 = diff.begin();
+    while (it != row->end() && it2 != diff.end()) {
+        if (it->first < it2->first) {
+            result.push_back(*it);
+            ++it;
+        } else if (it->first > it2->first) {
+            result.push_back(*it2);
+            ++it2;
+        } else {
+            if (uint64_t sum = it->second + it2->second)
+                result.emplace_back(it->first, sum);
+            ++it;
+            ++it2;
+        }
+    }
+    std::copy(it, row->end(), std::back_inserter(result));
+    std::copy(it2, diff.end(), std::back_inserter(result));
+    row->swap(result);
+    return 0;
 }
 
 // The visited rows of the trace: an open-addressing table (row -> visit index) whose growth
@@ -571,6 +613,77 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     return DecodeStatus::OK;
 }
 
+template <class RowT>
+DecodeStatus decode_rows_alone(const std::vector<Row> &rows, DecodeBudget &budget,
+                               RowFetcher<RowT> &fetcher, std::vector<RowT> *out,
+                               std::vector<RowCost> *costs, std::vector<uint64_t> *held) {
+    const uint64_t at_entry = budget.held();
+#ifndef NDEBUG
+    const uint64_t peak_before = budget.begin_peak();
+#endif
+    auto refuse = [&]() {
+        // every local container is freed by its scope: only the account is restored
+        budget.restore(at_entry);
+#ifndef NDEBUG
+        budget.end_peak(peak_before);
+#endif
+        return DecodeStatus::REFUSED;
+    };
+    const size_t n = rows.size();
+    assert(n <= std::numeric_limits<uint32_t>::max());
+    // the outputs and the reading order, at their exact sizes
+    const uint64_t order_bytes = buffer_bytes(n, sizeof(uint32_t));
+    if (!budget.charge(IRowDiff::output_bytes<RowT>(n) + order_bytes))
+        return refuse();
+    std::vector<RowT> result_rows(n);
+    std::vector<RowCost> result_costs(n);
+    std::vector<uint64_t> result_held(n);
+    std::vector<uint32_t> order(n);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return rows[a] < rows[b]; });
+    for (uint32_t i : order) {
+        if (!fetcher.fetch(rows[i], &result_rows[i], &result_held[i], budget))
+            return refuse();
+        // a row read alone: its outputs and order, the scratch grown to it, and its copy
+        RowCost &cost = result_costs[i];
+        cost.dependency_rows = 0;
+        cost.dependency_entries = 0;
+        cost.demand = IRowDiff::output_bytes<RowT>(1) + buffer_bytes(1, sizeof(uint32_t))
+                    + fetcher.scratch_peak(fetcher.scratch_entries(result_rows[i]))
+                    + result_held[i];
+    }
+    // the scratch (and a reader) and the order are freed with the call
+    budget.release(fetcher.scratch_charged() + order_bytes);
+#ifndef NDEBUG
+    {
+        uint64_t kept = IRowDiff::output_bytes<RowT>(n);
+        for (uint64_t b : result_held) {
+            kept += b;
+        }
+        assert(budget.held() == at_entry + kept);
+        assert(n != 1 || budget.peak() - at_entry <= result_costs[0].demand);
+        budget.end_peak(peak_before);
+    }
+#endif
+    out->swap(result_rows);
+    costs->swap(result_costs);
+    held->swap(result_held);
+    return DecodeStatus::OK;
+}
+
+template DecodeStatus
+decode_rows_alone<SetBitPositions>(const std::vector<Row> &, DecodeBudget &,
+                                   RowFetcher<SetBitPositions> &, std::vector<SetBitPositions> *,
+                                   std::vector<RowCost> *, std::vector<uint64_t> *);
+
+std::unique_ptr<BudgetedRows> budgeted_rows(const BinaryMatrix &matrix) {
+    if (const auto *brwt = dynamic_cast<const BRWT*>(&matrix))
+        return std::make_unique<BudgetedMatrixRows<BRWT>>(*brwt);
+    if (const auto *column_major = dynamic_cast<const ColumnMajor*>(&matrix))
+        return std::make_unique<BudgetedMatrixRows<ColumnMajor>>(*column_major);
+    return nullptr;
+}
+
 template DecodeStatus
 IRowDiff::decode_budgeted<SetBitPositions>(const std::vector<Row> &, DecodeBudget &,
                                            RowFetcher<SetBitPositions> &,
@@ -583,6 +696,11 @@ IRowDiff::decode_budgeted<RowTuples>(const std::vector<Row> &, DecodeBudget &,
                                      RowFetcher<RowTuples> &, std::vector<RowTuples> *,
                                      std::vector<RowCost> *, std::vector<uint64_t> *,
                                      RowDiffCache<RowTuples> *) const;
+template DecodeStatus
+IRowDiff::decode_budgeted<RowValues>(const std::vector<Row> &, DecodeBudget &,
+                                     RowFetcher<RowValues> &, std::vector<RowValues> *,
+                                     std::vector<RowCost> *, std::vector<uint64_t> *,
+                                     RowDiffCache<RowValues> *) const;
 
 } // namespace matrix
 } // namespace annot

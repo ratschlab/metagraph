@@ -52,6 +52,34 @@ RowFlat<BitVector>::get_row(Row row) const {
 }
 
 template <typename BitVector>
+bool RowFlat<BitVector>::row_columns(Row row, ChargedBuffer<Column> *scratch,
+                                     DecodeBudget &budget) const {
+    assert(compressed_rows_.get());
+    assert(row * num_columns_ < compressed_rows_->size());
+    // One pointer captured, so that the callback fits std::function's inline storage and
+    // the read allocates nothing but the scratch's growth. The range cannot be left early:
+    // after a refused growth the remaining bits are skipped.
+    struct Read {
+        ChargedBuffer<Column> *scratch;
+        DecodeBudget *budget;
+        uint64_t offset;
+        bool ok;
+    } read { scratch, &budget, row * num_columns_, true };
+    compressed_rows_->call_ones_in_range(read.offset, read.offset + num_columns_,
+        [&read](uint64_t j) {
+            if (!read.ok)
+                return;
+            if (!read.scratch->reserve_one(*read.budget)) {
+                read.ok = false;
+                return;
+            }
+            read.scratch->data.push_back(j - read.offset);
+        }
+    );
+    return read.ok;
+}
+
+template <typename BitVector>
 void RowFlat<BitVector>::call_rows(
         const std::function<void(const SetBitPositions &)> &callback) const {
     for (uint64_t r = 0; r < num_rows_; ++r) {

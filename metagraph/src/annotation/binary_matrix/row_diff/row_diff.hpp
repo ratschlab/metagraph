@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <concepts>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -41,13 +42,33 @@ const std::string kRowDiffAnchorExt = ".anchors";
 const std::string kRowDiffForkSuccExt = ".rd_succ";
 
 // Index matrices with the single-row reads the budget-aware decode path needs
-// (BRWT, ColumnMajor: row_columns(); TupleCSCMatrix over them: row_tuples())
+// (BRWT, ColumnMajor, RowFlat, RowSparse, RowDisk: row_columns(); TupleCSCMatrix over BRWT
+// or ColumnMajor: row_tuples(); CSCMatrix over them: row_values())
 template <class M, class = void>
 struct HasRowColumns : std::false_type {};
 template <class M>
 struct HasRowColumns<M, std::void_t<decltype(std::declval<const M&>().row_columns(
         BinaryMatrix::Row(), static_cast<ChargedBuffer<BinaryMatrix::Column>*>(nullptr),
         std::declval<DecodeBudget&>()))>> : std::true_type {};
+
+// Index matrices whose rows the budget-aware path reads through a reader opened once per
+// decode call rather than through the matrix itself (RowDisk: a view of its file, whose
+// block buffer and streams the call then holds): M::Reader with row_columns(), M::reader()
+// opening one, M::reader_bytes() what an open one holds
+template <class M, class = void>
+struct HasRowReader : std::false_type {};
+template <class M>
+struct HasRowReader<M, std::void_t<typename M::Reader,
+                                   decltype(std::declval<const M&>().reader_bytes())>>
+      : std::true_type {};
+
+struct NoRowReader {};
+template <class M, class = void>
+struct RowReaderOf { using type = NoRowReader; };
+template <class M>
+struct RowReaderOf<M, std::enable_if_t<HasRowReader<M>::value>> {
+    using type = typename M::Reader;
+};
 
 template <class M, class = void>
 struct HasRowTuples : std::false_type {};
@@ -283,7 +304,8 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
-    // the budget-aware decode path (IRowDiff), over BRWT and ColumnMajor
+    // the budget-aware decode path (IRowDiff), over every index matrix with a single-row
+    // read: BRWT, ColumnMajor, RowFlat, RowSparse, RowDisk
     bool supports_budgeted_decode() const override { return HasRowColumns<BaseMatrix>::value; }
     DecodeStatus decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                              std::vector<SetBitPositions> *out, std::vector<RowCost> *costs,
@@ -302,8 +324,11 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 };
 
 // The stored rows of a binary row-diff matrix for the budget-aware decode path: the index
-// matrix's single-row descent into the scratch, sorted, then copied into the row (charged
-// at its exact size before the copy)
+// matrix's single-row read (a descent for BRWT, a scan of the columns for ColumnMajor, one
+// range for the row-major forms) into the scratch, sorted, then copied into the row (charged
+// at its exact size before the copy). A matrix read through a reader (HasRowReader: RowDisk)
+// opens one at the call's first read, charged before it is opened and held, like the scratch,
+// until the call ends.
 template <class BaseMatrix>
 class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
   public:
@@ -313,7 +338,7 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
                DecodeBudget &budget) override {
         scratch_.data.clear();
         *bytes = 0;
-        if (!matrix_.row_columns(r, &scratch_, budget))
+        if (!read(r, budget))
             return false;
         std::sort(scratch_.data.begin(), scratch_.data.end());
         const uint64_t b = small_vector_bytes(scratch_.data.size(), sizeof(BinaryMatrix::Column));
@@ -323,18 +348,93 @@ class BudgetedRowFetcher : public RowFetcher<BinaryMatrix::SetBitPositions> {
         row->assign(scratch_.data.begin(), scratch_.data.end());
         return true;
     }
-    uint64_t scratch_charged() const override { return scratch_.charged(); }
+    uint64_t scratch_charged() const override { return scratch_.charged() + reader_charged_; }
+    // the reader is opened for a row read alone too, so it is in every row's peak
     uint64_t scratch_peak(uint64_t entries) const override {
-        return ChargedBuffer<BinaryMatrix::Column>::peak_for(entries);
+        return ChargedBuffer<BinaryMatrix::Column>::peak_for(entries) + reader_bytes();
     }
     uint64_t scratch_entries(const BinaryMatrix::SetBitPositions &row) const override {
         return row.size();
     }
 
   private:
+    bool read(BinaryMatrix::Row r, DecodeBudget &budget) {
+        if constexpr(HasRowReader<BaseMatrix>::value) {
+            if (!reader_) {
+                const uint64_t b = matrix_.reader_bytes();
+                if (!budget.charge(b))
+                    return false;
+                reader_charged_ = b;
+                reader_ = matrix_.reader();
+            }
+            return reader_->row_columns(r, &scratch_, budget);
+        } else {
+            return matrix_.row_columns(r, &scratch_, budget);
+        }
+    }
+    uint64_t reader_bytes() const {
+        if constexpr(HasRowReader<BaseMatrix>::value) {
+            return matrix_.reader_bytes();
+        } else {
+            return 0;
+        }
+    }
+
     const BaseMatrix &matrix_;
     ChargedBuffer<BinaryMatrix::Column> scratch_;
+    std::unique_ptr<typename RowReaderOf<BaseMatrix>::type> reader_;
+    uint64_t reader_charged_ = 0;
 };
+
+/**
+ * The budget-aware read of an index matrix used WITHOUT a row-diff (a plain BRWT, such as a
+ * relaxed .brwt.annodbg, or a plain ColumnMajor, a column annotation's matrix), with the
+ * contract of IRowDiff::decode_rows: every buffer charged to |budget| before it is allocated,
+ * a charge that does not fit refusing the whole call (REFUSED, outputs untouched, |budget| as
+ * at entry); OK: |*costs| and |*held| as decode_rows states them. Each row is read alone by
+ * the matrix's single-row read, so a row has no dependency rows and its demand is what reading
+ * it alone holds: the outputs for one row, the scratch grown to its entries and its copy.
+ * Single-threaded, as decode_rows.
+ */
+class BudgetedRows {
+  public:
+    virtual ~BudgetedRows() {}
+    virtual DecodeStatus decode_rows(const std::vector<BinaryMatrix::Row> &rows,
+                                     DecodeBudget &budget,
+                                     std::vector<BinaryMatrix::SetBitPositions> *out,
+                                     std::vector<RowCost> *costs,
+                                     std::vector<uint64_t> *held) const = 0;
+};
+
+// The body of BudgetedRows::decode_rows over one fetcher (row_diff_budgeted.cpp): the rows
+// read in ascending row order (the order in which a BRWT's descent is as fast as its batched
+// read), each into its own output, a duplicate read again
+template <class RowT>
+DecodeStatus decode_rows_alone(const std::vector<BinaryMatrix::Row> &rows, DecodeBudget &budget,
+                               RowFetcher<RowT> &fetcher, std::vector<RowT> *out,
+                               std::vector<RowCost> *costs, std::vector<uint64_t> *held);
+
+template <class Matrix>
+class BudgetedMatrixRows : public BudgetedRows {
+  public:
+    explicit BudgetedMatrixRows(const Matrix &matrix) : matrix_(matrix) {}
+
+    DecodeStatus decode_rows(const std::vector<BinaryMatrix::Row> &rows, DecodeBudget &budget,
+                             std::vector<BinaryMatrix::SetBitPositions> *out,
+                             std::vector<RowCost> *costs,
+                             std::vector<uint64_t> *held) const override {
+        BudgetedRowFetcher<Matrix> fetcher(matrix_);
+        return decode_rows_alone<BinaryMatrix::SetBitPositions>(rows, budget, fetcher, out,
+                                                                costs, held);
+    }
+
+  private:
+    const Matrix &matrix_;
+};
+
+// The budget-aware read of |matrix| when it is an index matrix read without a row-diff that
+// has one (BRWT, ColumnMajor); null otherwise (a row-diff annotation has IRowDiff::decode_rows)
+std::unique_ptr<BudgetedRows> budgeted_rows(const BinaryMatrix &matrix);
 
 template <class BaseMatrix>
 DecodeStatus RowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,

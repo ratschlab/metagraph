@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 
 class bit_vector_sd;
 
@@ -30,6 +31,11 @@ class RowFlat : public RowMajor, public GetEntrySupport {
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
+    // The budget-aware decode path (decode_budget.hpp, as BRWT::row_columns): the set bits
+    // of one row, ascending, appended to |scratch|. The row is one range of the flat bit
+    // vector, so one read; every growth of the scratch is charged before it happens. false:
+    // a growth did not fit (|scratch| keeps what was appended before).
+    bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
 
     // Iterate the rows in order, invoking `callback` once per row with its
     // `SetBitPositions`. Mirrors `BRWT::call_rows` so RowDiff converters can

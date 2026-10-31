@@ -41,6 +41,16 @@ inline int64_t decode_diff(uint64_t c) {
     return !(c & 1) ? c / 2 + 1 : -((c + 1) / 2);
 }
 
+// Count matrices with the single-row read of values the budget-aware decode path needs
+// (CSCMatrix over BRWT or ColumnMajor: row_values())
+template <class M, class = void>
+struct HasRowValues : std::false_type {};
+template <class M>
+struct HasRowValues<M, std::void_t<decltype(std::declval<const M&>().get_binary_matrix().row_column_ranks(
+        BinaryMatrix::Row(),
+        static_cast<ChargedBuffer<std::pair<BinaryMatrix::Column, uint64_t>>*>(nullptr),
+        std::declval<DecodeBudget&>())), decltype(&M::row_values)>> : std::true_type {};
+
 template <class BaseMatrix>
 class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
   public:
@@ -73,12 +83,107 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
 
     const BinaryMatrix& get_binary_matrix() const override { return *this; }
 
+    // The budget-aware decode path (IRowDiff), over CSCMatrix<BRWT | ColumnMajor, counts>
+    // (row_diff_int_brwt). Presence only, as get_rows() returns: whether a column is in a
+    // row is whether its count there is non-zero, the sum of the diffs on the row's path, so
+    // the stored rows are read with their values (the index matrix's single-row descent and
+    // the counts of the entries it finds), the counts reconstructed (the sum rule of
+    // add_diff), and their columns returned. No path cache (|cache| is not used): the
+    // default decode of counts has none either.
+    bool supports_budgeted_decode() const override { return HasRowValues<BaseMatrix>::value; }
+    DecodeStatus decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,
+                             std::vector<SetBitPositions> *out, std::vector<RowCost> *costs,
+                             std::vector<uint64_t> *held,
+                             RowDiffPathCache *cache = nullptr) const override;
+
   private:
     static void decode_diffs(RowValues *diffs);
     static void add_diff(const RowValues &diff, RowValues *row);
 
     BaseMatrix diffs_;
 };
+
+// The stored rows of a count row-diff matrix for the budget-aware decode path: the count
+// matrix's single-row read (CSCMatrix::row_values), which charges the row before its values
+// are copied, then the stored diffs decoded in place (IntRowDiff::decode_diffs, which the
+// default decode applies to every stored row, anchors included)
+template <class BaseMatrix>
+class BudgetedValuesFetcher : public RowFetcher<IntMatrix::RowValues> {
+  public:
+    using ColRank = std::pair<BinaryMatrix::Column, uint64_t>;
+
+    explicit BudgetedValuesFetcher(const BaseMatrix &matrix) : matrix_(matrix) {}
+
+    bool fetch(BinaryMatrix::Row r, IntMatrix::RowValues *row, uint64_t *bytes,
+               DecodeBudget &budget) override {
+        if (!matrix_.row_values(r, &scratch_, row, bytes, budget))
+            return false;
+        for (auto &[j, value] : *row) {
+            value = decode_diff(value);
+        }
+        return true;
+    }
+    uint64_t scratch_charged() const override { return scratch_.charged(); }
+    uint64_t scratch_peak(uint64_t entries) const override {
+        return ChargedBuffer<ColRank>::peak_for(entries);
+    }
+    uint64_t scratch_entries(const IntMatrix::RowValues &row) const override {
+        return row.size();
+    }
+
+  private:
+    const BaseMatrix &matrix_;
+    ChargedBuffer<ColRank> scratch_;
+};
+
+template <class BaseMatrix>
+DecodeStatus IntRowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows,
+                                                 DecodeBudget &budget,
+                                                 std::vector<SetBitPositions> *out,
+                                                 std::vector<RowCost> *costs,
+                                                 std::vector<uint64_t> *held,
+                                                 RowDiffPathCache *) const {
+    if constexpr(HasRowValues<BaseMatrix>::value) {
+        const uint64_t at_entry = budget.held();
+        BudgetedValuesFetcher<BaseMatrix> fetcher(diffs_);
+        std::vector<RowValues> values;
+        std::vector<RowCost> row_costs;
+        std::vector<uint64_t> values_held;
+        const DecodeStatus status = decode_budgeted<RowValues>(rows, budget, fetcher, &values,
+                                                               &row_costs, &values_held);
+        if (status != DecodeStatus::OK)
+            return status;
+        // the columns replace the counts row by row, as get_rows() converts them; a row's
+        // demand adds what converting it alone holds beside its counts (as
+        // TupleRowDiff::decode_rows does for tuples)
+        const size_t n = rows.size();
+        if (!budget.charge(output_bytes<SetBitPositions>(n))) {
+            budget.restore(at_entry);
+            return DecodeStatus::REFUSED;
+        }
+        std::vector<SetBitPositions> result(n);
+        std::vector<uint64_t> result_held(n);
+        for (size_t i = 0; i < n; ++i) {
+            const uint64_t bytes = small_vector_bytes(values[i].size(), sizeof(Column));
+            if (!budget.charge(bytes)) {
+                budget.restore(at_entry);
+                return DecodeStatus::REFUSED;
+            }
+            result[i] = utils::get_firsts<SetBitPositions>(values[i]);
+            result_held[i] = bytes;
+            budget.release(values_held[i]);
+            RowValues().swap(values[i]);
+            row_costs[i].demand += bytes + output_bytes<SetBitPositions>(1);
+        }
+        budget.release(output_bytes<RowValues>(n));
+        out->swap(result);
+        costs->swap(row_costs);
+        held->swap(result_held);
+        return DecodeStatus::OK;
+    } else {
+        return DecodeStatus::UNSUPPORTED;
+    }
+}
 
 
 template <class BaseMatrix>

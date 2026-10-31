@@ -7,6 +7,7 @@
 #include <sdsl/vlc_vector.hpp>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg {
@@ -26,6 +27,11 @@ class RowSparse : public RowMajor {
 
     SetBitPositions get_row(Row row) const override;
     std::vector<Row> get_column(Column column) const override;
+    // The budget-aware decode path (decode_budget.hpp, as BRWT::row_columns): the set bits
+    // of one row, ascending, appended to |scratch|. The row is one run of the delta-coded
+    // set bits, so one read; every growth of the scratch is charged before it happens.
+    // false: a growth did not fit (|scratch| keeps what was appended before).
+    bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;

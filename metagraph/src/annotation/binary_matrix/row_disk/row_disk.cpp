@@ -49,6 +49,44 @@ BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
     return result;
 }
 
+bool RowDisk::View::row_columns(Row row, ChargedBuffer<Column> *scratch,
+                                DecodeBudget &budget) const {
+    assert(boundary_[boundary_.size() - 1] == 1);
+    uint64_t begin = row == 0 ? 0 : boundary_.select1(row) + 1;
+    uint64_t end = boundary_.select1(row + 1);
+    // the first value stores the first set bit, the next ones the deltas (as get_row)
+    uint64_t last = 0;
+    for (uint64_t i = begin; i != end; ++i) {
+        if (!scratch->reserve_one(budget))
+            return false;
+        scratch->data.push_back(last += set_bits_[i - row]);
+    }
+    return true;
+}
+
+// What an open Reader holds, as decode_budget.hpp models a heap buffer (alloc_bytes): the view
+// itself; its block buffer, an int_vector of buff_size bytes rounded up to whole elements and
+// words (at most 80 bytes more for a width up to 64 bits: 128 covers it); the file name, copied
+// by int_vector_buffer's by-value parameter, its member and the input stream's (3 copies); and
+// kStreamBytes for the two stream objects int_vector_buffer allocates and the file buffer the
+// input stream opens with its own block (4 KiB in libc++, BUFSIZ = 8 KiB in libstdc++): an
+// upper bound on either library, not a measurement.
+uint64_t RowDisk::reader_bytes() const {
+    constexpr uint64_t kStreamBytes = 12 * 1024;
+    return alloc_bytes(sizeof(View)) + alloc_bytes(buffer_params_.buff_size + 128)
+            + 3 * alloc_bytes(buffer_params_.filename.size() + 1) + kStreamBytes;
+}
+
+bool RowDisk::row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const {
+    const uint64_t bytes = reader_bytes();
+    if (!budget.charge(bytes))
+        return false;
+    const bool ok = reader()->row_columns(row, scratch, budget);
+    // the reader is closed and freed with the expression above
+    budget.release(bytes);
+    return ok;
+}
+
 bool RowDisk::load(std::istream &f) {
     try {
         num_columns_ = load_number(f);

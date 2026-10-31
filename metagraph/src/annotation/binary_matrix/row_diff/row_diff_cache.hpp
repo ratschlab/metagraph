@@ -49,9 +49,14 @@ inline uint64_t row_copy_bytes(const MultiIntMatrix::RowTuples &row) {
     }
     return bytes;
 }
+inline uint64_t row_copy_bytes(const IntMatrix::RowValues &row) {
+    return buffer_bytes(row.size(), sizeof(row[0]));
+}
 
-// The entries of a row: its columns, and for a tuple row their coordinates too
+// The entries of a row: its columns, and for a tuple row their coordinates too (a count row
+// has one value per column, counted with it)
 inline uint64_t row_entries(const BinaryMatrix::SetBitPositions &row) { return row.size(); }
+inline uint64_t row_entries(const IntMatrix::RowValues &row) { return row.size(); }
 inline uint64_t row_entries(const MultiIntMatrix::RowTuples &row) {
     uint64_t entries = row.size();
     for (const auto &entry : row) {
@@ -83,6 +88,17 @@ struct StoredRow<BinaryMatrix::SetBitPositions> {
     static uint64_t bytes_of(const BinaryMatrix::SetBitPositions &full) {
         return row_copy_bytes(full);
     }
+};
+
+// A count row (IntRowDiff's budget-aware decode, which reads counts as presence) as it is.
+// Defined so that the decode compiles over count rows; that decode takes no path cache.
+template <>
+struct StoredRow<IntMatrix::RowValues> {
+    IntMatrix::RowValues row;
+    void store(const IntMatrix::RowValues &full) { row = full; }
+    void load(IntMatrix::RowValues *out) const { *out = row; }
+    uint64_t bytes() const { return row_copy_bytes(row); }
+    static uint64_t bytes_of(const IntMatrix::RowValues &full) { return row_copy_bytes(full); }
 };
 
 template <>

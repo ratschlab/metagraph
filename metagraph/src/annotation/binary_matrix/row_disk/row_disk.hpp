@@ -1,10 +1,12 @@
 #ifndef __ROW_DISK_HPP__
 #define __ROW_DISK_HPP__
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg {
@@ -43,7 +45,6 @@ class RowDisk : public BinaryMatrix {
 
     const bit_vector_small& get_boundary() const { return boundary_; }
 
-  private:
     // For the multithreading to work properly, we open int_vector_buffer<> in
     // a special View class that has an actual implementation of the method.
     class View {
@@ -57,12 +58,35 @@ class RowDisk : public BinaryMatrix {
 
         SetBitPositions get_row(Row i) const;
         std::vector<Row> get_column(Column j) const;
+        // The budget-aware decode path (decode_budget.hpp, as BRWT::row_columns): the set
+        // bits of one row, ascending, appended to |scratch|, every growth of the scratch
+        // charged before it happens. false: a growth did not fit (|scratch| keeps what was
+        // appended before).
+        bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
 
       private:
         const bit_vector_small &boundary_;
         sdsl::int_vector_buffer<> set_bits_;
     };
 
+    /**
+     * The budget-aware decode path reads a row through a view of the file, whose block
+     * buffer (the RA_ivbuffer_size given at construction, --RA-ivbuffer-size) and file
+     * streams the view holds while it is open. A Reader is such a view opened once for a
+     * whole decode call (the row-diff fetcher, BudgetedRowFetcher), so that the call's rows
+     * share one file handle and one block; reader_bytes() is what an open reader holds in
+     * decode_budget.hpp's model, charged before one is opened. row_columns() reads one row
+     * alone through a reader opened for it, charged around the read.
+     */
+    using Reader = View;
+    std::unique_ptr<Reader> reader() const {
+        return std::make_unique<Reader>(boundary_, buffer_params_.filename,
+                                        buffer_params_.offset, buffer_params_.buff_size);
+    }
+    uint64_t reader_bytes() const;
+    bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
+
+  private:
     View get_view() const {
         return View(boundary_, buffer_params_.filename,
                     buffer_params_.offset, buffer_params_.buff_size);

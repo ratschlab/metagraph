@@ -1,11 +1,14 @@
 #ifndef __CSC_MATRIX_HPP__
 #define __CSC_MATRIX_HPP__
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -32,6 +35,16 @@ class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport 
     // row is in [0, num_rows), column is in [0, num_columns)
     std::vector<RowValues> get_row_values(std::span<const Row> rows,
                                           size_t num_threads = 1) const;
+
+    // The budget-aware decode path (decode_budget.hpp, as TupleCSCMatrix::row_tuples): the
+    // values of ONE row into the empty |*out|, sorted by column, every byte charged to
+    // |budget| before it is allocated — the column ranks through |scratch| (the index
+    // matrix's row_column_ranks()), then the row's vector at its exact size. |*bytes|
+    // receives what is charged for |*out| (released by the caller when it frees the row).
+    // false: a charge did not fit. Only for index matrices with row_column_ranks() (BRWT,
+    // ColumnMajor): a member of a class template is instantiated only where it is used.
+    bool row_values(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+                    RowValues *out, uint64_t *bytes, DecodeBudget &budget) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -73,6 +86,29 @@ CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(std::span<const Row> rows,
         }
     }
     return row_values;
+}
+
+template <class BaseMatrix, class ColumnValues>
+inline bool CSCMatrix<BaseMatrix, ColumnValues>
+::row_values(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+             RowValues *out, uint64_t *bytes, DecodeBudget &budget) const {
+    assert(out->empty());
+    *bytes = 0;
+    scratch->data.clear();
+    if (!binary_matrix_.row_column_ranks(row, scratch, budget))
+        return false;
+    // the row is used sorted by column (as call_rows() sorts what get_row_values returns)
+    std::sort(scratch->data.begin(), scratch->data.end(), utils::LessFirst());
+    const uint64_t b = buffer_bytes(scratch->data.size(), sizeof((*out)[0]));
+    if (!budget.charge(b))
+        return false;
+    *bytes = b;
+    out->reserve(scratch->data.size());
+    for (auto [j, r] : scratch->data) {
+        assert(r >= 1 && "matches can't have zero-rank");
+        out->emplace_back(j, column_values_[j][r - 1]);
+    }
+    return true;
 }
 
 template <class BaseMatrix, class ColumnValues>
