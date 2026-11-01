@@ -275,6 +275,47 @@ class LoadReservations {
     std::condition_variable freed_;
 };
 
+/**
+ * Bytes taken from a LoadReservations (reserve() answered true), given back when this ends: the
+ * one owner of a reservation from reserve() on, so that no exception between it and the end of
+ * the load loses the bytes for good. Moved, not copied.
+ */
+class LoadReservation {
+  public:
+    LoadReservation(LoadReservations *reservations, size_t bytes)
+          : reservations_(reservations), bytes_(bytes) {}
+    LoadReservation(LoadReservation &&other) noexcept
+          : reservations_(other.reservations_), bytes_(other.bytes_) {
+        other.reservations_ = nullptr;
+    }
+    LoadReservation& operator=(LoadReservation &&) = delete;
+    ~LoadReservation() {
+        if (reservations_)
+            reservations_->release(bytes_);
+    }
+
+  private:
+    LoadReservations *reservations_;
+    size_t bytes_;
+};
+
+/**
+ * The steps of a load into RAM under |reservation|, each of which may throw: |start| (false: the
+ * load may not start: null, nothing loaded), |load| (the index) and |make_lease| (the object that
+ * owns the index and the reservation from then on, as |make_lease|(loaded, reservation), both
+ * rvalues). The reservation is given back on every way out but the lease, after the index
+ * loaded is freed.
+ */
+template <class Start, class Load, class MakeLease>
+auto load_under_reservation(LoadReservation reservation, const Start &start, const Load &load,
+                            const MakeLease &make_lease)
+        -> decltype(make_lease(load(), std::move(reservation))) {
+    if (!start())
+        return nullptr;
+    auto loaded = load();
+    return make_lease(std::move(loaded), std::move(reservation));
+}
+
 // How a request is served by one (graph, annotation) pair of a multi-graph server
 enum class InRamPlan {
     RESIDENT,             // without in_ram (or false): the index the server holds

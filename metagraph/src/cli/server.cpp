@@ -462,15 +462,9 @@ class IndexLease {
   public:
     explicit IndexLease(const AnnotatedDBG &resident, InRamPlan plan)
           : index_(&resident), plan_(plan) {}
-    IndexLease(std::unique_ptr<AnnotatedDBG> loaded, LoadReservations *reservations,
-               size_t bytes, double load_ms)
-          : loaded_(std::move(loaded)), index_(loaded_.get()), plan_(InRamPlan::LOAD),
-            reservations_(reservations), bytes_(bytes), load_ms_(load_ms) {}
-    ~IndexLease() {
-        loaded_.reset();
-        if (reservations_)
-            reservations_->release(bytes_);
-    }
+    IndexLease(std::unique_ptr<AnnotatedDBG> loaded, LoadReservation &&reservation, double load_ms)
+          : reservation_(std::move(reservation)), loaded_(std::move(loaded)),
+            index_(loaded_.get()), plan_(InRamPlan::LOAD), load_ms_(load_ms) {}
     IndexLease(const IndexLease&) = delete;
     IndexLease& operator=(const IndexLease&) = delete;
 
@@ -479,11 +473,11 @@ class IndexLease {
     double load_ms() const { return load_ms_; }
 
   private:
+    // (in this order: the copy is freed before its bytes are given back)
+    std::optional<LoadReservation> reservation_;
     std::unique_ptr<AnnotatedDBG> loaded_;
     const AnnotatedDBG *index_;
     InRamPlan plan_;
-    LoadReservations *reservations_ = nullptr;
-    size_t bytes_ = 0;
     double load_ms_ = 0;
 };
 
@@ -1195,12 +1189,9 @@ int run_server(Config *config) {
             throw LoadAbandoned("the client closed its connection (or the server stops) while "
                                 "the request waited for the memory to load its index");
         }
-        if (control && !control->start_loading(bytes)) {
-            reservations.release(bytes);
-            throw PairNotStarted();
-        }
-        std::unique_ptr<AnnotatedDBG> loaded;
-        try {
+        auto lease = load_under_reservation(LoadReservation(&reservations, bytes), [&]() {
+            return !control || control->start_loading(bytes);
+        }, [&]() {
             logger->trace("Request {}: Loading graph {} of size {} GB to RAM...", request_id,
                           pair.first, bytes / 1e9);
             Config config_copy = *config;
@@ -1218,17 +1209,17 @@ int run_server(Config *config) {
             // by every request
             auto mapping = resident.share_coord_to_header();
             config_copy.no_coord_mapping = !mapping;
-            loaded = initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
-        } catch (...) {
-            reservations.release(bytes);
-            throw;
-        }
-        const double load_ms = timer.elapsed() * 1000;
-        logger->info("[Server] Request {}: ({}, {}) loaded into RAM for it in {:.0f} ms (the "
-                     "wait for its {:.3f} GB included)", request_id, pair.first, pair.second,
-                     load_ms, bytes / 1e9);
-        auto lease = std::make_unique<IndexLease>(std::move(loaded), &reservations, bytes,
-                                                  load_ms);
+            return initialize_annotated_dbg(config_copy, preparation, std::move(mapping));
+        }, [&](std::unique_ptr<AnnotatedDBG> &&loaded, LoadReservation &&reservation) {
+            const double load_ms = timer.elapsed() * 1000;
+            logger->info("[Server] Request {}: ({}, {}) loaded into RAM for it in {:.0f} ms (the "
+                         "wait for its {:.3f} GB included)", request_id, pair.first, pair.second,
+                         load_ms, bytes / 1e9);
+            return std::make_unique<IndexLease>(std::move(loaded), std::move(reservation),
+                                                load_ms);
+        });
+        if (!lease)
+            throw PairNotStarted();
         // the load ended: the pair's work begins
         if (control)
             control->start_running();

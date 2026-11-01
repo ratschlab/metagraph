@@ -7,9 +7,12 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <new>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -466,6 +469,76 @@ TEST(MultiGraphInRam, ReservationsWaitForTheMemory) {
     EXPECT_EQ(100u, r.left());
 }
 
+// What a load holds from reserve() on: an exception at any step gives the bytes back, once and
+// after the index loaded is freed; a lease that exists owns them until it ends (GPT A8: a
+// reservation lost for good when the lease's allocation failed, or when the pair's start threw)
+TEST(MultiGraphInRam, AReservationEndsWithItsLoad) {
+    LoadReservations r(100);
+    size_t left_when_freed = 0;
+    struct Index {
+        LoadReservations *r;
+        size_t *left;
+        ~Index() {
+            if (r)
+                *left = r->left();
+        }
+    };
+    struct Lease {
+        std::optional<LoadReservation> reservation;
+        std::unique_ptr<Index> index;
+    };
+    auto reserved = [&]() {
+        EXPECT_TRUE(r.reserve(60));
+        return LoadReservation(&r, 60);
+    };
+    auto load = [&]() { return std::make_unique<Index>(Index { &r, &left_when_freed }); };
+    auto lease = [](std::unique_ptr<Index> &&index, LoadReservation &&reservation) {
+        auto l = std::make_unique<Lease>();
+        l->reservation.emplace(std::move(reservation));
+        l->index = std::move(index);
+        return l;
+    };
+    auto start = []() { return true; };
+
+    // the pair may not start: nothing loaded, the bytes back
+    EXPECT_FALSE(load_under_reservation(reserved(), []() { return false; }, load, lease));
+    ASSERT_EQ(100u, r.left());
+    // the start throws
+    EXPECT_THROW(load_under_reservation(reserved(),
+                                        []() -> bool { throw std::bad_alloc(); }, load, lease),
+                 std::bad_alloc);
+    ASSERT_EQ(100u, r.left());
+    // the load throws
+    EXPECT_THROW(load_under_reservation(reserved(), start, [&]() -> std::unique_ptr<Index> {
+        throw std::runtime_error("unreadable");
+    }, lease), std::runtime_error);
+    ASSERT_EQ(100u, r.left());
+    // the lease cannot be made: the index is freed first, while the bytes are still held
+    EXPECT_THROW(load_under_reservation(reserved(), start, load,
+        [](std::unique_ptr<Index> &&, LoadReservation &&) -> std::unique_ptr<Lease> {
+            throw std::bad_alloc();
+        }), std::bad_alloc);
+    EXPECT_EQ(40u, left_when_freed);
+    ASSERT_EQ(100u, r.left());
+
+    // the lease holds them until it ends, and gives them back once, the index first
+    {
+        left_when_freed = 0;
+        auto held = load_under_reservation(reserved(), start, load, lease);
+        ASSERT_TRUE(held);
+        EXPECT_EQ(40u, r.left());
+        {
+            LoadReservation moved(std::move(*held->reservation));
+            held->reservation.reset();
+            EXPECT_EQ(40u, r.left());
+        }
+        ASSERT_EQ(100u, r.left());
+        ASSERT_TRUE(r.reserve(60));
+        held->reservation.emplace(&r, 60);
+    }
+    EXPECT_EQ(40u, left_when_freed);
+    ASSERT_EQ(100u, r.left());
+}
 
 // ---------------------------------------------------------------- columns_disjoint
 
