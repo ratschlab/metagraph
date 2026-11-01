@@ -313,6 +313,39 @@ TEST(ServerFanout, OnePairRunsInline) {
     wait_for_workers();
 }
 
+// fanout F6 of the release-10 review: a pooled pair whose memory wait gave up is not reached
+// for the same reason whichever thread decides it, the worker (here, before the handler's
+// cutoff) or the handler at the cutoff: on a transport-bound request "transport"
+TEST(ServerFanout, NotReachedReasonIsTheRequestsWhoeverDecides) {
+    for (const double budget : { 2e6, 60'000.0 }) {
+        const RequestDeadlines d = deadlines_now(budget);
+        const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+        auto entry = entry_of(pairs);
+        FanoutOutcome out;
+        {
+            Threads threads;
+            out = run_fanout(settings_of(pairs, d), entry, [&](PairControl &control) {
+                if (control.index() == 0) {
+                    EXPECT_TRUE(control.start_running());
+                    return answered(control);
+                }
+                // the wait gave up (as at its limit): not started
+                control.waiting_memory();
+                PairResult r;
+                r.not_started = true;
+                return r;
+            }, threads.launch());
+        }
+        ASSERT_EQ(2u, out.entries.size());
+        const Json::Value &refusal = out.entries[1]["refusal"];
+        EXPECT_EQ("not_reached", refusal["code"].asString()) << budget;
+        EXPECT_EQ(d.transport_bound ? "transport" : "cutoff", refusal["reason"].asString())
+            << budget;
+        EXPECT_EQ(budget > 899'000, d.transport_bound);
+    }
+    wait_for_workers();
+}
+
 // fanout F2 of the release-10 review: a pair does not start loading its index once its wait
 // limit passed (inline: finish_by_ms less the skew allowance) or its client left, also when
 // the memory is free: not reached (its client gone: nothing answered), never loaded

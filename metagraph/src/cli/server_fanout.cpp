@@ -622,6 +622,14 @@ class FanoutState {
                                      "retained";
     }
 
+    // why a pair not started by now is not reached (section 4): its not_after_ms passed
+    // (|expired|), else the request's work cutoff, the transport's when the transport's cap
+    // is its effective deadline — one rule, whichever thread decides the pair
+    std::string not_reached_reason(bool expired) const {
+        return expired ? "not_after_ms"
+             : settings.deadlines.transport_bound ? "transport" : "cutoff";
+    }
+
     // the not_reached entry of pair |i| (under |mutex|): |reason| cutoff | not_after_ms |
     // transport, |why| what the pair was doing
     void not_reached_locked(size_t i, const std::string &reason, const std::string &why) {
@@ -693,11 +701,9 @@ class FanoutState {
                 slot.resolved = true;
                 entry->pair_outcome(i, "not_reached");
                 entry->pair_never_started(i);
-            } else if (expired) {
-                not_reached_locked(i, "not_after_ms", "while it " + what);
             } else {
-                not_reached_locked(i, settings.deadlines.transport_bound ? "transport" : "cutoff",
-                                   "it " + what);
+                not_reached_locked(i, not_reached_reason(expired),
+                                   (expired ? "while it " : "it ") + what);
             }
         }
         changed.notify_all();
@@ -790,11 +796,10 @@ class FanoutState {
                     slot.resolved = true;
                     entry->pair_outcome(i, "not_reached");
                 } else {
+                    // (a worker whose wait gave up at the cutoff may decide the pair before
+                    // the handler does: the same reason either way)
                     const bool expired = not_after_passed();
-                    const bool transport = now() >= settings.deadlines.arrival
-                                                        + steady_ms(kServerMaxDeadlineMs);
-                    not_reached_locked(i, expired ? "not_after_ms"
-                                                  : transport ? "transport" : "cutoff",
+                    not_reached_locked(i, not_reached_reason(expired),
                                        expired ? "while it waited for the memory to load its "
                                                  "index"
                                                : "it waited for the memory to load its index");
