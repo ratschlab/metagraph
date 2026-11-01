@@ -291,6 +291,29 @@ TEST(ServerFanout, FarFinishByMsBindsNothing) {
 }
 
 // One pair runs on the calling thread, as a single-graph request (no pool, no cutoff wait)
+// GPT A7 on every clock: no accepted finish_by_ms (up to 2^53 - 1) nor budget (the operator's
+// cap of /pattern's, up to 2^53 - 1 ms) reaches a clock past what it holds (the steady clock
+// counts nanoseconds, as Linux's system clock does): either binds nothing beyond the transport
+TEST(ServerFanout, NoFarInstantOverflowsTheClocks) {
+    const double far = static_cast<double>((uint64_t(1) << 53) - 1);
+    for (const double budget : { far, 1e300, 1e13, 899'001.0 }) {
+        for (const bool with_finish : { false, true }) {
+            RequestHandles h;
+            if (with_finish)
+                h.finish_by_ms = (uint64_t(1) << 53) - 1;
+            const RequestDeadlines d = deadlines_now(budget, h);
+            const double effective_ms = std::chrono::duration<double, std::milli>(
+                    d.effective - d.arrival).count();
+            EXPECT_NEAR(899'000.0, effective_ms, 1.0) << budget << " " << with_finish;
+            EXPECT_TRUE(d.transport_bound) << budget << " " << with_finish;
+            EXPECT_LT(d.cutoff, d.effective);
+            EXPECT_GT(d.cutoff, d.arrival);
+            EXPECT_EQ(iso_utc(d.wall_of(d.arrival + std::chrono::milliseconds(899'000))),
+                      iso_utc(d.effective_wall));
+        }
+    }
+}
+
 TEST(ServerFanout, OnePairRunsInline) {
     const std::thread::id handler = std::this_thread::get_id();
     const std::vector<SelectedPair> pairs { kPairs[0] };

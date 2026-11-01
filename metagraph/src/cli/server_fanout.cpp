@@ -135,8 +135,13 @@ RequestDeadlines request_deadlines(WallClock::time_point arrival_wall,
         arrival_wall = now_wall;
     d.arrival_wall = arrival_wall;
     d.arrival = now - std::chrono::duration_cast<SteadyClock::duration>(now_wall - arrival_wall);
-    const SteadyClock::time_point budget_end = d.arrival + steady_ms(std::max(0.0, budget_ms));
-    const SteadyClock::time_point transport_end = d.arrival + steady_ms(transport_ms);
+    // a budget past the transport's end binds nothing either (the cap of /pattern's budget is
+    // the operator's, up to 2^53 - 1 ms): it is saturated just past it before it meets the
+    // steady clock's nanoseconds, which it would overflow
+    const double transport_end_ms = std::max(0.0, transport_ms);
+    const SteadyClock::time_point budget_end
+            = d.arrival + steady_ms(std::min(std::max(0.0, budget_ms), transport_end_ms + 1));
+    const SteadyClock::time_point transport_end = d.arrival + steady_ms(transport_end_ms);
     d.transport_bound = !(budget_end < transport_end);
     d.effective = std::min(budget_end, transport_end);
     if (handles.finish_by_ms) {
