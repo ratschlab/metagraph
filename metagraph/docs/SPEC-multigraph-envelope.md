@@ -13,7 +13,9 @@ A server is in multi-graph mode when it is started with a graph list (csv); a na
 ## 1. The envelope (resolve, traverse, pattern, and the capabilities routes)
 
 On a multi-graph server `/resolve`, `/traverse` and `/pattern` answer HTTP 200 with the envelope, also for a named
-graph (one entry). Members, in this order:
+graph (one entry). Its members, listed here in reading order (a JSON object: the order of its members, of an entry's
+and of `deadline`'s carries no meaning; the server writes every object's members in byte order of their names, as
+all its answers, and the samples list them in this reading order):
 
 | Member | Type | Meaning |
 | --- | --- | --- |

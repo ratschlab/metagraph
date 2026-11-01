@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -144,6 +145,54 @@ Json::Value rebuilt_post_envelope(const Json::Value &body) {
 
 
 // ---------------------------------------------------------------- the envelope's builders
+
+// Contract F4 of the release-10 review: the envelope is written as every answer of the
+// server is, its members (and an entry's, and deadline's) in byte order of their names, so the
+// spec states that member order carries no meaning instead of an order the server never writes
+TEST(ServerEnvelope, MemberOrderIsTheWritersAndTheSpecSaysSo) {
+    const Json::Value body = sample("03_resolve_envelope_cutoff.json")["body"];
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    const std::string written = Json::writeString(builder, rebuilt_post_envelope(body));
+    // the top-level members in the text, in their order (a scan of the compact text: the keys
+    // at depth 1, strings skipped)
+    std::vector<std::string> in_text;
+    int depth = 0;
+    bool key_next = false;
+    for (size_t i = 0; i < written.size(); ++i) {
+        const char c = written[i];
+        if (c == '"') {
+            size_t end = i + 1;
+            while (written[end] != '"') {
+                end += written[end] == '\\' ? 2 : 1;
+            }
+            if (depth == 1 && key_next)
+                in_text.push_back(written.substr(i + 1, end - i - 1));
+            key_next = false;
+            i = end;
+        } else if (c == '{' || c == '[') {
+            ++depth;
+            key_next = c == '{' && depth == 1;
+        } else if (c == '}' || c == ']') {
+            --depth;
+        } else if (c == ',' && depth == 1) {
+            key_next = true;
+        }
+    }
+    ASSERT_EQ(body.size(), in_text.size());
+    std::vector<std::string> sorted = in_text;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(sorted, in_text);
+    EXPECT_NE("envelope_version", in_text.front());
+
+    std::ifstream in("../docs/SPEC-multigraph-envelope.md", std::ios::binary);
+    ASSERT_TRUE(in.good()) << "the spec not found (run from the build directory)";
+    const std::string spec { std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>() };
+    EXPECT_EQ(std::string::npos, spec.find("Members, in this order"));
+    EXPECT_NE(std::string::npos, spec.find("the order of its members, of an entry's\nand of "
+                                           "`deadline`'s carries no meaning"));
+}
 
 // Sample 01: two pairs answered, nothing unreached or unfinished, no deadline given
 TEST(ServerEnvelope, Sample01ResolveTwoPairs) {
