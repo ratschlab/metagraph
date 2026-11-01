@@ -195,7 +195,7 @@
     "refusal": {
      "code": "not_reached",
      "reason": "not_after_ms",
-     "error": "pattern: pair (bact_pseudomonadota) was not started: not_after_ms 1793520010000 had passed when a pool thread took it",
+     "error": "pattern: pair (bact_pseudomonadota, /scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg, /scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg) was not started: not_after_ms 1793520010000 had passed when a pool thread took it",
      "http_status": 503
     }
    }

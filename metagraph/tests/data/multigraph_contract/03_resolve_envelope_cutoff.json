@@ -181,7 +181,7 @@
     "refusal": {
      "code": "not_reached",
      "reason": "cutoff",
-     "error": "resolve: pair (bact_pseudomonadota) was not started before the request's work cutoff (2026-10-31T09:20:57.750Z): it waited for a pool thread",
+     "error": "resolve: pair (bact_pseudomonadota, /scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg, /scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg) was not started before the request's work cutoff (2026-10-31T09:20:57.750Z): it waited for a pool thread",
      "http_status": 503
     }
    },
@@ -194,7 +194,7 @@
     "refusal": {
      "code": "unfinished",
      "reason": "cutoff",
-     "error": "resolve: pair (inv_insecta) started at 2026-10-31T09:20:41.512Z and had not finished at the request's work cutoff (2026-10-31T09:20:57.750Z): told to stop; its final usage is in GET /requests/svc-res-5f0c2a-2",
+     "error": "resolve: pair (inv_insecta, /scratch/nvme8/refseq_r237/inv_insecta/graph.dbg, /scratch/nvme8/refseq_r237/inv_insecta/annotation.row_diff_brwt_coord.annodbg) started at 2026-10-31T09:20:41.512Z and had not finished at the request's work cutoff (2026-10-31T09:20:57.750Z): told to stop; its final usage is in GET /requests/svc-res-5f0c2a-2",
      "usage": {
       "state": "stopping",
       "started_at": "2026-10-31T09:20:41.512Z",

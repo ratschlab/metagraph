@@ -313,6 +313,32 @@ TEST(ServerFanout, OnePairRunsInline) {
     wait_for_workers();
 }
 
+// Samples 03 and 16 name a not_reached or unfinished pair as the code does (contract F6 of
+// the release-10 review): "(name, graph_path, annotation_path)", the entry's own tags, since a
+// name may hold several pairs
+TEST(ServerFanout, SamplesNameThePairAsTheFanOutDoes) {
+    size_t checked = 0;
+    for (const char *name : { "03_resolve_envelope_cutoff.json",
+                              "16_pattern_envelope_not_reached.json" }) {
+        const Json::Value body = sample(name)["body"];
+        const std::string route = body["route"].asString().substr(1);
+        for (const Json::Value &entry : body["answers"]) {
+            if (entry["outcome"].asString() != "refused")
+                continue;
+            const std::string code = entry["refusal"]["code"].asString();
+            if (code != "not_reached" && code != "unfinished")
+                continue;
+            const std::string label = "(" + entry["graph"].asString() + ", "
+                    + entry["graph_path"].asString() + ", "
+                    + entry["annotation_path"].asString() + ")";
+            EXPECT_EQ(0u, entry["refusal"]["error"].asString().find(route + ": pair " + label + " "))
+                << name << ": " << entry["refusal"]["error"].asString();
+            ++checked;
+        }
+    }
+    EXPECT_EQ(3u, checked);
+}
+
 // fanout F6 of the release-10 review: a pooled pair whose memory wait gave up is not reached
 // for the same reason whichever thread decides it, the worker (here, before the handler's
 // cutoff) or the handler at the cutoff: on a transport-bound request "transport"
