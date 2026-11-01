@@ -3372,6 +3372,9 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             ({'patterns': p, 'predicate': {'any': [str(i) for i in range(10001)]}},
              'predicate_too_large', '10001 names'),
             ({'patterns': p, 'graphs': ['x']}, 'invalid_request', 'single graph'),
+            # pairs (release 10's selector) is an unknown field here, as before release 10
+            ({'patterns': p, 'pairs': [{'graph': 'x'}]}, 'invalid_request',
+             "request: unknown field 'pairs'"),
             ({'patterns': p, 'budget_split': 1}, 'later_increment', 'budget_split'),
             ({'patterns': [{'protein': 'MKV'}], 'genetic_code': 7}, 'genetic_code_unknown',
              'genetic_code'),
@@ -3719,7 +3722,10 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(gate_block(block), probe['pattern'])
             ret = server.get('pattern/capabilities?graph_path=x')
             self.assertEqual(400, ret.status_code)
-            self.assertIn('needs ?graph=<name>', ret.json()['error'])
+            self.assertEqual({'error': 'Bad request: in multi-graph mode GET /pattern/capabilities '
+                                       'needs ?graph=<name> (and graph_path=<path> when the name '
+                                       'spans several graphs); GET /capabilities lists the graphs'},
+                             ret.json())
             # the multi-graph members of /capabilities, and not on a single-graph server (the
             # request registry's route is on both)
             self.assertIsNone(caps['composite_fp'])

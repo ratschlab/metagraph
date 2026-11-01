@@ -1,7 +1,7 @@
 {
  "route": "several",
  "status": 400,
- "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. The names cap (max_graphs_without_selection) keeps its existing 400.",
+ "note": "E12: the selector refusals, before any pair starts. Every one is 400 with code and, where a choice exists, the candidate pairs. A request the release-9 server already refused keeps that refusal's error text byte for byte (the code is an added member). The names cap (max_graphs_without_selection) keeps its existing 400.",
  "body": [
   {
    "case": "graphs and pairs together",
@@ -64,7 +64,7 @@
    "route": "POST /traverse",
    "status": 400,
    "body": {
-    "error": "request: graph 'refseq' holds 2 pairs; a traverse runs on exactly one pair: name it with pairs (graph, graph_path, annotation_path)",
+    "error": "Bad request: index 'refseq' spans several graphs (/scratch/nvme8/refseq_r237/bact_other/graph.dbg, /scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg); pass 'graph_path' to pick one",
     "code": "traverse_single_pair",
     "candidates": [
      {
@@ -85,7 +85,7 @@
    "route": "POST /resolve",
    "status": 400,
    "body": {
-    "error": "request.graphs: unknown graph 'bact_othr' (GET /capabilities lists the graphs)",
+    "error": "Bad request: unknown graph 'bact_othr'",
     "code": "graph_unknown"
    }
   },
@@ -103,7 +103,7 @@
    "route": "GET /traverse/capabilities",
    "status": 400,
    "body": {
-    "error": "graph 'sra-human-1/3' has 3 pairs on graph_path '/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg': add annotation_path",
+    "error": "Bad request: index 'sra-human-1/3' lists one graph (/scratch/nvme0/human/graph_merged_complete_k31.primary.small.indexed.dbg) with several annotations (/scratch/nvme0/human/annotation_0.relaxed.renamed.row_diff_brwt.annodbg, /scratch/nvme3/human/annotation_4.relaxed.renamed.row_diff_brwt.annodbg, /scratch/nvme4/human/annotation_8.relaxed.renamed.row_diff_brwt.annodbg): a traversal reads one annotation, which graph_path cannot choose; list each annotation under a name of its own",
     "code": "pair_ambiguous",
     "candidates": [
      {

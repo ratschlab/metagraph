@@ -48,6 +48,9 @@ MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mi
 FASTA = os.path.join(MINI_DIR, 'fasta')
 # $METAGRAPH_REQUIRE_GUARDS=1: a missing mini index fails the class instead of skipping it
 REQUIRE_GUARDS = os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') == '1'
+# the release-9 binary (8fa32e553, before release 10), whose refusal texts a multi-graph
+# client matches whole: compared with where given (not in CI)
+BASE_BINARY = os.environ.get('METAGRAPH_BASE_BINARY', '')
 K = 31
 # the chunks: (name, the mini's FASTA files, masked, annotation)
 CHUNKS = [
@@ -130,14 +133,14 @@ class Server:
     """A server_query process on a free port, ready once GET /stats answers 200; |threads| is
     its -p (the graph pool the pairs of a request run on, and its HTTP threads)."""
 
-    def __init__(self, args, log_path, timeout=300, threads=4):
+    def __init__(self, args, log_path, timeout=300, threads=4, binary=None):
         os.environ['NO_PROXY'] = '127.0.0.1'
         for _ in range(20):
             self.port = free_port()
             self.log_path = log_path
             self.log = open(log_path, 'ab')
             self.process = subprocess.Popen(
-                shlex.split(METAGRAPH) + ['server_query'] + args
+                shlex.split(binary or METAGRAPH) + ['server_query'] + args
                 + ['--port', str(self.port), '--address', '127.0.0.1', '-p', str(threads)],
                 stdout=self.log, stderr=subprocess.STDOUT)
             if self._wait_ready(timeout):
@@ -447,7 +450,10 @@ class TestMultiGraphServer(TestingBase):
         enterics = self.server.get('pattern/capabilities?graph=enterics')
         self.assertEqual(400, enterics.status_code)
         # a name of two pairs: a probe names one (SPEC-multigraph-envelope.md section 6)
-        self.assertEqual(('pair_ambiguous', "graph 'enterics' has 2 pairs on 2 graphs: add graph_path"),
+        # (in the words of the release-9 server, which a client matches whole)
+        self.assertEqual(('pair_ambiguous', f"Bad request: index 'enterics' spans several graphs "
+                                            f"({self.pairs['ecoli'][0]}, {self.pairs['kleb'][0]}); "
+                                            f"pass 'graph_path' to pick one"),
                          (enterics.json()['code'], enterics.json()['error']))
         self.assertEqual([self.pairs['ecoli'][0], self.pairs['kleb'][0]],
                          [c['graph_path'] for c in enterics.json()['candidates']])
@@ -470,6 +476,163 @@ class TestMultiGraphServer(TestingBase):
             ret = self.server.get('pattern/capabilities' + query)
             self.assertEqual(400, ret.status_code, query)
             self.assertIn(words, ret.json()['error'], query)
+
+    def _refusal_panel(self):
+        """Requests the release-9 server (8fa32e553) refused on this list, each with the
+        refusal text it gave, byte for byte (a multi-graph client matches these texts whole;
+        SPEC-multigraph-envelope.md section 6 adds a code beside them, never a new wording):
+        (method, route, payload or query, code, text)"""
+        ecoli, kleb = self.pairs['ecoli'][0], self.pairs['kleb'][0]
+        seed = self.records['ecoli'][0][1000:1100]
+        t = {'seeds': [{'sequence': seed}]}
+        r = {'sequence': seed}
+        spans = (f"Bad request: index 'enterics' spans several graphs ({ecoli}, {kleb}); pass "
+                 f"'graph_path' to pick one")
+        not_part = "Bad request: graph_path '/nowhere' is not part of index 'enterics'"
+        unknown = "Bad request: unknown graph 'nope'"
+        both = "Bad request: give the graph as 'graph' or as 'graphs', not both"
+        one_name = "Bad request: 'graphs' names the one graph a traversal reads: expected [name]"
+        required = "Bad request: 'graph' (index name) is required in multi-graph mode"
+        panel = []
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            needs = (f'Bad request: in multi-graph mode GET /{route} needs ?graph=<name> (and '
+                     f'graph_path=<path> when the name spans several graphs); GET /capabilities '
+                     f'lists the graphs')
+            panel += [
+                ('GET', route, '?graph=enterics', 'pair_ambiguous', spans),
+                ('GET', route, '?graph=nope', 'graph_unknown', unknown),
+                ('GET', route, '?graph=kleb&x=1', None,
+                 f"Bad request: unknown parameter 'x' of GET /{route} (graph, graph_path)"),
+                ('GET', route, '?graph=kleb&graph=ecoli', None,
+                 "Bad request: the parameter 'graph' is given twice"),
+                ('GET', route, '?graph_path=x', None, needs),
+                ('GET', route, '?graph=enterics&graph_path=/nowhere', 'pair_not_found', not_part),
+            ]
+        for route, body in (('traverse', t), ('resolve', r)):
+            panel += [
+                ('POST', route, dict(body, graph='nope'), 'graph_unknown', unknown),
+                ('POST', route, dict(body, graphs=['nope']), 'graph_unknown', unknown),
+                ('POST', route, dict(body, graph='kleb', graphs=['kleb']), 'selection_conflict',
+                 both),
+                ('POST', route, dict(body, graphs=[]), None, one_name),
+                ('POST', route, dict(body, graphs='kleb'), None, one_name),
+                ('POST', route, dict(body, graph_path=kleb), None, required),
+                ('POST', route, dict(body, graph=5), None, required),
+                ('POST', route, dict(body, graph='enterics', graph_path='/nowhere'),
+                 'pair_not_found', not_part),
+            ]
+        panel += [
+            ('POST', 'traverse', dict(t, graph='enterics'), 'traverse_single_pair', spans),
+            ('POST', 'traverse', dict(t, graphs=['ecoli', 'kleb']), 'traverse_single_pair',
+             one_name),
+            ('POST', 'traverse', t, 'traverse_single_pair', required),
+            ('POST', 'search', {'FASTA': '>q\n' + seed, 'graphs': ['nope']}, 'graph_unknown',
+             'Request with an uninitialized graph nope'),
+            ('POST', 'pattern', {'patterns': [{'dna': seed[:20]}], 'graphs': ['nope']},
+             'graph_unknown',
+             "request.graphs: unknown graph 'nope' (GET /capabilities lists the graphs)"),
+            ('POST', 'pattern', {'patterns': [{'dna': seed[:20]}], 'graphs': []},
+             'invalid_request',
+             'request.graphs: expected a non-empty array of graph names (GET /capabilities '
+             'lists them)'),
+        ]
+        return panel
+
+    @staticmethod
+    def _ask(server, method, route, request):
+        return server.get(route + request) if method == 'GET' else server.post(route, request)
+
+    def test_refusal_texts_are_those_before_release_10(self):
+        """Every request the release-9 server refused is refused in its words, byte for byte:
+        the probes' and /traverse's and /resolve's selection texts, /search's and /pattern's
+        unknown name, the code of SPEC-multigraph-envelope.md section 6 added (a malformed
+        selector keeps no code, /pattern's every 400 its invalid_request). Pinned here as
+        literals; the same requests against the release-9 binary:
+        test_refusal_texts_equal_the_base_binarys."""
+        for method, route, request, code, text in self._refusal_panel():
+            with self.subTest(route=route, request=request):
+                ret = self._ask(self.server, method, route, request)
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                body = ret.json()
+                self.assertEqual(text, body['error'])
+                self.assertEqual(code, body.get('code'))
+
+    def _names_cap_server(self, name, binary=None):
+        return Server([self.csv, '--mmap', '--mem-cap-gb', '1', '--max-graphs-without-selection',
+                       '1'], os.path.join(self.tempdir.name, f'server_cap_{name}.log'),
+                      binary=binary)
+
+    def _names_cap_panel(self):
+        """The requests without a selection beyond the names cap (one name, four listed), each
+        with its refusal body, byte for byte the release-9 one where that server answered the
+        request: (method, route, payload or query, body, as the base)"""
+        kleb = self.records['kleb'][0]
+        pattern_text = ('request.graphs: required on this server, which hosts 4 graph names '
+                        '(more than 1; GET /capabilities lists them)')
+        panel = [
+            ('POST', 'search', {'FASTA': '>q\n' + kleb[3000:3100]},
+             {'error': 'Bad request: requests without names (no "graphs" field) are only '
+                       'supported for small indexes (<=1 names)'}, True),
+            ('POST', 'pattern', {'patterns': [{'dna': kleb[3000:3020]}], 'mode': 'count'},
+             {'code': 'invalid_request', 'error': pattern_text}, True),
+            # new in release 10 (the release-9 /resolve needed a name): /pattern's text
+            ('POST', 'resolve', {'sequence': kleb[3000:3100]}, {'error': pattern_text}, False),
+            ('POST', 'traverse', {'seeds': [{'sequence': kleb[3000:3100]}]},
+             {'error': "Bad request: 'graph' (index name) is required in multi-graph mode"},
+             True),
+        ]
+        for route in ('traverse/capabilities', 'pattern/capabilities'):
+            panel.append(('GET', route, '',
+                          {'error': f'Bad request: in multi-graph mode GET /{route} needs '
+                                    f'?graph=<name> (and graph_path=<path> when the name spans '
+                                    f'several graphs); GET /capabilities lists the graphs'},
+                          True))
+        return panel
+
+    def test_the_names_cap_texts_are_those_before_release_10(self):
+        """Beyond --max-graphs-without-selection a request without a selection is refused in
+        the words of the release-9 server, byte for byte: /search's, /pattern's (which
+        /resolve uses since it reads the cap, release 10), the probes' without ?graph=, and
+        /traverse's (it always needed a name). SPEC-multigraph-envelope.md section 6."""
+        server = self._names_cap_server('new')
+        try:
+            for method, route, request, body, _ in self._names_cap_panel():
+                with self.subTest(route=route):
+                    ret = self._ask(server, method, route, request)
+                    self.assertEqual((400, body), (ret.status_code, ret.json()))
+        finally:
+            server.stop()
+
+    @unittest.skipUnless(BASE_BINARY and os.path.isfile(BASE_BINARY),
+                         '$METAGRAPH_BASE_BINARY (the release-9 binary, 8fa32e553) is not set')
+    def test_refusal_texts_equal_the_base_binarys(self):
+        """The panels above against the release-9 binary on the same lists: the same status
+        and error text for every request it answered (the code is release 10's addition)."""
+        base = Server([self.csv, '--mmap', '--mem-cap-gb', '1'],
+                      os.path.join(self.tempdir.name, 'server_base.log'), binary=BASE_BINARY)
+        try:
+            for method, route, request, code, text in self._refusal_panel():
+                with self.subTest(route=route, request=request):
+                    a = self._ask(base, method, route, request)
+                    b = self._ask(self.server, method, route, request)
+                    self.assertEqual((400, text), (a.status_code, a.json()['error']))
+                    self.assertEqual((a.status_code, a.json()['error']),
+                                     (b.status_code, b.json()['error']))
+        finally:
+            base.stop()
+        base, new = self._names_cap_server('base', BASE_BINARY), self._names_cap_server('new2')
+        try:
+            for method, route, request, body, as_base in self._names_cap_panel():
+                if not as_base:
+                    continue
+                with self.subTest(route=route):
+                    a = self._ask(base, method, route, request)
+                    b = self._ask(new, method, route, request)
+                    self.assertEqual((400, body), (a.status_code, a.json()))
+                    self.assertEqual((a.status_code, a.content), (b.status_code, b.content))
+        finally:
+            base.stop()
+            new.stop()
 
     def test_unmasked_pairs_are_sampled_at_load(self):
         """The dummy fraction of every graph without its mask is sampled at start-up, in its
@@ -1547,7 +1710,7 @@ class TestMultiGraphServer(TestingBase):
         ret = self.server.post('traverse', dict(one, graphs=['enterics']))
         self.assertEqual(400, ret.status_code)
         self.assertEqual('traverse_single_pair', ret.json()['code'])
-        self.assertIn("graph 'enterics' holds 2 pairs", ret.json()['error'])
+        self.assertIn("Bad request: index 'enterics' spans several graphs", ret.json()['error'])
         self.assertEqual([('enterics', self.pairs['ecoli'][0]), ('enterics', self.pairs['kleb'][0])],
                          [(c['graph'], c['graph_path']) for c in ret.json()['candidates']])
         picked = single(self.post('traverse', dict(one, graphs=['enterics'],
@@ -1559,7 +1722,7 @@ class TestMultiGraphServer(TestingBase):
                          (picked['graph'], picked['graph_path'], picked['annotation_path']))
         for payload, words, code in ((dict(one, graphs=['ecoli'], graph='ecoli'), 'not both',
                                       'selection_conflict'),
-                                     (dict(one, graphs=['ecoli', 'kleb']), 'graphs name 2 pairs',
+                                     (dict(one, graphs=['ecoli', 'kleb']), 'expected [name]',
                                       'traverse_single_pair')):
             ret = self.server.post('traverse', payload)
             self.assertEqual(400, ret.status_code)

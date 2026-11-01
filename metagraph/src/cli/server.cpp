@@ -1644,6 +1644,8 @@ int run_server(Config *config) {
         const common::ThreadUsageMeter own_usage;
         const std::vector<SelectedPair> pairs = select_pairs(
                 SelectionRoute::RESOLVE, json, indexes, config->max_graphs_without_selection);
+        // `pairs` is read: the pairs' requests are parsed without it (no field of the parser)
+        json.removeMember("pairs");
         const std::optional<bool> in_ram = in_ram_field(json);
         const std::vector<std::string> names = names_of(pairs);
         // what no pair decides refuses the whole request: its fields, the query's length (the
@@ -2079,6 +2081,9 @@ int run_server(Config *config) {
                     // with the candidates (traverse_single_pair)
                     selected = select_pairs(SelectionRoute::TRAVERSE, json, indexes,
                                             config->max_graphs_without_selection).front();
+                    // `pairs` is read: the request is parsed without it (no field of the
+                    // parser, which refuses it on a single-graph server as before release 10)
+                    json.removeMember("pairs");
                     const GraphPair &pair = selected->pair;
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)

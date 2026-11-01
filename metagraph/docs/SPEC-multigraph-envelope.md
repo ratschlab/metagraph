@@ -43,7 +43,7 @@ The capabilities routes (`GET /traverse/capabilities`, `GET /pattern/capabilitie
 selection with the envelope over every pair (up to `max_graphs_without_selection`): `envelope_version`, `route`,
 `graphs`, `answered`, `refused`, `server_instance`, `answers` (each entry the pair's capabilities block, tagged).
 With a pair selection (section 6) they answer a one-entry envelope. Beyond the cap a probe without `?graph=` keeps
-its 400 wording ("needs ?graph=<name> ...") with one clause added, the cap and the count.
+its 400 text of before release 10, byte for byte (section 6).
 
 ### 1.1 `/traverse` (E10)
 
@@ -161,6 +161,26 @@ are for selection outcomes only: a malformed selector (`pairs` not a non-empty a
 a missing `graph`, a path that is no string, `graph_path` without `graph`) is a plain 400 without a section 6 code
 (on `/pattern` the route's own `invalid_request`, as every `/pattern` 400). Without a selection a request runs on
 every pair, up to `max_graphs_without_selection` names (that refusal stays).
+
+The multi-graph 400 texts are those of before release 10 (8fa32e553), byte for byte: a request that server refused
+is refused in the same words, a section 6 code being only an added member (a client matches these texts whole;
+any later change is announced first). The names cap's three texts, `{N}` the cap and `{M}` the names listed:
+- `/search`: `Bad request: requests without names (no "graphs" field) are only supported for small indexes
+  (<={N} names)`;
+- `/pattern`, and `/resolve` (which reads the cap since release 10) in the same words: `request.graphs: required on
+  this server, which hosts {M} graph names (more than {N}; GET /capabilities lists them)`;
+- a capabilities probe without `?graph=` (also one with `graph_path` or `annotation_path` but no `graph`):
+  `Bad request: in multi-graph mode GET <route> needs ?graph=<name> (and graph_path=<path> when the name spans
+  several graphs); GET /capabilities lists the graphs`.
+The other texts kept: an unknown name on `/resolve`, `/traverse` and a probe `Bad request: unknown graph '<name>'`
+(on `/search` `Request with an uninitialized graph <name>`, on `/pattern` `request.graphs: unknown graph '<name>'
+(GET /capabilities lists the graphs)`), each now with `graph_unknown`; on `/resolve`, `/traverse` and the probes
+without `pairs` or `annotation_path` the release-9 selection texts (`... spans several graphs (...); pass
+'graph_path' to pick one`, `... with several annotations ...`, `graph_path '<path>' is not part of index
+'<name>'`, `'graphs' names the one graph a traversal reads: expected [name]`, `'graph' (index name) is required
+in multi-graph mode`, `give the graph as 'graph' or as 'graphs', not both`), coded `traverse_single_pair`,
+`pair_ambiguous`, `pair_not_found` or `selection_conflict` where section 6 has a code. On a single-graph server
+`pairs` is an unknown field, as before (`request: unknown field 'pairs'`).
 
 ## 7. Resolve discovery ties (E18)
 

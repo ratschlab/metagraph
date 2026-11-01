@@ -291,12 +291,14 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     for (const std::string &name : json.getMemberNames()) {
         // `in_ram` (as /search's: the server loads the index into RAM for the request when it
         // runs on mmap, before the request's deadline starts) is read by the server; a
-        // multi-graph server reads its selector (`graphs` or `pairs`) too and passes none here
+        // multi-graph server reads its selector (`graphs` or `pairs`) too and passes none here.
+        // On a single-graph server `pairs` (release 10) is refused as any unknown field, last,
+        // as before release 10
         if (name == "in_ram" && !json[name].isBool())
             throw invalid("request.in_ram: expected a boolean");
-        if (name == "graphs" || name == "pairs") {
-            throw invalid("request." + name + ": this server hosts a single graph; remove the '"
-                          + name + "' field");
+        if (name == "graphs") {
+            throw invalid("request.graphs: this server hosts a single graph; remove the "
+                          "'graphs' field");
         }
         for (const char *field : kLaterIncrementFields) {
             if (name == field)

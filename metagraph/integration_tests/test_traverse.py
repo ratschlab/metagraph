@@ -1821,12 +1821,15 @@ class TestTraverseAPI(TestTraverseBase):
         ret = self._post('resolve', {'sequence': self.element, 'labels': ['acc1']})
         self.assertEqual(200, ret.status_code, ret.text)
         self.assertNotIn('unknown_labels', ret.json())
-        for route, payload in (('traverse', {'seeds': [seed], 'pairs': [{'graph': 'x'}]}),
+        # pairs (release 10) is no field of a single-graph request: refused as an unknown field,
+        # as before release 10 (TestTraverseResolveRegression compares it with the base)
+        for route, payload in (('traverse', {'seeds': [seed], 'strategy': strategy,
+                                             'pairs': [{'graph': 'x'}]}),
                                ('resolve', {'sequence': self.element, 'labels': ['acc1'],
                                             'pairs': [{'graph': 'x'}]})):
             ret = self._post(route, payload)
             self.assertEqual(400, ret.status_code, ret.text)
-            self.assertIn("remove the 'pairs' field", ret.json()['error'])
+            self.assertEqual({'error': "request: unknown field 'pairs'"}, ret.json())
 
     def test_api_task_resources(self):
         """The per-task figures on the server and the CLI (SPEC §7.2.1, SPEC-pattern-search.md
@@ -3072,6 +3075,8 @@ class TestTraverseResolveRegression(TestTraverseBase):
             {'bogus': 1},
             {'sequence': e, 'labels': ['acc1'], 'bounds': {'max_query_bp': 10}},
             {'sequence': e, 'labels': ['acc1'], 'select': {'policy': 'explicit'}},
+            # pairs (the selector of release 10) is no field of a single-graph request
+            {'sequence': e, 'labels': ['acc1'], 'pairs': [{'graph': 'x'}]},
         ]
 
     @staticmethod
@@ -3107,6 +3112,8 @@ class TestTraverseResolveRegression(TestTraverseBase):
         out.append({'seeds': [{'sequence': self.left2[60:] + e[:60]}], 'strategy': untimed})
         out.append({'seeds': [{'sequence': e, 'labels': ['nope']}], 'strategy': untimed})
         out.append({'seeds': [], 'strategy': untimed})
+        # pairs (the selector of release 10) is no field of a single-graph request
+        out.append({'seeds': [{'sequence': e}], 'pairs': [{'graph': 'x'}], 'strategy': untimed})
         return out
 
     def test_traverse_answers_as_before(self):
@@ -3125,7 +3132,7 @@ class TestTraverseResolveRegression(TestTraverseBase):
                 answers.append((ret.status_code, self._untimed(ret.text)))
             self.assertEqual(answers[0], answers[1], json.dumps(request)[:300])
             compared += 1
-        self.assertEqual(35, compared)
+        self.assertEqual(36, compared)
 
     def test_server_answers_as_before(self):
         compared = 0
@@ -3140,7 +3147,7 @@ class TestTraverseResolveRegression(TestTraverseBase):
                                     self._untimed(ret.text)))
                 self.assertEqual(answers[0], answers[1], json.dumps(request)[:200])
                 compared += 1
-        self.assertGreaterEqual(compared, 34)
+        self.assertGreaterEqual(compared, 36)
 
     def test_cli_answers_as_before(self):
         path = f'{self.tempdir.name}/resolve-regression.json'
@@ -3386,12 +3393,21 @@ class TestTraverseMultiGraph(TestTraverseBase):
                           two['index_fp']))
         # one graph with two annotations is addressed by annotation_path (graph_path cannot
         # choose), and a name listing only that is told so, not to pass graph_path
+        # (in the words of the release-9 server, byte for byte: a client matches them whole)
         quoted = requests.utils.quote(self.graph, safe='')
-        for query in (f'?graph=C&graph_path={quoted}', '?graph=C'):
+        annotations = f"{self.anno}, {self.pairs['col'][1]}"
+        for query, text in (
+                (f'?graph=C&graph_path={quoted}',
+                 f"Bad request: graph_path '{self.graph}' names a graph with several annotations "
+                 f"under index 'C' ({annotations}): a traversal reads one annotation, which "
+                 f"graph_path cannot choose; list each annotation under a name of its own"),
+                ('?graph=C',
+                 f"Bad request: index 'C' lists one graph ({self.graph}) with several annotations "
+                 f"({annotations}): a traversal reads one annotation, which graph_path cannot "
+                 f"choose; list each annotation under a name of its own")):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, ret.text)
-            self.assertEqual(('pair_ambiguous', f"graph 'C' has 2 pairs on graph_path '{self.graph}': "
-                                                'add annotation_path'),
+            self.assertEqual(('pair_ambiguous', text),
                              (ret.json()['code'], ret.json()['error']), query)
             self.assertEqual([self.anno, self.pairs['col'][1]],
                              [c['annotation_path'] for c in ret.json()['candidates']])
@@ -3405,16 +3421,19 @@ class TestTraverseMultiGraph(TestTraverseBase):
             self.assertEqual(('C', self.graph, annotation, fp),
                              (entry['graph'], entry['graph_path'], entry['annotation_path'],
                               entry['index_fp']))
-        for query, needle, code in (('?graph=Z', "unknown graph 'Z'", 'graph_unknown'),
-                                    ('?graph=A&x=1', "unknown parameter 'x'", None),
-                                    ('?graph=A&graph=B', 'given twice', None),
-                                    ('?graph_path=/nowhere', 'add ?graph=<name>', None),
-                                    ('?graph=B&graph_path=/nowhere',
-                                     "no pair of graph 'B' has graph_path '/nowhere'",
-                                     'pair_not_found')):
+        for query, text, code in (
+                ('?graph=Z', "Bad request: unknown graph 'Z'", 'graph_unknown'),
+                ('?graph=A&x=1', "Bad request: unknown parameter 'x' of GET "
+                                 "/traverse/capabilities (graph, graph_path)", None),
+                ('?graph=A&graph=B', "Bad request: the parameter 'graph' is given twice", None),
+                ('?graph_path=/nowhere', 'Bad request: in multi-graph mode GET '
+                 '/traverse/capabilities needs ?graph=<name> (and graph_path=<path> when the '
+                 'name spans several graphs); GET /capabilities lists the graphs', None),
+                ('?graph=B&graph_path=/nowhere',
+                 "Bad request: graph_path '/nowhere' is not part of index 'B'", 'pair_not_found')):
             ret = self._caps(query)
             self.assertEqual(400, ret.status_code, query)
-            self.assertIn(needle, ret.json()['error'], query)
+            self.assertEqual(text, ret.json()['error'], query)
             self.assertEqual(code, ret.json().get('code'), query)
         # the server-wide document lists the names; align is not offered here
         c = requests.get(self.server.url + '/capabilities').json()
@@ -3796,8 +3815,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
             for route in ('traverse/capabilities', 'pattern/capabilities'):
                 ret = requests.get(f'{server.url}/{route}')
                 self.assertEqual(400, ret.status_code, ret.text[:2000])
-                self.assertIn('needs ?graph=<name>', ret.json()['error'])
-                self.assertIn('more than 2 graph names (3 here)', ret.json()['error'])
+                # the words of every probe without ?graph= before release 10, byte for byte
+                self.assertEqual({'error': f'Bad request: in multi-graph mode GET /{route} needs '
+                                           f'?graph=<name> (and graph_path=<path> when the name '
+                                           f'spans several graphs); GET /capabilities lists the '
+                                           f'graphs'}, ret.json())
                 self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
         finally:
             server.close()

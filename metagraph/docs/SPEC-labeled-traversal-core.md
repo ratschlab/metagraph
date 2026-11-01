@@ -3202,11 +3202,11 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `refused`, `server_instance`, `answers`), one entry: the probe tagged `graph`, `graph_path`,
     `annotation_path`, `index_fp`, `outcome` (before: the probe itself with `graph` and `graph_path` added).
     Without any parameter the envelope over every pair (in `graph_summary`'s order), up to
-    `max_graphs_without_selection` names; above it a 400 in the words a probe without `graph` always had, the cap
-    and the count added (`Bad request: in multi-graph mode GET /traverse/capabilities needs ?graph=<name> (and
-    graph_path=<path> when the name spans several graphs) on a list of more than N graph names (M here); ...`),
-    and parameters without `graph` a 400 that also says `needs ?graph=<name>`; an unknown or repeated parameter
-    is a 400. A multi-graph server's `POST /traverse`
+    `max_graphs_without_selection` names; above it, and for parameters without `graph`, the 400 a probe without
+    `graph` always had, byte for byte (`Bad request: in multi-graph mode GET /traverse/capabilities needs
+    ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET /capabilities lists the
+    graphs`); an unknown or repeated parameter is a 400 in its release-9 words (every refusal text of before
+    release 10 is kept, SPEC-multigraph-envelope.md section 6). A multi-graph server's `POST /traverse`
     answers HTTP 200 in that envelope too (section 1.1 there: the attempt's `usage` at its top level); its other
     statuses are unchanged. In single-graph mode `graph` and `graph_path` are a 400, any other parameter is
     ignored, as before.

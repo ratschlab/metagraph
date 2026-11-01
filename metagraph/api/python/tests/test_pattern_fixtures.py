@@ -3940,8 +3940,7 @@ class TestPatternFixtures(unittest.TestCase):
                 Checker(Raising(), 'single'), f,
                 {'error': 'Bad request: in multi-graph mode GET /pattern/capabilities needs '
                           '?graph=<name> (and graph_path=<path> when the name spans several '
-                          'graphs) on a list of more than 1 graph names (2 here); GET '
-                          '/capabilities lists the graphs'})
+                          'graphs); GET /capabilities lists the graphs'})
 
     def test_probe_envelopes(self):
         """SPEC-multigraph-envelope.md section 1 (release 10): a multi-graph server's GET

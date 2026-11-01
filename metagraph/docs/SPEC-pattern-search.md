@@ -4358,10 +4358,11 @@ the other pairs.
   envelope of
   SPEC-multigraph-envelope.md section 1, one entry: the block tagged `graph`, `graph_path`, `annotation_path`,
   `index_fp`, `outcome` (before: the block with the fields of `capabilities_pair`). Without any parameter the
-  envelope over every pair, up to `max_graphs_without_selection` names; above it 400 `{"error": "Bad request: in
-  multi-graph mode GET /pattern/capabilities needs ?graph=<name> (and graph_path=<path> when the name spans
-  several graphs) on a list of more than N graph names (M here); ..."}`, and for parameters without `graph` a 400
-  that also says `needs ?graph=<name>`; an unknown or repeated parameter: 400.
+  envelope over every pair, up to `max_graphs_without_selection` names; above it, and for parameters without
+  `graph`, the 400 of before release 10, byte for byte: `{"error": "Bad request: in multi-graph mode GET
+  /pattern/capabilities needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET
+  /capabilities lists the graphs"}`; an unknown or repeated parameter: 400 (every refusal text of before release
+  10 is kept, SPEC-multigraph-envelope.md section 6).
 - `GET /traverse/capabilities?graph=NAME[&graph_path=PATH]`: its `pattern` member is that pair's gate block
   (§23.2) with `details`.
 - `GET /capabilities`: its `pattern` member is the full block without a graph (as while a single index loads: the

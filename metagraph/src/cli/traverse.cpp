@@ -223,13 +223,14 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     req.release = s.str("release", "");
     // Routing fields: consumed by the server before parsing (resolve_traverse_index). They
     // are still checked and declared here, or the unknown-field check would reject every
-    // multi-graph request. `graphs` ([name], /search's form of `graph`), `pairs` (the pair
-    // selector, read by select_pairs, SPEC-multigraph-envelope.md section 6) and `in_ram`
-    // (load the index into RAM for the request, as /search does) likewise
+    // multi-graph request. `graphs` ([name], /search's form of `graph`) and `in_ram` (load the
+    // index into RAM for the request, as /search does) likewise. `pairs` (the pair selector of
+    // SPEC-multigraph-envelope.md section 6) is no field here: a multi-graph server reads it
+    // (select_pairs) and removes it before the request is parsed, and a single-graph server
+    // refuses it as an unknown field, as before release 10
     s.str("graph", "");
     s.str("graph_path", "");
     s.strings("graphs");
-    s.has("pairs");
     s.boolean("in_ram", false);
     // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
@@ -481,7 +482,6 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     s.str("graph", "");
     s.str("graph_path", "");
     s.strings("graphs");
-    s.has("pairs");
     s.boolean("in_ram", false);
     // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
     // not_after_ms, finish_by_ms): the server reads them before the request runs, by the same
