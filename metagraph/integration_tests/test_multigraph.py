@@ -1364,22 +1364,24 @@ class TestMultiGraphServer(TestingBase):
 
     def test_an_admitted_request_runs_past_not_after_ms(self):
         """not_after_ms is admission only (E20): a request admitted before it runs past it and
-        finishes -- b_big's resolve of 3 Mbp, over two seconds, admitted 800 ms before
-        not_after_ms, alone (inline) and beside c_tiny; c_tiny, queued behind b_big on the one
-        pool thread, was not started by not_after_ms: not_reached, reason not_after_ms (decided
-        when not_after_ms passed, not at the cutoff)."""
+        finishes -- b_big's resolve of 3 Mbp, over a second (1.25 s on an idle machine),
+        admitted 300 ms before not_after_ms, alone (inline) and beside c_tiny; c_tiny, queued
+        behind b_big on the one pool thread, was not started by not_after_ms: not_reached,
+        reason not_after_ms (decided when not_after_ms passed, not at the cutoff)."""
         server = self._cutoff_server('admission')
         try:
             request = self._slow_resolve(3000000)
             for graphs in (['b_big'], ['b_big', 'c_tiny']):
                 with self.subTest(graphs=graphs):
-                    not_after = int(time.time() * 1000) + 800
+                    not_after = int(time.time() * 1000) + 300
                     out = self.post_to(server, 'resolve', dict(request, graphs=graphs,
                                                                not_after_ms=not_after))
+                    # (it ran on well past not_after_ms; the margin holds on an idle machine,
+                    # where the whole resolve takes about 1.25 s)
                     self.assertGreater(time.time() * 1000, not_after + 500)
                     big = out['answers'][0]
                     self.assertEqual(('b_big', 'answered'), (big['graph'], big['outcome']))
-                    self.assertGreater(big['timing']['elapsed_ms'], 1000)
+                    self.assertGreater(big['timing']['elapsed_ms'], 800)
                     self.assertEqual((not_after, None),
                                      (out['deadline']['not_after_ms'],
                                       out['deadline']['finish_by_ms']))
