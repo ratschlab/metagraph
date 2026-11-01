@@ -62,6 +62,9 @@ class LowerMedianCounter {
     void add(uint64_t value, uint64_t positions = 1);
     // the lower median of the values added, 0 if none
     uint64_t lower_median();
+    // the (value, positions) entries held now: the distinct values since the last merge, and
+    // the runs added after it
+    size_t size() const { return counts_.size(); }
 
   private:
     void merge();

@@ -1,3 +1,8 @@
+#include <algorithm>
+#include <functional>
+#include <map>
+#include <random>
+#include <tuple>
 #include <vector>
 #include <unordered_set>
 
@@ -6,11 +11,20 @@
 
 #include "../graph/all/test_dbg_helpers.hpp"
 
+#include "../annotation/test_matrix_helpers.hpp"
+
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/config/config.hpp"
 #include "cli/query.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "common/vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 
@@ -25,6 +39,12 @@ construct_query_graph(const graph::AnnotatedDBG &full_anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
                       const Config &config);
+SeqSearchResult execute_query(QuerySequence&& sequence,
+                              QueryMode query_mode,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction,
+                              const graph::AnnotatedDBG &anno_graph);
 } // namespace mtg::cli
 
 namespace {
@@ -356,6 +376,201 @@ TEST(construct_query_graph, counts_annotation_binary_slice_reads_tie_medians) {
         EXPECT_EQ("b_high", std::get<0>(counts[0]));
         check_cut(cut);
     }
+}
+
+// Batched against unbatched search on an annotation with k-mer counts whose abundances differ
+// per k-mer, with query k-mers repeated (GPT B-gap): every query mode that reads such an
+// annotation answers the same rows, in the same order, with the same cut, whether the query
+// runs on the full index or on a batch's query graph (whose rows are the batch's distinct
+// k-mers: a k-mer repeated in a query must count once per position, also in the medians that
+// order the ties). The C5 order is checked against medians computed per query position here.
+
+// the integer matrices of a counts annotation the search reads: the CSR form, and an
+// integer CSC over a BRWT (int_brwt), read in batches of rows
+enum class CountsForm { CSR, INT_BRWT };
+
+std::unique_ptr<graph::AnnotatedDBG>
+counts_annotation(std::shared_ptr<graph::DeBruijnGraph> graph,
+                  const std::vector<std::string> &labels,
+                  const std::function<uint64_t(size_t label, const std::string &kmer)> &value,
+                  CountsForm form) {
+    using namespace annot::matrix;
+    const uint64_t num_rows = graph->max_index();
+    Vector<CSRMatrix::RowValues> rows(num_rows);
+    graph->call_kmers([&](graph::DeBruijnGraph::node_index node, const std::string &kmer) {
+        auto &row = rows[graph::AnnotatedDBG::graph_to_anno_index(node)];
+        for (size_t j = 0; j < labels.size(); ++j) {
+            if (uint64_t v = value(j, kmer))
+                row.emplace_back(j, v);
+        }
+    });
+    annot::LabelEncoder<std::string> encoder;
+    for (const auto &label : labels) {
+        encoder.insert_and_encode(label);
+    }
+    if (form == CountsForm::CSR) {
+        return std::make_unique<graph::AnnotatedDBG>(graph, std::make_unique<annot::IntRowAnnotator>(
+                std::make_unique<CSRMatrix>(std::move(rows), labels.size()), encoder));
+    }
+    test::BitVectorPtrArray columns;
+    std::vector<sdsl::int_vector<>> values(labels.size());
+    std::vector<sdsl::bit_vector> bits(labels.size(), sdsl::bit_vector(num_rows, false));
+    std::vector<std::vector<uint64_t>> column_values(labels.size());
+    for (uint64_t r = 0; r < num_rows; ++r) {
+        for (const auto &[j, v] : rows[r]) {
+            bits[j][r] = true;
+            column_values[j].push_back(v);
+        }
+    }
+    std::vector<annot::CountsVector> counts;
+    for (size_t j = 0; j < labels.size(); ++j) {
+        columns.push_back(std::make_unique<bit_vector_stat>(std::move(bits[j])));
+        sdsl::int_vector<> v(column_values[j].size());
+        for (size_t i = 0; i < v.size(); ++i) {
+            v[i] = column_values[j][i];
+        }
+        counts.emplace_back(v);
+    }
+    auto brwt = test::build_matrix_from_columns<BRWT>(columns, num_rows);
+    return std::make_unique<graph::AnnotatedDBG>(graph, std::make_unique<annot::IntMultiBRWTAnnotator>(
+            std::make_unique<CSCMatrix<BRWT, annot::CountsVector>>(std::move(brwt),
+                                                                   std::move(counts)),
+            encoder));
+}
+
+template <class Graph>
+void check_batched_parity(graph::DeBruijnGraph::Mode graph_mode, CountsForm form) {
+    const size_t k = 11;
+    std::mt19937 rng(11);
+    auto random_seq = [&](size_t length) {
+        std::string s(length, 'A');
+        for (char &c : s) {
+            c = "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    // A has 20 k-mers, B 30, C 15: the query has A three times, so 60 of A's positions and 30
+    // of B's, and a median that counted A's k-mers once (20 against 30) would land on the
+    // other side
+    const std::string A = random_seq(20 + k - 1);
+    const std::string B = random_seq(30 + k - 1);
+    const std::string C = random_seq(15 + k - 1);
+    auto graph = test::build_graph_batch<Graph>(k, { A, B, C }, graph_mode);
+    std::map<std::string, std::pair<char, size_t>> where;
+    for (const auto &[name, segment] : { std::make_pair('A', A), std::make_pair('B', B),
+                                         std::make_pair('C', C) }) {
+        for (size_t i = 0; i + k <= segment.size(); ++i) {
+            where[segment.substr(i, k)] = { name, i };
+        }
+    }
+    // the segment and offset of a k-mer of the graph, on either strand in a canonical one
+    auto locate = [&](const std::string &kmer) -> std::pair<char, size_t> {
+        if (auto it = where.find(kmer); it != where.end())
+            return it->second;
+        std::string rc = kmer;
+        reverse_complement(rc.begin(), rc.end());
+        if (auto it = where.find(rc); it != where.end())
+            return it->second;
+        return { '-', 0 };
+    };
+    const std::vector<std::string> labels { "u_wide", "v_a_only", "w_like_x", "x_low_a",
+                                            "y_high_a", "z_flat", "t_part_b" };
+    auto value = [&](size_t label, const std::string &kmer) -> uint64_t {
+        const auto [segment, i] = locate(kmer);
+        const bool a = segment == 'A', b = segment == 'B', c = segment == 'C';
+        switch (label) {
+            case 0: return a || b || c ? 7 + i % 2 : 0;           // u: 7 or 8 everywhere
+            case 1: return a ? 3 + i % 4 : 0;                     // v: A only, uneven
+            case 2: case 3: return a ? 1 + i % 2 : b ? 100 + i : 0;  // w = x: low on A
+            case 4: return a ? 100 + i : b ? 1 + i % 3 : 0;      // y: high on A
+            case 5: return a || b ? 50 : 0;                       // z: flat
+            case 6: return b && i >= 10 && i < 20 ? 1 + i : 0;    // t: part of B
+        }
+        return 0;
+    };
+    auto full = counts_annotation(graph, labels, value, form);
+    ASSERT_TRUE(full->has_kmer_abundances());
+
+    std::string reversed = A + B + A + A;
+    reverse_complement(reversed.begin(), reversed.end());
+    const std::vector<std::string> queries {
+        A + B + A + A,
+        // A's k-mers only, five times
+        A + A + A + A + A,
+        B + "T" + A + C + A,
+        reversed,
+        random_seq(60),
+    };
+
+    // the C5 order of the labels by the positions of |query|, each position once: the
+    // reference the engine's rows are checked against (MATCHES)
+    auto expected_matches = [&](const std::string &query, size_t n) {
+        std::vector<std::tuple<size_t, uint64_t, std::string>> rows;
+        for (size_t j = 0; j < labels.size(); ++j) {
+            std::vector<uint64_t> values;
+            graph->map_to_nodes(query, [&](graph::DeBruijnGraph::node_index node) {
+                if (!node)
+                    return;
+                std::string kmer = graph->get_node_sequence(node);
+                if (uint64_t v = value(j, kmer))
+                    values.push_back(v);
+            });
+            if (values.size())
+                rows.emplace_back(values.size(), graph::lower_median(values), labels[j]);
+        }
+        std::sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) {
+            if (std::get<0>(a) != std::get<0>(b))
+                return std::get<0>(a) > std::get<0>(b);
+            if (std::get<1>(a) != std::get<1>(b))
+                return std::get<1>(a) > std::get<1>(b);
+            return std::get<2>(a) < std::get<2>(b);
+        });
+        std::vector<std::string> names;
+        for (size_t r = 0; r < std::min(n, rows.size()); ++r) {
+            names.push_back(std::get<2>(rows[r]));
+        }
+        return names;
+    };
+
+    for (const std::string mode : { "labels", "matches", "counts-sum", "counts", "signature" }) {
+        auto config = query_config(mode);
+        auto query_graph = cli::construct_query_graph(*full, [&](const auto &callback) {
+            for (const auto &query : queries) {
+                callback(query);
+            }
+        }, 1, *config);
+        for (size_t q = 0; q < queries.size(); ++q) {
+            for (size_t n : { 0, 1, 2, 3, 4, 5, 6, 7, 100 }) {
+                SCOPED_TRACE(mode + " query " + std::to_string(q) + " top " + std::to_string(n));
+                auto run = [&](const graph::AnnotatedDBG &index) {
+                    return cli::execute_query(cli::QuerySequence { q, "q", queries[q] },
+                                              config->query_mode, n, 0.0, 0.0, index);
+                };
+                const cli::SeqSearchResult direct = run(*full);
+                const cli::SeqSearchResult batched = run(*query_graph);
+                EXPECT_EQ(direct.to_json(true, k), batched.to_json(true, k));
+                EXPECT_EQ(direct.cut_to_json(), batched.cut_to_json());
+                EXPECT_EQ(direct.to_string("\t", false, true, k),
+                          batched.to_string("\t", false, true, k));
+                if (std::string(mode) == "matches") {
+                    std::vector<std::string> names;
+                    for (const auto &[label, count]
+                            : std::get<cli::SeqSearchResult::LabelCountVec>(direct.get_result())) {
+                        names.push_back(label);
+                    }
+                    EXPECT_EQ(expected_matches(queries[q], n), names);
+                }
+            }
+        }
+    }
+}
+
+TEST(construct_query_graph, batched_counts_search_answers_as_unbatched) {
+    check_batched_parity<graph::DBGHashOrdered>(graph::DeBruijnGraph::BASIC, CountsForm::CSR);
+    check_batched_parity<graph::DBGHashOrdered>(graph::DeBruijnGraph::CANONICAL, CountsForm::CSR);
+    check_batched_parity<graph::DBGSuccinct>(graph::DeBruijnGraph::BASIC, CountsForm::CSR);
+    check_batched_parity<graph::DBGHashOrdered>(graph::DeBruijnGraph::BASIC, CountsForm::INT_BRWT);
+    check_batched_parity<graph::DBGSuccinct>(graph::DeBruijnGraph::CANONICAL, CountsForm::INT_BRWT);
 }
 
 } // namespace

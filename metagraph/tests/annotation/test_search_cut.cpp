@@ -501,6 +501,42 @@ TEST(SearchCut, AbundanceMediansReadInBatches) {
               matrix.rows_read);
 }
 
+// GPT B1: a k-mer repeated at 10000 query positions costs one (abundance, positions) entry per
+// label, never 10000 values. A counter holds its distinct values (a run along the query is one
+// entry, merged whenever the entries doubled), and a query's rows are read collapsed, each with
+// the number of positions it stands for
+TEST(SearchCut, ARepeatedKmerIsOneEntryPerLabel) {
+    LowerMedianCounter once;
+    once.add(5, 10'000);
+    EXPECT_EQ(1u, once.size());
+    once.add(9, 1);
+    EXPECT_EQ(2u, once.size());
+    EXPECT_EQ(5u, once.lower_median());
+    // one value per position, as the counts mode passes them: the entries stay a few times the
+    // distinct values (two here), never one per position
+    LowerMedianCounter positions;
+    size_t largest = 0;
+    for (size_t i = 0; i < 10'000; ++i) {
+        positions.add(1 + i % 2);
+        largest = std::max(largest, positions.size());
+    }
+    EXPECT_LE(largest, 2 * 2 + 16u);
+    EXPECT_EQ(1u, positions.lower_median());
+    // one row standing for 10000 positions is read once, for every label asked
+    std::vector<RecordingIntMatrix::RowValues> rows(2);
+    std::vector<uint32_t> columns(1000);
+    for (uint32_t j = 0; j < columns.size(); ++j) {
+        columns[j] = j;
+        rows[0].emplace_back(j, 3);
+        rows[1].emplace_back(j, 9);
+    }
+    RecordingIntMatrix matrix(rows);
+    EXPECT_EQ(std::vector<uint64_t>(columns.size(), 3),
+              abundance_medians(matrix, { { 0, 10'000 }, { 1, 1 } }, columns, columns.size(),
+                                2'500));
+    EXPECT_EQ((std::vector<annot::matrix::BinaryMatrix::Row>{ 0, 1 }), matrix.rows_read);
+}
+
 // An index whose annotation holds k-mer counts: one sequence, every k-mer of it annotated
 // with |abundances[j]| in column j
 std::unique_ptr<AnnotatedDBG> counts_index(const std::string &sequence, size_t k,
