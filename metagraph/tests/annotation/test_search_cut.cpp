@@ -445,6 +445,7 @@ class RecordingIntMatrix : public annot::matrix::IntMatrix {
     std::vector<RowValues> get_row_values(const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
                                           size_t = 1) const override {
         reads.push_back(rows.size());
+        rows_read.insert(rows_read.end(), rows.begin(), rows.end());
         std::vector<RowValues> values;
         for (auto row : rows) {
             values.push_back(rows_.at(row));
@@ -457,6 +458,7 @@ class RecordingIntMatrix : public annot::matrix::IntMatrix {
     }
 
     mutable std::vector<size_t> reads;
+    mutable std::vector<annot::matrix::BinaryMatrix::Row> rows_read;
 
   private:
     std::vector<RowValues> rows_;
@@ -469,13 +471,18 @@ TEST(SearchCut, AbundanceMediansReadInBatches) {
         rows.push_back({ { 0, r + 1 }, { 1, 10 } });
     }
     RecordingIntMatrix matrix(rows);
-    // row 2 stands for three query positions: column 0 holds 1, 2, 3, 3, 3, 4, 5
-    std::vector<std::pair<uint64_t, size_t>> row_counts { { 0, 1 }, { 1, 1 }, { 2, 3 },
-                                                          { 3, 1 }, { 4, 1 } };
+    // row 2 stands for three query positions: column 0 holds 1, 2, 3, 3, 3, 4, 5. The rows
+    // in the query's order, not the matrix's
+    std::vector<std::pair<uint64_t, size_t>> row_counts { { 3, 1 }, { 0, 1 }, { 4, 1 },
+                                                          { 2, 3 }, { 1, 1 } };
     EXPECT_EQ((std::vector<uint64_t>{ 10, 3, 0 }),
               abundance_medians(matrix, row_counts, { 1, 0, 2 }, 3, 2));
     // read two rows at a time, never all of the query's rows at once
     EXPECT_EQ((std::vector<size_t>{ 2, 2, 1 }), matrix.reads);
+    // in the matrix's order (its rank structures read in order, as a batched query's slice
+    // reads them): a matrix other than a row-diff one
+    EXPECT_EQ((std::vector<annot::matrix::BinaryMatrix::Row>{ 0, 1, 2, 3, 4 }),
+              matrix.rows_read);
 }
 
 // An index whose annotation holds k-mer counts: one sequence, every k-mer of it annotated

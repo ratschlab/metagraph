@@ -8,6 +8,7 @@
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -581,17 +582,28 @@ abundance_medians(const IntMatrix &matrix,
             }
         }, columns, num_columns);
     }
+    // in the order of the rows (the medians are of the values, whatever their order): the
+    // matrix is read as a batched query's slice reads it, a row-diff matrix in the query's
+    // order (along its paths), every other sorted (its rank structures read in order)
+    const std::vector<std::pair<uint64_t, size_t>> *rows_in_order = &row_counts;
+    std::vector<std::pair<uint64_t, size_t>> sorted;
+    if (!dynamic_cast<const annot::matrix::IRowDiff *>(&matrix)) {
+        sorted = row_counts;
+        std::sort(sorted.begin(), sorted.end(), utils::LessFirst());
+        rows_in_order = &sorted;
+    }
     return abundance_medians([&](const auto &callback) {
+        const auto &counts = *rows_in_order;
         std::vector<AnnotatedDBG::row_index> rows;
-        for (size_t begin = 0; begin < row_counts.size(); begin += rows_per_read) {
-            const size_t end = std::min(begin + rows_per_read, row_counts.size());
+        for (size_t begin = 0; begin < counts.size(); begin += rows_per_read) {
+            const size_t end = std::min(begin + rows_per_read, counts.size());
             rows.clear();
             for (size_t i = begin; i < end; ++i) {
-                rows.push_back(row_counts[i].first);
+                rows.push_back(counts[i].first);
             }
             auto row_values = matrix.get_row_values(rows);
             for (size_t i = begin; i < end; ++i) {
-                callback(row_values[i - begin], row_counts[i].second);
+                callback(row_values[i - begin], counts[i].second);
             }
         }
     }, columns, num_columns);
