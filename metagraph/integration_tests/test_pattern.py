@@ -4345,19 +4345,22 @@ def assert_search_as_before(test, base, new, where):
 
 
 @unittest.skipIf(PROTEIN_MODE, "the request panel is DNA")
-@guard(bool(BASE_BINARY) and os.path.isfile(BASE_BINARY),
-       "$METAGRAPH_BASE_BINARY (the binary before the pattern search) is not set (not in CI)")
+@unittest.skipUnless(BASE_BINARY, "$METAGRAPH_BASE_BINARY (an older build to compare with, e.g. "
+                                  "8fa32e553 before release 10) is not given (not in CI)")
 class TestPatternRegression(TestingBase):
-    """/search and /align answer byte for byte as a build without the pattern search does
-    (§11; $METAGRAPH_BASE_BINARY), on test_api.py's fixture (transcripts_100.fa, k = 6) and
-    requests, /search's answers apart from what release 10 adds and orders
-    (assert_search_as_before); /capabilities only gains."""
+    """/search and /align answer byte for byte as an older build does ($METAGRAPH_BASE_BINARY:
+    one before the pattern search, §11, or 8fa32e553, before release 10), on test_api.py's
+    fixture (transcripts_100.fa, k = 6) and requests, /search's answers apart from what release
+    10 adds and orders (assert_search_as_before); /capabilities only gains. Skipped only when
+    no base binary is given; a given path that is no file fails."""
 
     SEQ = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
     SEQ2 = 'AATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA'
 
     @classmethod
     def setUpClass(cls):
+        if not os.path.isfile(BASE_BINARY):
+            raise AssertionError(f'$METAGRAPH_BASE_BINARY is not a file: {BASE_BINARY}')
         super().setUpClass()
         d = cls.tempdir.name
         fasta = TEST_DATA_DIR + '/transcripts_100.fa'
@@ -4460,51 +4463,76 @@ class TestPatternRegression(TestingBase):
                     block[path[-1]] = None
             return caps
         def without_poll_stride(caps):
-            # the number of the deadline_check rule, a field beside its reference, and the
-            # window of its observation (SPEC-labeled-traversal-core.md §10.3)
-            self.assertEqual(8, caps['deadline_check'].pop('poll_stride'))
-            self.assertEqual(3600, caps['deadline_check'].pop('observed_window_s'))
+            # the numbers of the deadline_check rule, fields beside its reference: the poll
+            # stride and the window of its observation (SPEC-labeled-traversal-core.md §10.3),
+            # which a base before them lacks
+            if caps is b:
+                self.assertEqual((8, 3600), (caps['deadline_check'].get('poll_stride'),
+                                             caps['deadline_check'].get('observed_window_s')))
+            caps['deadline_check'].pop('poll_stride', None)
+            caps['deadline_check'].pop('observed_window_s', None)
             return caps
+
+        def only_gains(base, new, allowed, what):
+            # every member of |base| is in |new|, and what |new| adds is documented
+            self.assertLessEqual(set(base), set(new), what)
+            self.assertLessEqual(set(new) - set(base), allowed, what)
+
         a = without_reworded(without_instance(self.base.get('capabilities').json()))
         b = without_reworded(without_instance(self.new.get('capabilities').json()))
-        b = without_poll_stride(b)
-        self.assertIn('pattern', b)
-        self.assertEqual(a['features'] + ['pattern'], b['features'])
-        self.assertEqual(dict(a['routes'], pattern='POST /pattern',
-                              pattern_capabilities='GET /pattern/capabilities',
-                              requests='GET /requests/{request_id}'), b['routes'])
+        without_poll_stride(a)
+        without_poll_stride(b)
+        # The documented gains, compared as sets: routes.requests (GET /requests/{request_id},
+        # release 10, on every server); against a base before the pattern search also the
+        # feature `pattern` with its routes and its blocks -- `pattern`, `resolve` (the block of
+        # /resolve's opt-in bounds.time_budget_ms, SPEC-labeled-traversal-core.md §4.5), `in_ram`
+        # (accepted as /search accepts it), `graph_summary` and `max_graphs_without_selection`
+        # (both null on a single-graph server), SPEC-pattern-search.md §24, and
+        # `max_request_body_mb` (the largest request body read; null: unlimited, the default).
+        # A base that serves /pattern (8fa32e553) already states them
+        base_pattern = 'pattern' in a['features']
+        self.assertIn('pattern', b['features'])
+        only_gains(a['features'], b['features'], set() if base_pattern else {'pattern'},
+                   'features')
+        only_gains(a, b, set() if base_pattern else {
+            'pattern', 'resolve', 'in_ram', 'graph_summary', 'max_graphs_without_selection',
+            'max_request_body_mb'}, 'members')
+        only_gains(a['routes'], b['routes'],
+                   {'requests'} | (set() if base_pattern else {'pattern', 'pattern_capabilities'}),
+                   'routes')
+        self.assertEqual('GET /requests/{request_id}', b['routes']['requests'])
+        # what the base states keeps its value
+        for route in a['routes']:
+            self.assertEqual(a['routes'][route], b['routes'][route], route)
         for key in a:
             if key not in ('features', 'routes'):
                 self.assertEqual(a[key], b[key], key)
-        # the stated gains: `pattern` (this route) and `resolve`, the block of /resolve's
-        # opt-in bounds.time_budget_ms (SPEC-labeled-traversal-core.md §4.5): a capabilities
-        # block, not a feature, since /resolve is listed already; `in_ram` (accepted as /search
-        # accepts it), `graph_summary` and `max_graphs_without_selection` (both null on a
-        # single-graph server), SPEC-pattern-search.md §24, and `max_request_body_mb` (the
-        # largest request body read, --max-request-body-mb; null: unlimited, the default)
-        self.assertEqual(set(a) | {'pattern', 'resolve', 'in_ram', 'graph_summary',
-                                   'max_graphs_without_selection', 'max_request_body_mb'},
-                         set(b))
-        self.assertIsNone(b['graph_summary'])
-        self.assertIsNone(b['max_graphs_without_selection'])
-        self.assertIsNone(b['max_request_body_mb'])
-        self.assertFalse(b['in_ram']['loads'])
-        self.assertTrue(b['resolve']['time_budget']['accepted'])
-        self.assertIsNone(b['resolve']['time_budget']['default'])
-        # the probe gains the same two blocks and nothing else
+        if not base_pattern:
+            self.assertEqual(('POST /pattern', 'GET /pattern/capabilities'),
+                             (b['routes']['pattern'], b['routes']['pattern_capabilities']))
+            self.assertIsNone(b['graph_summary'])
+            self.assertIsNone(b['max_graphs_without_selection'])
+            self.assertIsNone(b['max_request_body_mb'])
+            self.assertFalse(b['in_ram']['loads'])
+            self.assertTrue(b['resolve']['time_budget']['accepted'])
+            self.assertIsNone(b['resolve']['time_budget']['default'])
+        # The probe gains discovery_trace_scale (a discovery under trace ranks by traced
+        # k-mers, release 10's post-merge fix, SPEC-multigraph-envelope.md section 7), and
+        # against a base before the pattern search the gate block and the two blocks above
         a = without_reworded(without_instance(self.base.get('traverse/capabilities').json()))
         b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
-        b = without_poll_stride(b)
+        without_poll_stride(a)
+        without_poll_stride(b)
         new_caps = self.new.get('capabilities').json()
-        self.assertEqual(gate_block(new_caps['pattern']), b.pop('pattern'))
-        self.assertEqual(new_caps['resolve'], b.pop('resolve'))
-        self.assertEqual(new_caps['in_ram'], b.pop('in_ram'))
-        # a discovery under trace ranks by traced k-mers (release 10's post-merge fix,
-        # SPEC-multigraph-envelope.md section 7), stated in every /traverse capabilities block
-        a.pop('discovery_trace_scale', None)
-        self.assertEqual('traced', b.pop('discovery_trace_scale'))
-        self.assertEqual(a, b)
-
+        gains = {'discovery_trace_scale'} | (set() if base_pattern
+                                             else {'pattern', 'resolve', 'in_ram'})
+        only_gains(a, b, gains, 'probe')
+        self.assertEqual('traced', b['discovery_trace_scale'])
+        self.assertEqual(gate_block(new_caps['pattern']), b['pattern'])
+        self.assertEqual(new_caps['resolve'], b['resolve'])
+        self.assertEqual(new_caps['in_ram'], b['in_ram'])
+        for key in a:
+            self.assertEqual(a[key], b[key], key)
 
 if __name__ == '__main__':
     unittest.main()
