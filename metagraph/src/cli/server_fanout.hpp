@@ -320,8 +320,10 @@ class PairControl {
     // the pair waits for the memory to load its index into RAM: not started yet
     void waiting_memory();
     // The pair starts: loading its index (|bytes| reserved for it), or its work. False when it
-    // may not (the request closed, or not_after_ms passed): the job releases what it holds
-    // and returns not_started. Once started, the pair is unfinished if it is still running at
+    // may not (the request closed, not_after_ms passed, a pooled pair's cutoff passed, read
+    // with the transition so that no thread starts a pair past them; an inline pair's load
+    // past its wait limit or with its client gone): the job releases what it holds and
+    // returns not_started. Once started, a pooled pair is unfinished if it is still running at
     // the cutoff. start_running after start_loading only notes the end of the load
     bool start_loading(uint64_t bytes);
     bool start_running();

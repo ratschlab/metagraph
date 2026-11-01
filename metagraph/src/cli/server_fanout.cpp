@@ -735,13 +735,17 @@ class FanoutState {
         return limit;
     }
 
-    // a pair starts (the worker's thread): false when it may not. A load is not started once
-    // the request stopped (its client gone, the cutoff passed) or its wait limit passed
-    // (section 4: the in_ram memory wait is not entered once finish_by_ms has passed, and a
-    // load would only hold memory for an answer already due): the pair is then not reached
+    // a pair starts (the worker's thread): false when it may not. Every limit is read under
+    // |mutex| with the transition, whichever thread reaches the cutoff first: a pooled pair
+    // starts nothing past the cutoff, also when the handler has not closed the request yet (a
+    // load cannot be interrupted once started). An inline pair is its request (section 4): it
+    // is not cut, and only a load is not started once its client left or its wait limit passed
+    // (the in_ram memory wait is not entered once finish_by_ms has passed, and a load would
+    // only hold memory for an answer already due): the pair is then not reached
     bool start(size_t i, bool loading, uint64_t bytes) {
-        if (loading && (stopped(i) || now() >= wait_limit()))
-            return false;
+        // (its client's check reads the socket, outside the lock: no other thread decides an
+        // inline pair)
+        const bool inline_stop = inline_run && loading && stopped(i);
         std::lock_guard<std::mutex> lock(mutex);
         Slot &slot = slots[i];
         if (slot.phase == Slot::STARTED) {
@@ -750,12 +754,23 @@ class FanoutState {
             entry->pair_running(i);
             return true;
         }
-        if (slot.resolved || closed)
+        if (slot.resolved || closed || inline_stop)
             return false;
         if (not_after_passed()) {
             not_reached_locked(i, "not_after_ms", loading ? "when the memory to load its index "
                                                             "was granted"
                                                           : "when it was to start");
+            changed.notify_all();
+            return false;
+        }
+        if (inline_run) {
+            if (loading && now() >= wait_limit())
+                return false;
+        } else if (now() >= wait_limit()) {
+            not_reached_locked(i, not_reached_reason(false),
+                               slot.phase == Slot::WAITING
+                                   ? "it waited for the memory to load its index"
+                                   : "it waited for a pool thread");
             changed.notify_all();
             return false;
         }

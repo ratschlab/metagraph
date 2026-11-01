@@ -443,6 +443,81 @@ TEST(ServerFanout, NoLoadPastTheWaitLimit) {
     wait_for_workers();
 }
 
+// A worker that reaches a pair's start after the cutoff, before the handler closed the request
+// (GPT A2: an immediately granted reservation asks no wait predicate, and the load then cannot
+// be interrupted): the cutoff is read with the transition, so nothing starts, a load or the
+// work, and the pair is not_reached. The worker runs inside the handler's client check, where
+// the handler has read the clock and holds no lock: the order that lost the race
+TEST(ServerFanout, NoPooledPairStartsPastTheCutoff) {
+    for (const bool load : { true, false }) {
+        SCOPED_TRACE(load);
+        const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+        auto entry = entry_of(pairs);
+        const RequestDeadlines d = deadlines_now(60'000);
+        auto time = std::make_shared<std::atomic<SteadyClock::rep>>(
+                d.arrival.time_since_epoch().count());
+        std::vector<std::function<void()>> tasks;
+        size_t asked = 0;
+        size_t started = 0;
+        FanoutSettings settings = settings_of(pairs, d, "/pattern");
+        settings.poll_ms = 1;
+        settings.clock = [time]() {
+            return SteadyClock::time_point(SteadyClock::duration(time->load()));
+        };
+        settings.gone = [&]() {
+            if (++asked == 2) {
+                EXPECT_EQ(2u, tasks.size());
+                time->store((d.cutoff + 1ms).time_since_epoch().count());
+                for (auto &task : tasks) {
+                    task();
+                }
+            }
+            return false;
+        };
+        FanoutOutcome out = run_fanout(settings, entry, [&](PairControl &control) {
+            PairResult r;
+            if (load) {
+                // (the reservation was granted at once: no wait polled the predicate)
+                control.waiting_memory();
+            }
+            r.not_started = !(load ? control.start_loading(100) : control.start_running());
+            started += !r.not_started;
+            return r;
+        }, [&](std::function<void()> task, SteadyClock::time_point) {
+            tasks.push_back(std::move(task));
+            return true;
+        });
+        EXPECT_EQ(0u, started);
+        ASSERT_EQ(2u, out.entries.size());
+        for (size_t i = 0; i < 2; ++i) {
+            const Json::Value &refusal = out.entries[i]["refusal"];
+            EXPECT_EQ("not_reached", refusal["code"].asString());
+            EXPECT_EQ("cutoff", refusal["reason"].asString());
+            EXPECT_NE(std::string::npos, refusal["error"].asString().find(
+                    load ? "it waited for the memory to load its index"
+                         : "it waited for a pool thread")) << refusal["error"].asString();
+            EXPECT_EQ("never_started", entry->json(0)["pairs"][int(i)]["state"].asString());
+        }
+    }
+    wait_for_workers();
+}
+
+// The cutoff is no limit of an inline pair (section 4): it starts and answers as a single-graph
+// request does, past the cutoff too
+TEST(ServerFanout, AnInlinePairStartsPastTheCutoff) {
+    const std::vector<SelectedPair> pairs { kPairs[0] };
+    auto entry = entry_of(pairs);
+    // (the budget is 0: the cutoff passed before the handler started)
+    FanoutOutcome out = run_fanout(settings_of(pairs, deadlines_now(0)), entry,
+        [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            return answered(control);
+        }, not_launched);
+    ASSERT_EQ(1u, out.entries.size());
+    EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
+    wait_for_workers();
+}
+
 // E4's test: one completed pair beside a sibling blocked waiting for the memory to load its
 // index, under a short route budget and a later finish_by_ms: at the cutoff (from the
 // effective deadline, not finish_by's) the completed answer survives and the sibling is
