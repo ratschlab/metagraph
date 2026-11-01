@@ -214,7 +214,8 @@ TEST(SearchCut, MediansOrderTheTies) {
 }
 
 // Sample 14 of SPEC-multigraph-envelope.md (round 2 of the contract notice): its row's
-// kmer_count is the number of query positions with a non-zero abundance, its cut's nth_median
+// kmer_abundances in the server's default format (the runs, zeros omitted), its kmer_count the
+// number of query positions the runs cover (a non-zero abundance each), its cut's nth_median
 // the lower median of those abundances, and the cut itself what search_top_n states for the
 // sample's N (its request's top_labels) over SRR1001 and the narrated SRR0999 (12 k-mers,
 // median 1)
@@ -232,14 +233,28 @@ TEST(SearchCut, Sample14IsTheEnginesCut) {
     const Json::Value &query = sample["body"][0];
     ASSERT_EQ(1u, query["results"].size());
     const Json::Value &row = query["results"][0];
+    // kmer_abundances as the server writes it without --verbose (SeqSearchResult::to_json):
+    // the runs of one abundance, "pos=count" or "start-end=count", the zero runs omitted
     std::vector<uint64_t> abundances;
-    std::stringstream positions(row["kmer_abundances"].asString());
-    for (std::string value; std::getline(positions, value, ':'); ) {
-        abundances.push_back(std::stoull(value));
+    std::stringstream runs(row["kmer_abundances"].asString());
+    size_t next = 0;
+    for (std::string run; std::getline(runs, run, ':'); ) {
+        const size_t eq = run.find('=');
+        ASSERT_NE(std::string::npos, eq) << run;
+        const std::string span = run.substr(0, eq);
+        const size_t dash = span.find('-');
+        const size_t first = std::stoull(span.substr(0, dash));
+        const size_t last = dash == std::string::npos ? first : std::stoull(span.substr(dash + 1));
+        const uint64_t value = std::stoull(run.substr(eq + 1));
+        EXPECT_LE(next, first) << run;
+        EXPECT_LE(first, last) << run;
+        EXPECT_GT(value, 0u) << run;
+        abundances.insert(abundances.end(), last - first + 1, value);
+        next = last + 1;
     }
-    const size_t present = std::count_if(abundances.begin(), abundances.end(),
-                                         [](uint64_t a) { return a > 0; });
-    EXPECT_EQ(present, row["kmer_count"].asUInt64());
+    // the positions the runs cover: those where the label is present
+    EXPECT_EQ(abundances.size(), row["kmer_count"].asUInt64());
+    EXPECT_EQ(12u, abundances.size());
     const uint64_t median = lower_median(abundances);
     const auto top = top_n({ "SRR0999", row["sample"].asString() },
                            { 12, row["kmer_count"].asUInt64() }, n, { 1, median });
