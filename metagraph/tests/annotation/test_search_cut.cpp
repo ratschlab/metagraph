@@ -1,6 +1,10 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <chrono>
+#include <limits>
+#include <numeric>
+#include <tuple>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -262,6 +266,117 @@ TEST(SearchCut, NoneRequested) {
     EXPECT_TRUE(top.decoded.empty());
 }
 
+
+// search_top_n against the definition: every candidate sorted in the C5 order (score
+// descending, median descending, label ascending, then its index), the first N taken, the
+// cut counted from that order; random scores with many ties, medians or none, and labels
+// held by two candidates
+TEST(SearchCut, SelectionIsTheC5Order) {
+    std::mt19937 rng(11);
+    for (size_t trial = 0; trial < 2000; ++trial) {
+        const size_t num = rng() % 40;
+        const size_t n = rng() % 45;
+        const bool counts = trial % 2;
+        std::vector<size_t> scores(num);
+        std::vector<uint64_t> medians(num);
+        std::vector<std::string> labels(num);
+        for (size_t i = 0; i < num; ++i) {
+            scores[i] = rng() % 5;
+            medians[i] = counts ? 1 + rng() % 3 : 0;
+            labels[i] = "L" + std::to_string(rng() % (num + 1));
+        }
+        auto top = top_n(labels, scores, n, counts ? medians : std::vector<uint64_t>());
+
+        std::vector<size_t> order(num);
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](size_t i, size_t j) {
+            return std::make_tuple(-(int64_t)scores[i], -(int64_t)medians[i], labels[i], i)
+                    < std::make_tuple(-(int64_t)scores[j], -(int64_t)medians[j], labels[j], j);
+        });
+        const size_t returned = std::min(n, num);
+        ASSERT_EQ(returned, top.rows.size()) << trial;
+        for (size_t r = 0; r < returned; ++r) {
+            ASSERT_EQ(order[r], top.rows[r].first) << trial << " " << r;
+            ASSERT_EQ(labels[order[r]], top.rows[r].second) << trial;
+        }
+        ASSERT_EQ(returned, top.cut.returned);
+        ASSERT_EQ(num <= n, top.cut.complete) << trial;
+        if (num)
+            ASSERT_EQ(counts, top.cut.abundances);
+        if (top.cut.complete || !n) {
+            ASSERT_EQ(0u, top.cut.tied) << trial;
+            ASSERT_FALSE(top.cut.nth_median_read) << trial;
+            continue;
+        }
+        const size_t nth = order[n - 1];
+        size_t tied = 0, tied_returned = 0, same_median = 0;
+        for (size_t r = 0; r < num; ++r) {
+            if (scores[order[r]] != scores[nth])
+                continue;
+            ++tied;
+            tied_returned += r < n;
+            same_median += medians[order[r]] == medians[nth];
+        }
+        ASSERT_EQ(scores[nth], top.cut.nth_score) << trial;
+        ASSERT_EQ(tied, top.cut.tied) << trial;
+        ASSERT_EQ(tied_returned, top.cut.tied_returned) << trial;
+        if (!counts) {
+            ASSERT_FALSE(top.cut.nth_median_read);
+            ASSERT_EQ(0u, top.cut.tied_same_median);
+        } else if (tied > 1) {
+            ASSERT_TRUE(top.cut.nth_median_read) << trial;
+            ASSERT_EQ(medians[nth], top.cut.nth_median) << trial;
+            ASSERT_EQ(same_median, top.cut.tied_same_median) << trial;
+        } else {
+            ASSERT_FALSE(top.cut.nth_median_read) << trial;
+            ASSERT_EQ(1u, top.cut.tied_same_median) << trial;
+        }
+    }
+}
+
+// R10-SEARCH-COST-3: a tie group at the cut takes its places by a selection, O(T + N log N),
+// not by sorting the whole group (twice): a million labels of one score cost a small multiple
+// of a million labels of distinct scores, of which only N are decoded. Measured as a ratio in
+// one process, the best of three runs each, so that a loaded machine slows both alike.
+TEST(SearchCut, LargeTieGroupIsSelectedNotSorted) {
+    const size_t num = 1'000'000;
+    const size_t n = 10;
+    std::vector<size_t> tied(num, 5);
+    std::vector<size_t> distinct(num);
+    std::vector<std::string> labels(num);
+    for (size_t i = 0; i < num; ++i) {
+        const size_t permuted = (i * 2654435761ull) % num;
+        distinct[i] = permuted + 1;
+        labels[i] = "SRR" + std::to_string(1'000'000'000ull + permuted);
+    }
+    auto best_of_three = [&](const std::vector<size_t> &scores) {
+        double best = std::numeric_limits<double>::max();
+        for (int run = 0; run < 3; ++run) {
+            SearchCut cut;
+            auto start = std::chrono::steady_clock::now();
+            auto rows = search_top_n(scores, n, [&](size_t i) { return labels[i]; }, {}, &cut);
+            best = std::min(best, std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - start).count());
+            EXPECT_EQ(n, rows.size());
+        }
+        return best;
+    };
+    const double distinct_s = best_of_three(distinct);
+    const double tied_s = best_of_three(tied);
+    // a full sort of the group took 35 to 80 times the distinct case, the selection 3 to 7
+    EXPECT_LT(tied_s, 20 * distinct_s) << "tied " << tied_s << " s, distinct " << distinct_s << " s";
+
+    // the tie group's first labels in byte order
+    SearchCut cut;
+    auto rows = search_top_n(tied, n, [&](size_t i) { return labels[i]; }, {}, &cut);
+    std::vector<std::string> sorted_labels = labels;
+    std::partial_sort(sorted_labels.begin(), sorted_labels.begin() + n, sorted_labels.end());
+    for (size_t r = 0; r < n; ++r) {
+        EXPECT_EQ(sorted_labels[r], rows[r].second);
+    }
+    EXPECT_EQ(num, cut.tied);
+    EXPECT_EQ(n, cut.tied_returned);
+}
 
 // R10-SEARCH-COST-2: the medians are read only for the rows a median is compared for (the tie
 // group at a cut, whose N-th row's median the cut states, and rows above the cut that share a

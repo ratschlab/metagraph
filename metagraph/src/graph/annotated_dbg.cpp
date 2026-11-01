@@ -437,24 +437,34 @@ search_top_n(const std::vector<size_t> &scores,
     };
 
     if (!c.complete && slots) {
-        // The tie group competes for |slots| places. Only the rows of the N-th row's median
-        // compete by label, so only they are decoded beside the rows returned: a large tie
-        // group (a common k-mer set at the cut) is not decoded entirely where the medians
-        // separate it.
+        // The tie group competes for |slots| places: by median where its medians were read,
+        // then by label. Only the rows of the N-th row's median compete by label, so only
+        // they are decoded beside the rows returned (a large tie group, a common k-mer set at
+        // the cut, is not decoded entirely where the medians separate it), and the places
+        // are taken by a selection, not a sort of the whole group: O(T + slots log slots),
+        // the returned rows sorted below.
         auto tie_begin = rows.begin() + above;
-        std::sort(tie_begin, rows.end(),
-                  [](const Row &a, const Row &b) { return a.median > b.median; });
-        c.nth_median = tie_begin[slots - 1].median;
-        auto same_begin = std::partition_point(tie_begin, rows.end(),
-                [&](const Row &row) { return row.median > c.nth_median; });
-        auto same_end = std::partition_point(same_begin, rows.end(),
-                [&](const Row &row) { return row.median == c.nth_median; });
+        auto same_begin = tie_begin;
+        auto same_end = rows.end();
+        if (c.nth_median_read) {
+            // the |slots|-th largest median, and the group split around it
+            std::nth_element(tie_begin, tie_begin + slots - 1, rows.end(),
+                             [](const Row &a, const Row &b) { return a.median > b.median; });
+            c.nth_median = tie_begin[slots - 1].median;
+            same_begin = std::partition(tie_begin, rows.end(),
+                    [&](const Row &row) { return row.median > c.nth_median; });
+            same_end = std::partition(same_begin, rows.end(),
+                    [&](const Row &row) { return row.median == c.nth_median; });
+        }
         c.tied_same_median = same_end - same_begin;
         for (auto it = tie_begin; it != same_end; ++it) {
             it->label = label(it->index);
         }
-        std::sort(same_begin, same_end, before);
-        rows.erase(tie_begin + slots, rows.end());
+        // the first rows of the N-th row's median in the C5 order take the places left
+        auto end_returned = tie_begin + slots;
+        assert(same_begin < end_returned && end_returned <= same_end);
+        std::nth_element(same_begin, end_returned - 1, same_end, before);
+        rows.erase(end_returned, rows.end());
     }
     if (!c.abundances) {
         c.nth_median = c.tied_same_median = 0;
