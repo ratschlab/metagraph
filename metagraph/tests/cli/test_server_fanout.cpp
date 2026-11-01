@@ -945,6 +945,59 @@ TEST(ServerFanout, PairsWaitingForRoomAreHandedOver) {
     wait_for_workers();
 }
 
+// Pairs that end while the handler hands them over (its lock released, their notices sent to
+// nobody) are seen at once, not after a whole poll (recheck4: the handler slept poll_ms with
+// every pair resolved)
+TEST(ServerFanout, PairsEndedDuringTheHandOverAreSeenAtOnce) {
+    const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+    auto entry = entry_of(pairs);
+    FanoutSettings settings = settings_of(pairs, deadlines_now(600'000), "/pattern");
+    settings.poll_ms = 10'000;
+    const auto start = SteadyClock::now();
+    FanoutOutcome out = run_fanout(settings, entry, [&](PairControl &control) {
+        EXPECT_TRUE(control.start_running());
+        return answered(control);
+    }, [](std::function<void()> task, SteadyClock::time_point) {
+        // the pair runs to its end before the launch returns
+        std::thread(std::move(task)).join();
+        return true;
+    });
+    const auto elapsed = SteadyClock::now() - start;
+    EXPECT_LT(elapsed, 5s) << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+                           << " ms";
+    ASSERT_EQ(2u, out.entries.size());
+    for (const Json::Value &e : out.entries) {
+        EXPECT_EQ("answered", e["outcome"].asString());
+    }
+    wait_for_workers();
+}
+
+// The same on the graphs' pool as the server uses it: no fan-out of trivial pairs waits a
+// whole poll after its pairs ended (recheck4: 1 in 300 did)
+TEST(ServerFanout, NoFanOutOnARealPoolWaitsAPollAfterItsPairs) {
+    ThreadPool pool(4, 1000);
+    const Launch launch = [&pool](std::function<void()> task, SteadyClock::time_point until) {
+        return pool.try_enqueue_until(until, std::move(task));
+    };
+    size_t slow = 0;
+    for (size_t r = 0; r < 300; ++r) {
+        const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+        auto entry = entry_of(pairs);
+        FanoutSettings settings = settings_of(pairs, deadlines_now(600'000), "/pattern");
+        settings.poll_ms = 2'000;
+        const auto start = SteadyClock::now();
+        run_fanout(settings, entry, [&](PairControl &control) {
+            control.start_running();
+            return answered(control);
+        }, launch);
+        if (SteadyClock::now() - start >= 1s)
+            ++slow;
+    }
+    pool.join();
+    wait_for_workers();
+    EXPECT_EQ(0u, slow);
+}
+
 // An exception of the submission (GPT A4: a task's allocation, the second of two): the first
 // pair is told to stop and the other ends at once, so that the entry ends with the response,
 // its id free again after the retention (none here), instead of "running" for good. The

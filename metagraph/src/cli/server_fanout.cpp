@@ -1084,9 +1084,11 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
             state->inline_gone = nullptr;
             throw;
         }
-        // (a full queue was the wait: the handler's checks come first)
+        // (a full queue was the wait: the handler's checks come first). A pair may have ended
+        // while the lock was released to hand it over, its notice sent to nobody: the wait
+        // reads the slots first
         if (next == n)
-            state->changed.wait_until(lock, until);
+            state->changed.wait_until(lock, until, all_resolved);
     }
     // a pair decided by the handler is told to stop (its worker ends at its next check)
     if (!state->closed && std::any_of(state->slots.begin(), state->slots.end(),
