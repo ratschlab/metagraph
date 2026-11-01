@@ -573,4 +573,114 @@ TEST(construct_query_graph, batched_counts_search_answers_as_unbatched) {
     check_batched_parity<graph::DBGSuccinct>(graph::DeBruijnGraph::CANONICAL, CountsForm::INT_BRWT);
 }
 
+// An int_brwt annotation's matrix that counts the integer values read from it
+class CountingIntBRWT : public annot::matrix::CSCMatrix<annot::matrix::BRWT, annot::CountsVector> {
+  public:
+    using CSCMatrix::CSCMatrix;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+                                          size_t num_threads = 1) const override {
+        ++reads;
+        rows_read += rows.size();
+        return CSCMatrix::get_row_values(rows, num_threads);
+    }
+    mutable size_t reads = 0;
+    mutable size_t rows_read = 0;
+};
+
+// GPT B3: a batch on a counts annotation keeps the binary slice in the modes that read no counts,
+// and reads no integer value where no median orders a tie: N = 0, every score its own, and a
+// tie of one at the cut (only a shared score reads the medians, once, a repeated k-mer's row
+// once). Unbatched alike
+TEST(construct_query_graph, no_values_read_without_a_tie) {
+    const size_t k = 11;
+    std::mt19937 rng(5);
+    std::string segment(60 + k - 1, 'A');
+    for (char &c : segment) {
+        c = "ACGT"[rng() % 4];
+    }
+    auto graph = test::build_graph_batch<graph::DBGHashOrdered>(k, { segment });
+    std::map<std::string, size_t> position;
+    for (size_t i = 0; i + k <= segment.size(); ++i) {
+        position[segment.substr(i, k)] = i;
+    }
+    // a: 60 k-mers, b: 40, c: 20, uneven; d: b's k-mers with other values (the tie with b)
+    const std::vector<std::string> labels { "a", "b", "c", "d" };
+    const size_t covered[] = { 60, 40, 20, 40 };
+    auto value = [&](size_t label, const std::string &kmer) -> uint64_t {
+        const size_t i = position.at(kmer);
+        return i < covered[label] ? 1 + (i * (label + 3)) % 7 : 0;
+    };
+    const uint64_t num_rows = graph->max_index();
+    std::vector<sdsl::bit_vector> bits(labels.size(), sdsl::bit_vector(num_rows, false));
+    std::vector<std::vector<uint64_t>> values(labels.size());
+    std::vector<std::pair<uint64_t, std::string>> kmers;
+    graph->call_kmers([&](graph::DeBruijnGraph::node_index node, const std::string &kmer) {
+        kmers.emplace_back(graph::AnnotatedDBG::graph_to_anno_index(node), kmer);
+    });
+    std::sort(kmers.begin(), kmers.end());
+    for (const auto &[row, kmer] : kmers) {
+        for (size_t j = 0; j < labels.size(); ++j) {
+            if (uint64_t v = value(j, kmer)) {
+                bits[j][row] = true;
+                values[j].push_back(v);
+            }
+        }
+    }
+    test::BitVectorPtrArray columns;
+    std::vector<annot::CountsVector> counts;
+    for (size_t j = 0; j < labels.size(); ++j) {
+        columns.push_back(std::make_unique<bit_vector_stat>(std::move(bits[j])));
+        sdsl::int_vector<> v(values[j].size());
+        for (size_t i = 0; i < v.size(); ++i) {
+            v[i] = values[j][i];
+        }
+        counts.emplace_back(v);
+    }
+    auto matrix = std::make_unique<CountingIntBRWT>(
+            test::build_matrix_from_columns<annot::matrix::BRWT>(columns, num_rows),
+            std::move(counts));
+    const CountingIntBRWT &counted = *matrix;
+    annot::LabelEncoder<std::string> encoder;
+    for (const auto &label : labels) {
+        encoder.insert_and_encode(label);
+    }
+    graph::AnnotatedDBG full(graph, std::make_unique<annot::IntMultiBRWTAnnotator>(
+            std::move(matrix), encoder));
+    ASSERT_TRUE(full.has_kmer_abundances());
+
+    // the segment, its first 20 k-mers three times more
+    const std::string query = segment + "T" + segment.substr(0, 20 + k - 1)
+                            + "T" + segment.substr(0, 20 + k - 1) + "T"
+                            + segment.substr(0, 20 + k - 1);
+    for (const std::string mode : { "matches", "signature" }) {
+        auto config = query_config(mode);
+        auto query_graph = cli::construct_query_graph(
+                full, [&](const auto &callback) { callback(query); }, 1, *config);
+        EXPECT_FALSE(dynamic_cast<const annot::matrix::IntMatrix *>(
+                &query_graph->get_annotator().get_matrix())) << mode;
+        for (const graph::AnnotatedDBG *index : { query_graph.get(), &full }) {
+            SCOPED_TRACE(mode + (index == &full ? " unbatched" : " batched"));
+            auto run = [&](size_t n) {
+                return cli::execute_query(cli::QuerySequence { 0, "q", query },
+                                          config->query_mode, n, 0.0, 0.0, *index);
+            };
+            const size_t reads = counted.reads;
+            const size_t rows_read = counted.rows_read;
+            // N = 0, and a cut whose N-th score has one label (positions: a 120, b and d 100,
+            // c 80): no value read
+            for (size_t n : { 0, 1 }) {
+                EXPECT_FALSE(run(n).get_cut().nth_median_read) << n;
+                EXPECT_EQ(reads, counted.reads) << n;
+            }
+            // a cut in the tie of b and d: the medians are read once, each of the query's 60
+            // distinct k-mers' rows once (the 60 repeated positions not again)
+            const cli::SeqSearchResult tie = run(2);
+            EXPECT_TRUE(tie.get_cut().nth_median_read);
+            EXPECT_EQ(2u, tie.get_cut().tied);
+            EXPECT_EQ(reads + 1, counted.reads);
+            EXPECT_EQ(rows_read + 60, counted.rows_read);
+        }
+    }
+}
+
 } // namespace

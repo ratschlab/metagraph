@@ -350,6 +350,50 @@ TEST(GraphletAttempt, ThePairLivesAsLongAsTheAttempt) {
     EXPECT_EQ(404, registry.state("with-pair", &pair).first);
 }
 
+// GPT A6: the pair of a running /traverse attempt stays with it whatever the retention: with
+// --traverse-attempt-retention-s 0 and at most one finished attempt kept, the attempts that
+// finish and are evicted around it never take its pair; it ends with the attempt
+TEST(GraphletAttempt, ThePairOutlivesEvictionWhileTheAttemptRuns) {
+    FakeClock clock;
+    for (const auto &[retention_s, retention_count] : { std::make_pair(0, 100),
+                                                        std::make_pair(3600, 1) }) {
+        AttemptRegistry registry(settings_with(&clock, retention_s, retention_count));
+        auto running = attempt_of(registry, "running");
+        Json::Value ref;
+        ref["graph"] = "A";
+        ref["graph_path"] = "a.dbg";
+        ref["annotation_path"] = "a.anno";
+        running->set_pair_ref(ref);
+        running->set_bound(1, 1000);
+        ASSERT_FALSE(registry.start(running));
+        for (int i = 0; i < 5; ++i) {
+            auto other = attempt_of(registry, "other-" + std::to_string(i));
+            Json::Value other_ref = ref;
+            other_ref["graph"] = "B";
+            other->set_pair_ref(other_ref);
+            other->set_bound(1, 1000);
+            ASSERT_FALSE(registry.start(other));
+            clock.ms += 1000;
+            registry.finish(other, "completed", 200, 10);
+            clock.ms += 1000;
+            Json::Value pair;
+            ASSERT_EQ(200, registry.state("running", &pair).first) << retention_s;
+            EXPECT_EQ(ref, pair) << retention_s;
+            const Json::Value request = traverse_request_json(registry.state("running").second,
+                                                              pair, retention_s);
+            EXPECT_EQ("A", request["pairs"][0]["graph"].asString());
+            EXPECT_EQ("a.dbg", request["pairs"][0]["graph_path"].asString());
+        }
+        // finished: kept as its retention says, its pair with it
+        registry.finish(running, "completed", 200, 10);
+        Json::Value pair;
+        EXPECT_EQ(retention_s ? 200 : 404, registry.state("running", &pair).first);
+        if (retention_s) {
+            EXPECT_EQ(ref, pair);
+        }
+    }
+}
+
 // The stop latency is measured where a seed's walk ends: its first seed_walked. A second call
 // for the seed comes while its result is built (the client left, or a writer refused it), and
 // the time since the walk-until then includes building, which the reserve prices apart. Taken
