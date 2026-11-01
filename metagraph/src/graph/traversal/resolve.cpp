@@ -599,8 +599,13 @@ SupportProfile resolve_support(LabelOracle &oracle,
             num_present = used;
         }
         checkpoint();
-        // A label found, as the ranking orders it: its k-mers, where its accumulator and id
-        // are (found, found_ids), and its name once it is looked up (null until then)
+        // A label found, as the ranking orders it: its k-mers supported, where its accumulator
+        // and id are (found, found_ids), and its name once it is looked up (null until then).
+        // The k-mers supported are the number the answer states as kmers_supported (SPEC-
+        // multigraph-envelope.md §7): under support "trace" the traced k-mers (those with a
+        // coordinate of the label, add_trace), else the k-mers it is present at. Both are
+        // final here: the pass over the rows is over (whole, or the prefix a deadline left,
+        // num_present cut to it), and nothing after it adds to an accumulator's counts
         struct Ranked {
             uint64_t kmers;
             uint64_t at;
@@ -610,11 +615,11 @@ SupportProfile resolve_support(LabelOracle &oracle,
         ranked.reserve(found.size());
         for (uint64_t at = 0; at < found.size(); ++at) {
             finishing(at);
-            ranked.push_back({ found[at].kmers, at, nullptr });
+            ranked.push_back({ with_coords ? found[at].traced : found[at].kmers, at, nullptr });
         }
         std::vector<uint32_t>().swap(slot);
         tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash>().swap(index);
-        // More k-mers first, ties by the name the answer states (bytes: the column's name, or
+        // More k-mers supported first, ties by the name the answer states (bytes: the column's name, or
         // the sequence's header), then by (column, seq_id) for a header that two columns hold.
         // A tie by column id let the index's numbering of its columns decide which of the
         // tied labels a cut keeps; by name the same labels rank the same in every index that
@@ -670,6 +675,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
             trunc.kept = kept;
             trunc.min_kept_kmers = ranked[kept - 1].kmers;
             trunc.max_dropped_kmers = ranked[kept].kmers;
+            // full length: supported at every k-mer of the query present in the graph (of
+            // the prefix read, under a stop) -- under trace traced at every one of them
             for (size_t i = kept; i < ranked.size(); ++i) {
                 if (ranked[i].kmers == num_present)
                     trunc.dropped_full_length++;

@@ -117,6 +117,7 @@
       "graphlet"
      ],
      "direct_access": false,
+     "discovery_trace_scale": "traced",
      "feature_level": 6,
      "graphlet_format": 1,
      "has_coord_to_header": true,

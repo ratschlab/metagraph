@@ -20,6 +20,9 @@
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 
 
 namespace {
@@ -568,6 +571,119 @@ TYPED_TEST(ResolveCoordTest, HeaderDiscoveryTiesByName) {
             << what;
         EXPECT_EQ((Cut{ 5, 4, n, m, 0, 4, 4 }), cut_of(profile)) << what;
     }
+}
+
+// SPEC-multigraph-envelope.md §7 under support "trace" (E18): a discovery ranks, cuts and
+// states its cut (min_kept_kmers, max_dropped_kmers, dropped_full_length, tied_at_boundary,
+// tied_kept) by the number it reports as kmers_supported -- under trace the traced k-mers
+// (those where the label has a coordinate), under presence the k-mers it is present at. A
+// coordinate matrix built by hand gives B every k-mer of the query but coordinates at its
+// first 50 only (an empty tuple at the others), so that B has more k-mers present than A
+// (q[0, 70): 60) and fewer traced; D and E carry the whole query with coordinates, C q[0, 40)
+TEST(ResolveTraceDiscovery, RanksByTracedKmers) {
+    const std::string q = random_seq(100, 21);
+    auto graph = build_graph_batch<DBGSuccinct>(kK, { q }, DeBruijnGraph::BASIC);
+    const uint64_t n = q.size() - kK + 1;
+    // the annotation rows of the query's k-mers, in the query's order (each once)
+    std::vector<uint64_t> rows;
+    graph->map_to_nodes(q, [&](node_index i) {
+        ASSERT_NE(DeBruijnGraph::npos, i);
+        rows.push_back(AnnotatedDBG::graph_to_anno_index(i));
+    });
+    ASSERT_EQ(n, rows.size());
+    ASSERT_EQ(n, std::set<uint64_t>(rows.begin(), rows.end()).size());
+    const uint64_t num_rows = graph->max_index();
+    // (label, k-mers present: the first ones, of them with a coordinate: the first ones)
+    const std::vector<std::tuple<std::string, uint64_t, uint64_t>> labels {
+        { "A", 60, 60 }, { "B", n, 50 }, { "C", 30, 30 }, { "D", n, n }, { "E", n, n } };
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    std::vector<bit_vector_smart> delimiters;
+    std::vector<sdsl::int_vector<>> values;
+    annot::LabelEncoder<std::string> encoder;
+    for (const auto &[name, present, traced] : labels) {
+        encoder.insert_and_encode(name);
+        // the label's rows in row order, each with its coordinate (consecutive along the
+        // query: one trace run) or none
+        std::vector<std::pair<uint64_t, std::vector<uint64_t>>> entries;
+        for (uint64_t i = 0; i < present; ++i) {
+            entries.emplace_back(rows[i], i < traced ? std::vector<uint64_t>{ 1000 + i }
+                                                     : std::vector<uint64_t>{});
+        }
+        std::sort(entries.begin(), entries.end());
+        sdsl::bit_vector column(num_rows, 0);
+        std::vector<bool> delims { 1 };
+        std::vector<uint64_t> vals;
+        for (const auto &[row, coords] : entries) {
+            column[row] = 1;
+            for (uint64_t c : coords) {
+                vals.push_back(c);
+                delims.push_back(0);
+            }
+            delims.push_back(1);
+        }
+        columns.push_back(std::make_unique<bit_vector_sd>(column));
+        sdsl::bit_vector d(delims.size());
+        for (size_t i = 0; i < delims.size(); ++i) {
+            d[i] = delims[i];
+        }
+        delimiters.emplace_back(d);
+        sdsl::int_vector<> v(vals.size(), 0, 64);
+        for (size_t i = 0; i < vals.size(); ++i) {
+            v[i] = vals[i];
+        }
+        values.push_back(std::move(v));
+    }
+    auto matrix = std::make_unique<annot::matrix::TupleCSCMatrix<annot::matrix::ColumnMajor>>(
+            annot::matrix::ColumnMajor(std::move(columns)), std::move(delimiters),
+            std::move(values));
+    AnnotatedDBG anno(graph, std::make_unique<annot::ColumnCoordAnnotator>(std::move(matrix),
+                                                                           encoder));
+    LabelOracle oracle(anno);
+    ASSERT_TRUE(oracle.has_coordinates());
+
+    auto discover = [&](Support support, size_t max_labels) {
+        ResolveOptions opts;
+        opts.discover = true;
+        opts.support = support;
+        opts.discover_max_labels = max_labels;
+        return resolve_support(oracle, q, opts);
+    };
+    auto supported = [](const SupportProfile &profile) {
+        std::vector<uint64_t> out;
+        for (const LabelProfile &lp : profile.labels) {
+            out.push_back(lp.kmers_supported);
+        }
+        return out;
+    };
+
+    // without a cut: the order of the k-mers each reports, ties by name
+    SupportProfile all = discover(Support::TRACE, 10);
+    EXPECT_FALSE(all.labels_truncated.has_value());
+    EXPECT_EQ((std::vector<std::string>{ "D", "E", "A", "B", "C" }), names_of(all));
+    EXPECT_EQ((std::vector<uint64_t>{ n, n, 60, 50, 30 }), supported(all));
+    all = discover(Support::KMER, 10);
+    EXPECT_EQ((std::vector<std::string>{ "B", "D", "E", "A", "C" }), names_of(all));
+    EXPECT_EQ((std::vector<uint64_t>{ n, n, n, 60, 30 }), supported(all));
+
+    // under trace B ranks by its 50 traced k-mers: below A, and never full length (traced at
+    // every one of the query's present k-mers), which by presence it is
+    SupportProfile profile = discover(Support::TRACE, 1);
+    EXPECT_EQ((std::vector<std::string>{ "D" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 1, n, n, 1, 2, 1 }), cut_of(profile));
+    profile = discover(Support::TRACE, 3);
+    EXPECT_EQ((std::vector<std::string>{ "D", "E", "A" }), names_of(profile));
+    EXPECT_EQ((std::vector<uint64_t>{ n, n, 60 }), supported(profile));
+    EXPECT_EQ((Cut{ 5, 3, 60, 50, 0, 1, 1 }), cut_of(profile));
+    profile = discover(Support::TRACE, 4);
+    EXPECT_EQ((std::vector<std::string>{ "D", "E", "A", "B" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 4, 50, 30, 0, 1, 1 }), cut_of(profile));
+    // by presence, unchanged: B is among the full-length labels
+    profile = discover(Support::KMER, 1);
+    EXPECT_EQ((std::vector<std::string>{ "B" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 1, n, n, 2, 3, 1 }), cut_of(profile));
+    profile = discover(Support::KMER, 3);
+    EXPECT_EQ((std::vector<std::string>{ "B", "D", "E" }), names_of(profile));
+    EXPECT_EQ((Cut{ 5, 3, n, 60, 0, 3, 3 }), cut_of(profile));
 }
 
 // Explicit labels with trace hand each hit to its label's accumulator in one pass, the calls

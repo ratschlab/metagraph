@@ -51,7 +51,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "d1b2bd9a8af9baec",
+  "server_instance": "fea54ab328a9348f",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -100,6 +100,7 @@
   "graphlet"
  ],
  "direct_access": true,
+ "discovery_trace_scale": "traced",
  "feature_level": 6,
  "graphlet_format": 1,
  "has_coord_to_header": false,

@@ -2347,6 +2347,10 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     c["has_coordinates"] = oracle.has_coordinates();
     c["has_coord_to_header"] = oracle.coord_to_header() != nullptr;
     c["supports_trace"] = oracle.has_coordinates() && oracle.regime() == Regime::BASIC;
+    // the scale a discovery under support "trace" ranks, truncates and states its cut by
+    // (labels_truncated): the traced k-mers, the number it reports as kmers_supported
+    // (SPEC-multigraph-envelope.md section 7; absent before the fix: by k-mers present)
+    c["discovery_trace_scale"] = "traced";
     c["cost_models_available"] = strings_json({ "forbid", "constant", "table" });
     c["label_modes"] = strings_json({ "constrain", "annotate" });
     c["direct_access"] = oracle.supports_direct();

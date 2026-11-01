@@ -98,7 +98,9 @@ struct SeedCandidate {
 };
 
 // A discovery's cut at ResolveOptions::discover_max_labels: the labels ranked by k-mers
-// supported (more first), ties by name (bytes), the first |kept| of them kept
+// supported (more first), ties by name (bytes), the first |kept| of them kept. The k-mers
+// supported are LabelProfile::kmers_supported's: under Support::TRACE the traced k-mers,
+// else the k-mers the label is present at; every count below is on that scale
 struct LabelTruncation {
     size_t kept = 0;
     size_t total = 0;

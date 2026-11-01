@@ -1986,6 +1986,52 @@ class TestTraverseAPI(TestTraverseBase):
                          normalize_result(g.to_json()))
         self.assertEqual([], g.check_rules(outs['full']['results'][0]))
 
+    def test_api_trace_discovery_ranks_by_kmers_supported(self):
+        """E18 under support "trace" (SPEC-multigraph-envelope.md §7, the post-merge fix): a
+        discovery ranks, cuts and states its cut (min_kept_kmers, max_dropped_kmers,
+        dropped_full_length, tied_at_boundary, tied_kept) by the number it reports as
+        kmers_supported, the traced k-mers, on the server as on the CLI; every /traverse
+        capabilities block (the probe, a /resolve's, a /traverse's, the CLI's) states
+        discovery_trace_scale "traced". On this index every present k-mer of a label carries
+        a coordinate, so its traced and present k-mers are the same number:
+        ResolveTraceDiscovery.RanksByTracedKmers builds labels where they differ."""
+        query = self.left1 + self.element
+        full = {'sequence': query, 'support': 'trace',
+                'discover': {'max_labels': 10, 'kind': 'header'}}
+        whole = self._post('resolve', full)
+        self.assertEqual(200, whole.status_code, whole.text)
+        whole = whole.json()
+        self.assertEqual('traced', whole['capabilities']['discovery_trace_scale'])
+        order = sorted(whole['labels'], key=lambda l: (-l['kmers_supported'], l['label'].encode()))
+        self.assertEqual(order, whole['labels'])
+        present = sum(end - begin for begin, end in whole['graph_runs'])
+        for max_labels in (1, 2):
+            request = dict(full, discover={'max_labels': max_labels, 'kind': 'header'})
+            served = self._post('resolve', request)
+            self.assertEqual(200, served.status_code, served.text)
+            served = served.json()
+            cli, rc = self._traverse(request, resolve=True)
+            self.assertEqual(0, rc)
+            kept, dropped = order[:max_labels], order[max_labels:]
+            for out in (served, cli):
+                self.assertEqual('traced', out['capabilities']['discovery_trace_scale'])
+                self.assertEqual(kept, out['labels'])
+                t = out['labels_truncated']
+                boundary = kept[-1]['kmers_supported']
+                tied = [l for l in order if l['kmers_supported'] == boundary]
+                self.assertEqual(
+                        (len(order), max_labels, boundary, dropped[0]['kmers_supported'],
+                         sum(l['kmers_supported'] == present for l in dropped), len(tied),
+                         sum(l['kmers_supported'] == boundary for l in kept)),
+                        (t['total'], t['kept'], t['min_kept_kmers'], t['max_dropped_kmers'],
+                         t['dropped_full_length'], t['tied_at_boundary'], t['tied_kept']))
+            self.assertEqual(served['labels_truncated'], cli['labels_truncated'])
+        probe = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
+        self.assertEqual('traced', probe['discovery_trace_scale'])
+        out = self._post('traverse', {'seeds': [{'sequence': self.element}],
+                                      'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
+        self.assertEqual('traced', out['capabilities']['discovery_trace_scale'])
+
     def test_api_capabilities(self):
         ret = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities')
         self.assertEqual(200, ret.status_code, ret.text)
@@ -3090,6 +3136,10 @@ class TestTraverseResolveRegression(TestTraverseBase):
         # SPEC-multigraph-envelope.md §7; this fixture's headers are numbered in their names'
         # order, so a base binary's tie by column id and seq_id keeps the same labels)
         text = re.sub(r'"tied_at_boundary":\d+,"tied_kept":\d+,', '', text)
+        # and the capabilities' discovery_trace_scale (the post-merge fix of release 10: a
+        # discovery under trace ranks by traced k-mers, which on this fixture are the k-mers
+        # present, so that the answers are otherwise the base's)
+        text = text.replace('"discovery_trace_scale":"traced",', '')
         return re.sub(r'"elapsed_ms":[-+0-9.eE]+', '"elapsed_ms":0', text)
 
     def _traverse_requests(self):

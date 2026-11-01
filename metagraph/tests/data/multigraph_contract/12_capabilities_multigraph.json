@@ -623,7 +623,8 @@
    "requests_route": "GET /requests/{request_id}",
    "unknown_labels": true,
    "search_cuts": true,
-   "resolve_boundary_ties": true
+   "resolve_boundary_ties": true,
+   "discovery_trace_scale": "traced"
   }
  }
 }

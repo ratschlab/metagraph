@@ -133,7 +133,12 @@ Let L = |sequence|, k = graph k, k-mer starts i ∈ [0, L−k+1).
   (ties by label name, byte order; before release 10 by column id, then seq_id) and `labels_truncated: {kept,
   total, min_kept_kmers, max_dropped_kmers, dropped_full_length, tied_at_boundary, tied_kept}` is reported
   (`tied_at_boundary`: the labels with the last kept label's support, kept or dropped; `tied_kept`: how many of
-  them were kept; SPEC-multigraph-envelope.md §7). *(Efficiency pass, the same answers byte for byte: the rows
+  them were kept; SPEC-multigraph-envelope.md §7). The supported k-mer count is the label's `kmers_supported`:
+  with `support: "trace"` its traced k-mers (those where it has a coordinate), otherwise the k-mers it is present
+  at; the ranking, the cut and every count of `labels_truncated` are on that scale (`dropped_full_length`: the
+  dropped labels supported — under trace traced — at every in-graph k-mer). *(Release 10's post-merge fix: a
+  discovery under trace ranked by k-mers present while it reported traced k-mers; a host with the fix states
+  `discovery_trace_scale: "traced"`, §10.3.)* *(Efficiency pass, the same answers byte for byte: the rows
   are decoded once — the support profile took its hits from the discovery's rows (tuple rows when the profile needs
   coordinates: header labels or `trace`; their columns are those of the whole rows) instead of decoding every row
   again, which made a column discover cost 1.6–2.1 times the profile of explicit labels on refseq33m —, the
@@ -2730,7 +2735,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   annotation statistics only, unchanged.)
   - **Every `/resolve` and `/traverse` response**, `capabilities`: `schema_version` (the request schema the server
     accepts, `strategy.schema_version`; 1), `feature_level`, `k`, `regime`, `alphabet`, `num_labels`,
-    `has_coordinates`, `has_coord_to_header`, `supports_trace`, `cost_models_available`, `label_modes`,
+    `has_coordinates`, `has_coord_to_header`, `supports_trace`, `discovery_trace_scale` (`"traced"`: a discovery
+    under `support: "trace"` ranks and cuts by traced k-mers, §4.2's discovery; absent before release 10's
+    post-merge fix, when it ranked by k-mers present), `cost_models_available`, `label_modes`,
     `direct_access`, `release`, `graphlet_format` (1: the MGT version `detail: graphlet` writes, §7.5),
     `detail_levels` (`["summary", "tree", "full", "graphlet"]`) and the index identity (`index_ns`, `index_fp`,
     `index_meta_fp`, below); `/traverse` responses also carry `algorithm_version` at the top level.

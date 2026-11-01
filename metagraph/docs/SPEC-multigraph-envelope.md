@@ -186,7 +186,13 @@ in multi-graph mode`, `give the graph as 'graph' or as 'graphs', not both`), cod
 
 Discovery ranks labels by k-mers supported (descending), ties by label name (byte order), then truncates at
 `discover_max_labels`. `labels_truncated` gains `tied_at_boundary` (the labels with the last kept label's
-support, kept or dropped) and `tied_kept` (how many of them were kept).
+support, kept or dropped) and `tied_kept` (how many of them were kept). The k-mers supported are the number the
+answer states as `kmers_supported`: under `support: "trace"` the traced k-mers, otherwise the k-mers present;
+the ranking, the cut and every count of `labels_truncated` (`min_kept_kmers`, `max_dropped_kmers`,
+`dropped_full_length`, `tied_at_boundary`, `tied_kept`) are on that scale. Every `/traverse` capabilities block
+(`GET /traverse/capabilities`, each entry of its envelope, the `capabilities` of a `/resolve` or `/traverse`
+answer, single-graph servers included) states `discovery_trace_scale: "traced"`; absent, a discovery under trace
+ranked by k-mers present (before release 10's post-merge fix).
 
 ## 8. Capabilities (E3)
 
@@ -195,4 +201,5 @@ joined by `\n`, no trailing newline; null when any pair has none; each loaded (g
 counted once, so a pair listed under two names counts once), `composite_rule` (that sentence), and a
 `multigraph` block advertising `envelope_version`, the envelope routes, the selectors per route,
 `traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`, the registry route,
-`unknown_labels`, `search_cuts` and `resolve_boundary_ties`. Clients switch on these, never on dates.
+`unknown_labels`, `search_cuts`, `resolve_boundary_ties` and `discovery_trace_scale` (`"traced"`, section 7).
+Clients switch on these, never on dates.

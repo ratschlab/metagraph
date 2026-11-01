@@ -4499,6 +4499,10 @@ class TestPatternRegression(TestingBase):
         self.assertEqual(gate_block(new_caps['pattern']), b.pop('pattern'))
         self.assertEqual(new_caps['resolve'], b.pop('resolve'))
         self.assertEqual(new_caps['in_ram'], b.pop('in_ram'))
+        # a discovery under trace ranks by traced k-mers (release 10's post-merge fix,
+        # SPEC-multigraph-envelope.md section 7), stated in every /traverse capabilities block
+        a.pop('discovery_trace_scale', None)
+        self.assertEqual('traced', b.pop('discovery_trace_scale'))
         self.assertEqual(a, b)
 
 
