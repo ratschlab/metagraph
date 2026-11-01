@@ -111,6 +111,22 @@ endif()
 message(STATUS "Compile for ${BoldCyan}${CMAKE_DBG_ALPHABET}${ColourReset} alphabet")
 list(APPEND METAGRAPH_PUBLIC_DEFS ${METAGRAPH_ALPHABET_DEF})
 
+# The sanitizer build types are defined before the first add_subdirectory, so that every
+# target is instrumented: a subdirectory sees only the flags set before it is added, and an
+# uninstrumented jsoncpp contributes vector<string> instantiations that the linker may keep
+# for every target, without the container annotations (false container-overflow reports)
+
+# Thread sanitizer build type
+set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
+set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
+set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
+
+# Address sanitizer build type (-DCMAKE_BUILD_TYPE=Address): use after free, overflows and
+# leaks, e.g. a worker of a multi-graph request that outlives its handler
+set(CMAKE_CXX_FLAGS_ADDRESS "-O1 -g -fsanitize=address -fno-omit-frame-pointer")
+set(CMAKE_EXE_LINKER_FLAGS_ADDRESS "-g -fsanitize=address")
+set(CMAKE_SHARED_LINKER_FLAGS_ADDRESS "-g -fsanitize=address")
+
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(external-libraries/jsoncpp)
 
@@ -261,17 +277,6 @@ if(LINK_OPT)
     set(CMAKE_CXX_ARCHIVE_FINISH   true)
   endif()
 endif()
-
-# Thread sanitizer build type
-set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
-set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-
-# Address sanitizer build type (-DCMAKE_BUILD_TYPE=Address): use after free, overflows and
-# leaks, e.g. a worker of a multi-graph request that outlives its handler
-set(CMAKE_CXX_FLAGS_ADDRESS "-O1 -g -fsanitize=address -fno-omit-frame-pointer")
-set(CMAKE_EXE_LINKER_FLAGS_ADDRESS "-g -fsanitize=address")
-set(CMAKE_SHARED_LINKER_FLAGS_ADDRESS "-g -fsanitize=address")
 
 # Build sdsl-lite out-of-tree and install locally to avoid target clashes
 include(ExternalProject)

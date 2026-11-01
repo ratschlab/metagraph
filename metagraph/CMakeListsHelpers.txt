@@ -82,7 +82,13 @@ endfunction()
 function (findFolly)
 unset(FOLLY_FOUND PARENT_SCOPE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR})
-find_package(Jemalloc)
+# No jemalloc under a sanitizer (CMAKE_BUILD_TYPE is upper-cased in CMakeLists.txt): the
+# sanitizer's allocator must be the only one (a binary linking both crashes freeing the
+# sanitizer's memory in jemalloc), and with FOLLY_SANITIZE folly declares mallctl & co. as
+# pointers, which clashes with the tests' USE_JEMALLOC declarations of mallctl
+if(NOT CMAKE_BUILD_TYPE MATCHES "^(ADDRESS|THREADS)$")
+  find_package(Jemalloc)
+endif()
 
 if(Jemalloc_FOUND)
   if(${JEMALLOC_VERSION} VERSION_LESS 4.0)
