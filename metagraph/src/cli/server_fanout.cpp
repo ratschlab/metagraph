@@ -734,8 +734,13 @@ class FanoutState {
         return limit;
     }
 
-    // a pair starts (the worker's thread): false when it may not
+    // a pair starts (the worker's thread): false when it may not. A load is not started once
+    // the request stopped (its client gone, the cutoff passed) or its wait limit passed
+    // (section 4: the in_ram memory wait is not entered once finish_by_ms has passed, and a
+    // load would only hold memory for an answer already due): the pair is then not reached
     bool start(size_t i, bool loading, uint64_t bytes) {
+        if (loading && (stopped(i) || now() >= wait_limit()))
+            return false;
         std::lock_guard<std::mutex> lock(mutex);
         Slot &slot = slots[i];
         if (slot.phase == Slot::STARTED) {

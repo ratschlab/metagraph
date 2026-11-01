@@ -1604,6 +1604,29 @@ class TestMultiGraphServer(TestingBase):
         query = {'FASTA': f'>q\n{seed}', 'graphs': ['ecoli'], 'discovery_fraction': 0.5}
         self.assertEqual(self.post('search', query), self.post('search', dict(query, in_ram=True)))
 
+    def test_in_ram_is_not_loaded_past_finish_by_ms(self):
+        """SPEC-multigraph-envelope.md section 4 (fanout F2 of the release-10 review): the
+        in_ram memory wait is not entered once finish_by_ms has passed, also by a request of
+        one pair (inline) whose memory is free: nothing is loaded, and the pair is not reached,
+        on /resolve and /pattern alike."""
+        kleb = self.records['kleb'][0]
+        past = int(time.time() * 1000) - 60000
+        for route, body in (
+                ('resolve', {'graphs': ['kleb'], 'sequence': kleb[3000:3100],
+                             'discover': {'max_labels': 2}}),
+                ('pattern', {'graphs': ['kleb'], 'patterns': [{'dna': kleb[3000:3020]}],
+                             'mode': 'count'})):
+            with self.subTest(route=route):
+                loads = self.server.text().count('loaded into RAM for it')
+                out = self.post(route, dict(body, in_ram=True, finish_by_ms=past))
+                self.assertEqual((0, 1), (out['answered'], out['refused']))
+                (entry,) = out['answers']
+                self.assertEqual({'http_status': 503, 'code': 'not_reached', 'reason': 'cutoff'},
+                                 {k: entry['refusal'][k]
+                                  for k in ('http_status', 'code', 'reason')})
+                self.assertEqual([self._ref(entry)], out['not_reached'])
+                self.assertEqual(loads, self.server.text().count('loaded into RAM for it'))
+
     def test_in_ram_shares_the_resident_header_index(self):
         """The copy an `in_ram` load makes is built with the resident pair's record mapping (the
         .seqs: the sequence headers and their reverse index, built once at start-up), so a load

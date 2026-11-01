@@ -1174,6 +1174,12 @@ int run_server(Config *config) {
                                    "passed while it waited for the memory to load its index";
         if (expired && expired())
             throw LoadExpired(expired_text);
+        // a pair of a fan-out does not enter the wait once its control's predicate answers
+        // (the request stopped, its client gone, not_after_ms, its wait limit: finish_by_ms
+        // inline, the cutoff pooled), as /traverse does not with LoadExpired: the memory may be
+        // free, and a load then would run for an answer already due
+        if (control && control->wait_predicate()())
+            throw PairNotStarted();
         Timer timer;
         if (control)
             control->waiting_memory();

@@ -282,6 +282,67 @@ TEST(ServerFanout, OnePairRunsInline) {
     wait_for_workers();
 }
 
+// fanout F2 of the release-10 review: a pair does not start loading its index once its wait
+// limit passed (inline: finish_by_ms less the skew allowance) or its client left, also when
+// the memory is free: not reached (its client gone: nothing answered), never loaded
+TEST(ServerFanout, NoLoadPastTheWaitLimit) {
+    const std::vector<SelectedPair> pairs { kPairs[0] };
+    RequestHandles h;
+    h.finish_by_ms = now_ms() - 60'000;
+    auto entry = entry_of(pairs);
+    bool loaded = false;
+    FanoutOutcome out = run_fanout(settings_of(pairs, deadlines_now(60'000, h)), entry,
+        [&](PairControl &control) {
+            PairResult r;
+            control.waiting_memory();
+            // the memory is free (the reservation is granted at once): the predicate is the
+            // only check before the load
+            EXPECT_TRUE(control.wait_predicate()());
+            loaded = control.start_loading(100);
+            r.not_started = !loaded;
+            return r;
+        },
+        [&](std::function<void()>) { ADD_FAILURE() << "one pair runs inline"; });
+    EXPECT_FALSE(loaded);
+    EXPECT_FALSE(out.client_gone);
+    ASSERT_EQ(1u, out.entries.size());
+    EXPECT_EQ("refused", out.entries[0]["outcome"].asString());
+    const Json::Value &refusal = out.entries[0]["refusal"];
+    EXPECT_EQ(kNotReachedMembers, members(refusal));
+    EXPECT_EQ(503, refusal["http_status"].asInt());
+    EXPECT_EQ("not_reached", refusal["code"].asString());
+    EXPECT_EQ("cutoff", refusal["reason"].asString());
+    EXPECT_EQ("never_started", entry->json(3600)["pairs"][0]["state"].asString());
+
+    // the client gone before the load: nothing loaded, nothing answered
+    auto gone_entry = entry_of(pairs);
+    FanoutSettings gone_settings = settings_of(pairs, deadlines_now(60'000));
+    gone_settings.gone = []() { return true; };
+    loaded = false;
+    out = run_fanout(gone_settings, gone_entry, [&](PairControl &control) {
+        PairResult r;
+        control.waiting_memory();
+        loaded = control.start_loading(100);
+        r.not_started = !loaded;
+        return r;
+    }, [&](std::function<void()>) { ADD_FAILURE() << "one pair runs inline"; });
+    EXPECT_FALSE(loaded);
+    EXPECT_TRUE(out.client_gone);
+
+    // before the limit, with the client there: the load starts
+    auto later = entry_of(pairs);
+    loaded = false;
+    out = run_fanout(settings_of(pairs, deadlines_now(60'000)), later, [&](PairControl &control) {
+        control.waiting_memory();
+        loaded = control.start_loading(100);
+        EXPECT_TRUE(control.start_running());
+        return answered(control);
+    }, [&](std::function<void()>) { ADD_FAILURE() << "one pair runs inline"; });
+    EXPECT_TRUE(loaded);
+    EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
+    wait_for_workers();
+}
+
 // E4's test: one completed pair beside a sibling blocked waiting for the memory to load its
 // index, under a short route budget and a later finish_by_ms: at the cutoff (from the
 // effective deadline, not finish_by's) the completed answer survives and the sibling is
