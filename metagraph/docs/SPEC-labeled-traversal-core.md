@@ -3135,19 +3135,18 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     `graph.dbg`, and the server, checking sizes only, could not notice another bundle's digest —, each match
     listed; each entry records `"digest": "hashed" | "precomputed" | "precomputed-by-base-name"`), and
     `--write-csv` the list with every line's manifest column filled with its pair's manifest.
-  - **Routing**: a request's `graph` (a name) is required; when the name lists one pair (the same pair listed
-    twice is one) that pair is used; when its pairs share one graph with several annotations, the request is
-    refused (400 naming them, with or without `graph_path`): a traversal reads one annotation, and `graph_path`
-    cannot choose among them (list each annotation under a name of its own); when it lists several graphs,
-    `graph_path` must name one of them (else 400 listing the graphs), and is refused like the above when that
-    graph has several annotations under the name. There is **no union oracle**: a traversal reads one pair. The
-    pair is not echoed (its identity is); a name with one pair ignores `graph_path`. The release id is
+  - **Routing** (since release 10: SPEC-multigraph-envelope.md section 6, which governs; the release-9 rules
+    that stood here are superseded): `/traverse` runs on exactly ONE pair, named by `graph` (or `graphs`
+    resolving to one pair) with `graph_path`, or by one object of `pairs` (`annotation_path` telling apart the
+    annotations of one graph); a selection of several pairs is refused `traverse_single_pair` with the
+    candidates, and a server holding one pair runs a request without a selector on it. `/resolve` runs on any
+    number of pairs (the envelope, section 1 there). The refusals keep their release-9 texts (section 6 there).
+    There is **no union oracle**: a traversal reads one pair, tagged in its envelope entry. The release id is
     server-wide (`--index-release ID`), in both modes.
-  - **`graphs: [name]`** (the owner's decision of 2026-10-09): `/search`'s field, accepted by `/traverse` and
-    `/resolve` as an alias of `graph`, the older spelling (one name: a traversal reads one graph; `graph_path`
-    selects as above). With both fields, a list that is not one name, or on a single-graph server, 400. The two
-    spellings are one request and get one answer, byte for byte (the owner's decision of 2026-10-10; until it, the
-    per-seed result below came with `graphs` only). A request to a multi-graph server is a fan-out's — the service
+  - **`graphs`** (the owner's decision of 2026-10-09): `/search`'s field, accepted by `/traverse` and `/resolve`
+    beside `graph`, selected by section 6 there; on a single-graph server a 400. `graph` and `graphs: [name]` are
+    one request and get one answer, byte for byte (the owner's decision of 2026-10-10; until it, the per-seed
+    result below came with `graphs` only). A request to a multi-graph server is a fan-out's — the service
     sends `/traverse` to every selected chunk, without a presence check, as it sends `/search` — so a seed the
     chunk does not hold (or holds in part) is its result, `outcome.walks: "not_in_graph"` with
     `not_in_graph.kmers_present` (§6.1 step 2), not the whole request's 400. On a single-graph server the 400
