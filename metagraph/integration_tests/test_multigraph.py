@@ -1515,6 +1515,17 @@ class TestMultiGraphServer(TestingBase):
                                               {'kmer_interval': [0, 5], 'labels': ['nolabel']}]}})
             self.assertEqual(400, ret.status_code, ret.text[:2000])
             self.assertEqual(404, server.get('requests/seed-discover').status_code)
+            # and it is checked before the seeds after it: their faults are not stated first
+            # (recheck4: a later seed's interval was stated where the base states the label)
+            discover_two = {'sequence': query, 'discover': {'max_labels': 2},
+                            'select': {'policy': 'explicit', 'seeds': [
+                                {'kmer_interval': [0, 5], 'labels': ['nolabel']},
+                                {'kmer_interval': [0, 1000], 'labels': []}]}}
+            not_profiled = "Explicit seed label was not profiled: 'nolabel'"
+            ret = server.post('resolve', dict(discover_two, request_id='seed-discover-two'))
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual(not_profiled, ret.json()['error'])
+            self.assertEqual(404, server.get('requests/seed-discover-two').status_code)
             # before the admission: a 400, not the expired 409
             past = int(time.time() * 1000) - 1000
             for name, bad, text in cases:
@@ -1530,6 +1541,9 @@ class TestMultiGraphServer(TestingBase):
                         ret = base.post('resolve', bad)
                         self.assertEqual(400, ret.status_code, ret.text[:2000])
                         self.assertEqual(text, ret.json()['error'])
+                ret = base.post('resolve', discover_two)
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertEqual(not_profiled, ret.json()['error'])
         finally:
             server.stop()
             if base:
