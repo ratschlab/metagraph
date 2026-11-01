@@ -502,8 +502,10 @@ TEST(ServerSelection, RefusalBody) {
     const SelectionRefusal unknown("request.graphs: unknown graph 'z'", "graph_unknown");
     EXPECT_FALSE(unknown.body().isMember("candidates"));
     EXPECT_TRUE(unknown.candidates().isNull());
-    // the refusals of sample 22 are bodies of this shape
-    for (const Json::Value &c : sample("22_selector_refusals.json")["body"]) {
+    // the refusals of sample 22 are bodies of this shape (the sample is held in a variable:
+    // a range-for over a member of the temporary sample() returns reads it once destroyed)
+    const Json::Value refusals = sample("22_selector_refusals.json");
+    for (const Json::Value &c : refusals["body"]) {
         const Json::Value &body = c["body"];
         const SelectionRefusal r(body["error"].asString(), body["code"].asString(),
                                  body.get("candidates", Json::Value()));
