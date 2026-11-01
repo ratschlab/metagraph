@@ -1,5 +1,6 @@
 #include "annotation/coord_to_header.hpp"
 
+#include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
@@ -34,6 +35,37 @@ struct HeaderOfRecordEqual {
 };
 
 } // namespace
+
+// header -> (column, seq_id) of its first occurrence in column order
+struct CoordToHeader::HeaderIndex {
+    tsl::hopscotch_map<std::string_view, std::pair<Column, size_t>> map;
+};
+
+CoordToHeader::CoordToHeader() {}
+CoordToHeader::~CoordToHeader() {}
+
+std::optional<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::find_header(std::string_view header) const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    if (!header_index_) {
+        auto index = std::make_unique<HeaderIndex>();
+        size_t total = 0;
+        for (const auto &column : headers_) {
+            total += column.size();
+        }
+        index->map.reserve(total);
+        for (Column col = 0; col < headers_.size(); ++col) {
+            for (size_t s = 0; s < headers_[col].size(); ++s) {
+                index->map.try_emplace(std::string_view(headers_[col][s]), col, s);
+            }
+        }
+        header_index_ = std::move(index);
+    }
+    auto it = header_index_->map.find(header);
+    if (it == header_index_->map.end())
+        return std::nullopt;
+    return it->second;
+}
 
 void CoordToHeader::find_duplicate_headers(const std::vector<std::string> &headers,
                                            const std::function<bool(size_t, size_t)> &callback) {
@@ -103,6 +135,19 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     return { header, local_coord };
 }
 
+uint64_t CoordToHeader::last_coord(Column col, size_t seq_id) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
+    }
+    if (seq_id >= num_sequences(col)) {
+        throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
+                "({} sequences)", seq_id, col, num_sequences(col)));
+    }
+    // a set bit marks the last coordinate of each sequence
+    return coord_offsets_[col].select1(seq_id + 1);
+}
+
 uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
     if (col >= num_columns()) {
         throw std::out_of_range(fmt::format("Column {} out of range "
@@ -128,6 +173,11 @@ bool CoordToHeader::load(const std::string &filename_base) {
         logger->error("Cannot open CoordToHeader file '{}': {}", path,
                       utils::file_read_failure_detail(path));
         return false;
+    }
+    {
+        // the index views the headers about to be replaced
+        std::lock_guard<std::mutex> lock(header_index_mutex_);
+        header_index_.reset();
     }
 
     try {
