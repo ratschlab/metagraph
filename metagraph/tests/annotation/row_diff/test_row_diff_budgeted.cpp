@@ -1147,9 +1147,11 @@ TEST(RowDiffPathCache, FlatTupleRowsRoundTrip) {
     EXPECT_TRUE(back.empty());
 }
 
+#if USE_JEMALLOC
 // the probe block of thread_allocated(), escaped so that the compiler cannot elide its
 // allocation (a new/delete pair whose memory is never read may be removed)
 char *volatile allocation_probe = nullptr;
+#endif
 
 // What the calling thread allocated so far (jemalloc's thread.allocated), or nullopt where
 // jemalloc is not the process allocator (the counter does not move for a 1 MiB block)
