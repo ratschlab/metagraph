@@ -3002,7 +3002,9 @@ class TestTraverseResolveRegression(TestTraverseBase):
     nothing else: removed where they stand, a /resolve and a /traverse — unbudgeted, under
     budgets that do not bind and under one that stops the walk, in every detail — are the
     base binary's answers byte for byte (with a base binary before them). So are a
-    discovery cut's tied_at_boundary and tied_kept (release 10)."""
+    discovery cut's tied_at_boundary and tied_kept (release 10). A not_after_ms, which
+    /resolve reads since release 10 and a base binary refuses as an unknown field, is not
+    in the panel: test_not_after_ms_is_read_since_release_10 checks it on its own."""
 
     @classmethod
     def setUpClass(cls):
@@ -3064,7 +3066,6 @@ class TestTraverseResolveRegression(TestTraverseBase):
             {'sequence': e[:40] + 'N' * 5 + e[45:], 'labels': ['acc2'],
              'bounds': {'max_query_bp': 1000}},
             # refusals
-            {'sequence': e, 'labels': ['acc1'], 'not_after_ms': 1},
             {'sequence': e, 'labels': ['nope']},
             {'sequence': 'ACGT', 'labels': ['acc1']},
             {'sequence': e, 'labels': ['acc1'], 'discover': {}},
@@ -3139,7 +3140,7 @@ class TestTraverseResolveRegression(TestTraverseBase):
                                     self._untimed(ret.text)))
                 self.assertEqual(answers[0], answers[1], json.dumps(request)[:200])
                 compared += 1
-        self.assertGreaterEqual(compared, 36)
+        self.assertGreaterEqual(compared, 34)
 
     def test_cli_answers_as_before(self):
         path = f'{self.tempdir.name}/resolve-regression.json'
@@ -3154,6 +3155,30 @@ class TestTraverseResolveRegression(TestTraverseBase):
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 answers.append((res.returncode, self._untimed(res.stdout.decode())))
             self.assertEqual(answers[0], answers[1], json.dumps(request)[:200])
+
+    def test_not_after_ms_is_read_since_release_10(self):
+        """not_after_ms on /resolve (SPEC-multigraph-envelope.md section 4, E20), which a base
+        binary refuses as an unknown field: the server refuses a request whose not_after_ms has
+        passed 409 expired, and nothing runs; the CLI reads and checks the field (only a
+        server's handler refuses an expired request) and answers as the base binary answers
+        the request without it."""
+        request = {'sequence': self.element, 'labels': ['acc1']}
+        expired = dict(request, not_after_ms=1)
+        ret = requests.post(self.servers['new'][1] + '/resolve', data=json.dumps(expired))
+        self.assertEqual(409, ret.status_code, ret.text)
+        self.assertEqual(('expired', 1), (ret.json()['state'], ret.json()['not_after_ms']))
+        answers = []
+        for name, body in (('base', request), ('new', expired)):
+            path = f'{self.tempdir.name}/resolve-not-after-{name}.json'
+            with open(path, 'w') as f:
+                json.dump(body, f)
+            res = subprocess.run(shlex.split(self.servers[name][0])
+                                 + ['traverse', '--resolve', '--json', '-i', self.graph,
+                                    '-a', self.anno, path],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            answers.append((res.returncode, self._untimed(res.stdout.decode())))
+        self.assertEqual(0, answers[1][0], answers[1][1])
+        self.assertEqual(answers[0], answers[1])
 
 
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
