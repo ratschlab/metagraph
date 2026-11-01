@@ -4,8 +4,14 @@
 #include <sdsl/int_vector.hpp>
 #include "gtest/gtest.h"
 
+#include "../graph/all/test_dbg_helpers.hpp"
+
+#include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "cli/config/config.hpp"
 #include "cli/query.hpp"
 #include "common/vector.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 
 
@@ -14,6 +20,11 @@ void split_contigs_for_rebalancing(size_t k,
                                    size_t kmers_per_seq,
                                    std::vector<std::pair<std::string, std::vector<uint64_t>>> *contigs);
 std::string encode_presence_mask(const sdsl::bit_vector &mask);
+std::unique_ptr<graph::AnnotatedDBG>
+construct_query_graph(const graph::AnnotatedDBG &full_anno_graph,
+                      StringGenerator call_sequences,
+                      size_t num_threads,
+                      const Config &config);
 } // namespace mtg::cli
 
 namespace {
@@ -237,6 +248,102 @@ TEST(SeqSearchResult, cut_to_json_cut) {
     EXPECT_EQ(12u, json["nth_score"].asUInt64());
     EXPECT_FALSE(json.isMember("nth_median"));
     EXPECT_EQ(5u, json.size());
+}
+
+
+// A batched search's query graph on an annotation with k-mer counts (R10-SEARCH-COST-1): the
+// modes that read no counts keep the binary slice (a fraction of the integer one's memory),
+// and the ties of their top N are still ordered by the median abundance, read from the full
+// index only where a tie needs it
+
+// a Config made from a query command line, as main() makes it (the swap path restored)
+std::unique_ptr<cli::Config> query_config(const std::string &mode) {
+    const auto swap = utils::get_swap_path();
+    std::vector<std::string> args { "metagraph", "query", "-i", "graph.dbg", "-a",
+                                    "annotation.annodbg", "--query-mode", mode, "query.fa" };
+    std::vector<char*> argv;
+    for (std::string &a : args) {
+        argv.push_back(a.data());
+    }
+    argv.push_back(nullptr);
+    auto config = std::make_unique<cli::Config>(static_cast<int>(args.size()), argv.data());
+    utils::set_swap_path(swap);
+    return config;
+}
+
+TEST(construct_query_graph, counts_annotation_binary_slice_reads_tie_medians) {
+    const size_t k = 5;
+    const std::string sequence = "ACGTTGCATTGACCGTAGGCTTAAC";
+    const size_t num_kmers = sequence.size() - k + 1;
+    // two labels on the same k-mers, abundance 1 and 100: equal k-mer counts, the median
+    // abundance returns "b_high"
+    auto graph = test::build_graph_batch<graph::DBGHashOrdered>(k, { sequence });
+    Vector<annot::matrix::CSRMatrix::RowValues> rows(graph->max_index());
+    graph->map_to_nodes(sequence, [&](graph::DeBruijnGraph::node_index node) {
+        rows[graph::AnnotatedDBG::graph_to_anno_index(node)] = { { 0, 1 }, { 1, 100 } };
+    });
+    annot::LabelEncoder<std::string> encoder;
+    encoder.insert_and_encode("a_low");
+    encoder.insert_and_encode("b_high");
+    graph::AnnotatedDBG full(graph, std::make_unique<annot::IntRowAnnotator>(
+            std::make_unique<annot::matrix::CSRMatrix>(std::move(rows), 2), encoder));
+    ASSERT_TRUE(full.has_kmer_abundances());
+
+    auto check_cut = [&](const graph::SearchCut &cut) {
+        EXPECT_EQ(1u, cut.returned);
+        EXPECT_FALSE(cut.complete);
+        EXPECT_EQ(num_kmers, cut.nth_score);
+        EXPECT_EQ(2u, cut.tied);
+        EXPECT_EQ(1u, cut.tied_returned);
+        EXPECT_TRUE(cut.abundances);
+        EXPECT_EQ(100u, cut.nth_median);
+        EXPECT_EQ(1u, cut.tied_same_median);
+    };
+
+    for (const std::string mode : { "matches", "signature", "labels" }) {
+        SCOPED_TRACE(mode);
+        auto config = query_config(mode);
+        auto query_graph = cli::construct_query_graph(
+                full, [&](const auto &callback) { callback(sequence); }, 1, *config);
+        // the binary slice: no integer matrix of the batch's rows
+        EXPECT_FALSE(dynamic_cast<const annot::matrix::IntMatrix *>(
+                &query_graph->get_annotator().get_matrix()));
+        EXPECT_TRUE(query_graph->has_kmer_abundances());
+
+        graph::SearchCut cut;
+        auto matches = query_graph->get_top_labels(sequence, 1, 0.0, 0.0, false, &cut);
+        ASSERT_EQ(1u, matches.size());
+        EXPECT_EQ("b_high", matches[0].first);
+        EXPECT_EQ(num_kmers, matches[0].second);
+        check_cut(cut);
+
+        auto signatures = query_graph->get_top_label_signatures(sequence, 1, 0.0, 0.0, &cut);
+        ASSERT_EQ(1u, signatures.size());
+        EXPECT_EQ("b_high", std::get<0>(signatures[0]));
+        check_cut(cut);
+
+        // without a cut both are returned, the higher median first
+        matches = query_graph->get_top_labels(sequence, 2, 0.0, 0.0, false, &cut);
+        ASSERT_EQ(2u, matches.size());
+        EXPECT_EQ("b_high", matches[0].first);
+        EXPECT_EQ("a_low", matches[1].first);
+        EXPECT_TRUE(cut.complete);
+    }
+
+    // the counts modes read the integer slice, as before
+    for (const std::string mode : { "counts", "counts-sum" }) {
+        SCOPED_TRACE(mode);
+        auto config = query_config(mode);
+        auto query_graph = cli::construct_query_graph(
+                full, [&](const auto &callback) { callback(sequence); }, 1, *config);
+        EXPECT_TRUE(dynamic_cast<const annot::matrix::IntMatrix *>(
+                &query_graph->get_annotator().get_matrix()));
+        graph::SearchCut cut;
+        auto counts = query_graph->get_kmer_counts(sequence, 1, 0.0, 0.0, &cut);
+        ASSERT_EQ(1u, counts.size());
+        EXPECT_EQ("b_high", std::get<0>(counts[0]));
+        check_cut(cut);
+    }
 }
 
 } // namespace

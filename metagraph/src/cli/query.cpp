@@ -641,12 +641,12 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  size_t num_threads,
                  QueryMode query_mode) {
     // NOTE: If a new query mode is added that requires IntMatrix (integer
-    // annotation), it must be added to this condition as well. An annotation with k-mer
-    // counts is sliced with its counts in every mode: the ties of a search's top N are
-    // ordered by their median abundance (graph::search_top_n), which the binary slice
-    // below does not keep.
-    if (query_mode == COUNTS || query_mode == COUNTS_SUM
-            || AnnotatedDBG::holds_kmer_abundances(full_annotation)) {
+    // annotation), it must be added to this condition as well. The other modes take the
+    // binary slice below also on an annotation with k-mer counts: the ties of a search's top N
+    // are ordered by their median abundance (graph::search_top_n), which the query graph reads
+    // from the full annotation only where a tie needs it (AnnotatedDBG::set_abundance_source),
+    // instead of an integer slice of every row of the batch.
+    if (query_mode == COUNTS || query_mode == COUNTS_SUM) {
         const auto &mat = dynamic_cast<const IntMatrix &>(full_annotation.get_matrix());
 
         // don't break the topological order for row-diff annotation
@@ -930,11 +930,12 @@ void split_contigs_for_rebalancing(size_t k,
  * 3. Extract annotation for the nodes of the query graph and return.
  */
 std::unique_ptr<AnnotatedDBG>
-construct_query_graph(const DeBruijnGraph &full_dbg,
-                      const AnnotatedDBG::Annotator &full_annotation,
+construct_query_graph(const AnnotatedDBG &full_anno_graph,
                       StringGenerator call_sequences,
                       size_t num_threads,
                       const Config &config) {
+    const DeBruijnGraph &full_dbg = full_anno_graph.get_graph();
+    const AnnotatedDBG::Annotator &full_annotation = full_anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
@@ -1156,7 +1157,12 @@ construct_query_graph(const DeBruijnGraph &full_dbg,
     auto query_anno_graph = std::make_unique<AnnotatedDBG>(graph, std::move(annotation));
     // the slice of a coordinate annotation holds its coordinate counts as integers, which are
     // no abundances: the query graph orders a search's ties as the full annotation does
-    query_anno_graph->set_kmer_abundances(AnnotatedDBG::holds_kmer_abundances(full_annotation));
+    const bool abundances = AnnotatedDBG::holds_kmer_abundances(full_annotation);
+    query_anno_graph->set_kmer_abundances(abundances);
+    // a binary slice of an annotation with k-mer counts: the medians of the ties are read
+    // from the full index (which outlives the batch)
+    if (abundances && !AnnotatedDBG::holds_kmer_abundances(query_anno_graph->get_annotator()))
+        query_anno_graph->set_abundance_source(&full_anno_graph);
     return query_anno_graph;
 }
 
@@ -1398,8 +1404,7 @@ size_t batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
             // Construct the query graph for this batch
             auto query_graph = construct_query_graph(
-                anno_graph.get_graph(),
-                anno_graph.get_annotator(),
+                anno_graph,
                 [&seq_batch](auto callback) {
                     for (const auto &seq : *seq_batch) {
                         callback(seq.sequence);

@@ -175,6 +175,13 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // full index does
     void set_kmer_abundances(bool abundances) { kmer_abundances_ = abundances; }
 
+    // A query graph sliced from an annotation with k-mer counts into a binary matrix (the
+    // query modes that read no counts keep the binary slice, which costs a fraction of the
+    // integer one) reads the abundances of a search's ties from the full index |source|: the
+    // query sequence mapped onto its graph, the values read from its integer matrix, only
+    // where a tie needs a median (search_top_n). |source| must outlive this index.
+    void set_abundance_source(const AnnotatedDBG *source) { abundance_source_ = source; }
+
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
@@ -259,9 +266,21 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     // matrix when it holds k-mer counts (has_kmer_abundances), null otherwise
     const annot::matrix::IntMatrix* abundance_matrix() const;
 
+    // The lower medians of the abundances of the columns it is passed over the query
+    // |sequence|'s k-mer positions where they are present, which search_top_n asks for the
+    // ties it orders; empty where this index holds no abundances. |row_counts|: the rows of
+    // this index's graph the query's k-mers map to, each with the number of query positions
+    // it stands for. Read from this index's integer matrix, or from the abundance source's
+    // (set_abundance_source), the query mapped onto the source's graph. |sequence| and
+    // |row_counts| must outlive the function returned.
+    std::function<std::vector<uint64_t>(const std::vector<uint32_t> &)>
+    tie_medians(std::string_view sequence,
+                const std::vector<std::pair<row_index, size_t>> &row_counts) const;
+
     DeBruijnGraph &dbg_;
     std::shared_ptr<const annot::CoordToHeader> coord_to_header_;
     bool kmer_abundances_;
+    const AnnotatedDBG *abundance_source_ = nullptr;
 };
 
 } // namespace graph

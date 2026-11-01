@@ -517,6 +517,34 @@ abundance_medians(const IntMatrix &matrix,
     }, columns, num_columns);
 }
 
+ColumnMedians
+AnnotatedDBG::tie_medians(std::string_view sequence,
+                          const std::vector<std::pair<row_index, size_t>> &row_counts) const {
+    if (const IntMatrix *abundances = abundance_matrix()) {
+        // the matrix is captured by value, its pointer ends with the condition's scope
+        return [this, &row_counts, abundances](const std::vector<Column> &columns) {
+            return abundance_medians(*abundances, row_counts, columns, annotator_->num_labels());
+        };
+    }
+    if (kmer_abundances_ && abundance_source_ && abundance_source_->abundance_matrix()) {
+        // a binary slice of a counts annotation: the rows of the full index the query maps
+        // to, each with its multiplicity in the query (the rows of this index's graph stand
+        // for the same k-mers; a k-mer the full graph lacks has an empty row here)
+        return [this, sequence](const std::vector<Column> &columns) {
+            const AnnotatedDBG &source = *abundance_source_;
+            VectorMap<row_index, size_t> source_counts;
+            source.get_graph().map_to_nodes(sequence, [&](node_index i) {
+                if (i > 0)
+                    source_counts[graph_to_anno_index(i)]++;
+            });
+            return abundance_medians(*source.abundance_matrix(),
+                                     source_counts.values_container(), columns,
+                                     source.get_annotator().num_labels());
+        };
+    }
+    return {};
+}
+
 // The candidates' indexes mapped to the columns |medians| reads: what search_top_n asks of
 // a list of (column, score) pairs
 template <class Container>
@@ -621,15 +649,8 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         return {};
 
     // the abundances of the ties, read from the rows matched (each with its multiplicity in
-    // the query) only where a tie needs them; the matrix is captured by value, its pointer
-    // ends with the condition's scope
-    ColumnMedians medians;
-    if (const IntMatrix *abundances = abundance_matrix()) {
-        medians = [&, abundances](const std::vector<Column> &columns) {
-            return abundance_medians(*abundances, index_counts.values_container(), columns,
-                                     annotator_->num_labels());
-        };
-    }
+    // the query) only where a tie needs them
+    ColumnMedians medians = tie_medians(sequence, index_counts.values_container());
 
     std::vector<StringCountPair> result;
     if (with_kmer_counts) {
@@ -1100,17 +1121,14 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     const auto &matrix = annotator_->get_matrix();
     // the abundances of the ties: the rows enumerated below may be binary, so they are read
     // from the integer matrix (one value per position), only where a tie needs them
-    ColumnMedians medians;
-    if (const IntMatrix *abundances = abundance_matrix()) {
-        medians = [&, abundances](const std::vector<Column> &columns) {
-            std::vector<std::pair<row_index, size_t>> row_counts;
-            row_counts.reserve(row_indices.size());
-            for (row_index row : row_indices) {
-                row_counts.emplace_back(row, 1);
-            }
-            return abundance_medians(*abundances, row_counts, columns, annotator_->num_labels());
-        };
+    std::vector<std::pair<row_index, size_t>> row_counts;
+    if (kmer_abundances_) {
+        row_counts.reserve(row_indices.size());
+        for (row_index row : row_indices) {
+            row_counts.emplace_back(row, 1);
+        }
     }
+    ColumnMedians medians = tie_medians(sequence, row_counts);
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,
