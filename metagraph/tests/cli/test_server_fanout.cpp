@@ -873,6 +873,82 @@ TEST(ServerFanout, PairsWaitingForRoomAreHandedOver) {
     wait_for_workers();
 }
 
+// An exception of the submission (GPT A4: a task's allocation, the second of two): the first
+// pair is told to stop and the other ends at once, so that the entry ends with the response,
+// its id free again after the retention (none here), instead of "running" for good. The
+// exception reaches the caller, which answers its error
+TEST(ServerFanout, ASubmissionThatThrowsEndsTheRequest) {
+    for (const bool first_started : { true, false }) {
+        SCOPED_TRACE(first_started);
+        const std::vector<SelectedPair> pairs = kPairs;
+        RequestSettings rs;
+        rs.server_instance = "inst";
+        rs.retention_s = 0;
+        rs.retention_count = 0;
+        RequestRegistry registry(rs);
+        auto entry = std::make_shared<RequestEntry>(std::string("r"), "/pattern", "inst",
+                                                    std::chrono::system_clock::now(),
+                                                    refs_of(pairs));
+        ASSERT_FALSE(registry.start(entry));
+        Gate running;
+        std::atomic<bool> told { false };
+        std::vector<std::function<void()>> queued;
+        std::thread worker;
+        size_t offered = 0;
+        EXPECT_THROW(run_fanout(settings_of(pairs, deadlines_now(600'000), "/pattern"), entry,
+            [&](PairControl &control) {
+                EXPECT_TRUE(control.start_running());
+                running.open();
+                while (!control.stopped()) {
+                    std::this_thread::sleep_for(1ms);
+                }
+                told = true;
+                PairResult r;
+                r.aborted = true;
+                return r;
+            },
+            [&](std::function<void()> task, SteadyClock::time_point) -> bool {
+                if (offered++ == 1)
+                    throw std::bad_alloc();
+                if (first_started) {
+                    worker = std::thread(std::move(task));
+                    running.wait();
+                } else {
+                    queued.push_back(std::move(task));
+                }
+                return true;
+            }), std::bad_alloc);
+        EXPECT_EQ(2u, offered);
+        if (worker.joinable())
+            worker.join();
+        EXPECT_EQ(first_started, told.load());
+        // the pairs never handed over are ended; one still queued ends with its task
+        Json::Value state = registry.state("r").second;
+        EXPECT_EQ("running", state["state"].asString());
+        EXPECT_EQ(first_started ? "ended" : "never_started",
+                  state["pairs"][0]["state"].asString());
+        EXPECT_EQ(first_started ? "unfinished" : "not_reached",
+                  state["pairs"][0]["outcome"].asString());
+        for (int i : { 1, 2 }) {
+            EXPECT_EQ("never_started", state["pairs"][i]["state"].asString());
+            EXPECT_EQ("not_reached", state["pairs"][i]["outcome"].asString());
+        }
+        for (auto &task : queued) {
+            task();
+        }
+        queued.clear();
+        // what the handler answers: an error, and the request has ended
+        entry->response(500, 10);
+        EXPECT_TRUE(entry->ended());
+        EXPECT_EQ("error", entry->json(0)["reason"].asString());
+        EXPECT_EQ(404, registry.state("r").first);
+        EXPECT_FALSE(registry.start(std::make_shared<RequestEntry>(
+                std::string("r"), "/pattern", "inst", std::chrono::system_clock::now(),
+                refs_of(pairs))));
+        wait_for_workers();
+    }
+}
+
 // The client leaves while the pairs run: nothing is answered, the workers are told to stop,
 // and the registry records the end (client_gone) once they ended
 TEST(ServerFanout, ClientGoneStopsTheWorkers) {

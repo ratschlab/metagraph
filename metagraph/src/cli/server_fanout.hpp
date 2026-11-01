@@ -432,7 +432,10 @@ struct FanoutOutcome {
  * final usage. A pair that a worker takes after not_after_ms is not_reached (not_after_ms). A
  * full queue is a wait of the same loop: |launch| is asked for at most |poll_ms| at a time
  * between the handler's checks, so that the cutoff and a client gone are honoured while pairs
- * wait to be handed over; a pair not handed over by then is not_reached like a queued one.
+ * wait to be handed over; a pair not handed over by then is not_reached like a queued one. An
+ * exception of |launch| closes the request, stops the workers handed over and ends every pair
+ * not started (not_reached in |entry|), then leaves here: nothing is answered, and |entry|
+ * ends once the caller records the response and the workers ended.
  */
 FanoutOutcome run_fanout(const FanoutSettings &settings,
                          const std::shared_ptr<RequestEntry> &entry,

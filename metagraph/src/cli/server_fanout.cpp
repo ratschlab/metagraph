@@ -706,6 +706,29 @@ class FanoutState {
         entry->pair_outcome(i, "unfinished");
     }
 
+    // The fan-out failed while it handed its pairs over (under |mutex|; the exception leaves
+    // run_fanout, so nothing of the entries is written, and nothing here allocates): the
+    // request closes, the workers handed over are told to stop, and every pair not started
+    // ends now as not_reached, so that the registry entry ends with the response and its
+    // workers
+    void abandon_locked() {
+        closed = true;
+        stop.store(true, std::memory_order_release);
+        for (size_t i = 0; i < slots.size(); ++i) {
+            Slot &slot = slots[i];
+            if (slot.resolved)
+                continue;
+            slot.resolved = true;
+            if (slot.phase == Slot::STARTED) {
+                entry->pair_outcome(i, "unfinished");
+            } else {
+                entry->pair_outcome(i, "not_reached");
+                entry->pair_never_started(i);
+            }
+        }
+        changed.notify_all();
+    }
+
     // The handler stops waiting (under |mutex|): the cutoff passed (|gone| false) or the
     // client left. Every pair not done is decided now, and the work told to stop
     void close_locked(bool gone) {
@@ -1045,7 +1068,17 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         }
         SteadyClock::time_point until = std::min(d.cutoff,
                                                  t + std::chrono::milliseconds(settings.poll_ms));
-        hand_over(until);
+        try {
+            hand_over(until);
+        } catch (...) {
+            // a pair handed over runs on; the pairs after it never will: without this, they
+            // would hold the registry entry running for good
+            if (!lock.owns_lock())
+                lock.lock();
+            state->abandon_locked();
+            state->inline_gone = nullptr;
+            throw;
+        }
         // (a full queue was the wait: the handler's checks come first)
         if (next == n)
             state->changed.wait_until(lock, until);
