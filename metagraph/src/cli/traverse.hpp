@@ -504,15 +504,21 @@ class ResolveDelivery {
 // What POST /resolve writes its answer under: |control| (process_request's ResponseControl),
 // whose check asks whether the client is gone (|gone|, on the first check and then at most
 // every |every|: GoneCheck, nothing is written once it left) and then the request's deadline
-// (|delivery|, set once the body is parsed: 503 with resolve_deadline_body). Its errors are
-// written whatever the client did (no ResponseControl::gone, which is /pattern's). The route
-// builds its control only here (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not
-// copyable: |control| refers to the members
+// (|delivery|, set once the body is parsed: 503 with resolve_deadline_body). An error is written
+// whatever the client did as long as no registry entry records the request (a request refused
+// before it was admitted, or one without a request_id on a single-graph server); once |tracked|
+// answers true, ResponseControl::gone asks too, so that an entry records client_gone, not an
+// error that nobody received (SPEC-multigraph-envelope.md section 5). The route builds its
+// control only here (ServerRequest.TheResolveRouteWritesUnderItsGoneCheck). Not copyable:
+// |control| refers to the members
 struct ResolveWriting {
     ResolveWriting(std::function<bool()> gone, std::chrono::milliseconds every,
                    int compression_level)
-          : writing_gone(std::move(gone), every) {
+          : writing_gone(gone, every) {
         control.compression_level = compression_level;
+        control.gone = [this, gone = std::move(gone)]() {
+            return tracked && tracked() && gone();
+        };
         control.check = [this]() {
             writing_gone();
             try {
@@ -528,6 +534,8 @@ struct ResolveWriting {
     ResolveDelivery delivery;
     GoneCheck writing_gone;
     ResponseControl control;
+    // whether a registry entry records this request (unset: never)
+    std::function<bool()> tracked;
 };
 
 // The `resolve` block of both capabilities routes (GET /capabilities, GET

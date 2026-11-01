@@ -2524,8 +2524,10 @@ TEST(ServerRequest, AGoneCheckStopsTheWriting) {
 
 // What the /resolve route writes its answer under (ResolveWriting, the route's ResponseControl):
 // the client's connection first (GoneCheck: nothing written once it left), then the request's
-// deadline (503 deadline); its errors are written whatever the client did. The route builds its
-// control only through ResolveWriting, so a route that stopped asking about the client fails here
+// deadline (503 deadline); its errors are written whatever the client did until a registry entry
+// records the request, then only to a client that is there (nothing written: the entry records
+// client_gone, GPT A-Q3). The route builds its control only through ResolveWriting, so a route
+// that stopped asking about the client fails here
 TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
     Json::Value big(Json::arrayValue);
     for (size_t i = 0; i < 20'000; ++i) {
@@ -2538,7 +2540,6 @@ TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
         size_t asked = 0;
         ResolveWriting connected([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);
         EXPECT_EQ(1, connected.control.compression_level);
-        EXPECT_FALSE(connected.control.gone);
         EXPECT_EQ(200, answer_request("{}", encoding, 1, process, true,
                                       &connected.control).status);
         EXPECT_EQ(1u, asked);
@@ -2547,10 +2548,23 @@ TEST(ServerRequest, TheResolveRouteWritesUnderItsGoneCheck) {
         ResolveWriting left([&]() { ++asked; return gone; }, std::chrono::hours(1), 1);
         left.delivery.set_check([]() { throw ResolveDeadline("past the deadline"); });
         EXPECT_EQ(0, answer_request("{}", encoding, 1, process, true, &left.control).status);
-        // an error is still written to it
-        EXPECT_EQ(400, answer_request("{}", encoding, 1, [](const std::string &) -> Json::Value {
+        // an error is still written to it, as long as no registry entry records the request
+        auto refused = [](const std::string &) -> Json::Value {
             throw std::invalid_argument("Bad json received: x");
+        };
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, refused, true, &left.control).status);
+        left.tracked = []() { return false; };
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, refused, true, &left.control).status);
+        // tracked: nothing is written, every error of the route alike
+        left.tracked = []() { return true; };
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, refused, true, &left.control).status);
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, [](const std::string &) -> Json::Value {
+            throw HttpError(503, resolve_deadline_body(ResolveDeadline("past the deadline")));
         }, true, &left.control).status);
+        EXPECT_EQ(0, answer_request("{}", encoding, 1, process, true, &left.control).status);
+        // a client that is there gets its error, tracked or not
+        gone = false;
+        EXPECT_EQ(400, answer_request("{}", encoding, 1, refused, true, &left.control).status);
         // a client that is there and a passed deadline: the 503 of the deadline
         gone = false;
         ResolveWriting late([&]() { return gone; }, std::chrono::hours(1), 1);

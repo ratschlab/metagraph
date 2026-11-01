@@ -1546,7 +1546,7 @@ int run_server(Config *config) {
         PatternDelivery delivery;
         // a client that is gone, or a shutdown, is not answered: the work ends at its next
         // clock reading, the writing at its next check, and nothing is written (as on /resolve
-        // and /traverse, which still write their errors to it: control.gone is /pattern's alone)
+        // and /traverse, which write their errors to it, /resolve until it is tracked)
         auto gone = gone_of(request);
         delivery.set_abort(gone);
         ResponseControl control;
@@ -1821,8 +1821,8 @@ int run_server(Config *config) {
         // at the next check, the connection asked at most every client_check_ms, and nothing
         // is written (as on /pattern and /traverse); then the request's deadline, set once its
         // body is parsed (none without the field: the check then does nothing, and the text
-        // and its compression are the same bytes). Its errors are still written to it: no
-        // control.gone, which is /pattern's alone (ResolveWriting)
+        // and its compression are the same bytes). Its errors are written to it until the
+        // request is tracked, its registry entry then recording client_gone (ResolveWriting)
         ResolveWriting writing(gone_of(request),
                                std::chrono::milliseconds(attempt_settings.client_check_ms),
                                traversal_io.compression_level);
@@ -1831,6 +1831,7 @@ int run_server(Config *config) {
         // server, one with request_id on a single-graph one): its response is recorded when
         // written, or that nothing was (SPEC-multigraph-envelope.md section 5)
         std::shared_ptr<RequestEntry> tracked;
+        writing.tracked = [&tracked]() { return tracked != nullptr; };
         writing.control.on_written = [&](int status, std::optional<size_t> bytes) {
             record_response(tracked, status, bytes);
         };

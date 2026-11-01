@@ -168,8 +168,10 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
   `error` (any other status but 400, which leaves no entry).
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
-  "client_gone"`, with usage). An answer written but lost on the way is recorded `ended` with its status and bytes;
-  results are not retained.
+  "client_gone"`, with usage). That holds for an error too: on `/resolve` and `/pattern` nothing is written to a
+  client that left once the request has its entry, and the entry records `client_gone`; a delivered error stays
+  `error`. An answer written but lost on the way is recorded `ended` with its status and bytes; results are not
+  retained.
 
 ## 6. Selectors (E12)
 
