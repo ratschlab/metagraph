@@ -7250,6 +7250,62 @@ TEST(ResolveDeadline, AStopAnswersThePrefixWithTheStopBlock) {
     EXPECT_EQ((std::vector<uint64_t>{ 0, 64, 192, 448, 960, 1984 }), resolved);
 }
 
+// A pooled pair of a multi-graph fan-out (SPEC-multigraph-envelope.md section 4, the owner's
+// decision of 2026-11-01): a /resolve with a deadline runs under the time left before the
+// request's work cutoff when that is less (ResolveDelivery::set_cutoff_cap). A stop there
+// states the lowered budget (limits.time_budget_ms, a bounds.time_budget_ms entry of
+// limits.clamped, the stop's message); a pair that finishes before it answers exactly its
+// single-graph answer; a request without a deadline has no budget to cap and is unchanged
+TEST(ResolveDeadline, TheCutoffCapIsStatedOnlyWhenItBinds) {
+    const ResolveDeadlineFixture f;
+    Json::Value request = f.request(f.q);
+    request["bounds"]["time_budget_ms"] = 900;
+    auto untimed = [](Json::Value v) {
+        v.removeMember("timing");
+        return v;
+    };
+    // binds: the cutoff 252 ms after the start (its work time 2 ms) on a clock moving 1 ms a
+    // reading (the whole work reads it about six times: AStopAnswersThePrefixWithTheStopBlock)
+    {
+        SteppingClock clock;
+        ResolveDelivery delivery;
+        delivery.set_cutoff_cap(clock.base + std::chrono::milliseconds(252));
+        const Json::Value out = f.resolve(request, &clock, {}, &delivery);
+        ASSERT_TRUE(out["stop"].isObject()) << compact(out["limits"]);
+        EXPECT_EQ("time", out["stop"]["reason"].asString());
+        EXPECT_EQ("{\"clamped\":[{\"effective\":252,\"field\":\"bounds.time_budget_ms\","
+                  "\"requested\":900}],\"finalize_reserve_ms\":250,\"time_budget_ms\":252}",
+                  compact(out["limits"]));
+        // the prefix's resolve, as every stop
+        const uint64_t x = out["stop"]["resolved_kmers"].asUInt64();
+        EXPECT_LT(x, 2970u);
+        EXPECT_EQ(x, out["num_kmers"].asUInt64());
+    }
+    // finishes before the cutoff (800 ms: work time 550 ms, far more readings than it makes):
+    // the answer without the cap, the request's budget stated, nothing clamped
+    SteppingClock plain_clock;
+    const Json::Value expected = untimed(f.resolve(request, &plain_clock));
+    EXPECT_TRUE(expected["stop"].isNull());
+    for (int cutoff_ms : { 800, 5000 }) {
+        SteppingClock clock;
+        ResolveDelivery delivery;
+        delivery.set_cutoff_cap(clock.base + std::chrono::milliseconds(cutoff_ms));
+        EXPECT_EQ(compact(expected), compact(untimed(f.resolve(request, &clock, {}, &delivery))))
+                << cutoff_ms;
+    }
+    // no deadline: nothing to cap, no clock read, the answer as before
+    {
+        SteppingClock clock;
+        ResolveDelivery delivery;
+        delivery.set_cutoff_cap(clock.base + std::chrono::milliseconds(1));
+        const Json::Value plain = f.request(f.q);
+        const Json::Value out = f.resolve(plain, &clock, {}, &delivery);
+        EXPECT_EQ(0u, clock.reads);
+        EXPECT_FALSE(out.isMember("limits"));
+        EXPECT_EQ(compact(untimed(f.resolve(plain, nullptr))), compact(untimed(out)));
+    }
+}
+
 TEST(ResolveDeadline, ReserveOverrunAnswers503) {
     const ResolveDeadlineFixture f;
     Json::Value request = f.request(f.q);

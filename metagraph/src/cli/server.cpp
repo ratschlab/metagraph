@@ -1347,7 +1347,8 @@ int run_server(Config *config) {
      * answered (SPEC §24.1), or its not_reached / unfinished outcome at the work cutoff
      * (section 4). What no pair decides (the body, the selection, `in_ram`, the request's
      * fields) is checked before any pair and refuses the whole request as before. Each pair
-     * keeps its own deadline (from its start, capped by finish_by_ms only); two or more pairs
+     * keeps its own deadline (from its start, capped by finish_by_ms and, pooled, by the
+     * work cutoff, that cap stated only when it binds); two or more pairs
      * are written by the request's effective deadline, one pair by its own deadline, as a
      * single-graph request
      */
@@ -1420,6 +1421,9 @@ int run_server(Config *config) {
                     own.set_abort(control.stop_predicate());
                 if (const auto cap = control.deadline_cap())
                     pair_delivery->set_deadline_cap(*cap);
+                // a pooled pair's budget is capped at the work cutoff, stated when it binds
+                if (const auto cut = control.cutoff_cap())
+                    pair_delivery->set_cutoff_cap(*cut);
                 Json::Value answer = process_pattern_request(json, lease->index(), *config,
                                                              &identity, pair_delivery);
                 if (in_ram)
@@ -1677,10 +1681,11 @@ int run_server(Config *config) {
                      request_id, pairs.size(), names.size(),
                      in_ram.value_or(false) ? ", in_ram" : "",
                      handles.request_id ? ", request_id " + *handles.request_id : std::string());
-        // A pair's own deadline is capped by finish_by_ms alone (a budget-less pair then gets
-        // the server's maximum, process_resolve_request); without it the pair's answer is the
-        // single-graph one, and a pair without a budget is told to stop at the cutoff (at the
-        // server's maximum)
+        // A pair's own deadline is capped by finish_by_ms (a budget-less pair then gets the
+        // server's maximum, process_resolve_request) and, pooled, by the work cutoff, stated
+        // only when that cap stopped its work (the owner's decision of 2026-11-01); a pair
+        // without a deadline (no budget, no finish_by_ms) has no budget to cap and is told to
+        // stop at the cutoff (at the server's maximum)
         PairJob job = [&, json, in_ram, request_id, writing](PairControl &control) {
             PairResult result;
             const SelectedPair &selected = control.pair();
@@ -1700,6 +1705,9 @@ int run_server(Config *config) {
                 ResolveDelivery *pair_delivery = control.inline_run() ? &writing->delivery : &own;
                 if (const auto cap = control.deadline_cap())
                     pair_delivery->set_deadline_cap(*cap);
+                // a pooled pair's budget is capped at the work cutoff, stated when it binds
+                if (const auto cut = control.cutoff_cap())
+                    pair_delivery->set_cutoff_cap(*cut);
                 // the pair answers for the labels it holds and lists the others
                 // (unknown_labels, SPEC-multigraph-envelope.md section 2)
                 Json::Value out = process_resolve_request(

@@ -473,19 +473,32 @@ class ResolveDelivery {
     }
 
     // The latest instant the request's deadline may reach (SPEC-multigraph-envelope.md section
-    // 4: finish_by_ms less the clock skew allowance; a multi-graph fan-out's work cutoff caps
-    // nothing): process_resolve_request makes its deadline the minimum of its own and this,
-    // stated in limits.clamped; a request without bounds.time_budget_ms then gets the server's
-    // maximum (ResolveTimeLimits::max_time_ms) as its own. Unset: the request's own deadline
-    // alone (none without the field)
+    // 4: finish_by_ms less the clock skew allowance): process_resolve_request makes its
+    // deadline the minimum of its own and this, stated in limits.clamped; a request without
+    // bounds.time_budget_ms then gets the server's maximum (ResolveTimeLimits::max_time_ms) as
+    // its own. Unset: the request's own deadline alone (none without the field)
     void set_deadline_cap(std::chrono::steady_clock::time_point cap) { cap_ = cap; }
     const std::optional<std::chrono::steady_clock::time_point>& deadline_cap() const {
         return cap_;
     }
 
+    // The work cutoff of a pooled pair of a multi-graph fan-out (SPEC-multigraph-envelope.md
+    // section 4, the owner's decision of 2026-11-01): a request with a deadline (its
+    // bounds.time_budget_ms, or the deadline cap above) runs under the time left to it at its
+    // start when that is less, so that a pair stopped by time is answered by the cutoff instead
+    // of racing it; the lowered budget is stated (limits.time_budget_ms, a
+    // bounds.time_budget_ms entry of limits.clamped) only when it binds: when the work stopped
+    // by time. A request without a deadline has no budget to cap (a deadline would change its
+    // work: the explicit labels' hits fetched in pieces) and runs as before. Unset: no such cap
+    void set_cutoff_cap(std::chrono::steady_clock::time_point cutoff) { cutoff_ = cutoff; }
+    const std::optional<std::chrono::steady_clock::time_point>& cutoff_cap() const {
+        return cutoff_;
+    }
+
   private:
     std::function<void()> check_;
     std::optional<std::chrono::steady_clock::time_point> cap_;
+    std::optional<std::chrono::steady_clock::time_point> cutoff_;
 };
 
 // What POST /resolve writes its answer under: |control| (process_request's ResponseControl),

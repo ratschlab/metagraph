@@ -116,7 +116,18 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     "cutoff" | "loading", error, usage: {state, started_at, elapsed_ms, cpu_ms, memory_bytes}}`; it is told to stop;
     a load in progress may run past every deadline;
   - the completed pairs are written beside them. Each pair keeps its own per-pair budget, which starts when it
-    starts; a pair that starts late can be cut `unfinished` by the cutoff, and the answer says so.
+    starts and, when the pair runs pooled (two or more pairs), is capped at the work cutoff (the owner's decision
+    of 2026-11-01): a pair whose budget would end later stops by time before the cutoff and answers what it found,
+    so a time-limited answer always survives instead of racing the cutoff. The cap is stated in the pair's answer
+    only when it binds, i.e. when the work stopped by time under it: `limits.time_budget_ms` is then the budget it
+    ran under (the time left before the cutoff at its start) and `limits.clamped` gains its entry (`/pattern`:
+    `{field: "time_budget_ms", requested: <its time_budget_ms or the default>, effective}`; `/resolve`: `{field:
+    "bounds.time_budget_ms", requested: <its budget or null>, effective}`), after the `finish_by_ms` entry, which is
+    stated whenever it lowers the budget, as on a single-graph server. A pair that finishes before the cutoff
+    answers exactly its single-graph answer. A `/resolve` pair without a deadline (no `bounds.time_budget_ms`, no
+    `finish_by_ms`) has no budget to cap and runs as its single-graph answer does (a deadline would change its
+    work: the explicit labels' hits fetched in pieces); it is told to stop at the cutoff. A pair that cannot stop
+    by then (a load in progress, a step that reads no clock, a pair without a deadline) is `unfinished`.
 - `deadline.effective_deadline_at` and `deadline.cutoff_at` are stated only when the request gives `not_after_ms`
   or `finish_by_ms` (samples 01 and 02 give neither); otherwise they are null, the cutoff applying all the same.
 - The 899 s transport cap bounds every answer.

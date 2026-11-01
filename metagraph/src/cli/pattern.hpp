@@ -259,20 +259,35 @@ class PatternDelivery {
 
     /**
      * The latest instant the request's deadline may reach (SPEC-multigraph-envelope.md
-     * section 4: finish_by_ms less the clock skew allowance; a multi-graph fan-out's work
-     * cutoff caps nothing): process_pattern_request lowers time_budget_ms to the time left at
-     * its start when that is less, and states it in limits.clamped. Unset: the request's own
-     * budget
+     * section 4: finish_by_ms less the clock skew allowance): process_pattern_request lowers
+     * time_budget_ms to the time left at its start when that is less, and states it in
+     * limits.clamped. Unset: the request's own budget
      */
     void set_deadline_cap(graph::pattern::Deadline::Clock::time_point cap) { cap_ = cap; }
     const std::optional<graph::pattern::Deadline::Clock::time_point>& deadline_cap() const {
         return cap_;
     }
 
+    /**
+     * The work cutoff of a pooled pair of a multi-graph fan-out (SPEC-multigraph-envelope.md
+     * section 4, the owner's decision of 2026-11-01): process_pattern_request runs the pair
+     * under the time left to it at its start when that is less than its budget, so that a
+     * pair stopped by time is answered by the cutoff instead of racing it, and states the
+     * lowered budget (limits.time_budget_ms, and a time_budget_ms entry of limits.clamped) only
+     * when it binds: when a reading of the work's clock passed it. A pair that finishes before
+     * it answers exactly its single-graph answer. Unset (one pair, a single-graph request): no
+     * such cap
+     */
+    void set_cutoff_cap(graph::pattern::Deadline::Clock::time_point cutoff) { cutoff_ = cutoff; }
+    const std::optional<graph::pattern::Deadline::Clock::time_point>& cutoff_cap() const {
+        return cutoff_;
+    }
+
   private:
     std::optional<graph::pattern::Deadline> deadline_;
     std::function<bool()> abort_;
     std::optional<graph::pattern::Deadline::Clock::time_point> cap_;
+    std::optional<graph::pattern::Deadline::Clock::time_point> cutoff_;
 };
 
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after

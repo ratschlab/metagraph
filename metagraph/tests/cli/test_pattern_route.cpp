@@ -764,6 +764,73 @@ TEST(PatternRoute, TimeStopAnsweredWithinTheReserve) {
     EXPECT_FALSE(e["retrieval_complete"].asBool());
 }
 
+// A pooled pair of a multi-graph fan-out (SPEC-multigraph-envelope.md section 4, the owner's
+// decision of 2026-11-01): its budget is capped at the request's work cutoff
+// (PatternDelivery::set_cutoff_cap), so that a pair stopped by time answers by the cutoff. A
+// pair stopped there states the lowered budget (limits.time_budget_ms and a time_budget_ms
+// entry of limits.clamped); one that finishes before the cutoff answers exactly its
+// single-graph answer, and a cutoff after its budget's end caps nothing
+TEST(PatternRoute, TheCutoffCapIsStatedOnlyWhenItBinds) {
+    auto g = tiny();
+    const std::string body = "{\"patterns\": [{\"dna\": \"AACG\"}], \"time_budget_ms\": 1000}";
+    auto without_timing = [](Json::Value out) {
+        out.removeMember("timing");
+        for (Json::Value &e : out["patterns"]) {
+            e.removeMember("timing");
+        }
+        return out;
+    };
+    {
+        // the cutoff 400 ms after the start (its work time 150 ms), the clock at 200 ms after
+        // the start's reading: the work stops by time, answered within the cutoff
+        const Clock::time_point t0 = Clock::now();
+        auto calls = std::make_shared<size_t>(0);
+        auto clock = [t0, calls]() {
+            return (*calls)++ ? t0 + std::chrono::milliseconds(200) : t0;
+        };
+        PatternDelivery delivery;
+        delivery.set_cutoff_cap(t0 + std::chrono::milliseconds(400));
+        const Json::Value out = run(*g, body, &delivery, clock);
+        const Json::Value &e = out["patterns"][0];
+        EXPECT_EQ("time", e["stop"]["reason"].asString());
+        EXPECT_EQ("time_limited", e["determinism"].asString());
+        EXPECT_EQ(400, out["limits"]["time_budget_ms"].asDouble());
+        ASSERT_EQ(1u, out["limits"]["clamped"].size());
+        const Json::Value &c = out["limits"]["clamped"][0];
+        EXPECT_EQ("time_budget_ms", c["field"].asString());
+        EXPECT_EQ(1000, c["requested"].asDouble());
+        EXPECT_EQ(400, c["effective"].asDouble());
+        // without time_budget_ms: the default stated as requested
+        PatternDelivery again;
+        auto calls2 = std::make_shared<size_t>(0);
+        const Clock::time_point t1 = Clock::now();
+        again.set_cutoff_cap(t1 + std::chrono::milliseconds(400));
+        const Json::Value def = run(*g, "{\"patterns\": [{\"dna\": \"AACG\"}]}", &again,
+                                    [t1, calls2]() {
+                                        return (*calls2)++ ? t1 + std::chrono::milliseconds(200)
+                                                           : t1;
+                                    });
+        ASSERT_EQ(1u, def["limits"]["clamped"].size());
+        EXPECT_EQ(limits().default_time_ms,
+                  def["limits"]["clamped"][0]["requested"].asDouble());
+    }
+    // a clock that never moves: the work finishes before the cutoff, and the answer is the one
+    // without the cap (its own budget stated, nothing clamped); a cutoff past the budget's end
+    // caps nothing either
+    VirtualClock plain_clock;
+    PatternDelivery plain;
+    const Json::Value expected = without_timing(run(*g, body, &plain, plain_clock.fn()));
+    EXPECT_EQ(1000, expected["limits"]["time_budget_ms"].asDouble());
+    EXPECT_EQ(0u, expected["limits"]["clamped"].size());
+    for (double cutoff_ms : { 400.0, 5000.0 }) {
+        VirtualClock clock;
+        PatternDelivery delivery;
+        delivery.set_cutoff_cap(clock.start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(cutoff_ms)));
+        EXPECT_EQ(expected, without_timing(run(*g, body, &delivery, clock.fn()))) << cutoff_ms;
+    }
+}
+
 TEST(PatternRoute, DeadlineOverrunIs503) {
     auto g = tiny();
     PatternDelivery delivery;

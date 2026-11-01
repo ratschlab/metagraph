@@ -329,8 +329,15 @@ class PairControl {
 
     // The cap of the pair's own deadline (its route's deadline, which starts when it starts,
     // becomes the minimum of its own and this): finish_by_ms - the skew allowance, none
-    // without it. The work cutoff caps nothing: a pair still working there is unfinished
+    // without it; stated as a clamp of the pair's budget whenever it lowers it
     std::optional<SteadyClock::time_point> deadline_cap() const;
+    // The work cutoff, for a pooled pair (none for an inline one, which answers as a
+    // single-graph request): its own time budget is capped there too, so that a pair stopped
+    // by time is answered by the cutoff instead of racing it (the owner's decision of
+    // 2026-11-01), the cap stated only when it binds (PatternDelivery::set_cutoff_cap,
+    // ResolveDelivery::set_cutoff_cap). A pair that cannot stop by then (a load, an
+    // uninterruptible step) is unfinished as before
+    std::optional<SteadyClock::time_point> cutoff_cap() const;
 
   private:
     std::shared_ptr<FanoutState> state_;

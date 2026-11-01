@@ -5600,6 +5600,13 @@ Json::Value process_resolve_request(
     std::optional<Deadline> deadline;
     Json::Value clamped(Json::arrayValue);
     std::string late;
+    // the budget an answer whose work did not stop by time states (the request's, under the
+    // server's cap and finish_by_ms), and a pooled pair's budget cut at the work cutoff
+    // (a flag and a value rather than an optional, whose copy GCC 13 takes for
+    // maybe-uninitialized)
+    double stated_budget = 0;
+    bool cut = false;
+    double cut_budget = 0;
     // the cap of the request's deadline (finish_by_ms less the clock skew allowance), held as
     // a flag and an instant initialised either way rather than an optional, whose copy GCC 13
     // takes for maybe-uninitialized
@@ -5636,6 +5643,21 @@ Json::Value process_resolve_request(
                 note_clamped(&clamped, "bounds.time_budget_ms",
                              req.time_budget_ms ? req.time_budget_given : Json::Value(),
                              number_json(left));
+                budget = left;
+            }
+        }
+        // the budget the answer states when the work did not stop by time
+        stated_budget = budget;
+        if (delivery && delivery->cutoff_cap()) {
+            // a pooled pair of a multi-graph fan-out runs under the time left to it before the
+            // request's work cutoff when that is less (SPEC-multigraph-envelope.md section 4,
+            // the owner's decision of 2026-11-01): a stop by time is then answered by the
+            // cutoff instead of racing it, and only such a stop states the lowered budget
+            const double left = std::max(0.0, std::chrono::duration<double, std::milli>(
+                                                      *delivery->cutoff_cap() - *start).count());
+            if (left < budget) {
+                cut = true;
+                cut_budget = left;
                 budget = left;
             }
         }
@@ -5695,9 +5717,18 @@ Json::Value process_resolve_request(
     out["release"] = release;
     out["capabilities"] = capabilities_to_json(oracle, release, identity);
     if (deadline) {
-        // the budget the work ran under, stated whether or not it stopped the work
+        // the budget the work ran under, stated whether or not it stopped the work; a pooled
+        // pair's cut at the work cutoff only when it stopped the work (the stop is by time:
+        // the deadline is what ends a resolve's work), stated as a clamp of the budget, else
+        // the request's own: the pair's single-graph answer
+        const bool cut_bound = cut && profile.stop.has_value();
+        if (cut_bound) {
+            note_clamped(&clamped, "bounds.time_budget_ms",
+                         req.time_budget_ms ? req.time_budget_given : Json::Value(),
+                         number_json(cut_budget));
+        }
         Json::Value l;
-        l["time_budget_ms"] = number_json(deadline->time_budget_ms());
+        l["time_budget_ms"] = number_json(cut_bound ? cut_budget : stated_budget);
         l["finalize_reserve_ms"] = number_json(deadline->finalize_reserve_ms());
         l["clamped"] = std::move(clamped);
         out["limits"] = std::move(l);

@@ -4250,13 +4250,17 @@ how the search service uses it; the route serves any number.
   EFFECTIVE deadline is its arrival plus `time_budget_ms`, or `finish_by_ms` less the clock skew allowance when
   that is earlier; its WORK CUTOFF is that less the finalisation reserve. Each pair keeps its own deadline, which
   starts with its own work (after its load, §24.2; after its turn on the pool when the pool has fewer threads than
-  the request has pairs) and is capped by `finish_by_ms` alone. At the cutoff the request stops waiting: a pair
-  never started is a refused entry `{http_status: 503, code: "not_reached", reason, error}`, a pair started and
-  not finished one `{http_status: 503, code: "unfinished", reason, error, usage}` (told to stop), and the
-  answered pairs are written beside them by the effective deadline; past it, 503 `deadline` (§7.6). A pair's
-  `time_budget_ms` equals the request's, so a pair that runs to its own budget ends at about the cutoff, answered
-  or cut by a narrow margin. With one pair the pair runs on the handler's thread and the envelope is written by
-  its own deadline: the single-graph rule exactly. The texts of several pairs are written together, each pair's
+  the request has pairs) and is capped by `finish_by_ms` and, with two or more pairs, by the work cutoff (the
+  owner's decision of 2026-11-01): a pair whose `time_budget_ms` would end after the cutoff runs under the time
+  left before it, so that a pair stopped by time answers by the cutoff with what it found (its time stop, §5.3)
+  instead of racing it. That cap is stated only when it binds -- when a reading of the work's clock passed it --
+  as `limits.time_budget_ms` (the budget the work ran under) and an entry `{field: "time_budget_ms", requested,
+  effective}` of `limits.clamped`; a pair that finishes before the cutoff answers exactly its single-graph answer.
+  At the cutoff the request stops waiting: a pair never started is a refused entry `{http_status: 503, code:
+  "not_reached", reason, error}`, a pair started and not finished one `{http_status: 503, code: "unfinished",
+  reason, error, usage}` (told to stop: a load in progress, or a step that reads no clock), and the answered pairs
+  are written beside them by the effective deadline; past it, 503 `deadline` (§7.6). With one pair the pair runs
+  on the handler's thread and the envelope is written by its own deadline: the single-graph rule exactly. The texts of several pairs are written together, each pair's
   work having kept back the time for its own text only, so a request naming many graphs can reach the 503 where
   each alone would not: name one graph per request where the answer is large.
 - A client that left is not answered (§3), at any point: while a load waits for memory, during the work, while

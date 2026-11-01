@@ -258,8 +258,10 @@ TEST(ServerFanout, OnePairRunsInline) {
         [&](PairControl &control) {
             EXPECT_EQ(handler, std::this_thread::get_id());
             EXPECT_TRUE(control.inline_run());
-            // inline: only finish_by_ms caps the pair's own deadline
+            // inline: only finish_by_ms caps the pair's own deadline, never the cutoff (the
+            // pair is the request, answered as a single-graph one)
             EXPECT_FALSE(control.deadline_cap());
+            EXPECT_FALSE(control.cutoff_cap());
             EXPECT_TRUE(control.start_running());
             return answered(control);
         },
@@ -382,8 +384,10 @@ TEST(ServerFanout, StartedPairCutAtTheCutoffEndsLater) {
             return r;
         }
         EXPECT_TRUE(control.start_running());
-        // a pooled pair keeps its own deadline: the cutoff caps nothing (no finish_by_ms)
+        // a pooled pair's own budget is capped at the cutoff (the owner's decision of
+        // 2026-11-01); finish_by_ms caps nothing here (none given)
         EXPECT_FALSE(control.deadline_cap());
+        EXPECT_EQ(d.cutoff, control.cutoff_cap());
         // some CPU time to state, then uninterruptible until the gate opens
         const auto until = std::chrono::steady_clock::now() + 30ms;
         volatile uint64_t x = 0;

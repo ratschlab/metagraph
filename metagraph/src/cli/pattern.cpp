@@ -1585,7 +1585,27 @@ Json::Value process_pattern_request(
             req.time_budget_ms = left;
         }
     }
-    const Deadline deadline(start, req.time_budget_ms, limits.finalize_ms, now);
+    // A pooled pair of a multi-graph fan-out runs under the time left to it before the request's
+    // work cutoff when that is less (SPEC-multigraph-envelope.md section 4, the owner's decision
+    // of 2026-11-01), so that a pair stopped by time answers by the cutoff instead of racing
+    // it. The budget it ran under is stated as clamped only when the cap binds: when a reading
+    // of the work's clock passed its work time (the work stopped by time there). Otherwise the
+    // answer is the pair's single-graph one, its own budget stated
+    // (a flag and a value rather than an optional, whose copy GCC 13 takes for
+    // maybe-uninitialized)
+    double run_budget_ms = req.time_budget_ms;
+    bool cut = false;
+    double cut_budget_ms = 0;
+    if (delivery && delivery->cutoff_cap()) {
+        const double left = std::max(0.0, std::chrono::duration<double, std::milli>(
+                                                  *delivery->cutoff_cap() - start).count());
+        if (left < req.time_budget_ms) {
+            cut = true;
+            cut_budget_ms = left;
+            run_budget_ms = left;
+        }
+    }
+    const Deadline deadline(start, run_budget_ms, limits.finalize_ms, now);
     if (delivery)
         delivery->set_deadline(deadline);
     /**
@@ -1600,13 +1620,22 @@ Json::Value process_pattern_request(
      */
     AnswerVolume volume(limits.delivery_build_mbps, limits.delivery_compress_mbps,
                         limits.delivery_text_scale);
-    auto work_clock = [&now, &volume]() {
+    // whether a reading of the work's clock passed the work time of the cutoff's budget: the
+    // reading the work stops at (Deadline::work_expired's comparison), so the cap bound
+    bool cut_bound = false;
+    const double cut_work_ms = cut_budget_ms - limits.finalize_ms;
+    auto work_clock = [&now, &volume, &cut_bound, cut, cut_work_ms, start]() {
         // (bounded far above any budget, so that absurd rates cannot overflow the clock)
-        return now() + std::chrono::duration_cast<Deadline::Clock::duration>(
-                std::chrono::duration<double, std::milli>(std::min(volume.finalize_ms(), 1e12)));
+        const Deadline::Clock::time_point t = now()
+                + std::chrono::duration_cast<Deadline::Clock::duration>(
+                        std::chrono::duration<double, std::milli>(
+                                std::min(volume.finalize_ms(), 1e12)));
+        if (cut && std::chrono::duration<double, std::milli>(t - start).count() >= cut_work_ms)
+            cut_bound = true;
+        return t;
     };
     // one budget for the request, spent by the patterns in request order (§5.3, §5.5)
-    Budget budget(req.max_steps, Deadline(start, req.time_budget_ms, limits.finalize_ms,
+    Budget budget(req.max_steps, Deadline(start, run_budget_ms, limits.finalize_ms,
                                           work_clock));
     // a caller that left is not answered: the work ends at its next clock reading
     if (delivery && delivery->abort())
@@ -2812,7 +2841,9 @@ Json::Value process_pattern_request(
     l["max_contexts"] = uint_json(req.request.max_contexts);
     l["max_anchors"] = uint_json(req.request.max_anchors);
     l["max_steps"] = uint_json(req.max_steps);
-    l["time_budget_ms"] = number_json(req.time_budget_ms);
+    // the budget the work ran under: a pooled pair's cut at the work cutoff when that bound
+    // it (stated as a clamp below), else the request's own
+    l["time_budget_ms"] = number_json(cut_bound ? cut_budget_ms : req.time_budget_ms);
     l["finalize_reserve_ms"] = number_json(limits.finalize_ms);
     l["min_information_bits"] = number_json(limits.min_information_bits);
     l["max_patterns"] = uint_json(limits.max_patterns);
@@ -2858,6 +2889,12 @@ Json::Value process_pattern_request(
         // (SPEC §25) as requested, when named
         if (req.predicate_scope_named)
             l["predicate_scope"] = req.motif ? kPredicateScopeMotif : kPredicateScopeContext;
+    }
+    if (cut_bound) {
+        note_clamped(&req.clamped, "time_budget_ms",
+                     json.isMember("time_budget_ms") ? json["time_budget_ms"]
+                                                     : number_json(limits.default_time_ms),
+                     number_json(cut_budget_ms));
     }
     l["clamped"] = std::move(req.clamped);
     out["limits"] = std::move(l);
