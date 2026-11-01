@@ -43,7 +43,21 @@
     "memory_bytes": 740988
    },
    "work_units": 1025295,
-   "not_after_ms": 1793520010000
+   "not_after_ms": 1793520010000,
+   "per_seed": [
+    {
+     "index": 0,
+     "outcome": "complete",
+     "stopped_by": null,
+     "work_units": 1025295,
+     "work_seed": 4096,
+     "peak_admitted_bytes": 101404284,
+     "final_bytes": 740988,
+     "soft_excess_bytes": 0,
+     "refused_bytes": null,
+     "elapsed_ms": 698
+    }
+   ]
   }
  }
 }

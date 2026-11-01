@@ -1000,6 +1000,34 @@ class TestMultiGraphServer(TestingBase):
                          [(a['graph'], a['outcome'], a['refusal']['http_status'],
                            a['refusal']['code']) for a in none['answers']])
 
+    def test_a_pairs_400_in_the_envelope_keeps_the_request_id(self):
+        """Only an HTTP-level 400 frees a request_id (section 5). A pair's 400 found by the work
+        is a refused entry of a 200 envelope: the request was answered, GET /requests/{id}
+        states it ended with that pair refused, and the same id is a 409 (a corrected request
+        takes a new id). A mixed fan-out is never forgotten for one pair's 400 (GPT review 3,
+        finding 4)."""
+        ecoli = self.records['ecoli'][0]
+        request = {'patterns': [{'dna': ecoli[123456:123476], 'id': 'p'}],
+                   'mode': 'all_or_count', 'output': {'labels': 'all'}}
+        for request_id, graphs in (('it-pair400-1', ['kleb']),
+                                   ('it-pair400-2', ['kleb', 'ecoli'])):
+            out = self.post('pattern', dict(request, graphs=graphs, request_id=request_id))
+            self.assertEqual(request_id, out['request_id'])
+            refused = [a for a in out['answers'] if a['graph'] == 'kleb']
+            self.assertEqual([(400, 'annotation_unbudgeted')],
+                             [(a['refusal']['http_status'], a['refusal']['code'])
+                              for a in refused])
+            entry = self._wait_ended(self.server, request_id)
+            self.assertEqual(('/pattern', 'ended', 'answered'),
+                             (entry['route'], entry['state'], entry['reason']))
+            self.assertEqual({('kleb', 'refused')} | ({('ecoli', 'answered')}
+                                                      if 'ecoli' in graphs else set()),
+                             {(p['graph'], p['outcome']) for p in entry['pairs']})
+            repeat = self.server.post('pattern', dict(request, graphs=['ecoli'],
+                                                      request_id=request_id))
+            self.assertEqual(409, repeat.status_code, repeat.text[:2000])
+            self.assertEqual(request_id, repeat.json()['request_id'])
+
     # -------------------------------------------------------------------- deadlines, the registry
 
     def _cutoff_csv(self):

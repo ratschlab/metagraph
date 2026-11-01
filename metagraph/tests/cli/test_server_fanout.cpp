@@ -4,7 +4,9 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <iterator>
 #include <memory>
@@ -1487,6 +1489,44 @@ TEST_F(IdNamespace, NoWindowAdmitsBoth) {
     b.join();
     for (size_t i = 0; i < rounds; ++i) {
         EXPECT_EQ(1, request_won[i] + attempt_won[i]) << i;
+    }
+}
+
+// One server answers each sample and one execution is described in it: every server_instance in
+// a sample (the envelope's, an attempt's, its usage's, a capabilities block's) is the same, and
+// so is every attempt_id and request_id (the request's, its attempt's, the attempt's usage). A
+// reader that checks identity must accept every sample (GPT review 3, finding 10).
+TEST(ServerFanout, EachSampleNamesOneServerAndOneExecution) {
+    const std::string dir = "../tests/data/multigraph_contract";
+    std::vector<std::string> names;
+    for (const auto &file : std::filesystem::directory_iterator(dir)) {
+        if (file.path().extension() == ".json")
+            names.push_back(file.path().filename().string());
+    }
+    ASSERT_LE(22u, names.size()) << dir << " (run from the build directory)";
+    for (const std::string &name : names) {
+        std::set<std::string> instances;
+        std::set<std::string> ids;
+        std::function<void(const Json::Value &, const std::string &)> walk
+                = [&](const Json::Value &v, const std::string &path) {
+            if (v.isObject()) {
+                for (const std::string &key : v.getMemberNames()) {
+                    const Json::Value &child = v[key];
+                    if (child.isString() && key == "server_instance")
+                        instances.insert(child.asString());
+                    if (child.isString() && (key == "attempt_id" || key == "request_id"))
+                        ids.insert(child.asString());
+                    walk(child, path + "." + key);
+                }
+            } else if (v.isArray()) {
+                for (Json::ArrayIndex i = 0; i < v.size(); ++i) {
+                    walk(v[i], path + "[" + std::to_string(i) + "]");
+                }
+            }
+        };
+        walk(sample(name), "");
+        EXPECT_GE(1u, instances.size()) << name << ": " << instances.size() << " server instances";
+        EXPECT_GE(1u, ids.size()) << name << ": " << ids.size() << " execution ids";
     }
 }
 

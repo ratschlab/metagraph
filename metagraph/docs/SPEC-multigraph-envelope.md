@@ -156,17 +156,20 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 ## 5. The request registry (E4)
 
 - `/resolve` and `/pattern` take an optional `request_id`, the same token rule as `attempt_id`
-  (`[A-Za-z0-9._-]+`, length-capped), checked by the strict parsers before anything is registered. `/traverse`'s
+  (`^[A-Za-z0-9._:-]{1,128}$`), checked by the strict parsers before anything is registered. `/traverse`'s
   `attempt_id` is its request handle; no second id.
 - On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
   the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
   one of `labels`) come before the registry's 409 and the expired 409: a malformed request with an expired
   `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
-  the next seed: under a discovery the seeds after the first that names labels are checked by the work. A 400 never
-  holds a `request_id`: one that only the work can find (a seed not fully present in the graph, a seed label a
-  discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer) frees the id when it is
-  answered, so `GET /requests/{id}` answers 404 and a retry runs. `/traverse` keeps checking expiry before it parses
-  the body.
+  the next seed: under a discovery the seeds after the first that names labels are checked by the work. An
+  HTTP-level 400 never holds a `request_id`: one that only the work can find (a seed not fully present in the graph,
+  a seed label a discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer) frees the
+  id when it is answered, so `GET /requests/{id}` answers 404 and a retry runs. On a multi-graph server such a 400
+  of one pair is a refused entry (`refusal.http_status` 400) of a 200 envelope: the request was answered, its id
+  is retained like any answered request's (`GET /requests/{id}` states it ended, that pair `refused`), and a
+  corrected request takes a new id. A fan-out is never forgotten because one of its pairs gave 400; only a 400 of
+  the whole request frees the id. `/traverse` keeps checking expiry before it parses the body.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `request_id` and `attempt_id` are one namespace, as `GET /requests/{id}` reads both: a `request_id` equal to a

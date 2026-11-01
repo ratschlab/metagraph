@@ -52,7 +52,7 @@
    "stop_requested_by": null,
    "stopped_at": "2026-10-21T09:14:29.385Z",
    "usage": {
-    "attempt_id": "suite-s1-TTAAATTTACGGCACA-20261021T084452Z_refseq97-90ec1fbc-direct-local",
+    "attempt_id": "svc-trv-91aa07-1",
     "bound": {
      "allowance_ms": 10000,
      "capped_by": null,
@@ -77,7 +77,7 @@
      "requested": 1,
      "started": 1
     },
-    "server_instance": "5521aa4bddb78e49",
+    "server_instance": "7c1e0f3a9b24d6e8",
     "stopped_at": "2026-10-21T09:14:29.385Z",
     "timing": {
      "cpu_ms": 167.004554,
