@@ -1364,11 +1364,12 @@ int run_server(Config *config) {
         Json::Value json = parse_pattern_body(content);
         if (!json.isObject())
             throw PatternRefusal(400, "invalid_request", "request: expected an object");
+        // the checks in the release-9 order (the selection, in_ram, then the fields), so that
+        // a request it refused keeps its words; the request's handles (new in release 10, an
+        // unknown field before) after its fields (validate_pattern_request reads them last)
         std::vector<SelectedPair> pairs;
         std::optional<bool> in_ram;
-        RequestHandles handles;
         try {
-            handles = read_request_handles(json);
             pairs = select_pairs(SelectionRoute::PATTERN, json, indexes,
                                  config->max_graphs_without_selection);
             in_ram = in_ram_field(json);
@@ -1383,6 +1384,12 @@ int run_server(Config *config) {
         json.removeMember("pairs");
         const PatternLimits limits = pattern_limits(*config);
         const double budget_ms = validate_pattern_request(json, limits);
+        RequestHandles handles;
+        try {
+            handles = read_request_handles(json);
+        } catch (const std::invalid_argument &e) {
+            throw PatternRefusal(400, "invalid_request", e.what());
+        }
         const RequestDeadlines deadlines = deadlines_of(
                 request, budget_ms, handles, static_cast<double>(config->pattern_finalize_ms));
         auto entry = std::make_shared<RequestEntry>(handles.request_id, "/pattern",
@@ -1562,13 +1569,15 @@ int run_server(Config *config) {
                 // fields are valid, with or without a request_id: a request refused 400 holds
                 // no id, and a malformed one is refused 400 also when its not_after_ms has
                 // passed (the request's own 400s come before the expired 409)
+                // (the fields first, the handles last: a request the release-9 server refused
+                // keeps its words, as their fields were unknown to it)
+                validate_pattern_request(json, pattern_limits(*config));
                 RequestHandles handles;
                 try {
                     handles = read_request_handles(json);
                 } catch (const std::invalid_argument &e) {
                     throw PatternRefusal(400, "invalid_request", e.what());
                 }
-                validate_pattern_request(json, pattern_limits(*config));
                 std::shared_ptr<RequestEntry> entry;
                 if (handles.request_id) {
                     entry = std::make_shared<RequestEntry>(
@@ -1641,23 +1650,29 @@ int run_server(Config *config) {
      * (the body, the selection, in_ram, the query's length and budget) are checked before any
      * pair and refuse the whole request, as on a single-graph server
      */
-    auto multi_graph_resolve = [&](Json::Value json, const RequestHandles &handles,
-                                   size_t request_id,
+    auto multi_graph_resolve = [&](Json::Value json, size_t request_id,
                                    const shared_ptr<HttpServer::Request> &request,
                                    ResolveWriting *writing,
                                    std::shared_ptr<RequestEntry> *tracked) {
         Timer timer;
         const common::ThreadUsageMeter own_usage;
+        // the checks in the release-9 order, so that a request it refused keeps its words:
+        // the selection's shape, in_ram, the pairs the names select, then the fields
+        check_selection_shape(SelectionRoute::RESOLVE, json, indexes,
+                              config->max_graphs_without_selection);
+        const std::optional<bool> in_ram = in_ram_field(json);
         const std::vector<SelectedPair> pairs = select_pairs(
                 SelectionRoute::RESOLVE, json, indexes, config->max_graphs_without_selection);
         // `pairs` is read: the pairs' requests are parsed without it (no field of the parser)
         json.removeMember("pairs");
-        const std::optional<bool> in_ram = in_ram_field(json);
         const std::vector<std::string> names = names_of(pairs);
-        // what no pair decides refuses the whole request: its fields, the query's length (the
-        // server's limit and bounds.max_query_bp), a budget not above the reserve
+        // what no pair decides refuses the whole request: its fields (the request's handles,
+        // sections 4 and 5, read last, where they were unknown fields before release 10), the
+        // query's length (the server's limit and bounds.max_query_bp), a budget not above the
+        // reserve
         const ResolveRequest req = parse_resolve_request(json);
         check_resolve_fields(req, config->resolve_max_query_bp, resolve_time);
+        const RequestHandles handles = read_request_handles(json);
         // the request budget: bounds.time_budget_ms (lowered to the server's cap), else the
         // server's maximum
         const double budget_ms = req.time_budget_ms
@@ -1813,18 +1828,25 @@ int run_server(Config *config) {
 
             Json::Value json = parse_traversal_body(content);
             const bool multi = !config->fnames.empty();
-            // the request's handles (sections 4 and 5), checked before anything is registered
-            const RequestHandles handles = read_request_handles(json);
             if (multi) {
                 try {
-                    return multi_graph_resolve(std::move(json), handles, request_id, request,
-                                               &writing, &tracked);
+                    return multi_graph_resolve(std::move(json), request_id, request, &writing,
+                                               &tracked);
                 } catch (const ResolveDeadline &e) {
                     throw as_http(e);
                 }
             }
             traverse_graph_selection(json, multi);
             const std::optional<bool> in_ram = in_ram_field(json);
+            // the request's handles (sections 4 and 5), checked before anything is registered:
+            // by the parser of process_resolve_request, after every other field (they were
+            // unknown fields before release 10, refused last), so that a request the
+            // release-9 server refused keeps its words. Malformed, they are none here: the
+            // parser refuses the request before it is admitted
+            RequestHandles handles;
+            try {
+                handles = read_request_handles(json);
+            } catch (const std::invalid_argument &) {}
             // its not_after_ms admits it, its finish_by_ms caps its deadline (a request without
             // bounds.time_budget_ms then gets the server's maximum), its request_id registers
             // it — once every refusal of its own is past (its fields, the query's length and
@@ -2022,8 +2044,28 @@ int run_server(Config *config) {
             attempt->set_ids(attempt_ids(json));
             // finish_by_ms, the completion deadline (SPEC-multigraph-envelope.md section 4):
             // the attempt's bound and walk-until become the minimum of their own and it less
-            // the clock skew allowance
-            attempt->set_finish_by(read_finish_by_ms(json, "request"));
+            // the clock skew allowance. Malformed, it is refused before anything is registered
+            // (400, no usage) — after the checks the release-9 server made before its parser
+            // refused it as an unknown field (the selection, in_ram, the other fields), so that
+            // a request it refused for another fault keeps its words
+            try {
+                attempt->set_finish_by(read_finish_by_ms(json, "request"));
+            } catch (const std::invalid_argument &e) {
+                if (!config->fnames.empty()) {
+                    check_selection_shape(SelectionRoute::TRAVERSE, json, indexes,
+                                          config->max_graphs_without_selection);
+                    in_ram_field(json);
+                    select_pairs(SelectionRoute::TRAVERSE, json, indexes,
+                                 config->max_graphs_without_selection);
+                    json.removeMember("pairs");
+                } else {
+                    traverse_graph_selection(json, false);
+                    in_ram_field(json);
+                }
+                // its fields, finish_by_ms last
+                parse_traverse_request(json);
+                throw;
+            }
             if (attempt->managed()) {
                 // an id does not run twice at once, nor again while it is retained or held, on
                 // this server process: a second request with a running, retained, held or
@@ -2072,9 +2114,15 @@ int run_server(Config *config) {
             }
             try {
                 const bool multi = !config->fnames.empty();
-                // a single-graph server refuses the selectors
-                if (!multi)
+                // a single-graph server refuses the selectors; a multi-graph one checks their
+                // shape before in_ram and resolves the names after it, as the release-9 server
+                // did (a request it refused keeps its words)
+                if (!multi) {
                     traverse_graph_selection(json, false);
+                } else {
+                    check_selection_shape(SelectionRoute::TRAVERSE, json, indexes,
+                                          config->max_graphs_without_selection);
+                }
                 const std::optional<bool> in_ram = in_ram_field(json);
                 std::unique_ptr<IndexLease> lease;
                 IndexIdentity identity = single_identity;

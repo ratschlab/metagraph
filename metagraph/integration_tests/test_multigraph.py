@@ -536,6 +536,38 @@ class TestMultiGraphServer(TestingBase):
              'request.graphs: expected a non-empty array of graph names (GET /capabilities '
              'lists them)'),
         ]
+        # Two faults (contract F3 of the release-10 review): the release-9 order of the checks
+        # decides the words, the selection's shape, then in_ram, then the names, then the
+        # fields, the request's handles (unknown fields to it) last
+        in_ram = 'request.in_ram: expected a boolean'
+        unknown_pattern = "request.graphs: unknown graph 'nope' (GET /capabilities lists the graphs)"
+        p = {'patterns': [{'dna': seed[:20]}]}
+        panel += [
+            ('POST', 'resolve', dict(r, graph='nope', in_ram='x'), None, in_ram),
+            ('POST', 'traverse', dict(t, graph='nope', in_ram='x'), None, in_ram),
+            ('POST', 'traverse', dict(t, in_ram='x'), 'traverse_single_pair', required),
+            ('POST', 'traverse', dict(t, in_ram='x', graphs=5), None, one_name),
+            ('POST', 'resolve', dict(r, in_ram='x', graphs=5), None, one_name),
+            ('POST', 'resolve', dict(r, graph='nope', request_id='bad id'), 'graph_unknown',
+             unknown),
+            ('POST', 'resolve', dict(r, graph='nope', not_after_ms='x'), 'graph_unknown',
+             unknown),
+            ('POST', 'resolve', dict(r, graph='kleb', sequence=5, finish_by_ms='x'), None,
+             'request.sequence: expected a string'),
+            ('POST', 'traverse', dict(t, graph='nope', finish_by_ms='soon'), 'graph_unknown',
+             unknown),
+            ('POST', 'traverse', dict(t, graph='kleb', seeds=5, finish_by_ms='soon'), None,
+             'request.seeds: expected a non-empty array'),
+            ('POST', 'pattern', dict(p, graphs=['nope'], not_after_ms='x'), 'graph_unknown',
+             unknown_pattern),
+            ('POST', 'pattern', dict(p, graphs=['nope'], request_id='bad id'), 'graph_unknown',
+             unknown_pattern),
+            ('POST', 'pattern', dict(p, graphs=['kleb'], patterns=[5], request_id='bad id'),
+             'invalid_request', 'request.patterns[0]: expected an object'),
+            # several names: the base refused every such list as not one name; with a name the
+            # server lacks it still is (a list of known names runs on /resolve since release 10)
+            ('POST', 'resolve', dict(r, graphs=['kleb', 'nope']), 'graph_unknown', one_name),
+        ]
         return panel
 
     @staticmethod

@@ -177,6 +177,22 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
                                        size_t max_names_without_selection);
 
 /**
+ * What select_pairs refuses on RESOLVE and TRAVERSE before the route reads `in_ram`: the
+ * release-9 server (8fa32e553) checked the selection's shape (traverse_graph_selection:
+ * `graph` beside `graphs`, a `graphs` that is not a list of one name, a missing or non-string
+ * `graph`, `graph_path` without a name) before in_ram and resolved the name after it, so that
+ * a request it refused for two faults keeps its words (section 6): the routes call this, then
+ * in_ram_field, then select_pairs. Also `pairs` beside another selector (a
+ * selection_conflict), the names cap of a /resolve without a selector, and what the base
+ * refused because it named no single graph (several names; no name on /traverse). Nothing on
+ * the other routes (/pattern read its graphs before in_ram, as select_pairs does).
+ */
+void check_selection_shape(SelectionRoute route,
+                           const Json::Value &request,
+                           const GraphIndexes &indexes,
+                           size_t max_names_without_selection);
+
+/**
  * The pairs a GET capabilities probe selects on a multi-graph server, from its query
  * parameters (section 6): ?graph=<name>[&graph_path=<path>][&annotation_path=<path>] names
  * exactly one pair of the name, as an object of `pairs` does (graph_unknown, pair_not_found,

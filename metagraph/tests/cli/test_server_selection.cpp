@@ -234,8 +234,16 @@ TEST(ServerSelection, Resolve) {
                                                  &body));
     EXPECT_EQ(parse(R"({"error": "Bad request: unknown graph 'z'", "code": "graph_unknown"})"),
               body);
+    // several names with one the list lacks: 8fa32e553 refused every list of several names
+    // as not one name, and so it still is (contract F3 of the release-10 review), the code of
+    // the name it lacks added; a single unknown name keeps the base's unknown-graph text
     EXPECT_EQ("graph_unknown", selection_code_of([&] {
         select(route, R"({"graphs": ["a", "z", "y"]})");
+    }, &body));
+    EXPECT_EQ("Bad request: 'graphs' names the one graph a traversal reads: expected [name]",
+              body["error"].asString());
+    EXPECT_EQ("graph_unknown", selection_code_of([&] {
+        select(route, R"({"graphs": ["z"]})");
     }, &body));
     EXPECT_EQ("Bad request: unknown graph 'z'", body["error"].asString());
     EXPECT_EQ("Bad request: 'graph' (index name) is required in multi-graph mode",
@@ -250,6 +258,58 @@ TEST(ServerSelection, Resolve) {
     }
     // a graph_path that is no string is not read here: the parser refuses it, as before
     EXPECT_EQ(Pairs({ kB1, kB2 }), select(route, R"({"graph": "b", "graph_path": 2})"));
+}
+
+// What the routes check before in_ram (contract F3 of the release-10 review): the release-9
+// server checked the selection's shape before in_ram and resolved the name after it, so that
+// a request it refused for two faults keeps its words
+TEST(ServerSelection, ShapeBeforeInRam) {
+    const GraphIndexes indexes = small_indexes();
+    auto shape = [&](SelectionRoute route, const std::string &request, size_t max = 10) {
+        check_selection_shape(route, parse(request), indexes, max);
+    };
+    for (SelectionRoute route : { SelectionRoute::RESOLVE, SelectionRoute::TRAVERSE }) {
+        // a name, known or not, and its graph_path are resolved after in_ram
+        for (const char *request : { R"({"graph": "z"})", R"({"graphs": ["z"]})",
+                                     R"({"graph": "b"})",
+                                     R"({"graph": "b", "graph_path": "x.dbg"})",
+                                     R"({"pairs": [{"graph": "z"}]})", R"({"pairs": 5})" }) {
+            EXPECT_EQ("", refusal_of([&] { shape(route, request); })) << request;
+            EXPECT_EQ("", selection_code_of([&] { shape(route, request); })) << request;
+        }
+        // the shape is refused before it, in the words select_pairs refuses it in
+        for (const char *request : { R"({"graph": "a", "graphs": ["a"]})", R"({"graphs": 5})",
+                                     R"({"graphs": []})", R"({"graph": 1})",
+                                     R"({"graph_path": "b1.dbg"})",
+                                     R"({"graphs": ["a", "z"]})",
+                                     R"({"graph": "a", "pairs": [{"graph": "a"}]})" }) {
+            Json::Value body;
+            const std::string code = selection_code_of([&] { select(route, request); }, &body);
+            ASSERT_NE("", code) << request;
+            if (code == "(none)") {
+                EXPECT_EQ(refusal_of([&] { select(route, request); }),
+                          refusal_of([&] { shape(route, request); })) << request;
+            } else {
+                Json::Value shaped_body;
+                EXPECT_EQ(code, selection_code_of([&] { shape(route, request); },
+                                                  &shaped_body)) << request;
+                EXPECT_EQ(body, shaped_body) << request;
+            }
+        }
+    }
+    // no name: /traverse runs on a server of one pair only, /resolve on every pair up to the
+    // names cap
+    EXPECT_EQ("traverse_single_pair", selection_code_of([&] {
+        shape(SelectionRoute::TRAVERSE, "{}");
+    }));
+    EXPECT_EQ("", selection_code_of([&] { shape(SelectionRoute::RESOLVE, "{}"); }));
+    EXPECT_EQ("request.graphs: required on this server, which hosts 3 graph names (more than "
+              "2; GET /capabilities lists them)",
+              refusal_of([&] { shape(SelectionRoute::RESOLVE, "{}", 2); }));
+    // the other routes' selection is read before in_ram as a whole
+    EXPECT_EQ("", selection_code_of([&] {
+        shape(SelectionRoute::PATTERN, R"({"graphs": ["z"]})");
+    }));
 }
 
 // POST /traverse: exactly one pair, by graph or graphs (with graph_path), or one object of

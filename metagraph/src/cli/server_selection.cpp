@@ -480,15 +480,25 @@ std::vector<SelectedPair> selected_of(const std::string &name,
 }
 
 /**
- * RESOLVE and TRAVERSE without `pairs`: `graph` (one name) or `graphs`, `graph_path` beside
- * one name, or no selector. The requests the base answered are answered as before; those it
- * refused are refused in its words (the codes of section 6 added), apart from what section 6
- * now admits: /resolve runs on any number of pairs (several names, a name's several pairs, no
- * selector up to the names cap, beyond it /pattern's text), and a /traverse without a
- * selector runs on a server of one pair.
+ * RESOLVE and TRAVERSE without `pairs`, before `in_ram` is read: what the base refused in
+ * traverse_graph_selection, which it ran before it read in_ram and resolved the name
+ * (select_traverse_pair), in its words — `graph` beside `graphs`, a `graphs` that is not a
+ * list of names, a name that is no string, `graph_path` without a name, and what the base
+ * refused because it named no single graph: several names on /traverse (a selection of
+ * several pairs), several names with `graph_path` or with a name the list lacks on /resolve
+ * (the base's "expected [name]", with graph_unknown), no name on /traverse unless the server
+ * holds one pair. What it decides already (several names, every name) is |selected|; else the
+ * one name (and its graph_path, when a string) select_by_name resolves after in_ram.
  */
-std::vector<SelectedPair> select_by_name(bool traverse, const Json::Value &request,
-                                         const GraphIndexes &indexes, size_t max_names) {
+struct NameSelection {
+    std::optional<std::vector<SelectedPair>> selected;
+    std::string name;
+    std::optional<std::string> graph_path;
+};
+
+NameSelection name_selection(bool traverse, const Json::Value &request,
+                             const GraphIndexes &indexes, size_t max_names) {
+    NameSelection selection;
     std::vector<std::string> names;
     if (request.isMember("graphs")) {
         if (request.isMember("graph"))
@@ -523,12 +533,15 @@ std::vector<SelectedPair> select_by_name(bool traverse, const Json::Value &reque
             // graph_path picks a graph of one name
             if (request.isMember("graph_path"))
                 throw SelectionRefusal(kGraphsOneName, "selection_conflict");
-            // the first unknown name in the list's order
+            // a list with a name the server lacks: the base refused every list of several
+            // names in these words (a client matches them whole), the section 6 code added
             for (const std::string &name : names) {
-                check_known_name(name, indexes);
+                if (!indexes.count(name))
+                    throw SelectionRefusal(kGraphsOneName, "graph_unknown");
             }
             std::sort(names.begin(), names.end());
-            return pairs_of(names, indexes);
+            selection.selected = pairs_of(names, indexes);
+            return selection;
         }
     } else if (request.isMember("graph")) {
         if (!request["graph"].isString())
@@ -540,7 +553,8 @@ std::vector<SelectedPair> select_by_name(bool traverse, const Json::Value &reque
             throw InvalidRequest(kGraphRequired);
         if (!traverse) {
             check_names_cap(indexes, max_names, "request.graphs");
-            return pairs_of(sorted_names(indexes), indexes);
+            selection.selected = pairs_of(sorted_names(indexes), indexes);
+            return selection;
         }
         // the names cap, as the base refused every /traverse without a name
         if (indexes.size() > max_names)
@@ -548,16 +562,34 @@ std::vector<SelectedPair> select_by_name(bool traverse, const Json::Value &reque
         std::vector<SelectedPair> all = pairs_of(sorted_names(indexes), indexes);
         if (all.size() != 1)
             throw SelectionRefusal(kGraphRequired, "traverse_single_pair", candidates_of(all));
-        return all;
+        selection.selected = std::move(all);
+        return selection;
     }
     // one name, and its graph_path when that is a string (another type is the parser's
     // refusal, as in the base)
-    const std::string &name = names.front();
-    std::optional<std::string> graph_path;
+    selection.name = names.front();
     if (request.isMember("graph_path") && request["graph_path"].isString())
-        graph_path = request["graph_path"].asString();
-    const TraversePairChoice choice
-            = choose_traverse_pair(name, graph_path ? &*graph_path : nullptr, indexes);
+        selection.graph_path = request["graph_path"].asString();
+    return selection;
+}
+
+/**
+ * RESOLVE and TRAVERSE without `pairs`: `graph` (one name) or `graphs`, `graph_path` beside
+ * one name, or no selector (name_selection), the one name resolved as the base resolved it
+ * after in_ram. The requests the base answered are answered as before; those it refused are
+ * refused in its words (the codes of section 6 added), apart from what section 6 now admits:
+ * /resolve runs on any number of pairs (several names, a name's several pairs, no selector up
+ * to the names cap, beyond it /pattern's text), and a /traverse without a selector runs on a
+ * server of one pair.
+ */
+std::vector<SelectedPair> select_by_name(bool traverse, const Json::Value &request,
+                                         const GraphIndexes &indexes, size_t max_names) {
+    NameSelection selection = name_selection(traverse, request, indexes, max_names);
+    if (selection.selected)
+        return std::move(*selection.selected);
+    const std::string &name = selection.name;
+    const TraversePairChoice choice = choose_traverse_pair(
+            name, selection.graph_path ? &*selection.graph_path : nullptr, indexes);
     switch (choice.outcome) {
         case TraversePairChoice::ONE:
             return { SelectedPair { name, *choice.pair } };
@@ -578,6 +610,23 @@ std::vector<SelectedPair> select_by_name(bool traverse, const Json::Value &reque
     return selected;
 }
 
+// `pairs` beside another selector (`graphs`, and on RESOLVE and TRAVERSE `graph` or
+// `graph_path`): a selection_conflict
+void check_pairs_alone(SelectionRoute route, const Json::Value &request) {
+    const bool by_graph = route != SelectionRoute::PATTERN;
+    for (const char *selector : { "graphs", "graph", "graph_path" }) {
+        if (!request.isMember(selector) || (!by_graph && std::string(selector) != "graphs"))
+            continue;
+        const std::string name = selector;
+        throw SelectionRefusal(
+                "request: " + name + " and pairs are exclusive: "
+                + (name == "graphs" ? "name graphs, or list pairs, not both"
+                   : name == "graph" ? "name a graph, or list pairs, not both"
+                                     : "give each pair's graph_path in its object, not both"),
+                "selection_conflict");
+    }
+}
+
 // RESOLVE, PATTERN and TRAVERSE: `pairs`, or the names of `graphs` (`graph` beside them on
 // RESOLVE and TRAVERSE, with `graph_path`), or every name up to the cap
 std::vector<SelectedPair> select_posted(SelectionRoute route, const Json::Value &request,
@@ -585,17 +634,7 @@ std::vector<SelectedPair> select_posted(SelectionRoute route, const Json::Value 
     const bool by_graph = route != SelectionRoute::PATTERN;
     const bool traverse = route == SelectionRoute::TRAVERSE;
     if (request.isMember("pairs")) {
-        for (const char *selector : { "graphs", "graph", "graph_path" }) {
-            if (!request.isMember(selector) || (!by_graph && std::string(selector) != "graphs"))
-                continue;
-            const std::string name = selector;
-            throw SelectionRefusal(
-                    "request: " + name + " and pairs are exclusive: "
-                    + (name == "graphs" ? "name graphs, or list pairs, not both"
-                       : name == "graph" ? "name a graph, or list pairs, not both"
-                                         : "give each pair's graph_path in its object, not both"),
-                    "selection_conflict");
-        }
+        check_pairs_alone(route, request);
         std::vector<SelectedPair> selected = select_listed_pairs(request["pairs"], indexes);
         if (traverse)
             check_single_pair(selected, "pairs names", "list one");
@@ -671,6 +710,21 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
         }
     }
     throw std::logic_error("select_pairs: unknown route");
+}
+
+void check_selection_shape(SelectionRoute route,
+                           const Json::Value &request,
+                           const GraphIndexes &indexes,
+                           size_t max_names_without_selection) {
+    if (route != SelectionRoute::RESOLVE && route != SelectionRoute::TRAVERSE)
+        return;
+    const Json::Value &object = object_or_empty(request);
+    if (object.isMember("pairs")) {
+        check_pairs_alone(route, object);
+        return;
+    }
+    name_selection(route == SelectionRoute::TRAVERSE, object, indexes,
+                   max_names_without_selection);
 }
 
 std::vector<SelectedPair>

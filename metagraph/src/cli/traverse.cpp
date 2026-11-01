@@ -235,12 +235,13 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
     // the same rule); declared here so that strict parsing accepts them. finish_by_ms, the
-    // completion deadline (SPEC-multigraph-envelope.md section 4), is read with them
+    // completion deadline (SPEC-multigraph-envelope.md section 4), is checked last (where,
+    // unknown before release 10, it was refused), so that a request with another fault keeps
+    // its words
     const AttemptIds ids = attempt_ids(json);
     for (const char *field : kAttemptFields) {
         s.has(field);
     }
-    read_finish_by_ms(json, "request");
     s.has("finish_by_ms");
     req.attempt_id = ids.attempt_id;
     req.budget_id = ids.budget_id;
@@ -472,6 +473,8 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             }
         }
     }
+    s.finish();
+    read_finish_by_ms(json, "request");
     return req;
 }
 
@@ -486,8 +489,8 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
     // not_after_ms, finish_by_ms): the server reads them before the request runs, by the same
     // rule (read_request_handles); declared here so that strict parsing accepts them, and
-    // checked here so that the CLI refuses what the server refuses
-    read_request_handles(json);
+    // checked at the end (where, unknown before release 10, they were refused) so that the
+    // CLI refuses what the server refuses and a request with another fault keeps its words
     for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
         s.has(field);
     }
@@ -562,6 +565,9 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
         if (req.policy.policy == SelectionPolicy::EXPLICIT && req.policy.explicit_seeds.empty())
             throw InvalidRequest("request.select.seeds is required for policy explicit");
     }
+    // an unknown field, then the handles' values
+    s.finish();
+    read_request_handles(json);
     return req;
 }
 

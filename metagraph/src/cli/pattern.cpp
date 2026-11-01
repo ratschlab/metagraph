@@ -311,12 +311,9 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     f.has("in_ram");
     // the request's handles (SPEC-multigraph-envelope.md sections 4 and 5: request_id,
     // not_after_ms, finish_by_ms), read by the server before the request runs by the same rule
-    // (read_request_handles), checked here too, so that the CLI refuses what the server refuses
-    try {
-        read_request_handles(json);
-    } catch (const std::invalid_argument &e) {
-        throw invalid(e.what());
-    }
+    // (read_request_handles), checked here too (last, where, unknown before release 10, they
+    // were refused), so that the CLI refuses what the server refuses and a request with
+    // another fault keeps its words
     for (const char *field : { "request_id", "not_after_ms", "finish_by_ms" }) {
         f.has(field);
     }
@@ -631,6 +628,11 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     }
 
     f.finish();
+    try {
+        read_request_handles(json);
+    } catch (const std::invalid_argument &e) {
+        throw invalid(e.what());
+    }
     return req;
 }
 
