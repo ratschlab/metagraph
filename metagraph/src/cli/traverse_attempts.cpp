@@ -1362,7 +1362,18 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
     return { 200, j };
 }
 
-std::pair<int, Json::Value> AttemptRegistry::state(const std::string &id) {
+void Attempt::set_pair_ref(Json::Value pair) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pair_ref_ = std::move(pair);
+}
+
+Json::Value Attempt::pair_ref() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pair_ref_;
+}
+
+std::pair<int, Json::Value> AttemptRegistry::state(const std::string &id,
+                                                   Json::Value *pair_ref) {
     std::shared_ptr<Attempt> attempt;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1378,6 +1389,8 @@ std::pair<int, Json::Value> AttemptRegistry::state(const std::string &id) {
             return { 404, j };
         }
     }
+    if (pair_ref)
+        *pair_ref = attempt->pair_ref();
     return { 200, attempt->state_json() };
 }
 

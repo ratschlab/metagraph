@@ -29,6 +29,7 @@
 
 #include "cli/config/config.hpp"
 #include "cli/server_checks.hpp"
+#include "cli/server_fanout.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "cli/load/load_annotation.hpp"
@@ -314,6 +315,39 @@ TEST(GraphletAttempt, AbandonedWalksAreNotFinished) {
     EXPECT_EQ(seeds, state["usage"]["seeds"]);
     EXPECT_FALSE(state["usage"].isMember("per_seed"));
     EXPECT_NE(std::string::npos, a->stop_summary().find("1 abandoned"));
+}
+
+// fanout F5 of the release-10 review: the pair an attempt ran on (GET /requests/{attempt_id})
+// is kept with the attempt, as long as the attempt is answered: past the request registry's
+// retention (here none at all) and through the attempt's own retention, until it expires
+TEST(GraphletAttempt, ThePairLivesAsLongAsTheAttempt) {
+    FakeClock clock;
+    AttemptRegistry registry(settings_with(&clock, /* retention_s */ 3600));
+    auto a = attempt_of(registry, "with-pair");
+    Json::Value ref;
+    ref["graph"] = "A";
+    ref["graph_path"] = "a.dbg";
+    ref["annotation_path"] = "a.anno";
+    a->set_pair_ref(ref);
+    a->set_bound(1, 1000);
+    ASSERT_FALSE(registry.start(a));
+    Json::Value pair;
+    EXPECT_EQ(200, registry.state("with-pair", &pair).first);
+    EXPECT_EQ(ref, pair);
+    clock.ms += 600'000;
+    registry.finish(a, "completed", 200, 10);
+    clock.ms += 3'000'000;
+    pair = Json::Value();
+    EXPECT_EQ(200, registry.state("with-pair", &pair).first);
+    EXPECT_EQ(ref, pair);
+    // what GET /requests answers from it
+    const Json::Value request = traverse_request_json(registry.state("with-pair").second,
+                                                      pair, 3600);
+    EXPECT_EQ("A", request["pairs"][0]["graph"].asString());
+    EXPECT_EQ("a.anno", request["pairs"][0]["annotation_path"].asString());
+    // the attempt expires, and the pair with it
+    clock.ms += 700'000;
+    EXPECT_EQ(404, registry.state("with-pair", &pair).first);
 }
 
 // The stop latency is measured where a seed's walk ends: its first seed_walked. A second call

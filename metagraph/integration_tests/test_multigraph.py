@@ -1542,6 +1542,26 @@ class TestMultiGraphServer(TestingBase):
 
     # -------------------------------------------------------------------- per-task figures
 
+    def test_traverse_pair_tags_live_as_long_as_the_attempt(self):
+        """GET /requests/{attempt_id} names the pair a /traverse attempt ran on for as long as
+        the attempt is answered (fanout F5 of the release-10 review): with the request
+        registry's retention at 0 the tags are still there after the attempt finished."""
+        server = Server([self.csv, '--request-retention-s', '0'],
+                        os.path.join(self.tempdir.name, 'server_retention0.log'))
+        try:
+            seed = self.records['ecoli'][0][20000:20100]
+            t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed}], 'attempt_id': 'it-ret-1',
+                 'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                              'output': {'detail': 'summary'}}}
+            self.post_to(server, 'traverse', t)
+            entry = self._wait_ended(server, 'it-ret-1')
+            (pair,) = entry['pairs']
+            self.assertEqual(('ecoli', self.pairs['ecoli'][0], self.pairs['ecoli'][1]),
+                             (pair['graph'], pair['graph_path'], pair['annotation_path']))
+            self.assertEqual('answered', pair['outcome'])
+        finally:
+            server.stop()
+
     def test_pattern_envelope_states_the_cpu_of_its_pairs(self):
         """The envelope's timing.cpu_ms (SPEC-pattern-search.md §24.1, §8.4): its own thread's
         part and every pair's work on its pool thread, so at least the answered pairs' own

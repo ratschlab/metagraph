@@ -243,11 +243,6 @@ class RequestRegistry {
     // the 404 body of an unknown id
     Json::Value unknown_json(const std::string &request_id) const;
 
-    // /traverse: the pair the attempt |attempt_id| ran on ({graph, graph_path,
-    // annotation_path}), kept as requests are (by the same retention, from now)
-    void note_traverse_pair(const std::string &attempt_id, Json::Value pair);
-    std::optional<Json::Value> traverse_pair(const std::string &attempt_id) const;
-
     // the requests held now (running and retained), for tests
     size_t size() const;
 
@@ -258,8 +253,6 @@ class RequestRegistry {
         std::map<std::string, std::shared_ptr<RequestEntry>> entries;
         // ended entries, oldest first: (when it ended, id)
         std::deque<std::pair<SteadyClock::time_point, std::string>> ended;
-        std::map<std::string, Json::Value> traverse_pairs;
-        std::deque<std::pair<SteadyClock::time_point, std::string>> traverse_order;
         SteadyClock::time_point now() const;
         void expire_locked();
     };

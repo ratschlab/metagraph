@@ -2147,11 +2147,9 @@ int run_server(Config *config) {
                     // a malformed request is refused before its index is loaded for it
                     if (in_ram.value_or(false) && loaded_with_mmap)
                         parse_traverse_request(json);
-                    // GET /requests/{attempt_id} names the pair the attempt ran on
-                    if (attempt->managed()) {
-                        requests.note_traverse_pair(attempt->ids().attempt_id,
-                                                    pair_ref_json(*selected));
-                    }
+                    // GET /requests/{attempt_id} names the pair the attempt ran on, for as
+                    // long as the attempt is answered
+                    attempt->set_pair_ref(pair_ref_json(*selected));
                     // the wait for the memory is abandoned when the client is gone or the server
                     // stops, and not entered or given up once finish_by_ms (less the clock skew
                     // allowance) has passed; a cancel takes effect when the work begins (its
@@ -2273,11 +2271,10 @@ int run_server(Config *config) {
             auto [status, body] = requests.state(id);
             if (status == 200)
                 return body;
-            auto [attempt_status, attempt] = attempts.state(id);
+            Json::Value pair;
+            auto [attempt_status, attempt] = attempts.state(id, &pair);
             if (attempt_status == 200 && attempt.get("state", "").asString() != "unknown") {
-                return traverse_request_json(attempt,
-                                             requests.traverse_pair(id).value_or(Json::Value()),
-                                             attempts.settings().retention_s);
+                return traverse_request_json(attempt, pair, attempts.settings().retention_s);
             }
             throw HttpError(404, std::move(body));
         }, /* compact */ true, &traversal_io);

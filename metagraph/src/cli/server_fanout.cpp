@@ -426,16 +426,6 @@ void RequestRegistry::Shared::expire_locked() {
                 entries.erase(it);
         }
     }
-    while (expired(traverse_order)) {
-        const std::string id = traverse_order.front().second;
-        traverse_order.pop_front();
-        bool newer = false;
-        for (const auto &[_, later] : traverse_order) {
-            newer |= later == id;
-        }
-        if (!newer)
-            traverse_pairs.erase(id);
-    }
 }
 
 RequestRegistry::RequestRegistry(RequestSettings settings)
@@ -501,21 +491,6 @@ std::pair<int, Json::Value> RequestRegistry::state(const std::string &request_id
     if (it == shared_->entries.end())
         return { 404, unknown_json(request_id) };
     return { 200, it->second->json(shared_->settings.retention_s) };
-}
-
-void RequestRegistry::note_traverse_pair(const std::string &attempt_id, Json::Value pair) {
-    std::lock_guard<std::mutex> lock(shared_->mutex);
-    shared_->traverse_pairs[attempt_id] = std::move(pair);
-    shared_->traverse_order.emplace_back(shared_->now(), attempt_id);
-    shared_->expire_locked();
-}
-
-std::optional<Json::Value> RequestRegistry::traverse_pair(const std::string &attempt_id) const {
-    std::lock_guard<std::mutex> lock(shared_->mutex);
-    auto it = shared_->traverse_pairs.find(attempt_id);
-    if (it == shared_->traverse_pairs.end())
-        return std::nullopt;
-    return it->second;
 }
 
 size_t RequestRegistry::size() const {

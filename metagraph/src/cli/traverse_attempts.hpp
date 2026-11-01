@@ -418,6 +418,12 @@ class Attempt {
     Json::Value usage_json(const std::string &reason, bool per_seed = true) const;
     // the attempt's state (GET /traverse/attempt/{id})
     Json::Value state_json() const;
+    // The pair a multi-graph server ran the attempt on ({graph, graph_path, annotation_path}),
+    // which GET /requests/{attempt_id} names (SPEC-multigraph-envelope.md section 5): kept with
+    // the attempt, so that it lives exactly as long as the attempt is answered (null: none, a
+    // single-graph server)
+    void set_pair_ref(Json::Value pair);
+    Json::Value pair_ref() const;
     // for the server's log: when the walk stopped, how long after the stop was requested, and
     // the seeds walked
     std::string stop_summary() const;
@@ -538,6 +544,8 @@ class Attempt {
     uint64_t tomb_wall_until_ms_ = 0;
     // the largest not_after_ms a cancel or a refused copy named for the id (none: none did)
     std::optional<uint64_t> tomb_not_after_ms_;
+    // the pair the attempt ran on (set_pair_ref), under |mutex_|
+    Json::Value pair_ref_;
     // a finished attempt whose retention ended while its hold had not: kept among the
     // tombstones (in the registry's |tomb_expiry_|) until the hold ends
     bool held_ = false;
@@ -630,8 +638,9 @@ class AttemptRegistry {
     // promised for it
     std::pair<int, Json::Value> cancel(const std::string &id, uint64_t wait_ms,
                                        std::optional<uint64_t> not_after_ms = std::nullopt);
-    // GET /traverse/attempt/{id}: (HTTP status, body)
-    std::pair<int, Json::Value> state(const std::string &id);
+    // GET /traverse/attempt/{id}: (HTTP status, body); with |pair_ref|, on 200 also the pair
+    // the attempt ran on (Attempt::pair_ref)
+    std::pair<int, Json::Value> state(const std::string &id, Json::Value *pair_ref = nullptr);
     // the handler returned: the attempt is finished, and kept for the retention period
     void finish(const std::shared_ptr<Attempt> &attempt, const std::string &reason, int status,
                 std::optional<size_t> bytes);
