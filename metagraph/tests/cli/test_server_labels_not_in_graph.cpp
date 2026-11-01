@@ -438,3 +438,40 @@ TEST(LabelsNotInGraph, AnAbsentSeedLabelUnderAStopIsNotRefused) {
     }
     EXPECT_GT(stopped, 0u);
 }
+
+// A result without a walk that lists megabytes of absent names (traversal F2 of the release-10
+// review): the names are request-supplied, as seed_id is, and priced in work.memory_bytes; its
+// memory_bound_soft observes them beyond the budget, and a managed request's usage states them
+// in the seed's final_bytes and soft_excess_bytes
+TEST(LabelsNotInGraph, AbsentNamesBeyondTheBudgetAreObserved) {
+    const Pair pair;
+    std::vector<std::string> names;
+    for (size_t i = 0; i < 3000; ++i) {
+        names.push_back("Z" + std::to_string(i) + std::string(500, 'n'));
+    }
+    for (const std::string &sequence : { pair.seed(), std::string("ACGTACGTACGTACGTACGT") }) {
+        Json::Value request = traverse_request({ { sequence, names } });
+        request["strategy"]["bounds"]["max_memory_mb"] = 1;
+        request["attempt_id"] = "names-1";
+        const Json::Value out = process_traverse_request(request, *pair.index, "",
+                                                         multi_graph());
+        const Json::Value &r = out["results"][0];
+        EXPECT_EQ(sequence == pair.seed() ? "labels_not_in_graph" : "not_in_graph",
+                  r["outcome"]["walks"].asString());
+        ASSERT_EQ(3000u, r["unknown_labels"].size());
+        const uint64_t memory = r["work"]["memory_bytes"].asUInt64();
+        EXPECT_GT(memory, 3000u * 500);
+        ASSERT_EQ(1u, r["limitations"].size()) << r["limitations"];
+        const Json::Value &soft = r["limitations"][0];
+        EXPECT_EQ("memory_bound_soft", soft["kind"].asString());
+        EXPECT_EQ(1u, soft["limit"].asUInt64());
+        // the excess beyond the 1 MiB budget, MiB rounded up
+        EXPECT_EQ(((memory - (1 << 20)) + (1 << 20) - 1) >> 20, soft["observed"].asUInt64())
+            << memory;
+        EXPECT_GT(soft["observed"].asUInt64(), 0u);
+        const Json::Value &seed = out["usage"]["per_seed"][0];
+        EXPECT_EQ(memory, seed["final_bytes"].asUInt64()) << seed;
+        EXPECT_EQ(memory - (1 << 20), seed["soft_excess_bytes"].asUInt64()) << seed;
+    }
+}
+

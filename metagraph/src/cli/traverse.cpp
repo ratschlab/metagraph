@@ -4395,11 +4395,48 @@ static uint64_t without_allotments(uint64_t bytes, const ResourceAccount &accoun
 // and what exceeds the budget is stated with what the walk observed. Index-supplied names
 // in its messages are cut under a budget (Walker::echoed), so they add no more than a
 // bounded prefix.
-static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t observed) {
+// |names|: what the names the result lists beside its echo of seed_id hold (listed_names_bytes:
+// on a multi-graph server's pair the request's labels the pair does not hold, echoed as
+// unknown_labels and dropped_labels), request-supplied as seed_id is
+static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t observed,
+                            uint64_t names = 0) {
     if (!st.max_memory_bytes)
         return observed;
-    const uint64_t held = failed_result_bytes(st, seed);
+    const uint64_t held = failed_result_bytes(st, seed) + names;
     return std::max(observed, held > st.max_memory_bytes ? held - st.max_memory_bytes : 0);
+}
+
+// What the names a result lists as unknown_labels and dropped_labels hold (a multi-graph
+// server's pair, SPEC-multigraph-envelope.md section 2), each priced as the walker prices a
+// dropped label: request-supplied names, which only the request's size bounds
+static uint64_t listed_names_bytes(const Strategy &st, const Json::Value &rj) {
+    uint64_t bytes = 0;
+    const DeliveryCosts &d = st.delivery;
+    for (const char *list : { "unknown_labels", "dropped_labels" }) {
+        if (!rj.isMember(list))
+            continue;
+        for (const Json::Value &v : rj[list]) {
+            const std::string name = v.isString() ? v.asString() : v["label"].asString();
+            bytes += sizeof(std::string) + name.size() + d.dropped
+                   + (d.name ? d.name(name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
+        }
+    }
+    return bytes;
+}
+
+// A result without a walk holds the names it lists (|names| bytes, listed_names_bytes) beside
+// its echo of seed_id: its memory_bound_soft observes them as failed_soft prices them (the
+// largest excess, MiB rounded up), whatever it observed before they were stated
+static void observe_listed_names(Json::Value *rj, const Strategy &st, const Seed &seed,
+                                 uint64_t names) {
+    if (!st.max_memory_bytes || !names || !rj->isMember("limitations"))
+        return;
+    const uint64_t excess = failed_soft(st, seed, 0, names);
+    const uint64_t mib = (excess + (1 << 20) - 1) >> 20;
+    for (Json::Value &l : (*rj)["limitations"]) {
+        if (l["kind"].asString() == "memory_bound_soft" && l["observed"].asUInt64() < mib)
+            l["observed"] = uint_json(mib);
+    }
 }
 
 // The head of a result without a walk (a failed, refused or never started seed): its seed
@@ -5178,18 +5215,15 @@ Json::Value process_traverse_request(const Json::Value &json,
     };
     // a result without a walk holds its fixed part and its echo of seed_id, as priced, and the
     // names it lists as unknown or dropped labels (a multi-graph server's pair), each priced
-    // as the walker prices a dropped label
-    auto put_failed_memory = [&](Json::Value *rj, const Seed &s) {
-        uint64_t holds = failed_result_bytes(req.strategy, s);
-        const DeliveryCosts &d = req.strategy.delivery;
-        for (const char *list : { "unknown_labels", "dropped_labels" }) {
-            for (const Json::Value &v : rj->get(list, Json::Value(Json::arrayValue))) {
-                const std::string name = v.isString() ? v.asString() : v["label"].asString();
-                holds += sizeof(std::string) + name.size() + d.dropped
-                       + (d.name ? d.name(name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
-            }
-        }
-        put_memory(rj, holds, holds);
+    // as the walker prices a dropped label (listed_names_bytes), which its memory_bound_soft
+    // observes too; |peak|: what the seed held before (its walk's, its account's). Returns the
+    // names' bytes (for the seed's usage)
+    auto put_failed_memory = [&](Json::Value *rj, const Seed &s, uint64_t peak = 0) {
+        const uint64_t names = listed_names_bytes(req.strategy, *rj);
+        observe_listed_names(rj, req.strategy, s, names);
+        const uint64_t holds = failed_result_bytes(req.strategy, s) + names;
+        put_memory(rj, peak, holds);
+        return names;
     };
     for (size_t i = 0; i < req.seeds.size(); ++i) {
         const Seed &seed = req.seeds[i];
@@ -5208,12 +5242,13 @@ Json::Value process_traverse_request(const Json::Value &json,
                             req.seeds[j], stop, attempt->bound_ms(), attempt->elapsed_ms(),
                             req.strategy, decode_charged, no_coordinates);
                     state_unknown_labels(&never, req.seeds[j]);
-                    put_failed_memory(&never, req.seeds[j]);
+                    const uint64_t names = put_failed_memory(&never, req.seeds[j]);
                     append(std::move(never), 0);
                     // its usage is what its result states and holds
                     SeedUsage usage;
-                    usage.meter.memory_final = failed_result_bytes(req.strategy, req.seeds[j]);
-                    usage.meter.soft_excess = failed_soft(req.strategy, req.seeds[j], 0);
+                    usage.meter.memory_final
+                            = failed_result_bytes(req.strategy, req.seeds[j]) + names;
+                    usage.meter.soft_excess = failed_soft(req.strategy, req.seeds[j], 0, names);
                     attempt->seed_not_started(j, usage);
                 }
                 break;
@@ -5232,7 +5267,8 @@ Json::Value process_traverse_request(const Json::Value &json,
         // |refused|: the demand a memory budget refused, when one stopped or failed the seed
         auto walked = [&](const std::string &outcome, const std::string &stopped_by,
                           bool failed_result = false,
-                          std::optional<uint64_t> refused = std::nullopt) {
+                          std::optional<uint64_t> refused = std::nullopt,
+                          uint64_t names = 0) {
             if (!attempt)
                 return;
             // the longest read or head piece so far (usage, and the server's deadline_check)
@@ -5242,8 +5278,10 @@ Json::Value process_traverse_request(const Json::Value &json,
             usage.stopped_by = stopped_by;
             usage.meter = meter;
             if (failed_result) {
-                usage.meter.memory_final = failed_result_bytes(req.strategy, seed);
-                usage.meter.soft_excess = failed_soft(req.strategy, seed, meter.soft_excess);
+                // its echo of seed_id and the names it lists (|names|, listed_names_bytes)
+                usage.meter.memory_final = failed_result_bytes(req.strategy, seed) + names;
+                usage.meter.soft_excess = failed_soft(req.strategy, seed, meter.soft_excess,
+                                                      names);
             }
             usage.refused_bytes = refused;
             usage.elapsed_ms = seed_timer.elapsed() * 1000;
@@ -5306,21 +5344,25 @@ Json::Value process_traverse_request(const Json::Value &json,
             if (!refused.isNull()) {
                 if (req.strategy.drop_labels_not_in_graph)
                     refused["unknown_labels"] = names_json(r.unknown_labels);
+                // the names it lists, echoed from the request as seed_id is
+                const uint64_t names = listed_names_bytes(req.strategy, refused);
                 if (req.strategy.max_memory_bytes) {
                     // every response under a memory budget states it (§7.0), with what
                     // this result's echo of the request holds beyond it (failed_soft)
                     ResourceAccount account = r.account;
-                    account.soft_overshoot = failed_soft(req.strategy, seed, account.soft_overshoot);
+                    account.soft_overshoot = failed_soft(req.strategy, seed,
+                                                         account.soft_overshoot, names);
                     refused["limitations"].append(memory_bound_soft(req.strategy, account));
                     refused["outcome"] = outcome_of(refused, true);
                 }
                 // its result is the refusal, not the walk
                 walked("failed", r.resource_stop ? resource_name(r.resource_stop->resource) : "",
-                       true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt);
+                       true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt,
+                       names);
                 const std::string outcome = refused["outcome"]["walks"].asString();
                 // the walk's peak; its result is the refusal
                 put_memory(&refused, without_allotments(r.account.memory_peak, r.account),
-                           failed_result_bytes(req.strategy, seed));
+                           failed_result_bytes(req.strategy, seed) + names);
                 append(std::move(refused), 0);
                 delivered(outcome);
                 continue;
@@ -5357,13 +5399,14 @@ Json::Value process_traverse_request(const Json::Value &json,
             // labels, so it had no lever on that and nothing to fix in the request:
             // report it against the seed and keep the other seeds' traversals, instead of
             // discarding a 100-seed batch because seed 57 spans a recombination point.
-            walked("failed", e.cause() == SeedDerivationError::TIME_BUDGET ? "time" : "", true);
             Json::Value failed = failed_seed_to_json(seed, e, req.strategy, clamped,
                                                      oracle.decode_charged(), no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
             state_unknown_labels(&failed, seed);
             // the seed phase holds no modelled account (its rows are observed, not charged)
-            put_failed_memory(&failed, seed);
+            const uint64_t names = put_failed_memory(&failed, seed);
+            walked("failed", e.cause() == SeedDerivationError::TIME_BUDGET ? "time" : "", true,
+                   std::nullopt, names);
             append(std::move(failed), 0);
             delivered(outcome);
             oracle.sync_path_cache_counters();
@@ -5372,14 +5415,15 @@ Json::Value process_traverse_request(const Json::Value &json,
             // a request budget does not hold this seed (§14): failed per seed, like a
             // derivation, since the budget is per seed and the other seeds may fit (or the
             // attempt stopped it in its seed phase)
-            walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()));
             Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy, clamped,
                                                             no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
             state_unknown_labels(&failed, seed);
-            // what the account held when the budget failed the seed
-            put_memory(&failed, without_allotments(e.account().memory_peak, e.account()),
-                       failed_result_bytes(req.strategy, seed));
+            // what the account held when the budget failed the seed, and what its result holds
+            const uint64_t names = put_failed_memory(
+                    &failed, seed, without_allotments(e.account().memory_peak, e.account()));
+            walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()),
+                   names);
             append(std::move(failed), 0);
             delivered(outcome);
             oracle.sync_path_cache_counters();
@@ -5399,12 +5443,11 @@ Json::Value process_traverse_request(const Json::Value &json,
             }
             // a chunk of a multi-graph server that does not hold the seed: stated per seed, the
             // other seeds traversed
-            walked("not_in_graph", "", true);
             Json::Value absent = not_in_graph_seed_to_json(seed, e, req.strategy,
                                                            oracle.decode_charged(),
                                                            no_coordinates);
             state_unknown_labels(&absent, seed);
-            put_failed_memory(&absent, seed);
+            walked("not_in_graph", "", true, std::nullopt, put_failed_memory(&absent, seed));
             append(std::move(absent), 0);
             delivered("not_in_graph");
             oracle.sync_path_cache_counters();
@@ -5413,11 +5456,11 @@ Json::Value process_traverse_request(const Json::Value &json,
             // raised only on a multi-graph server's pair (Strategy::drop_labels_not_in_graph):
             // the pair holds none of the seed's labels, which is its result; the other seeds
             // are traversed
-            walked("labels_not_in_graph", "", true);
             Json::Value absent = labels_not_in_graph_seed_to_json(seed, e, req.strategy,
                                                                   oracle.decode_charged(),
                                                                   no_coordinates);
-            put_failed_memory(&absent, seed);
+            walked("labels_not_in_graph", "", true, std::nullopt,
+                   put_failed_memory(&absent, seed));
             append(std::move(absent), 0);
             delivered("labels_not_in_graph");
             oracle.sync_path_cache_counters();
