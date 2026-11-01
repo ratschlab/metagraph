@@ -1,9 +1,14 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <json/json.h>
 
 #include "../test_helpers.hpp"
 #include "../graph/all/test_dbg_helpers.hpp"
@@ -199,6 +204,49 @@ TEST(SearchCut, MediansOrderTheTies) {
     EXPECT_TRUE(top.cut.complete);
     EXPECT_EQ(0u, top.cut.nth_median);
     EXPECT_EQ(0u, top.cut.tied_same_median);
+}
+
+// Sample 14 of SPEC-multigraph-envelope.md (round 2 of the contract notice): its row's
+// kmer_count is the number of query positions with a non-zero abundance, its cut's nth_median
+// the lower median of those abundances, and the cut itself what search_top_n states for the
+// sample's N (its request's top_labels) over SRR1001 and the narrated SRR0999 (12 k-mers,
+// median 1)
+TEST(SearchCut, Sample14IsTheEnginesCut) {
+    const std::string path = "../tests/data/multigraph_contract/14_search_counts_cut.json";
+    std::ifstream in(path, std::ios::binary);
+    ASSERT_TRUE(in.good()) << path << " not found (run from the build directory)";
+    Json::Value sample;
+    Json::CharReaderBuilder builder;
+    std::string errors;
+    ASSERT_TRUE(Json::parseFromStream(builder, in, &sample, &errors)) << errors;
+    const Json::Value &request = sample["request"];
+    EXPECT_FALSE(request.isMember("num_labels"));
+    const size_t n = request["top_labels"].asUInt64();
+    const Json::Value &query = sample["body"][0];
+    ASSERT_EQ(1u, query["results"].size());
+    const Json::Value &row = query["results"][0];
+    std::vector<uint64_t> abundances;
+    std::stringstream positions(row["kmer_abundances"].asString());
+    for (std::string value; std::getline(positions, value, ':'); ) {
+        abundances.push_back(std::stoull(value));
+    }
+    const size_t present = std::count_if(abundances.begin(), abundances.end(),
+                                         [](uint64_t a) { return a > 0; });
+    EXPECT_EQ(present, row["kmer_count"].asUInt64());
+    const uint64_t median = lower_median(abundances);
+    const auto top = top_n({ "SRR0999", row["sample"].asString() },
+                           { 12, row["kmer_count"].asUInt64() }, n, { 1, median });
+    EXPECT_EQ((std::vector<std::string>{ row["sample"].asString() }), labels_of(top));
+    ASSERT_EQ(1u, query["cuts"].size());
+    const Json::Value &cut = query["cuts"][0];
+    EXPECT_EQ(top.cut.returned, cut["returned"].asUInt64());
+    EXPECT_EQ(top.cut.complete, cut["complete"].asBool());
+    EXPECT_EQ(top.cut.nth_score, cut["nth_score"].asUInt64());
+    EXPECT_EQ(top.cut.tied, cut["tied"].asUInt64());
+    EXPECT_EQ(top.cut.tied_returned, cut["tied_returned"].asUInt64());
+    EXPECT_EQ(top.cut.nth_median, cut["nth_median"].asUInt64());
+    EXPECT_EQ(top.cut.tied_same_median, cut["tied_same_median"].asUInt64());
+    EXPECT_EQ(7u, median);
 }
 
 TEST(SearchCut, NoneRequested) {

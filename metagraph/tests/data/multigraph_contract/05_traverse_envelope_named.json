@@ -51,8 +51,8 @@
   "deadline": {
    "not_after_ms": 1793520010000,
    "finish_by_ms": null,
-   "effective_deadline_at": null,
-   "cutoff_at": null
+   "effective_deadline_at": "2026-10-21T09:14:53.688Z",
+   "cutoff_at": "2026-10-21T09:14:48.688Z"
   },
   "usage": {
    "attempt_id": "svc-trv-91aa07-1",

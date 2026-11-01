@@ -312,7 +312,7 @@
     "graph": "bact_pseudomonadota",
     "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg",
     "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
-    "index_fp": "907ec986e19ecb04c9702478eac098a832a2cd4a3d7d7c8febbf8a71f42af5de",
+    "index_fp": "c9a9c34fa17d947caa08350e41652ee3506ff27f4141ff1717eb959bbb5064dc",
     "outcome": "answered",
     "algorithm_version": "traverse-0.2",
     "alphabet": "$ACGT",
