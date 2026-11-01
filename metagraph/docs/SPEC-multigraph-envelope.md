@@ -97,7 +97,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   ordered by label.
 - The result cache key includes the selected names (with their pairs), so a pair listed under two names never
   returns rows tagged with the other name.
-- `/search` takes `graphs` only (no `pairs`; it has no re-ask).
+- `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
+  server, single-graph included, before any cached answer is looked up. On a single-graph server the field used to
+  be ignored (a request it refused for `graphs` keeps that refusal).
 
 ## 4. Deadlines and the work cutoff (E4, E20)
 
@@ -177,7 +179,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 
 | Route | `graphs` | `pairs` | Note |
 | --- | --- | --- | --- |
-| `/search` | yes | refused (`pairs_unsupported`) | |
+| `/search` | yes | refused (`pairs_unsupported`) | also on a single-graph server |
 | `/resolve`, `/pattern` | yes | yes | any number of pairs |
 | `/traverse` | `graph`, or `graphs` resolving to ONE pair | exactly one pair | several pairs: `traverse_single_pair` |
 | `GET /traverse/capabilities`, `GET /pattern/capabilities` | `?graph=` | `?graph=&graph_path=&annotation_path=` | one pair per probe |

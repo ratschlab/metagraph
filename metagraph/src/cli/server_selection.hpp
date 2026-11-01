@@ -134,6 +134,10 @@ probe_parameters(const Query &query, const std::string &route) {
                             route);
 }
 
+// A POST /search request with `pairs`, on any server: SelectionRefusal pairs_unsupported
+// (/search selects by `graphs` only)
+void refuse_search_pairs(const Json::Value &request);
+
 /**
  * The pairs a request on |route| selects on a multi-graph server (|indexes|), in the
  * envelope's order (ordered_pairs: the names in byte order, each name's pairs in the graph

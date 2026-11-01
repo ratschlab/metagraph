@@ -656,6 +656,13 @@ std::vector<SelectedPair> select_posted(SelectionRoute route, const Json::Value 
 
 } // namespace
 
+void refuse_search_pairs(const Json::Value &request) {
+    if (request.isObject() && request.isMember("pairs")) {
+        throw SelectionRefusal("request: /search selects by graphs only (it has no re-ask): "
+                               "pairs is not accepted", "pairs_unsupported");
+    }
+}
+
 std::vector<SelectedPair> select_pairs(SelectionRoute route,
                                        const Json::Value &request,
                                        const GraphIndexes &indexes,
@@ -663,10 +670,7 @@ std::vector<SelectedPair> select_pairs(SelectionRoute route,
     const Json::Value &object = object_or_empty(request);
     switch (route) {
         case SelectionRoute::SEARCH: {
-            if (object.isMember("pairs")) {
-                throw SelectionRefusal("request: /search selects by graphs only (it has no "
-                                       "re-ask): pairs is not accepted", "pairs_unsupported");
-            }
+            refuse_search_pairs(object);
             // its own message for an unknown name, as before, now with the code
             if (object.isMember("graphs") && object["graphs"].isArray()) {
                 for (const Json::Value &name : object["graphs"]) {

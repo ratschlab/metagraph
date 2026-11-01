@@ -219,6 +219,43 @@ class TestServerCache(TestingBase):
                                    'results': []}],
                                  response.json())
 
+    def test_search_refuses_pairs_on_every_server(self):
+        """/search selects by `graphs` only (SPEC-multigraph-envelope.md section 6): `pairs` is
+        refused 400 pairs_unsupported on a single-graph server too, where it used to be
+        ignored (GPT B4), cold and with the same request otherwise cached: the check comes
+        before the cache. `graphs` keeps its refusal of before."""
+        graph, annotation = self.tiny_index()
+        payload = {'FASTA': '>q\nACGTACGTACGT\n', 'top_labels': 1}
+        refusal = {'error': 'request: /search selects by graphs only (it has no re-ask): '
+                            'pairs is not accepted', 'code': 'pairs_unsupported'}
+        indexes = graph.with_name('indexes.csv')
+        indexes.write_text(f'one,{graph},{annotation}\n')
+        for server in (('-i', graph, '-a', annotation), (indexes,)):
+            with self.subTest(server=server), \
+                    self.running_server(*server) as (client, url, log):
+                for pairs in ([{'graph': 'one'}], [], 'x'):
+                    # cold
+                    response = client.post(url, json=dict(payload, pairs=pairs), timeout=30)
+                    self.assertEqual(400, response.status_code, response.text)
+                    self.assertEqual(refusal, response.json())
+                # warm: the request without pairs is cached, with them it is refused
+                for _ in range(2):
+                    response = client.post(url, json=payload, timeout=30)
+                    self.assertEqual(200, response.status_code, response.text)
+                response = client.post(url, json=dict(payload, pairs=[{'graph': 'one'}]),
+                                       timeout=30)
+                self.assertEqual(400, response.status_code, response.text)
+                self.assertEqual(refusal, response.json())
+                self.assertEqual(log.read_text().count('cache STORE'), 1)
+                self.assertEqual(log.read_text().count('cache HIT'), 1)
+        # a single-graph server's refusal of `graphs` comes first, as before
+        with self.running_server('-i', graph, '-a', annotation) as (client, url, _):
+            response = client.post(url, json=dict(payload, graphs=['one'], pairs=[]),
+                                   timeout=30)
+            self.assertEqual(400, response.status_code, response.text)
+            self.assertEqual({'error': 'Bad request: no support for filtering graphs on this '
+                                       'server'}, response.json())
+
     def test_graph_paths_with_delimiters_have_distinct_cache_entries(self):
         root = Path(self.tempdir.name)
         fasta = TEST_DATA_DIR + '/transcripts_100.fa'

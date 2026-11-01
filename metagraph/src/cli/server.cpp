@@ -913,6 +913,10 @@ int run_server(Config *config) {
                 if (config->fnames.empty()) {
                     if (content_json.isMember("graphs"))
                         throw std::invalid_argument("Bad request: no support for filtering graphs on this server");
+                    // nor for `pairs` (SPEC-multigraph-envelope.md section 6), as on a
+                    // multi-graph server; before the cache, so that no cached answer is given
+                    // for it (before release 10 the field was ignored here)
+                    refuse_search_pairs(content_json);
                 } else {
                     // the pairs of the selection (SPEC-multigraph-envelope.md section 6:
                     // `graphs` only, `pairs` refused with pairs_unsupported, an unknown name
