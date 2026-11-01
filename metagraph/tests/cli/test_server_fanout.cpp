@@ -248,6 +248,37 @@ TEST(ServerFanout, EffectiveDeadlineAndCutoff) {
 
 // ---------------------------------------------------------------- the fan-out
 
+// fanout F4 of the release-10 review: a finish_by_ms far in the future (up to 2^53 - 1, as
+// read_finish_by_ms accepts) binds nothing and overflows no clock: the effective deadline is
+// the budget's (or the transport's), never an instant in the past
+TEST(ServerFanout, FarFinishByMsBindsNothing) {
+    for (uint64_t finish_by : { uint64_t(10'000'000'000'000), uint64_t(12'000'000'000'000),
+                                (uint64_t(1) << 53) - 1 }) {
+        RequestHandles h;
+        h.finish_by_ms = finish_by;
+        const RequestDeadlines d = deadlines_now(60'000, h);
+        const RequestDeadlines without = deadlines_now(60'000);
+        const double effective_ms = std::chrono::duration<double, std::milli>(
+                d.effective - d.arrival).count();
+        EXPECT_NEAR(60000.0, effective_ms, 1.0) << finish_by;
+        EXPECT_FALSE(d.transport_bound) << finish_by;
+        EXPECT_GT(d.cutoff, d.arrival) << finish_by;
+        ASSERT_TRUE(d.finish) << finish_by;
+        EXPECT_GT(*d.finish, d.effective) << finish_by;
+        // the instants written: the budget's, after the arrival, in this millennium
+        EXPECT_EQ(iso_utc(without.effective_wall).substr(0, 4),
+                  iso_utc(d.effective_wall).substr(0, 4)) << finish_by;
+        EXPECT_EQ(finish_by, d.json()["finish_by_ms"].asUInt64()) << finish_by;
+
+        // beyond the transport's cap the transport binds
+        const RequestDeadlines t = deadlines_now(2e6, h);
+        EXPECT_TRUE(t.transport_bound) << finish_by;
+        const double transport_ms = std::chrono::duration<double, std::milli>(
+                t.effective - t.arrival).count();
+        EXPECT_NEAR(899000.0, transport_ms, 1.0) << finish_by;
+    }
+}
+
 // One pair runs on the calling thread, as a single-graph request (no pool, no cutoff wait)
 TEST(ServerFanout, OnePairRunsInline) {
     const std::thread::id handler = std::this_thread::get_id();

@@ -140,8 +140,16 @@ RequestDeadlines request_deadlines(WallClock::time_point arrival_wall,
     d.transport_bound = !(budget_end < transport_end);
     d.effective = std::min(budget_end, transport_end);
     if (handles.finish_by_ms) {
-        const uint64_t finish_ms = *handles.finish_by_ms > skew_ms
+        uint64_t finish_ms = *handles.finish_by_ms > skew_ms
                 ? *handles.finish_by_ms - skew_ms : 0;
+        // A finish after the transport's end cannot bind (the effective deadline is at most
+        // that end): saturated just past it, so that a far-future finish_by_ms (read up to
+        // 2^53 - 1) is no instant the clocks cannot hold (on Linux the system clock counts
+        // nanoseconds, which overflow past the year 2262, and the steady difference past 292
+        // years)
+        const uint64_t past_transport = ms_of_wall(arrival_wall)
+                + static_cast<uint64_t>(std::ceil(std::max(0.0, transport_ms))) + 1;
+        finish_ms = std::min(finish_ms, past_transport);
         d.finish_wall = wall_of_ms(finish_ms);
         d.finish = d.steady_of(*d.finish_wall);
         if (*d.finish < d.effective) {
