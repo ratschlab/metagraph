@@ -338,17 +338,19 @@ bool search_row_before(const SearchRow &a, const SearchRow &b) {
 std::vector<std::pair<size_t, std::string>>
 search_top_n(const std::vector<size_t> &scores,
              size_t num_top_labels,
-             const std::function<std::string(size_t)> &label,
+             const std::function<const std::string &(size_t)> &label,
              const std::function<std::vector<uint64_t>(const std::vector<size_t> &)> &medians,
              SearchCut *cut) {
     SearchCut c;
     c.abundances = static_cast<bool>(medians);
 
+    // (a label is the caller's, never copied but for the rows returned: a tie group at a cut
+    // can hold millions of rows, all of them ordered by label)
     struct Row {
         size_t index;
         size_t score;
         uint64_t median;
-        std::string label;
+        std::string_view label;
     };
     std::vector<size_t> order(scores.size());
     std::iota(order.begin(), order.end(), 0);
@@ -379,22 +381,33 @@ search_top_n(const std::vector<size_t> &scores,
         }
     }
 
+    // the rows above the N-th score (every row of a complete result), each returned; the tie
+    // group at a cut, [above, order.size()) of |order|, is held as its candidates' indexes
+    // (and medians where they are read) until its |slots| places are taken, so that a tie
+    // group of millions costs a few words per row, as the selection before release 10 did
     std::vector<Row> rows;
-    rows.reserve(order.size());
-    for (size_t i : order) {
-        rows.push_back(Row{ i, scores[i], 0, std::string() });
+    rows.reserve(above + slots);
+    for (size_t p = 0; p < above; ++p) {
+        rows.push_back(Row{ order[p], scores[order[p]], 0, std::string_view() });
     }
+    struct Tied {
+        uint64_t median;
+        size_t index;
+    };
+    // (filled where the medians of the tie group are read; without them the group stays in
+    // |order|)
+    std::vector<Tied> tie;
+    const size_t tied = order.size() - above;
 
     // The medians break ties only, so a row's median is read only where it is compared: the
     // rows that share their score with another one, the tie group at a cut (whose N-th row's
     // median the cut then states) and the rows above it of one score. A row with a score of
     // its own keeps median 0, which no comparison reads, and a cut whose N-th score has one
     // row states no median. Reading the abundances costs a pass over the query's rows and
-    // holds values of the columns asked, so it is asked for no other row.
-    if (medians && rows.size()) {
+    // holds values of the columns asked, so it is asked for no other row, and once.
+    if (medians && (rows.size() || tied)) {
         std::vector<size_t> asked;
-        // the rows above the N-th score (every row of a complete result) in score order: the
-        // runs of one score
+        // the rows above the N-th score in score order: the runs of one score
         std::vector<size_t> by_score(above);
         std::iota(by_score.begin(), by_score.end(), 0);
         std::sort(by_score.begin(), by_score.end(), [&](size_t r, size_t s) {
@@ -409,31 +422,38 @@ search_top_n(const std::vector<size_t> &scores,
                 asked.insert(asked.end(), by_score.begin() + b, by_score.begin() + e);
             b = e;
         }
+        std::vector<size_t> indexes(asked.size());
+        std::transform(asked.begin(), asked.end(), indexes.begin(),
+                       [&](size_t r) { return rows[r].index; });
         // the tie group at the cut, if the N-th score is shared
-        if (rows.size() - above > 1) {
-            for (size_t r = above; r < rows.size(); ++r) {
-                asked.push_back(r);
-            }
+        if (tied > 1) {
+            indexes.insert(indexes.end(), order.begin() + above, order.end());
             c.nth_median_read = true;
         }
-        if (asked.size()) {
-            std::vector<size_t> indexes(asked.size());
-            std::transform(asked.begin(), asked.end(), indexes.begin(),
-                           [&](size_t r) { return rows[r].index; });
+        if (indexes.size()) {
             std::vector<uint64_t> values = medians(indexes);
-            assert(values.size() == asked.size());
+            assert(values.size() == indexes.size());
             for (size_t a = 0; a < asked.size(); ++a) {
                 rows[asked[a]].median = values[a];
+            }
+            if (c.nth_median_read) {
+                tie.reserve(tied);
+                for (size_t t = 0; t < tied; ++t) {
+                    tie.push_back(Tied{ values[asked.size() + t], order[above + t] });
+                }
             }
         }
     }
 
+    // search_row_before's order, with one comparison of the labels, and candidates of one label
+    // (a header in two columns) in their order in |scores|
     auto before = [](const Row &a, const Row &b) {
-        if (search_row_before({ a.score, a.median, a.label }, { b.score, b.median, b.label }))
-            return true;
-        if (search_row_before({ b.score, b.median, b.label }, { a.score, a.median, a.label }))
-            return false;
-        // one label in two candidates (a header in two columns): their order in |scores|
+        if (a.score != b.score)
+            return a.score > b.score;
+        if (a.median != b.median)
+            return a.median > b.median;
+        if (const int labels = a.label.compare(b.label))
+            return labels < 0;
         return a.index < b.index;
     };
 
@@ -444,28 +464,54 @@ search_top_n(const std::vector<size_t> &scores,
         // the cut, is not decoded entirely where the medians separate it), and the places
         // are taken by a selection, not a sort of the whole group: O(T + slots log slots),
         // the returned rows sorted below.
-        auto tie_begin = rows.begin() + above;
-        auto same_begin = tie_begin;
-        auto same_end = rows.end();
+        // the candidates of the N-th row's median: the whole group, or (medians read) those
+        // left once the |slots|-th largest median is found and the group split around it
+        std::vector<std::pair<const std::string *, size_t>> same;
         if (c.nth_median_read) {
-            // the |slots|-th largest median, and the group split around it
-            std::nth_element(tie_begin, tie_begin + slots - 1, rows.end(),
-                             [](const Row &a, const Row &b) { return a.median > b.median; });
-            c.nth_median = tie_begin[slots - 1].median;
-            same_begin = std::partition(tie_begin, rows.end(),
-                    [&](const Row &row) { return row.median > c.nth_median; });
-            same_end = std::partition(same_begin, rows.end(),
-                    [&](const Row &row) { return row.median == c.nth_median; });
+            std::nth_element(tie.begin(), tie.begin() + slots - 1, tie.end(),
+                             [](const Tied &a, const Tied &b) { return a.median > b.median; });
+            c.nth_median = tie[slots - 1].median;
+            auto same_begin = std::partition(tie.begin(), tie.end(),
+                    [&](const Tied &t) { return t.median > c.nth_median; });
+            auto same_end = std::partition(same_begin, tie.end(),
+                    [&](const Tied &t) { return t.median == c.nth_median; });
+            // every row of a larger median is returned
+            for (auto it = tie.begin(); it != same_begin; ++it) {
+                rows.push_back(Row{ it->index, c.nth_score, it->median, label(it->index) });
+            }
+            same.reserve(same_end - same_begin);
+            for (auto it = same_begin; it != same_end; ++it) {
+                same.emplace_back(&label(it->index), it->index);
+            }
+        } else {
+            // no median: the whole group competes by label, selected where it is (|order|)
+            c.tied_same_median = tied;
+            std::nth_element(order.begin() + above, order.begin() + above + slots - 1,
+                             order.end(), [&](size_t a, size_t b) {
+                                 if (const int labels = label(a).compare(label(b)))
+                                     return labels < 0;
+                                 return a < b;
+                             });
+            for (size_t p = above; p < above + slots; ++p) {
+                rows.push_back(Row{ order[p], c.nth_score, 0, label(order[p]) });
+            }
         }
-        c.tied_same_median = same_end - same_begin;
-        for (auto it = tie_begin; it != same_end; ++it) {
-            it->label = label(it->index);
+        if (c.nth_median_read) {
+            c.tied_same_median = same.size();
+            tie = std::vector<Tied>();
+            // the first rows of the N-th row's median in the C5 order take the places left
+            const size_t left = slots - (rows.size() - above);
+            assert(left && left <= same.size());
+            std::nth_element(same.begin(), same.begin() + left - 1, same.end(),
+                             [](const auto &a, const auto &b) {
+                                 if (const int labels = a.first->compare(*b.first))
+                                     return labels < 0;
+                                 return a.second < b.second;
+                             });
+            for (size_t r = 0; r < left; ++r) {
+                rows.push_back(Row{ same[r].second, c.nth_score, c.nth_median, *same[r].first });
+            }
         }
-        // the first rows of the N-th row's median in the C5 order take the places left
-        auto end_returned = tie_begin + slots;
-        assert(same_begin < end_returned && end_returned <= same_end);
-        std::nth_element(same_begin, end_returned - 1, same_end, before);
-        rows.erase(end_returned, rows.end());
     }
     if (!c.abundances) {
         c.nth_median = c.tied_same_median = 0;
@@ -483,8 +529,8 @@ search_top_n(const std::vector<size_t> &scores,
 
     std::vector<std::pair<size_t, std::string>> result;
     result.reserve(rows.size());
-    for (auto &row : rows) {
-        result.emplace_back(row.index, std::move(row.label));
+    for (const Row &row : rows) {
+        result.emplace_back(row.index, std::string(row.label));
     }
     return result;
 }
@@ -702,7 +748,9 @@ std::vector<StringCountPair> filter_and_decode(Container&& code_counts,
         scores.push_back(count);
     }
     auto top = search_top_n(scores, num_top_labels,
-                            [&](size_t i) { return label_encoder.decode(code_counts[i].first); },
+                            [&](size_t i) -> const std::string & {
+                                return label_encoder.decode(code_counts[i].first);
+                            },
                             medians_of_candidates(code_counts, medians), cut);
 
     std::vector<StringCountPair> label_counts;
@@ -830,7 +878,9 @@ Result filter_and_aggregate(const RowEnumerator &enumerate_rows,
         scores.push_back(count);
     }
     auto top = search_top_n(scores, num_top_labels,
-                            [&](size_t i) { return label_encoder.decode(candidates[i].first); },
+                            [&](size_t i) -> const std::string & {
+                                return label_encoder.decode(candidates[i].first);
+                            },
                             medians_of_candidates(candidates, medians), cut);
     if (top.empty())
         return {};
@@ -1112,7 +1162,7 @@ AnnotatedDBG::query_kmer_coordinates(std::string_view sequence,
         for (const auto &[h, c] : candidates) {
             scores.push_back(score_by_coordinates ? c.second : c.first);
         }
-        auto top = search_top_n(scores, num_top_labels, [&](size_t i) {
+        auto top = search_top_n(scores, num_top_labels, [&](size_t i) -> const std::string & {
             const auto &[col, header] = candidates[i].first;
             return coord_to_header_->get_headers(col)[header];
         }, {}, cut);

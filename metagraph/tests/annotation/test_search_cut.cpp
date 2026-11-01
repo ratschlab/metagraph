@@ -93,11 +93,13 @@ TopN top_n(const std::vector<std::string> &labels,
             return values;
         };
     }
-    out.rows = search_top_n(scores, n, [&](size_t i) {
+    out.rows = search_top_n(scores, n, [&](size_t i) -> const std::string & {
         out.decoded.push_back(i);
         return labels.at(i);
     }, medians_of, &out.cut);
+    // (a label is looked up whenever compared: the candidates decoded, each once)
     std::sort(out.decoded.begin(), out.decoded.end());
+    out.decoded.erase(std::unique(out.decoded.begin(), out.decoded.end()), out.decoded.end());
     return out;
 }
 
@@ -370,7 +372,9 @@ TEST(SearchCut, LargeTieGroupIsSelectedNotSorted) {
         for (int run = 0; run < 3; ++run) {
             SearchCut cut;
             auto start = std::chrono::steady_clock::now();
-            auto rows = search_top_n(scores, n, [&](size_t i) { return labels[i]; }, {}, &cut);
+            auto rows = search_top_n(scores, n,
+                                     [&](size_t i) -> const std::string & { return labels[i]; },
+                                     {}, &cut);
             best = std::min(best, std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - start).count());
             EXPECT_EQ(n, rows.size());
@@ -384,7 +388,9 @@ TEST(SearchCut, LargeTieGroupIsSelectedNotSorted) {
 
     // the tie group's first labels in byte order
     SearchCut cut;
-    auto rows = search_top_n(tied, n, [&](size_t i) { return labels[i]; }, {}, &cut);
+    auto rows = search_top_n(tied, n,
+                             [&](size_t i) -> const std::string & { return labels[i]; }, {},
+                             &cut);
     std::vector<std::string> sorted_labels = labels;
     std::partial_sort(sorted_labels.begin(), sorted_labels.begin() + n, sorted_labels.end());
     for (size_t r = 0; r < n; ++r) {
@@ -392,6 +398,54 @@ TEST(SearchCut, LargeTieGroupIsSelectedNotSorted) {
     }
     EXPECT_EQ(num, cut.tied);
     EXPECT_EQ(n, cut.tied_returned);
+}
+
+// GPT B2: a tie group of many rows at the cut costs about a partial selection in the C5 order
+// over the candidates' indexes (the labels compared by reference, never copied but for the rows
+// returned), which takes the same rows; the selection of release 10 before this fix built,
+// decoded and copied every label of the group (8 times this reference)
+TEST(SearchCut, ATieGroupCostsAboutAPartialSelection) {
+    const size_t num = 300'000;
+    const size_t n = 1000;
+    std::vector<std::string> labels(num);
+    for (size_t i = 0; i < num; ++i) {
+        labels[i] = "sample-common-prefix-" + std::to_string((i * 999'983ull) % num);
+    }
+    const std::vector<size_t> scores(num, 100);
+    using Clock = std::chrono::steady_clock;
+    double head = std::numeric_limits<double>::max();
+    double reference = std::numeric_limits<double>::max();
+    for (int run = 0; run < 5; ++run) {
+        auto start = Clock::now();
+        SearchCut cut;
+        auto rows = search_top_n(scores, n,
+                                 [&](size_t i) -> const std::string & { return labels[i]; },
+                                 {}, &cut);
+        head = std::min(head, std::chrono::duration<double>(Clock::now() - start).count());
+        start = Clock::now();
+        std::vector<size_t> order(num);
+        std::iota(order.begin(), order.end(), 0);
+        auto c5 = [&](size_t a, size_t b) {
+            if (scores[a] != scores[b])
+                return scores[a] > scores[b];
+            if (labels[a] != labels[b])
+                return labels[a] < labels[b];
+            return a < b;
+        };
+        std::nth_element(order.begin(), order.begin() + n - 1, order.end(), c5);
+        order.resize(n);
+        std::sort(order.begin(), order.end(), c5);
+        reference = std::min(reference,
+                             std::chrono::duration<double>(Clock::now() - start).count());
+        ASSERT_EQ(n, rows.size());
+        for (size_t r = 0; r < n; ++r) {
+            ASSERT_EQ(order[r], rows[r].first) << r;
+            ASSERT_EQ(labels[order[r]], rows[r].second) << r;
+        }
+        EXPECT_EQ(num, cut.tied);
+        EXPECT_EQ(n, cut.tied_returned);
+    }
+    EXPECT_LT(head, 3 * reference) << "head " << head << " s, reference " << reference << " s";
 }
 
 // R10-SEARCH-COST-2: the medians are read only for the rows a median is compared for (the tie
@@ -404,7 +458,8 @@ TEST(SearchCut, MediansReadOnlyWhereCompared) {
         for (size_t i = 0; i < scores.size(); ++i) {
             labels.push_back("L" + std::to_string(i));
         }
-        search_top_n(scores, n, [&](size_t i) { return labels.at(i); },
+        search_top_n(scores, n,
+                     [&](size_t i) -> const std::string & { return labels.at(i); },
                      [&](const std::vector<size_t> &indexes) {
                          asked.insert(asked.end(), indexes.begin(), indexes.end());
                          return std::vector<uint64_t>(indexes.size(), 1);

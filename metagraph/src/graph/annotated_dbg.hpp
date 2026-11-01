@@ -105,8 +105,10 @@ bool search_row_before(const SearchRow &a, const SearchRow &b);
  * |scores|: the candidates' scores, every candidate above the request's thresholds. |label|:
  * a candidate's label, decoded only for the rows returned and for the rows of the N-th score
  * that compete for the last places (the tie group at the cut, of the N-th row's median where
- * medians are given), never for every candidate. |medians|: on an annotation with k-mer counts
- * the lower medians (lower_median) of the candidates it is passed, asked only for the rows a
+ * medians are given), never for every candidate; a reference that outlives the call (the
+ * label encoder's, the record mapping's), copied only for the rows returned. |medians|: on an
+ * annotation with k-mer counts the lower medians (lower_median) of the candidates it is
+ * passed, asked only for the rows a
  * median is compared for (the tie group at a cut, and the rows above it that share a score);
  * empty otherwise. Candidates with one label (a header in two
  * columns of one pair) keep their order in |scores|.
@@ -116,7 +118,7 @@ bool search_row_before(const SearchRow &a, const SearchRow &b);
 std::vector<std::pair<size_t, std::string>>
 search_top_n(const std::vector<size_t> &scores,
              size_t num_top_labels,
-             const std::function<std::string(size_t)> &label,
+             const std::function<const std::string &(size_t)> &label,
              const std::function<std::vector<uint64_t>(const std::vector<size_t> &)> &medians,
              SearchCut *cut);
 
