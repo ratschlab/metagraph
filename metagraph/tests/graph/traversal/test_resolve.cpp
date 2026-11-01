@@ -322,6 +322,94 @@ TYPED_TEST(ResolveTest, DiscoveryTiesByNameNotColumn) {
 // needed) with many labels whose runs end at jittered positions. The breadth-optimal
 // block is the prefix every label covers; picking it must stay fast and must agree
 // with a brute-force count (checked by an assert inside the sweep in debug builds).
+// What a single-graph /resolve refuses before its admission of an explicit selection: the
+// faults the request and k decide, in select_seeds' words, the fault select_seeds would state
+// first also when that is a seed not fully in the graph; a request without such a fault passes,
+// whatever select_seeds finds of it after the work
+TEST(Resolve, ExplicitSeedsCheckedBeforeTheWork) {
+    const std::string seq = random_seq(200, 7);
+    auto anno_graph = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+            kK, { seq.substr(0, 100) }, { "A" });
+    LabelOracle oracle(*anno_graph);
+    // the first 90 k-mers are in the graph, then k - 1 + 100 are not
+    const std::string query = seq.substr(0, 150);
+    const uint64_t num_kmers = query.size() - kK + 1;
+    ResolveOptions options;
+    options.labels = { "A" };
+
+    auto text = [&](std::vector<ExplicitSeed> seeds,
+                    SelectionPolicy::Policy kind = SelectionPolicy::EXPLICIT,
+                    const ResolveOptions &with = ResolveOptions()) -> std::string {
+        SelectionPolicy policy;
+        policy.policy = kind;
+        policy.explicit_seeds = std::move(seeds);
+        try {
+            check_explicit_seeds(oracle, query, with.discover ? with : options, policy);
+        } catch (const std::invalid_argument &e) {
+            return e.what();
+        }
+        return "";
+    };
+    const std::string range = "Explicit seed interval out of range";
+    const std::string absent = "Explicit seed interval is not fully present in the graph";
+    const std::string label = "Explicit seed label was not profiled: 'nope'";
+    const KmerInterval good { 0, 10 };
+    const KmerInterval missing { 80, 120 };
+
+    // nothing certain: passed, a seed not fully in the graph left to the work
+    EXPECT_EQ("", text({ { good, { "A" } } }));
+    EXPECT_EQ("", text({ { missing, { "A" } } }));
+    EXPECT_EQ("", text({ { good, { "A" } }, { missing, { "A" } } }));
+    // one fault of the request's own
+    EXPECT_EQ(range, text({ { { 0, num_kmers + 1 }, { "A" } } }));
+    EXPECT_EQ(range, text({ { { 5, 5 }, { "A" } } }));
+    EXPECT_EQ(range, text({ { { 6, 5 }, { "A" } } }));
+    EXPECT_EQ(label, text({ { good, { "A", "nope" } } }));
+    EXPECT_EQ(label, text({ { good, { "A" } }, { good, { "nope" } } }));
+    EXPECT_EQ(range, text({ { good, { "A" } }, { { 5, 5 }, { "A" } } }));
+    // two faults: select_seeds' first, seed by seed, the interval, its presence, its labels
+    EXPECT_EQ(range, text({ { { 5, 5 }, { "nope" } } }));
+    EXPECT_EQ(absent, text({ { missing, { "nope" } } }));
+    EXPECT_EQ(absent, text({ { missing, { "A" } }, { { 5, 5 }, { "A" } } }));
+    EXPECT_EQ(absent, text({ { missing, { "A" } }, { good, { "nope" } } }));
+    EXPECT_EQ(range, text({ { { 5, 5 }, { "A" } }, { missing, { "nope" } } }));
+    EXPECT_EQ(label, text({ { good, { "nope" } }, { missing, { "A" } } }));
+    // not an explicit selection: its seeds are read by nothing
+    EXPECT_EQ("", text({ { { 5, 5 }, { "A" } } }, SelectionPolicy::MAX_SUPPORT));
+    // a discovery's labels are known after the work
+    ResolveOptions discovery;
+    discovery.discover = true;
+    EXPECT_EQ("", text({ { good, { "nope" } } }, SelectionPolicy::EXPLICIT, discovery));
+    EXPECT_EQ(range, text({ { { 5, 5 }, { "nope" } } }, SelectionPolicy::EXPLICIT, discovery));
+
+    // what passes and what is stated are what select_seeds does on the profile
+    auto select = [&](std::vector<ExplicitSeed> seeds) -> std::string {
+        SelectionPolicy policy;
+        policy.policy = SelectionPolicy::EXPLICIT;
+        policy.explicit_seeds = std::move(seeds);
+        policy.release_id = "r";
+        LabelOracle fresh(*anno_graph);
+        try {
+            select_seeds(resolve_support(fresh, query, options), query, policy, false);
+        } catch (const std::invalid_argument &e) {
+            return e.what();
+        }
+        return "";
+    };
+    const std::vector<std::vector<ExplicitSeed>> requests {
+        { { { 5, 5 }, { "nope" } } },
+        { { missing, { "nope" } } },
+        { { missing, { "A" } }, { { 5, 5 }, { "A" } } },
+        { { missing, { "A" } }, { good, { "nope" } } },
+        { { good, { "nope" } }, { missing, { "A" } } },
+        { { good, { "A" } }, { { 0, num_kmers + 1 }, { "A" } } },
+    };
+    for (size_t i = 0; i < requests.size(); ++i) {
+        EXPECT_EQ(select(requests[i]), text(requests[i])) << i;
+        EXPECT_NE("", text(requests[i])) << i;
+    }
+}
+
 TEST(Resolve, MaxSupportScalesWithManyLabels) {
     const size_t num_labels = 1000;
     const uint64_t num_kmers = 5000;

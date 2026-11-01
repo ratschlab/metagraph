@@ -5750,9 +5750,14 @@ Json::Value process_resolve_request(
     LabelOracle oracle(anno_graph);
     if (admit) {
         // the request's own refusals come before its admission (a 400 never registers a
-        // request_id): those resolve_support makes before it reads a row, its labels included
+        // request_id): those resolve_support makes before it reads a row, its labels included,
+        // and those of its explicit seeds that the request and k decide
         try {
             graph::traversal::check_resolve_request(oracle, req.sequence, req.options);
+            if (req.select) {
+                graph::traversal::check_explicit_seeds(oracle, req.sequence, req.options,
+                                                       req.policy);
+            }
         } catch (const std::invalid_argument &e) {
             throw InvalidRequest(e.what());
         }

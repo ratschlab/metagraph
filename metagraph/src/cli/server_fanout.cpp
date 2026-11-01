@@ -484,6 +484,18 @@ std::optional<Json::Value> RequestRegistry::start(
     return std::nullopt;
 }
 
+void RequestRegistry::forget(const std::shared_ptr<RequestEntry> &entry) {
+    if (!entry->request_id())
+        return;
+    // no retention, whenever its workers end (it holds no record in |ended| yet: it has not
+    // recorded its response)
+    entry->set_on_ended(nullptr);
+    std::lock_guard<std::mutex> lock(shared_->mutex);
+    auto it = shared_->entries.find(*entry->request_id());
+    if (it != shared_->entries.end() && it->second == entry)
+        shared_->entries.erase(it);
+}
+
 std::pair<int, Json::Value> RequestRegistry::state(const std::string &request_id) const {
     std::lock_guard<std::mutex> lock(shared_->mutex);
     shared_->expire_locked();

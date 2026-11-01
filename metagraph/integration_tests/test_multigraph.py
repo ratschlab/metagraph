@@ -1394,11 +1394,11 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(400, ret.status_code, ret.text[:2000])
                 self.assertIn(f'request.{field}', ret.json()['error'])
 
-    def _single_server(self, name, *args):
+    def _single_server(self, name, *args, binary=None):
         """A single-graph server on the kleb pair"""
         graph, anno = self.pairs['kleb']
         return Server(['-i', graph, '-a', anno] + list(args),
-                      os.path.join(self.tempdir.name, f'server_single_{name}.log'))
+                      os.path.join(self.tempdir.name, f'server_single_{name}.log'), binary=binary)
 
     def test_single_graph_resolve_400s_register_no_request_id(self):
         """A single-graph /resolve with request_id refused 400 for its own fields (a budget
@@ -1445,6 +1445,96 @@ class TestMultiGraphServer(TestingBase):
         finally:
             server.stop()
 
+    def test_single_graph_resolve_seed_400s_hold_no_request_id(self):
+        """A 400 never holds a request_id (SPEC-multigraph-envelope.md section 5, notice B4). A
+        single-graph /resolve's explicit seeds faulty by the request and k alone are refused
+        before its admission, so also when its not_after_ms has passed; a seed only the work
+        finds faulty is refused after it and frees the id when it answers: GET /requests
+        answers 404 and the corrected request with the same id runs. The texts, with two
+        faults too, are the base binary's (METAGRAPH_BASE_BINARY)."""
+        server = self._single_server('seeds')
+        base = None
+        try:
+            kleb = self.records['kleb'][0]
+            label = server.post('resolve', {'sequence': kleb[3000:3080],
+                                            'discover': {'max_labels': 1}}).json()
+            label = label['labels'][0]['label']
+            # 40 bases of the record, then bases no graph holds: a query of 110 k-mers
+            absent = 'ACGT' * 25
+            query = kleb[3000:3040] + absent
+            kmers = len(query) - K + 1
+            def explicit(*seeds):
+                return {'sequence': query, 'labels': [label],
+                        'select': {'policy': 'explicit',
+                                   'seeds': [{'kmer_interval': list(iv), 'labels': labels}
+                                             for iv, labels in seeds]}}
+            good = explicit(((0, 5), [label]))
+            cases = (
+                ('range', explicit(((0, 1000), [label])), 'Explicit seed interval out of range'),
+                ('empty', explicit(((5, 5), [label])), 'Explicit seed interval out of range'),
+                ('edge', explicit(((0, kmers + 1), [label])),
+                 'Explicit seed interval out of range'),
+                ('label', explicit(((0, 5), ['nolabel'])),
+                 "Explicit seed label was not profiled: 'nolabel'"),
+                ('second', explicit(((0, 5), [label]), ((5, 5), [label])),
+                 'Explicit seed interval out of range'),
+                # two faults: the order of the selection, seed by seed, the interval, its
+                # presence in the graph, its labels
+                ('two-a', explicit(((5, 5), ['nolabel'])), 'Explicit seed interval out of range'),
+                ('two-b', explicit(((20, 40), ['nolabel'])),
+                 'Explicit seed interval is not fully present in the graph'),
+                ('two-c', explicit(((20, 40), [label]), ((5, 5), [label])),
+                 'Explicit seed interval is not fully present in the graph'),
+                ('two-d', explicit(((0, 5), ['nolabel']), ((20, 40), [label])),
+                 "Explicit seed label was not profiled: 'nolabel'"),
+            )
+            for name, bad, text in cases:
+                request_id = f'seed-{name}'
+                with self.subTest(case=name):
+                    ret = server.post('resolve', dict(bad, request_id=request_id))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual(text, ret.json()['error'])
+                    self.assertEqual(404, server.get(f'requests/{request_id}').status_code)
+                    ret = server.post('resolve', dict(good, request_id=request_id))
+                    self.assertEqual(200, ret.status_code, ret.text[:2000])
+            # found by the work, after the admission: the id is free once it is answered
+            bad = explicit(((20, 40), [label]))
+            for n in range(2):
+                ret = server.post('resolve', dict(bad, request_id='seed-work'))
+                self.assertEqual(400, ret.status_code, ret.text[:2000])
+                self.assertEqual('Explicit seed interval is not fully present in the graph',
+                                 ret.json()['error'])
+                self.assertEqual(404, server.get('requests/seed-work').status_code)
+            ret = server.post('resolve', dict(good, request_id='seed-work'))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual('answered', self._wait_ended(server, 'seed-work')['reason'])
+            # a discovery's seed label is known after the work
+            ret = server.post('resolve', {'sequence': query, 'discover': {'max_labels': 2},
+                                          'request_id': 'seed-discover',
+                                          'select': {'policy': 'explicit', 'seeds': [
+                                              {'kmer_interval': [0, 5], 'labels': ['nolabel']}]}})
+            self.assertEqual(400, ret.status_code, ret.text[:2000])
+            self.assertEqual(404, server.get('requests/seed-discover').status_code)
+            # before the admission: a 400, not the expired 409
+            past = int(time.time() * 1000) - 1000
+            for name, bad, text in cases:
+                with self.subTest(expired=name):
+                    ret = server.post('resolve', dict(bad, not_after_ms=past))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual(text, ret.json()['error'])
+            # the texts of the base binary (which knows no request_id)
+            if BASE_BINARY:
+                base = self._single_server('seeds-base', binary=BASE_BINARY)
+                for name, bad, text in cases:
+                    with self.subTest(base=name):
+                        ret = base.post('resolve', bad)
+                        self.assertEqual(400, ret.status_code, ret.text[:2000])
+                        self.assertEqual(text, ret.json()['error'])
+        finally:
+            server.stop()
+            if base:
+                base.stop()
+
     def test_single_graph_pattern_400s_come_before_the_expired_409(self):
         """A single-graph /pattern refused for its own fields is refused 400 (invalid_request)
         also when its not_after_ms has passed, with or without a request_id, and registers
@@ -1468,6 +1558,18 @@ class TestMultiGraphServer(TestingBase):
                                           'not_after_ms': past, 'request_id': 'sg-pattern'})
             self.assertEqual(409, ret.status_code, ret.text[:2000])
             self.assertEqual('expired', ret.json()['state'])
+            # a 400 only the index decides (no budget-aware decode on this annotation), after
+            # the admission: it frees the id when it is answered, as any 400
+            unbudgeted = {'patterns': [{'dna': kleb[3000:3020]}], 'mode': 'all_or_count',
+                          'output': {'labels': 'all'}, 'request_id': 'sg-unbudgeted'}
+            ret = server.post('pattern', unbudgeted)
+            self.assertEqual((400, 'annotation_unbudgeted'),
+                             (ret.status_code, ret.json()['code']), ret.text[:2000])
+            self.assertEqual(404, server.get('requests/sg-unbudgeted').status_code)
+            ret = server.post('pattern', {'patterns': [{'dna': kleb[3000:3020]}],
+                                          'request_id': 'sg-unbudgeted'})
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            self.assertEqual('answered', self._wait_ended(server, 'sg-unbudgeted')['reason'])
         finally:
             server.stop()
 

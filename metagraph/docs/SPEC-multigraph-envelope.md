@@ -142,9 +142,13 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - `/resolve` and `/pattern` take an optional `request_id`, the same token rule as `attempt_id`
   (`[A-Za-z0-9._-]+`, length-capped), checked by the strict parsers before anything is registered. `/traverse`'s
   `attempt_id` is its request handle; no second id.
-- On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields) come before the
-  registry's 409 and the expired 409: a malformed request with an expired `not_after_ms` gets 400, and a 400 never
-  registers a `request_id`. `/traverse` keeps checking expiry before it parses the body.
+- On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
+  the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
+  one of `labels`) come before the registry's 409 and the expired 409: a malformed request with an expired
+  `not_after_ms` gets 400. A 400 never holds a `request_id`: one that only the work can find (a seed not fully
+  present in the graph, a seed label a discovery did not find, a `/pattern` the index cannot answer) frees the id when
+  it is answered, so `GET /requests/{id}` answers 404 and a retry runs. `/traverse` keeps checking expiry before it
+  parses the body.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `GET /requests/{request_id}` answers the entry: `{request_id, server_instance, route, state: "running" |
@@ -154,7 +158,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   `GET /traverse/attempt/{attempt_id}`). An entry is retained for a period and a count set by server flags, then
   the id is unknown: 404 `{error, request_id, server_instance}`. An id that breaks the token rule is 400. `reason`
   on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
-  `error` (any other status).
+  `error` (any other status but 400, which leaves no entry).
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
   "client_gone"`, with usage). An answer written but lost on the way is recorded `ended` with its status and bytes;
   results are not retained.

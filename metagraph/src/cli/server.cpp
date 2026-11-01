@@ -1307,6 +1307,19 @@ int run_server(Config *config) {
         }
     };
 
+    // What a /resolve or /pattern request's response records in its registry entry (section 5,
+    // none before it was admitted): a 400 found after the admission (only the work could find
+    // it) frees the request_id as if it had been refused before it, any other status ends the
+    // entry and retains it
+    auto record_response = [&requests](const std::shared_ptr<RequestEntry> &entry, int status,
+                                       std::optional<size_t> bytes) {
+        if (!entry)
+            return;
+        if (status == 400)
+            requests.forget(entry);
+        entry->response(status, bytes);
+    };
+
     // The pairs' refs of a request's registry entry: the selected pairs, or on a single-graph
     // server one pair with null tags
     auto pair_refs = [](const std::vector<SelectedPair> &pairs) {
@@ -1555,9 +1568,8 @@ int run_server(Config *config) {
         // server, one with request_id on a single-graph one): its response is recorded when
         // written, or that nothing was (SPEC-multigraph-envelope.md section 5)
         std::shared_ptr<RequestEntry> tracked;
-        control.on_written = [&tracked](int status, std::optional<size_t> bytes) {
-            if (tracked)
-                tracked->response(status, bytes);
+        control.on_written = [&](int status, std::optional<size_t> bytes) {
+            record_response(tracked, status, bytes);
         };
         process_request(response, request, request_id, [&](const std::string &content) {
             return translated([&]() {
@@ -1824,9 +1836,8 @@ int run_server(Config *config) {
         // server, one with request_id on a single-graph one): its response is recorded when
         // written, or that nothing was (SPEC-multigraph-envelope.md section 5)
         std::shared_ptr<RequestEntry> tracked;
-        writing.control.on_written = [&tracked](int status, std::optional<size_t> bytes) {
-            if (tracked)
-                tracked->response(status, bytes);
+        writing.control.on_written = [&](int status, std::optional<size_t> bytes) {
+            record_response(tracked, status, bytes);
         };
         process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)

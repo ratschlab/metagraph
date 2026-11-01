@@ -550,10 +550,12 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
 // label refuses the request (400 "Label not found in the annotation") and the answer has no
 // unknown_labels.
 // |admit|, when given, is called once every refusal of the request's own is past (its fields,
-// the query's length and budget, and what resolve_support refuses before it reads a row: on
-// a single-graph server the labels the index does not hold), before any work: a single-graph
-// server admits the request there (its not_after_ms, its request_id registered), so that a
-// 400 never registers a request_id (SPEC-multigraph-envelope.md section 5).
+// the query's length and budget, what resolve_support refuses before it reads a row: on a
+// single-graph server the labels the index does not hold; and what its explicit seeds refuse
+// by the request and k alone, check_explicit_seeds), before any work: a single-graph server
+// admits the request there (its not_after_ms, its request_id registered). A 400 only the work
+// can find (a seed not fully in the graph) comes after it: the server frees the request_id when
+// it answers it, so that a 400 never holds one (SPEC-multigraph-envelope.md section 5).
 // Throws ResolveDeadline when the answer could not be built by the deadline.
 Json::Value process_resolve_request(
         const Json::Value &json,

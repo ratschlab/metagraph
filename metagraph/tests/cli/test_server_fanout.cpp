@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <json/json.h>
@@ -829,6 +830,64 @@ TEST(ServerFanout, RetentionThen404) {
     e->response(400, 20);
     EXPECT_EQ(404, forgetful.state("x").first);
     EXPECT_NE(std::string::npos, forgetful.retention_text().find("not kept"));
+}
+
+// A request refused 400 after its admission (only its work could find the fault) frees its id:
+// nothing is retained, a retry runs, and a late worker of the freed entry touches no newer
+// request of the id. Any other status keeps the entry
+TEST(ServerFanout, A400FreesTheRequestId) {
+    RequestSettings rs;
+    rs.server_instance = "inst";
+    rs.retention_s = 3600;
+    RequestRegistry registry(rs);
+    auto entry = [&](const std::string &id) {
+        return std::make_shared<RequestEntry>(id, "/resolve", "inst",
+                                              std::chrono::system_clock::now(),
+                                              refs_of({ kPairs[0] }));
+    };
+    auto first = entry("r");
+    ASSERT_FALSE(registry.start(first));
+    first->pair_running(0);
+    EXPECT_EQ(200, registry.state("r").first);
+    EXPECT_TRUE(registry.start(entry("r")));
+    // (the route's order: the id, then the response)
+    registry.forget(first);
+    first->response(400, 20);
+    EXPECT_EQ(404, registry.state("r").first);
+    EXPECT_EQ(0u, registry.size());
+
+    auto retry = entry("r");
+    EXPECT_FALSE(registry.start(retry));
+    // the worker of the freed request ends now: nothing of it reaches the registry
+    first->pair_outcome(0, "refused");
+    first->pair_ended(0);
+    EXPECT_TRUE(first->ended());
+    EXPECT_EQ("running", registry.state("r").second["state"].asString());
+    // forgetting the old entry again leaves the new one
+    registry.forget(first);
+    EXPECT_EQ(200, registry.state("r").first);
+    retry->pair_running(0);
+    retry->pair_ended(0);
+    retry->response(200, 10);
+    EXPECT_EQ("answered", registry.state("r").second["reason"].asString());
+
+    // every other status stays retained (reason error, deadline)
+    for (const auto &[id, status, reason] : { std::make_tuple("e500", 500, "error"),
+                                              std::make_tuple("e404", 404, "error"),
+                                              std::make_tuple("e503", 503, "deadline") }) {
+        auto e = entry(id);
+        ASSERT_FALSE(registry.start(e));
+        e->pair_never_started(0);
+        e->response(status, 10);
+        EXPECT_EQ(reason, registry.state(id).second["reason"].asString());
+        EXPECT_TRUE(registry.start(entry(id)));
+    }
+
+    // a request without an id is held by nobody
+    auto anonymous = std::make_shared<RequestEntry>(std::nullopt, "/resolve", "inst",
+                                                    std::chrono::system_clock::now(),
+                                                    refs_of({ kPairs[0] }));
+    registry.forget(anonymous);
 }
 
 // GET /requests/{attempt_id} of a /traverse attempt: the request object built from the

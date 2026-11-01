@@ -384,6 +384,60 @@ void check_resolve_request(const LabelOracle &oracle,
     }
 }
 
+void check_explicit_seeds(const LabelOracle &oracle,
+                          std::string_view query,
+                          const ResolveOptions &options,
+                          const SelectionPolicy &policy) {
+    if (policy.policy != SelectionPolicy::EXPLICIT)
+        return;
+    const std::vector<ExplicitSeed> &seeds = policy.explicit_seeds;
+    const uint64_t num_kmers = query.size() - oracle.get_k() + 1;
+    auto out_of_range = [&](const ExplicitSeed &ex) {
+        return ex.kmers.end > num_kmers || ex.kmers.begin >= ex.kmers.end;
+    };
+    // a seed's label that is no label of the request (explicit labels are all profiled; what a
+    // discovery profiles is known after the work, and a label dropped by a multi-graph pair
+    // covers nothing rather than being refused)
+    auto unlisted = [&](const ExplicitSeed &ex) -> const std::string* {
+        if (options.discover || options.drop_labels_not_in_graph)
+            return nullptr;
+        for (const std::string &name : ex.labels) {
+            if (std::find(options.labels.begin(), options.labels.end(), name)
+                    == options.labels.end()) {
+                return &name;
+            }
+        }
+        return nullptr;
+    };
+    size_t faulty = 0;
+    while (faulty < seeds.size() && !out_of_range(seeds[faulty]) && !unlisted(seeds[faulty])) {
+        ++faulty;
+    }
+    if (faulty == seeds.size())
+        return;
+    // A refusal for sure. Its words are select_seeds', whose first fault may be a seed not fully
+    // in the graph before this one, or this one's before its labels: only such a request
+    // maps the query's k-mers here (no row is read)
+    const bool range = out_of_range(seeds[faulty]);
+    if (faulty || !range) {
+        const std::vector<node_index> keys = oracle.keys_of_sequence(query);
+        const std::vector<KmerInterval> graph_runs
+                = runs_of(keys.size(), [&](uint64_t i) { return keys[i] != npos; });
+        for (size_t i = 0; i < faulty + !range; ++i) {
+            const KmerInterval &seed = seeds[i].kmers;
+            if (std::none_of(graph_runs.begin(), graph_runs.end(), [&](const KmerInterval &run) {
+                    return run.begin <= seed.begin && run.end >= seed.end;
+                })) {
+                throw std::invalid_argument("Explicit seed interval is not fully present in the graph");
+            }
+        }
+    }
+    if (range)
+        throw std::invalid_argument("Explicit seed interval out of range");
+    throw std::invalid_argument("Explicit seed label was not profiled: '"
+                                + *unlisted(seeds[faulty]) + "'");
+}
+
 SupportProfile resolve_support(LabelOracle &oracle,
                                std::string_view query,
                                const ResolveOptions &options) {

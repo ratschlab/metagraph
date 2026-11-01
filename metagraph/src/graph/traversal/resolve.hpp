@@ -249,6 +249,19 @@ SeedSelection select_seeds(const SupportProfile &profile,
                            const SelectionPolicy &policy,
                            bool canonical_orientation);
 
+// What select_seeds refuses of an explicit selection that |query|'s length, k, |options|' labels
+// and |policy| decide alone: a seed's kmer_interval empty or out of range, a seed's label that
+// is none of the explicit labels (nothing with a discovery's labels, known after the work, or
+// with options.drop_labels_not_in_graph). Throws std::invalid_argument in select_seeds' words,
+// and only when a refusal is certain: the first fault in select_seeds' order is the one stated,
+// which for a request with two faults may be a seed not fully in the graph (found by mapping
+// the query's k-mers; no row is read). A seed not fully in the graph is otherwise left to
+// select_seeds. Call after check_resolve_request (|query| is not shorter than k)
+void check_explicit_seeds(const LabelOracle &oracle,
+                          std::string_view query,
+                          const ResolveOptions &options,
+                          const SelectionPolicy &policy);
+
 // seed_id = hex FNV-1a-64 over release, the case-mapped canonical sequence and the
 // length-prefixed sorted labels
 std::string make_seed_id(const std::string &release_id,
