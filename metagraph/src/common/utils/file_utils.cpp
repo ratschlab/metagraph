@@ -196,6 +196,11 @@ std::filesystem::path create_temp_dir(std::filesystem::path path,
 
     auto &dirs = tmp_dirs();
     if (dirs.empty()) {
+        // the handlers log: construct the logger (a function-local static) before they are
+        // registered, so that std::exit runs cleanup_tmp_dir_on_exit before it destroys the
+        // logger (in the reverse order of registration); constructed after, it would be
+        // destroyed first and the handler would log through a freed logger
+        mtg::common::get_logger();
         tmp_dirs_owner_pid() = getpid();
         if (std::signal(SIGINT, cleanup_tmp_dir_on_signal) == SIG_ERR)
             logger->error("Couldn't reset the signal handler for SIGINT");
