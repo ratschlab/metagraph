@@ -934,16 +934,29 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         outcome.entries.push_back(std::move(slot.entry));
         return outcome;
     }
-    for (size_t i = 0; i < n; ++i) {
-        // each task holds the state: it may run after the handler answered
-        launch([state, i]() { FanoutState::run_pair(state, i); });
-    }
     const RequestDeadlines &d = state->settings.deadlines;
     const std::function<bool()> &gone = state->inline_gone;
     std::unique_lock<std::mutex> lock(state->mutex);
     auto all_resolved = [&]() {
         return std::all_of(state->slots.begin(), state->slots.end(),
                            [](const FanoutState::Slot &s) { return s.resolved; });
+    };
+    // the pairs handed to the pool so far, in their order
+    size_t next = 0;
+    // hands over the next pairs (without the lock: |launch| may wait for room until |until|);
+    // each task holds the state: it may run after the handler answered. A pair decided
+    // meanwhile is not handed over
+    auto hand_over = [&](SteadyClock::time_point until) {
+        for ( ; next < n; ++next) {
+            if (state->slots[next].resolved)
+                continue;
+            lock.unlock();
+            const bool taken = launch(
+                    [state, i = next]() { FanoutState::run_pair(state, i); }, until);
+            lock.lock();
+            if (!taken)
+                return;
+        }
     };
     while (!all_resolved()) {
         const SteadyClock::time_point t = state->now();
@@ -977,7 +990,10 @@ FanoutOutcome run_fanout(const FanoutSettings &settings,
         }
         SteadyClock::time_point until = std::min(d.cutoff,
                                                  t + std::chrono::milliseconds(settings.poll_ms));
-        state->changed.wait_until(lock, until);
+        hand_over(until);
+        // (a full queue was the wait: the handler's checks come first)
+        if (next == n)
+            state->changed.wait_until(lock, until);
     }
     // a pair decided by the handler is told to stop (its worker ends at its next check)
     if (!state->closed && std::any_of(state->slots.begin(), state->slots.end(),

@@ -1349,9 +1349,11 @@ int run_server(Config *config) {
         return names;
     };
 
-    // two or more pairs run on the graphs' pool (one runs on its handler's thread)
-    const Launch on_pool = [&graphs_pool](std::function<void()> task) {
-        graphs_pool.enqueue(std::move(task));
+    // two or more pairs run on the graphs' pool (one runs on its handler's thread); its queue is
+    // bounded, and a handler that waits for room there must still see its cutoff and its client
+    const Launch on_pool = [&graphs_pool](std::function<void()> task,
+                                          SteadyClock::time_point until) {
+        return graphs_pool.try_enqueue_until(until, std::move(task));
     };
 
     /**

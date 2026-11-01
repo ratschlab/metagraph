@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <future>
+#include <thread>
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -285,6 +287,78 @@ TEST(ThreadPool, EmptyTasks) {
             pool.enqueue([]() {});
         }
     }
+}
+
+// enqueue with a bound on the wait for a full queue: at once while there is room, false at the
+// deadline with nothing queued, and as soon as a worker frees a slot before it
+TEST(ThreadPool, TryEnqueueUntil) {
+    using Clock = std::chrono::steady_clock;
+    using namespace std::chrono_literals;
+    ThreadPool pool(1, 2);
+    std::promise<void> running;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    pool.enqueue([&]() {
+        running.set_value();
+        released.wait();
+    });
+    running.get_future().wait();
+
+    std::atomic<int> ran { 0 };
+    auto count = [&]() { ++ran; };
+    // room: taken whatever the deadline, also a past one
+    EXPECT_TRUE(pool.try_enqueue_until(Clock::now() - 1s, count));
+    EXPECT_TRUE(pool.try_enqueue_until(Clock::now() + 1h, count));
+    // full: not taken, at the deadline
+    const auto start = Clock::now();
+    EXPECT_FALSE(pool.try_enqueue_until(start, count));
+    EXPECT_FALSE(pool.try_enqueue_until(start + 30ms, count));
+    EXPECT_GE(Clock::now() - start, 30ms);
+
+    // a slot freed while it waits: taken
+    std::thread later([&]() {
+        std::this_thread::sleep_for(20ms);
+        release.set_value();
+    });
+    EXPECT_TRUE(pool.try_enqueue_until(Clock::now() + 1h, count));
+    later.join();
+    pool.join();
+    EXPECT_EQ(3, ran.load());
+
+    // no workers: the task runs on the caller, as enqueue's
+    ThreadPool inline_pool(0, 1);
+    bool here = false;
+    EXPECT_TRUE(inline_pool.try_enqueue_until(Clock::now() - 1s, [&]() { here = true; }));
+    EXPECT_TRUE(here);
+}
+
+// a blocked enqueue beside a bounded one: neither takes the other's slot or wake-up
+TEST(ThreadPool, TryEnqueueUntilBesideEnqueue) {
+    using Clock = std::chrono::steady_clock;
+    using namespace std::chrono_literals;
+    std::atomic<size_t> ran { 0 };
+    std::atomic<size_t> given_up { 0 };
+    {
+        ThreadPool pool(2, 1);
+        std::vector<std::thread> threads;
+        for (size_t t = 0; t < 4; ++t) {
+            threads.emplace_back([&, t]() {
+                for (size_t i = 0; i < 500; ++i) {
+                    if (t % 2) {
+                        pool.enqueue([&]() { ++ran; });
+                    } else if (!pool.try_enqueue_until(Clock::now() + 200us,
+                                                       [&]() { ++ran; })) {
+                        ++given_up;
+                    }
+                }
+            });
+        }
+        for (auto &thread : threads) {
+            thread.join();
+        }
+        pool.join();
+    }
+    EXPECT_EQ(2000u, ran.load() + given_up.load());
 }
 
 TEST(ThreadPool, EmptyJoin) {

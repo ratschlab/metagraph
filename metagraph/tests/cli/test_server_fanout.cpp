@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -21,6 +22,7 @@
 #include "cli/server_fanout.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
+#include "common/threads/threading.hpp"
 
 
 // The multi-graph fan-out of /resolve and /pattern (server_fanout.hpp; SPEC-multigraph-envelope.md
@@ -72,9 +74,10 @@ void wait_for_workers() {
 class Threads {
   public:
     Launch launch() {
-        return [this](std::function<void()> task) {
+        return [this](std::function<void()> task, SteadyClock::time_point) {
             std::lock_guard<std::mutex> lock(mutex_);
             threads_.emplace_back(std::move(task));
+            return true;
         };
     }
     ~Threads() {
@@ -86,6 +89,12 @@ class Threads {
   private:
     std::mutex mutex_;
     std::vector<std::thread> threads_;
+};
+
+// A fan-out of one pair runs it inline: nothing is handed over
+const Launch not_launched = [](std::function<void()>, SteadyClock::time_point) {
+    ADD_FAILURE() << "one pair runs inline";
+    return true;
 };
 
 // A gate a test job waits at (ignoring the request's stop: an uninterruptible piece of work, a
@@ -297,7 +306,7 @@ TEST(ServerFanout, OnePairRunsInline) {
             EXPECT_TRUE(control.start_running());
             return answered(control);
         },
-        [&](std::function<void()>) { launched = true; });
+        [&](std::function<void()>, SteadyClock::time_point) { launched = true; return true; });
     EXPECT_FALSE(launched);
     EXPECT_FALSE(out.client_gone);
     ASSERT_EQ(1u, out.entries.size());
@@ -393,7 +402,7 @@ TEST(ServerFanout, NoLoadPastTheWaitLimit) {
             r.not_started = !loaded;
             return r;
         },
-        [&](std::function<void()>) { ADD_FAILURE() << "one pair runs inline"; });
+        not_launched);
     EXPECT_FALSE(loaded);
     EXPECT_FALSE(out.client_gone);
     ASSERT_EQ(1u, out.entries.size());
@@ -416,7 +425,7 @@ TEST(ServerFanout, NoLoadPastTheWaitLimit) {
         loaded = control.start_loading(100);
         r.not_started = !loaded;
         return r;
-    }, [&](std::function<void()>) { ADD_FAILURE() << "one pair runs inline"; });
+    }, not_launched);
     EXPECT_FALSE(loaded);
     EXPECT_TRUE(out.client_gone);
 
@@ -428,7 +437,7 @@ TEST(ServerFanout, NoLoadPastTheWaitLimit) {
         loaded = control.start_loading(100);
         EXPECT_TRUE(control.start_running());
         return answered(control);
-    }, [&](std::function<void()>) { ADD_FAILURE() << "one pair runs inline"; });
+    }, not_launched);
     EXPECT_TRUE(loaded);
     EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
     wait_for_workers();
@@ -622,13 +631,14 @@ TEST(ServerFanout, NotAfterMsLeavesQueuedPairsUnreached) {
             EXPECT_TRUE(control.start_running());
             return answered(control);
         },
-        [&](std::function<void()> task) {
+        [&](std::function<void()> task, SteadyClock::time_point) {
             if (launched++ == 0) {
                 threads.emplace_back(std::move(task));
             } else {
                 std::lock_guard<std::mutex> lock(held_mutex);
                 held.push_back(std::move(task));
             }
+            return true;
         });
     // decided once not_after_ms passed, not at the cutoff 60 s later
     ASSERT_EQ(2u, out.entries.size());
@@ -649,6 +659,143 @@ TEST(ServerFanout, NotAfterMsLeavesQueuedPairsUnreached) {
     entry->response(200, 1);
     EXPECT_EQ("never_started", entry->json(0)["pairs"][1]["state"].asString());
     EXPECT_TRUE(entry->ended());
+}
+
+// The graphs' pool with its bounded queue full behind a blocked worker: what a fan-out hands
+// over is |launch|'s in the server (ThreadPool::try_enqueue_until), whose wait must leave the
+// handler its cutoff and its client
+class FullPool {
+  public:
+    explicit FullPool(size_t room_left = 0) : pool_(1, kQueue) {
+        std::promise<void> running;
+        pool_.enqueue([this, &running]() {
+            running.set_value();
+            gate_.wait();
+        });
+        running.get_future().wait();
+        for (size_t i = room_left; i < kQueue; ++i) {
+            pool_.enqueue([]() {});
+        }
+    }
+    ~FullPool() {
+        gate_.open();
+        pool_.join();
+    }
+    void release() { gate_.open(); }
+    Launch launch() {
+        return [this](std::function<void()> task, SteadyClock::time_point until) {
+            return pool_.try_enqueue_until(until, std::move(task));
+        };
+    }
+
+  private:
+    static constexpr size_t kQueue = 20;
+    Gate gate_;
+    ThreadPool pool_;
+};
+
+// A cutoff at a full queue: the handler answers at the cutoff, every pair not_reached by the
+// reason of a queued one, nothing handed over, and its client is asked while it waits (GPT A1:
+// run_fanout blocked in the pool's enqueue past the cutoff, until a worker freed a slot)
+TEST(ServerFanout, AFullPoolLeavesTheHandlerItsCutoff) {
+    FullPool pool;
+    const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+    auto entry = entry_of(pairs);
+    std::atomic<size_t> jobs { 0 };
+    std::atomic<size_t> asked { 0 };
+    // (the deadline less the reserve of 50 ms)
+    FanoutSettings settings = settings_of(pairs, deadlines_now(130), "/pattern");
+    settings.poll_ms = 5;
+    settings.gone = [&]() { ++asked; return false; };
+    const auto start = SteadyClock::now();
+    std::promise<FanoutOutcome> answer;
+    std::thread handler([&]() {
+        answer.set_value(run_fanout(settings, entry, [&](PairControl &control) {
+            ++jobs;
+            return answered(control);
+        }, pool.launch()));
+    });
+    auto future = answer.get_future();
+    const bool returned = future.wait_for(30s) == std::future_status::ready;
+    const auto elapsed = SteadyClock::now() - start;
+    pool.release();
+    handler.join();
+    ASSERT_TRUE(returned);
+    // the cutoff is 80 ms from the start (a scheduler's delay aside, well before the worker
+    // was released: nothing else could free the queue)
+    EXPECT_GE(elapsed, 70ms);
+    EXPECT_LT(elapsed, 20s);
+    EXPECT_GT(asked.load(), 1u);
+    FanoutOutcome out = future.get();
+    ASSERT_EQ(2u, out.entries.size());
+    for (const Json::Value &e : out.entries) {
+        EXPECT_EQ("refused", e["outcome"].asString());
+        EXPECT_EQ("not_reached", e["refusal"]["code"].asString());
+        EXPECT_EQ("cutoff", e["refusal"]["reason"].asString());
+        EXPECT_NE(std::string::npos,
+                  e["refusal"]["error"].asString().find("waited for a pool thread"));
+    }
+    wait_for_workers();
+    EXPECT_EQ(0u, jobs.load());
+    EXPECT_EQ("never_started", entry->json(0)["pairs"][0]["state"].asString());
+    EXPECT_EQ("never_started", entry->json(0)["pairs"][1]["state"].asString());
+    entry->response(200, 1);
+    EXPECT_TRUE(entry->ended());
+}
+
+// A client that leaves while the queue is full stops the fan-out as it does otherwise
+TEST(ServerFanout, AFullPoolLeavesTheHandlerItsClient) {
+    FullPool pool;
+    const std::vector<SelectedPair> pairs { kPairs[0], kPairs[1] };
+    auto entry = entry_of(pairs);
+    std::atomic<size_t> asked { 0 };
+    FanoutSettings settings = settings_of(pairs, deadlines_now(600'000), "/pattern");
+    settings.poll_ms = 5;
+    settings.gone = [&]() { return ++asked > 3; };
+    std::promise<FanoutOutcome> answer;
+    std::thread handler([&]() {
+        answer.set_value(run_fanout(settings, entry, [&](PairControl &control) {
+            return answered(control);
+        }, pool.launch()));
+    });
+    auto future = answer.get_future();
+    const bool returned = future.wait_for(30s) == std::future_status::ready;
+    pool.release();
+    handler.join();
+    ASSERT_TRUE(returned);
+    EXPECT_TRUE(future.get().client_gone);
+    wait_for_workers();
+    entry->response(0, std::nullopt);
+    EXPECT_TRUE(entry->ended());
+    EXPECT_EQ("client_gone", entry->json(0)["reason"].asString());
+}
+
+// A queue that frees up before the cutoff delays the pairs, and loses none: those that did not
+// fit at first are handed over as room appears, in their order
+TEST(ServerFanout, PairsWaitingForRoomAreHandedOver) {
+    FullPool pool(/* room_left */ 1);
+    const std::vector<SelectedPair> pairs = kPairs;
+    auto entry = entry_of(pairs);
+    FanoutSettings settings = settings_of(pairs, deadlines_now(600'000), "/pattern");
+    settings.poll_ms = 5;
+    std::promise<FanoutOutcome> answer;
+    std::thread handler([&]() {
+        answer.set_value(run_fanout(settings, entry, [&](PairControl &control) {
+            EXPECT_TRUE(control.start_running());
+            return answered(control);
+        }, pool.launch()));
+    });
+    auto future = answer.get_future();
+    // the handler keeps waiting for a full queue
+    EXPECT_EQ(std::future_status::timeout, future.wait_for(30ms));
+    pool.release();
+    handler.join();
+    FanoutOutcome out = future.get();
+    ASSERT_EQ(3u, out.entries.size());
+    for (const Json::Value &e : out.entries) {
+        EXPECT_EQ("answered", e["outcome"].asString());
+    }
+    wait_for_workers();
 }
 
 // The client leaves while the pairs run: nothing is answered, the workers are told to stop,

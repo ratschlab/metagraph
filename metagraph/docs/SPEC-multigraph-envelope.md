@@ -115,8 +115,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   and the transport cap, and the reserve is the delivery reserve: `effective_deadline_at` is the request's receipt
   plus `usage.bound_ms`, `cutoff_at` its receipt plus `usage.bound.walk_until_ms`. At the cutoff the fan-out stops
   admitting and waiting:
-  - a pair not yet started (queued, waiting for memory) is `not_reached`: refusal `{http_status: 503, code:
-    "not_reached", reason: "cutoff" | "not_after_ms" | "transport", error}`;
+  - a pair not yet started (queued, waiting for room in the pool's bounded queue, waiting for memory) is
+    `not_reached`: refusal `{http_status: 503, code: "not_reached", reason: "cutoff" | "not_after_ms" | "transport",
+    error}`; a full queue never holds the handler past the cutoff or past its client's departure;
   - a pair started and not finished is `unfinished`: refusal `{http_status: 503, code: "unfinished", reason:
     "cutoff" | "loading", error, usage: {state, started_at, elapsed_ms, cpu_ms, memory_bytes}}`; it is told to stop;
     a load in progress may run past every deadline;

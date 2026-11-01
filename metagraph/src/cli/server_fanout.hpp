@@ -349,8 +349,9 @@ class PairControl {
 // thread it is called on. Must not throw (the fan-out turns an escaping exception into a 500
 // refusal); must not read the handler's stack (it may outlive it): it holds what it reads
 using PairJob = std::function<PairResult(PairControl &)>;
-// Runs a task on another thread (the graphs' pool)
-using Launch = std::function<void(std::function<void()>)>;
+// Hands a task to another thread (the graphs' pool), waiting for room in its queue until the
+// instant given at most: false when it was not taken (nothing runs; it may be offered again)
+using Launch = std::function<bool(std::function<void()>, SteadyClock::time_point)>;
 
 struct FanoutSettings {
     // "/resolve" or "/pattern": the messages name the route ("resolve: pair (...) ...")
@@ -385,7 +386,10 @@ struct FanoutOutcome {
  * the work cutoff: then pairs never started are not_reached (reason cutoff, not_after_ms or
  * transport), pairs started and not done are unfinished with their usage so far and told to
  * stop; their workers end later and |entry| (the registry's, always given) records their
- * final usage. A pair that a worker takes after not_after_ms is not_reached (not_after_ms).
+ * final usage. A pair that a worker takes after not_after_ms is not_reached (not_after_ms). A
+ * full queue is a wait of the same loop: |launch| is asked for at most |poll_ms| at a time
+ * between the handler's checks, so that the cutoff and a client gone are honoured while pairs
+ * wait to be handed over; a pair not handed over by then is not_reached like a queued one.
  */
 FanoutOutcome run_fanout(const FanoutSettings &settings,
                          const std::shared_ptr<RequestEntry> &entry,

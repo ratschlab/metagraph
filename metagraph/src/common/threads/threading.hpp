@@ -59,6 +59,33 @@ class ThreadPool {
         return emplace(true /*front*/, true /*force*/, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
+    // enqueue, for a caller that must not wait for a full queue past |deadline| (a handler with
+    // a client and a deadline to watch): queues |task| as soon as the queue has room, at once
+    // when it has: true; false at |deadline|, nothing queued and |task| dropped. There is no
+    // future: the task states its own outcome, and must not throw on a worker. Without workers
+    // the task runs here, as enqueue's does.
+    template <class Clock, class Duration>
+    bool try_enqueue_until(const std::chrono::time_point<Clock, Duration> &deadline,
+                           std::function<void()> task) {
+        if (!workers.size()) {
+            task();
+            return true;
+        }
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            assert(!joining_);
+            if (!not_full.wait_until(lock, deadline, [this]() {
+                    return this->tasks.size() < this->max_num_tasks_;
+                })) {
+                return false;
+            }
+            tasks.emplace_back(std::move(task));
+        }
+        has_work.notify_one();
+        helper_wakeup.notify_one();
+        return true;
+    }
+
     // Exception behavior differs between the two execution paths:
     //   * Tasks run on a worker thread: if they throw, `future.get()` inside
     //     `wrapped_task` rethrows on the worker, which escapes the worker
