@@ -1413,6 +1413,32 @@ class TestMultiGraphServer(TestingBase):
         finally:
             server.stop()
 
+    def test_single_graph_pattern_400s_come_before_the_expired_409(self):
+        """A single-graph /pattern refused for its own fields is refused 400 (invalid_request)
+        also when its not_after_ms has passed, with or without a request_id, and registers
+        nothing (SPEC-multigraph-envelope.md section 5, notice B4: the request's own 400s come
+        before the expired 409); a valid request with an expired not_after_ms gets the 409."""
+        server = self._single_server('pattern')
+        try:
+            kleb = self.records['kleb'][0]
+            past = int(time.time() * 1000) - 1000
+            for patterns, text in (('bad', 'request.patterns: expected a list of 1 to '),
+                                   ([5], 'request.patterns[0]: expected an object')):
+                for extra in ({}, {'request_id': 'sg-pattern'}):
+                    with self.subTest(patterns=patterns, **extra):
+                        ret = server.post('pattern', dict({'patterns': patterns,
+                                                           'not_after_ms': past}, **extra))
+                        self.assertEqual(400, ret.status_code, ret.text[:2000])
+                        self.assertEqual('invalid_request', ret.json()['code'])
+                        self.assertTrue(ret.json()['error'].startswith(text), ret.json())
+                        self.assertEqual(404, server.get('requests/sg-pattern').status_code)
+            ret = server.post('pattern', {'patterns': [{'dna': kleb[3000:3020]}],
+                                          'not_after_ms': past, 'request_id': 'sg-pattern'})
+            self.assertEqual(409, ret.status_code, ret.text[:2000])
+            self.assertEqual('expired', ret.json()['state'])
+        finally:
+            server.stop()
+
     def test_an_admitted_request_runs_past_not_after_ms(self):
         """not_after_ms is admission only (E20): a request admitted before it runs past it and
         finishes -- b_big's resolve of 3 Mbp, over a second (1.25 s on an idle machine),

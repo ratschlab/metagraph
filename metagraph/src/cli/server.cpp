@@ -1559,16 +1559,18 @@ int run_server(Config *config) {
                 const Json::Value json = parse_pattern_body(content);
                 // the request's handles (sections 4 and 5): its not_after_ms admits it, its
                 // finish_by_ms caps its deadline, its request_id registers it — once its
-                // fields are valid, so that a request refused 400 holds no id
+                // fields are valid, with or without a request_id: a request refused 400 holds
+                // no id, and a malformed one is refused 400 also when its not_after_ms has
+                // passed (the request's own 400s come before the expired 409)
                 RequestHandles handles;
                 try {
                     handles = read_request_handles(json);
                 } catch (const std::invalid_argument &e) {
                     throw PatternRefusal(400, "invalid_request", e.what());
                 }
+                validate_pattern_request(json, pattern_limits(*config));
                 std::shared_ptr<RequestEntry> entry;
                 if (handles.request_id) {
-                    validate_pattern_request(json, pattern_limits(*config));
                     entry = std::make_shared<RequestEntry>(
                             handles.request_id, "/pattern", attempts.server_instance(),
                             request->header_read_time, pair_refs({}));
