@@ -316,8 +316,9 @@ TEST(SearchCut, SelectionIsTheC5Order) {
         }
         ASSERT_EQ(returned, top.cut.returned);
         ASSERT_EQ(num <= n, top.cut.complete) << trial;
-        if (num)
+        if (num) {
             ASSERT_EQ(counts, top.cut.abundances);
+        }
         if (top.cut.complete || !n) {
             ASSERT_EQ(0u, top.cut.tied) << trial;
             ASSERT_FALSE(top.cut.nth_median_read) << trial;
