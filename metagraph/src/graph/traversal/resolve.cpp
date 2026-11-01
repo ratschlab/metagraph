@@ -395,11 +395,13 @@ void check_explicit_seeds(const LabelOracle &oracle,
     auto out_of_range = [&](const ExplicitSeed &ex) {
         return ex.kmers.end > num_kmers || ex.kmers.begin >= ex.kmers.end;
     };
-    // a seed's label that is no label of the request (explicit labels are all profiled; what a
-    // discovery profiles is known after the work, and a label dropped by a multi-graph pair
-    // covers nothing rather than being refused)
+    // what a discovery profiles is known after the work, and a label dropped by a multi-graph
+    // pair covers nothing rather than being refused: a seed's labels are then decided by the
+    // work, and select_seeds checks them before any later seed
+    const bool labels_after_work = options.discover || options.drop_labels_not_in_graph;
+    // a seed's label that is no label of the request (explicit labels are all profiled)
     auto unlisted = [&](const ExplicitSeed &ex) -> const std::string* {
-        if (options.discover || options.drop_labels_not_in_graph)
+        if (labels_after_work)
             return nullptr;
         for (const std::string &name : ex.labels) {
             if (std::find(options.labels.begin(), options.labels.end(), name)
@@ -411,6 +413,10 @@ void check_explicit_seeds(const LabelOracle &oracle,
     };
     size_t faulty = 0;
     while (faulty < seeds.size() && !out_of_range(seeds[faulty]) && !unlisted(seeds[faulty])) {
+        // (the first seed whose labels the work decides ends what is certain here, after its
+        // interval: a later seed's fault may not be select_seeds' first)
+        if (labels_after_work && !seeds[faulty].labels.empty())
+            return;
         ++faulty;
     }
     if (faulty == seeds.size())

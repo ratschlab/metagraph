@@ -344,7 +344,9 @@ TEST(Resolve, ExplicitSeedsCheckedBeforeTheWork) {
         policy.policy = kind;
         policy.explicit_seeds = std::move(seeds);
         try {
-            check_explicit_seeds(oracle, query, with.discover ? with : options, policy);
+            check_explicit_seeds(oracle, query,
+                                 with.discover || with.drop_labels_not_in_graph ? with : options,
+                                 policy);
         } catch (const std::invalid_argument &e) {
             return e.what();
         }
@@ -381,21 +383,47 @@ TEST(Resolve, ExplicitSeedsCheckedBeforeTheWork) {
     discovery.discover = true;
     EXPECT_EQ("", text({ { good, { "nope" } } }, SelectionPolicy::EXPLICIT, discovery));
     EXPECT_EQ(range, text({ { { 5, 5 }, { "nope" } } }, SelectionPolicy::EXPLICIT, discovery));
+    // so the scan ends at the first seed that names labels, after its interval: select_seeds
+    // checks those labels before a later seed (recheck4: a later seed's interval was stated
+    // where the base states the first seed's label). A fault before it is still the first
+    const std::vector<ExplicitSeed> label_first { { good, { "nolabel" } },
+                                                  { { 0, num_kmers + 1 }, {} } };
+    EXPECT_EQ("", text(label_first, SelectionPolicy::EXPLICIT, discovery));
+    EXPECT_EQ("", text({ { good, { "nope" } }, { { 5, 5 }, { "A" } } },
+                       SelectionPolicy::EXPLICIT, discovery));
+    EXPECT_EQ("", text({ { missing, { "nope" } }, { { 5, 5 }, { "A" } } },
+                       SelectionPolicy::EXPLICIT, discovery));
+    EXPECT_EQ(range, text({ { { 5, 5 }, { "A" } }, { good, { "nope" } } },
+                          SelectionPolicy::EXPLICIT, discovery));
+    EXPECT_EQ(range, text({ { good, {} }, { { 5, 5 }, { "nope" } } },
+                          SelectionPolicy::EXPLICIT, discovery));
+    EXPECT_EQ(absent, text({ { missing, {} }, { { 5, 5 }, { "nope" } } },
+                           SelectionPolicy::EXPLICIT, discovery));
+    // the same for a multi-graph pair's labels (a label it does not hold covers nothing)
+    ResolveOptions dropping = options;
+    dropping.drop_labels_not_in_graph = true;
+    EXPECT_EQ("", text(label_first, SelectionPolicy::EXPLICIT, dropping));
+    EXPECT_EQ(range, text({ { good, {} }, { { 5, 5 }, { "nope" } } },
+                          SelectionPolicy::EXPLICIT, dropping));
 
     // what passes and what is stated are what select_seeds does on the profile
-    auto select = [&](std::vector<ExplicitSeed> seeds) -> std::string {
+    auto select = [&](std::vector<ExplicitSeed> seeds,
+                      const ResolveOptions &with = ResolveOptions()) -> std::string {
         SelectionPolicy policy;
         policy.policy = SelectionPolicy::EXPLICIT;
         policy.explicit_seeds = std::move(seeds);
         policy.release_id = "r";
         LabelOracle fresh(*anno_graph);
         try {
-            select_seeds(resolve_support(fresh, query, options), query, policy, false);
+            select_seeds(resolve_support(fresh, query, with.discover ? with : options), query,
+                         policy, false);
         } catch (const std::invalid_argument &e) {
             return e.what();
         }
         return "";
     };
+    // the discovery's first fault is the first seed's label
+    EXPECT_EQ("Explicit seed label was not profiled: 'nolabel'", select(label_first, discovery));
     const std::vector<std::vector<ExplicitSeed>> requests {
         { { { 5, 5 }, { "nope" } } },
         { { missing, { "nope" } } },
