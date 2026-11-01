@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
+#include <chrono>
 #include <fstream>
+#include <memory>
 #include <iterator>
 #include <random>
 #include <set>
@@ -396,4 +398,43 @@ TEST(LabelsNotInGraph, ResolveListsTheAbsentLabels) {
         resolve(R"({"labels": ["A"], "select": {"policy": "explicit", "seeds":
             [{"kmer_interval": [0, 10], "labels": ["A", "Z"]}]}})", true);
     }).find("Explicit seed label was not profiled: 'Z'"));
+}
+
+// An explicit seed naming a label the pair does not hold, the work stopped by time (traversal
+// F1 of the release-10 review): the label covers nothing of the seed, as without a stop, and
+// the pair answers (unknown_labels, its stop block) instead of refusing the request with
+// "Explicit seed label was not profiled". A pooled pair's budget capped at the work cutoff
+// makes such stops routine
+TEST(LabelsNotInGraph, AnAbsentSeedLabelUnderAStopIsNotRefused) {
+    const Pair pair;
+    size_t stopped = 0;
+    for (double work_ms = 1; work_ms < 12; ++work_ms) {
+        Json::Value json = parse(R"({"labels": ["A", "Z"], "select": {"policy": "explicit",
+            "seeds": [{"kmer_interval": [0, 10], "labels": ["A", "Z"]}]}})");
+        json["sequence"] = pair.records[0].substr(10, 50);
+        json["bounds"]["time_budget_ms"] = kResolveFinalizeMs + work_ms;
+        // the clock moves 1 ms a reading: the work deadline passes work_ms readings in
+        auto reads = std::make_shared<uint64_t>(0);
+        const auto start = std::chrono::steady_clock::now();
+        auto clock = [reads, start]() {
+            return start + std::chrono::milliseconds((*reads)++);
+        };
+        const std::string what = "work " + std::to_string(work_ms) + " ms";
+        Json::Value out;
+        EXPECT_EQ("", refusal_of([&] {
+            out = process_resolve_request(json, *pair.index, "", 0, nullptr, nullptr, {},
+                                          nullptr, clock, /* multi */ true);
+        })) << what;
+        EXPECT_EQ(strings({ "Z" }), out["unknown_labels"]) << what;
+        if (out["stop"].isNull())
+            continue;
+        ++stopped;
+        // a selection made from the prefix lists the absent label as not covering the seed
+        if (!out["selection"].isNull()) {
+            ASSERT_EQ(1u, out["selection"]["seeds"].size()) << out;
+            EXPECT_EQ(strings({ "Z" }),
+                      out["selection"]["seeds"][0]["labels_not_covering"]) << what;
+        }
+    }
+    EXPECT_GT(stopped, 0u);
 }

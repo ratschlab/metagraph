@@ -5495,6 +5495,14 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
 // label that is not one of them
 static std::string explicit_selection_blocked(const SupportProfile &profile,
                                               const SelectionPolicy &policy, bool discover) {
+    // a label the pair does not hold (unknown_labels, a multi-graph server's pair,
+    // SPEC-multigraph-envelope.md section 2) covers nothing of a seed, under a stop as without
+    // one (select_seeds lists it in labels_not_covering): it is neither unprofiled nor
+    // undiscovered
+    auto absent = [&](const std::string &name) {
+        return std::find(profile.unknown_labels.begin(), profile.unknown_labels.end(), name)
+                != profile.unknown_labels.end();
+    };
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
         if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > profile.stop->query_kmers)
@@ -5511,7 +5519,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
         for (const std::string &name : ex.labels) {
             const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
                 [&](const LabelProfile &lp) { return lp.label.name == name; });
-            if (!profiled)
+            if (!profiled && !absent(name))
                 throw InvalidRequest("Explicit seed label was not profiled: '" + name + "'");
         }
     }
@@ -5525,7 +5533,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
         for (const std::string &name : ex.labels) {
             const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
                 [&](const LabelProfile &lp) { return lp.label.name == name; });
-            if (!profiled)
+            if (!profiled && !absent(name))
                 return seed + " names a label the resolved prefix did not discover";
         }
     }
