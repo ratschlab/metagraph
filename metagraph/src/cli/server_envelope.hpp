@@ -97,7 +97,8 @@ constexpr char kRequestsRoute[] = "GET /requests/{request_id}";
 // How composite_fp is computed, stated beside it in GET /capabilities (composite_rule)
 constexpr char kCompositeRule[] = "sha256 over the pairs' index_fp sorted as bytes, joined by "
                                   "\"\\n\" without a trailing newline; null when any pair has "
-                                  "no index_fp";
+                                  "no index_fp; each loaded (graph_path, annotation_path) pair "
+                                  "counted once, whatever names list it";
 
 /**
  * GET /capabilities' composite_fp on a multi-graph server (section 8, kCompositeRule): the

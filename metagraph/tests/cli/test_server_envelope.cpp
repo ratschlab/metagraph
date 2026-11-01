@@ -427,6 +427,17 @@ TEST(ServerEnvelope, CompositeRule) {
     EXPECT_EQ(11u, fps.size());
     EXPECT_EQ(body["composite_fp"].asString(), composite_fp_json(fps).asString());
     EXPECT_EQ(body["composite_rule"].asString(), std::string(kCompositeRule));
+    // the rule a client recomputes composite_fp by states that a pair counts once (section 8,
+    // contract notice B1; contract F5 of the release-10 review): graph_summary.pairs lists a
+    // pair once per name that holds it
+    EXPECT_NE(std::string::npos, std::string(kCompositeRule).find(
+            "each loaded (graph_path, annotation_path) pair counted once, whatever names list "
+            "it"));
+    std::vector<std::string> listed_twice = fps;
+    listed_twice.push_back(fps.front());
+    std::sort(listed_twice.begin(), listed_twice.end());
+    listed_twice.erase(std::unique(listed_twice.begin(), listed_twice.end()), listed_twice.end());
+    EXPECT_EQ(body["composite_fp"].asString(), composite_fp_json(listed_twice).asString());
 }
 
 // The multigraph block and routes.requests are sample 12's

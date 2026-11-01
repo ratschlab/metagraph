@@ -567,7 +567,7 @@
   "schema_version": 1,
   "server_instance": "7c1e0f3a9b24d6e8",
   "composite_fp": "92b237d75da25be01f941aff7fb47737e89978aa6e8f96144d63b2051d6c6c5d",
-  "composite_rule": "sha256 over the pairs' index_fp sorted as bytes, joined by \"\\n\" without a trailing newline; null when any pair has no index_fp",
+  "composite_rule": "sha256 over the pairs' index_fp sorted as bytes, joined by \"\\n\" without a trailing newline; null when any pair has no index_fp; each loaded (graph_path, annotation_path) pair counted once, whatever names list it",
   "multigraph": {
    "envelope_version": 1,
    "envelope_routes": [
