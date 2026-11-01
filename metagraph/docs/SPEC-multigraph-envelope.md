@@ -161,10 +161,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
 - On `/resolve` and `/pattern` the request's own 400s (the body, the selection, the fields; on `/resolve` also what
   the request and k decide of its explicit seeds: a `kmer_interval` empty or out of range, a seed label that is not
   one of `labels`) come before the registry's 409 and the expired 409: a malformed request with an expired
-  `not_after_ms` gets 400. A 400 never holds a `request_id`: one that only the work can find (a seed not fully
-  present in the graph, a seed label a discovery did not find, a `/pattern` the index cannot answer) frees the id when
-  it is answered, so `GET /requests/{id}` answers 404 and a retry runs. `/traverse` keeps checking expiry before it
-  parses the body.
+  `not_after_ms` gets 400. The seeds are checked in their order, the work's, which checks a seed's labels before
+  the next seed: under a discovery the seeds after the first that names labels are checked by the work. A 400 never
+  holds a `request_id`: one that only the work can find (a seed not fully present in the graph, a seed label a
+  discovery did not find, a fault of a seed after it, a `/pattern` the index cannot answer) frees the id when it is
+  answered, so `GET /requests/{id}` answers 404 and a retry runs. `/traverse` keeps checking expiry before it parses
+  the body.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
 - `request_id` and `attempt_id` are one namespace, as `GET /requests/{id}` reads both: a `request_id` equal to a
