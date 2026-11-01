@@ -815,8 +815,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     for (const Entry &src : item.state) {
         auto it = continuations.find(src.label);
         if (it != continuations.end() && it->second >= 2
-                && (strategy_.max_label_branches == Strategy::kUnlimited
-                        || src.branches + 1 > strategy_.max_label_branches)) {
+                && strategy_.max_label_branches != Strategy::kUnlimited
+                && src.branches + 1 > strategy_.max_label_branches) {
             excluded.insert(src.label);
         }
     }
