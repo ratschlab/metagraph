@@ -1655,16 +1655,7 @@ int run_server(Config *config) {
         // what no pair decides refuses the whole request: its fields, the query's length (the
         // server's limit and bounds.max_query_bp), a budget not above the reserve
         const ResolveRequest req = parse_resolve_request(json);
-        if (config->resolve_max_query_bp && req.sequence.size() > config->resolve_max_query_bp)
-            throw InvalidRequest("request.sequence: longer than the server limit of "
-                                 + std::to_string(config->resolve_max_query_bp) + " bp");
-        if (req.sequence.size() > req.max_query_bp)
-            throw InvalidRequest("request.sequence: longer than bounds.max_query_bp");
-        if (req.time_budget_ms && !(*req.time_budget_ms > resolve_time.finalize_ms)) {
-            throw InvalidRequest("request.bounds.time_budget_ms: expected more than the "
-                                 "finalisation reserve of " + ms_text(resolve_time.finalize_ms)
-                                 + " ms");
-        }
+        check_resolve_fields(req, config->resolve_max_query_bp, resolve_time);
         // the request budget: bounds.time_budget_ms (lowered to the server's cap), else the
         // server's maximum
         const double budget_ms = req.time_budget_ms
@@ -1834,34 +1825,37 @@ int run_server(Config *config) {
             const std::optional<bool> in_ram = in_ram_field(json);
             // its not_after_ms admits it, its finish_by_ms caps its deadline (a request without
             // bounds.time_budget_ms then gets the server's maximum), its request_id registers
-            // it — once its fields are valid, so that a request refused 400 holds no id
+            // it — once every refusal of its own is past (its fields, the query's length and
+            // budget, its labels: process_resolve_request admits it then), so that a request
+            // refused 400 holds no id and a malformed one is refused 400 also when expired
             std::shared_ptr<RequestEntry> entry;
             if (handles.request_id) {
-                parse_resolve_request(json);
                 entry = std::make_shared<RequestEntry>(handles.request_id, "/resolve",
                                                        attempts.server_instance(),
                                                        request->header_read_time,
                                                        pair_refs({}));
             }
-            admit(entry, handles, request_id);
-            tracked = entry;
+            const auto admitted = [&]() {
+                admit(entry, handles, request_id);
+                tracked = entry;
+                if (entry)
+                    entry->pair_running(0);
+            };
             if (handles.finish_by_ms) {
                 writing.delivery.set_deadline_cap(
                         *deadlines_of(request, 0, handles, resolve_time.finalize_ms).finish);
             }
             const IndexIdentity identity = single_identity;
-            // a client that is gone is not answered: abandoned between the request's phases
-            if (entry)
-                entry->pair_running(0);
             try {
                 // a single-graph server keeps the 400 for a label it does not hold
-                // (SPEC-multigraph-envelope.md section 2): multi is false here
+                // (SPEC-multigraph-envelope.md section 2): multi is false here. A client that
+                // is gone is not answered: abandoned between the request's phases
                 Json::Value out = process_resolve_request(json, *anno_graph.get(),
                                                           config->index_release,
                                                           config->resolve_max_query_bp,
                                                           &identity, gone_of(request),
                                                           resolve_time, &writing.delivery,
-                                                          nullptr, multi);
+                                                          nullptr, multi, admitted);
                 // in_ram: a single-graph server's index is the one it holds, nothing is loaded
                 if (in_ram)
                     out["timing"]["load_ms"] = 0.0;
@@ -1874,9 +1868,10 @@ int run_server(Config *config) {
                 }
                 return out;
             } catch (...) {
-                if (entry) {
-                    entry->pair_outcome(0, "refused");
-                    entry->pair_ended(0);
+                // (an entry refused before its admission was never registered)
+                if (tracked) {
+                    tracked->pair_outcome(0, "refused");
+                    tracked->pair_ended(0);
                 }
                 try {
                     throw;

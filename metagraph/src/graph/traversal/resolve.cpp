@@ -344,14 +344,10 @@ size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint6
 
 } // namespace
 
-SupportProfile resolve_support(LabelOracle &oracle,
-                               std::string_view query,
-                               const ResolveOptions &options) {
-    SupportProfile profile;
-    profile.k = oracle.get_k();
-    profile.regime = oracle.regime();
-    profile.support = options.support;
-
+// The refusals of resolve_support's options and query, before it reads anything
+static void check_resolve_options(const LabelOracle &oracle,
+                                  std::string_view query,
+                                  const ResolveOptions &options) {
     if (options.labels.empty() == !options.discover) {
         throw std::invalid_argument("Specify either an explicit label list or discovery, not both");
     }
@@ -367,8 +363,36 @@ SupportProfile resolve_support(LabelOracle &oracle,
                                         "graphs: coordinates carry no strand in canonical indexes");
         }
     }
-    if (query.size() < profile.k)
+    if (query.size() < oracle.get_k())
         throw std::invalid_argument("Query shorter than k");
+}
+
+void check_resolve_request(const LabelOracle &oracle,
+                           std::string_view query,
+                           const ResolveOptions &options) {
+    check_resolve_options(oracle, query, options);
+    // then, as resolve_support resolves them, the explicit labels or the header discovery's
+    // record mapping
+    if (!options.labels.empty()) {
+        if (!options.drop_labels_not_in_graph) {
+            for (const auto &name : options.labels) {
+                oracle.resolve_label(name);
+            }
+        }
+    } else if (options.discover_kind == LabelKind::HEADER && !oracle.coord_to_header()) {
+        throw std::invalid_argument("Header discovery requires a CoordToHeader index");
+    }
+}
+
+SupportProfile resolve_support(LabelOracle &oracle,
+                               std::string_view query,
+                               const ResolveOptions &options) {
+    SupportProfile profile;
+    profile.k = oracle.get_k();
+    profile.regime = oracle.regime();
+    profile.support = options.support;
+
+    check_resolve_options(oracle, query, options);
 
     // a phase boundary: the caller can abandon the request here (ResolveOptions::stop)
     auto checkpoint = [&]() {

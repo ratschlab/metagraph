@@ -180,6 +180,16 @@ SupportProfile resolve_support(LabelOracle &oracle,
                                std::string_view query,
                                const ResolveOptions &options);
 
+// What resolve_support refuses before it reads a row, in its order and words: the options
+// (labels or discovery, a discovery keeping a label, trace on an index with coordinates in
+// the BASIC regime), a query shorter than k, an explicit label the index does not hold (unless
+// options.drop_labels_not_in_graph), a header discovery without a record mapping. Throws
+// std::invalid_argument; reads nothing of the matrix (a single-graph /resolve is admitted
+// after it)
+void check_resolve_request(const LabelOracle &oracle,
+                           std::string_view query,
+                           const ResolveOptions &options);
+
 
 struct ExplicitSeed {
     KmerInterval kmers;

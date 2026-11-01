@@ -549,6 +549,11 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
 // unknown_labels (present, possibly empty); false (a single-graph server, the CLI): such a
 // label refuses the request (400 "Label not found in the annotation") and the answer has no
 // unknown_labels.
+// |admit|, when given, is called once every refusal of the request's own is past (its fields,
+// the query's length and budget, and what resolve_support refuses before it reads a row: on
+// a single-graph server the labels the index does not hold), before any work: a single-graph
+// server admits the request there (its not_after_ms, its request_id registered), so that a
+// 400 never registers a request_id (SPEC-multigraph-envelope.md section 5).
 // Throws ResolveDeadline when the answer could not be built by the deadline.
 Json::Value process_resolve_request(
         const Json::Value &json,
@@ -560,7 +565,16 @@ Json::Value process_resolve_request(
         const ResolveTimeLimits &time = {},
         ResolveDelivery *delivery = nullptr,
         const std::function<std::chrono::steady_clock::time_point()> &clock = nullptr,
-        bool labels_not_in_graph_dropped = false);
+        bool labels_not_in_graph_dropped = false,
+        const std::function<void()> &admit = nullptr);
+
+// The refusals of a /resolve request's own fields beyond parse_resolve_request's (which does
+// not know the server), in process_resolve_request's order and words: the query longer than
+// the server's limit (|max_query_bp|, 0: none) or than bounds.max_query_bp, and a
+// bounds.time_budget_ms not above |time|'s finalisation reserve. Throws InvalidRequest. A
+// multi-graph server checks them once for the whole request, before any pair
+void check_resolve_fields(const ResolveRequest &req, uint64_t max_query_bp,
+                          const ResolveTimeLimits &time);
 
 // CLI entry point: `metagraph traverse [--resolve] -i GRAPH -a ANNOTATION request.json ...`
 int traverse_graph(Config *config);

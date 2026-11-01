@@ -5553,6 +5553,20 @@ static Json::Value resolve_stop_json(const ResolveStop &stop, size_t k, double b
     return s;
 }
 
+void check_resolve_fields(const ResolveRequest &req, uint64_t max_query_bp,
+                          const ResolveTimeLimits &time) {
+    if (max_query_bp && req.sequence.size() > max_query_bp)
+        throw InvalidRequest("request.sequence: longer than the server limit of "
+                             + std::to_string(max_query_bp) + " bp");
+    if (req.sequence.size() > req.max_query_bp)
+        throw InvalidRequest("request.sequence: longer than bounds.max_query_bp");
+    // the reserve is inside the budget: a budget not above it leaves no time to work
+    if (req.time_budget_ms && !(*req.time_budget_ms > time.finalize_ms)) {
+        throw InvalidRequest("request.bounds.time_budget_ms: expected more than the "
+                             "finalisation reserve of " + ms_text(time.finalize_ms) + " ms");
+    }
+}
+
 Json::Value process_resolve_request(
         const Json::Value &json,
         const graph::AnnotatedDBG &anno_graph,
@@ -5563,7 +5577,8 @@ Json::Value process_resolve_request(
         const ResolveTimeLimits &time,
         ResolveDelivery *delivery,
         const std::function<std::chrono::steady_clock::time_point()> &clock,
-        bool labels_not_in_graph_dropped) {
+        bool labels_not_in_graph_dropped,
+        const std::function<void()> &admit) {
     // the request's CPU time and page faults (timing.cpu_ms, timing.page_faults): its work runs
     // on this thread from here to its timing block (the answer's text and compression after it)
     const common::ThreadUsageMeter request_usage;
@@ -5588,11 +5603,7 @@ Json::Value process_resolve_request(
         req.options.stop = client_gone;
         req.options.abandon = abandon;
     }
-    if (max_query_bp && req.sequence.size() > max_query_bp)
-        throw InvalidRequest("request.sequence: longer than the server limit of "
-                             + std::to_string(max_query_bp) + " bp");
-    if (req.sequence.size() > req.max_query_bp)
-        throw InvalidRequest("request.sequence: longer than bounds.max_query_bp");
+    check_resolve_fields(req, max_query_bp, time);
 
     // the deadline, only when asked for: without it no deadline is set or read (the clock of
     // timing.elapsed_ms is read as it always was), and the answer is the one this route
@@ -5619,11 +5630,9 @@ Json::Value process_resolve_request(
         double budget = req.time_budget_ms ? *req.time_budget_ms
                       : time.max_time_ms > 0 ? time.max_time_ms
                       : std::numeric_limits<double>::infinity();
-        // the reserve is inside the budget: a budget not above it leaves no time to work
-        if (req.time_budget_ms && !(budget > time.finalize_ms)) {
-            throw InvalidRequest("request.bounds.time_budget_ms: expected more than the "
-                                 "finalisation reserve of " + ms_text(time.finalize_ms) + " ms");
-        }
+        // (a budget not above the reserve, which leaves no time to work, was refused by
+        // check_resolve_fields)
+        assert(!req.time_budget_ms || budget > time.finalize_ms);
         if (req.time_budget_ms && time.max_time_ms > 0 && budget > time.max_time_ms) {
             // lowered to the server's cap and stated, as /traverse states its clamps
             note_clamped(&clamped, "bounds.time_budget_ms", req.time_budget_given,
@@ -5682,6 +5691,16 @@ Json::Value process_resolve_request(
     }
 
     LabelOracle oracle(anno_graph);
+    if (admit) {
+        // the request's own refusals come before its admission (a 400 never registers a
+        // request_id): those resolve_support makes before it reads a row, its labels included
+        try {
+            graph::traversal::check_resolve_request(oracle, req.sequence, req.options);
+        } catch (const std::invalid_argument &e) {
+            throw InvalidRequest(e.what());
+        }
+        admit();
+    }
     Timer timer;
     SupportProfile profile;
     std::optional<SeedSelection> selection;

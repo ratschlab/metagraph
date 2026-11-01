@@ -1362,6 +1362,57 @@ class TestMultiGraphServer(TestingBase):
                 self.assertEqual(400, ret.status_code, ret.text[:2000])
                 self.assertIn(f'request.{field}', ret.json()['error'])
 
+    def _single_server(self, name, *args):
+        """A single-graph server on the kleb pair"""
+        graph, anno = self.pairs['kleb']
+        return Server(['-i', graph, '-a', anno] + list(args),
+                      os.path.join(self.tempdir.name, f'server_single_{name}.log'))
+
+    def test_single_graph_resolve_400s_register_no_request_id(self):
+        """A single-graph /resolve with request_id refused 400 for its own fields (a budget
+        not above the finalisation reserve, the query longer than bounds.max_query_bp or the
+        server's limit, a label the index does not hold, a query shorter than k) registers
+        nothing (SPEC-multigraph-envelope.md section 5, notice B4): GET /requests answers 404
+        and the corrected request with the same id runs, as on a multi-graph server."""
+        server = self._single_server('ids', '--resolve-max-query-bp', '5000')
+        try:
+            kleb = self.records['kleb'][0]
+            ok = {'sequence': kleb[3000:3080], 'discover': {'max_labels': 2}}
+            for n, (bad, text) in enumerate((
+                    (dict(ok, bounds={'time_budget_ms': 100}),
+                     'request.bounds.time_budget_ms: expected more than the finalisation '
+                     'reserve of 250 ms'),
+                    (dict(ok, sequence=kleb[3000:3100], bounds={'max_query_bp': 10}),
+                     'request.sequence: longer than bounds.max_query_bp'),
+                    (dict(ok, sequence=kleb[:6000], bounds={'max_query_bp': 10000}),
+                     'request.sequence: longer than the server limit of 5000 bp'),
+                    ({'sequence': ok['sequence'], 'labels': ['no-such-label']},
+                     "Label not found in the annotation: 'no-such-label'"),
+                    (dict(ok, sequence=kleb[:20]), 'Query shorter than k'))):
+                request_id = f'sg-400-{n}'
+                with self.subTest(error=text):
+                    ret = server.post('resolve', dict(bad, request_id=request_id))
+                    self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertTrue(ret.json()['error'].startswith(text), ret.json())
+                    ret = server.get(f'requests/{request_id}')
+                    self.assertEqual(404, ret.status_code, ret.text[:2000])
+                    ret = server.post('resolve', dict(ok, request_id=request_id))
+                    self.assertEqual(200, ret.status_code, ret.text[:2000])
+                    self.assertEqual(('ended', 'answered'),
+                                     tuple(self._wait_ended(server, request_id)[k]
+                                           for k in ('state', 'reason')))
+            # the same refusals with an expired not_after_ms: 400, not the expired 409
+            past = int(time.time() * 1000) - 1000
+            for bad in (dict(ok, bounds={'max_query_bp': 10}), {'labels': ['x']},
+                        {'sequence': 5}):
+                with self.subTest(expired=bad):
+                    for extra in ({}, {'request_id': 'sg-expired'}):
+                        ret = server.post('resolve', dict(bad, not_after_ms=past, **extra))
+                        self.assertEqual(400, ret.status_code, ret.text[:2000])
+                    self.assertEqual(404, server.get('requests/sg-expired').status_code)
+        finally:
+            server.stop()
+
     def test_an_admitted_request_runs_past_not_after_ms(self):
         """not_after_ms is admission only (E20): a request admitted before it runs past it and
         finishes -- b_big's resolve of 3 Mbp, over a second (1.25 s on an idle machine),
