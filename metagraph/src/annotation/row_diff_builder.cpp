@@ -724,11 +724,13 @@ void traverse_anno_chunked(
     auto pred_it = pred.begin();
     auto pred_boundary_it = pred_boundary.begin();
 
-    ThreadPool async_reader(2);
     // start reading the first block
     uint64_t next_block_size = std::min(BLOCK_SIZE, num_rows);
     std::array<std::vector<uint64_t>, 4> context;
     std::array<std::vector<uint64_t>, 4> context_other;
+    // declared after the state its reads write (next_block_size, context_other), so that it
+    // is destroyed, and its reads finished, before that state is, also on an exception
+    ThreadPool async_reader(2);
 
     async_reader.enqueue([&]() {
         read_next_block(succ_it, succ_boundary_it, next_block_size,
@@ -794,6 +796,10 @@ void traverse_anno_chunked(
 
         progress_bar += block_size;
     }
+
+    // finish the reads enqueued last (of an empty block), which advance the iterators
+    // checked below
+    async_reader.join();
 
     if (succ_it != succ.end()
             || succ_boundary_it != succ_boundary.end()
