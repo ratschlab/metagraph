@@ -147,7 +147,8 @@ class SeqSearchResult {
      * (SPEC-multigraph-envelope.md section 3), without the pair's tags: returned, complete,
      * nth_score, tied, tied_returned, and on an annotation with k-mer counts nth_median and
      * tied_same_median. A complete cut states nth_score (and nth_median) null and its counts
-     * 0.
+     * 0; a cut whose N-th score has one label (tied 1) states nth_median null, no median
+     * having been read for it.
      */
     Json::Value cut_to_json() const;
 

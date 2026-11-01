@@ -24,9 +24,11 @@ namespace graph {
  * cut, |complete|); otherwise the score of the N-th returned row, the labels with that score,
  * returned or not, and how many of them were returned. On an annotation with k-mer counts
  * (|abundances|) also the N-th returned row's median abundance and the labels with the N-th
- * score and that median. A complete cut leaves the members after |complete| at 0, which a
- * writer states as null (the score and the median) or 0 (the counts); so does a cut with no
- * row returned (N = 0), which has no N-th row.
+ * score and that median. The median is read only where the N-th score is shared (|tied| > 1,
+ * |nth_median_read|): a cut whose N-th score has one label orders no tie by median and states
+ * none. A complete cut leaves the members after |complete| at 0, which a writer states as null
+ * (the score and the median) or 0 (the counts); so does a cut with no row returned (N = 0),
+ * which has no N-th row.
  */
 struct SearchCut {
     size_t returned = 0;
@@ -37,6 +39,7 @@ struct SearchCut {
     bool abundances = false;
     uint64_t nth_median = 0;
     size_t tied_same_median = 0;
+    bool nth_median_read = false;
 };
 
 /**
@@ -45,6 +48,40 @@ struct SearchCut {
  * ascending, the element at index floor((n - 1) / 2); 0 when no value is left.
  */
 uint64_t lower_median(std::vector<uint64_t> values);
+
+/**
+ * lower_median of the abundances added, held as their distinct values with their counts
+ * instead of one value per position: a run of one value along the query is one entry, and
+ * the entries are merged by value whenever they have doubled since the last merge, so a
+ * label's counter holds O(its distinct values), not O(its positions).
+ */
+class LowerMedianCounter {
+  public:
+    // |positions| query positions with abundance |value|; a zero (the label absent) is no
+    // abundance and not counted
+    void add(uint64_t value, uint64_t positions = 1);
+    // the lower median of the values added, 0 if none
+    uint64_t lower_median();
+
+  private:
+    void merge();
+
+    std::vector<std::pair<uint64_t, uint64_t>> counts_;
+    size_t merged_ = 0;
+};
+
+/**
+ * The lower medians of the abundances of |columns| (in that order) over a query's k-mer
+ * positions, read from |matrix|: |row_counts| are the rows the query's k-mers map to, each
+ * with the number of query positions it stands for. A matrix other than a CSRMatrix is read
+ * |rows_per_read| rows at a time; each column holds its distinct values (LowerMedianCounter).
+ */
+std::vector<uint64_t>
+abundance_medians(const annot::matrix::IntMatrix &matrix,
+                  const std::vector<std::pair<uint64_t, size_t>> &row_counts,
+                  const std::vector<uint32_t> &columns,
+                  size_t num_columns,
+                  size_t rows_per_read);
 
 // One row of a search in the C5 order (search_row_before), |median| 0 on an annotation
 // without k-mer counts
@@ -66,8 +103,9 @@ bool search_row_before(const SearchRow &a, const SearchRow &b);
  * a candidate's label, decoded only for the rows returned and for the rows of the N-th score
  * that compete for the last places (the tie group at the cut, of the N-th row's median where
  * medians are given), never for every candidate. |medians|: on an annotation with k-mer counts
- * the lower medians (lower_median) of the candidates it is passed, asked only where two rows
- * share a score and at a cut; empty otherwise. Candidates with one label (a header in two
+ * the lower medians (lower_median) of the candidates it is passed, asked only for the rows a
+ * median is compared for (the tie group at a cut, and the rows above it that share a score);
+ * empty otherwise. Candidates with one label (a header in two
  * columns of one pair) keep their order in |scores|.
  * Returns the returned candidates (their indexes in |scores|) with their labels in the C5
  * order, and states the cut in |cut|.
@@ -276,6 +314,13 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::function<std::vector<uint64_t>(const std::vector<uint32_t> &)>
     tie_medians(std::string_view sequence,
                 const std::vector<std::pair<row_index, size_t>> &row_counts) const;
+    // tie_medians over |row_indices|, the rows of the query's k-mers found, one per position:
+    // collapsed into rows with their multiplicity only when a tie asks
+    std::function<std::vector<uint64_t>(const std::vector<uint32_t> &)>
+    tie_medians(std::string_view sequence, const std::vector<row_index> &row_indices) const;
+    // tie_medians read from the abundance source (set_abundance_source), empty without one
+    std::function<std::vector<uint64_t>(const std::vector<uint32_t> &)>
+    source_tie_medians(std::string_view sequence) const;
 
     DeBruijnGraph &dbg_;
     std::shared_ptr<const annot::CoordToHeader> coord_to_header_;

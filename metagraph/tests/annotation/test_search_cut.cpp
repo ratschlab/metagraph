@@ -5,6 +5,8 @@
 #include <fstream>
 #include <sstream>
 #include <memory>
+#include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -184,6 +186,7 @@ TEST(SearchCut, MediansOrderTheTies) {
     EXPECT_EQ(4u, top.cut.tied);
     EXPECT_EQ(2u, top.cut.tied_returned);
     EXPECT_TRUE(top.cut.abundances);
+    EXPECT_TRUE(top.cut.nth_median_read);
     EXPECT_EQ(7u, top.cut.nth_median);
     EXPECT_EQ(2u, top.cut.tied_same_median);
     // the tie member of a lower median than the N-th row's is not decoded
@@ -260,6 +263,106 @@ TEST(SearchCut, NoneRequested) {
 }
 
 
+// R10-SEARCH-COST-2: the medians are read only for the rows a median is compared for (the tie
+// group at a cut, whose N-th row's median the cut states, and rows above the cut that share a
+// score), never for a row with a score of its own
+TEST(SearchCut, MediansReadOnlyWhereCompared) {
+    auto asked_for = [](const std::vector<size_t> &scores, size_t n) {
+        std::vector<size_t> asked;
+        std::vector<std::string> labels;
+        for (size_t i = 0; i < scores.size(); ++i) {
+            labels.push_back("L" + std::to_string(i));
+        }
+        search_top_n(scores, n, [&](size_t i) { return labels.at(i); },
+                     [&](const std::vector<size_t> &indexes) {
+                         asked.insert(asked.end(), indexes.begin(), indexes.end());
+                         return std::vector<uint64_t>(indexes.size(), 1);
+                     }, nullptr);
+        std::sort(asked.begin(), asked.end());
+        return asked;
+    };
+    // complete, every score its own: no median read at all
+    EXPECT_EQ(std::vector<size_t>(), asked_for({ 9, 5, 3, 1 }, 10));
+    // complete: the two rows of score 5 only
+    EXPECT_EQ((std::vector<size_t>{ 1, 2 }), asked_for({ 9, 5, 5, 3 }, 10));
+    // a cut at score 5 (three rows for one place): the tie group and the two rows of score 9,
+    // not the row of score 7 nor the row below the cut
+    EXPECT_EQ((std::vector<size_t>{ 0, 1, 3, 4, 5 }),
+              asked_for({ 9, 9, 7, 5, 5, 5, 1 }, 4));
+    // a cut whose N-th score has one row: no median orders anything, none is read (the cut
+    // states nth_median null)
+    EXPECT_EQ(std::vector<size_t>(), asked_for({ 9, 7, 5 }, 2));
+    // ... but the rows above it that share a score are ordered by median
+    EXPECT_EQ((std::vector<size_t>{ 0, 1 }), asked_for({ 9, 9, 7, 5 }, 3));
+    // N = 0: nothing returned, nothing read
+    EXPECT_EQ(std::vector<size_t>(), asked_for({ 9, 7, 5 }, 0));
+}
+
+TEST(SearchCut, MedianCounterIsTheLowerMedian) {
+    std::mt19937 rng(7);
+    for (size_t trial = 0; trial < 500; ++trial) {
+        const size_t n = rng() % 200;
+        const uint64_t max_value = 1 + rng() % (trial % 2 ? 4 : 1000);
+        std::vector<uint64_t> values;
+        LowerMedianCounter counter;
+        for (size_t i = 0; i < n; ++i) {
+            // runs of one value, as along a query, and zeros (absent)
+            const uint64_t value = rng() % (max_value + 1);
+            const size_t run = 1 + rng() % 3;
+            const size_t positions = 1 + rng() % 2;
+            for (size_t r = 0; r < run; ++r) {
+                counter.add(value, positions);
+                values.insert(values.end(), positions, value);
+            }
+        }
+        ASSERT_EQ(lower_median(values), counter.lower_median()) << trial;
+    }
+    LowerMedianCounter none;
+    none.add(0, 5);
+    EXPECT_EQ(0u, none.lower_median());
+}
+
+// An integer matrix that records the rows each read asks for
+class RecordingIntMatrix : public annot::matrix::IntMatrix {
+  public:
+    explicit RecordingIntMatrix(std::vector<RowValues> rows) : rows_(std::move(rows)) {}
+
+    std::vector<RowValues> get_row_values(const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
+                                          size_t = 1) const override {
+        reads.push_back(rows.size());
+        std::vector<RowValues> values;
+        for (auto row : rows) {
+            values.push_back(rows_.at(row));
+        }
+        return values;
+    }
+
+    const annot::matrix::BinaryMatrix& get_binary_matrix() const override {
+        throw std::logic_error("not read");
+    }
+
+    mutable std::vector<size_t> reads;
+
+  private:
+    std::vector<RowValues> rows_;
+};
+
+TEST(SearchCut, AbundanceMediansReadInBatches) {
+    // row r: abundance r + 1 in column 0, 10 in column 1
+    std::vector<RecordingIntMatrix::RowValues> rows;
+    for (uint64_t r = 0; r < 5; ++r) {
+        rows.push_back({ { 0, r + 1 }, { 1, 10 } });
+    }
+    RecordingIntMatrix matrix(rows);
+    // row 2 stands for three query positions: column 0 holds 1, 2, 3, 3, 3, 4, 5
+    std::vector<std::pair<uint64_t, size_t>> row_counts { { 0, 1 }, { 1, 1 }, { 2, 3 },
+                                                          { 3, 1 }, { 4, 1 } };
+    EXPECT_EQ((std::vector<uint64_t>{ 10, 3, 0 }),
+              abundance_medians(matrix, row_counts, { 1, 0, 2 }, 3, 2));
+    // read two rows at a time, never all of the query's rows at once
+    EXPECT_EQ((std::vector<size_t>{ 2, 2, 1 }), matrix.reads);
+}
+
 // An index whose annotation holds k-mer counts: one sequence, every k-mer of it annotated
 // with |abundances[j]| in column j
 std::unique_ptr<AnnotatedDBG> counts_index(const std::string &sequence, size_t k,
@@ -302,6 +405,7 @@ TEST(SearchCut, CountsTieBrokenByMedianAbundance) {
         EXPECT_EQ(2u, cut.tied);
         EXPECT_EQ(1u, cut.tied_returned);
         EXPECT_TRUE(cut.abundances);
+        EXPECT_TRUE(cut.nth_median_read);
         EXPECT_EQ(100u, cut.nth_median);
         EXPECT_EQ(1u, cut.tied_same_median);
     };
@@ -334,7 +438,7 @@ TEST(SearchCut, CountsTieBrokenByMedianAbundance) {
     EXPECT_EQ(2u, cut.returned);
     EXPECT_EQ(0u, cut.tied);
 
-    // the abundance sums differ: no tie
+    // the abundance sums differ: no tie, no median read
     matches = index->get_top_labels(sequence, 1, 0.0, 0.0, true, &cut);
     ASSERT_EQ(1u, matches.size());
     EXPECT_EQ("b_high", matches[0].first);
@@ -342,6 +446,8 @@ TEST(SearchCut, CountsTieBrokenByMedianAbundance) {
     EXPECT_EQ(100 * num_kmers, cut.nth_score);
     EXPECT_EQ(1u, cut.tied);
     EXPECT_EQ(1u, cut.tied_same_median);
+    EXPECT_TRUE(cut.abundances);
+    EXPECT_FALSE(cut.nth_median_read);
 
     // no k-mer of the query in the graph: nothing returned, complete
     matches = index->get_top_labels("TTTTTTTTTT", 1, 0.0, 0.0, false, &cut);

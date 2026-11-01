@@ -305,7 +305,10 @@ Json::Value SeqSearchResult::cut_to_json() const {
     cut["tied"] = Json::UInt64(cut_.tied);
     cut["tied_returned"] = Json::UInt64(cut_.tied_returned);
     if (cut_.abundances) {
-        cut["nth_median"] = nth_row ? Json::Value(Json::UInt64(cut_.nth_median)) : Json::Value();
+        // the N-th row's median is read only where the N-th score is shared (tied > 1)
+        cut["nth_median"] = nth_row && cut_.nth_median_read
+                ? Json::Value(Json::UInt64(cut_.nth_median))
+                : Json::Value();
         cut["tied_same_median"] = Json::UInt64(cut_.tied_same_median);
     }
     return cut;

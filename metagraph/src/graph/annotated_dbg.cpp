@@ -384,27 +384,45 @@ search_top_n(const std::vector<size_t> &scores,
         rows.push_back(Row{ i, scores[i], 0, std::string() });
     }
 
-    // The medians break ties only: they are read at a cut (its tie group, and the N-th row's
-    // median stated) and where two returned rows share a score, which is the only place the
-    // reading of the abundances costs a pass over the query's rows
+    // The medians break ties only, so a row's median is read only where it is compared: the
+    // rows that share their score with another one, the tie group at a cut (whose N-th row's
+    // median the cut then states) and the rows above it of one score. A row with a score of
+    // its own keeps median 0, which no comparison reads, and a cut whose N-th score has one
+    // row states no median. Reading the abundances costs a pass over the query's rows and
+    // holds values of the columns asked, so it is asked for no other row.
     if (medians && rows.size()) {
-        bool shared_score = !c.complete;
-        if (!shared_score) {
-            std::vector<size_t> sorted_scores(rows.size());
-            std::transform(rows.begin(), rows.end(), sorted_scores.begin(),
-                           [](const Row &row) { return row.score; });
-            std::sort(sorted_scores.begin(), sorted_scores.end());
-            shared_score = std::adjacent_find(sorted_scores.begin(), sorted_scores.end())
-                            != sorted_scores.end();
+        std::vector<size_t> asked;
+        // the rows above the N-th score (every row of a complete result) in score order: the
+        // runs of one score
+        std::vector<size_t> by_score(above);
+        std::iota(by_score.begin(), by_score.end(), 0);
+        std::sort(by_score.begin(), by_score.end(), [&](size_t r, size_t s) {
+            return rows[r].score < rows[s].score;
+        });
+        for (size_t b = 0; b < by_score.size(); ) {
+            size_t e = b + 1;
+            while (e < by_score.size() && rows[by_score[e]].score == rows[by_score[b]].score) {
+                ++e;
+            }
+            if (e - b > 1)
+                asked.insert(asked.end(), by_score.begin() + b, by_score.begin() + e);
+            b = e;
         }
-        if (shared_score) {
-            std::vector<size_t> indexes(rows.size());
-            std::transform(rows.begin(), rows.end(), indexes.begin(),
-                           [](const Row &row) { return row.index; });
+        // the tie group at the cut, if the N-th score is shared
+        if (rows.size() - above > 1) {
+            for (size_t r = above; r < rows.size(); ++r) {
+                asked.push_back(r);
+            }
+            c.nth_median_read = true;
+        }
+        if (asked.size()) {
+            std::vector<size_t> indexes(asked.size());
+            std::transform(asked.begin(), asked.end(), indexes.begin(),
+                           [&](size_t r) { return rows[r].index; });
             std::vector<uint64_t> values = medians(indexes);
-            assert(values.size() == rows.size());
-            for (size_t r = 0; r < rows.size(); ++r) {
-                rows[r].median = values[r];
+            assert(values.size() == asked.size());
+            for (size_t a = 0; a < asked.size(); ++a) {
+                rows[asked[a]].median = values[a];
             }
         }
     }
@@ -438,8 +456,10 @@ search_top_n(const std::vector<size_t> &scores,
         std::sort(same_begin, same_end, before);
         rows.erase(tie_begin + slots, rows.end());
     }
-    if (!c.abundances)
+    if (!c.abundances) {
         c.nth_median = c.tied_same_median = 0;
+        c.nth_median_read = false;
+    }
 
     for (size_t r = 0; r < above; ++r) {
         rows[r].label = label(rows[r].index);
@@ -460,43 +480,90 @@ search_top_n(const std::vector<size_t> &scores,
 
 using ColumnMedians = std::function<std::vector<uint64_t>(const std::vector<Column> &)>;
 
+void LowerMedianCounter::add(uint64_t value, uint64_t positions) {
+    if (!value || !positions)
+        return;
+    if (counts_.size() && counts_.back().first == value) {
+        // a run of one value along the query
+        counts_.back().second += positions;
+        return;
+    }
+    counts_.emplace_back(value, positions);
+    if (counts_.size() >= 2 * merged_ + 16)
+        merge();
+}
+
+void LowerMedianCounter::merge() {
+    std::sort(counts_.begin(), counts_.end(), utils::LessFirst());
+    size_t last = 0;
+    for (size_t i = 1; i < counts_.size(); ++i) {
+        if (counts_[i].first == counts_[last].first) {
+            counts_[last].second += counts_[i].second;
+        } else {
+            counts_[++last] = counts_[i];
+        }
+    }
+    if (counts_.size())
+        counts_.resize(last + 1);
+    merged_ = counts_.size();
+}
+
+uint64_t LowerMedianCounter::lower_median() {
+    merge();
+    uint64_t n = 0;
+    for (const auto &[value, count] : counts_) {
+        n += count;
+    }
+    if (!n)
+        return 0;
+    // the element at index floor((n - 1) / 2) of the values sorted ascending
+    uint64_t rank = (n - 1) / 2;
+    for (const auto &[value, count] : counts_) {
+        if (rank < count)
+            return value;
+        rank -= count;
+    }
+    assert(false);
+    return 0;
+}
+
 // The lower medians (lower_median) of the abundances of |columns| over the query's k-mer
 // positions: |call_rows| calls its callback with the row of (column, abundance) pairs of each
 // k-mer of the query found in the graph and the number of query positions that row stands for
-// (a k-mer repeated in the query is a position each time)
+// (a k-mer repeated in the query is a position each time). Each column asked holds its
+// distinct values with their counts (LowerMedianCounter), not a value per position.
 template <class CallRows>
 std::vector<uint64_t> abundance_medians(const CallRows &call_rows,
                                         const std::vector<Column> &columns,
                                         size_t num_columns) {
-    utils::ValueStore<Column, std::vector<uint64_t>> values(num_columns, columns.size());
+    utils::ValueStore<Column, LowerMedianCounter> values(num_columns, columns.size());
     for (Column j : columns) {
-        values.emplace(j, std::vector<uint64_t>());
+        values.emplace(j, LowerMedianCounter());
     }
     call_rows([&](const auto &row, size_t positions) {
         for (const auto &[j, value] : row) {
-            if (!value)
-                continue;
-            if (std::vector<uint64_t> *v = values.get(j))
-                v->insert(v->end(), positions, value);
+            if (LowerMedianCounter *counter = values.get(j))
+                counter->add(value, positions);
         }
     });
     std::vector<uint64_t> medians;
     medians.reserve(columns.size());
     for (Column j : columns) {
-        medians.push_back(lower_median(std::move(*values.get(j))));
+        medians.push_back(values.get(j)->lower_median());
     }
     return medians;
 }
 
-// abundance_medians read from |matrix|: |row_counts| are the query's rows, each with the
-// number of query positions it stands for
 std::vector<uint64_t>
 abundance_medians(const IntMatrix &matrix,
-                  const std::vector<std::pair<AnnotatedDBG::row_index, size_t>> &row_counts,
-                  const std::vector<Column> &columns,
-                  size_t num_columns) {
+                  const std::vector<std::pair<uint64_t, size_t>> &row_counts,
+                  const std::vector<uint32_t> &columns,
+                  size_t num_columns,
+                  size_t rows_per_read) {
+    assert(rows_per_read);
     // per-row access is cheap for a CSRMatrix (a batched query's slice); other matrices
-    // decode their rows in a batch
+    // decode their rows in batches of |rows_per_read|, so that the values decoded at a time
+    // stay bounded whatever the query's length
     if (const auto *csr = dynamic_cast<const CSRMatrix *>(&matrix)) {
         return abundance_medians([&](const auto &callback) {
             for (const auto &[row, positions] : row_counts) {
@@ -504,18 +571,38 @@ abundance_medians(const IntMatrix &matrix,
             }
         }, columns, num_columns);
     }
-    std::vector<AnnotatedDBG::row_index> rows;
-    rows.reserve(row_counts.size());
-    for (const auto &[row, positions] : row_counts) {
-        rows.push_back(row);
-    }
-    auto row_values = matrix.get_row_values(rows);
     return abundance_medians([&](const auto &callback) {
-        for (size_t i = 0; i < row_values.size(); ++i) {
-            callback(row_values[i], row_counts[i].second);
+        std::vector<AnnotatedDBG::row_index> rows;
+        for (size_t begin = 0; begin < row_counts.size(); begin += rows_per_read) {
+            const size_t end = std::min(begin + rows_per_read, row_counts.size());
+            rows.clear();
+            for (size_t i = begin; i < end; ++i) {
+                rows.push_back(row_counts[i].first);
+            }
+            auto row_values = matrix.get_row_values(rows);
+            for (size_t i = begin; i < end; ++i) {
+                callback(row_values[i - begin], row_counts[i].second);
+            }
         }
     }, columns, num_columns);
 }
+
+// The rows of |row_indices| (one per query position), each with the number of positions it
+// stands for, in the order of their first position
+std::vector<std::pair<AnnotatedDBG::row_index, size_t>>
+count_rows(const std::vector<AnnotatedDBG::row_index> &row_indices) {
+    VectorMap<AnnotatedDBG::row_index, size_t> row_counts;
+    row_counts.reserve(row_indices.size());
+    for (AnnotatedDBG::row_index row : row_indices) {
+        row_counts[row]++;
+    }
+    return to_vector(std::move(row_counts));
+}
+
+// The rows read at a time where the medians of a search's ties are read from a matrix other
+// than a CSRMatrix: integer values take four times the bytes of the set bits a binary row
+// holds, so a quarter of the rows BinaryMatrix::sum_rows decodes at a time
+constexpr size_t kMedianRowsPerRead = 2'500;
 
 ColumnMedians
 AnnotatedDBG::tie_medians(std::string_view sequence,
@@ -523,26 +610,44 @@ AnnotatedDBG::tie_medians(std::string_view sequence,
     if (const IntMatrix *abundances = abundance_matrix()) {
         // the matrix is captured by value, its pointer ends with the condition's scope
         return [this, &row_counts, abundances](const std::vector<Column> &columns) {
-            return abundance_medians(*abundances, row_counts, columns, annotator_->num_labels());
+            return abundance_medians(*abundances, row_counts, columns,
+                                     annotator_->num_labels(), kMedianRowsPerRead);
         };
     }
-    if (kmer_abundances_ && abundance_source_ && abundance_source_->abundance_matrix()) {
-        // a binary slice of a counts annotation: the rows of the full index the query maps
-        // to, each with its multiplicity in the query (the rows of this index's graph stand
-        // for the same k-mers; a k-mer the full graph lacks has an empty row here)
-        return [this, sequence](const std::vector<Column> &columns) {
-            const AnnotatedDBG &source = *abundance_source_;
-            VectorMap<row_index, size_t> source_counts;
-            source.get_graph().map_to_nodes(sequence, [&](node_index i) {
-                if (i > 0)
-                    source_counts[graph_to_anno_index(i)]++;
-            });
-            return abundance_medians(*source.abundance_matrix(),
-                                     source_counts.values_container(), columns,
-                                     source.get_annotator().num_labels());
+    return source_tie_medians(sequence);
+}
+
+ColumnMedians
+AnnotatedDBG::tie_medians(std::string_view sequence,
+                          const std::vector<row_index> &row_indices) const {
+    if (const IntMatrix *abundances = abundance_matrix()) {
+        // the rows collapsed with their multiplicity (a k-mer repeated in the query is read
+        // once), only when a tie asks
+        return [this, &row_indices, abundances](const std::vector<Column> &columns) {
+            return abundance_medians(*abundances, count_rows(row_indices), columns,
+                                     annotator_->num_labels(), kMedianRowsPerRead);
         };
     }
-    return {};
+    return source_tie_medians(sequence);
+}
+
+ColumnMedians AnnotatedDBG::source_tie_medians(std::string_view sequence) const {
+    if (!kmer_abundances_ || !abundance_source_ || !abundance_source_->abundance_matrix())
+        return {};
+    // a binary slice of a counts annotation: the rows of the full index the query maps to,
+    // each with its multiplicity in the query (the rows of this index's graph stand for the
+    // same k-mers; a k-mer the full graph lacks has an empty row here)
+    return [this, sequence](const std::vector<Column> &columns) {
+        const AnnotatedDBG &source = *abundance_source_;
+        VectorMap<row_index, size_t> source_counts;
+        source.get_graph().map_to_nodes(sequence, [&](node_index i) {
+            if (i > 0)
+                source_counts[graph_to_anno_index(i)]++;
+        });
+        return abundance_medians(*source.abundance_matrix(), source_counts.values_container(),
+                                 columns, source.get_annotator().num_labels(),
+                                 kMedianRowsPerRead);
+    };
 }
 
 // The candidates' indexes mapped to the columns |medians| reads: what search_top_n asks of
@@ -1121,14 +1226,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     const auto &matrix = annotator_->get_matrix();
     // the abundances of the ties: the rows enumerated below may be binary, so they are read
     // from the integer matrix (one value per position), only where a tie needs them
-    std::vector<std::pair<row_index, size_t>> row_counts;
-    if (kmer_abundances_) {
-        row_counts.reserve(row_indices.size());
-        for (row_index row : row_indices) {
-            row_counts.emplace_back(row, 1);
-        }
-    }
-    ColumnMedians medians = tie_medians(sequence, row_counts);
+    ColumnMedians medians = tie_medians(sequence, row_indices);
     auto get_results = [&](const auto &enumerate_rows) {
         auto results = filter_and_aggregate<std::vector<std::tuple<std::string, size_t, sdsl::bit_vector>>>(
             enumerate_rows, annotator_->get_label_encoder(), min_count, num_top_labels, kmer_positions, num_kmers,

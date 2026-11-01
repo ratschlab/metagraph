@@ -83,12 +83,15 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   - otherwise `nth_score` is the score of the N-th returned row, `tied` the number of matching labels with that
     score (returned or not), `tied_returned` how many of them were returned;
   - on COUNTS annotations also `nth_median` and `tied_same_median` (the labels with the N-th score and median).
+    The median is read only where the N-th score is shared: a cut with `tied` 1 states `nth_median` null (and
+    `tied_same_median` 1).
 - The order before every engine-local cut (C5): score descending; then, on counts annotations only, the median
   abundance descending; then label ascending (byte order). The median is the LOWER median of the label's
   abundances over the query's k-mer positions where the label is present (abundance at least 1, zeros excluded),
-  each position once: sorted ascending, the element at index floor((n - 1) / 2). A counts annotation is an integer
-  matrix that is not a coordinate matrix (row_diff_int_brwt, int_row_diff_disk, the integer CSC forms). On
-  coordinate and binary annotations ties are ordered by label.
+  each position once: sorted ascending, the element at index floor((n - 1) / 2); it is read only for the rows
+  it orders (those sharing a score). A counts annotation is an integer matrix that is not a coordinate matrix
+  (row_diff_int_brwt, int_row_diff_disk, the integer CSC forms). On coordinate and binary annotations ties are
+  ordered by label.
 - The result cache key includes the selected names (with their pairs), so a pair listed under two names never
   returns rows tagged with the other name.
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask).

@@ -64,7 +64,8 @@ def c5_top_n(rows, n, counts=False):
         cut.update(nth_score=nth['kmer_count'], tied=len(tied),
                    tied_returned=sum(r['kmer_count'] == nth['kmer_count'] for r in top))
         if counts:
-            cut.update(nth_median=median(nth),
+            # the N-th row's median is read and stated only where the N-th score is shared
+            cut.update(nth_median=median(nth) if len(tied) > 1 else None,
                        tied_same_median=sum(median(r) == median(nth) for r in tied))
     return top, cut
 
@@ -927,7 +928,10 @@ class TestAPIClientWithCounts(TestAPIBase):
             if expected['tied'] > expected['tied_returned']:
                 straddling.setdefault(expected['nth_score'], n)
         self.assertTrue(straddling)
-        for n in [1] + sorted(straddling.values())[:6]:
+        # a cut whose N-th score has one label states no median (none is read for it)
+        unshared = [n for n in range(1, len(rows))
+                    if c5_top_n(rows, n, counts=True)[1]['tied'] == 1][:1]
+        for n in [1] + sorted(straddling.values())[:6] + unshared:
             with self.subTest(top_labels=n):
                 top, expected = c5_top_n(rows, n, counts=True)
                 self.assertEqual((top, expected), search(n, query_counts=True))
