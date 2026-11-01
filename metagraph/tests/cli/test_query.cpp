@@ -674,11 +674,18 @@ TEST(construct_query_graph, no_values_read_without_a_tie) {
             }
             // a cut in the tie of b and d: the medians are read once, each of the query's 60
             // distinct k-mers' rows once (the 60 repeated positions not again)
+            size_t searches = 1;
+#ifndef NDEBUG
+            // (a build with assertions checks a signature against get_top_labels, a second
+            // search that reads the medians again)
+            if (mode == "signature")
+                searches = 2;
+#endif
             const cli::SeqSearchResult tie = run(2);
             EXPECT_TRUE(tie.get_cut().nth_median_read);
             EXPECT_EQ(2u, tie.get_cut().tied);
-            EXPECT_EQ(reads + 1, counted.reads);
-            EXPECT_EQ(rows_read + 60, counted.rows_read);
+            EXPECT_EQ(reads + searches, counted.reads);
+            EXPECT_EQ(rows_read + 60 * searches, counted.rows_read);
         }
     }
 }
