@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
@@ -516,6 +517,54 @@ TEST(ServerFanout, AnInlinePairStartsPastTheCutoff) {
     ASSERT_EQ(1u, out.entries.size());
     EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
     wait_for_workers();
+}
+
+// The spec states what an inline pair does (GPT A-Q1, A-Q2), and the fan-out does it: started,
+// it is answered past the cutoff (its own deadline ends it, never the cutoff), and its entry is
+// the request's as soon as it ends; before it starts, an in_ram load past its wait limit is not
+// started and the pair is refused 503 not_reached (NoLoadPastTheWaitLimit)
+TEST(ServerFanout, TheSpecStatesTheInlinePairRule) {
+    const std::vector<SelectedPair> pairs { kPairs[0] };
+    auto entry = entry_of(pairs);
+    // the cutoff 10 ms after the arrival; the pair works 60 ms past it
+    const RequestDeadlines d = deadlines_now(60);
+    FanoutOutcome out = run_fanout(settings_of(pairs, d), entry, [&](PairControl &control) {
+        EXPECT_TRUE(control.start_running());
+        std::this_thread::sleep_for(70ms);
+        EXPECT_FALSE(control.stopped());
+        return answered(control);
+    }, not_launched);
+    ASSERT_EQ(1u, out.entries.size());
+    EXPECT_EQ("answered", out.entries[0]["outcome"].asString());
+    EXPECT_GT(SteadyClock::now(), d.cutoff + 50ms);
+    wait_for_workers();
+
+    std::ifstream in("../docs/SPEC-multigraph-envelope.md", std::ios::binary);
+    ASSERT_TRUE(in.good()) << "the spec not found (run from the build directory)";
+    std::string spec;
+    bool space = false;
+    for (char c; in.get(c); ) {
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            space = true;
+            continue;
+        }
+        if (space && spec.size())
+            spec += ' ';
+        space = false;
+        spec += c;
+    }
+    for (const char *clause : {
+            "A one-pair request (the selection holds one pair) runs inline, as its single-graph "
+            "route does.",
+            "is capped by `finish_by_ms` - clock_skew_allowance_ms, never by the work cutoff",
+            "a load in progress is not interrupted; once the pair has started it is never "
+            "`not_reached` or `unfinished` by the cutoff",
+            "its envelope, answered or refused, is written as soon as the pair ends",
+            "nothing is loaded and its entry is refused 503 `not_reached`",
+            "`metagraph query --query-mode labels`",
+            "so it is not reachable over HTTP" }) {
+        EXPECT_NE(std::string::npos, spec.find(clause)) << clause;
+    }
 }
 
 // E4's test: one completed pair beside a sibling blocked waiting for the memory to load its

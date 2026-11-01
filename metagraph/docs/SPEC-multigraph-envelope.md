@@ -97,6 +97,8 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   ordered by label.
 - The result cache key includes the selected names (with their pairs), so a pair listed under two names never
   returns rows tagged with the other name.
+- The CLI's `metagraph query --query-mode labels` (every label above the thresholds, no counts, no cut) keeps the
+  annotation's column order, not the C5 order; `/search` has no such mode, so it is not reachable over HTTP.
 - `/search` takes `graphs` only (no `pairs`; it has no re-ask): `pairs` is refused 400 `pairs_unsupported` on every
   server, single-graph included, before any cached answer is looked up. On a single-graph server the field used to
   be ignored (a request it refused for `graphs` keeps that refusal).
@@ -137,6 +139,16 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
     `finish_by_ms`) has no budget to cap and runs as its single-graph answer does (a deadline would change its
     work: the explicit labels' hits fetched in pieces); it is told to stop at the cutoff. A pair that cannot stop
     by then (a load in progress, a step that reads no clock, a pair without a deadline) is `unfinished`.
+- A one-pair request (the selection holds one pair) runs inline, as its single-graph route does. The pair's own
+  deadline, which starts when its work starts (after an in_ram load), is capped by `finish_by_ms` -
+  clock_skew_allowance_ms, never by the work cutoff; a load in progress is not interrupted; once the pair has
+  started it is never `not_reached` or `unfinished` by the cutoff, it ends by its own deadline; and its envelope,
+  answered or refused, is written as soon as the pair ends (a refused pair's envelope is bound by the transport cap
+  only, so it can be written after `finish_by_ms`). Before it starts, an in_ram load is not started once its wait
+  limit has passed (`finish_by_ms` - clock_skew_allowance_ms, else the transport cap) or its client has left:
+  nothing is loaded and its entry is refused 503 `not_reached` (reason `cutoff`, `transport` or `not_after_ms` as
+  above). `not_after_ms` refuses it as in a fan-out. The envelope's `deadline` states the request's instants as for
+  any request.
 - `deadline.effective_deadline_at` and `deadline.cutoff_at` are stated only when the request gives `not_after_ms`
   or `finish_by_ms` (samples 01 and 02 give neither); otherwise they are null, the cutoff applying all the same.
 - The 899 s transport cap bounds every answer.
