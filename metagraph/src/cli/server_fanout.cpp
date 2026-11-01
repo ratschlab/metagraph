@@ -450,6 +450,11 @@ Json::Value RequestRegistry::unknown_json(const std::string &request_id) const {
     return j;
 }
 
+std::string RequestRegistry::repeated_text(const std::string &request_id) const {
+    return "request_id '" + request_id + "' is running, or retained after it finished, on this "
+           "server (" + retention_text() + "): it is not run again; its state is this body";
+}
+
 std::optional<Json::Value> RequestRegistry::start(
         const std::shared_ptr<RequestEntry> &entry,
         const std::function<std::optional<Json::Value>()> &admission) {
@@ -460,9 +465,7 @@ std::optional<Json::Value> RequestRegistry::start(
     auto it = shared_->entries.find(id);
     if (it != shared_->entries.end()) {
         Json::Value body = it->second->json(shared_->settings.retention_s);
-        body["error"] = "request_id '" + id + "' is running, or retained after it finished, on "
-                        "this server (" + retention_text() + "): it is not run again; its state "
-                        "is this body";
+        body["error"] = repeated_text(id);
         return body;
     }
     if (admission) {
@@ -538,6 +541,43 @@ Json::Value traverse_request_json(const Json::Value &attempt, const Json::Value 
     j["pairs"].append(std::move(p));
     j["attempt"] = attempt;
     return j;
+}
+
+Json::Value request_as_attempt_json(const Json::Value &entry) {
+    Json::Value attempt = entry;
+    attempt["attempt_id"] = entry["request_id"];
+    attempt["state"] = entry["state"].asString() == "ended" ? "finished" : "running";
+    return attempt;
+}
+
+std::optional<Json::Value> IdAdmission::start_request(
+        const std::shared_ptr<RequestEntry> &entry,
+        const std::function<std::optional<Json::Value>()> &admission) {
+    assert(entry->request_id());
+    std::lock_guard<std::mutex> lock(mutex_);
+    return requests_.start(entry, [&]() -> std::optional<Json::Value> {
+        const std::string &id = *entry->request_id();
+        Json::Value pair;
+        auto [status, attempt] = attempts_.state(id, &pair);
+        if (status == 200 && attempt.get("state", "").asString() != "unknown") {
+            Json::Value body = traverse_request_json(attempt, pair,
+                                                     attempts_.settings().retention_s);
+            body["error"] = requests_.repeated_text(id);
+            return body;
+        }
+        return admission ? admission() : std::nullopt;
+    });
+}
+
+std::optional<AttemptRegistry::StartRefusal> IdAdmission::start_attempt(
+        const std::shared_ptr<Attempt> &attempt) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return attempts_.start(attempt, [&]() -> std::optional<Json::Value> {
+        auto [status, entry] = requests_.state(attempt->ids().attempt_id);
+        if (status != 200)
+            return std::nullopt;
+        return request_as_attempt_json(entry);
+    });
 }
 
 // ---------------------------------------------------------------- the fan-out

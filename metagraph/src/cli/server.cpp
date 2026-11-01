@@ -1266,6 +1266,8 @@ int run_server(Config *config) {
     request_settings.server_instance = attempts.server_instance();
     RequestRegistry requests(request_settings);
     logger->info("[Server] Requests by request_id: {}", requests.retention_text());
+    // a request_id and an attempt_id are one namespace (GET /requests/{id} reads both)
+    IdAdmission id_admission(requests, attempts);
 
     // The deadlines of a /resolve or /pattern request whose handler starts now (section 4):
     // |budget_ms| the route's request budget, |reserve_ms| its finalisation reserve
@@ -1279,9 +1281,9 @@ int run_server(Config *config) {
 
     /**
      * The admission of a /resolve or /pattern request (sections 4 and 5), before anything of it
-     * runs: a request_id that is running or retained here is refused (409, its entry and an
-     * error: no second worker), then one whose not_after_ms has passed (409 expired, as
-     * /traverse refuses it); otherwise |entry| is registered under its request_id (a request
+     * runs: a request_id that is running or retained here, on any route, is refused (409, its
+     * entry and an error: no second worker), then one whose not_after_ms has passed (409
+     * expired, as /traverse refuses it); otherwise |entry| is registered under its request_id (a request
      * without one is not registered). A malformed field was refused before (400), so that
      * nothing a client must correct holds its id
      */
@@ -1298,8 +1300,8 @@ int run_server(Config *config) {
                 body["request_id"] = *handles.request_id;
             return body;
         };
-        std::optional<Json::Value> refused = handles.request_id ? requests.start(entry, expired)
-                                                                : expired();
+        std::optional<Json::Value> refused
+                = handles.request_id ? id_admission.start_request(entry, expired) : expired();
         if (refused) {
             logger->info("[Server] Request {}: not started, {}", request_id,
                          refused->get("error", "").asString());
@@ -2092,7 +2094,7 @@ int run_server(Config *config) {
                 // other attempt); and one whose not_after_ms has passed is not started at all
                 // (its ledger may already have released it), also without usage. Once its
                 // retention and hold are over the id runs again
-                if (auto refused = attempts.start(attempt)) {
+                if (auto refused = id_admission.start_attempt(attempt)) {
                     // the refusal's body is read with get(): operator[] of a non-const value
                     // adds a missing member (as null) to the body served
                     if (refused->instance_mismatch || refused->expired) {

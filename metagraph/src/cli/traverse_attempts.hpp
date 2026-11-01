@@ -619,8 +619,12 @@ class AttemptRegistry {
     // tombstone to the request's not_after_ms + clock_skew_ms (within the cap, never
     // shortened), so that every later copy of it is refused while it could still be admitted;
     // a running or finished attempt's refusal extends its hold likewise (a running one's from
-    // its finish)
-    std::optional<StartRefusal> start(const std::shared_ptr<Attempt> &attempt);
+    // its finish). |taken|, when given, is asked after the id's check and before the
+    // not_after check, under the registry's lock: a body it returns means that the id is in
+    // use elsewhere (IdAdmission): refused as a running id, with that body
+    std::optional<StartRefusal> start(
+            const std::shared_ptr<Attempt> &attempt,
+            const std::function<std::optional<Json::Value>()> &taken = nullptr);
     // the wall clock not_after_ms is compared with (Unix epoch ms)
     uint64_t now_ms() const;
     // the `attempts` block of both capabilities routes: the fields, routes, retention, the

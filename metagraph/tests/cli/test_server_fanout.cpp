@@ -1112,6 +1112,183 @@ TEST(ServerFanout, A400FreesTheRequestId) {
     registry.forget(anonymous);
 }
 
+// request_id and attempt_id are one namespace (GET /requests/{id} looks up both): an id held by
+// either registry refuses the other route, running or retained, in that route's 409, until its
+// retention ended; a repeat on one route answers as before (GPT A3: a retained /resolve "x" hid
+// a running /traverse attempt "x")
+class IdNamespace : public ::testing::Test {
+  protected:
+    IdNamespace() : requests_(request_settings()), attempts_(attempt_settings()),
+                    admission_(requests_, attempts_) {}
+
+    RequestSettings request_settings() {
+        RequestSettings rs;
+        rs.server_instance = "inst";
+        rs.retention_s = 60;
+        rs.clocks.steady = [this]() { return now(); };
+        return rs;
+    }
+    AttemptSettings attempt_settings() {
+        AttemptSettings as;
+        as.retention_s = 60;
+        as.retention_count = 100;
+        as.clock = [this]() { return now(); };
+        return as;
+    }
+    SteadyClock::time_point now() const { return base_ + std::chrono::seconds(seconds_.load()); }
+    void pass(int64_t seconds) { seconds_ += seconds; }
+
+    std::shared_ptr<RequestEntry> entry(const std::string &id) {
+        RequestEntry::Clocks clocks;
+        clocks.steady = [this]() { return now(); };
+        return std::make_shared<RequestEntry>(id, "/resolve", "inst",
+                                              std::chrono::system_clock::now(),
+                                              refs_of({ kPairs[0] }), clocks);
+    }
+    std::shared_ptr<Attempt> attempt(const std::string &id) {
+        auto a = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(),
+                                           attempts_.settings(), attempts_.server_instance(),
+                                           true, nullptr);
+        AttemptIds ids;
+        ids.attempt_id = id;
+        a->set_ids(ids);
+        return a;
+    }
+    void end(const std::shared_ptr<RequestEntry> &e) {
+        e->pair_running(0);
+        e->pair_outcome(0, "answered");
+        e->pair_ended(0, 1, 0.5);
+        e->response(200, 10);
+    }
+
+    SteadyClock::time_point base_ = SteadyClock::now();
+    std::atomic<int64_t> seconds_ { 0 };
+    RequestRegistry requests_;
+    AttemptRegistry attempts_;
+    IdAdmission admission_;
+};
+
+TEST_F(IdNamespace, ARequestHoldsItsIdAgainstAnAttempt) {
+    auto e = entry("x");
+    ASSERT_FALSE(admission_.start_request(e));
+    // running
+    auto refused = admission_.start_attempt(attempt("x"));
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_FALSE(refused->instance_mismatch);
+    EXPECT_EQ("x", refused->body["attempt_id"].asString());
+    EXPECT_EQ("running", refused->body["state"].asString());
+    EXPECT_EQ("/resolve", refused->body["route"].asString());
+    EXPECT_EQ(404, attempts_.state("x").first);
+    // retained
+    end(e);
+    refused = admission_.start_attempt(attempt("x"));
+    ASSERT_TRUE(refused);
+    EXPECT_EQ("finished", refused->body["state"].asString());
+    EXPECT_EQ("answered", refused->body["reason"].asString());
+    EXPECT_EQ(404, attempts_.state("x").first);
+    // past its retention: the attempt runs
+    pass(60);
+    auto a = attempt("x");
+    EXPECT_FALSE(admission_.start_attempt(a));
+    EXPECT_EQ(200, attempts_.state("x").first);
+    EXPECT_EQ(404, requests_.state("x").first);
+    // and holds the id in its turn
+    EXPECT_TRUE(admission_.start_request(entry("x")));
+}
+
+TEST_F(IdNamespace, AnAttemptHoldsItsIdAgainstARequest) {
+    auto a = attempt("y");
+    ASSERT_FALSE(admission_.start_attempt(a));
+    // running: the attempt as GET /requests/{id} answers it, with the route's error
+    auto e = entry("y");
+    bool asked = false;
+    auto refused = admission_.start_request(e, [&]() -> std::optional<Json::Value> {
+        asked = true;
+        return std::nullopt;
+    });
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(asked);
+    EXPECT_EQ("y", (*refused)["request_id"].asString());
+    EXPECT_EQ("/traverse", (*refused)["route"].asString());
+    EXPECT_EQ("running", (*refused)["state"].asString());
+    EXPECT_EQ("y", (*refused)["attempt"]["attempt_id"].asString());
+    EXPECT_EQ(requests_.repeated_text("y"), (*refused)["error"].asString());
+    EXPECT_EQ(404, requests_.state("y").first);
+    // retained
+    attempts_.finish(a, "completed", 200, 10);
+    refused = admission_.start_request(entry("y"));
+    ASSERT_TRUE(refused);
+    EXPECT_EQ("ended", (*refused)["state"].asString());
+    EXPECT_EQ(404, requests_.state("y").first);
+    // past its retention: the request runs
+    pass(60);
+    EXPECT_FALSE(admission_.start_request(e));
+    EXPECT_EQ(200, requests_.state("y").first);
+    EXPECT_EQ(404, attempts_.state("y").first);
+    EXPECT_TRUE(admission_.start_attempt(attempt("y")));
+}
+
+// a repeat on one route answers as before: its own registry's body; a tombstone of a cancel holds
+// an attempt_id only (no request ran with it, GET /requests does not answer it)
+TEST_F(IdNamespace, ARepeatOnOneRouteAnswersAsBefore) {
+    auto e = entry("r");
+    ASSERT_FALSE(admission_.start_request(e));
+    auto repeated = admission_.start_request(entry("r"));
+    auto direct = requests_.start(entry("r"));
+    ASSERT_TRUE(repeated);
+    ASSERT_TRUE(direct);
+    EXPECT_EQ(*direct, *repeated);
+
+    auto a = attempt("t");
+    ASSERT_FALSE(admission_.start_attempt(a));
+    auto again = admission_.start_attempt(attempt("t"));
+    ASSERT_TRUE(again);
+    EXPECT_EQ("t", again->body["attempt_id"].asString());
+    EXPECT_FALSE(again->body.isMember("route"));
+
+    attempts_.cancel("cancelled", 0);
+    EXPECT_FALSE(admission_.start_request(entry("cancelled")));
+    ASSERT_TRUE(admission_.start_attempt(attempt("cancelled")));
+}
+
+// an admission's check of the other registry, whatever the order: never both
+TEST_F(IdNamespace, NoWindowAdmitsBoth) {
+    const size_t rounds = 2000;
+    std::atomic<size_t> go { 0 };
+    std::vector<std::shared_ptr<RequestEntry>> entries;
+    std::vector<std::shared_ptr<Attempt>> tries;
+    for (size_t i = 0; i < rounds; ++i) {
+        entries.push_back(entry("id" + std::to_string(i)));
+        tries.push_back(attempt("id" + std::to_string(i)));
+    }
+    std::vector<int> request_won(rounds, 0);
+    std::vector<int> attempt_won(rounds, 0);
+    auto wait_turn = [&](size_t i) {
+        ++go;
+        while (go.load() < 2 * (i + 1)) {
+            std::this_thread::yield();
+        }
+    };
+    std::thread a([&]() {
+        for (size_t i = 0; i < rounds; ++i) {
+            wait_turn(i);
+            request_won[i] = !admission_.start_request(entries[i]);
+        }
+    });
+    std::thread b([&]() {
+        for (size_t i = 0; i < rounds; ++i) {
+            wait_turn(i);
+            attempt_won[i] = !admission_.start_attempt(tries[i]);
+        }
+    });
+    a.join();
+    b.join();
+    for (size_t i = 0; i < rounds; ++i) {
+        EXPECT_EQ(1, request_won[i] + attempt_won[i]) << i;
+    }
+}
+
 // GET /requests/{attempt_id} of a /traverse attempt: the request object built from the
 // attempt's state (sample 21)
 TEST(ServerFanout, TraverseRequestFromTheAttempt) {

@@ -51,8 +51,9 @@ its 400 text of before release 10, byte for byte (section 6).
 
 The envelope wraps HTTP 200 answers only. Every other answer of `/traverse` stays HTTP-level and unwrapped,
 exactly as before, because the service's attempt ledger reads those statuses:
-- 409: a repeated `attempt_id` that is running, retained, held or tombstoned (`{error, attempt}`), and an expired
-  `not_after_ms` (`{error, state: "expired", ...}`);
+- 409: a repeated `attempt_id` that is running, retained, held or tombstoned (`{error, attempt}`; also an
+  `attempt_id` equal to a running or retained `request_id`, section 5, `attempt` then being that request's entry with
+  `attempt_id` and `state` `running` or `finished`), and an expired `not_after_ms` (`{error, state: "expired", ...}`);
 - 503 with `usage` when the attempt reaches its bound;
 - 400 with `usage` for a managed request (without `usage` for an unmanaged one).
 429 exists only on `POST /traverse/cancel` (an unknown id that could not be tombstoned); that route and
@@ -152,6 +153,12 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   parses the body.
 - A repeated `request_id` that is running, or retained after it finished, starts no work: 409, body = the registry
   entry (below) plus `error`.
+- `request_id` and `attempt_id` are one namespace, as `GET /requests/{id}` reads both: a `request_id` equal to a
+  running, retained or held `attempt_id` is such a 409 (the entry being the attempt's, as `GET /requests/{id}`
+  answers it), and an `attempt_id` equal to a running or retained `request_id` is `/traverse`'s 409 of a repeated
+  `attempt_id` (section 1.1). The check of both registries is atomic, so two requests with one id are never both
+  admitted, in either order; once its retention ended the id runs on either route. A tombstone holds an
+  `attempt_id` only.
 - `GET /requests/{request_id}` answers the entry: `{request_id, server_instance, route, state: "running" |
   "ended", received_at, finished_at, reason, response: {status, bytes, written} | null, retained_until, pairs:
   [{graph, graph_path, annotation_path, state: "queued" | "waiting_memory" | "loading" | "running" | "ended" |

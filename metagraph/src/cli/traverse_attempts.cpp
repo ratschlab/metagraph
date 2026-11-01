@@ -1180,7 +1180,8 @@ uint64_t AttemptRegistry::now_ms() const {
 }
 
 std::optional<AttemptRegistry::StartRefusal>
-AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
+AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt,
+                       const std::function<std::optional<Json::Value>()> &taken) {
     std::lock_guard<std::mutex> lock(mutex_);
     expire_locked();
     // meant for another process (this one restarted, or the request reached another server):
@@ -1208,6 +1209,10 @@ AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
             hold_locked(*it->second, attempt->ids().not_after_ms, false);
         }
         return StartRefusal { false, std::move(body) };
+    }
+    if (taken) {
+        if (std::optional<Json::Value> body = taken())
+            return StartRefusal { false, std::move(*body) };
     }
     // not run, and not kept: a later copy of the request is expired as well, so nothing has
     // to remember it (GET /traverse/attempt answers 404 for it)

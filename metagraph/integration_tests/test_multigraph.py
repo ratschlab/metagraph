@@ -1642,6 +1642,75 @@ class TestMultiGraphServer(TestingBase):
         self.assertEqual({'status': 200, 'written': True},
                          {k: entry['response'][k] for k in ('status', 'written')})
 
+    def test_request_ids_and_attempt_ids_are_one_namespace(self):
+        """GET /requests/{id} reads the request registry and the attempt ledger, so an id is
+        admitted by one of them only while the other holds nothing with it (GPT A3): a
+        /traverse attempt_id equal to a retained request_id is refused 409 {error, attempt}
+        and a /resolve or /pattern request_id equal to a retained attempt_id 409 with the
+        attempt's request object plus error, in both orders, nothing run; GET answers the id's
+        holder; a repeat on one route answers as before; past the retention the id runs on
+        the other route."""
+        server = Server([self.csv, '--request-retention-s', '2',
+                         '--traverse-attempt-retention-s', '2'],
+                        os.path.join(self.tempdir.name, 'server_ids.log'))
+        try:
+            ecoli = self.records['ecoli'][0]
+            seed = ecoli[20000:20100]
+            t = {'graphs': ['ecoli'], 'seeds': [{'sequence': seed}],
+                 'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                              'output': {'detail': 'summary'}}}
+            r = {'graphs': ['ecoli'], 'sequence': seed, 'discover': {'max_labels': 2}}
+            p = {'graphs': ['ecoli'], 'patterns': [{'dna': seed[:20]}], 'mode': 'count'}
+
+            # a retained /resolve, then the attempt
+            self.post_to(server, 'resolve', dict(r, request_id='one'))
+            self._wait_ended(server, 'one')
+            ret = server.post('traverse', dict(t, attempt_id='one'))
+            self.assertEqual(409, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error', 'attempt'}, set(ret.json()))
+            self.assertIn("attempt_id 'one' is running, or retained", ret.json()['error'])
+            self.assertEqual(('one', 'finished', '/resolve'),
+                             tuple(ret.json()['attempt'][k]
+                                   for k in ('attempt_id', 'state', 'route')))
+            self.assertEqual('/resolve', server.get('requests/one').json()['route'])
+            self.assertEqual(404, server.get('traverse/attempt/one').status_code)
+
+            # a retained attempt, then /resolve and /pattern
+            self.post_to(server, 'traverse', dict(t, attempt_id='two'))
+            self._wait_ended(server, 'two')
+            for route, request in (('resolve', r), ('pattern', p)):
+                with self.subTest(route=route):
+                    ret = server.post(route, dict(request, request_id='two'))
+                    self.assertEqual(409, ret.status_code, ret.text[:2000])
+                    body = ret.json()
+                    self.assertIn("request_id 'two' is running, or retained", body['error'])
+                    self.assertEqual({'error'} | set(server.get('requests/two').json()),
+                                     set(body))
+                    self.assertEqual(('two', '/traverse', 'ended'),
+                                     tuple(body[k] for k in ('request_id', 'route', 'state')))
+            self.assertEqual('/traverse', server.get('requests/two').json()['route'])
+
+            # a repeat on one route, as before
+            ret = server.post('resolve', dict(r, request_id='one'))
+            self.assertEqual(409, ret.status_code, ret.text[:2000])
+            self.assertEqual(('/resolve', 'ended'), (ret.json()['route'], ret.json()['state']))
+            self.assertNotIn('attempt', ret.json())
+            ret = server.post('traverse', dict(t, attempt_id='two'))
+            self.assertEqual(409, ret.status_code, ret.text[:2000])
+            self.assertEqual({'error', 'attempt'}, set(ret.json()))
+            self.assertNotIn('route', ret.json()['attempt'])
+
+            # past the retention: each id runs on the other route
+            time.sleep(2.5)
+            self.assertEqual(404, server.get('requests/one').status_code)
+            self.assertEqual(404, server.get('requests/two').status_code)
+            self.post_to(server, 'traverse', dict(t, attempt_id='one'))
+            self.post_to(server, 'resolve', dict(r, request_id='two'))
+            self.assertEqual('/traverse', self._wait_ended(server, 'one')['route'])
+            self.assertEqual('/resolve', self._wait_ended(server, 'two')['route'])
+        finally:
+            server.stop()
+
     # -------------------------------------------------------------------- per-task figures
 
     def test_traverse_pair_tags_live_as_long_as_the_attempt(self):

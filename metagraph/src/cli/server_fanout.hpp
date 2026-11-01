@@ -19,6 +19,7 @@
 
 #include "common/threads/thread_usage.hpp"
 #include "server_selection.hpp"
+#include "traverse_attempts.hpp"
 
 
 namespace mtg {
@@ -217,8 +218,7 @@ struct RequestSettings {
  * The requests of one server process by request_id (section 5): running ones, and ended ones
  * for the retention period. A request_id runs once while it is running or retained: a repeat
  * starts no work (409, the entry and an error). For /traverse the attempt_id is the handle and
- * the attempt registry answers; this registry keeps only the pair each attempt ran on (for
- * the pairs of GET /requests), as long as it keeps a request.
+ * the attempt registry answers, the two sharing one namespace (IdAdmission).
  */
 class RequestRegistry {
   public:
@@ -246,6 +246,8 @@ class RequestRegistry {
     std::pair<int, Json::Value> state(const std::string &request_id) const;
     // the retention rule, stated by the 404 and the 409
     std::string retention_text() const;
+    // the `error` of the 409 of a repeated |request_id|
+    std::string repeated_text(const std::string &request_id) const;
     // the 404 body of an unknown id
     Json::Value unknown_json(const std::string &request_id) const;
 
@@ -270,6 +272,45 @@ class RequestRegistry {
 // null tags when unknown: a single-graph server) and |retention_s| for retained_until
 Json::Value traverse_request_json(const Json::Value &attempt, const Json::Value &pair,
                                   uint64_t retention_s);
+
+/**
+ * The admission of the handles of one server process: a request_id (/resolve, /pattern) and an
+ * attempt_id (/traverse) are one namespace, GET /requests/{id} looking up both registries, so
+ * an id is admitted by one route's registry only while the other holds nothing with it: a
+ * request_id equal to a running, retained or held attempt_id is refused as a repeated
+ * request_id, and an attempt_id equal to a running or retained request_id as a repeated
+ * attempt_id (409, the route's shape; a tombstone holds an attempt_id, as before, not a
+ * request_id: no request ran with it). Each admission checks both registries under one lock,
+ * so that two requests with one id are never both admitted, whatever their order; once an
+ * id is past its retention it runs again on either route. Routes other than these two
+ * read no id. Thread-safe.
+ */
+class IdAdmission {
+  public:
+    IdAdmission(RequestRegistry &requests, AttemptRegistry &attempts)
+          : requests_(requests), attempts_(attempts) {}
+
+    // RequestRegistry::start of |entry| (with a request_id); the id held by an attempt is
+    // refused like a repeated one, its body the attempt as GET /requests/{id} answers it
+    // plus `error`. |admission| as start's, asked after that
+    std::optional<Json::Value> start_request(
+            const std::shared_ptr<RequestEntry> &entry,
+            const std::function<std::optional<Json::Value>()> &admission = nullptr);
+    // AttemptRegistry::start of |attempt|; the id held by a request is refused like a running
+    // or retained attempt_id, its body the attempt-shaped request (request_as_attempt_json)
+    std::optional<AttemptRegistry::StartRefusal> start_attempt(
+            const std::shared_ptr<Attempt> &attempt);
+
+  private:
+    std::mutex mutex_;
+    RequestRegistry &requests_;
+    AttemptRegistry &attempts_;
+};
+
+// The `attempt` of a /traverse 409 whose attempt_id is a request's request_id: the request's
+// entry |entry| (GET /requests/{id}) with what is read of an attempt there: attempt_id, and
+// `state` in an attempt's words ("running" or "finished")
+Json::Value request_as_attempt_json(const Json::Value &entry);
 
 // ---------------------------------------------------------------- the fan-out
 
