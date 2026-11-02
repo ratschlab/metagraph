@@ -433,7 +433,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   delivery too (§6.8, the attempt's bound).
   **The request-wide memory bound** *(E5b; feature level unchanged: a client gates on the capabilities'
   `max_request_memory_mb`, §10.3)*: with `--traverse-max-request-memory-mb` R (MiB; 0 = off, the default, under
-  which every answer is byte for byte what it was), before seed i ≥ 1 starts — after the stop between seeds
+  which every `/traverse` answer is byte for byte what it was, the capabilities stating 0), before seed i ≥ 1
+  starts — after the stop between seeds
   (§6.8), which keeps precedence — the request compares H + B with R, where H is what the results of seeds 0 to
   i − 1 hold until the response is written (their `usage.per_seed[].final_bytes`, §7.3: walked, failed,
   not-in-graph and refused results alike, the attempt's held account) and B the request's effective per-seed
@@ -3291,8 +3292,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   knob is at the server's maximum (server_limit), which a request cannot raise" where they would say "raise the
   knob". A budget the request gave below the maximum keeps its lever. The probe states the maxima (`max_memory_mb`,
   `max_work_units`). **The request-wide memory bound** *(E5b)*: `--traverse-max-request-memory-mb R` (an integer
-  in [0, 1 048 576] MiB, the per-seed flag's range; 0 = off, the default, under which every answer is byte for
-  byte what it was) leaves the later seeds of a request unstarted when the results before a seed and its
+  in [0, 1 048 576] MiB, the per-seed flag's range; 0 = off, the default, under which every `/traverse` answer
+  is byte for byte what it was) leaves the later seeds of a request unstarted when the results before a seed and its
   memory budget would pass R (§5, request budgets). **Start-up rule**: the server refuses to start when R > 0
   and `--traverse-max-memory-mb` is 0 or above R ("--traverse-max-request-memory-mb R needs
   --traverse-max-memory-mb in [1, R] ..."), so that every seed runs under a budget of at most R (an omitted one
