@@ -34,7 +34,7 @@ Online documentation is available at https://metagraph.ethz.ch/static/docs/index
 
 If you are using MetaGraph or the index resources for your work, please cite:
 
-<!-- text-rules-allow: R1 Preserve the published citation punctuation. -->
+<!-- text-rules-allow: R1 ; the published citation punctuation stays. -->
 > Karasikov M, Mustafa H, Danciu D, Kulkov O, Zimmermann M, Barber C, Rätsch G, Kahles A. Efficient and accurate search in petabase-scale sequence repositories. *Nature*. 2025;647: 1036–1044.  
 > https://www.nature.com/articles/s41586-025-09603-w
 

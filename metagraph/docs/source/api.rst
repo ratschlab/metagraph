@@ -229,7 +229,7 @@ Find more examples `here <https://github.com/ratschlab/metagraph_paper_resources
 
 In-process queries with pymetagraph
 -----------------------------------
-.. text-rules-allow: R7 The experimental API deliberately gives no stability guarantee.
+.. text-rules-allow: R7 may The experimental API deliberately gives no stability guarantee.
 .. attention:: pymetagraph is experimental. Its interface may still change.
 
 ``pymetagraph`` loads an annotated index into the Python process and runs the same label query as

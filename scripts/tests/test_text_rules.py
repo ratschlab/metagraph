@@ -58,6 +58,33 @@ class TextExtraction(unittest.TestCase):
         self.assertEqual(results["metagraph/src/cli/parse_sequences.hpp"][0][1], "R4")
 
 
+class AllowComment(unittest.TestCase):
+    def scan(self, src):
+        cfg = {"scopes": [{"name": "docs", "include": ["a.md"]}], "terms": [{"use": "k-mer", "not": ["kmer"]}]}
+        with mock.patch.object(RULES, "repo_files", return_value=["a.md"]), \
+                mock.patch.object(Path, "read_text", return_value=src):
+            return [rule for _, rule, _ in RULES.scan(Path("/unused"), cfg).get("a.md", [])]
+
+    def test_allow_names_rule_and_term(self):
+        self.assertEqual(self.scan("<!-- text-rules-allow: R8 kmer the flag name -->\nCount each kmer twice.\n"), [])
+
+    def test_allow_without_matching_term_is_ignored(self):
+        self.assertEqual(self.scan("<!-- text-rules-allow: R8 genome -->\nCount each kmer twice.\n"), ["R8"])
+
+
+class BaselineCheck(unittest.TestCase):
+    def test_drop_passes_with_a_note(self):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["checker", "--root", "/unused", "--config", "config.json",
+                                            "--baseline", "baseline.json"]), \
+                mock.patch.object(RULES, "scan", return_value={}), \
+                mock.patch.object(Path, "read_text", autospec=True,
+                                  side_effect=lambda p, *a, **k: json.dumps({"a.md": {"R1": 1}} if p.name == "baseline.json" else {})), \
+                mock.patch.object(Path, "exists", return_value=True), contextlib.redirect_stdout(out):
+            self.assertEqual(RULES.main(), 0)
+        self.assertIn("Run --update-baseline to lower it", out.getvalue())
+
+
 class BaselineUpdate(unittest.TestCase):
     def update(self, base, results, exists=True):
         def read(path, *args, **kwargs):

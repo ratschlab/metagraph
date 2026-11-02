@@ -4,10 +4,15 @@ Rules for coding agents working in this repository.
 
 ## Writing for people
 
-These rules apply to everything a person reads in this repository: `README.md`, `metagraph/docs/source/`, the
-`--help` text in `metagraph/src/cli/config/config.cpp`, the errors and warnings the CLI prints, and the PR
-descriptions, review comments and commit messages of this repository. They don't apply to code comments or debug
-logs. The numbers follow the shared list R1 to R28, so a missing number is a rule that doesn't apply here.
+These rules apply to everything a person reads in this repository:
+
+- `README.md` and the docs in `metagraph/docs/source/`.
+- The `--help` text in `metagraph/src/cli/config/config.cpp`.
+- The errors and warnings the CLI prints.
+- PR descriptions, review comments and commit messages.
+
+They don't apply to code comments or debug logs. The numbers follow the shared list R1 to R28. A missing number is a
+rule that doesn't apply here.
 
 - R1. One idea per sentence. No semicolons, no em dash between clauses, and at most 1 colon per sentence. Split the
   sentence or use a list.
@@ -18,16 +23,17 @@ logs. The numbers follow the shared list R1 to R28, so a missing number is a rul
   wrong".
 - R5. The reader's words. Domain terms such as *k*-mer, de Bruijn graph or annotation are fine. Define an internal
   name (a format such as `RowDiff<Multi-BRWT>`, a class name) the first time, or leave it to the docs.
-- R6. Active voice with a named actor: you, MetaGraph, the server, the workflow. A short outcome with no actor, such
-  as "Nothing was changed.", can stay passive.
+- R6. Active voice with a named actor: you, MetaGraph, the server, the workflow. Passive voice is fine when no actor
+  matters, as in "Nothing was changed."
 - R7. Digits and units for every number and time: "1 hour", "5 GB". Write "may" only for permission. No "soon" or "a
   while" when the code knows the answer.
-- R8. One term per thing and one verb per action. The term list is `scripts/text-rules.json`. Write "k-mer", not
-  "kmer". A flag or default in the docs matches `--help` word for word.
+- R8. One term per thing and one verb per action. The term list in `scripts/text-rules.json` is closed: a new term
+  goes into it in the same commit. Write "k-mer", not "kmer". A flag or default in the docs matches `--help` word
+  for word.
 - R9. No "we" unless the text says who "we" is.
-- R10. Every number, limit, default or guarantee matches the code or config that sets it. A change to the value
-  changes the text in the same commit.
-- R12. A `--help` line fits on 1 line and ends with the default in brackets, such as `[0.7]`.
+- R10. Every number, limit, default or guarantee matches the code or config that sets it. The commit that adds a
+  value to the text names where the code sets it. A change to the value changes the text in the same commit.
+- R12. A `--help` option fits on 1 line. An option with a default ends with it in brackets, such as `[0.7]`.
 - R17. Paragraphs: at most 5 sentences in docs and 3 sentences in an error. Three or more parallel items become a
   list.
 - R18. Headings are statements that name the topic, with the key word first.
@@ -45,10 +51,22 @@ What a PR, a review and a commit look like:
   breaks, for whom. Then the evidence (`file:line`, input, output) and a concrete fix. End the review with a line
   `Text rules: pass` or the rule numbers with `file:line`.
 
-`python3 scripts/check_text_rules.py` checks the files in `scripts/text-rules.json` against
-`scripts/text-rules-baseline.json`. It rejects new hits for R1 (semicolons only), R4, R5, R7, R8 and R9. R2 and R6
-are advisory in `--report`. Reviewers check em dashes, colons and the other rules. Existing hits are allowed. A file
-that loses a hit fails until you lower its baseline in the same commit with `--update-baseline`, which refuses
-increases. Mark a deliberate exception with a comment `text-rules-allow: R1 <reason>` on that line or the line
-before. Text outside these files, such as commit messages, is not linted. Check it against this list by hand.
+`python3 scripts/check_text_rules.py` compares the files in `scripts/text-rules.json` with
+`scripts/text-rules-baseline.json`. It fails only when a file gains one of these hits:
 
+- R1: a semicolon in prose.
+- R4: "sorry", "oops", "something went wrong", "an error occurred" or "unknown error".
+- R5: a word from the jargon list, in prose.
+- R7: "may", "might", "soon", "shortly", "a while", "eventually", or a number in words before a unit.
+- R8: a banned term from the term list.
+- R9: "we", "our" or "us" where the scope bans them.
+
+It reports R2 (sentences over 30 words) and R6 (passive voice) with `--report` and never fails on them. Every other
+rule, and em dashes and colons for R1, is for the reviewer. Text outside these files, such as commit messages and PR
+descriptions, is not linted.
+
+A file with fewer hits than its baseline passes with a note. Lower its baseline with `--update-baseline`, which
+refuses increases. A deliberate exception takes a comment on that line or the line before: `text-rules-allow: <rule>
+<term> <reason>`, such as `text-rules-allow: R8 kmer the flag name`. The term must occur in the text.
+
+Reviewers use this list.

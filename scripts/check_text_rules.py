@@ -13,9 +13,12 @@ Usage:
   check_text_rules.py --update-baseline  # record reductions only
   check_text_rules.py --report FILE...   # list hits in some files only
 
-Hits that only count, never fail: R2 (sentences over the word limit) and
-R6 (passive voice). Mark a deliberate exception with `text-rules-allow: <rule>`
-on the same line or the line before (in a comment).
+The check fails when a file gains a hit of R1 (semicolons), R4, R5, R7, R8
+or R9. A file with fewer hits than its baseline passes with a note to lower
+the baseline. R2 (sentences over the word limit) and R6 (passive voice) only
+count. Mark a deliberate exception with a comment on the same line or the
+line before: `text-rules-allow: <rule> <term> <reason>`, such as
+`text-rules-allow: R8 kmer the flag name`. The term must occur in the text.
 """
 import argparse
 import ast
@@ -30,7 +33,7 @@ RATCHET = ("R1", "R4", "R5", "R7", "R8", "R9")
 REPORT_ONLY = ("R2", "R6")
 WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
 PROSE = re.compile(r"[A-Za-z]{2,},? [A-Za-z]{2,},? [A-Za-z]{2,}")  # 3 plain words in a row
-ALLOW = re.compile(r"text-rules-allow:\s*([R0-9, ]+)")
+ALLOW = re.compile(r"text-rules-allow:\s*(R\d+)\s+(\S+)")
 
 
 # ---------- extractors: each yields (line, text) ----------
@@ -353,9 +356,9 @@ def scan(root, cfg, only=None):
             lines = src.split("\n")
             for ln, text in units:
                 ctx = " ".join(lines[max(0, ln - 2):ln])
-                allowed = set(re.findall(r"R\d+", " ".join(ALLOW.findall(ctx))))
+                allowed = ALLOW.findall(ctx)
                 for rule, snip in check_text(text, cfg, scope):
-                    if rule in allowed:
+                    if any(r == rule and term.lower() in text.lower() for r, term in allowed):
                         continue
                     results.setdefault(f, []).append((ln, rule, re.sub(r"\s+", " ", snip).strip()))
     return results
@@ -409,7 +412,7 @@ def main():
         base_path.write_text(json.dumps(now, indent=1) + "\n")
         print(f"wrote {base_path.name}: {sum(sum(c.values()) for c in now.values())} hits in {len(now)} files")
         return 0
-    problems = []
+    problems, notes = [], []
     for f in sorted(set(now) | set(base)):
         for rule in RATCHET:
             n, b = now.get(f, {}).get(rule, 0), base.get(f, {}).get(rule, 0)
@@ -418,11 +421,13 @@ def main():
                 problems.append(f"{f}: {rule} has {n} hits, baseline {b}. The new hit is one of these:")
                 problems += [f"  {f}:{ln}: {snip[:160]}" for ln, _, snip in new]
             elif n < b and (f in now or (root / f).exists()):
-                problems.append(f"{f}: {rule} has {n} hits, baseline {b}. Run --update-baseline to lower it.")
+                notes.append(f"{f}: {rule} has {n} hits, baseline {b}. Run --update-baseline to lower it.")
+    if notes:
+        print("\n".join(notes))
     if problems:
         print("\n".join(problems))
-        print(f"\nRules: see {cfg.get('rules_doc', 'AGENTS.md')}. A deliberate exception takes "
-              "`text-rules-allow: <rule>` in a comment on that line or the line before.")
+        print(f"\nRules: see {cfg.get('rules_doc', 'AGENTS.md')}. A deliberate exception takes a comment "
+              "`text-rules-allow: <rule> <term> <reason>` on that line or the line before.")
         return 1
     print(f"text rules: OK ({sum(sum(c.values()) for c in now.values())} known hits, none new)")
     return 0
