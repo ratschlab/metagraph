@@ -452,9 +452,9 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   unstarted states the same H, the results held when the first was left unstarted. The response is 200, as with
   an attempt's unstarted seeds (on a multi-graph server the one-entry envelope). Seed 0 always starts (0 + B ≤
   R). The rule binds by the memory account only, never by time: the attempt's bound, a cancel and a gone client
-  stop as before. **What one request then holds at once** is at most R plus the last walked seed's soft
-  excess (its `memory_bound_soft`; while a seed is walked, the results before it and its walk hold at most R plus
-  that walk's excess) — the account `usage.memory.held_bound_bytes` states (§7.3) — beside the priced echo of
+  stop as before. **What one request then holds at once** is at most R plus the largest soft excess of a
+  walked seed (its `memory_bound_soft`; while a seed is walked, the results before it and its walk hold at most R
+  plus that walk's excess) — the account `usage.memory.held_bound_bytes` states (§7.3) — beside the priced echo of
   each seed left unstarted (its `final_bytes`: the fixed part of a result and its `seed_id`, §5, a few KB of
   text in fact); two request slots, 2R plus their soft excess, where without the bound n seeds could hold n × B.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
