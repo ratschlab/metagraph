@@ -17,8 +17,8 @@
    "inv_insecta"
   ],
   "request_id": "svc-res-5f0c2a-2",
-  "not_after_ms": 1793520010000,
-  "finish_by_ms": 1793520060000
+  "not_after_ms": 1793438459000,
+  "finish_by_ms": 1793438460000
  },
  "body": {
   "envelope_version": 1,
@@ -47,8 +47,8 @@
   "request_id": "svc-res-5f0c2a-2",
   "server_instance": "7c1e0f3a9b24d6e8",
   "deadline": {
-   "not_after_ms": 1793520010000,
-   "finish_by_ms": 1793520060000,
+   "not_after_ms": 1793438459000,
+   "finish_by_ms": 1793438460000,
    "effective_deadline_at": "2026-10-31T09:20:58.000Z",
    "cutoff_at": "2026-10-31T09:20:57.750Z"
   },
@@ -207,7 +207,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 58004.2
+   "elapsed_ms": 57902.3
   },
   "work": {
    "memory_bytes": 19534

@@ -262,7 +262,7 @@ TEST(ServerEnvelope, Sample03ResolveCutoff) {
     ASSERT_EQ(1u, built["unfinished"].size());
     EXPECT_EQ("inv_insecta", built["unfinished"][0]["graph"].asString());
     EXPECT_EQ("2026-10-31T09:20:57.750Z", built["deadline"]["cutoff_at"].asString());
-    EXPECT_EQ(1793520060000u, built["deadline"]["finish_by_ms"].asUInt64());
+    EXPECT_EQ(1793438460000u, built["deadline"]["finish_by_ms"].asUInt64());
 }
 
 // Sample 05: a named-graph /traverse, one entry; request_id is the attempt_id and the

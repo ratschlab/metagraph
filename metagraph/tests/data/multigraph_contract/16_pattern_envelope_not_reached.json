@@ -22,7 +22,7 @@
   "request_id": "svc-pat-0c33d1-1",
   "server_instance": "7c1e0f3a9b24d6e8",
   "deadline": {
-   "not_after_ms": 1793520010000,
+   "not_after_ms": 1793438430000,
    "finish_by_ms": null,
    "effective_deadline_at": "2026-10-31T09:22:10.000Z",
    "cutoff_at": "2026-10-31T09:22:09.750Z"
@@ -195,13 +195,13 @@
     "refusal": {
      "code": "not_reached",
      "reason": "not_after_ms",
-     "error": "pattern: pair (bact_pseudomonadota, /scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg, /scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg) was not started: not_after_ms 1793520010000 had passed when a pool thread took it",
+     "error": "pattern: pair (bact_pseudomonadota, /scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg, /scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg) was not started: not_after_ms 1793438430000 had passed when a pool thread took it",
      "http_status": 503
     }
    }
   ],
   "timing": {
-   "elapsed_ms": 2210.4
+   "elapsed_ms": 109851.6
   },
   "work": {
    "memory_bytes": 0

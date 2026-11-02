@@ -6,7 +6,9 @@
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <ctime>
 #include <functional>
+#include <iomanip>
 #include <future>
 #include <iterator>
 #include <memory>
@@ -1528,6 +1530,72 @@ TEST(ServerFanout, EachSampleNamesOneServerAndOneExecution) {
         EXPECT_GE(1u, instances.size()) << name << ": " << instances.size() << " server instances";
         EXPECT_GE(1u, ids.size()) << name << ": " << ids.size() << " execution ids";
     }
+}
+
+// "2026-10-31T09:20:57.750Z" as Unix epoch milliseconds (UTC)
+int64_t iso_ms(const std::string &iso) {
+    std::tm tm = {};
+    std::istringstream in(iso.substr(0, 19));
+    in >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    EXPECT_FALSE(in.fail()) << iso;
+    int64_t ms = static_cast<int64_t>(timegm(&tm)) * 1000;
+    if (iso.size() > 20 && iso[19] == '.')
+        ms += std::stoi(iso.substr(20, 3));
+    return ms;
+}
+
+// Each /resolve and /pattern sample's deadline block tells one timeline (section 4): the cutoff is the effective
+// deadline less the finalisation reserve, the effective deadline is at most finish_by_ms less
+// the clock skew allowance, a pair not reached by not_after_ms names a not_after_ms before the
+// cutoff, one not reached by the cutoff a not_after_ms (if any) at or after it, and no answered
+// entry ran longer than its envelope (the suite's review of the samples, 2026-11-02)
+TEST(ServerFanout, EachSampleDeadlineTellsOneTimeline) {
+    const int64_t reserve_ms = 250;
+    const int64_t skew_ms = 2000;
+    size_t checked = 0;
+    for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
+        if (file.path().extension() != ".json")
+            continue;
+        const std::string name = file.path().filename().string();
+        const Json::Value body = sample(name)["body"];
+        // section 4's cutoff and reserve are the fan-out routes'; /traverse states its cutoff as
+        // the attempt's walk_until (SPEC-labeled-traversal-core section 6.8)
+        if (!body.isObject() || !body.isMember("deadline")
+                || (body["route"].asString() != "/resolve" && body["route"].asString() != "/pattern"))
+            continue;
+        const Json::Value &d = body["deadline"];
+        if (d["effective_deadline_at"].isString()) {
+            const int64_t effective = iso_ms(d["effective_deadline_at"].asString());
+            ASSERT_TRUE(d["cutoff_at"].isString()) << name;
+            const int64_t cutoff = iso_ms(d["cutoff_at"].asString());
+            EXPECT_EQ(effective - reserve_ms, cutoff) << name;
+            if (d["finish_by_ms"].isIntegral()) {
+                EXPECT_LE(effective, d["finish_by_ms"].asInt64() - skew_ms) << name;
+            }
+            for (const Json::Value &entry : body["answers"]) {
+                const Json::Value &refusal = entry["refusal"];
+                if (refusal["code"].asString() != "not_reached")
+                    continue;
+                if (refusal["reason"].asString() == "not_after_ms") {
+                    ASSERT_TRUE(d["not_after_ms"].isIntegral()) << name;
+                    EXPECT_LT(d["not_after_ms"].asInt64(), cutoff) << name;
+                } else if (refusal["reason"].asString() == "cutoff" && d["not_after_ms"].isIntegral()) {
+                    EXPECT_GE(d["not_after_ms"].asInt64(), cutoff) << name;
+                }
+            }
+        }
+        if (body.isMember("timing") && body["timing"]["elapsed_ms"].isNumeric()) {
+            for (const Json::Value &entry : body["answers"]) {
+                if (entry["outcome"].asString() == "answered"
+                        && entry["timing"]["elapsed_ms"].isNumeric()) {
+                    EXPECT_LE(entry["timing"]["elapsed_ms"].asDouble(),
+                              body["timing"]["elapsed_ms"].asDouble()) << name;
+                }
+            }
+        }
+        ++checked;
+    }
+    EXPECT_LE(4u, checked);
 }
 
 // GET /requests/{attempt_id} of a /traverse attempt: the request object built from the
