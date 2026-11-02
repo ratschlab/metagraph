@@ -1,5 +1,5 @@
 {
- "rules_doc": "CONTRIBUTING.md, \"Writing user-facing text\"",
+ "rules_doc": "AGENTS.md, \"Writing for people\"",
  "scopes": [
   {
    "name": "docs",
