@@ -13,7 +13,7 @@
 [![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
 [![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#1-install)
 [![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#docker)
-[![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-sources)
+[![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-source)
 [![DOI](https://img.shields.io/badge/DOI-10.1038%2Fs41586--025--09603--w-blue)](https://doi.org/10.1038/s41586-025-09603-w)
 [![documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://metagraph.ethz.ch/static/docs/index.html)
 
@@ -116,7 +116,7 @@ metagraph query --query-mode matches -p 8 \
 
 Other ways to use the index:
 
-- [`metagraph align`](https://metagraph.ethz.ch/static/docs/sequence_search.html#sequence-to-graph-alignment): align sequences to the graph and report the alignment itself. With a coordinate-aware annotator it acts as a read mapper, returning source positions.
+- [`metagraph align`](https://metagraph.ethz.ch/static/docs/sequence_search.html#sequence-to-graph-alignment): align sequences to the graph and report the alignment itself. With a coordinate-aware annotation it acts as a read mapper, returning source positions.
 - `metagraph query --align`: align each query to the graph first, then report the *labels* of the best-scoring alignment instead of requiring exact *k*-mer matches. Useful for divergent or noisy queries.
 - [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html): start an HTTP server that answers queries over a REST API (also drivable from the Python client).
 
@@ -127,7 +127,7 @@ The [Minimal example](#minimal-example) below walks through each step on a small
 <details>
 <summary>Step-by-step walkthrough with the <code>metagraph</code> CLI (build → annotate → query → stats)</summary>
 
-A hands-on demo using `metagraph` directly (no workflow wrapper). A *label* is whatever tag you want each *k*-mer associated with: a filename, a fasta header, or a custom string. `--anno-header` below produces one label per fasta record.
+A hands-on demo using `metagraph` directly (no workflow wrapper). A *label* is whatever tag you want each *k*-mer associated with: a filename, a FASTA header, or a custom string. `--anno-header` below produces one label per FASTA record.
 
 ```bash
 cd metagraph/tests/data
@@ -149,7 +149,7 @@ metagraph query --query-mode matches \
 metagraph stats -a samples.column.annodbg samples.dbg
 ```
 
-Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labels, one per fasta record). Sample query output (tab-separated: query index, query header, then one `<label>:k-mer-count` entry per matching label):
+Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labels, one per FASTA record). Sample query output (tab-separated: query index, query header, then one `<label>:k-mer-count` entry per matching label):
 
 ```
 0   kl_sample   <kl_sample>:330
@@ -302,7 +302,7 @@ metagraph build -v -k 31 -o /mnt/graph /mnt/data.fa.gz
 
 </details>
 
-### Install from sources
+### Install from source
 
 See the [installation guide](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source) for custom alphabet / debug builds.
 
