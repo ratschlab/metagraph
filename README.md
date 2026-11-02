@@ -19,7 +19,7 @@
 
 **Scalable indexing and querying of annotated genome graphs, from a handful of genomes to petabase-scale sequence repositories.**
 
-Think of MetaGraph as a search engine for sequencing data: index your reads or assemblies once, then query, align, or recover source positions in milliseconds.
+Index your reads or assemblies once. Then search them for matching samples, alignments and source positions.
 
 A MetaGraph index has two components: a **de Bruijn graph** that stores all *k*-mers extracted from the input sequences, and an **annotation matrix** that links each *k*-mer to its source labels (for example the sample, sequence header, expression level, or position).
 
@@ -36,7 +36,7 @@ flowchart LR
 
 ### Features
 
-- **Search in public archives.** [metagraph.ethz.ch](https://metagraph.ethz.ch) hosts a search engine over 56 petabases of public sequencing data. See [MetaGraph Online](#metagraph-online).
+- **Search public archives** at [metagraph.ethz.ch](https://metagraph.ethz.ch). See [MetaGraph Online](#metagraph-online).
 - **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
 - **Optional per-*k*-mer payloads.** Attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, e.g. expression or coverage) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions that losslessly encode source sequences and return per-target hit positions).
 - **Sequence alignment.** Align sequences to the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
@@ -52,7 +52,7 @@ flowchart LR
 - **Custom alphabets**: `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - **Extensible by design**: generic interfaces let developers add new graph/annotation representations or algorithms with little code.
 - **Memory-mapped loading**: pass `--mmap` to any subcommand for fast cold start and low query-time RAM (NVMe recommended; SSD works but slower).
-- **Scales to trillions of *k*-mers and millions of labels**: petabase-scale collections have been indexed end-to-end.
+- **Scales to trillions of *k*-mers and millions of labels**: the hosted indexes at metagraph.ethz.ch cover all public SRA data.
 
 </details>
 
@@ -117,7 +117,7 @@ metagraph query --query-mode matches -p 8 \
 Other ways to use the index:
 
 - [`metagraph align`](https://metagraph.ethz.ch/static/docs/sequence_search.html#sequence-to-graph-alignment): align sequences to the graph and report the alignment itself. With a coordinate-aware annotator it acts as a read mapper, returning source positions.
-- `metagraph query --align`: align each query to the graph first, then report the *labels* of the best-scoring alignment instead of requiring exact *k*-mer matches. Useful for divergent or noisy queries. (So `align` returns alignments/positions; `query --align` returns labels found via alignment.)
+- `metagraph query --align`: align each query to the graph first, then report the *labels* of the best-scoring alignment instead of requiring exact *k*-mer matches. Useful for divergent or noisy queries.
 - [`metagraph server_query`](https://metagraph.ethz.ch/static/docs/api.html): start an HTTP server that answers queries over a REST API (also drivable from the Python client).
 
 The [Minimal example](#minimal-example) below walks through each step on a smaller dataset.
@@ -216,7 +216,7 @@ See the [online docs](https://metagraph.ethz.ch/static/docs/index.html) for the 
 <details>
 <summary>Build from KMC k-mer counters (e.g., to filter low-abundance k-mers)</summary>
 
-[KMC](https://github.com/refresh-bio/KMC) is an extremely efficient *k*-mer counter that can pre-process inputs and filter by abundance.
+[KMC](https://github.com/refresh-bio/KMC) is a fast *k*-mer counter that can pre-process inputs and filter by abundance.
 
 Configure with `cmake .. -DBUILD_KMC=ON` to build the standalone KMC executable
 used below. Reading existing KMC files is always supported.
@@ -263,7 +263,7 @@ metagraph server_query -i graph.dbg -a annotation.row_diff_brwt.annodbg --port 5
 
 ## More install options
 
-The recommended conda install is in [Quick start](#quick-start). MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets (`metagraph` is symlinked to `metagraph_DNA`); the Docker image adds `DNA5`. For other alphabets, build from source.
+MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets (`metagraph` is symlinked to `metagraph_DNA`); the Docker image adds `DNA5`. For other alphabets, build from source.
 
 ### Docker
 
