@@ -136,6 +136,7 @@
    "/resolve",
    "/pattern"
   ],
+  "max_request_memory_mb": 0,
   "not_after_ms": [
    "/traverse",
    "/resolve",

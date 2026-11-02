@@ -130,6 +130,7 @@
  ],
  "max_memory_mb": 0,
  "max_query_bp": 0,
+ "max_request_memory_mb": 0,
  "max_seed_bp": 100000,
  "max_seed_labels": 10000,
  "max_seeds": 64,
