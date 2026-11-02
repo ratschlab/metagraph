@@ -377,6 +377,13 @@ struct TraverseLimits {
     // to it, an omitted one set to it, both echoed in strategy.clamped
     uint64_t max_memory_mb = 0;    // of strategy.bounds.max_memory_mb
     uint64_t max_work_units = 0;   // of strategy.bounds.max_work_units
+    // The request-wide memory bound (MiB; 0 = off; Config::traverse_max_request_memory_mb, which
+    // the server sets only with max_memory_mb in [1, it]): before seed i >= 1 starts, the bytes
+    // the results of seeds 0 to i-1 hold (the attempt's held account, usage final_bytes) and
+    // the request's effective per-seed memory budget are compared with it; past it (a tie
+    // starts), seed i and every later seed are not started (resource_stop scope "request").
+    // Seed 0 always starts
+    uint64_t max_request_memory_mb = 0;
     // Not a cap: the chunked deadlines (spec §6.8, Config::traverse_chunk_target_ms) — an
     // annotation read a deadline may fall into is decoded in chunks of about this many ms, the
     // deadline checked between them; 0: one piece per read

@@ -152,6 +152,12 @@ class Config {
     // deployment that did not choose one keeps the results it always gave
     uint64_t traverse_max_memory_mb = 0;
     uint64_t traverse_max_work_units = 0;
+    // The request-wide memory bound of /traverse (MiB, 0 = off, the default; E5b, SPEC §5
+    // "Request budgets"): a seed after the first is not started when the bytes the results of
+    // the seeds before it hold (their usage final_bytes) and its memory budget would pass it.
+    // Set, it needs traverse_max_memory_mb in [1, it] (refused at start-up otherwise), so that
+    // every seed runs under a budget of at most it; off, the answers are what they always were
+    uint64_t traverse_max_request_memory_mb = 0;
     // Ledger-managed /traverse attempts (requests with attempt_id, traverse_attempts.hpp):
     // the allowance added to n_seeds x the per-seed time budget in the duration bound the
     // server enforces, and how long (and how many) finished attempts stay queryable

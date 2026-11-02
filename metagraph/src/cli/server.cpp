@@ -2184,6 +2184,7 @@ int run_server(Config *config) {
                 limits.max_seed_labels = config->traverse_max_seed_labels;
                 limits.max_memory_mb = config->traverse_max_memory_mb;
                 limits.max_work_units = config->traverse_max_work_units;
+                limits.max_request_memory_mb = config->traverse_max_request_memory_mb;
                 limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
                 limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
                 // a multi-graph server's graphs are the chunks of an index, which the fan-out

@@ -480,6 +480,9 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--traverse-max-work-units")) {
             exact_ms(argv[i], get_value(i), &traverse_max_work_units);
             i++;
+        } else if (!strcmp(argv[i], "--traverse-max-request-memory-mb")) {
+            exact_ms(argv[i], get_value(i), &traverse_max_request_memory_mb);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-attempt-allowance-ms")) {
             uint64_t ms = 0;
             exact_ms(argv[i], get_value(i), &ms);
@@ -1018,6 +1021,24 @@ Config::Config(int argc, char *argv[]) {
     }
     if (traverse_max_memory_mb > 1'048'576) {
         std::cerr << "Error: --traverse-max-memory-mb must be in [0, 1048576]" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // the request-wide bound in the per-seed flag's range; set, it needs a per-seed budget of at
+    // most it on every seed (the per-seed maximum, which sets an omitted budget and lowers a
+    // larger one), so that the first seed always fits it and the rule's check (the results held
+    // + the seed's budget) bounds what a request holds
+    if (traverse_max_request_memory_mb > 1'048'576) {
+        std::cerr << "Error: --traverse-max-request-memory-mb must be in [0, 1048576]"
+                  << std::endl;
+        print_usage_and_exit = true;
+    } else if (traverse_max_request_memory_mb
+                && (!traverse_max_memory_mb
+                    || traverse_max_memory_mb > traverse_max_request_memory_mb)) {
+        std::cerr << "Error: --traverse-max-request-memory-mb "
+                  << traverse_max_request_memory_mb << " needs --traverse-max-memory-mb in [1, "
+                  << traverse_max_request_memory_mb << "] (the per-seed maximum, which every "
+                     "seed's memory budget is then at most), got " << traverse_max_memory_mb
+                  << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1960,6 +1981,7 @@ if (advanced) {
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
             fprintf(stderr, "\t   --traverse-max-memory-mb [INT] \tmaximum of bounds.max_memory_mb per /traverse seed: a larger one is lowered to it, an omitted one set to it; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-max-work-units [INT] \tmaximum of bounds.max_work_units per /traverse seed, likewise; 0 = off [0]\n");
+            fprintf(stderr, "\t   --traverse-max-request-memory-mb [INT] \trequest-wide memory bound of a /traverse, in MiB: a seed after the first is not started (failed per seed, resource_stop scope request) when the results of the seeds before it and its memory budget would pass it; needs --traverse-max-memory-mb in [1, this]; in [0, 1048576], 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long (and their ids refused; one sent with not_after_ms is held until not_after_ms + the clock skew allowance, within the tombstone cap), and a cancel of an unknown id tombstones it at least this long, in [0, 31536000]; 0 = nothing kept, no tombstones (such a cancel is refused, 429) [3600]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones and held attempts are held (else it is refused, 429), in [0, 10000000] [10000]\n");

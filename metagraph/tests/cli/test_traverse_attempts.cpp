@@ -957,6 +957,68 @@ TEST(GraphletAttemptRegistry, ObservedWindowFlagIsValidated) {
     }
 }
 
+// --traverse-max-request-memory-mb (E5b): an integer in the per-seed flag's range [0, 1048576],
+// 0 (off) by default. Set, the server refuses to start unless --traverse-max-memory-mb is in
+// [1, it] — every seed then runs under a budget of at most the request's bound, so the first seed
+// always fits it — and passes it to the request's limits
+TEST(GraphletAttemptRegistry, RequestMemoryFlagAndItsStartUpRule) {
+    auto config_of = [](const std::vector<std::string> &flags) {
+        std::vector<std::string> args = { "metagraph", "server_query" };
+        args.insert(args.end(), flags.begin(), flags.end());
+        for (const char *a : { "-i", "graph.dbg", "-a", "annotation.column.annodbg" }) {
+            args.push_back(a);
+        }
+        std::vector<char*> argv;
+        for (std::string &a : args) {
+            argv.push_back(a.data());
+        }
+        argv.push_back(nullptr);
+        // the Config sets the swap path: the one the other tests use is restored
+        const std::filesystem::path swap = utils::get_swap_path();
+        auto config = std::make_unique<Config>(static_cast<int>(args.size()), argv.data());
+        utils::set_swap_path(swap);
+        return config;
+    };
+    EXPECT_EQ(0u, config_of({})->traverse_max_request_memory_mb);
+    // off whatever the per-seed maximum
+    EXPECT_EQ(0u, config_of({ "--traverse-max-memory-mb", "64" })->traverse_max_request_memory_mb);
+    EXPECT_EQ(0u, config_of({ "--traverse-max-request-memory-mb", "0" })
+                          ->traverse_max_request_memory_mb);
+    // the per-seed maximum at most the request's bound, a tie included
+    for (const auto &[seed, request] : std::vector<std::pair<const char*, const char*>> {
+            { "1", "1" }, { "1024", "8192" }, { "8192", "8192" }, { "1", "1048576" },
+            { "1048576", "1048576" } }) {
+        const auto config = config_of({ "--traverse-max-memory-mb", seed,
+                                        "--traverse-max-request-memory-mb", request });
+        EXPECT_EQ(std::stoull(seed), config->traverse_max_memory_mb) << request;
+        EXPECT_EQ(std::stoull(request), config->traverse_max_request_memory_mb) << seed;
+    }
+    // in either order on the command line
+    EXPECT_EQ(2u, config_of({ "--traverse-max-request-memory-mb", "2",
+                              "--traverse-max-memory-mb", "1" })->traverse_max_request_memory_mb);
+    // no per-seed maximum, or a larger one: refused, naming both flags
+    EXPECT_DEATH(config_of({ "--traverse-max-request-memory-mb", "8192" }),
+                 "--traverse-max-request-memory-mb 8192 needs --traverse-max-memory-mb in "
+                 "\\[1, 8192\\] .*got 0");
+    EXPECT_DEATH(config_of({ "--traverse-max-memory-mb", "8193",
+                             "--traverse-max-request-memory-mb", "8192" }),
+                 "--traverse-max-request-memory-mb 8192 needs --traverse-max-memory-mb in "
+                 "\\[1, 8192\\] .*got 8193");
+    EXPECT_DEATH(config_of({ "--traverse-max-memory-mb", "2",
+                             "--traverse-max-request-memory-mb", "1" }),
+                 "needs --traverse-max-memory-mb in \\[1, 1\\]");
+    // the per-seed flag's range
+    EXPECT_DEATH(config_of({ "--traverse-max-memory-mb", "1",
+                             "--traverse-max-request-memory-mb", "1048577" }),
+                 "--traverse-max-request-memory-mb must be in \\[0, 1048576\\]");
+    for (const char *value : { "-1", "1.5", "x", "", "9007199254740992" }) {
+        EXPECT_DEATH(config_of({ "--traverse-max-memory-mb", "1",
+                                 "--traverse-max-request-memory-mb", value }),
+                     "--traverse-max-request-memory-mb must be an integer in "
+                     "\\[0, 2\\^53 - 1\\]") << value;
+    }
+}
+
 // The seeds stop being walked at bound - max(allowance / 2, reserve), the reserve 1.25 times
 // the time to compress the text written so far and the walked seed's estimated text (its
 // account / the account per text byte), and to build the latter — at the configured rates and
