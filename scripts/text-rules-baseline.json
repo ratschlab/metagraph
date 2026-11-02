@@ -25,12 +25,8 @@
  "metagraph/docs/source/workflows.rst": {
   "R1": 1
  },
- "metagraph/src/cli/annotate.cpp": {
-  "R1": 2
- },
  "metagraph/src/cli/config/config.cpp": {
   "R1": 3,
-  "R7": 1,
-  "R8": 2
+  "R7": 1
  }
 }

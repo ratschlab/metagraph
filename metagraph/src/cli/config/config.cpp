@@ -706,7 +706,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (bloom_fpp <= 0.0 || bloom_fpp > 1.0) {
-        std::cerr << "Error: bloom-fpp must be > 0.0 and < 1.0" << std::endl;
+        std::cerr << "Error: --bloom-fpp must be greater than 0 and at most 1." << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -991,7 +991,7 @@ if (advanced) {
             fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files to graph\n\n");
 
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
-            fprintf(stderr, "\t\t\tthe respective kmers\n\n");
+            fprintf(stderr, "\t\t\tthe respective k-mers\n\n");
 if (advanced) {
             fprintf(stderr, "\tmerge_anno\tmerge annotations\n\n");
 }
@@ -1020,8 +1020,8 @@ if (advanced) {
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --min-count-q [INT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
-            fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
+            fprintf(stderr, "\t   --min-count-q [FLOAT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
+            fprintf(stderr, "\t   --max-count-q [FLOAT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct] / sshash\n");
@@ -1036,7 +1036,7 @@ if (advanced) {
             fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB (sshash: RAM budget, at least 8) [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tpreallocated buffer size in GB (sshash: RAM budget, at least 8) [1]\n");
 if (advanced) {
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
@@ -1178,7 +1178,7 @@ if (advanced) {
         case CONCATENATE: {
             fprintf(stderr, "Usage: %s concatenate -o <graph_basename> [options] [[CHUNK] ...]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for merge:\n");
+            fprintf(stderr, "Available options for concatenate:\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap [succinct]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
@@ -1194,7 +1194,7 @@ if (advanced) {
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
-            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends shorter than this many k-mers [1]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
@@ -1211,7 +1211,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for --initialize-bloom. bloom-fpp, when < 1, overrides bloom-bpk.\n");
             fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate [1.0]\n");
-            fprintf(stderr, "\t   --bloom-bpk [FLOAT] \t\t\t\tnumber of bits per kmer [4.0]\n");
+            fprintf(stderr, "\t   --bloom-bpk [FLOAT] \t\t\t\tnumber of bits per k-mer [4.0]\n");
             fprintf(stderr, "\t   --bloom-max-num-hash-functions [INT] \tmaximum number of hash functions [10]\n");
         } break;
         case ASSEMBLE: {
@@ -1219,7 +1219,7 @@ if (advanced) {
                             "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends shorter than this many k-mers [1]\n");
             fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences assembled and dumped to FASTA [off]\n");
 #if ! _PROTEIN_GRAPH
@@ -1290,7 +1290,7 @@ if (advanced) {
         case MERGE_ANNOTATIONS: {
             fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "Available options for merge_anno:\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {

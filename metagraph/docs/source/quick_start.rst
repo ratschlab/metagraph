@@ -167,7 +167,7 @@ which can be constructed by simply adding the flag ``--count-kmers`` to the grap
 
     metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.cutoff_5.kmc_pre
 
-which will construct a de Bruijn graph ``graph.dbg`` and an array of counts ``counts.dbg.weights`` associated with its k-mers.
+which will construct a de Bruijn graph ``graph.dbg`` and an array of counts ``graph.dbg.weights`` associated with its k-mers.
 This supplementing vector of counts can then be used for graph cleaning (see :ref:`graph_cleaning`) or indexing k-mer counts
 with pre-counting (see :ref:`annotate_with_precounting`).
 
@@ -266,7 +266,7 @@ they are situated in a unitig with sufficiently many highly abundant k-mers.
 ::
 
     K=31
-    metagraph build -v -p 4 -k $K --count-kmers -o graph SRR403017.fasta.gz
+    metagraph build -v -p 4 -k $K --count-kmers -o graph SRR403017.fastq.gz
 
     metagraph clean -v -p 4 --to-fasta --prune-tips $((2*$K)) --prune-unitigs 0 --fallback 2 \
                     -o SRR403017_clean_contigs graph.dbg
@@ -539,8 +539,8 @@ and the second run creates only the coordinate-to-header (``CoordToHeader``) map
 The second run requires the original sequence input files (FASTA/FASTQ) used for building the annotation.
 Pass these files in an order that is consistent with the final transformed annotation used for querying
 (for example, ``row_diff_brwt_coord``), so file labels and coordinate offsets stay aligned.
-During query, MetaGraph loads ``annotation.*.annodbg.seqs`` (where ``*`` is the final transformed annotation type)
-automatically and reports sequence-based hits (header + local coordinate) instead of file-based coordinates.
+During query, MetaGraph loads ``annotation.seqs`` automatically. Its name is the annotation path without
+the ``.<type>.annodbg`` extension. MetaGraph then reports sequence-based hits (header + local coordinate) instead of file-based coordinates.
 
 Each record is named by its whole header, so every header must be non-empty, valid UTF-8 and distinct within
 its file; the same header may appear in different files. A file that breaks this is refused, and no ``.seqs``

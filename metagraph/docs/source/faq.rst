@@ -41,7 +41,7 @@ Installation
 Which installation method?
 --------------------------
 
-1. **Conda** (easiest): ``conda install -c bioconda metagraph``
+1. **Conda** (easiest): ``conda install -c bioconda -c conda-forge metagraph``
 2. **Docker** (isolated): ``docker run ghcr.io/ratschlab/metagraph:master``
 3. **Source** (for custom alphabets or latest features)
 
@@ -64,8 +64,10 @@ What k-mer size?
 
 **General rules:**
 
-- DNA/RNA: k=21-41 (default: 31)
-- Protein: k=7-15 (default: 10)
+- DNA/RNA: k=21 to 41
+- Protein: k=7 to 15
+
+Always pass ``-k``. The ``build`` default is 3. Only ``metagraph-workflows`` defaults to 31.
 - Longer k = more specific, less sensitive
 - Must be ≤ sequence/read length
 
@@ -141,7 +143,7 @@ Which annotation type?
 **By scale:**
 
 - In most scenarios, start with: ``column`` (default)
-- Fast and easy to construct: ``row_flat``
+- Fast and easy to construct: ``flat``
 - Fast queries and small: ``row_diff_flat``
 - Very large scale: ``row_diff_brwt`` (best compression)
 
@@ -203,7 +205,7 @@ How to query?
    metagraph query -i graph.dbg -a annotation.annodbg query.fa
    
    # With threshold (80% k-mers must match)
-   metagraph query --discovery-fraction 0.8 ...
+   metagraph query --min-kmers-fraction-label 0.8 ...
    
    # K-mer counts
    metagraph query --query-mode counts -a annotation.int_brwt.annodbg ...
@@ -256,7 +258,7 @@ How to align?
    metagraph align -i graph.dbg -a annotation.annodbg reads.fa
    
    # Adjust sensitivity
-   metagraph align --align-min-seed-length 15 --min-exact-match 0.7 ...
+   metagraph align --align-min-seed-length 15 --align-min-exact-match 0.7 ...
 
 Performance
 ===========
@@ -299,7 +301,7 @@ How to reduce RAM usage while querying?
 
 - **Use memory mapping (--mmap):** see :ref:`memory_mapping`
 - **Reduce the batch size:** see ``./metagraph query --batch-size ...``
-- **Alternative: Use disk-backed formats:** ``row_disk`` or ``row_diff_disk``
+- **Alternative: Use disk-backed formats:** ``row_diff_disk``
 
 When to use memory mapping?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -271,8 +271,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     // A record's reverse complement shares its coordinates
                     const size_t record = calls++ / (forward_and_reverse ? 2 : 1);
                     if (labels.size() != 1 || labels[0].empty() || !utils::valid_utf8(labels[0])) {
-                        logger->error("Record {} in '{}' needs one non-empty UTF-8 header for "
-                                      "the record mapping; do not split it with --header-delimiter",
+                        logger->error("Record {} in '{}' has no usable header. --index-header-coords "
+                                      "needs 1 non-empty UTF-8 header per record. Remove --header-delimiter.",
                                       record + 1, files[i]);
                         exit(1);
                     }
@@ -502,8 +502,8 @@ int annotate_graph(Config *config) {
             }
         }
         if (!config->fasta_header_delimiter.empty()) {
-            logger->error("--index-header-coords requires whole record headers; "
-                          "do not use --header-delimiter");
+            logger->error("--index-header-coords needs whole record headers. "
+                          "Remove --header-delimiter.");
             exit(1);
         }
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {

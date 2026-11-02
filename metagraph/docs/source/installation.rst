@@ -184,7 +184,7 @@ When configuring via ``cmake .. <arguments>`` additional arguments can be provid
 - ``-DBUILD_STATIC=[ON|OFF]`` -- link statically (``OFF`` by default)
 - ``-DLINK_OPT=[ON|OFF]`` -- enable link time optimization (``OFF`` by default)
 - ``-DBUILD_KMC=[ON|OFF]`` -- compile the standalone KMC executable (``OFF`` by default; reading KMC files is always supported)
-- ``-DWITH_AVX=[ON|OFF]`` -- compile with *avx* instructions (``ON`` by default, if available)
+- ``-DWITH_AVX=[ON|OFF]`` -- compile with *AVX2* instructions (``ON`` by default, if available)
 - ``-DWITH_MSSE42=[ON|OFF]`` -- compile with *msse4.2* instructions (``ON`` by default, if available)
 - ``-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]`` -- alphabet to use (``DNA`` by default)
 
