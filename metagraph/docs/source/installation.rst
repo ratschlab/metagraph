@@ -11,7 +11,7 @@ Install with conda
 
 There are conda packages available on bioconda for both Linux and Mac OS X::
 
-    conda install -c bioconda -c conda-forge metagraph
+    conda install -c conda-forge -c bioconda --strict-channel-priority metagraph
 
 The executables are called ``metagraph_DNA`` (with a ``metagraph`` symlink) and ``metagraph_Protein``.
 

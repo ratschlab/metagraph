@@ -13,7 +13,7 @@ See :ref:`installation` for platform-specific troubleshooting.
 
 **Quick fixes:**
 
-- **Conda fails:** ``conda install -c bioconda -c conda-forge metagraph`` or fresh environment
+- **Conda fails:** ``conda install -c conda-forge -c bioconda --strict-channel-priority metagraph`` or fresh environment
 - **Docker error:** pull the latest image: ``docker pull ghcr.io/ratschlab/metagraph:master``
 - **Compiler too old:** Need GCC 9+ or Clang 9+
 

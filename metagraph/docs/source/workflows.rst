@@ -18,7 +18,7 @@ wrapper needs an extra ``pip install`` step alongside it:
 
    conda create -n metagraph-workflows python=3.8
    conda activate metagraph-workflows
-   conda install -c bioconda -c conda-forge metagraph       # the metagraph binary
+   conda install -c conda-forge -c bioconda --strict-channel-priority metagraph       # the metagraph binary
    pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
 
 After this, the ``metagraph`` binary and the ``metagraph-workflows``
