@@ -216,7 +216,12 @@ See the [online docs](https://metagraph.ethz.ch/static/docs/index.html) for the 
 <details>
 <summary>Build from KMC k-mer counters (e.g., to filter low-abundance k-mers)</summary>
 
-[KMC](https://github.com/refresh-bio/KMC) is an extremely efficient *k*-mer counter that can pre-process inputs and filter by abundance. Build a graph from *k*-mers occurring at least 5 times:
+[KMC](https://github.com/refresh-bio/KMC) is an extremely efficient *k*-mer counter that can pre-process inputs and filter by abundance.
+
+Configure with `cmake .. -DBUILD_KMC=ON` to build the standalone KMC executable
+used below. Reading existing KMC files is always supported.
+
+Build a graph from *k*-mers occurring at least 5 times:
 
 ```bash
 K=31
