@@ -21,7 +21,7 @@
 
 Index your reads or assemblies once. Then search them for matching samples, alignments and source positions.
 
-A MetaGraph index has two components: a **de Bruijn graph** that stores all *k*-mers extracted from the input sequences, and an **annotation matrix** that links each *k*-mer to its source labels (for example the sample, sequence header, expression level, or position).
+A MetaGraph index has 2 parts. The **de Bruijn graph** stores every *k*-mer of the input sequences. The **annotation matrix** links each *k*-mer to its labels, such as the sample, the sequence header, a count or a position.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ flowchart LR
 ### Features
 
 - **Search public archives** at [metagraph.ethz.ch](https://metagraph.ethz.ch). See [MetaGraph Online](#metagraph-online).
-- **Index your own data.** Build a *k*-mer index over reads, assemblies, or transcripts; query for matching labels.
+- **Index your own data.** Build a *k*-mer index over reads, assemblies or transcripts. Then query it for matching labels.
 - **Optional per-*k*-mer payloads.** Attach [counts](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (abundance, e.g. expression or coverage) or [coordinates](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions that losslessly encode source sequences and return per-target hit positions).
 - **Sequence alignment.** Align sequences to the full annotated graph, with sub-*k* seeding for arbitrarily short queries.
 - **Scalable graph cleaning.** Strip sequencing errors out of very large de Bruijn graphs.
@@ -51,7 +51,7 @@ flowchart LR
 - **Modular annotation formats**: `ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants. Pick the compression/speed tradeoff that fits your scale.
 - **Custom alphabets**: `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - **Extensible by design**: generic interfaces let developers add new graph/annotation representations or algorithms with little code.
-- **Memory-mapped loading**: pass `--mmap` to any subcommand for fast cold start and low query-time RAM (NVMe recommended; SSD works but slower).
+- **Memory-mapped loading**: pass `--mmap` to any command to start fast and use less RAM at query time. NVMe works best. An SSD works but is slower.
 - **Scales to trillions of *k*-mers and millions of labels**: the hosted indexes at metagraph.ethz.ch cover all public SRA data.
 
 </details>
@@ -60,7 +60,7 @@ flowchart LR
 
 ## MetaGraph Online
 
-Try MetaGraph without installing anything: <https://metagraph.ethz.ch/search> hosts a search engine over indexes built from 56 petabases of public DNA, RNA, and protein sequencing data: RefSeq, UHGG, Tara Oceans, UniParc, and more (see the [databases list](https://metagraph.ethz.ch/indexes)). Paste a query sequence and pick the indexes to search.
+Try MetaGraph without installing anything at <https://metagraph.ethz.ch/search>. It searches indexes of public DNA, RNA and protein data, such as RefSeq, UHGG, Tara Oceans and UniParc. See the [list of databases](https://metagraph.ethz.ch/indexes). Paste a sequence and pick the indexes to search.
 
 Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data](https://registry.opendata.aws/metagraph/) for download (no AWS account needed) and offline querying. See [Preconstructed indexes](https://metagraph.ethz.ch/static/docs/resources.html#preconstructed-indexes).
 
@@ -75,7 +75,7 @@ conda install -c bioconda -c conda-forge metagraph
 pip install "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
 ```
 
-`metagraph` is the compiled binary; `metagraph-workflows` is the Python wrapper that drives the full build pipeline.
+`metagraph` is the compiled program. `metagraph-workflows` is the Python wrapper that runs the full build pipeline.
 
 ### 2. Build an index
 
@@ -88,9 +88,9 @@ git clone https://github.com/ratschlab/metagraph.git && cd metagraph
 metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary
 ```
 
-`--primary` indexes one strand per *k*-mer pair (about half the size; appropriate when read strand orientation is unknown, e.g. typical short-read sequencing).
+`--primary` indexes 1 strand of each *k*-mer pair. The index is about half the size. Use it when the strand of the reads is unknown, as in most short-read sequencing.
 
-Internally this chains `metagraph build → annotate → row-diff transform → BRWT clustering → BRWT relaxation` and produces `graph.dbg`, the more compact `graph_small.dbg` (smaller and slower at access, useful when RAM or storage is tight), and the default annotation `graph.relax.row_diff_brwt.annodbg` (`RowDiff<Multi-BRWT>`). See the [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) in the docs for a step-by-step of index construction.
+This runs the full pipeline. It writes the graph `graph.dbg`, a smaller and slower copy `graph_small.dbg`, and the annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
 
 <details>
 <summary>Real-workload example with file list and hardware budget</summary>
@@ -106,7 +106,7 @@ The positional argument accepts a file list (one path per line), a directory, or
 
 ### 3. Query
 
-Query the index (any fasta works as input; the bundled test data is fine for a smoke test):
+Query the index. Any FASTA file works as input. The bundled test data is enough for a first try.
 
 ```bash
 metagraph query --query-mode matches -p 8 \
@@ -157,7 +157,7 @@ Outputs `samples.dbg` (the de Bruijn graph) and `samples.column.annodbg` (3 labe
 2   tk_sample   <kl_sample>:207   <tk_sample>:207
 ```
 
-Each query matches at least its own label. `zh_sample`'s 243 *k*-mers are fully contained in `kl_sample` (243/243), and the same holds for `tk_sample` (207/207); they share enough content to clear the 80% threshold. `kl_sample` matches only itself: its 330 *k*-mers aren't fully covered by either of the shorter samples.
+Each query matches at least its own label. `zh_sample` has 243 *k*-mers, and all of them are in `kl_sample`. The same holds for `tk_sample` (207 of 207). Both clear the 80% threshold. `kl_sample` matches only itself, because neither shorter sample covers its 330 *k*-mers.
 
 </details>
 
@@ -263,7 +263,7 @@ metagraph server_query -i graph.dbg -a annotation.row_diff_brwt.annodbg --port 5
 
 ## More install options
 
-MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets (`metagraph` is symlinked to `metagraph_DNA`); the Docker image adds `DNA5`. For other alphabets, build from source.
+MetaGraph runs on Linux and macOS. Bioconda ships the `DNA` and `Protein` alphabets. `metagraph` is a link to `metagraph_DNA`. The Docker image adds `DNA5`. For other alphabets, build from source.
 
 ### Docker
 
@@ -273,7 +273,7 @@ docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
     metagraph build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 ```
 
-Replace `${HOME}` with the host directory you want to expose under `/mnt`. The default image targets the `DNA` alphabet `{A,C,G,T}`; the `DNA5` and `Protein` variants are invoked as `metagraph_DNA5` / `metagraph_Protein` from the same image. All published images are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
+Replace `${HOME}` with the host directory you want to expose under `/mnt`. The default image uses the `DNA` alphabet `{A,C,G,T}`. The same image runs `metagraph_DNA5` and `metagraph_Protein`. All published images are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
 
 <details>
 <summary>Advanced Docker usage</summary>
@@ -313,7 +313,7 @@ See the [installation guide](https://metagraph.ethz.ch/static/docs/installation.
 
 **Build a docker container.** Run `docker build .`
 
-**Releases.** Three steps: 1) bump the version in `package.json`; 2) tag the commit with that version; 3) create a GitHub release.
+**Releases.** 1. Bump the version in `package.json`. 2. Tag the commit with that version. 3. Create a GitHub release.
 
 </details>
 
