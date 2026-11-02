@@ -1,0 +1,25 @@
+name: Text rules
+
+# Checks user-facing text against the writing rules. Existing hits are allowed by
+# scripts/text-rules-baseline.json. A new hit, or a fixed hit without a lowered
+# baseline, fails. See scripts/text-rules.json for the files in scope.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  text-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/check_text_rules.py

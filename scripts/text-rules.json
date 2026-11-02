@@ -1,0 +1,37 @@
+{
+ "rules_doc": "CONTRIBUTING.md, \"Writing user-facing text\"",
+ "scopes": [
+  {
+   "name": "docs",
+   "include": [
+    "README.md",
+    "metagraph/docs/source/*.rst",
+    "metagraph/api/python/README*"
+   ]
+  },
+  {
+   "name": "cli",
+   "include": [
+    "metagraph/src/cli/*.cpp",
+    "metagraph/src/cli/config/*.cpp",
+    "metagraph/src/cli/load/*.cpp"
+   ]
+  }
+ ],
+ "cpp_all_strings": [
+  "metagraph/src/cli/config/config.cpp"
+ ],
+ "terms": [
+  {
+   "use": "k-mer",
+   "not": [
+    "kmer",
+    "kmers",
+    "K-mer",
+    "K-mers"
+   ],
+   "case": true
+  }
+ ],
+ "jargon": []
+}

@@ -1,0 +1,36 @@
+{
+ "README.md": {
+  "R1": 4,
+  "R7": 2
+ },
+ "metagraph/docs/source/faq.rst": {
+  "R1": 1,
+  "R7": 2
+ },
+ "metagraph/docs/source/installation.rst": {
+  "R1": 4,
+  "R7": 1
+ },
+ "metagraph/docs/source/quick_start.rst": {
+  "R1": 3,
+  "R4": 1,
+  "R7": 7
+ },
+ "metagraph/docs/source/sequence_assembly.rst": {
+  "R7": 2
+ },
+ "metagraph/docs/source/sequence_search.rst": {
+  "R7": 3
+ },
+ "metagraph/docs/source/workflows.rst": {
+  "R1": 1
+ },
+ "metagraph/src/cli/annotate.cpp": {
+  "R1": 2
+ },
+ "metagraph/src/cli/config/config.cpp": {
+  "R1": 3,
+  "R7": 1,
+  "R8": 2
+ }
+}
