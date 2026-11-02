@@ -36,13 +36,13 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
         column_values_(std::move(column_values)) {}
 
     // return tuple sizes (if not zero) at each entry
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
                                           size_t num_threads = 1) const;
 
     uint64_t num_attributes() const;
 
     // return entries of the matrix -- where each entry is a set of integers
-    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows,
+    std::vector<RowTuples> get_row_tuples(std::span<const Row> rows,
                                           size_t num_threads = 1) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
@@ -51,7 +51,7 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const {
         return binary_matrix_.get_rows(rows);
     }
     std::vector<Row> get_column(Column column) const {
@@ -77,7 +77,7 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
 
 template <class BaseMatrix, class Values, class Delims>
 inline std::vector<typename TupleCSCMatrix<BaseMatrix, Values, Delims>::RowValues>
-TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_values(const std::vector<Row> &rows,
+TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_values(std::span<const Row> rows,
                                                            size_t num_threads) const {
     const auto &column_ranks = binary_matrix_.get_column_ranks(rows, num_threads);
     std::vector<RowValues> row_values(rows.size());
@@ -105,7 +105,7 @@ uint64_t TupleCSCMatrix<BaseMatrix, Values, Delims>::num_attributes() const {
 
 template <class BaseMatrix, class Values, class Delims>
 inline std::vector<typename TupleCSCMatrix<BaseMatrix, Values, Delims>::RowTuples>
-TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(const std::vector<Row> &rows,
+TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(std::span<const Row> rows,
                                                            size_t num_threads) const {
     const auto &column_ranks = binary_matrix_.get_column_ranks(rows, num_threads);
     std::vector<RowTuples> row_tuples(rows.size());

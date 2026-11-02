@@ -3,7 +3,6 @@
 #include "test_annotation.hpp"
 #include "../test_helpers.hpp"
 
-#define private public
 #include "test_matrix_helpers.hpp"
 #include "common/unix_tools.hpp"
 #include "common/data_generation.hpp"

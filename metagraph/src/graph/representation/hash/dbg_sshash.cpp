@@ -12,7 +12,7 @@
 
 // sshash template implementations
 #include <src/dictionary.cpp>
-#include <src/build.cpp>
+#include <src/builder/build.cpp>
 #include <src/query.cpp>
 #include <src/info.cpp>
 
@@ -22,7 +22,9 @@
 #include "common/algorithms.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/file_utils.hpp"
+#include "common/unix_tools.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "seq_io/sequence_io.hpp"
 
 
 namespace mtg {
@@ -66,11 +68,15 @@ DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
     }
 }
 
-std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash& graph,
-                                                                 uint64_t num_nodes) {
+// Also reports whether the input had duplicate k-mers. SSHash requires each k-mer (and,
+// for canonical graphs, its reverse complement) to occur at most once. Otherwise,
+// a k-mer gets several node indexes, only one of which can be found by a lookup.
+std::tuple<bit_vector_smart, bit_vector_smart, bool>
+generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes) {
     sdsl::bit_vector succ_is_next(num_nodes + 1, false);
     sdsl::bit_vector pred_is_prev(num_nodes + 1, false);
     bool with_rc = (graph.get_mode() != DBGSSHash::BASIC);
+    std::atomic<bool> has_duplicates(false);
 
     std::visit(
             [&](const auto& dict) {
@@ -88,7 +94,7 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
 
 #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
                 for (DBGSSHash::node_index begin = 0; begin <= num_nodes; begin += BS) {
-                    DBGSSHash::node_index end = std::min(begin + BS, num_nodes);
+                    DBGSSHash::node_index end = std::min(begin + BS, num_nodes + 1);
 
                     bool last_single_outdeg = false;
                     kmer_t kmer;
@@ -100,6 +106,11 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             std::string string_kmer = graph.get_node_sequence(node);
                             kmer = sshash::util::string_to_uint_kmer<kmer_t>(
                                     string_kmer.c_str(), graph.get_k());
+                            // a k-mer reached from its predecessor was already found at
+                            // this node by the neighbour lookup, so check only the others
+                            if (dict.lookup(kmer, with_rc).kmer_id
+                                    != graph_index_to_sshash(node))
+                                has_duplicates.store(true, std::memory_order_relaxed);
                         }
 
                         last_single_outdeg = false;
@@ -122,7 +133,9 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
                             }
                         }
 
-                        if (next == node + 1) {
+                        // in canonical mode, num_nodes + 1 is the reverse complement of
+                        // node 1, not the next forward node
+                        if (node < num_nodes && next == node + 1) {
                             assert(found_fw);
                             succ_is_next[node] = true;
                             last_single_outdeg = true;
@@ -159,11 +172,39 @@ std::pair<bit_vector_smart, bit_vector_smart> generate_succ_pred(const DBGSSHash
             },
             graph.data());
 
-    return std::make_pair(bit_vector_smart(std::move(succ_is_next)),
-                          bit_vector_smart(std::move(pred_is_prev)));
+    return std::make_tuple(bit_vector_smart(std::move(succ_is_next)),
+                           bit_vector_smart(std::move(pred_is_prev)),
+                           has_duplicates.load());
 }
 
-DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, size_t num_chars)
+// Total length of the sequences in a FASTA file, read like SSHash reads it:
+// gzipped if the name ends with .gz, plain otherwise
+static uint64_t count_input_chars(const std::string& input_filename) {
+    using namespace seq_io;
+
+    std::ifstream file(input_filename, std::ios::binary);
+    if (!file)
+        throw std::runtime_error("Cannot read SSHash input " + input_filename);
+
+    boost::iostreams::filtering_istream in;
+    if (std::string_view(input_filename).ends_with(".gz"))
+        in.push(boost::iostreams::gzip_decompressor(), 1 << 20);
+    in.push(file, 1 << 20);
+
+    std::unique_ptr<kseq_t, decltype(&kseq_destroy)> read_stream(
+            kseq_init(compFile::open_read(in)), kseq_destroy);
+    uint64_t num_chars = 0;
+    while (kseq_read(read_stream.get()) >= 0) {
+        num_chars += read_stream->seq.l;
+    }
+    return num_chars;
+}
+
+DBGSSHash::DBGSSHash(const std::string& input_filename,
+                     size_t k,
+                     Mode mode,
+                     size_t num_chars,
+                     double ram_limit_gb)
     : DBGSSHash(k, mode) {
     if (k <= 1)
         throw std::domain_error("k must be at least 2");
@@ -174,9 +215,18 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
     sshash::build_configuration build_config;
     build_config.k = k;
 
+    // the minimizer length depends on the input size, so count it if not given
+    bool num_chars_counted = !num_chars;
+    if (num_chars_counted) {
+        Timer timer;
+        num_chars = count_input_chars(input_filename);
+        common::logger->trace("Counted {} characters in {} in {} sec",
+                              num_chars, input_filename, timer.elapsed());
+    }
+
     // use a value of m recommended here:
     // https://twitter.com/giulio_pibiri/status/1803417277213114501
-    // otherwise, use the next odd value greater than or equal to floor(k / 2)
+    // for an empty input, use the next odd value greater than or equal to floor(k / 2)
     build_config.m
             = std::min({ (num_chars > 0
                                   ? uint64_t(ceil(log(static_cast<double>(num_chars))
@@ -191,16 +241,40 @@ DBGSSHash::DBGSSHash(const std::string& input_filename, size_t k, Mode mode, siz
                                  dict_),
                          uint64_t(k - 2) })
             | 1;
+    common::logger->info("SSHash minimizer length m = {} for {} input characters ({})",
+                         build_config.m, num_chars,
+                         num_chars_counted ? "counted" : "given");
 
     build_config.verbose = common::get_verbose();
     build_config.num_threads = get_num_threads();
-    build_config.canonical = mode != BASIC;
+    // SSHash writes its minimizer tuples to sorted runs of ~RAM / (2 * threads) bytes
+    // each, so a larger budget means fewer and longer runs to merge
+    double ram_limit_GiB = ram_limit_gb * 1e9 / (1ull << 30);
+    if (std::isfinite(ram_limit_GiB) && ram_limit_GiB > build_config.ram_limit_in_GiB)
+        build_config.ram_limit_in_GiB = std::ceil(ram_limit_GiB);
+    build_config.allow_reverse_complement_duplicates = mode == BASIC;
 
-    std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
+    // put SSHash's temp files under --disk-swap (default: ./) and clean them up
+    auto tmp_dir = utils::create_temp_dir(utils::get_swap_path(), "sshash");
+    build_config.tmp_dirname = tmp_dir.string();
+    try {
+        std::visit([&](auto& d) { d.build(input_filename, build_config); }, dict_);
+    } catch (...) {
+        utils::remove_temp_dir(tmp_dir);
+        throw;
+    }
+    utils::remove_temp_dir(tmp_dir);
 
     num_nodes_ = dict_size();
 
-    std::tie(succ_is_next_, pred_is_prev_) = generate_succ_pred(*this, num_nodes_);
+    bool has_duplicates;
+    std::tie(succ_is_next_, pred_is_prev_, has_duplicates) = generate_succ_pred(*this, num_nodes_);
+    if (has_duplicates) {
+        std::string message = "SSHash input " + input_filename + " contains duplicate"
+                " k-mers. Build from unitigs instead, e.g., from 'metagraph transform --to-fasta'";
+        common::logger->error(message);
+        throw std::invalid_argument(message);
+    }
 }
 
 std::string DBGSSHash::file_extension() const {
@@ -233,10 +307,13 @@ void map_to_nodes_with_rc_impl(const DBGSSHash& graph,
     using kmer_t = typename Dict::kmer_type;
 
     if (with_rc) {
-        auto parser = sshash::streaming_query<Dict, true>(&dict);
+        auto parser = sshash::streaming_query<Dict>(&dict);
         for (size_t i = 0; i + k <= sequence.size() && !terminate(); ++i) {
             auto ret_val = parser.lookup(sequence.data() + i);
-            assert(sshash::equal_lookup_result(ret_val,
+            // Direct dictionary lookup assumes a valid alphabet. Streaming
+            // lookup also accepts ambiguous bases and returns no match.
+            assert(!sshash::util::is_valid<kmer_t>(sequence.data() + i, k)
+                   || sshash::equal_lookup_result(ret_val,
                                                dict.lookup(sequence.data() + i, with_rc)));
             callback(ret_val);
         }
@@ -329,6 +406,14 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     std::string rc_str_kmer(str_kmer);
     ::reverse_complement(rc_str_kmer.begin(), rc_str_kmer.end());
     return str_kmer != rc_str_kmer ? node + dict_size() : node;
+}
+
+DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
+    if (node == npos)
+        return npos;
+
+    assert(in_graph(node));
+    return node > dict_size() ? node - dict_size() : node;
 }
 
 uint64_t DBGSSHash::num_nodes() const {

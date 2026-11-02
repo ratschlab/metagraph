@@ -8,9 +8,6 @@
 #include <htslib/kseq.h>
 #include <gtest/gtest.h>
 
-#define protected public
-#define private public
-
 #include "../../test_helpers.hpp"
 #include "common/algorithms.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -23,6 +20,22 @@
 #include "kmer/kmer_collector.hpp"
 #include "tests/utils/gtest_patch.hpp"
 
+
+namespace mtg::graph::boss {
+
+struct BOSSConstructTestAccess {
+    static const sdsl::sd_vector<>& ranges(const BOSS &graph) {
+        return graph.indexed_suffix_ranges_;
+    }
+    static uint64_t range(const BOSS &graph, uint64_t i) {
+        return graph.get_suffix_range(i);
+    }
+    static size_t suffix_length(const BOSS::Chunk &chunk) {
+        return chunk.indexed_suffix_length_;
+    }
+};
+
+} // namespace mtg::graph::boss
 
 namespace {
 
@@ -346,7 +359,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         common::SortedSet<typename KMER::WordType> *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
-    kmers->try_reserve(reserved_capacity);
+    kmers->reserve(reserved_capacity);
     kmer::extract_kmers<KMER, KmerExtractorBOSS, common::SortedSet<typename KMER::WordType>>(
         [reads](kmer::CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
@@ -439,7 +452,6 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         Container *kmers,
                                         const std::vector<KmerExtractorBOSS::TAlphabet> &suffix) {
     static_assert(std::is_same_v<typename Container::key_type, typename KMER::WordType>);
-    // kmers->try_reserve(reserved_capacity);
     kmer::count_kmers<KMER, KmerExtractorBOSS, Container>(
         [reads](kmer::CallStringCount callback) {
             for (const auto &read : *reads) {
@@ -521,22 +533,32 @@ TYPED_TEST(CountKmers, CountKmers32bits) {
 
 TYPED_TEST(CountKmers, CountKmers8bitsDisk) {
     using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint8_t>;
-    Container result(1, 100'000);
-    size_t sequence_size = 500;
+    // not the default /tmp/, whose chunk files would be shared by parallel test processes
+    auto tmp_dir = utils::create_temp_dir(test_dump_dir(), "count_kmers");
+    {
+        Container result(1, 100'000, tmp_dir);
+        size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 255u });
+        sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
+                new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+        assert_contents(result, { 255u });
+    }
+    utils::remove_temp_dir(tmp_dir);
 }
 
 TYPED_TEST(CountKmers, CountKmers32bitsDisk) {
     using Container = common::SortedMultisetDisk<typename TypeParam::WordType, uint32_t>;
-    Container result(1, 100'000);
-    size_t sequence_size = 500;
+    // not the default /tmp/, whose chunk files would be shared by parallel test processes
+    auto tmp_dir = utils::create_temp_dir(test_dump_dir(), "count_kmers");
+    {
+        Container result(1, 100'000, tmp_dir);
+        size_t sequence_size = 500;
 
-    sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
-            new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
-    assert_contents(result, { 5 * (sequence_size - 2 + 1) });
+        sequence_to_kmers_parallel_wrapper<TypeParam, Container>(
+                new std::vector<std::string>(5, std::string(sequence_size, 'A')), 2, &result, {});
+        assert_contents(result, { 5 * (sequence_size - 2 + 1) });
+    }
+    utils::remove_temp_dir(tmp_dir);
 }
 
 TYPED_TEST(CountKmers, CountKmersAppendParallel) {
@@ -610,13 +632,6 @@ TEST(BOSSConstruct, RedundantDummySinkInChunkedConstruction) {
 }
 
 
-bool operator==(const sdsl::sd_vector<> &first, const sdsl::sd_vector<> &second) {
-    return (first.m_size == second.m_size
-            && first.m_wl == second.m_wl
-            && first.m_low == second.m_low
-            && first.m_high == second.m_high);
-}
-
 // Test that suffix ranges survive a serialize→load round-trip with a single k-mer.
 TEST(BOSSConstruct, SuffixRangesSingleKmer) {
     for (auto container : { kmer::ContainerType::VECTOR, kmer::ContainerType::VECTOR_DISK }) {
@@ -655,12 +670,12 @@ TEST(BOSSConstruct, SuffixRangesSingleKmer) {
             ref_chunk.initialize_boss(&reference);
             reference.index_suffix_ranges(1, 1);
 
-            ASSERT_EQ(reference.indexed_suffix_length_, loaded.indexed_suffix_length_);
-            ASSERT_TRUE(reference.indexed_suffix_ranges_ == loaded.indexed_suffix_ranges_);
+            ASSERT_EQ(reference.get_indexed_suffix_length(), loaded.get_indexed_suffix_length());
+            ASSERT_TRUE(BOSSConstructTestAccess::ranges(reference) == BOSSConstructTestAccess::ranges(loaded));
 
             const size_t num_ranges = utils::ipow(loaded.alph_size - 1, 1);
             for (size_t i = 0; i < 2 * num_ranges; ++i) {
-                EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
+                EXPECT_EQ(BOSSConstructTestAccess::range(reference, i), BOSSConstructTestAccess::range(loaded, i))
                     << "k=" << k << " i=" << i;
             }
 
@@ -671,26 +686,22 @@ TEST(BOSSConstruct, SuffixRangesSingleKmer) {
 
 void reindex_ranges_and_compare(BOSS &constructed) {
     // save suffix ranges
-    size_t suffix_length = constructed.indexed_suffix_length_;
-    sdsl::sd_vector<> indexed_suffix_ranges = constructed.indexed_suffix_ranges_;
+    size_t suffix_length = constructed.get_indexed_suffix_length();
+    sdsl::sd_vector<> indexed_suffix_ranges = BOSSConstructTestAccess::ranges(constructed);
 
     const size_t num_ranges = utils::ipow(constructed.alph_size - 1, suffix_length);
     std::vector<uint64_t> onthefly_ranges(suffix_length ? 2 * num_ranges : 0);
     for (size_t i = 0; i < onthefly_ranges.size(); ++i) {
-        onthefly_ranges[i] = constructed.get_suffix_range(i);
+        onthefly_ranges[i] = BOSSConstructTestAccess::range(constructed, i);
     }
-
-    constructed.indexed_suffix_length_ = 0;
-    constructed.indexed_suffix_ranges_ = {};
 
     // overwrite with traditionally computed ranges
     constructed.index_suffix_ranges(suffix_length, 1);
     ASSERT_EQ(suffix_length, constructed.get_indexed_suffix_length());
-    ASSERT_EQ(constructed.indexed_suffix_length_, suffix_length);
-    ASSERT_TRUE(constructed.indexed_suffix_ranges_ == indexed_suffix_ranges);
+    ASSERT_TRUE(BOSSConstructTestAccess::ranges(constructed) == indexed_suffix_ranges);
 
     for (size_t i = 0; i < onthefly_ranges.size(); ++i) {
-        EXPECT_EQ(onthefly_ranges[i], constructed.get_suffix_range(i))
+        EXPECT_EQ(onthefly_ranges[i], BOSSConstructTestAccess::range(constructed, i))
             << "k=" << constructed.get_k() << " suffix_length=" << suffix_length << " i=" << i;
     }
 }
@@ -809,12 +820,12 @@ TEST(BOSSConstruct, SuffixRangesSerializeRoundTrip) {
                 ref_chunk.initialize_boss(&reference);
                 reference.index_suffix_ranges(suffix_length, 1);
 
-                ASSERT_EQ(reference.indexed_suffix_length_, loaded.indexed_suffix_length_);
-                ASSERT_TRUE(reference.indexed_suffix_ranges_ == loaded.indexed_suffix_ranges_);
+                ASSERT_EQ(reference.get_indexed_suffix_length(), loaded.get_indexed_suffix_length());
+                ASSERT_TRUE(BOSSConstructTestAccess::ranges(reference) == BOSSConstructTestAccess::ranges(loaded));
 
                 const size_t num_ranges = utils::ipow(loaded.alph_size - 1, suffix_length);
                 for (size_t i = 0; i < 2 * num_ranges; ++i) {
-                    EXPECT_EQ(reference.get_suffix_range(i), loaded.get_suffix_range(i))
+                    EXPECT_EQ(BOSSConstructTestAccess::range(reference, i), BOSSConstructTestAccess::range(loaded, i))
                         << "k=" << k << " suffix_length=" << suffix_length << " i=" << i;
                 }
 
@@ -838,7 +849,7 @@ TEST(BOSSConstruct, SuffixRangesSerializeNone) {
             constructor->add_sequences(std::vector<std::string>(input_data));
             BOSS::Chunk chunk = constructor->build_chunk();
 
-            EXPECT_EQ(0u, chunk.indexed_suffix_length_);
+            EXPECT_EQ(0u, BOSSConstructTestAccess::suffix_length(chunk));
 
             const std::string fname = test_dump_basename + ".suffix_none";
             {
@@ -876,7 +887,7 @@ TEST(BOSSConstruct, SuffixRangesSerializeSkipped) {
     constructor->add_sequences(std::vector<std::string>(input_data));
     BOSS::Chunk chunk = constructor->build_chunk();
 
-    EXPECT_EQ(suffix_length, chunk.indexed_suffix_length_);
+    EXPECT_EQ(suffix_length, BOSSConstructTestAccess::suffix_length(chunk));
 
     // serialize WITHOUT suffix ranges (BOSS-only overload, no mode)
     const std::string fname = test_dump_basename + ".suffix_skip";

@@ -122,6 +122,16 @@ size_t get_max_files_open() {
     return max_files;
 }
 
+void raise_max_files_open() {
+    struct rlimit lim;
+    if (getrlimit(RLIMIT_NOFILE, &lim) == 0 && lim.rlim_cur < lim.rlim_max) {
+        rlim_t soft = lim.rlim_cur;
+        lim.rlim_cur = lim.rlim_max;
+        if (setrlimit(RLIMIT_NOFILE, &lim) != 0)
+            logger->warn("Could not raise the limit on open files from {}", soft);
+    }
+}
+
 int get_num_fds() {
     FILE *p = popen(fmt::format("bash -c 'set -o pipefail; lsof -p {} | tail -n +2 | wc -l'", getpid()).c_str(), "r");
     if (!p) {

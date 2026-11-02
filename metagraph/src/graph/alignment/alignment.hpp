@@ -1,14 +1,16 @@
 #ifndef __ALIGNER_ALIGNMENT_HPP__
 #define __ALIGNER_ALIGNMENT_HPP__
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <ostream>
 #include <string>
+#include <span>
 #include <vector>
 
 #include <json/json.h>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
@@ -73,11 +75,7 @@ class Seed {
 
     // Add more nodes to the Seed. This assumes that the original query has |next|
     // extra characters and that the updated path still spells the query view.
-    void expand(const std::vector<node_index> &next) {
-        query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
-        end_clipping_ -= next.size();
-        nodes_.insert(nodes_.end(), next.begin(), next.end());
-    }
+    void expand(std::span<const node_index> next);
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
 
@@ -97,31 +95,26 @@ class Seed {
     Cigar::LengthType end_clipping_;
 };
 
+// Return the number of query characters covered by at least one seed
 template <class It>
 inline size_t get_num_char_matches_in_seeds(It begin, It end) {
-    size_t num_matching = 0;
-    size_t last_q_end = 0;
+    std::vector<std::pair<size_t, size_t>> ranges;
     for (auto it = begin; it != end; ++it) {
         const auto &aln = utils::get_first(*it);
-        if (aln.empty())
-            continue;
+        if (!aln.empty()) {
+            ranges.emplace_back(aln.get_clipping(),
+                                aln.get_clipping() + aln.get_query_view().size());
+        }
+    }
+    std::sort(ranges.begin(), ranges.end());
 
-        size_t q_begin = aln.get_clipping();
-        size_t q_end = q_begin + aln.get_query_view().size();
+    size_t num_matching = 0;
+    size_t last_q_end = 0;
+    for (const auto &[q_begin, q_end] : ranges) {
         if (q_end > last_q_end) {
-            num_matching += q_end - q_begin;
-            if (q_begin < last_q_end)
-                num_matching -= last_q_end - q_begin;
+            num_matching += q_end - std::max(q_begin, last_q_end);
+            last_q_end = q_end;
         }
-
-        if (size_t offset = aln.get_offset()) {
-            size_t clipping = aln.get_clipping();
-            for (++it; it != end && aln.get_offset() == offset
-                                    && aln.get_clipping() == clipping; ++it) {}
-            --it;
-        }
-
-        last_q_end = q_end;
     }
     return num_matching;
 }
@@ -349,10 +342,6 @@ class Alignment {
     Cigar cigar_;
 };
 
-inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
-    return out << fmt::format("{}", a);
-}
-
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
         // 1) score is less, or
@@ -443,7 +432,7 @@ template <> struct formatter<mtg::graph::align::Alignment> {
 
     template <typename FormatContext>
     auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) const -> decltype(ctx.out()) {
-        return format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
+        return fmt::format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
                          a.get_orientation() ? "-" : "+",
                          a.get_sequence(),
                          a.get_score(),
@@ -453,5 +442,11 @@ template <> struct formatter<mtg::graph::align::Alignment> {
     }
 };
 } // namespace fmt
+
+namespace mtg::graph::align {
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
+    return out << fmt::format("{}", a);
+}
+} // namespace mtg::graph::align
 
 #endif  // __ALIGNER_ALIGNMENT_HPP__

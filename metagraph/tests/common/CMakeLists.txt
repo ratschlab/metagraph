@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.19)
 project(test_common)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(../../src/common metagraph_common)
@@ -20,7 +20,6 @@ list(FILTER test_files  EXCLUDE REGEX "benchmark_.*")
 
 add_executable(tests ${test_files})
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
 target_include_directories(tests
   PRIVATE
     ${GTEST_INCLUDE_DIRS}
@@ -39,7 +38,7 @@ target_link_libraries(tests
     test_utils
     ${GTEST_BOTH_LIBRARIES}
     ${OpenMP_CXX_LIBRARIES}
-    ${SDSL_LIBRARY}
+
 )
 target_compile_definitions(tests PUBLIC _USE_FOLLY MODE_TI)
 

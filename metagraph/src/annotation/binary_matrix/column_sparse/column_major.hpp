@@ -24,10 +24,10 @@ class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
 
     bool get(Row row, Column column) const override;
     using BinaryMatrix::get_rows;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const override;
     // query row and get ranks of each set bit in its column
     std::vector<Vector<std::pair<Column, uint64_t>>>
-    get_column_ranks(const std::vector<Row> &rows, size_t num_threads = 1) const;
+    get_column_ranks(std::span<const Row> rows, size_t num_threads = 1) const;
     std::vector<Row> get_column(Column column) const override;
 
     void call_columns(const std::vector<Column> &columns,

@@ -6,16 +6,19 @@
 #include <vector>
 #include <string>
 
-#include "graph/representation/base/sequence_graph.hpp"
+#include "graph/annotated_dbg.hpp"
 
 
 namespace mtg {
 
-namespace graph {
-    class AnnotatedDBG;
-}
-
 namespace test {
+
+class MutableAnnotatedDBG : public graph::AnnotatedDBG {
+  public:
+    using graph::AnnotatedDBG::AnnotatedDBG;
+    using graph::AnnotatedSequenceGraph::graph_;
+    using graph::AnnotatedSequenceGraph::annotator_;
+};
 
 template <class Graph, class Annotation>
 std::unique_ptr<graph::AnnotatedDBG>

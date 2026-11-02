@@ -1,8 +1,5 @@
 #include "gtest/gtest.h"
 
-#define private public
-#define protected public
-
 #include "../../test_helpers.hpp"
 #include "test_dbg_helpers.hpp"
 

@@ -37,8 +37,7 @@ ARG CODE_BASE
 COPY . ${CODE_BASE}
 
 WORKDIR ${CODE_BASE}
-RUN make build-sdsl-lite \
-    && make build-metagraph alphabet=DNA \
+RUN make build-metagraph alphabet=DNA \
     && make build-metagraph alphabet=DNA5 \
     && make build-metagraph alphabet=Protein
 

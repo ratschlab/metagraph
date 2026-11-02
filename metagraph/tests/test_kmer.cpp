@@ -5,9 +5,6 @@
 
 #include "gtest/gtest.h"
 
-#define private public
-#define protected public
-
 #include "test_helpers.hpp"
 #include "kmer/kmer.hpp"
 #include "kmer/kmer_extractor.hpp"
@@ -237,15 +234,17 @@ TYPED_TEST(Kmer, BitShiftBuild) {
     }
     long_seq = long_seq.substr(0, sizeof(typename TypeParam::type) * 8 / kBitsPerChar);
     //test bit shifting
-    KMer<typename TypeParam::type, kBitsPerChar> kmer_builtup(0u);
+    KMer<typename TypeParam::type, kBitsPerChar> kmer_builtup(typename TypeParam::type{0});
+    auto packed = kmer_builtup.data();
     size_t k = 0;
     //ASSERT_EQ(k, kmer_builtup.get_k());
-    ASSERT_EQ(k * kBitsPerChar, sdsl::bits::hi(kmer_builtup.seq_));
+    ASSERT_EQ(k * kBitsPerChar, sdsl::bits::hi(packed));
     for (int i = long_seq.length() - 1; i >= 0; --i) {
-        kmer_builtup.seq_ <<= static_cast<uint64_t>(kBitsPerChar);
-        kmer_builtup.seq_ |= kmer_extractor.encode(long_seq[i]);
+        packed <<= static_cast<uint64_t>(kBitsPerChar);
+        packed |= kmer_extractor.encode(long_seq[i]);
         ++k;
     }
+    kmer_builtup = KMer<typename TypeParam::type, kBitsPerChar>(packed);
     std::string dec = kmer_builtup.to_string(long_seq.length(),
                                              kmer_extractor.alphabet);
     ASSERT_EQ(long_seq, dec);

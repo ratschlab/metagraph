@@ -1000,7 +1000,7 @@ void convert_to_row_disk(
     if (!files.size())
         return;
 
-    assert(utils::ends_with(result_fname, file_extension));
+    assert(result_fname.ends_with(file_extension));
 
     double density_prediction = 0.01; // TODO: predict it better?
 
@@ -1453,7 +1453,7 @@ void merge_row_compressed(const std::vector<std::string> &filenames,
     std::vector<std::unique_ptr<StreamRows<>>> streams;
 
     for (auto filename : filenames) {
-        if (!utils::ends_with(filename, RowCompressed<>::kExtension))
+        if (!filename.ends_with(RowCompressed<>::kExtension))
             throw std::runtime_error("Can't merge annotations of mixed types");
 
         label_encoders.emplace_back(RowCompressed<>::read_label_encoder(filename));

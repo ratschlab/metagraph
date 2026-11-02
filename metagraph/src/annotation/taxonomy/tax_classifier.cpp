@@ -38,7 +38,7 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
 
     std::string line;
     getline(f, line);
-    if (!utils::starts_with(line, "accession\taccession.version\ttaxid\t")) {
+    if (!line.starts_with("accession\taccession.version\ttaxid\t")) {
         logger->error("Error: The accession to taxid map table is not in the standard (*.accession2taxid) format {}",
                       filepath);
         exit(1);
@@ -89,10 +89,10 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
     // Take one sample label and find the label type.
     std::string sample_label = anno_matrix_->get_annotator().get_label_encoder().get_labels()[0];
 
-    if (utils::starts_with(sample_label, "gi|")) {
+    if (sample_label.starts_with("gi|")) {
         // e.g.   >gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome
         label_type_ = GEN_BANK;
-    } else if (utils::starts_with(utils::split_string(sample_label, ":")[1], "taxid|")) {
+    } else if (utils::split_string(sample_label, ":")[1].starts_with("taxid|")) {
         // e.g.   >kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome
         label_type_ = TAXID;
     } else {

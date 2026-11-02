@@ -66,10 +66,7 @@ sync:
 
 ## BUILDING BINARIES AND IMAGES
 
-build: build-sdsl-lite build-metagraph
-
-build-sdsl-lite:
-	$(EXEC_CMD) 'cd $(CODE_BASE)/metagraph/external-libraries/sdsl-lite && ./install.sh $${PWD}'
+build: build-metagraph
 
 
 

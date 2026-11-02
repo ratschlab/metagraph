@@ -66,6 +66,7 @@ class Config {
     // `metagraph align --json` output. Off by default since nothing in-tree
     // consumes it and it dominates the JSON size for long alignments.
     bool align_output_path = false;
+    bool align_map_only = false;
     bool advanced = false;
 
     unsigned int k = 3;
@@ -94,6 +95,7 @@ class Config {
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned long long RA_ivbuffer_size = 16'384; // in B
+    double server_cache_size = 1.0; // server query cache, in GB (default 1 GB; 0 disables)
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;

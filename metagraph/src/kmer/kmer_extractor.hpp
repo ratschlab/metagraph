@@ -2,6 +2,7 @@
 #define __KMER_EXTRACTOR_HPP__
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -115,19 +116,19 @@ class KmerExtractorT {
 
     #if _PROTEIN_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetProtein,
-                   const uint8_t CharToCode[128] = alphabets::kCharToProtein,
+                   std::span<const uint8_t, 128> CharToCode = alphabets::kCharToProtein,
                    const std::vector<uint8_t> &complement_code = alphabets::kComplementMapProtein);
     #elif _DNA_CASE_SENSITIVE_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNACaseSent,
-                   const uint8_t CharToCode[128] = alphabets::kCharToDNACaseSent,
+                   std::span<const uint8_t, 128> CharToCode = alphabets::kCharToDNACaseSent,
                    const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNACaseSent);
     #elif _DNA5_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA5,
-                   const uint8_t CharToCode[128] = alphabets::kCharToDNA,
+                   std::span<const uint8_t, 128> CharToCode = alphabets::kCharToDNA,
                    const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
     #elif _DNA_GRAPH
     KmerExtractorT(const char Alphabet[] = alphabets::kAlphabetDNA,
-                   const uint8_t CharToCode[128] = alphabets::kCharToDNA,
+                   std::span<const uint8_t, 128> CharToCode = alphabets::kCharToDNA,
                    const std::vector<uint8_t> &complement_code = alphabets::kComplementMapDNA);
     #else
     static_assert(false,
@@ -178,7 +179,8 @@ class KmerExtractorT {
     }
 
   private:
-    const TAlphabet *char_to_code_;
+    // The lookup table is borrowed and must outlive the extractor.
+    std::span<const TAlphabet, 128> char_to_code_;
     const std::vector<TAlphabet> complement_code_;
 };
 

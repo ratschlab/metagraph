@@ -1,5 +1,11 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <array>
+#include <atomic>
+#include <mutex>
+#include <utility>
+#include <variant>
+
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -16,65 +22,115 @@ typedef AnnotatedDBG::Annotator::Label Label;
 
 typedef std::function<size_t()> LabelCountCallback;
 
-constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
+// Native-width counters need live typed elements for atomic_ref; other widths stay packed.
+// C++23 start_lifetime_as_array could reuse SDSL storage, but would require
+// restoring uint64_t lifetimes before SDSL's word-based access.
+class LabelCounts {
+  public:
+    LabelCounts(uint64_t size, uint8_t width) {
+        assert(width && width <= 64);
+        switch (width) {
+            case 8: storage_.emplace<std::vector<uint8_t>>(size); break;
+            case 16: storage_.emplace<std::vector<uint16_t>>(size); break;
+            case 32: storage_.emplace<std::vector<uint32_t>>(size); break;
+            case 64: storage_.emplace<std::vector<uint64_t>>(size); break;
+            default: storage_.emplace<sdsl::int_vector<>>(size, 0, width); break;
+        }
+    }
 
-uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
-                      uint64_t i,
-                      std::mutex &backup_mutex,
-                      int mo) {
-    const uint8_t width = vector.width();
-    if (width == 64)
-        return __atomic_load_n(vector.data() + i, mo);
+    uint64_t size() const {
+        return std::visit([](const auto &v) -> uint64_t { return v.size(); }, storage_);
+    }
 
-    if (width == 32)
-        return __atomic_load_n((uint32_t*)vector.data() + i, mo);
+    uint64_t operator[](uint64_t i) const {
+        return std::visit([&](const auto &v) -> uint64_t { return v[i]; }, storage_);
+    }
 
-    if (width == 16)
-        return __atomic_load_n((uint16_t*)vector.data() + i, mo);
+    // Select the storage type once per parallel phase, outside the inner loops.
+    template <class Callback>
+    void visit(Callback &&callback) {
+        std::visit(std::forward<Callback>(callback), storage_);
+    }
 
-    if (width == 8)
-        return __atomic_load_n((uint8_t*)vector.data() + i, mo);
+  private:
+    std::variant<std::vector<uint8_t>, std::vector<uint16_t>, std::vector<uint32_t>,
+                 std::vector<uint64_t>, sdsl::int_vector<>> storage_;
+};
 
-    std::lock_guard<std::mutex> lock(backup_mutex);
-    return vector[i];
+template <class T>
+std::atomic_ref<T> counter_atomic(T &value) {
+    static_assert(std::atomic_ref<T>::required_alignment <= alignof(T));
+    return std::atomic_ref<T>(value);
 }
 
-uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
-                              uint64_t i,
-                              uint64_t val,
-                              std::mutex &backup_mutex,
-                              int mo) {
-    const uint8_t width = vector.width();
-    if (width == 64)
-        return __atomic_fetch_add(vector.data() + i, val, mo);
+void replace_field(uint64_t &value, uint64_t mask, uint64_t bits) {
+    auto word = counter_atomic(value);
+    uint64_t expected = word.load(std::memory_order_relaxed);
+    while (!word.compare_exchange_weak(expected, (expected & ~mask) | bits,
+                                       std::memory_order_relaxed)) {}
+}
 
-    if (width == 32)
-        return __atomic_fetch_add((uint32_t*)vector.data() + i, val, mo);
+// Spread crossing fields across locks without padding the packed counter storage.
+using CounterLocks = std::array<std::mutex, 256>;
 
-    if (width == 16)
-        return __atomic_fetch_add((uint16_t*)vector.data() + i, val, mo);
+uint64_t atomic_fetch(sdsl::int_vector<> &vector, uint64_t i, CounterLocks &locks) {
+    const unsigned width = vector.width();
+    uint64_t bit = i * width, k = bit / 64;
+    unsigned shift = bit % 64;
+    uint64_t mask = sdsl::bits::lo_set[width];
+    if (shift + width <= 64)
+        return (counter_atomic(vector.data()[k]).load(std::memory_order_relaxed) >> shift) & mask;
+    std::lock_guard lock(locks[k % locks.size()]);
+    return ((counter_atomic(vector.data()[k]).load(std::memory_order_relaxed) >> shift)
+          | (counter_atomic(vector.data()[k + 1]).load(std::memory_order_relaxed) << (64 - shift))) & mask;
+}
 
-    if (width == 8)
-        return __atomic_fetch_add((uint8_t*)vector.data() + i, val, mo);
+void atomic_add(sdsl::int_vector<> &vector, uint64_t i, uint64_t value, CounterLocks &locks) {
+    const unsigned width = vector.width();
+    uint64_t bit = i * width, k = bit / 64;
+    unsigned shift = bit % 64;
+    uint64_t mask = sdsl::bits::lo_set[width];
+    auto word = counter_atomic(vector.data()[k]);
+    if (shift + width <= 64) {
+        uint64_t expected = word.load(std::memory_order_relaxed);
+        for (;;) {
+            uint64_t desired = (expected & ~(mask << shift))
+                | ((((expected >> shift) + value) & mask) << shift);
+            if (word.compare_exchange_weak(expected, desired, std::memory_order_relaxed))
+                return;
+        }
+    }
+    // Readers and writers of this field share a lock; CAS preserves neighboring fields.
+    std::lock_guard lock(locks[k % locks.size()]);
+    uint64_t next = (word.load(std::memory_order_relaxed) >> shift)
+          | (counter_atomic(vector.data()[k + 1]).load(std::memory_order_relaxed) << (64 - shift));
+    next = (next + value) & mask;
+    replace_field(vector.data()[k], mask << shift, next << shift);
+    replace_field(vector.data()[k + 1], mask >> (64 - shift), next >> (64 - shift));
+}
 
-    std::lock_guard<std::mutex> lock(backup_mutex);
-    uint64_t old_val = vector[i];
-    vector[i] += val;
-    return old_val;
+template <class T>
+uint64_t atomic_fetch(std::vector<T> &vector, uint64_t i, CounterLocks &) {
+    return counter_atomic(vector[i]).load(std::memory_order_relaxed);
+}
+
+template <class T>
+void atomic_add(std::vector<T> &vector, uint64_t i, uint64_t value, CounterLocks &) {
+    counter_atomic(vector[i]).fetch_add(value, std::memory_order_relaxed);
 }
 
 
 /**
- * Return an int_vector<>, bit_vector pair, of lengths anno_graph.get_graph().max_index() * 2
+ * Return a count-vector, bit-vector pair, of lengths anno_graph.get_graph().max_index() * 2
  * and anno_graph.get_graph().max_index(), respectively.
- * For an index i, the int_vector at indices 2*i and 2*i + 1 represent the
+ * For an index i, the count-vector at indices 2*i and 2*i + 1 represent the
  * number of labels in labels_in and labels_out which the k-mer of index i is
- * annotated with, respectively. The width of the int_vector<> is computed to be
+ * annotated with, respectively. The count width is computed to be
  * wide enough to contain counts up to num_labels.
  * The returned bit_vector is a k-mer mask indicating those k-mers annotated
  * with at least one in-label or out-label.
  */
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::pair<LabelCounts, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
@@ -97,7 +153,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 // is true, then add the reverse complements of all nodes to the graph as well.
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                          sdsl::int_vector<> &counts,
+                          LabelCounts &counts,
                           sdsl::bit_vector&& mask,
                           bool add_complement,
                           size_t num_threads);
@@ -144,7 +200,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
-        std::mutex vector_backup_mutex;
+        CounterLocks counter_locks;
         std::atomic_thread_fence(std::memory_order_release);
 
         auto mask_or = [&](sdsl::bit_vector &a,
@@ -152,42 +208,43 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                            const std::vector<node_index> &id_map) {
             call_ones(b, [&](size_t i) {
                 if (id_map[i])
-                    set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
+                    set_bit(a.data(), id_map[i], parallel, std::memory_order_relaxed);
             });
         };
 
-        auto count_merge = [&](sdsl::bit_vector &a,
-                               const sdsl::bit_vector &b,
-                               const std::vector<node_index> &id_map,
-                               size_t offset = 0) {
-            call_ones(b, [&](size_t i) {
-                if (id_map[i]) {
-                    set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
-                    atomic_fetch_and_add(count_vector.first, id_map[i] * 2 + offset, 1,
-                                         vector_backup_mutex, MO_RELAXED);
+        counts.visit([&](auto &values) {
+            auto count_merge = [&](sdsl::bit_vector &a,
+                                   const sdsl::bit_vector &b,
+                                   const std::vector<node_index> &id_map,
+                                   size_t offset = 0) {
+                call_ones(b, [&](size_t i) {
+                    if (id_map[i]) {
+                        set_bit(a.data(), id_map[i], parallel, std::memory_order_relaxed);
+                        atomic_add(values, id_map[i] * 2 + offset, 1, counter_locks);
+                    }
+                });
+            };
+
+            logger->trace("Checking shared and other labels");
+            masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
+                for (const auto &[label, count, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
+                    bool found_in = labels_in.count(label);
+                    bool found_out = labels_out.count(label);
+                    bool found_in_round2 = labels_in_round2.count(label);
+                    bool found_out_round2 = labels_out_round2.count(label);
+                    if (!found_in && !found_out
+                            && !found_in_round2 && !found_out_round2 && check_other) {
+                        mask_or(other_mask, sig, path);
+                    }
+
+                    if (found_in_round2)
+                        count_merge(union_mask, sig, path);
+
+                    if (found_out_round2)
+                        count_merge(union_mask, sig, path, 1);
                 }
-            });
-        };
-
-        logger->trace("Checking shared and other labels");
-        masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
-            for (const auto &[label, count, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
-                bool found_in = labels_in.count(label);
-                bool found_out = labels_out.count(label);
-                bool found_in_round2 = labels_in_round2.count(label);
-                bool found_out_round2 = labels_out_round2.count(label);
-                if (!found_in && !found_out
-                        && !found_in_round2 && !found_out_round2 && check_other) {
-                    mask_or(other_mask, sig, path);
-                }
-
-                if (found_in_round2)
-                    count_merge(union_mask, sig, path);
-
-                if (found_out_round2)
-                    count_merge(union_mask, sig, path, 1);
-            }
-        }, num_threads);
+            }, num_threads);
+        });
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -291,7 +348,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                          sdsl::int_vector<> &counts,
+                          LabelCounts &counts,
                           sdsl::bit_vector&& mask,
                           bool add_complement,
                           size_t num_threads) {
@@ -312,25 +369,27 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     if (add_complement) {
         logger->trace("Adding reverse complements");
-        std::mutex vector_backup_mutex;
+        CounterLocks counter_locks;
         std::atomic_thread_fence(std::memory_order_release);
-        masked_graph->call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
-            std::string rc_seq = seq;
-            std::vector<DeBruijnGraph::node_index> rc_path = path;
-            reverse_complement_seq_path(*graph_ptr, rc_seq, rc_path);
+        counts.visit([&](auto &values) {
+            masked_graph->call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
+                std::string rc_seq = seq;
+                std::vector<DeBruijnGraph::node_index> rc_path = path;
+                reverse_complement_seq_path(*graph_ptr, rc_seq, rc_path);
 
-            auto it = rc_path.rbegin();
-            for (size_t i = 0; i < path.size(); ++i, ++it) {
-                if (*it) {
-                    uint64_t in_count = atomic_fetch(counts, path[i] * 2, vector_backup_mutex, MO_RELAXED);
-                    uint64_t out_count = atomic_fetch(counts, path[i] * 2 + 1, vector_backup_mutex, MO_RELAXED);
-                    atomic_fetch_and_add(counts, *it * 2, in_count, vector_backup_mutex, MO_RELAXED);
-                    atomic_fetch_and_add(counts, *it * 2 + 1, out_count, vector_backup_mutex, MO_RELAXED);
+                auto it = rc_path.rbegin();
+                for (size_t i = 0; i < path.size(); ++i, ++it) {
+                    if (*it) {
+                        uint64_t in_count = atomic_fetch(values, path[i] * 2, counter_locks);
+                        uint64_t out_count = atomic_fetch(values, path[i] * 2 + 1, counter_locks);
+                        atomic_add(values, *it * 2, in_count, counter_locks);
+                        atomic_add(values, *it * 2 + 1, out_count, counter_locks);
 
-                    set_bit(mask.data(), *it, in_count, MO_RELAXED);
+                        set_bit(mask.data(), *it, num_threads > 1, std::memory_order_relaxed);
+                    }
                 }
-            }
-        }, num_threads, true);
+            }, num_threads, true);
+        });
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -342,7 +401,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     return masked_graph;
 }
 
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::pair<LabelCounts, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
@@ -352,7 +411,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
 
     // the in and out counts are stored interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
+    LabelCounts counts(indicator.size() * 2, width);
 
     const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
     const auto &binmat = anno_graph.get_annotator().get_matrix();
@@ -371,25 +430,27 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         label_codes.push_back(code);
     }
 
-    std::mutex vector_backup_mutex;
+    CounterLocks counter_locks;
     std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
 
-    binmat.call_columns(label_codes,
-        [&](auto col_idx, const bitmap &rows) {
-            uint8_t col_indicator = code_to_indicator[label_codes[col_idx]];
-            rows.call_ones([&](auto r) {
-                node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                if (col_indicator & 1)
-                    atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+    counts.visit([&](auto &values) {
+        binmat.call_columns(label_codes,
+            [&](auto col_idx, const bitmap &rows) {
+                uint8_t col_indicator = code_to_indicator[label_codes[col_idx]];
+                rows.call_ones([&](auto r) {
+                    node_index i = AnnotatedDBG::anno_to_graph_index(r);
+                    set_bit(indicator.data(), i, parallel, std::memory_order_relaxed);
+                    if (col_indicator & 1)
+                        atomic_add(values, i * 2, 1, counter_locks);
 
-                if (col_indicator & 2)
-                    atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-            });
-        },
-        num_threads
-    );
+                    if (col_indicator & 2)
+                        atomic_add(values, i * 2 + 1, 1, counter_locks);
+                });
+            },
+            num_threads
+        );
+    });
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -410,21 +471,21 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     std::atomic_thread_fence(std::memory_order_release);
 
     masked_graph.call_unitigs([&](const std::string &unitig, const std::vector<node_index> &path) {
-        total_unitigs.fetch_add(1, MO_RELAXED);
+        total_unitigs.fetch_add(1, std::memory_order_relaxed);
 
         size_t last = 0;
         for (const auto &pair : get_kept_intervals(unitig, path)) {
             const auto &[begin, end] = pair;
-            kept_unitigs.fetch_add(1, MO_RELAXED);
-            num_kept_nodes.fetch_add(end - begin, MO_RELAXED);
+            kept_unitigs.fetch_add(1, std::memory_order_relaxed);
+            num_kept_nodes.fetch_add(end - begin, std::memory_order_relaxed);
             for ( ; last < begin; ++last) {
-                unset_bit(mask.data(), path[last], parallel, MO_RELAXED);
+                unset_bit(mask.data(), path[last], parallel, std::memory_order_relaxed);
             }
             last = end;
         }
 
         for ( ; last < path.size(); ++last) {
-            unset_bit(mask.data(), path[last], parallel, MO_RELAXED);
+            unset_bit(mask.data(), path[last], parallel, std::memory_order_relaxed);
         }
 
     }, num_threads);

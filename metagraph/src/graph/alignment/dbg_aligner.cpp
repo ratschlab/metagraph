@@ -14,6 +14,20 @@ namespace align {
 
 using mtg::common::logger;
 
+// Fraction of the query which an alignment of the first strand must span for
+// the second strand to be skipped on CANONICAL graphs
+constexpr double SECOND_STRAND_SKIP_SPAN = 0.95;
+
+bool extend_second_strand(const DeBruijnGraph &graph,
+                          const DBGAlignerConfig &config,
+                          size_t query_size,
+                          size_t first_strand_query_span) {
+    // the second strand may provide alternative alignments
+    return graph.get_mode() != DeBruijnGraph::CANONICAL
+        || config.num_alternative_paths > 1
+        || first_strand_query_span < SECOND_STRAND_SKIP_SPAN * query_size;
+}
+
 const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
     return dynamic_cast<const DBGSuccinct*>(&(canonical ? canonical->get_graph() : graph));
@@ -545,7 +559,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (config_.chain_alignments) {
         if (!has_coordinates()) {
-            logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
+            logger->error("Chaining requires seeds with coordinates");
             exit(1);
         }
 
@@ -738,17 +752,28 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     size_t fwd_num_matches = forward_seeder.get_num_matches();
     size_t bwd_num_matches = reverse_seeder.get_num_matches();
 
+    size_t first_strand_query_span = 0;
+    auto first_strand_callback = [&](Alignment&& alignment) {
+        first_strand_query_span = std::max(first_strand_query_span,
+                                           alignment.get_query_view().size());
+        callback(std::move(alignment));
+    };
+
     if (fwd_num_matches >= bwd_num_matches) {
         aln_both(forward, reverse, std::move(fwd_seeds),
-                 forward_extender, reverse_extender, callback);
-        if (bwd_num_matches >= fwd_num_matches * config_.rel_score_cutoff) {
+                 forward_extender, reverse_extender, first_strand_callback);
+        if (bwd_num_matches >= fwd_num_matches * config_.rel_score_cutoff
+                && extend_second_strand(graph_, config_, forward.size(),
+                                        first_strand_query_span)) {
             aln_both(reverse, forward, std::move(bwd_seeds),
                      reverse_extender, forward_extender, callback);
         }
     } else {
         aln_both(reverse, forward, std::move(bwd_seeds),
-                 reverse_extender, forward_extender, callback);
-        if (fwd_num_matches >= bwd_num_matches * config_.rel_score_cutoff) {
+                 reverse_extender, forward_extender, first_strand_callback);
+        if (fwd_num_matches >= bwd_num_matches * config_.rel_score_cutoff
+                && extend_second_strand(graph_, config_, forward.size(),
+                                        first_strand_query_span)) {
             aln_both(forward, reverse, std::move(fwd_seeds),
                      forward_extender, reverse_extender, callback);
         }

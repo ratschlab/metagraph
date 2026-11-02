@@ -80,11 +80,10 @@ bool BloomFilter::check(uint64_t hash) const {
  */
 
 // compute Bloom filter hashes in batches of 4
-inline const uint64_t*
+inline size_t
 batch_insert_avx2(BloomFilter &bloom,
                   const uint32_t num_hash_functions_,
-                  const uint64_t *hashes_begin,
-                  const uint64_t *hashes_end) {
+                  std::span<const uint64_t> hashes) {
     assert(num_hash_functions_);
 
     auto &filter_ = bloom.data();
@@ -107,7 +106,9 @@ batch_insert_avx2(BloomFilter &bloom,
     simde__m256i *updates_cast = reinterpret_cast<simde__m256i*>(&updates_store);
 
     // check four input elements (represented by hashes) at a time
-    for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
+    size_t i = 0;
+    for (; hashes.size() - i >= 4; i += 4) {
+        const uint64_t *hashes_begin = hashes.data() + i;
         simde__m256i block_indices
             = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
         alignas(32) uint64_t block_index_array[4];
@@ -177,7 +178,7 @@ batch_insert_avx2(BloomFilter &bloom,
                            [&](uint64_t h) { return bloom.check(h); }));
     }
 
-    return hashes_begin;
+    return i;
 }
 
 // Helper for Bloom filter
@@ -193,8 +194,7 @@ SIMDE_FUNCTION_ATTRIBUTES simde__m128i cvtepi64_epi32(simde__m256i v) {
 // compute Bloom filter hashes in batches of 4
 inline uint64_t
 batch_check_avx2(const BloomFilter &bloom,
-                 const uint64_t *hashes_begin,
-                 const uint64_t *hashes_end,
+                 std::span<const uint64_t> hashes,
                  const uint64_t num_hash_functions_,
                  const std::function<void(size_t)> &present_index_callback) {
     assert(num_hash_functions_);
@@ -214,7 +214,8 @@ batch_check_avx2(const BloomFilter &bloom,
 
     // check four input elements (represented by hashes) at a time
     size_t i = 0;
-    for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
+    for (; hashes.size() - i >= 4; i += 4) {
+        const uint64_t *hashes_begin = hashes.data() + i;
         simde__m256i block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
         alignas(32) uint64_t block_index_array[4];
         simde_mm256_store_si256(reinterpret_cast<simde__m256i*>(block_index_array), block_indices);
@@ -303,58 +304,46 @@ batch_check_avx2(const BloomFilter &bloom,
                 present_index_callback(i + 3);
 
         }
-
-        i += 4;
     }
 
     return i;
 }
 
-void BloomFilter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end) {
+void BloomFilter::insert(std::span<const uint64_t> hashes) {
     if (!num_hash_functions_) {
-        assert(std::all_of(hashes_begin, hashes_end,
+        assert(std::all_of(hashes.begin(), hashes.end(),
                            [&](uint64_t hash) { return check(hash); }));
 
         return;
     }
 
-    const uint64_t *it = batch_insert_avx2(*this, num_hash_functions_,
-                                           hashes_begin, hashes_end);
+    size_t i = batch_insert_avx2(*this, num_hash_functions_, hashes);
 
     // insert residual
-    for (; it < hashes_end; ++it) {
-        insert(*it);
-        assert(check(*it));
+    for (; i < hashes.size(); ++i) {
+        insert(hashes[i]);
+        assert(check(hashes[i]));
     }
 
-    assert(std::all_of(hashes_begin, hashes_end,
+    assert(std::all_of(hashes.begin(), hashes.end(),
                        [&](uint64_t hash) { return check(hash); }));
 }
 
-void BloomFilter::check(const uint64_t *hashes_begin,
-                        const uint64_t *hashes_end,
+void BloomFilter::check(std::span<const uint64_t> hashes,
                         const std::function<void(size_t)> &present_index_callback) const {
-    assert(hashes_end >= hashes_begin);
-
-    const size_t num_elements = hashes_end - hashes_begin;
-
     if (!num_hash_functions_) {
-        for (size_t i = 0; i < num_elements; ++i) {
+        for (size_t i = 0; i < hashes.size(); ++i) {
             present_index_callback(i);
         }
 
         return;
     }
 
-    size_t i = batch_check_avx2(*this,
-                                hashes_begin,
-                                hashes_end,
-                                num_hash_functions_,
-                                present_index_callback);
+    size_t i = batch_check_avx2(*this, hashes, num_hash_functions_, present_index_callback);
 
     // check residual
-    for (; i < num_elements; ++i) {
-        if (check(hashes_begin[i]))
+    for (; i < hashes.size(); ++i) {
+        if (check(hashes[i]))
             present_index_callback(i);
     }
 }

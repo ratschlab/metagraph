@@ -71,7 +71,7 @@ const size_t kMaxColumnsChunkSize = 1000;
 
 template <typename RowT>
 std::vector<RowT>
-BRWT::slice_rows_parallel(const std::vector<Row> &row_ids, size_t num_threads) const {
+BRWT::slice_rows_parallel(std::span<const Row> row_ids, size_t num_threads) const {
     using T = typename RowT::value_type;
     ThreadPool thread_pool(num_threads > 1 ? num_threads : 0);
     std::mutex mu;
@@ -107,7 +107,7 @@ bool check_equal(const std::vector<T> &first, const std::vector<T> &second) {
 #endif // NDEBUG
 
 std::vector<BRWT::SetBitPositions>
-BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
+BRWT::get_rows(std::span<const Row> row_ids, size_t num_threads) const {
     if (get_one_pass_brwt())
         return slice_rows_parallel<SetBitPositions>(row_ids, num_threads);
 
@@ -119,7 +119,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids, size_t num_threads) const {
 }
 
 std::vector<BRWT::SetBitPositions>
-BRWT::get_rows(const std::vector<Row> &row_ids) const {
+BRWT::get_rows(std::span<const Row> row_ids) const {
     Vector<Column> slice;
     // expect at least 3 relations per row
     slice.reserve(row_ids.size() * 4);
@@ -166,13 +166,13 @@ void BRWT::call_rows(const std::function<void(const SetBitPositions &)> &callbac
 }
 
 using ColRanks = Vector<std::pair<BRWT::Column, uint64_t>>;
-std::vector<ColRanks> BRWT::get_column_ranks(const std::vector<Row>& row_ids,
+std::vector<ColRanks> BRWT::get_column_ranks(std::span<const Row> row_ids,
                                              size_t num_threads) const {
     if (get_one_pass_brwt())
         return slice_rows_parallel<ColRanks>(row_ids, num_threads);
 
     auto result = get_row_data_parallel<ColRanks>(row_ids, num_threads,
-                [this](const std::vector<Row> &row_ids) {
+                [this](std::span<const Row> row_ids) {
         ColRanks slice;
         // expect at least 3 relations per row
         slice.reserve(row_ids.size() * 4);
@@ -199,7 +199,7 @@ std::vector<ColRanks> BRWT::get_column_ranks(const std::vector<Row>& row_ids,
 // the rows with the set bit in `nonzero_rows_`, and their recalculated
 // (via rank) row indices for the respective rows in the children.
 using NonzeroAndChildRows = std::pair<std::vector<size_t>, std::vector<BRWT::Row>>;
-NonzeroAndChildRows BRWT::get_nonzero_rows(const std::vector<Row>& row_ids,
+NonzeroAndChildRows BRWT::get_nonzero_rows(std::span<const Row> row_ids,
                                            ThreadPool* thread_pool,
                                            bool adaptive_chunk_size) const {
     std::vector<size_t> nonzero_indices;
@@ -215,10 +215,9 @@ NonzeroAndChildRows BRWT::get_nonzero_rows(const std::vector<Row>& row_ids,
                                     ? get_chunk_size(row_ids.size(), kMaxChunkSize, thread_pool->num_threads())
                                     : kMaxChunkSize;
         for (size_t offset = 0; offset < row_ids.size(); offset += chunk_size) {
-            futures.emplace_back(thread_pool->force_enqueue_front([&,offset]() {
-                // TODO: Use std::span when moving to C++20
-                return get_nonzero_rows({ row_ids.begin() + offset,
-                                          std::min(row_ids.begin() + offset + chunk_size, row_ids.end()) });
+            auto chunk = row_ids.subspan(offset, std::min(chunk_size, row_ids.size() - offset));
+            futures.emplace_back(thread_pool->force_enqueue_front([this, chunk]() {
+                return get_nonzero_rows(chunk);
             }), offset);
         }
         for (auto &[future, offset] : futures) {
@@ -282,7 +281,7 @@ NonzeroAndChildRows BRWT::get_nonzero_rows(const std::vector<Row>& row_ids,
 //      return positions of set bits with their column ranks.
 // Appends to `slice`
 template <typename T>
-void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
+void BRWT::slice_rows(std::span<const Row> row_ids, Vector<T> *slice,
                       ThreadPool *thread_pool) const {
     const T delim = make_delim<T>();
 
@@ -372,7 +371,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, Vector<T> *slice,
 }
 
 template <typename T, class CallSlice>
-void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
+void BRWT::slice_rows(std::span<const Row> row_ids, std::vector<size_t> rows,
                       const BRWT *root, std::vector<size_t> call_stack,
                       size_t max_columns_cutoff, ThreadPool &thread_pool,
                       CallSlice call_slice) const {
@@ -405,7 +404,7 @@ void BRWT::slice_rows(const std::vector<Row> &row_ids, std::vector<size_t> rows,
             call_stack.back() = j;
             // Each lambda captures `rows` and `call_stack` by value, giving each
             // child its own copy to modify independently.
-            thread_pool.force_enqueue_front([=,&thread_pool]() {
+            thread_pool.force_enqueue_front([=,this,&thread_pool]() {
                 this->child_nodes_[j]->slice_rows<T>(*child_row_ids_ptr, std::move(rows), root,
                                                      std::move(call_stack), max_columns_cutoff,
                                                      thread_pool, std::move(call_slice));

@@ -22,10 +22,6 @@ template <typename KmerCollector>
 class BitmapChunkConstructor : public IBitmapChunkConstructor {
     friend IBitmapChunkConstructor;
 
-    template <template <typename KMER> class Collector, typename... Args>
-    friend IBitmapChunkConstructor*
-    initialize_bitmap_chunk_constructor(size_t k, const Args& ...args);
-
   private:
     BitmapChunkConstructor(size_t k,
                            DeBruijnGraph::Mode mode,
@@ -239,40 +235,6 @@ DBGBitmap* DBGBitmapConstructor
     );
 }
 
-template <template <typename KMER> class KmerCollector, typename... Args>
-IBitmapChunkConstructor*
-initialize_bitmap_chunk_constructor(size_t k, const Args& ...args) {
-    if (k < 1 || k > 63 / KmerExtractor2Bit::bits_per_char) {
-        logger->error("For bitmap graph, k must be between 1 and {}",
-                      63 / KmerExtractor2Bit::bits_per_char);
-        exit(1);
-    }
-
-    if (k * KmerExtractor2Bit::bits_per_char <= 64) {
-        return new BitmapChunkConstructor<KmerCollector<KmerExtractor2Bit::Kmer64>>(k, args...);
-    } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
-        return new BitmapChunkConstructor<KmerCollector<KmerExtractor2Bit::Kmer128>>(k, args...);
-    } else {
-        return new BitmapChunkConstructor<KmerCollector<KmerExtractor2Bit::Kmer256>>(k, args...);
-    }
-}
-
-template <typename KMER>
-using KmerSet
-        = kmer::KmerCollector<KMER, KmerExtractor2Bit, common::SortedSet<typename KMER::WordType>>;
-template <typename KMER>
-using KmerMultsetVector8 = kmer::KmerCollector<KMER,
-                                               KmerExtractor2Bit,
-                                               common::SortedMultiset<typename KMER::WordType, uint8_t>>;
-template <typename KMER>
-using KmerMultsetVector16 = kmer::KmerCollector<KMER,
-                                                KmerExtractor2Bit,
-                                                common::SortedMultiset<typename KMER::WordType, uint16_t>>;
-template <typename KMER>
-using KmerMultsetVector32 = kmer::KmerCollector<KMER,
-                                                KmerExtractor2Bit,
-                                                common::SortedMultiset<typename KMER::WordType, uint32_t>>;
-
 IBitmapChunkConstructor*
 IBitmapChunkConstructor::initialize(size_t k,
                                     DeBruijnGraph::Mode mode,
@@ -280,19 +242,29 @@ IBitmapChunkConstructor::initialize(size_t k,
                                     const std::string &filter_suffix,
                                     size_t num_threads,
                                     double memory_preallocated) {
-#define OTHER_ARGS k, mode, filter_suffix, num_threads, memory_preallocated
-
-    if (!bits_per_count) {
-        return initialize_bitmap_chunk_constructor<KmerSet>(OTHER_ARGS);
-    } else if (bits_per_count <= 8) {
-        return initialize_bitmap_chunk_constructor<KmerMultsetVector8>(OTHER_ARGS);
-    } else if (bits_per_count <= 16) {
-        return initialize_bitmap_chunk_constructor<KmerMultsetVector16>(OTHER_ARGS);
-    } else if (bits_per_count <= 32) {
-        return initialize_bitmap_chunk_constructor<KmerMultsetVector32>(OTHER_ARGS);
-    } else {
+    if (bits_per_count > 32)
         throw std::runtime_error("Error: trying to allocate too many bits per k-mer count");
+
+    if (k < 1 || k > 63 / KmerExtractor2Bit::bits_per_char) {
+        logger->error("For bitmap graph, k must be between 1 and {}",
+                      63 / KmerExtractor2Bit::bits_per_char);
+        exit(1);
     }
+
+    auto make_constructor = [&]<typename Storage>() -> IBitmapChunkConstructor* {
+        using Collector = kmer::KmerCollector<KmerExtractor2Bit::Kmer64,
+                                             KmerExtractor2Bit, Storage>;
+        return new BitmapChunkConstructor<Collector>(k, mode, filter_suffix,
+                                                      num_threads, memory_preallocated);
+    };
+
+    if (!bits_per_count)
+        return make_constructor.operator()<common::SortedSet<uint64_t>>();
+    if (bits_per_count <= 8)
+        return make_constructor.operator()<common::SortedMultiset<uint64_t, uint8_t>>();
+    if (bits_per_count <= 16)
+        return make_constructor.operator()<common::SortedMultiset<uint64_t, uint16_t>>();
+    return make_constructor.operator()<common::SortedMultiset<uint64_t, uint32_t>>();
 }
 
 void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {

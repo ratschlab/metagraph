@@ -1,6 +1,6 @@
 [submodule "metagraph/external-libraries/sdsl-lite"]
 	path = metagraph/external-libraries/sdsl-lite
-	url = https://github.com/hmusta/sdsl-lite.git
+	url = https://github.com/ratschlab/sdsl-lite.git
 	ignore = untracked
 [submodule "metagraph/external-libraries/hopscotch-map"]
 	path = metagraph/external-libraries/hopscotch-map
@@ -13,7 +13,7 @@
 	url = https://github.com/karasikov/caches.git
 [submodule "metagraph/external-libraries/eigen"]
 	path = metagraph/external-libraries/eigen
-	url = https://github.com/eigenteam/eigen-git-mirror.git
+	url = https://github.com/eigen-mirror/eigen.git
 [submodule "metagraph/external-libraries/KMC"]
 	path = metagraph/external-libraries/KMC
 	url = https://github.com/karasikov/KMC.git
@@ -34,7 +34,7 @@
 	url = https://github.com/karasikov/cpp_progress_bar
 [submodule "metagraph/external-libraries/DYNAMIC"]
 	path = metagraph/external-libraries/DYNAMIC
-	url = https://github.com/karasikov/DYNAMIC.git
+	url = https://github.com/ratschlab/DYNAMIC.git
 [submodule "metagraph/external-libraries/rollinghashcpp"]
 	path = metagraph/external-libraries/rollinghashcpp
 	url = https://github.com/hmusta/rollinghashcpp
@@ -49,13 +49,13 @@
 	url = https://github.com/google/benchmark
 [submodule "metagraph/external-libraries/zlib"]
 	path = metagraph/external-libraries/zlib
-	url = https://github.com/cloudflare/zlib
+	url = https://github.com/ratschlab/zlib.git
 [submodule "metagraph/external-libraries/Simple-Web-Server"]
 	path = metagraph/external-libraries/Simple-Web-Server
 	url = https://gitlab.com/eidheim/Simple-Web-Server.git
 [submodule "metagraph/external-libraries/folly"]
 	path = metagraph/external-libraries/folly
-	url = https://github.com/facebook/folly
+	url = https://github.com/ratschlab/folly
 [submodule "metagraph/external-libraries/Priority-Deque"]
 	path = metagraph/external-libraries/Priority-Deque
 	url = https://github.com/nmcclatchey/Priority-Deque
@@ -71,3 +71,6 @@
 [submodule "metagraph/external-libraries/sshash"]
 	path = metagraph/external-libraries/sshash
 	url = https://github.com/ratschlab/sshash
+[submodule "metagraph/external-libraries/fmt"]
+	path = metagraph/external-libraries/fmt
+	url = https://github.com/fmtlib/fmt.git

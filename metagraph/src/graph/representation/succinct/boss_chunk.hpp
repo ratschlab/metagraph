@@ -18,6 +18,7 @@ namespace boss {
  */
 class BOSS::Chunk {
     friend BOSS;
+    friend struct BOSSConstructTestAccess;
 
   public:
     typedef uint8_t TAlphabet;

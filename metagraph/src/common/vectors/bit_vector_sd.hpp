@@ -151,7 +151,7 @@ bit_vector_sd
 }
 
 bit_vector_sd::bit_vector_sd(std::initializer_list<bool> init)
-      : bit_vector_sd(sdsl::bit_vector(init)) {}
+      : bit_vector_sd(sdsl::bit_vector(init.begin(), init.end())) {}
 
 bit_vector_sd& bit_vector_sd::operator=(const bit_vector_sd &other) {
     inverted_ = other.inverted_;

@@ -419,12 +419,12 @@ int print_stats(Config *config) {
     const auto &files = config->fnames;
 
     for (const auto &file : files) {
-        if (utils::ends_with(file, ".annodbg")) {
+        if (file.ends_with(".annodbg")) {
             print_annotation_stats(file, *config);
             continue;
         }
 
-        if (utils::ends_with(file, annot::CoordToHeader::kExtension)) {
+        if (file.ends_with(annot::CoordToHeader::kExtension)) {
             print_coord_to_header_stats(file);
             continue;
         }

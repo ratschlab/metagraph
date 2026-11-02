@@ -1,6 +1,7 @@
 #ifndef __ALPHABETS_HPP__
 #define __ALPHABETS_HPP__
 
+#include <bit>
 #include <string>
 #include <vector>
 
@@ -8,24 +9,9 @@ namespace mtg {
 namespace kmer {
 namespace alphabets {
 
-template <size_t n>
-class log2 {
-    static constexpr size_t _log2(size_t x) {
-        if (x < 2) {
-            return 0;
-        } else {
-            return _log2(x >> 1) + 1;
-        }
-    }
-
-  public:
-    static constexpr size_t value = _log2(n);
-};
-
-
 constexpr char kBOSSAlphabetProtein[] = "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
 constexpr uint8_t kBOSSSigmaProtein = sizeof(kBOSSAlphabetProtein) - 1;
-constexpr uint8_t kBOSSBitsPerCharProtein = log2<kBOSSSigmaProtein - 1>::value + 1;
+constexpr uint8_t kBOSSBitsPerCharProtein = std::bit_width(kBOSSSigmaProtein - 1u);
 constexpr uint8_t kBOSSCharToProtein[128] = {
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
@@ -44,7 +30,7 @@ static_assert(kBOSSSigmaProtein > 1llu << (kBOSSBitsPerCharProtein - 1));
 //for case-specific DNA and RNA (U <-> T) data
 constexpr char kBOSSAlphabetDNACaseSent[] = "$ACGTNacgt";
 constexpr uint8_t kBOSSSigmaDNACaseSent = sizeof(kBOSSAlphabetDNACaseSent) - 1;
-constexpr uint8_t kBOSSBitsPerCharDNACaseSent = log2<kBOSSSigmaDNACaseSent - 1>::value + 1;
+constexpr uint8_t kBOSSBitsPerCharDNACaseSent = std::bit_width(kBOSSSigmaDNACaseSent - 1u);
 constexpr uint8_t kBOSSCharToDNACaseSent[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -63,7 +49,7 @@ static_assert(kBOSSSigmaDNACaseSent > 1llu << (kBOSSBitsPerCharDNACaseSent - 1))
 //for DNA and RNA (U <-> T) alphabets
 constexpr char kBOSSAlphabetDNA[] = "$ACGT";
 constexpr uint8_t kBOSSSigmaDNA = sizeof(kBOSSAlphabetDNA) - 1;
-constexpr uint8_t kBOSSBitsPerCharDNA = log2<kBOSSSigmaDNA - 1>::value + 1;
+constexpr uint8_t kBOSSBitsPerCharDNA = std::bit_width(kBOSSSigmaDNA - 1u);
 constexpr uint8_t kBOSSCharToDNA[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -80,7 +66,7 @@ static_assert(kBOSSSigmaDNA > 1llu << (kBOSSBitsPerCharDNA - 1));
 
 constexpr char kBOSSAlphabetDNA5[] = "$ACGTN";
 constexpr uint8_t kBOSSSigmaDNA5 = sizeof(kBOSSAlphabetDNA5) - 1;
-constexpr uint8_t kBOSSBitsPerCharDNA5 = log2<kBOSSSigmaDNA5 - 1>::value + 1;
+constexpr uint8_t kBOSSBitsPerCharDNA5 = std::bit_width(kBOSSSigmaDNA5 - 1u);
 static_assert(kBOSSSigmaDNA5 <= 1llu << kBOSSBitsPerCharDNA5);
 static_assert(kBOSSSigmaDNA5 > 1llu << (kBOSSBitsPerCharDNA5 - 1));
 
@@ -88,7 +74,7 @@ static_assert(kBOSSSigmaDNA5 > 1llu << (kBOSSBitsPerCharDNA5 - 1));
 
 inline constexpr char kAlphabetProtein[] = "ABCDEFGHIJKLMNOPQRSTUVWYZX";
 constexpr uint8_t kSigmaProtein = sizeof(kAlphabetProtein) - 1;
-constexpr uint8_t kBitsPerCharProtein = log2<kSigmaProtein - 1>::value + 1;
+constexpr uint8_t kBitsPerCharProtein = std::bit_width(kSigmaProtein - 1u);
 constexpr uint8_t kCharToProtein[128] = {
     25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,
     25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,
@@ -107,7 +93,7 @@ static_assert(kSigmaProtein > 1llu << (kBitsPerCharProtein - 1));
 //for case-specific DNA and RNA (U <-> T) data
 inline constexpr char kAlphabetDNACaseSent[] = "ACGTNacgt";
 constexpr uint8_t kSigmaDNACaseSent = sizeof(kAlphabetDNACaseSent) - 1;
-constexpr uint8_t kBitsPerCharDNACaseSent = log2<kSigmaDNACaseSent - 1>::value + 1;
+constexpr uint8_t kBitsPerCharDNACaseSent = std::bit_width(kSigmaDNACaseSent - 1u);
 constexpr uint8_t kCharToDNACaseSent[128] = {
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -126,7 +112,7 @@ static_assert(kSigmaDNACaseSent > 1llu << (kBitsPerCharDNACaseSent - 1));
 //for DNA and RNA (U <-> T) alphabets
 inline constexpr char kAlphabetDNA[] = "ACGT";
 constexpr uint8_t kSigmaDNA = sizeof(kAlphabetDNA) - 1;
-constexpr uint8_t kBitsPerCharDNA = log2<kSigmaDNA - 1>::value + 1;
+constexpr uint8_t kBitsPerCharDNA = std::bit_width(kSigmaDNA - 1u);
 constexpr uint8_t kCharToDNA[128] = {
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -143,7 +129,7 @@ static_assert(kSigmaDNA > 1llu << (kBitsPerCharDNA - 1));
 
 inline constexpr char kAlphabetDNA5[] = "ACGTN";
 constexpr uint8_t kSigmaDNA5 = sizeof(kAlphabetDNA5) - 1;
-constexpr uint8_t kBitsPerCharDNA5 = log2<kSigmaDNA5 - 1>::value + 1;
+constexpr uint8_t kBitsPerCharDNA5 = std::bit_width(kSigmaDNA5 - 1u);
 static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
 static_assert(kSigmaDNA5 > 1llu << (kBitsPerCharDNA5 - 1));
 

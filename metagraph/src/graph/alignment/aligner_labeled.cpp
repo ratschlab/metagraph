@@ -1,5 +1,7 @@
 #include "aligner_labeled.hpp"
 
+#include <map>
+
 #include "graph/representation/rc_dbg.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
@@ -43,36 +45,6 @@ bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, int64_t diff) {
     return false;
 }
 
-template <class AIt, class BIt, class OutIt, class OutIt2, class OutIt3>
-void set_intersection_difference(AIt a_begin, AIt a_end,
-                                 BIt b_begin, BIt b_end,
-                                 OutIt intersection_out,
-                                 OutIt2 diff_out,
-                                 OutIt3 diff_out2) {
-    while (a_begin != a_end || b_begin != b_end) {
-        if (b_begin == b_end) {
-            *diff_out = *a_begin;
-            ++diff_out;
-            ++a_begin;
-        } else if (a_begin == a_end || *a_begin > *b_begin) {
-            *diff_out2 = *b_begin;
-            ++diff_out2;
-            ++b_begin;
-        } else {
-            if (*a_begin == *b_begin) {
-                *intersection_out = *a_begin;
-                ++intersection_out;
-                ++b_begin;
-            } else {
-                *diff_out = *a_begin;
-                ++diff_out;
-            }
-
-            ++a_begin;
-        }
-    }
-}
-
 LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view query)
     : LabeledExtender(aligner.get_graph(), aligner.get_config(),
                       dynamic_cast<const LabeledAligner<>&>(aligner).annotation_buffer_,
@@ -114,11 +86,7 @@ void LabeledExtender::flush() {
             auto parent_real_labels = annotation_buffer_.get_labels(table[parent_i].node);
             assert(parent_real_labels);
             assert(parent_real_labels->size() >= parent_labels.size());
-            Columns diff;
-            std::set_difference(parent_labels.begin(), parent_labels.end(),
-                                parent_real_labels->begin(), parent_real_labels->end(),
-                                std::back_inserter(diff));
-            assert(diff.empty());
+            assert(std::ranges::includes(*parent_real_labels, parent_labels));
         }
 #endif
 
@@ -139,6 +107,17 @@ void LabeledExtender::flush() {
 bool LabeledExtender::set_seed(const Alignment &seed) {
     if (!DefaultColumnExtender::set_seed(seed))
         return false;
+
+    // Seeds passed to the backward extension are reverse complements of forward
+    // extensions. In CANONICAL graphs, their nodes are distinct from those
+    // traversed in the forward direction, so their labels may not be fetched yet.
+    if (std::any_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+                    [&](node_index n) {
+                        return n != DeBruijnGraph::npos && !annotation_buffer_.get_labels(n);
+                    })) {
+        annotation_buffer_.queue_path(std::vector<node_index>(seed.get_nodes()));
+        annotation_buffer_.fetch_queued_annotations();
+    }
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
                     [&](node_index n) {
@@ -707,17 +686,86 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
-    auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
+    std::erase_if(seeds, [](const auto &a) {
         return !a.label_encoder || a.label_columns.empty();
     });
-
-    seeds.erase(seed_it, seeds.end());
 
     assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &a) {
         return a.get_query_view().size() >= this->config_.min_seed_length;
     }));
 
     return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
+}
+
+template <class Seeder, class Extender, class AlignmentCompare>
+void LabeledAligner<Seeder, Extender, AlignmentCompare>
+::map_batch(const std::vector<IDBGAligner::Query> &seq_batch,
+            const MappingCallback &callback) const {
+    std::vector<AlignmentResults> wrapped_seqs;
+    wrapped_seqs.reserve(seq_batch.size());
+    for (const auto &[header, query] : seq_batch) {
+        wrapped_seqs.emplace_back(query);
+    }
+
+    auto seeders = build_seeders(seq_batch, wrapped_seqs);
+    assert(seeders.size() == seq_batch.size());
+
+    // the labels whose seeds cover the most query characters on one strand
+    auto map_seeds = [&](const ISeeder &seeder, bool orientation, size_t query_size) {
+        std::map<Column, std::vector<std::pair<size_t, size_t>>> label_ranges;
+        for (const Seed &seed : seeder.get_seeds()) {
+            size_t begin = seed.get_clipping();
+            size_t end = begin + seed.get_query_view().size();
+            for (Column label : seed.label_columns) {
+                label_ranges[label].emplace_back(begin, end);
+            }
+        }
+
+        std::optional<LabelMapping> best;
+        for (auto &[label, ranges] : label_ranges) {
+            std::sort(ranges.begin(), ranges.end());
+            size_t covered = 0;
+            size_t last_end = 0;
+            for (const auto &[begin, end] : ranges) {
+                if (end > last_end) {
+                    covered += end - std::max(begin, last_end);
+                    last_end = end;
+                }
+            }
+
+            if (!best || covered > best->num_matches) {
+                best = LabelMapping{ orientation, {}, covered, ranges.front().first, last_end };
+            } else if (covered < best->num_matches) {
+                continue;
+            }
+
+            best->labels.push_back(label);
+            best->query_begin = std::min(best->query_begin, ranges.front().first);
+            best->query_end = std::max(best->query_end, last_end);
+        }
+
+        if (best && orientation) {
+            // report the range on the forward query
+            std::tie(best->query_begin, best->query_end)
+                = std::make_pair(query_size - best->query_end, query_size - best->query_begin);
+        }
+
+        return best;
+    };
+
+    for (size_t i = 0; i < seq_batch.size(); ++i) {
+        const auto &[header, query] = seq_batch[i];
+        const auto &[seeder, seeder_rc] = seeders[i];
+
+        std::optional<LabelMapping> best = map_seeds(*seeder, false, query.size());
+        if (seeder_rc) {
+            auto best_rc = map_seeds(*seeder_rc, true, query.size());
+            if (best_rc && (!best || best_rc->num_matches > best->num_matches))
+                best = std::move(best_rc);
+        }
+
+        callback(header, std::move(best));
+    }
 }
 
 template class LabeledAligner<>;

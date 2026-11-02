@@ -2,6 +2,7 @@
 #define __STRING_UTILS_HPP__
 
 #include <string>
+#include <string_view>
 #include <deque>
 #include <vector>
 #include <cstdint>
@@ -10,9 +11,8 @@
 
 namespace utils {
 
-bool starts_with(const std::string &str, const std::string &prefix);
-
-bool ends_with(const std::string &str, const std::string &suffix);
+// well-formed UTF-8: no overlong forms, no surrogates, at most U+10FFFF
+bool valid_utf8(std::string_view s);
 
 std::optional<uint64_t> parse_abundance(const std::string &comment);
 

@@ -25,6 +25,7 @@ See [`CMakeLists.txt`](CMakeLists.txt) for the complete configuration:
 Minimal example:
 
 ```cmake
+cmake_minimum_required(VERSION 3.19)
 include(ExternalProject)
 
 ExternalProject_Add(metagraph-external
@@ -39,6 +40,7 @@ ExternalProject_Add(metagraph-external
 ExternalProject_Get_Property(metagraph-external INSTALL_DIR)
 
 add_executable(your_app main.cpp)
+target_compile_features(your_app PRIVATE cxx_std_20)
 
 target_include_directories(your_app PRIVATE ${INSTALL_DIR}/include)
 target_link_directories(your_app PRIVATE ${INSTALL_DIR}/lib)
@@ -67,7 +69,9 @@ add_dependencies(your_app metagraph-external)
 // ... other MetaGraph headers and other external libraryes (e.g., sdsl)
 ```
 
-See [`CMakeLists.txt`](CMakeLists.txt) for the most up-to-date working version, and more configurations you might need, depending on the system.
+See [`CMakeLists.txt`](CMakeLists.txt) for the complete configuration, including
+AppleClang/OpenMP setup. It does not require MetaGraph's CMake helper files;
+when copying it into your project, replace `../src/basic_query.cpp` with your source file.
 
 ## When to Use
 

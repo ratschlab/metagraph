@@ -75,6 +75,20 @@ class TestAPIRaw(TestAPIBase):
                                     url=f'http://{self.host}:{self.port}/{cmd}',
                                     data=payload)
 
+    def test_api_cache_does_not_bypass_missing_fasta(self):
+        warm = self.raw_post_request('search', json.dumps({'FASTA': ''}))
+        self.assertEqual(warm.status_code, 200)
+        response = self.raw_post_request('search', '{}')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No input sequences', response.json()['error'])
+
+    def test_api_cache_does_not_bypass_graph_filter_validation(self):
+        warm = self.raw_post_request('search', json.dumps({'FASTA': ''}))
+        self.assertEqual(warm.status_code, 200)
+        response = self.raw_post_request('search', json.dumps({'FASTA': '', 'graphs': []}))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('no support for filtering graphs', response.json()['error'])
+
     def test_api_raw_incomplete_json(self):
         ret = self.raw_post_request('search',
             '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
@@ -448,6 +462,13 @@ class TestAPIClientMultiple(TestingBase):
     @classmethod
     def tearDownClass(cls):
         cls.server_process.kill()
+
+    def test_api_cache_does_not_bypass_in_ram_validation(self):
+        url = f'http://{self.host}:{self.port}/search'
+        payload = {'FASTA': '', 'graphs': ['G1']}
+        self.assertEqual(requests.post(url, json=payload, timeout=30).status_code, 200)
+        payload['in_ram'] = []
+        self.assertEqual(requests.post(url, json=payload, timeout=30).status_code, 400)
 
     def test_api_query_df_multiple_1(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,

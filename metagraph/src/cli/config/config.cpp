@@ -1,6 +1,8 @@
 #include "config.hpp"
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <iostream>
 #include <unordered_set>
 #include <filesystem>
@@ -246,6 +248,8 @@ Config::Config(int argc, char *argv[]) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
+        } else if (!strcmp(argv[i], "--align-map-only")) {
+            align_map_only = true;
         } else if (!strcmp(argv[i], "--align-only-forwards")) {
             align_only_forwards = true;
         } else if (!strcmp(argv[i], "--align-output-path")) {
@@ -409,8 +413,20 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
-        // } else if (!strcmp(argv[i], "--cache-size")) {
-        //     row_cache_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--cache-size")) {
+            std::string value = get_value(i++);
+            size_t end = 0;
+            try {
+                server_cache_size = std::stod(value, &end);
+            } catch (const std::exception &) {
+                server_cache_size = -1;
+            }
+            double bytes = server_cache_size * 1e9;
+            if (end != value.size() || !std::isfinite(bytes) || bytes < 0
+                    || bytes >= static_cast<double>(std::numeric_limits<size_t>::max())) {
+                fprintf(stderr, "ERROR: --cache-size must be a finite, non-negative size representable in bytes\n");
+                exit(1);
+            }
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_welcome_message();
             print_usage(argv[0], identity);
@@ -637,8 +653,8 @@ Config::Config(int argc, char *argv[]) {
         // bitmaps are embedded in the .annodbg, so no graph is needed when
         // re-formatting to another row_diff representation.
         const bool input_has_embedded_anchor = fnames.size()
-                && (utils::ends_with(fnames.front(), annot::RowDiffBRWTAnnotator::kExtension)
-                        || utils::ends_with(fnames.front(), annot::RowDiffRowFlatAnnotator::kExtension));
+                && (fnames.front().ends_with(annot::RowDiffBRWTAnnotator::kExtension)
+                        || fnames.front().ends_with(annot::RowDiffRowFlatAnnotator::kExtension));
         if (input_has_embedded_anchor && fnames.size() != 1) {
             std::cerr << "Can only convert " << fnames.front()
                       << " annotations one at a time" << std::endl;
@@ -675,6 +691,13 @@ Config::Config(int argc, char *argv[]) {
     if (min_count >= max_count) {
         std::cerr << "Error: max-count must be greater than min-count" << std::endl;
         print_usage(argv[0], identity);
+    }
+
+    if (identity == ALIGN && align_map_only
+            && (infbase_annotators.empty() || output_json || map_sequences)) {
+        std::cerr << "Error: --align-map-only requires an annotation (-a) and TSV output,"
+                     " and cannot be combined with --map, --count-kmers or --query-presence" << std::endl;
+        print_usage_and_exit = true;
     }
 
     if (alignment_max_seed_length < alignment_min_seed_length) {
@@ -1007,13 +1030,13 @@ if (advanced) {
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
-            fprintf(stderr, "\t   --num-chars [INT]\tif the number of characters is known beforehand, enter it here [0]\n");
+            fprintf(stderr, "\t   --num-chars [INT]\tnumber of input characters, sets the SSHash minimizer length [0: count them]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
 #if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB (sshash: RAM budget, at least 8) [1]\n");
 if (advanced) {
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
@@ -1099,6 +1122,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --align-map-only \t\t\t\treport the labels best supported by seeds, without extending them into alignments (requires -a) [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
@@ -1438,7 +1462,7 @@ if (advanced) {
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             fprintf(stderr, "\t   --threads-each [INT] \tnumber of threads per graph [1]\n");
             fprintf(stderr, "\t   --one-pass-brwt \tuse one-pass parallel BRWT traversal for queries [off]\n");
-            // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
+            fprintf(stderr, "\t   --cache-size [GB] \tmax size of the /search result cache, in GB (0 disables) [1]\n");
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");

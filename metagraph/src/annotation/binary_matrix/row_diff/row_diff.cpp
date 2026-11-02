@@ -73,7 +73,7 @@ std::tuple<std::vector<BinaryMatrix::Row>,
            std::vector<std::vector<size_t>>,
            std::vector<size_t>,
            std::vector<std::vector<size_t>>>
-IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids, size_t num_threads) const {
+IRowDiff::get_rd_ids(std::span<const BinaryMatrix::Row> row_ids, size_t num_threads) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
     num_threads = std::max<size_t>(1, num_threads);
