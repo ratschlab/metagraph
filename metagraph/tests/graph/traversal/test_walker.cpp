@@ -952,7 +952,7 @@ TEST(WalkerDerive, IntersectionStartsFromTheCheapestRowOfTheFirstWindow) {
     for (size_t i = 0; i < labels.size(); ++i) {
         Column c = static_cast<Column>(encoder.encode(labels[i]));
         headers[c] = { "h_" + labels[i] };
-        num_kmers[c] = { seqs[i].size() - kK + 1 };
+        num_kmers[c].assign(1, seqs[i].size() - kK + 1);
     }
     annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
 
@@ -982,9 +982,9 @@ TEST(WalkerDerive, AmbiguousDerivedHeaderNamesAreRefused) {
     std::vector<std::vector<std::string>> headers(2);
     std::vector<std::vector<uint64_t>> num_kmers(2);
     headers[static_cast<Column>(encoder.encode("colA"))] = { "ACC1" };
-    num_kmers[static_cast<Column>(encoder.encode("colA"))] = { (S + T).size() - kK + 1 };
+    num_kmers[static_cast<Column>(encoder.encode("colA"))].assign(1, (S + T).size() - kK + 1);
     headers[static_cast<Column>(encoder.encode("colB"))] = { "ACC1" };
-    num_kmers[static_cast<Column>(encoder.encode("colB"))] = { S.size() - kK + 1 };
+    num_kmers[static_cast<Column>(encoder.encode("colB"))].assign(1, S.size() - kK + 1);
     annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
 
     LabelOracle oracle(*anno, &cth);
@@ -1021,9 +1021,9 @@ TEST(WalkerDerive, DerivedHeaderMustNotBeAColumnName) {
     std::vector<std::vector<std::string>> headers(2);
     std::vector<std::vector<uint64_t>> num_kmers(2);
     headers[enc.encode("ACC")] = { "decoy" };
-    num_kmers[enc.encode("ACC")] = { in_acc.size() - kK + 1 };
+    num_kmers[enc.encode("ACC")].assign(1, in_acc.size() - kK + 1);
     headers[enc.encode("B")] = { "ACC" };
-    num_kmers[enc.encode("B")] = { in_b.size() - kK + 1 };
+    num_kmers[enc.encode("B")].assign(1, in_b.size() - kK + 1);
     annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
     LabelOracle oracle(*anno, &cth);
 
