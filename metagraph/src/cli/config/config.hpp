@@ -60,6 +60,10 @@ class Config {
     bool output_json = false;
     bool aggregate_columns = false;
     bool coordinates = false;
+    // traverse: run REQUEST.json as a /resolve request instead of a /traverse request
+    bool traverse_resolve = false;
+    // server_query: serve /resolve, /traverse and /traverse/capabilities
+    bool experimental_traverse = false;
     bool index_header_coords = false;
     bool no_coord_mapping = false;
     // Opt-in: include the bulky VG-style `path.mapping[]` object in
@@ -96,6 +100,11 @@ class Config {
     unsigned int relax_arity_brwt = 10;
     unsigned long long RA_ivbuffer_size = 16'384; // in B
     double server_cache_size = 1.0; // server query cache, in GB (default 1 GB; 0 disables)
+    // bounds of a traversal request: its time budget is clamped to the first, its seeds
+    // and their length are refused beyond the others
+    double traverse_max_time_ms = 30'000;
+    size_t traverse_max_seeds = 10;
+    uint64_t traverse_max_seed_bp = 10'000;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -194,6 +203,7 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TRAVERSE,
     };
     IdentityType identity = NO_IDENTITY;
 
