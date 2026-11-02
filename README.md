@@ -179,8 +179,8 @@ metagraph annotate -v -p 8 --anno-filename -i graph.dbg -o annotation data.fa.gz
 # Align sequences to the graph (plain sequence-to-graph alignment, no labels).
 metagraph align -v -i graph.dbg query.fa
 
-# Labeled alignment: with -a, the walk is label-trace-consistent, i.e. every
-# k-mer of the reported path lies in every reported label.
+# Labeled alignment: with -a, the walk continues only while its k-mers share
+# at least 1 label. It reports those shared labels.
 metagraph align -v -i graph.dbg -a annotation.row_diff_brwt.annodbg reads.fq
 
 # Same, but with a coordinate-aware annotator: the walk is additionally

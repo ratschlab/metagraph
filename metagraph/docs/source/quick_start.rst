@@ -690,9 +690,11 @@ The conversion to ``Multi-BRWT`` can be done either
 .. note::
     Rough RAM requirements of the two stages above:
 
-    *   computing the column clustering (linkage) needs about ``N*R/8 + 6*N^2`` bytes, where ``N``
-        is the number of columns (labels) and ``R`` the number of subsampled rows
-        (flag ``--subsample``, 1M by default);
+    *   computing the column clustering (linkage) needs about ``8*N*R + 6*N^2`` bytes by default,
+        where ``N`` is the number of columns (labels) and ``R`` the number of sampled set bits per
+        column (flag ``--subsample``, 1M by default). Each sampled position takes 8 bytes. With
+        ``--subsample-rows``, each column keeps a bit vector of ``R`` rows instead, so this term is
+        about ``N*R/8`` bytes;
     *   constructing the Multi-BRWT needs about ``M*V/8 + Size(BRWT)`` bytes, where ``M`` is the
         number of rows in the annotation and ``V`` the number of nodes processed in parallel
         (flag ``--parallel-nodes``).
