@@ -24,6 +24,11 @@ class TextExtraction(unittest.TestCase):
         cfg = {"terms": [{"use": "k-mer", "not": ["kmer"]}]}
         self.assertIn("R8", [r for r, _ in RULES.check_text("kmer", cfg, {})])
 
+    def test_jargon_needs_prose(self):
+        cfg, scope = {"jargon": ["re:\\b[a-z]+_[a-z_]+\\b"]}, {"jargon": True}
+        self.assertEqual(RULES.check_text("min_kmers", cfg, scope), [])
+        self.assertIn("R5", [r for r, _ in RULES.check_text("Set min_kmers to 3 in the search form.", cfg, scope)])
+
     def test_clean_text_and_code(self):
         for text in ("Read the file.", "SELECT * FROM records;"):
             self.assertEqual(RULES.check_text(text, {}, {}), [])

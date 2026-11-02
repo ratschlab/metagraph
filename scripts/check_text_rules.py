@@ -29,6 +29,7 @@ import sys
 RATCHET = ("R1", "R4", "R5", "R7", "R8", "R9")
 REPORT_ONLY = ("R2", "R6")
 WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
+PROSE = re.compile(r"[A-Za-z]{2,},? [A-Za-z]{2,},? [A-Za-z]{2,}")  # 3 plain words in a row
 ALLOW = re.compile(r"text-rules-allow:\s*([R0-9, ]+)")
 
 
@@ -301,7 +302,7 @@ def check_text(t, cfg, scope):
         for bad in term["not"]:
             if re.search(r"(?<![\w-])" + re.escape(bad) + r"(?![\w-])", t, 0 if term.get("case") else re.I):
                 hits.append(("R8", f"'{bad}' -> '{term['use']}': {t}"))
-    if scope.get("jargon"):
+    if scope.get("jargon") and PROSE.search(t):  # a lone identifier or a code line is not prose
         for j in cfg.get("jargon", []):
             pat = j[3:] if j.startswith("re:") else r"(?<![\w-])" + re.escape(j) + r"(?![\w-])"
             if re.search(pat, t):
