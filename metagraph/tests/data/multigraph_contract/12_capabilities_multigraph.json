@@ -624,7 +624,8 @@
    "unknown_labels": true,
    "search_cuts": true,
    "resolve_boundary_ties": true,
-   "discovery_trace_scale": "traced"
+   "discovery_trace_scale": "traced",
+   "max_request_memory_mb": 0
   }
  }
 }

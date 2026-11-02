@@ -113,10 +113,13 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps);
  * release's multi-graph routes do, for clients to switch on (never on dates):
  * envelope_version, the routes that answer in the envelope (envelope_routes), the selectors
  * of each route (section 6), traverse_pairs_per_request, the routes that read not_after_ms,
- * finish_by_ms and request_id, the registry's route (requests_route), and the flags
- * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7)
+ * finish_by_ms and request_id, the registry's route (requests_route), the flags
+ * unknown_labels (section 2), search_cuts (section 3) and resolve_boundary_ties (section 7),
+ * discovery_trace_scale, and |max_request_memory_mb| (the server's request-wide memory bound of
+ * /traverse, --traverse-max-request-memory-mb; 0 = off), which every /traverse capabilities
+ * probe states too: a graph-less probe sees it without reading a pair
  */
-Json::Value multigraph_capabilities_json();
+Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb);
 
 } // namespace cli
 } // namespace mtg

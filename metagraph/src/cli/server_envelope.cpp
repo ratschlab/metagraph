@@ -192,7 +192,7 @@ Json::Value composite_fp_json(std::vector<std::string> index_fps) {
     return Json::Value(sha256_hex(joined));
 }
 
-Json::Value multigraph_capabilities_json() {
+Json::Value multigraph_capabilities_json(uint64_t max_request_memory_mb) {
     auto strings = [](std::initializer_list<const char *> values) {
         Json::Value out(Json::arrayValue);
         for (const char *value : values) {
@@ -228,6 +228,9 @@ Json::Value multigraph_capabilities_json() {
     // a discovery under support "trace" ranks by traced k-mers (section 7), as every
     // /traverse capabilities block states it
     m["discovery_trace_scale"] = "traced";
+    // the request-wide memory bound of /traverse (0: off), as the /traverse capabilities probe
+    // states it (the service's request of 2026-11-01: seen without reading a pair)
+    m["max_request_memory_mb"] = Json::Value(static_cast<Json::UInt64>(max_request_memory_mb));
     return m;
 }
 

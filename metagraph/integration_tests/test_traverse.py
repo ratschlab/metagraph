@@ -2055,6 +2055,9 @@ class TestTraverseAPI(TestTraverseBase):
         # feature level 4: the server's maxima of the budgets (off unless configured) and the
         # row-diff path cache of the reads (128 MiB by default)
         self.assertEqual((0, 0), (caps['max_memory_mb'], caps['max_work_units']))
+        # E5b: the request-wide memory bound beside them, off unless configured
+        self.assertIs(type(caps['max_request_memory_mb']), int)
+        self.assertEqual(0, caps['max_request_memory_mb'])
         self.assertEqual(128, caps['decode_cache']['path_cache_mb'])
         self.assertEqual('SPEC-labeled-traversal-core.md section 8.4, the row-diff path cache',
                          caps['decode_cache']['rule'])
@@ -2166,6 +2169,12 @@ class TestTraverseAPI(TestTraverseBase):
         with TestTraverseAttempts._Server(self, '--traverse-max-memory-mb', '1') as off, \
                 TestTraverseAttempts._Server(self, '--traverse-max-memory-mb', '1',
                                              '--traverse-max-request-memory-mb', '2') as on:
+            # the probe states the bound beside the per-seed maximum (0: off)
+            for server, bound in ((off, 0), (on, 2)):
+                caps = requests.get(server.url + '/traverse/capabilities').json()
+                self.assertEqual((1, bound), (caps['max_memory_mb'],
+                                              caps['max_request_memory_mb']))
+                self.assertIs(type(caps['max_request_memory_mb']), int)
             plain = off.post('traverse', dict(request, attempt_id='off-1'))
             self.assertEqual(200, plain.status_code, plain.text[:500])
             plain = plain.json()
@@ -3948,6 +3957,59 @@ class TestTraverseMultiGraph(TestTraverseBase):
                                            f'spans several graphs); GET /capabilities lists the '
                                            f'graphs'}, ret.json())
                 self._entry(requests.get(f'{server.url}/{route}?graph=A'), 'A', '/' + route)
+        finally:
+            server.close()
+
+    def test_multi_request_memory_bound(self):
+        """E5b on a multi-graph server: GET /capabilities' multigraph block and every
+        /traverse capabilities probe (each entry of its envelope) state
+        max_request_memory_mb (0 on this class's server, the flag's value with it); a named
+        /traverse whose results pass the bound answers the one-entry envelope with the later
+        seeds not started (resource_stop scope request), unknown_labels as every result of
+        the pair states it, and the attempt's usage at the top level."""
+        caps = requests.get(self.server.url + '/capabilities').json()
+        self.assertEqual(0, caps['multigraph']['max_request_memory_mb'])
+        probes = requests.get(self.server.url + '/traverse/capabilities').json()
+        self.assertEqual({0}, {e['max_request_memory_mb'] for e in probes['answers']})
+        server = self._Server(self, self.csv, flags=('--traverse-max-memory-mb', '1',
+                                                     '--traverse-max-request-memory-mb', '2'))
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            caps = requests.get(server.url + '/capabilities').json()
+            self.assertEqual(2, caps['multigraph']['max_request_memory_mb'])
+            self.assertIs(type(caps['multigraph']['max_request_memory_mb']), int)
+            probes = requests.get(server.url + '/traverse/capabilities').json()
+            self.assertEqual(5, len(probes['answers']))
+            self.assertEqual({(1, 2)}, {(e['max_memory_mb'], e['max_request_memory_mb'])
+                                        for e in probes['answers']})
+            one = requests.get(server.url + '/traverse/capabilities?graph=A').json()
+            self.assertEqual(2, one['answers'][0]['max_request_memory_mb'])
+            req = {'graph': 'A', 'attempt_id': 'multi-bound-1',
+                   'seeds': [{'sequence': self.element}, {'sequence': self.left1[20:80]},
+                             {'sequence': self.right1[20:80], 'labels': ['acc1', 'nowhere']}],
+                   'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': BLOCK},
+                                'output': {'detail': 'summary', 'timing': False}}}
+            ret = requests.post(server.url + '/traverse', data=json.dumps(req))
+            entry = self._entry(ret, 'A')
+            out = ret.json()
+            self.assertEqual('multi-bound-1', out['request_id'])
+            results = entry['results']
+            walks = [r['outcome']['walks'] for r in results]
+            self.assertEqual('failed', walks[2])
+            # walked (each under its 1 MiB budget, which may stop it: scope locus)
+            for r in results[:2]:
+                self.assertIn(r['outcome']['walks'], ('complete', 'partial'))
+                self.assertIn('arms', r)
+                self.assertNotEqual('request', r.get('resource_stop', {}).get('scope'))
+            q = results[2]['resource_stop']
+            self.assertEqual(('request', 'memory', 'not_started', ['split_request']),
+                             (q['scope'], q['resource'], q['phase'], q['actions']))
+            self.assertEqual(['nowhere'], results[2]['unknown_labels'])
+            self.assertEqual([], results[0]['unknown_labels'])
+            self.assertEqual(walks[:2] + ['not_started'],
+                             [s['outcome'] for s in out['usage']['per_seed']])
+            self.assertEqual('request_memory', out['usage']['per_seed'][2]['stopped_by'])
+            self.assertEqual(2, out['usage']['seeds']['started'])
         finally:
             server.close()
 

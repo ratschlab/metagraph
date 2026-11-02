@@ -2372,6 +2372,11 @@ int run_server(Config *config) {
         // budget is lowered to it and an omitted one set to it, echoed in strategy.clamped
         caps["max_memory_mb"] = static_cast<Json::UInt64>(config->traverse_max_memory_mb);
         caps["max_work_units"] = static_cast<Json::UInt64>(config->traverse_max_work_units);
+        // the request-wide memory bound (E5b; 0: off): a seed after the first is not started
+        // when the results before it and its budget would pass it (resource_stop scope
+        // "request"); its presence says that this server can leave seeds unstarted for it
+        caps["max_request_memory_mb"]
+            = static_cast<Json::UInt64>(config->traverse_max_request_memory_mb);
         caps["work_check_interval"]
             = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
         // what bounds.max_work_units counts and how far a work stop can exceed it: the rule is
@@ -2568,7 +2573,8 @@ int run_server(Config *config) {
                 // deadlines and the request registry
                 c["composite_fp"] = composite_fp;
                 c["composite_rule"] = kCompositeRule;
-                c["multigraph"] = multigraph_capabilities_json();
+                c["multigraph"] = multigraph_capabilities_json(
+                        config->traverse_max_request_memory_mb);
             }
             // the request registry (section 5) on every server: a single-graph /resolve or
             // /pattern with request_id registers too, and GET /requests/{attempt_id} reads a
