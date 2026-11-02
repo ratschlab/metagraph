@@ -26,7 +26,10 @@ comments, debug logs or commit messages.
 11. A `--help` line fits on 1 line and ends with the default in brackets, such as `[0.7]`.
 
 Check: `python3 scripts/check_text_rules.py`. It reads `scripts/text-rules.json` and compares each file with
-`scripts/text-rules-baseline.json`. Existing text is allowed. A file that gains a hit fails. A file that loses one
-fails too, so lower the baseline in the same commit with `--update-baseline`. Mark a deliberate exception with a
+`scripts/text-rules-baseline.json`. It rejects new hits for R1, R4, R5, R7, R8 and R9. R2 and R6 are advisory
+in `--report`. Reviewers check R3, R10 and R11, and the parts of the other rules that need judgment.
+Existing baseline hits are allowed. A file that loses a checked hit fails too, so lower its baseline in the same
+commit with `--update-baseline`. That command refuses increases. Changes to the scanner's scope need a reviewed
+baseline migration. Mark a deliberate exception with a
 comment `text-rules-allow: R1 <reason>` on that line or the line before.
 A review of a change to user-facing text ends with a line "Text rules: pass" or the list of breaks.

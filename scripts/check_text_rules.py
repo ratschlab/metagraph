@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check user-facing text against the writing rules (R1-R13) with a ratchet.
+"""Check mechanically detectable writing rules with a ratchet.
 
 The scanner reads the files that `scripts/text-rules.json` names, pulls out the text a
 user reads (prose in Markdown and reStructuredText, strings in code that reach
@@ -10,7 +10,7 @@ hits than its baseline, or fewer (lower the baseline in the same change).
 Usage:
   check_text_rules.py                    # check against the baseline
   check_text_rules.py --report           # list every hit, then the counts
-  check_text_rules.py --update-baseline  # write the current counts
+  check_text_rules.py --update-baseline  # record reductions only
   check_text_rules.py --report FILE...   # list hits in some files only
 
 Hits that only count, never fail: R2 (sentences over the word limit) and
@@ -29,7 +29,6 @@ import sys
 RATCHET = ("R1", "R4", "R5", "R7", "R8", "R9")
 REPORT_ONLY = ("R2", "R6")
 WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
-PROSE = re.compile(r"[A-Za-z]{2,}[,]? [A-Za-z]{2,}[,]? [A-Za-z]{2,}")
 ALLOW = re.compile(r"text-rules-allow:\s*([R0-9, ]+)")
 
 
@@ -46,6 +45,7 @@ def markdown_units(src, rst=False):
     out, buf, start = [], [], 0
     fence = None
     literal_indent = None
+    directive_indent = None
 
     def flush():
         nonlocal buf
@@ -57,6 +57,11 @@ def markdown_units(src, rst=False):
         line = raw.rstrip()
         stripped = line.lstrip()
         indent = len(line) - len(stripped)
+        if rst and directive_indent is not None:
+            if stripped and indent <= directive_indent:
+                directive_indent = None
+            elif re.match(r":[\w-]+:", stripped):
+                continue
         if fence:
             if stripped.startswith(fence):
                 fence = None
@@ -85,6 +90,11 @@ def markdown_units(src, rst=False):
             continue
         if rst and stripped.startswith(".. "):
             flush()
+            directive = re.match(r"\.\. (?:note|warning|attention|caution|danger|error|hint|important|tip)::\s*(.*)", stripped)
+            if directive:
+                directive_indent = indent
+                if directive.group(1):
+                    out.append((i, directive.group(1)))
             continue
         if not rst and indent >= 4 and not buf:
             continue  # indented code block
@@ -201,6 +211,7 @@ def cpp_units(src, cfg, path):
     """String literal runs in help output, log errors and exceptions."""
     src = re.sub(r"/\*.*?\*/", _blank, src, flags=re.S)
     src = re.sub(r"(?m)//.*$", "", src)
+    src = re.sub(r"(?m)^\s*#\s*include\b[^\n]*", _blank, src)
     every = any(fnmatch.fnmatch(path, g) for g in cfg.get("cpp_all_strings", []))
     ctx = re.compile(cfg.get("cpp_context", r"(logger->(error|warn|critical)|throw\s+[\w:]+|fprintf\s*\(\s*stderr|std::cerr)"))
     out = []
@@ -271,12 +282,11 @@ def sentences(t):
 def check_text(t, cfg, scope):
     """Return a list of (rule, snippet) for one text unit."""
     t = re.sub(r"\{[^{}]*\}|%[-0-9.]*[sdzlufgx]+|\bCODE\b", "X", t)
-    if not PROSE.search(t) or looks_like_code(t):
+    if looks_like_code(t):
         return []
     hits = []
-    for m in re.finditer(r"[A-Za-z0-9)\"'\]]\s*;\s+[A-Za-z0-9(]", t):
+    if ";" in t:
         hits.append(("R1", t))
-        break
     for s in sentences(t):
         n = len(WORD.findall(s))
         if n > cfg.get("max_sentence_words", 30):
@@ -386,11 +396,18 @@ def main():
         print("TOTALS", json.dumps(dict(sorted(totals.items()))), "files", len(results), file=sys.stderr)
         return 0
     base_path = pathlib.Path(a.baseline)
+    base = json.loads(base_path.read_text()) if base_path.exists() else {}
     if a.update_baseline:
+        increases = [f"{f}: {rule} has {n} hits, baseline {base.get(f, {}).get(rule, 0)}"
+                     for f, rules in now.items() for rule, n in rules.items()
+                     if n > base.get(f, {}).get(rule, 0)]
+        if increases:
+            print("Cannot raise the baseline. Fix these hits or document an exception:")
+            print("\n".join(increases))
+            return 1
         base_path.write_text(json.dumps(now, indent=1) + "\n")
         print(f"wrote {base_path.name}: {sum(sum(c.values()) for c in now.values())} hits in {len(now)} files")
         return 0
-    base = json.loads(base_path.read_text()) if base_path.exists() else {}
     problems = []
     for f in sorted(set(now) | set(base)):
         for rule in RATCHET:

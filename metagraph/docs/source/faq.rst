@@ -41,7 +41,7 @@ Installation
 Which installation method?
 --------------------------
 
-1. **Conda** (easiest): ``conda install -c bioconda -c conda-forge metagraph``
+1. **Conda** (easiest): ``conda install -c conda-forge -c bioconda --strict-channel-priority metagraph``
 2. **Docker** (isolated): ``docker run ghcr.io/ratschlab/metagraph:master``
 3. **Source** (for custom alphabets or latest features)
 
@@ -68,6 +68,7 @@ What k-mer size?
 - Protein: k=7 to 15
 
 Always pass ``-k``. The ``build`` default is 3. Only ``metagraph-workflows`` defaults to 31.
+
 - Longer k = more specific, less sensitive
 - Must be ≤ sequence/read length
 
@@ -149,7 +150,7 @@ Which annotation type?
 
 **By feature:**
 
-- K-mer counts: ``int_brwt`` or ``row_diff_int_brwt``
+- k-mer counts: ``int_brwt`` or ``row_diff_int_brwt``
 - Coordinates: ``brwt_coord`` or ``row_diff_brwt_coord``
 
 How to annotate with counts?

@@ -34,6 +34,7 @@ Online documentation is available at https://metagraph.ethz.ch/static/docs/index
 
 If you are using MetaGraph or the index resources for your work, please cite:
 
+<!-- text-rules-allow: R1 Preserve the published citation punctuation. -->
 > Karasikov M, Mustafa H, Danciu D, Kulkov O, Zimmermann M, Barber C, Rätsch G, Kahles A. Efficient and accurate search in petabase-scale sequence repositories. *Nature*. 2025;647: 1036–1044.  
 > https://www.nature.com/articles/s41586-025-09603-w
 
@@ -62,7 +63,7 @@ If you are using MetaGraph or the index resources for your work, please cite:
 Install the [latest release](https://github.com/ratschlab/metagraph/releases/latest) on Linux or Mac OS X with Anaconda:
 
 ```
-conda install -c bioconda -c conda-forge metagraph
+conda install -c conda-forge -c bioconda --strict-channel-priority metagraph
 ```
 
 ### Docker
@@ -114,7 +115,7 @@ recipe only installs the C++ binary, so the workflow CLI needs an extra
 `pip install` step:
 
 ```bash
-conda install -c bioconda -c conda-forge metagraph     # the metagraph binary
+conda install -c conda-forge -c bioconda --strict-channel-priority metagraph     # the metagraph binary
 pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
 ```
 

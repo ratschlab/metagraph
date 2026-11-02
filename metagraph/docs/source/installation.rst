@@ -111,7 +111,7 @@ Before compiling MetaGraph, install the following dependencies:
         Homebrew before configuring CMake.
 
         On **macOS**, use the AppleClang instructions above. Homebrew's macOS Boost
-        packages use libc++, while GNU GCC uses libstdc++; choosing GCC therefore
+        packages use libc++, while GNU GCC uses libstdc++. Choosing GCC therefore
         requires building and installing Boost separately with that GCC toolchain.
         See Homebrew's `C++ runtime compatibility guidance
         <https://docs.brew.sh/C%2B%2B-Standard-Libraries>`_.

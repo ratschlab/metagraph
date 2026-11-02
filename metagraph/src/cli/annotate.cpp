@@ -272,7 +272,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     const size_t record = calls++ / (forward_and_reverse ? 2 : 1);
                     if (labels.size() != 1 || labels[0].empty() || !utils::valid_utf8(labels[0])) {
                         logger->error("Record {} in '{}' has no usable header. --index-header-coords "
-                                      "needs 1 non-empty UTF-8 header per record. Remove --header-delimiter.",
+                                      "needs 1 non-empty UTF-8 header per record. Give each record a valid, whole header.",
                                       record + 1, files[i]);
                         exit(1);
                     }

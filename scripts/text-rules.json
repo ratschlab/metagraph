@@ -14,7 +14,8 @@
    "include": [
     "metagraph/src/cli/*.cpp",
     "metagraph/src/cli/config/*.cpp",
-    "metagraph/src/cli/load/*.cpp"
+    "metagraph/src/cli/load/*.cpp",
+    "metagraph/src/cli/*.hpp"
    ]
   }
  ],
