@@ -250,5 +250,11 @@ joined by `\n`, no trailing newline; null when any pair has none; each loaded (g
 counted once, so a pair listed under two names counts once), `composite_rule` (that sentence), and a
 `multigraph` block advertising `envelope_version`, the envelope routes, the selectors per route,
 `traverse_pairs_per_request`, the routes reading `not_after_ms`, `finish_by_ms` and `request_id`, the registry route,
-`unknown_labels`, `search_cuts`, `resolve_boundary_ties` and `discovery_trace_scale` (`"traced"`, section 7).
+`unknown_labels`, `search_cuts`, `resolve_boundary_ties`, `discovery_trace_scale` (`"traced"`, section 7) and
+`max_request_memory_mb` (E5b: the request-wide memory bound of `/traverse`, `--traverse-max-request-memory-mb`, an
+integer in MiB, 0 when off; `SPEC-labeled-traversal-core.md` §5, request budgets), which every `/traverse`
+capabilities probe (each entry of its envelope) states too, beside `max_memory_mb`: a graph-less probe sees it
+without reading a pair. A seed the bound leaves unstarted is a result of the pair's entry (a failed result with
+`resource_stop.scope: "request"`, phase `not_started`, its `unknown_labels` stated as every result of the pair
+states them); the envelope is the one-entry envelope of a named `/traverse` as with any other result.
 Clients switch on these, never on dates.

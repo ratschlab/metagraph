@@ -386,7 +386,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   limitation (§7.0). Both budgets are **per seed** (the design's *locus* scope): each seed of a request is
   walked under budgets of its own, so that its result does not depend on the other seeds, and a request of n
   seeds can hold up to n times the memory budget (each seed's output is kept until the response is written;
-  the server bounds n). A budget that does not hold the seed itself — the work of reading the seed (its
+  the server bounds n, and with its request-wide memory bound what the results hold together, below). A budget
+  that does not hold the seed itself — the work of reading the seed (its
   validation, or the derivation of its permitted set), or the memory of its depth-0 state (the label
   dictionary and both roots, with what ending and delivering them costs in the requested detail) — fails
   that seed (`outcome.walks: failed`, §7.0) before anything per label is delivered; the other seeds are
@@ -430,6 +431,32 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   enforcement during delivery, a staged item, §6.8); what bounds the delivery's time is the size the memory
   budget admits — except for a request with `attempt_id`, whose duration bound the server enforces through the
   delivery too (§6.8, the attempt's bound).
+  **The request-wide memory bound** *(E5b; feature level unchanged: a client gates on the capabilities'
+  `max_request_memory_mb`, §10.3)*: with `--traverse-max-request-memory-mb` R (MiB; 0 = off, the default, under
+  which every answer is byte for byte what it was), before seed i ≥ 1 starts — after the stop between seeds
+  (§6.8), which keeps precedence — the request compares H + B with R, where H is what the results of seeds 0 to
+  i − 1 hold until the response is written (their `usage.per_seed[].final_bytes`, §7.3: walked, failed,
+  not-in-graph and refused results alike, the attempt's held account) and B the request's effective per-seed
+  memory budget (`bounds.max_memory_mb` after the server's clamp; R requires the server's per-seed maximum in
+  [1, R], §10.3, so every seed has one, at most R). If H + B > R (a tie at exactly R starts), seed i and every
+  later seed are **not started**: each is failed in the shape of a seed the attempt never started (§6.8) — no
+  `arms` and no graphlet, `outcome.walks: failed`, the `error` "not started: the results already held (H bytes)
+  and this seed's memory budget (B bytes) would pass the server's request memory bound (R MiB); no budget of
+  the seed ran out: send it in a new request", a `resource_stop` `{scope: "request", resource: "memory", phase:
+  "not_started", requested: R, effective: R, used: ⌈H / MiB⌉, remaining: R − used (at least 0), actions:
+  ["split_request"], message}`, a seed-level `walk_domain` with knob `max_request_memory_mb` (`limit` R,
+  `observed` ⌈H / MiB⌉), `memory_bound_soft` as every result under a budget states it, and on a multi-graph
+  server's pair `unknown_labels` (`SPEC-multigraph-envelope.md` section 2) — and `usage.per_seed[]` states
+  `outcome: "not_started"`, `stopped_by: "request_memory"`, not counted in `seeds.started`. Every seed left
+  unstarted states the same H, the results held when the first was left unstarted. The response is 200, as with
+  an attempt's unstarted seeds (on a multi-graph server the one-entry envelope). Seed 0 always starts (0 + B ≤
+  R). The rule binds by the memory account only, never by time: the attempt's bound, a cancel and a gone client
+  stop as before. **What one request then holds at once** is at most R plus the last walked seed's soft
+  excess (its `memory_bound_soft`; while a seed is walked, the results before it and its walk hold at most R plus
+  that walk's excess) — the account `usage.memory.held_bound_bytes` states (§7.3) — beside the priced echo of
+  each seed left unstarted (its `final_bytes`: the fixed part of a result and its `seed_id`, §5, a few KB of
+  text in fact); two request slots, 2R plus their soft excess, where without the bound n seeds could hold n × B.
+  A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
   and `locus_id`, each optional, each a string matching `^[A-Za-z0-9._:-]{1,128}$`. A request with
@@ -974,7 +1001,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     ["continue_from_leaves"]`, and an arm `walk_domain` naming `attempt_id` (§7.0). In its seed phase the seed
     fails — no result exists yet, not even one complete to 0 bp: no arms, an `error`, a seed-level
     `walk_domain` naming `attempt_id` and `actions: ["retry_attempt"]`. The seeds not started yet are failed per
-    seed with `resource_stop.phase: "not_started"` (§7.0). No budget ran out, and the statements say so
+    seed with `resource_stop.phase: "not_started"` (§7.0); a stop seen between seeds is checked before the
+    request-wide memory bound (§5), which leaves seeds unstarted with `scope: "request"` instead. No budget ran
+    out, and the statements say so
     (`time_budget` would tell a reader to raise one). A cancel that arrives after every seed was walked discards
     nothing: the response is written (within the bound) and `usage.reason` is `completed`. MGT v1 is unchanged:
     only free tokens take new values (`Q` scope `attempt`, resources `cancelled` and `attempt_deadline`, phase
@@ -1582,7 +1611,7 @@ is rejected instead (§5).
 
   | axis | values | meaning |
   |---|---|---|
-  | `walks` | `complete` \| `partial` \| `failed` | `complete` only when no walk-class limitation applies: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`) **per path** (keep, or merge where no merge united a history) and no carrier of the seed was left out. `partial`: a valid certified prefix whose limits are stated — a `walk_domain` (an arm was truncated or pruned), a `scope` with `observed > 0` (a merge united histories: the walks are complete for the united-history rule, not per path) or a `seed_labels` limitation (the walks only a cut carrier carries are missing). `failed`: no traversal — the permitted set could not be derived (§6.1 step 4): the result has no `arms`, an `error`, and a `derivation` limitation; or a request budget does not hold the seed itself (§5, request budgets): no `arms`, an `error`, a seed-level `walk_domain` naming the budget's knob and a `resource_stop`; or a stop from outside the walk reached the seed in its seed phase or before it started (§6.8: a cancel, the attempt's bound): the same shape, the `walk_domain` naming `attempt_id`, the `resource_stop` with `scope: "attempt"` (`phase: "not_started"` for a seed never started) |
+  | `walks` | `complete` \| `partial` \| `failed` | `complete` only when no walk-class limitation applies: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`) **per path** (keep, or merge where no merge united a history) and no carrier of the seed was left out. `partial`: a valid certified prefix whose limits are stated — a `walk_domain` (an arm was truncated or pruned), a `scope` with `observed > 0` (a merge united histories: the walks are complete for the united-history rule, not per path) or a `seed_labels` limitation (the walks only a cut carrier carries are missing). `failed`: no traversal — the permitted set could not be derived (§6.1 step 4): the result has no `arms`, an `error`, and a `derivation` limitation; or a request budget does not hold the seed itself (§5, request budgets): no `arms`, an `error`, a seed-level `walk_domain` naming the budget's knob and a `resource_stop`; or a stop from outside the walk reached the seed in its seed phase or before it started (§6.8: a cancel, the attempt's bound): the same shape, the `walk_domain` naming `attempt_id`, the `resource_stop` with `scope: "attempt"` (`phase: "not_started"` for a seed never started); or the request-wide memory bound left it unstarted (§5): the same shape, the `walk_domain` naming `max_request_memory_mb`, the `resource_stop` with `scope: "request"`, `phase: "not_started"` |
   | `branch_diagnostics` | `complete` \| `cut` | `cut`: a `branch_events` limitation — some arm's `evidence.complete` is `false`, and branch decisions and refusals at or beyond `evidence.complete_to_bp` are not reported |
   | `label_evidence` | `complete` \| `lower_bound` \| `qualified` | `lower_bound`: evidence may be *missing or understated* — recorded lists were cut (`label_lists`, `inexact_counts`: annotate mode's `label_summary` and the counts flagged `exact: false` are lower bounds), carriers of the seed were cut (`seed_labels`), a `max_switch_sources` cut may have raised a loss or missed a switch entry (`switch_sources`), or losses were re-minimised greedily (`greedy_losses`). `qualified`: something reported may be *overstated* — a column-label trace cannot see a record boundary (`trace_record_boundaries`), or the permitted set was derived from part of the seed (a `derivation` on a walked result, D3, feature level 6: it may hold labels the whole seed would exclude); `qualified` wins when both apply |
   | `delivery` | `inline` | the whole result is in this response; `spooled` / `paged` are reserved for the graphlet delivery path (`DESIGN-traverse-graphlet.md` §14) |
@@ -1614,7 +1643,7 @@ is rejected instead (§5).
 
 | `kind` | Where | Emitted when | `knob` | `observed` |
 |---|---|---|---|---|
-| `walk_domain` | arm; seed, on a seed a request budget failed, or the attempt stopped in its seed phase or before it started (no `complete_to_bp`: nothing was walked) | `status` is not `complete`: the cap in `cap_trigger`, then any other cap that ended walks after it (a beam, then a step cap) | the cap's field: `bounds.max_steps`, `bounds.max_live_paths` (also a beam's width), `bounds.max_paths`, `bounds.max_output_bp`, `bounds.time_budget_ms`, `bounds.max_memory_mb`, `bounds.max_work_units` (`resource_limit`); `attempt_id` for a stop from outside the walk (§6.8: a cancel or the attempt's bound, `resource_limit`; `limit` the attempt's bound in ms, and the effect says no budget ran out) | what the cap compared at the trip: steps of the seed, bases of the arm, leaves + live heads, live heads (beam: heads of the level), elapsed ms, the smallest budget in MiB that admits the head — what admitting it needed with that budget's own caches' allotments, which grow with the knob (§6.8) —, the work units used, the attempt's elapsed ms; for a later cap the walks it ended. `complete_to_bp` = the arm's |
+| `walk_domain` | arm; seed, on a seed a request budget failed, or the attempt stopped in its seed phase or before it started, or the request-wide memory bound left unstarted (no `complete_to_bp`: nothing was walked) | `status` is not `complete`: the cap in `cap_trigger`, then any other cap that ended walks after it (a beam, then a step cap) | the cap's field: `bounds.max_steps`, `bounds.max_live_paths` (also a beam's width), `bounds.max_paths`, `bounds.max_output_bp`, `bounds.time_budget_ms`, `bounds.max_memory_mb`, `bounds.max_work_units` (`resource_limit`); `attempt_id` for a stop from outside the walk (§6.8: a cancel or the attempt's bound, `resource_limit`; `limit` the attempt's bound in ms, and the effect says no budget ran out); `max_request_memory_mb` for a seed the request-wide memory bound left unstarted (§5; `limit` the bound in MiB, and the effect says no budget of the seed ran out) | what the cap compared at the trip: steps of the seed, bases of the arm, leaves + live heads, live heads (beam: heads of the level), elapsed ms, the smallest budget in MiB that admits the head — what admitting it needed with that budget's own caches' allotments, which grow with the knob (§6.8) —, the work units used, the attempt's elapsed ms, what the results before an unstarted seed hold (MiB rounded up); for a later cap the walks it ended. `complete_to_bp` = the arm's |
 | `branch_events` | arm | events were dropped by the cap | `output.max_branch_events` | `branch_events_total`; `complete_to_bp` = `evidence.complete_to_bp` |
 | `label_lists` | arm | `labels_per_node.nodes_truncated > 0` | `labels.max_labels_per_node` | `labels_per_node.max_seen` |
 | `inexact_counts` | arm | a live-label count in `frontier_remaining`, `cap_trigger` or a `growth` bin is flagged `exact: false` | `labels.max_labels_per_node` | how many counts are flagged |
@@ -1652,7 +1681,11 @@ is rejected instead (§5).
   way with `scope: "attempt"`, `resource: "cancelled" | "attempt_deadline"`, the attempt's bound (`requested`,
   `effective`) and elapsed time (`used`) in whole ms, and `actions: ["continue_from_leaves"]` on a walked seed,
   `["retry_attempt"]` on a seed failed in its seed phase (`phase: "traversal"`) or never started (`phase:
-  "not_started"`); its message says when the walk stopped on the attempt's clock and that no budget ran out.
+  "not_started"`); its message says when the walk stopped on the attempt's clock and that no budget ran out. A
+  seed the request-wide memory bound left unstarted (§5) states `scope: "request"`, `resource: "memory"`,
+  `phase: "not_started"`, `requested` = `effective` the bound (MiB), `used` what the results before it hold
+  (MiB, rounded up), `remaining` the bound less that (at least 0) and `actions: ["split_request"]` (send it in a
+  new request); its message says that nothing of the seed was read and no budget of the seed ran out.
   The MGT `Q` record carries
   it (§7.5.2). It is a property of the walk, the same in every detail; a memory stop itself depends on the
   requested detail (the output is charged), so the same request can stop at another depth in another detail.
@@ -2134,7 +2167,9 @@ attempt) nor a 400 for a malformed id:
   none of the last three.
 - `per_seed` (in responses; the attempt's retained state keeps the totals only): `outcome` — `complete |
   partial | failed | not_started` as the result's `outcome.walks`; `stopped_by` — the resource that stopped
-  it: `memory | work | time | cancelled | attempt_deadline` (null: none, or a cap); `work_units` — the seed's
+  it: `memory | work | time | cancelled | attempt_deadline`, or `request_memory` for a seed the request-wide
+  memory bound left unstarted (§5; a seed an attempt's stop left unstarted states null) (null: none, or a
+  cap); `work_units` — the seed's
   charged work (its seed phase `work_seed` and both arms, the account a work budget is compared with; computed
   whether or not a budget is set: deterministic logical work, §6.8; a derivation found `too_wide` includes the
   window it decoded); `peak_admitted_bytes` — the modelled account's peak, which under `bounds.max_memory_mb` is
@@ -2155,9 +2190,11 @@ attempt) nor a 400 for a malformed id:
   seed's over its own budget), null without a memory budget; `memory.held_bound_bytes` — an upper bound of what
   the walks and the results held at once, **as observed** (what `memory_bound_soft` lists as not observed is not
   in it), under `bounds.max_memory_mb` only: max over walked seeds i of (the `final_bytes` before i + the budget
-  + i's soft excess), and at least all results together; null without a memory budget. The modelled account is
-  **no bound of what was held**: without a memory budget it leaves out the label caches (up to 1,000,000 rows),
-  the lookahead and a level's decoded rows (review of the stage-4 backend, F2: 0.79 MB stated for a walk that
+  + i's soft excess), and at least all results together; null without a memory budget. Under the request-wide
+  memory bound (§5) it is at most the bound plus the largest per-seed soft excess, beside the `final_bytes` of
+  the seeds left unstarted. The modelled account is **no bound of what was held**: without a memory budget it
+  leaves out the label caches (up to 1,000,000 rows), the lookahead and a level's decoded rows (review of the
+  stage-4 backend, F2: 0.79 MB stated for a walk that
   raised the server's RSS by about 111 MB), and under one the rows within the budget beside the account are
   in neither number — read `held_bound_bytes`, not `peak_admitted_bytes`, as the request's memory. The block
   lies outside the per-seed budgets (like the strategy echo).
@@ -2744,8 +2781,11 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   - **`GET /traverse/capabilities`** (the probe; per graph in multi-graph mode, below): all of the above for its
     index, plus the server maxima (`max_time_ms`, `max_seeds`, `max_seed_bp`, `max_seed_labels`,
     `max_query_bp`; from feature level 4 also `max_memory_mb` and `max_work_units`, the server's maxima of the
-    budgets, 0 when off, below), the request budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`),
-    `work_check_interval` (`W` of §6.8, in work units), `work_bound` (a reference to §6.8, work units: what
+    budgets, 0 when off, below; from E5b `max_request_memory_mb` beside them, the request-wide memory bound, an
+    integer, 0 when off (its presence says that the server can leave seeds unstarted for it, §5), which GET
+    /capabilities' `multigraph` block states too, below), the request budgets it accepts (`budgets:
+    ["max_memory_mb", "max_work_units"]`), `work_check_interval` (`W` of §6.8, in work units), `work_bound` (a
+    reference to §6.8, work units: what
     `bounds.max_work_units` counts and how far a work stop can exceed it — deterministic logical work, not
     measured decode effort, with its weights, the dependency weighting of a budget-aware row included; what was
     charged since the previous comparison, one indivisible charge such as a fetch call's rows decoded whole, with
@@ -2753,8 +2793,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     comparison finding it at least `work_check_interval` units over budget; the physical decode counters in
     `timing`), `memory_bound: "soft"` (stage 3 charges budget-aware annotation reads, §6.8, but
     what is held beyond the admitted account is still soft, §7.0 `memory_bound_soft`: no hard request-wide memory
-    bound), `attempts` (below), from feature level 6 `coordinates` (record coordinates, §7.1: `supported` —
-    whether this index reports them, which is `supports_trace` —, `knob` `"output.coordinates"`, `cap_knob`
+    bound — the request-wide bound of §5, `max_request_memory_mb`, is soft by the same excess), `attempts`
+    (below), from feature level 6 `coordinates` (record coordinates, §7.1: `supported` — whether this index reports
+    them, which is `supports_trace` —, `knob` `"output.coordinates"`, `cap_knob`
     `"output.max_coordinate_occurrences"`, `max_occurrences_default` (16), `kinds` (the block kinds this index can
     report: `record` and `mixed` need a `CoordToHeader`; `[]` when not supported), `limitation`
     `"coordinates"`, `action` `"drop_coordinates"`, `output_bound` — a reference to §7.1, what bounds the block:
@@ -3249,7 +3290,17 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   or a failed seed's) carry `server_limit` (the maximum, as a `derivation`'s and `seed_labels`' do) and say "the
   knob is at the server's maximum (server_limit), which a request cannot raise" where they would say "raise the
   knob". A budget the request gave below the maximum keeps its lever. The probe states the maxima (`max_memory_mb`,
-  `max_work_units`). The CLI applies none. The traverse caps are non-zero by DEFAULT because a request may
+  `max_work_units`). **The request-wide memory bound** *(E5b)*: `--traverse-max-request-memory-mb R` (an integer
+  in [0, 1 048 576] MiB, the per-seed flag's range; 0 = off, the default, under which every answer is byte for
+  byte what it was) leaves the later seeds of a request unstarted when the results before a seed and its
+  memory budget would pass R (§5, request budgets). **Start-up rule**: the server refuses to start when R > 0
+  and `--traverse-max-memory-mb` is 0 or above R ("--traverse-max-request-memory-mb R needs
+  --traverse-max-memory-mb in [1, R] ..."), so that every seed runs under a budget of at most R (an omitted one
+  set to the per-seed maximum, a larger one lowered to it, echoed in `strategy.clamped`, as above) and the first
+  seed always fits. Stated as `max_request_memory_mb` by every `/traverse` capabilities probe (beside
+  `max_memory_mb`) and by GET /capabilities' `multigraph` block (`SPEC-multigraph-envelope.md` section 8); not
+  by the capabilities of a `/resolve` or `/traverse` answer, which state no maxima. What one request then holds:
+  §5. The CLI applies none. The traverse caps are non-zero by DEFAULT because a request may
   name no labels at all: the server then chooses the permitted set, so the request's own bounds no longer describe
   the work it asks for, and an unconfigured deployment must not be the unlimited one. `--traverse-max-time-ms` is
   also the only bound on the derivation phase, so when a request has a derived seed a `bounds.time_budget_ms` of 0
