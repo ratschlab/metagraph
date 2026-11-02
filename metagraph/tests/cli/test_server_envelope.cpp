@@ -278,6 +278,56 @@ TEST(ServerEnvelope, Sample05TraverseNamed) {
     EXPECT_TRUE(built["deadline"]["finish_by_ms"].isNull());
 }
 
+// Sample 23 (E5b): a named /traverse whose third seed the request-wide memory bound left
+// unstarted, from a real run: the envelope built again from its entry, and the unstarted
+// result's statements consistent with the usage (H, the final_bytes of the seeds before it; B,
+// the effective per-seed budget; R, the bound)
+TEST(ServerEnvelope, Sample23TraverseRequestMemoryBound) {
+    const Json::Value s23 = sample("23_traverse_request_memory_bound.json");
+    const Json::Value &body = s23["body"];
+    const Json::Value built = rebuilt_post_envelope(body);
+    EXPECT_EQ(text(body), text(built));
+    EXPECT_EQ(s23["request"]["attempt_id"], built["request_id"]);
+    EXPECT_EQ(text(body["usage"]), text(built["usage"]));
+    ASSERT_EQ(1u, body["answers"].size());
+    const Json::Value &entry = body["answers"][0];
+    ASSERT_EQ(3u, entry["results"].size());
+    const Json::Value &u = body["usage"];
+    const uint64_t held = u["per_seed"][0]["final_bytes"].asUInt64()
+                        + u["per_seed"][1]["final_bytes"].asUInt64();
+    const uint64_t budget = entry["strategy"]["bounds"]["max_memory_mb"].asUInt64() << 20;
+    const Json::Value &unstarted = entry["results"][2];
+    const Json::Value &q = unstarted["resource_stop"];
+    const uint64_t bound_mb = q["effective"].asUInt64();
+    EXPECT_GT(held + budget, bound_mb << 20);
+    EXPECT_LE(u["per_seed"][0]["final_bytes"].asUInt64() + budget, bound_mb << 20);
+    EXPECT_FALSE(fits_request_memory(held, budget, bound_mb));
+    EXPECT_TRUE(fits_request_memory(u["per_seed"][0]["final_bytes"].asUInt64(), budget, bound_mb));
+    EXPECT_EQ("not started: the results already held (" + std::to_string(held) + " bytes) and "
+              "this seed's memory budget (" + std::to_string(budget) + " bytes) would pass the "
+              "server's request memory bound (" + std::to_string(bound_mb) + " MiB); no budget "
+              "of the seed ran out: send it in a new request", unstarted["error"].asString());
+    EXPECT_EQ("failed", unstarted["outcome"]["walks"].asString());
+    EXPECT_EQ("request", q["scope"].asString());
+    EXPECT_EQ("memory", q["resource"].asString());
+    EXPECT_EQ("not_started", q["phase"].asString());
+    EXPECT_EQ(bound_mb, q["requested"].asUInt64());
+    EXPECT_EQ((held + (1 << 20) - 1) >> 20, q["used"].asUInt64());
+    EXPECT_EQ("split_request", q["actions"][0].asString());
+    EXPECT_EQ("max_request_memory_mb", unstarted["limitations"][0]["knob"].asString());
+    EXPECT_EQ("memory_bound_soft", unstarted["limitations"][1]["kind"].asString());
+    EXPECT_TRUE(unstarted["unknown_labels"].isArray());
+    EXPECT_EQ("not_started", u["per_seed"][2]["outcome"].asString());
+    EXPECT_EQ("request_memory", u["per_seed"][2]["stopped_by"].asString());
+    EXPECT_EQ(unstarted["work"]["memory_bytes"], u["per_seed"][2]["final_bytes"]);
+    EXPECT_EQ(2u, u["seeds"]["started"].asUInt64());
+    EXPECT_EQ(3u, u["seeds"]["requested"].asUInt64());
+    for (Json::ArrayIndex i = 0; i < 2; ++i) {
+        EXPECT_TRUE(entry["results"][i].isMember("arms")) << i;
+        EXPECT_EQ(u["per_seed"][i]["outcome"], entry["results"][i]["outcome"]["walks"]) << i;
+    }
+}
+
 // Sample 16: /pattern keeps pattern_contract_version beside the envelope's members; a pair
 // not started by not_after_ms is not_reached; work.memory_bytes the answered entry's (0)
 TEST(ServerEnvelope, Sample16PatternNotReached) {

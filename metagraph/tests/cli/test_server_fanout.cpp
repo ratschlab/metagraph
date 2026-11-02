@@ -1503,7 +1503,7 @@ TEST(ServerFanout, EachSampleNamesOneServerAndOneExecution) {
         if (file.path().extension() == ".json")
             names.push_back(file.path().filename().string());
     }
-    ASSERT_LE(22u, names.size()) << dir << " (run from the build directory)";
+    ASSERT_LE(23u, names.size()) << dir << " (run from the build directory)";
     for (const std::string &name : names) {
         std::set<std::string> instances;
         std::set<std::string> ids;
