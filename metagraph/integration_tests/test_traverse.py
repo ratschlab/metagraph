@@ -2148,6 +2148,83 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(0, ret.json()['strategy']['bounds']['time_budget_ms'])
         self.assertEqual([], ret.json()['strategy']['clamped'])
 
+    def test_api_request_memory_bound(self):
+        """--traverse-max-request-memory-mb R (E5b; SPEC §5 "Request budgets", §10.3): before
+        seed i >= 1 starts, the results of seeds 0 to i-1 (their usage final_bytes) and the
+        seed's memory budget are compared with R; past it, the seed and every later one are
+        not started — failed per seed with a resource_stop of scope request, phase
+        not_started, action split_request, and a walk_domain naming max_request_memory_mb;
+        per_seed not_started, stopped_by request_memory. The seeds walked are those of the
+        same request without the flag, with or without attempt_id. The server refuses to
+        start with R and no per-seed maximum, or a larger one."""
+        mib = 1 << 20
+        seeds = [{'sequence': self.element}, {'sequence': self.left1[20:80]},
+                 {'sequence': self.right1[20:80]}]
+        request = {'seeds': seeds,
+                   'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': BLOCK},
+                                'output': {'detail': 'summary', 'timing': False}}}
+        with TestTraverseAttempts._Server(self, '--traverse-max-memory-mb', '1') as off, \
+                TestTraverseAttempts._Server(self, '--traverse-max-memory-mb', '1',
+                                             '--traverse-max-request-memory-mb', '2') as on:
+            plain = off.post('traverse', dict(request, attempt_id='off-1'))
+            self.assertEqual(200, plain.status_code, plain.text[:500])
+            plain = plain.json()
+            final = [s['final_bytes'] for s in plain['usage']['per_seed']]
+            self.assertEqual(3, plain['usage']['seeds']['started'])
+            # each result holds under 1 MiB here (the label caches' allotments of the 1 MiB
+            # budget and the delivery's fixed part): with the budget, the first fits 2 MiB, the
+            # first two do not
+            self.assertLessEqual(final[0] + mib, 2 * mib, final)
+            self.assertGreater(final[0] + final[1] + mib, 2 * mib, final)
+            ret = on.post('traverse', dict(request, attempt_id='on-1'))
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            out = ret.json()
+            self.assertEqual(plain['results'][:2], out['results'][:2])
+            unstarted = out['results'][2]
+            held = final[0] + final[1]
+            self.assertEqual(
+                f'not started: the results already held ({held} bytes) and this seed\'s memory '
+                f'budget ({mib} bytes) would pass the server\'s request memory bound (2 MiB); no '
+                f'budget of the seed ran out: send it in a new request', unstarted['error'])
+            self.assertEqual('failed', unstarted['outcome']['walks'])
+            self.assertNotIn('arms', unstarted)
+            q = unstarted['resource_stop']
+            self.assertEqual(('request', 'memory', 'not_started', 2, 2, 2, 0, ['split_request']),
+                             (q['scope'], q['resource'], q['phase'], q['requested'],
+                              q['effective'], q['used'], q['remaining'], q['actions']))
+            self.assertEqual([('walk_domain', 'max_request_memory_mb', 2, 2),
+                              ('memory_bound_soft', 'bounds.max_memory_mb', 1, 0)],
+                             [(l['kind'], l['knob'], l['limit'], l['observed'])
+                              for l in unstarted['limitations']])
+            usage = out['usage']
+            self.assertEqual({'requested': 3, 'started': 2, 'finished': 2, 'abandoned': 0},
+                             usage['seeds'])
+            self.assertEqual('completed', usage['reason'])
+            self.assertEqual([(s['outcome'], s['stopped_by'])
+                              for s in plain['usage']['per_seed'][:2]]
+                             + [('not_started', 'request_memory')],
+                             [(s['outcome'], s['stopped_by']) for s in usage['per_seed']])
+            self.assertEqual(final[:2], [s['final_bytes'] for s in usage['per_seed'][:2]])
+            self.assertEqual(unstarted['work']['memory_bytes'],
+                             usage['per_seed'][2]['final_bytes'])
+            # without attempt_id (no usage): the same results
+            bare = on.post('traverse', request)
+            self.assertEqual(200, bare.status_code, bare.text[:500])
+            self.assertNotIn('usage', bare.json())
+            self.assertEqual(out['results'], bare.json()['results'])
+            # one seed: nothing to leave unstarted, the response is the one without the flag
+            one = dict(request, seeds=seeds[:1])
+            self.assertEqual(off.post('traverse', one).text, on.post('traverse', one).text)
+        # the start-up rule: R needs a per-seed maximum in [1, R]
+        for flags in ((), ('--traverse-max-memory-mb', '3')):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', '-i', self.graph, '-a', self.anno, '--port', str(_free_port()),
+                '--address', '127.0.0.1', '--traverse-max-request-memory-mb', '2'] + list(flags),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+            self.assertNotEqual(0, res.returncode, flags)
+            self.assertIn('--traverse-max-request-memory-mb 2 needs --traverse-max-memory-mb in '
+                          '[1, 2]', res.stdout.decode(), flags)
+
     def test_api_resolve_deadline(self):
         """The /resolve deadline (SPEC §4.5): bounds.time_budget_ms on /resolve. The `resolve`
         block on both GET routes; a budget a microsecond above the finalisation reserve stops

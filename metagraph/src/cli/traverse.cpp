@@ -4860,6 +4860,65 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     return rj;
 }
 
+bool fits_request_memory(uint64_t held, uint64_t budget, uint64_t bound_mb) {
+    // a bound past what 64 bits of bytes hold bounds nothing those can count
+    if (bound_mb > (std::numeric_limits<uint64_t>::max() >> 20))
+        return true;
+    const uint64_t bound = bound_mb << 20;
+    return held <= bound && budget <= bound - held;
+}
+
+// A seed the request-wide memory bound left unstarted (E5b; TraverseLimits::
+// max_request_memory_mb): the results of the seeds before the first one not started hold
+// |held| bytes, which with the request's per-seed memory budget (|budget| bytes) would pass the
+// bound (|bound_mb| MiB). In the shape of a seed the attempt never started — no arms, an error,
+// outcome.walks: failed, a seed-level walk_domain and a resource_stop of phase not_started —
+// whose scope is the request and whose lever is a new request: nothing of the seed was read,
+// and no budget of the seed ran out. memory_bound_soft as every result under a budget states it
+static Json::Value request_memory_not_started_seed_to_json(const Seed &seed, uint64_t held,
+                                                           uint64_t budget, uint64_t bound_mb,
+                                                           const Strategy &st,
+                                                           bool decode_charged,
+                                                           const char *coordinates_reason) {
+    // MiB as a memory stop states them: used rounded up, remaining down
+    const uint64_t used = (held + (1 << 20) - 1) >> 20;
+    const std::string held_text = std::to_string(held) + " bytes";
+    Json::Value rj = failed_seed_head(seed, labels_derived_from_seed(seed, st.label_mode),
+        "not started: the results already held (" + held_text + ") and this seed's memory "
+        "budget (" + std::to_string(budget) + " bytes) would pass the server's request memory "
+        "bound (" + std::to_string(bound_mb) + " MiB); no budget of the seed ran out: send it "
+        "in a new request");
+    Json::Value lims(Json::arrayValue);
+    lims.append(limitation("walk_domain", "max_request_memory_mb", uint_json(bound_mb),
+                           uint_json(used),
+                           "the results of the seeds before the first one not started (observed: "
+                           "what they hold, MiB rounded up) and this seed's memory budget would "
+                           "pass the server's request memory bound (limit, MiB), so the seed was "
+                           "not started and no traversal was made; no budget of the seed ran "
+                           "out: send it in a new request"));
+    // every response under a memory budget states it (§7.0): this result echoes seed_id
+    append_failed_memory(&lims, st, seed, 0, decode_charged);
+    rj["limitations"] = std::move(lims);
+    rj["outcome"] = outcome_of(rj, true);
+    Json::Value j;
+    j["scope"] = "request";
+    j["resource"] = "memory";
+    j["phase"] = "not_started";
+    j["requested"] = uint_json(bound_mb);
+    j["effective"] = uint_json(bound_mb);
+    j["used"] = uint_json(used);
+    j["remaining"] = uint_json(bound_mb > used ? bound_mb - used : 0);
+    j["actions"] = strings_json({ "split_request" });
+    j["message"] = "the results of the seeds before the first one not started hold " + held_text
+                 + ", which with this seed's memory budget (" + std::to_string(budget)
+                 + " bytes) would pass the server's request memory bound ("
+                 + std::to_string(bound_mb) + " MiB): the seed is failed, nothing of it was "
+                   "read; no budget of the seed ran out: send it in a new request";
+    rj["resource_stop"] = std::move(j);
+    state_no_coordinates(&rj, coordinates_reason);
+    return rj;
+}
+
 // A seed with a k-mer the graph does not have, on a server whose graphs need not hold the seeds
 // sent to them (TraverseLimits::not_in_graph_per_seed: a multi-graph server's chunks): no walk,
 // outcome.walks "not_in_graph", the walker's message as `error` (the graph runs of its k-mers)
@@ -4942,7 +5001,10 @@ Json::Value process_traverse_request(const Json::Value &json,
     const common::ThreadUsageMeter request_usage;
     TraverseRequest req = parse_traverse_request(json);
     std::unique_ptr<Attempt> local;
-    if (!attempt && !req.attempt_id.empty()) {
+    // a request-wide memory bound reads what the results before a seed hold from the attempt's
+    // account (the server always has an attempt; the CLI sets no bound): one outside the server
+    // is kept as a request with attempt_id keeps it, which changes nothing of the response
+    if (!attempt && (!req.attempt_id.empty() || limits.max_request_memory_mb)) {
         local = local_attempt({ req.attempt_id, req.budget_id, req.locus_id, req.not_after_ms, {} });
         attempt = local.get();
     }
@@ -5252,6 +5314,34 @@ Json::Value process_traverse_request(const Json::Value &json,
                     attempt->seed_not_started(j, usage);
                 }
                 break;
+            }
+            // The request-wide memory bound (E5b), after the stop (which keeps precedence): the
+            // results of seeds 0 to i-1 are held until the response is written, so seed i
+            // starts only when they and its memory budget fit the bound (a tie starts); else
+            // it and every later seed are not started. Seed 0 always starts (its budget is at
+            // most the bound: the server's start-up rule)
+            if (i && limits.max_request_memory_mb) {
+                const uint64_t held = attempt->held_bytes(i);
+                const uint64_t budget = req.strategy.max_memory_bytes;
+                if (!fits_request_memory(held, budget, limits.max_request_memory_mb)) {
+                    for (size_t j = i; j < req.seeds.size(); ++j) {
+                        Json::Value never = request_memory_not_started_seed_to_json(
+                                req.seeds[j], held, budget, limits.max_request_memory_mb,
+                                req.strategy, decode_charged, no_coordinates);
+                        state_unknown_labels(&never, req.seeds[j]);
+                        const uint64_t names = put_failed_memory(&never, req.seeds[j]);
+                        append(std::move(never), 0);
+                        // its usage is what its result states and holds
+                        SeedUsage usage;
+                        usage.stopped_by = "request_memory";
+                        usage.meter.memory_final
+                                = failed_result_bytes(req.strategy, req.seeds[j]) + names;
+                        usage.meter.soft_excess
+                                = failed_soft(req.strategy, req.seeds[j], 0, names);
+                        attempt->seed_not_started(j, usage);
+                    }
+                    break;
+                }
             }
             attempt->seed_started(i);
         }

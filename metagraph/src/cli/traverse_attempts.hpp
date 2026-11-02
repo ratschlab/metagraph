@@ -398,6 +398,12 @@ class Attempt {
     void seed_not_started(size_t index, const SeedUsage &usage);
     // the seed's outcome once its result is built, and its elapsed time with the building
     void seed_delivered(size_t index, const std::string &outcome, double elapsed_ms);
+    // What the results of seeds 0 to |before| - 1 hold until the response is written: their
+    // final_bytes summed (a walked result's account when its walk ended; a failed, refused,
+    // not-in-graph or never started one's priced echo), an abandoned walk's left out — the
+    // `held` of usage_json's totals as far as those seeds. The request-wide memory bound
+    // (TraverseLimits::max_request_memory_mb) compares it with the bound before seed |before|
+    uint64_t held_bytes(size_t before) const;
     // The longest uninterruptible piece of the request's walks so far (ms; an annotation read
     // or chunk, or a head piece — the walk between two readings of the clock for a stop,
     // DecodePacer::max_uninterruptible_ms),

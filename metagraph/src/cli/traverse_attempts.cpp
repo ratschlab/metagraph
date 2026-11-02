@@ -651,6 +651,17 @@ void Attempt::seed_delivered(size_t index, const std::string &outcome, double el
     seeds_[index].elapsed_ms = elapsed_ms;
 }
 
+uint64_t Attempt::held_bytes(size_t before) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    uint64_t held = 0;
+    // as usage_json sums its held account: an abandoned walk has no result
+    for (size_t i = 0; i < std::min(before, seeds_.size()); ++i) {
+        if (seeds_[i].outcome != "abandoned")
+            held += seeds_[i].meter.memory_final;
+    }
+    return held;
+}
+
 double Attempt::stated_walk_until_ms_locked() const {
     const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
     return tripped_walk_until_ms_ ? *tripped_walk_until_ms_

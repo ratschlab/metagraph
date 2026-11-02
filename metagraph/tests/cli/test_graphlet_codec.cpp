@@ -5893,6 +5893,266 @@ TEST(GraphletAttempt, UnstartedSeedsStateLabelsFromSeedAsTheWalked) {
     }
 }
 
+// The request-wide memory bound's check (E5b): held + budget against the bound, a tie fitting,
+// exact for every value
+TEST(GraphletAttempt, RequestMemoryCheckIsHeldPlusBudgetAgainstTheBound) {
+    const uint64_t mib = uint64_t(1) << 20;
+    const uint64_t max = std::numeric_limits<uint64_t>::max();
+    // a tie at exactly the bound starts, a byte more does not
+    EXPECT_TRUE(fits_request_memory(0, mib, 1));
+    EXPECT_FALSE(fits_request_memory(1, mib, 1));
+    EXPECT_TRUE(fits_request_memory(mib, mib, 2));
+    EXPECT_FALSE(fits_request_memory(mib + 1, mib, 2));
+    EXPECT_FALSE(fits_request_memory(mib, mib + 1, 2));
+    EXPECT_TRUE(fits_request_memory(7 * mib + 3, mib - 3, 8));
+    EXPECT_FALSE(fits_request_memory(7 * mib + 3, mib - 2, 8));
+    // the held results alone (no per-seed budget: never on a server, whose start-up rule sets one)
+    EXPECT_TRUE(fits_request_memory(2 * mib, 0, 2));
+    EXPECT_FALSE(fits_request_memory(2 * mib + 1, 0, 2));
+    // no overflow: held or budget past the bound, either alone or both at the largest values
+    EXPECT_FALSE(fits_request_memory(max, 0, 1));
+    EXPECT_FALSE(fits_request_memory(0, max, 1));
+    EXPECT_FALSE(fits_request_memory(max, max, 1048576));
+    EXPECT_FALSE(fits_request_memory(1048576 * mib, 1, 1048576));
+    EXPECT_TRUE(fits_request_memory(1048575 * mib, mib, 1048576));
+    // a bound past 64 bits of bytes bounds nothing those count
+    EXPECT_TRUE(fits_request_memory(max, max, max));
+    EXPECT_FALSE(fits_request_memory(max, max, max >> 20));
+}
+
+namespace {
+
+// three seeds of budget_cases()[0]'s graph, the third's labels partly absent from it
+std::vector<Seed> three_seeds() {
+    return { seed_of("AAA", { "C", "D", "E" }), seed_of("AAA", { "C", "D" }),
+             seed_of("AAA", { "C", "Z" }) };
+}
+
+// a request of |seeds| under the per-seed maximum |seed_mb| and the request's bound |request_mb|
+Json::Value bounded_request(const graph::AnnotatedDBG &anno, const Json::Value &request,
+                            uint64_t seed_mb, uint64_t request_mb, bool absent_dropped = true,
+                            Attempt *attempt = nullptr) {
+    TraverseLimits limits;
+    limits.max_memory_mb = seed_mb;
+    limits.max_request_memory_mb = request_mb;
+    // a multi-graph server's pair: the absent label Z is dropped and stated
+    limits.labels_not_in_graph_dropped = absent_dropped;
+    return process_traverse_request(request, anno, "", limits, nullptr, attempt);
+}
+
+} // namespace
+
+// A seed after the first is not started when the results of the seeds before it and its memory
+// budget would pass the request's bound: it and every later seed are failed in the shape of a
+// never started seed (no arms, an error, outcome.walks failed, a seed-level walk_domain naming
+// max_request_memory_mb, a resource_stop of scope request and phase not_started whose action is
+// a new request, memory_bound_soft, unknown_labels on a pair that does not hold its labels),
+// the seeds walked before it are those of the request without the bound, and the usage states
+// them not started, stopped by request_memory. Seed 0 always starts
+TEST(GraphletAttempt, RequestMemoryBoundLeavesLaterSeedsUnstarted) {
+    const BudgetCase c = budget_cases()[0];
+    const uint64_t mib = uint64_t(1) << 20;
+    for (const char *detail : { "graphlet", "summary", "full" }) {
+        Json::Value request = request_of(three_seeds(), R"({"bounds": {"max_extension_bp": 7}})",
+                                         detail);
+        request["attempt_id"] = "t-1";
+        // off: every seed walked, under the per-seed maximum of 1 MiB (each result holds 0.85
+        // to 0.98 MiB here: the label caches' allotments and the delivery's fixed part)
+        const Json::Value off = bounded_request(*c.anno, request, 1, 0);
+        ASSERT_EQ(3u, off["results"].size());
+        std::vector<uint64_t> final_bytes;
+        for (Json::ArrayIndex i = 0; i < 3; ++i) {
+            ASSERT_FALSE(off["results"][i].isMember("resource_stop")) << detail << " " << i;
+            final_bytes.push_back(off["usage"]["per_seed"][i]["final_bytes"].asUInt64());
+            ASSERT_LT(final_bytes.back(), mib) << detail << " " << i;
+        }
+        ASSERT_GT(final_bytes[0] + final_bytes[1], mib) << detail;
+        // the bound, the results held when the first seed is not started, the seeds walked
+        struct Case { uint64_t bound_mb; uint64_t held; size_t walked; };
+        for (const Case &k : { Case { 1, final_bytes[0], 1 },
+                               Case { 2, final_bytes[0] + final_bytes[1], 2 },
+                               Case { 3, 0, 3 } }) {
+            const std::string what = std::string(detail) + " bound "
+                                   + std::to_string(k.bound_mb);
+            const Json::Value out = bounded_request(*c.anno, request, 1, k.bound_mb);
+            ASSERT_EQ(3u, out["results"].size()) << what;
+            for (Json::ArrayIndex i = 0; i < k.walked; ++i) {
+                EXPECT_EQ(compact_json(off["results"][i]), compact_json(out["results"][i]))
+                    << what << " seed " << i;
+            }
+            const Json::Value &u = out["usage"];
+            EXPECT_EQ("completed", u["reason"].asString()) << what;
+            EXPECT_EQ(3u, u["seeds"]["requested"].asUInt64()) << what;
+            EXPECT_EQ(k.walked, u["seeds"]["started"].asUInt64()) << what;
+            EXPECT_EQ(k.walked, u["seeds"]["finished"].asUInt64()) << what;
+            uint64_t work = 0, held = 0;
+            for (Json::ArrayIndex i = 0; i < 3; ++i) {
+                const Json::Value &s = u["per_seed"][i];
+                work += s["work_units"].asUInt64();
+                held += s["final_bytes"].asUInt64();
+                if (i < k.walked) {
+                    EXPECT_EQ(off["usage"]["per_seed"][i]["final_bytes"], s["final_bytes"])
+                        << what << " seed " << i;
+                    EXPECT_TRUE(s["stopped_by"].isNull()) << what << " seed " << i;
+                    continue;
+                }
+                const Json::Value &r = out["results"][i];
+                const std::string seed_what = what + " seed " + std::to_string(i) + ": "
+                                            + compact_json(r);
+                check_widths(r, 2, "", seed_what);
+                EXPECT_FALSE(r.isMember("arms")) << seed_what;
+                EXPECT_FALSE(r.isMember("graphlet")) << seed_what;
+                EXPECT_EQ("failed", r["outcome"]["walks"].asString()) << seed_what;
+                EXPECT_EQ("not started: the results already held (" + std::to_string(k.held)
+                          + " bytes) and this seed's memory budget (1048576 bytes) would pass "
+                            "the server's request memory bound (" + std::to_string(k.bound_mb)
+                          + " MiB); no budget of the seed ran out: send it in a new request",
+                          r["error"].asString()) << seed_what;
+                const uint64_t used = (k.held + mib - 1) / mib;
+                const Json::Value &q = r["resource_stop"];
+                EXPECT_EQ("request", q["scope"].asString()) << seed_what;
+                EXPECT_EQ("memory", q["resource"].asString()) << seed_what;
+                EXPECT_EQ("not_started", q["phase"].asString()) << seed_what;
+                EXPECT_EQ(k.bound_mb, q["requested"].asUInt64()) << seed_what;
+                EXPECT_EQ(k.bound_mb, q["effective"].asUInt64()) << seed_what;
+                EXPECT_EQ(used, q["used"].asUInt64()) << seed_what;
+                EXPECT_EQ(k.bound_mb > used ? k.bound_mb - used : 0, q["remaining"].asUInt64())
+                    << seed_what;
+                ASSERT_EQ(1u, q["actions"].size()) << seed_what;
+                EXPECT_EQ("split_request", q["actions"][0].asString()) << seed_what;
+                EXPECT_NE(std::string::npos, q["message"].asString().find(
+                        "hold " + std::to_string(k.held) + " bytes")) << seed_what;
+                // its statements fit the widths priced (a message of 1 KiB) at the widest
+                // numbers they can carry: 20 digits held, 14 budget, 7 bound
+                EXPECT_LE(q["message"].asString().size() + 20 + 14 + 7, 1024u) << seed_what;
+                EXPECT_LE(r["error"].asString().size() + 20 + 14 + 7, 1024u) << seed_what;
+                ASSERT_EQ(2u, r["limitations"].size()) << seed_what;
+                const Json::Value &l = r["limitations"][0];
+                EXPECT_EQ("walk_domain", l["kind"].asString()) << seed_what;
+                EXPECT_EQ("max_request_memory_mb", l["knob"].asString()) << seed_what;
+                EXPECT_EQ(k.bound_mb, l["limit"].asUInt64()) << seed_what;
+                EXPECT_EQ(used, l["observed"].asUInt64()) << seed_what;
+                EXPECT_FALSE(l.isMember("complete_to_bp")) << seed_what;
+                // every response under a memory budget states it (§7.0)
+                EXPECT_EQ("memory_bound_soft", r["limitations"][1]["kind"].asString())
+                    << seed_what;
+                // the pair does not hold Z of the third seed: stated as its walk stated it
+                EXPECT_EQ(off["results"][i]["unknown_labels"], r["unknown_labels"]) << seed_what;
+                EXPECT_EQ(i == 2 ? 1u : 0u, r["unknown_labels"].size()) << seed_what;
+                for (const char *key : { "seed_id", "length_bp", "labels_from_seed" }) {
+                    EXPECT_EQ(off["results"][i]["seed"][key], r["seed"][key]) << seed_what;
+                }
+                EXPECT_EQ("not_started", s["outcome"].asString()) << seed_what;
+                EXPECT_EQ("request_memory", s["stopped_by"].asString()) << seed_what;
+                EXPECT_EQ(0u, s["work_units"].asUInt64()) << seed_what;
+                EXPECT_GT(s["final_bytes"].asUInt64(), 0u) << seed_what;
+                EXPECT_EQ(r["work"]["memory_bytes"], s["final_bytes"]) << seed_what;
+                EXPECT_FALSE(s["soft_excess_bytes"].isNull()) << seed_what;
+                EXPECT_TRUE(s["refused_bytes"].isNull()) << seed_what;
+            }
+            // the totals: the work of the seeds walked, every result held
+            EXPECT_EQ(work, u["work_units"].asUInt64()) << what;
+            EXPECT_LE(held, u["memory"]["peak_admitted_bytes"].asUInt64()) << what;
+            EXPECT_LE(held, u["memory"]["held_bound_bytes"].asUInt64()) << what;
+            if (k.walked == 3) {
+                // nothing left unstarted: the response is the one without the bound
+                Json::Value a = off, b = out;
+                a.removeMember("usage");
+                b.removeMember("usage");
+                EXPECT_EQ(compact_json(a), compact_json(b)) << what;
+            }
+        }
+        // seed 0 always starts, whatever its budget against the bound (a server's start-up rule
+        // keeps the budget within it)
+        const Json::Value first = bounded_request(*c.anno, request, 4, 1);
+        EXPECT_FALSE(first["results"][0].isMember("resource_stop")) << detail;
+        EXPECT_EQ("request", first["results"][1]["resource_stop"]["scope"].asString()) << detail;
+        EXPECT_EQ(1u, first["usage"]["seeds"]["started"].asUInt64()) << detail;
+    }
+}
+
+// The budget compared is the request's effective per-seed budget: a request's own smaller one
+// (kept under the server's maximum), else the maximum (an omitted one set to it)
+TEST(GraphletAttempt, RequestMemoryBoundComparesTheEffectiveBudget) {
+    const BudgetCase c = budget_cases()[0];
+    Json::Value request = request_of(three_seeds(), R"({"bounds": {"max_extension_bp": 7}})",
+                                     "summary");
+    request["attempt_id"] = "t-1";
+    // the request's own 1 MiB under a maximum of 2: three results of under 1 MiB and its budget
+    // fit 3 MiB
+    request["strategy"]["bounds"]["max_memory_mb"] = 1;
+    const Json::Value small = bounded_request(*c.anno, request, 2, 3);
+    EXPECT_EQ(3u, small["usage"]["seeds"]["started"].asUInt64());
+    for (const Json::Value &r : small["results"]) {
+        EXPECT_FALSE(r.isMember("resource_stop")) << compact_json(r);
+    }
+    // none: the maximum of 2 MiB, whose results of over 1 MiB with it pass 3 MiB at seed 1
+    request["strategy"]["bounds"].removeMember("max_memory_mb");
+    const Json::Value set = bounded_request(*c.anno, request, 2, 3);
+    EXPECT_EQ(1u, set["usage"]["seeds"]["started"].asUInt64());
+    const uint64_t held = set["usage"]["per_seed"][0]["final_bytes"].asUInt64();
+    EXPECT_GT(held, uint64_t(1) << 20);
+    for (Json::ArrayIndex i = 1; i < 3; ++i) {
+        const Json::Value &r = set["results"][i];
+        EXPECT_NE(std::string::npos, r["error"].asString().find(
+                "(" + std::to_string(held) + " bytes) and this seed's memory budget (2097152 "
+                "bytes)")) << r["error"].asString();
+    }
+}
+
+// The stop between seeds keeps precedence: a cancel seen before seed 1 leaves the seeds unstarted
+// with the attempt's stop, not the request's bound (which would also have left them so)
+TEST(GraphletAttempt, RequestMemoryBoundAfterTheStop) {
+    const BudgetCase c = budget_cases()[0];
+    Json::Value request = request_of(three_seeds(), R"({"bounds": {"max_extension_bp": 7}})",
+                                     "summary");
+    request["attempt_id"] = "t-1";
+    CancelAtPoll single(std::numeric_limits<uint64_t>::max());
+    bounded_request(*c.anno, request_of({ three_seeds()[0] },
+                                        R"({"bounds": {"max_extension_bp": 7}})", "summary"),
+                    1, 1, true, single.attempt.get());
+    CancelAtPoll cancel(single.calls + 1);
+    const Json::Value out = bounded_request(*c.anno, request, 1, 1, true, cancel.attempt.get());
+    ASSERT_EQ(3u, out["results"].size());
+    EXPECT_FALSE(out["results"][0].isMember("resource_stop"));
+    for (Json::ArrayIndex i = 1; i < 3; ++i) {
+        const Json::Value &q = out["results"][i]["resource_stop"];
+        EXPECT_EQ("attempt", q["scope"].asString()) << compact_json(q);
+        EXPECT_EQ("cancelled", q["resource"].asString()) << compact_json(q);
+        EXPECT_TRUE(out["usage"]["per_seed"][i]["stopped_by"].isNull());
+    }
+    EXPECT_EQ("cancelled", out["usage"]["reason"].asString());
+}
+
+// Off (0), nothing changes: the answers are those of a server without the flag. Without
+// attempt_id (no usage) and outside the server (no attempt) the bound still holds, from the
+// account an attempt kept for it alone; the response is the managed one's without its usage
+TEST(GraphletAttempt, RequestMemoryBoundWithoutAnAttempt) {
+    const BudgetCase c = budget_cases()[0];
+    const Json::Value plain = request_of(three_seeds(), R"({"bounds": {"max_extension_bp": 7}})",
+                                         "graphlet");
+    Json::Value managed = plain;
+    managed["attempt_id"] = "t-1";
+    for (uint64_t bound_mb : { 0, 1, 2, 3 }) {
+        const Json::Value out = bounded_request(*c.anno, plain, 1, bound_mb);
+        EXPECT_FALSE(out.isMember("usage")) << bound_mb;
+        Json::Value with = bounded_request(*c.anno, managed, 1, bound_mb);
+        with.removeMember("usage");
+        EXPECT_EQ(compact_json(with), compact_json(out)) << bound_mb;
+        size_t unstarted = 0;
+        for (const Json::Value &r : out["results"]) {
+            unstarted += r["resource_stop"]["scope"].asString() == "request";
+        }
+        EXPECT_EQ(bound_mb == 1 ? 2u : bound_mb == 2 ? 1u : 0u, unstarted) << bound_mb;
+    }
+    // off is the response of limits without the field
+    TraverseLimits limits;
+    limits.max_memory_mb = 1;
+    limits.labels_not_in_graph_dropped = true;
+    EXPECT_EQ(compact_json(process_traverse_request(plain, *c.anno, "", limits)),
+              compact_json(bounded_request(*c.anno, plain, 1, 0)));
+}
+
 // The usage block: per seed the walk's own account (the work of its seed phase and both arms,
 // the modelled peak), the request's sums; only a request with attempt_id has one, and with
 // it the response is otherwise byte for byte the one without

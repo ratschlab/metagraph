@@ -414,6 +414,13 @@ struct TraverseLimits {
     std::optional<double> load_ms;
 };
 
+// The request-wide memory bound's check before seed i >= 1 (E5b,
+// TraverseLimits::max_request_memory_mb): whether the bytes the results of seeds 0 to i-1 hold
+// (|held|, their usage final_bytes) and the request's effective per-seed memory budget
+// (|budget| bytes) fit |bound_mb| MiB — held + budget <= bound, a tie fitting; exact for every
+// value (no overflow)
+bool fits_request_memory(uint64_t held, uint64_t budget, uint64_t bound_mb);
+
 // The results of a /traverse response written as text, one per seed, as each was built
 // (the server: the JSON tree of a seed's result is freed at once, and an attempt knows the
 // exact bytes it has to deliver). |active|: the response's `results` are these texts, in
