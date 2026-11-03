@@ -11,6 +11,7 @@ framework, a software platform for indexing and analysis of very large sequence 
 .. toctree::
    :maxdepth: 3
 
+   release_notes.rst
    installation.rst
    quick_start.rst
    workflows.rst

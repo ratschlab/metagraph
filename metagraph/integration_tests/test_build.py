@@ -27,6 +27,13 @@ class TestBuild(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
+    def test_default_k(self):
+        graph = os.path.join(self.tempdir.name, 'default')
+        subprocess.run([METAGRAPH, 'build', '-o', graph,
+                        os.path.join(TEST_DATA_DIR, 'genome.MT.fa')], check=True)
+        stats = self._get_stats(graph + '.dbg')
+        self.assertEqual(stats['k'], '3' if PROTEIN_MODE else '31')
+
     @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
         representation, tmp_dir = build_params[build]

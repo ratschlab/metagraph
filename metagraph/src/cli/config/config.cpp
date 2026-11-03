@@ -27,6 +27,12 @@ using mtg::graph::DeBruijnGraph;
 const size_t Config::kDefaultIndexSuffixLen
     = 24 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
 
+#if _PROTEIN_GRAPH
+constexpr unsigned int kDefaultBuildK = 3;
+#else
+constexpr unsigned int kDefaultBuildK = 31;
+#endif
+
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
     fprintf(stderr, "### Welcome to MetaGraph! ###\n");
@@ -43,6 +49,7 @@ Config::Config(int argc, char *argv[]) {
     // parse identity from first command line argument
     if (!strcmp(argv[1], "build")) {
         identity = BUILD;
+        k = kDefaultBuildK;
     } else if (!strcmp(argv[1], "clean")) {
         identity = CLEAN;
     } else if (!strcmp(argv[1], "merge")) {
@@ -1031,7 +1038,7 @@ if (advanced) {
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t   --num-chars [INT]\tnumber of input characters, sets the SSHash minimizer length [0: count them]\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [%u]\n", kDefaultBuildK);
 #if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --mode \t\tk-mer indexing mode: basic / canonical / primary [basic]\n");
 #endif

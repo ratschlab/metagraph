@@ -64,8 +64,12 @@ What k-mer size?
 
 **General rules:**
 
-- DNA/RNA: k=21-41 (default: 31)
-- Protein: k=7-15 (default: 10)
+- DNA/RNA: k=21 to 41
+- Protein: k=7 to 15
+
+Pass ``-k`` explicitly for reproducible builds. Run ``metagraph build --help``
+to see the default for your installed binary. The workflow CLI defaults to 31.
+
 - Longer k = more specific, less sensitive
 - Must be ≤ sequence/read length
 
