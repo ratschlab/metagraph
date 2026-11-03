@@ -4,6 +4,24 @@ Use [the shared principles](PRINCIPLES.md) for meaning, audience and evidence. T
 
 The cited sources are established engineering practice, not experiments establishing an optimal template. Additional choices are labeled **house guidance**. There is no universal word count, required section list or mandatory verdict phrase. These checks require a reader and are not enforced by Vale.
 
+Across these formats, use plain language and enough context for the recipient to understand and act. Lead with the useful point, explain necessary technical terms, and remove repetition and irrelevant detail. Concision must preserve evidence, uncertainty and consequences. This applies the audience and language guidance in [P1/P3](PRINCIPLES.md), supported by Google and Microsoft's writing guides (S4/S5); it is not a requirement to minimize word count.
+
+## Follow the receiving project's process
+
+Before preparing a contribution, read its current `CONTRIBUTING` guidance, relevant repository instructions, issue/PR templates and applicable code of conduct. Check the documented destination: an issue tracker, discussion forum, mailing list or private security-reporting channel. GitHub supports repository and organization contribution guidance and templates; a shared writing guide cannot replace them. [S26](SOURCES.md#engineering-communication)
+
+**House workflow:** check requirements relevant to this submission, including reproduction evidence, tests, commit format, attribution, AI-use/disclosure rules and CLA/DCO procedures. Do not infer that permission to contribute certifies a sign-off or grants publication approval. If a project-specific requirement conflicts with this guide, follow the applicable project requirement; surface unresolved conflicts with higher-level instructions rather than silently bypassing either.
+
+## Agent replies to the person requesting work
+
+Apply the same reader-centered principles to chat. **House application of P1/P4/P10:** answer the question or state the result first, then give evidence and qualifications needed to understand it. Distinguish proposed, attempted, completed and verified work. Include a next step or decision only when one exists; do not end every answer with an offer or a permission question.
+
+During longer work, communicate meaningful findings, changed assumptions, blockers and decisions. Avoid narrating each tool call or repeating an unchanged status. Adapt detail to the person's question and expertise. A final reply should stand on its own without requiring progress messages to be read. Respect the user's communication preferences and the actual authorization boundaries.
+
+Example: “The wording change is committed. CI is still running.” Report “CI passed” only after checking the relevant revision. If an action awaits a decision, explain the choice, recommendation and consequence rather than saying only “Please confirm.”
+
+These agent-specific recommendations are an explicit application of the broader principles, not findings from a controlled study of agent replies. Evaluate them with real tasks and reader judgments before claiming improved outcomes.
+
 ## Pull request descriptions
 
 Help a reviewer understand the problem, resulting behavior and reason for the approach. Write a specific title that remains useful in search. Give enough context for someone who has not seen the discussion; summarize essential reasoning before linking to it. Update the description when the scope changes. **Practice:** Google's change-description guidance emphasizes what changed, why, and the lasting record. [S20](SOURCES.md#engineering-communication)
@@ -22,6 +40,8 @@ Example: “If the server commits the request before this timeout, retrying can 
 
 For a reply, address the actual concern: explain the correction and point to it, or explain why the current behavior is intentional with evidence. Recheck the revised code before treating the finding as addressed. In a review summary, separate what was inspected, what was demonstrated and any material coverage gap. Do not imply human review, approval or exhaustive coverage that did not occur. Thread resolution and approval authority remain project policy.
 
+Review also supports understanding and knowledge transfer, not only defect detection: Bacchelli and Bird's empirical study found these benefits in Microsoft teams. That supports preserving useful rationale, not requiring every comment to teach a lesson or invent a defect. [S27](SOURCES.md#engineering-communication)
+
 ## Commit titles and bodies
 
 Make the subject describe the change on its own. In the body, preserve the motivation, prior behavior and important design constraints that a future maintainer cannot readily recover from the diff. Essential reasoning should remain understandable without a transient external discussion. **Practice:** Git's contribution guide provides this model; its detailed formatting requirements are specific to Git. [S23](SOURCES.md#engineering-communication)
@@ -30,9 +50,13 @@ Make the subject describe the change on its own. In the body, preserve the motiv
 
 ## Bug reports and investigation updates
 
+Before opening an issue, search existing issues and discussions for the same problem and read relevant prior decisions. Use the project's appropriate template and channel. For a feature request, explain the user problem, desired outcome and constraints before proposing an implementation; do not present a preference as a bug. **House workflow**, using the contribution mechanisms documented by GitHub (S26).
+
 Give the smallest useful reproduction, relevant versions and inputs, expected behavior and actual behavior. Keep observations separate from suspected causes. **Practice:** Simon Tatham's reporting guidance centers on enabling someone else to reproduce or diagnose the failure. [S24](SOURCES.md#engineering-communication)
 
 **House guidance:** keep a short reproducer in the report and link lengthy logs. Remove secrets and unnecessary personal data. State which environment or revision produced the evidence. For intermittent behavior, give the observed frequency and conditions rather than claiming determinism. A successful workaround is not proof that the root cause is fixed.
+
+In follow-up replies, answer the requested question directly and add the new evidence or changed conclusion. Keep a running investigation understandable without duplicating every previous message. If the earlier report was wrong, correct the claim explicitly. Distinguish a proposed fix, a merged fix and a released fix. Do not close an issue merely because a workaround exists; follow the maintainers' resolution criteria.
 
 ## Release notes and migration instructions
 

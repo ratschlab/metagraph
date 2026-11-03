@@ -2,6 +2,14 @@
 
 Sources checked on 2026-11-03. This is a selected primary-source review, not a systematic literature review. Research reports, standards and practitioner guidance answer different questions. No cited study proves that this particular package improves agent output. Text here is original synthesis; linked works retain their own licenses.
 
+## How recommendations are selected
+
+This is an evidence-informed synthesis, not a claim that every recommendation is experimentally validated. Prefer directly relevant research, normative standards for the applicable scope, and established community or vendor guidance from the originating source. A famous source is insufficient if it addresses a different audience or task.
+
+For each substantive recommendation, state the reader/task it helps, the supporting source, the source type, and any boundary or exception. Label additional thresholds and workflow choices as house guidance. Prefer a short rationale and example over a new prohibition. If sources disagree, explain the tradeoff or leave the choice to the project. Do not turn advice into a mandatory rule merely to make it mechanically testable.
+
+Add guidance when it addresses a recurring consequential ambiguity or a distinct communication task. Keep general language principles in one place; use task-specific sections for differences. Keep operational authority, exact style budgets and project conventions local. Retire redundant or misleading guidance. Evaluate changes against factual preservation, reader understanding and task success; style-lint scores and instruction length alone are inadequate measures.
+
 ## Research
 
 - **S18. John M. Carroll, Penny L. Smith-Kerker, James R. Ford and Sandra A. Mazur-Rimetz (1987), [The Minimal Manual](https://doi.org/10.1207/s15327051hci0302_2), Human–Computer Interaction 3(2), 123–153.** [Full paper](https://swcarpentry.github.io/swc-releases/2017.02/instructor-training/files/papers/carroll-minimal-manual-1987.pdf) reports two experiments on self-instruction for a word processor. Supports task-oriented learning, guided exploration and error recovery in that setting; does not establish that shorter is always better or that reference material should be omitted.
@@ -50,3 +58,5 @@ This review recommends Google as the first technical-documentation style to tria
 - **S23. Git, [SubmittingPatches](https://git-scm.com/docs/SubmittingPatches).** A project's contribution policy explaining self-contained motivation, imperative change descriptions and commit scope. Its trailer, wrapping and submission requirements apply to Git, not automatically to every consumer.
 - **S24. Simon Tatham, [How to Report Bugs Effectively](https://www.chiark.greenend.org.uk/~sgtatham/bugs.html).** Established practitioner guidance on reproducibility and precise observations. Not a controlled study of a required issue template.
 - **S25. [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).** A widely used convention for curated release history. Its exact categories and versioning choices remain project decisions.
+- **S26. GitHub, [Setting guidelines for repository contributors](https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/setting-guidelines-for-repository-contributors).** Documents repository/organization contribution guidance and issue/PR templates. Supports discovering the receiving project's process; the specific pre-submission checks in this guide are our workflow synthesis.
+- **S27. Alberto Bacchelli and Christian Bird (2013), [Expectations, Outcomes, and Challenges of Modern Code Review](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/ICSE202013-codereview.pdf), ICSE.** Observations, interviews, surveys and review-comment analysis at Microsoft identify understanding, knowledge transfer and alternative solutions alongside defect finding. This is empirical support for review's broader communication role, not a trial of our comment format or evidence that all organizations obtain the same benefits.

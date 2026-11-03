@@ -23,9 +23,11 @@ which are not automatically linted. Describe the concrete change and useful
 evidence concisely; report material review findings without a mandatory verdict
 phrase or a fixed word count.
 
-Before drafting a PR description, review or commit message, read the relevant
+Before drafting an issue, PR description, review or commit message, read the relevant
 section of [engineering communication](docs/writing/ENGINEERING.md).
-Its guidance also covers bug reports and release/migration notes.
+Its guidance also covers replies to users and release/migration notes.
+Before submission, check the receiving project's contribution guidelines,
+templates and required disclosures.
 
 Run the [text check](docs/writing/README.md) after editing scoped text.
 It blocks increases in terminology errors and malformed exceptions. Sentence
