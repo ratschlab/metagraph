@@ -292,21 +292,6 @@ Stats for both
 
 Simply run `docker build .`
 
-### Makefile
-
-The `Makefile` in the top level source directory can be used to build and test `metagraph` more conveniently. The following
-arguments are supported:
-* `env`: environment in which to compile/run (`""`: on the host, `docker`: in a docker container)
-* `alphabet`: compile metagraph for a certain alphabet (e.g. `DNA` or `Protein`, default `DNA`)
-* `additional_cmake_args`: additional arguments to pass to cmake.
-
-Examples:
-
-```
-# compiles metagraph in a docker container for the `DNA` alphabet
-make build-metagraph env=docker alphabet=DNA
-```
-
 ### Update and create a new release
 
 Creating a new version release is done in three steps:

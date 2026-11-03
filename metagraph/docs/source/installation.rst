@@ -175,6 +175,20 @@ To compile MetaGraph, please follow these steps.
 
     ./integration_tests --test_filter="*"
 
+Compiling inside Docker
+^^^^^^^^^^^^^^^^^^^^^^^
+
+To build without installing the toolchain on your host, run these commands
+from the root of a checkout with its submodules initialized::
+
+    docker build --target metagraph_dev_env -t metagraph-dev .
+    docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src metagraph-dev \
+        sh -ec 'cmake -S metagraph -B metagraph/build_docker -DCMAKE_DBG_ALPHABET=DNA &&
+                cmake --build metagraph/build_docker --target metagraph --parallel'
+
+The binary and build files stay in ``metagraph/build_docker`` on the host.
+Rerun the second command after editing the source.
+
 Build configurations
 ^^^^^^^^^^^^^^^^^^^^
 

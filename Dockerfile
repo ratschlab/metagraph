@@ -2,8 +2,7 @@ ARG CODE_BASE="/opt/metagraph"
 
 FROM ubuntu:22.04 AS metagraph_dev_env
 
-# contains all dependencies to build metagraph. Can also be used during development by mounting the code base and
-# build dir on the host (this is done in `make build-metagraph env=docker`)
+# Build toolchain for the image and for local development.
 
 RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install -y \
     autoconf \
@@ -37,9 +36,10 @@ ARG CODE_BASE
 COPY . ${CODE_BASE}
 
 WORKDIR ${CODE_BASE}
-RUN make build-metagraph alphabet=DNA \
-    && make build-metagraph alphabet=DNA5 \
-    && make build-metagraph alphabet=Protein
+RUN set -e; for alphabet in DNA DNA5 Protein; do \
+        cmake -S metagraph -B metagraph/build -DCMAKE_DBG_ALPHABET="$alphabet" -DBUILD_KMC=OFF; \
+        cmake --build metagraph/build --target metagraph --parallel "$(getconf _NPROCESSORS_ONLN)"; \
+    done
 
 FROM ubuntu:24.04
 ARG CODE_BASE
