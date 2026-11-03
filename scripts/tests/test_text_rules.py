@@ -60,7 +60,7 @@ class TextExtraction(unittest.TestCase):
 
 class AllowComment(unittest.TestCase):
     def scan(self, src):
-        cfg = {"scopes": [{"name": "docs", "include": ["a.md"]}], "terms": [{"use": "k-mer", "not": ["kmer"]}]}
+        cfg = {"scopes": [{"name": "docs", "include": ["a.md"]}], "terms": [{"use": "k-mer", "not": ["kmer", "kmers"]}]}
         with mock.patch.object(RULES, "repo_files", return_value=["a.md"]), \
                 mock.patch.object(Path, "read_text", return_value=src):
             return [rule for _, rule, _ in RULES.scan(Path("/unused"), cfg).get("a.md", [])]
@@ -70,6 +70,21 @@ class AllowComment(unittest.TestCase):
 
     def test_allow_without_matching_term_is_ignored(self):
         self.assertEqual(self.scan("<!-- text-rules-allow: R8 genome -->\nCount each kmer twice.\n"), ["R8"])
+
+    def test_allow_requires_reason_before_comment_end(self):
+        for comment in ("text-rules-allow: R8 kmer", "<!-- text-rules-allow: R8 kmer -->",
+                        "<!-- text-rules-allow: R8 kmer   -->", "/* text-rules-allow: R8 kmer */"):
+            with self.subTest(comment=comment):
+                self.assertEqual(self.scan(comment + "\nCount each kmer twice.\n"), ["R8"])
+
+    def test_allow_does_not_match_plural(self):
+        self.assertEqual(self.scan("<!-- text-rules-allow: R8 kmer the flag name -->\nCount the kmers twice.\n"), ["R8"])
+
+    def test_next_line_cannot_supply_reason(self):
+        self.assertEqual(RULES.ALLOW.findall("// text-rules-allow: R8 kmer\nCount each kmer twice."), [])
+
+    def test_allow_matches_punctuation(self):
+        self.assertEqual(self.scan("<!-- text-rules-allow: R1 ; published punctuation -->\nStop; retry.\n"), [])
 
 
 class BaselineCheck(unittest.TestCase):

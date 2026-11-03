@@ -7,6 +7,7 @@ Rules for coding agents working in this repository.
 These rules apply to everything a person reads in this repository:
 
 - `README.md` and the docs in `metagraph/docs/source/`.
+- The Python API README at `metagraph/api/python/README.rst`.
 - The `--help` text in `metagraph/src/cli/config/config.cpp`.
 - The errors and warnings the CLI prints.
 - PR descriptions, review comments and commit messages.
@@ -55,9 +56,13 @@ What a PR, a review and a commit look like:
 `scripts/text-rules-baseline.json`. It fails only when a file gains one of these hits:
 
 - R1: a semicolon in prose.
-- R4: "sorry", "oops", "something went wrong", "an error occurred" or "unknown error".
+- R4: "sorry", "oops", "whoops", "something went wrong", "an error occurred" or "unknown error".
 - R5: a word from the jargon list, in prose.
-- R7: "may", "might", "soon", "shortly", "a while", "eventually", or a number in words before a unit.
+- R7: "may", "might", "soon", "shortly", "a while" or "eventually".
+  It also detects selected number words before selected units, ignoring case.
+  Numbers: two, three, four, five, six, seven, eight, nine, ten, twelve, twenty, thirty and sixty.
+  Units: second, minute, hour, day, week, month, thread, file, step and result, including their plurals.
+  It also recognizes times, GB, MB and TB. Other number words and units need manual review.
 - R8: a banned term from the term list.
 - R9: "we", "our" or "us" where the scope bans them.
 
@@ -67,6 +72,7 @@ descriptions, is not linted.
 
 A file with fewer hits than its baseline passes with a note. Lower its baseline with `--update-baseline`, which
 refuses increases. A deliberate exception takes a comment on that line or the line before: `text-rules-allow: <rule>
-<term> <reason>`, such as `text-rules-allow: R8 kmer the flag name`. The term must occur in the text.
+<term> <reason>`, such as `text-rules-allow: R8 kmer the flag name`. A reason is required.
+The term must occur in the text with the same word boundaries used by the term check.
 
 Reviewers use this list.

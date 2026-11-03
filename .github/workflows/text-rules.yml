@@ -1,8 +1,8 @@
 name: Text rules
 
 # Checks user-facing text against the writing rules. Existing hits are allowed by
-# scripts/text-rules-baseline.json. A new hit, or a fixed hit without a lowered
-# baseline, fails. See scripts/text-rules.json for the files in scope.
+# scripts/text-rules-baseline.json. A new hit fails. Fewer hits pass with a note
+# to lower the baseline. See scripts/text-rules.json for the files in scope.
 
 on:
   push:

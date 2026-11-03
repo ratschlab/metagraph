@@ -5,7 +5,7 @@ The scanner reads the files that `scripts/text-rules.json` names, pulls out the 
 user reads (prose in Markdown and reStructuredText, strings in code that reach
 a user), and counts rule hits per file. `text-rules-baseline.json` holds the
 counts that existing text already has (`scripts/text-rules-baseline.json`). The check fails when a file has more
-hits than its baseline, or fewer (lower the baseline in the same change).
+hits than its baseline. Fewer hits pass with a note to lower the baseline.
 
 Usage:
   check_text_rules.py                    # check against the baseline
@@ -33,7 +33,7 @@ RATCHET = ("R1", "R4", "R5", "R7", "R8", "R9")
 REPORT_ONLY = ("R2", "R6")
 WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
 PROSE = re.compile(r"[A-Za-z]{2,},? [A-Za-z]{2,},? [A-Za-z]{2,}")  # 3 plain words in a row
-ALLOW = re.compile(r"text-rules-allow:\s*(R\d+)\s+(\S+)")
+ALLOW = re.compile(r"text-rules-allow:[ \t]*(R\d+)[ \t]+(\S+)[ \t]+(?![ \t]|-->|\*/|$)\S+")
 
 
 # ---------- extractors: each yields (line, text) ----------
@@ -355,10 +355,13 @@ def scan(root, cfg, only=None):
                 continue
             lines = src.split("\n")
             for ln, text in units:
-                ctx = " ".join(lines[max(0, ln - 2):ln])
+                ctx = "\n".join(lines[max(0, ln - 2):ln])
                 allowed = ALLOW.findall(ctx)
                 for rule, snip in check_text(text, cfg, scope):
-                    if any(r == rule and term.lower() in text.lower() for r, term in allowed):
+                    if any(r == rule and re.search((r"(?<![\w-])" if re.match(r"[\w-]", term) else "")
+                                                  + re.escape(term)
+                                                  + (r"(?![\w-])" if re.search(r"[\w-]$", term) else ""), text, re.I)
+                           for r, term in allowed):
                         continue
                     results.setdefault(f, []).append((ln, rule, re.sub(r"\s+", " ", snip).strip()))
     return results
