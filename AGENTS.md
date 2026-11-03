@@ -2,10 +2,11 @@
 
 ## Writing for people
 
+From a plain clone, run `git submodule update --init -- tools/writing-rules`.
 Before changing documentation or user-facing text, read
-[the shared principles](docs/writing/PRINCIPLES.md). The accompanying
-[sources](docs/writing/SOURCES.md) distinguish research, standards and style
-preferences. `.writing-rules-revision` pins this local snapshot and the checker.
+[the shared principles](tools/writing-rules/PRINCIPLES.md). The accompanying
+[sources](tools/writing-rules/SOURCES.md) distinguish research, standards and style
+preferences. The submodule pins the guide and checker together.
 
 Write for the reader's task. Preserve facts, uncertainty and necessary technical
 detail. Check defaults, flags, file names and guarantees against their owning
@@ -24,7 +25,7 @@ evidence concisely; report material review findings without a mandatory verdict
 phrase or a fixed word count.
 
 Before drafting an issue, PR description, review or commit message, read the relevant
-section of [engineering communication](docs/writing/ENGINEERING.md).
+section of [engineering communication](tools/writing-rules/ENGINEERING.md).
 Its guidance also covers replies to users and release/migration notes.
 Before submission, check the receiving project's contribution guidelines,
 templates and required disclosures.

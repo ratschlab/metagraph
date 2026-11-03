@@ -1,9 +1,8 @@
 # Writing guidance and checks
 
-`PRINCIPLES.md`, `SOURCES.md`, `ENGINEERING.md`, `LICENSE` and `AUTHORS` are a tracked snapshot from
-[ratschlab/writing-rules](https://github.com/ratschlab/writing-rules), at the
-commit in `.writing-rules-revision`. Keep the snapshot and tool pin together.
-The license here covers the shared guidance; MetaGraph's license is unchanged.
+The [writing-rules submodule](../../tools/writing-rules) contains the guide and
+checker at the revision selected by MetaGraph. Initialize it once after cloning,
+and repeat the update command after pulling a new submodule revision.
 
 ## Local check
 
@@ -11,8 +10,9 @@ Use Python 3.12 and Vale 3.26.0. Install Vale from its official release;
 CI verifies the Linux x86_64 archive checksum. From the repository root:
 
 ```sh
+git submodule update --init -- tools/writing-rules
 python3 -m venv .writing/venv
-.writing/venv/bin/pip install "git+https://github.com/ratschlab/writing-rules.git@$(cat .writing-rules-revision)"
+.writing/venv/bin/pip install ./tools/writing-rules
 .writing/venv/bin/writing-rules export-package .writing/WritingRules.zip
 vale sync --no-global
 PATH="$PWD/.writing/venv/bin:$PATH" .writing/venv/bin/writing-rules check
