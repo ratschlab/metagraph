@@ -67,7 +67,8 @@ What k-mer size?
 - DNA/RNA: k=21 to 41
 - Protein: k=7 to 15
 
-Always pass ``-k``. The ``build`` default is 3. Only ``metagraph-workflows`` defaults to 31.
+Pass ``-k`` explicitly for reproducible builds. Run ``metagraph build --help``
+to see the default for your installed binary. The workflow CLI defaults to 31.
 
 - Longer k = more specific, less sensitive
 - Must be ≤ sequence/read length
@@ -75,20 +76,18 @@ Always pass ``-k``. The ``build`` default is 3. Only ``metagraph-workflows`` def
 How many threads to use?
 ------------------------
 
-Most of the routines in MetaGraph are well parallelized, so the more threads, the better.
-More than the number of cores is not recommended.
+Use ``-p`` to set the thread count within your CPU allocation. Scaling depends on the operation and available I/O.
 
 What buffer size?
 -----------------
 When constructing very large graphs, it is recommended to use disk swap
 to limit the RAM usage::
 
-   metagraph build --disk-swap <TMP_DIR> --mem-cap-gb 10
+   metagraph build -k 31 --disk-swap /tmp --mem-cap-gb 10 -o graph input.fa
 
-- For small graphs: 1 GB is enough (Default)
-- For large graphs: the more, the better (50-80 GB is always sufficient, even for trillions of k-mers)
-- Larger than 80 GB is **not** recommended
-- ``<TMP_DIR>`` may be on a spinning disk (SSD might help but not necessary)
+For succinct construction, ``--mem-cap-gb`` sets the preallocated buffer size
+(default 1 GB). Allow additional RAM for the rest of the process and enough free
+space in the swap directory.
 
 Canonical vs Primary graph?
 ----------------------------
@@ -108,7 +107,7 @@ How to handle large datasets?
 
 .. code-block:: bash
 
-   metagraph build -k 31 --disk-swap /tmp --mem-cap-gb 50 input.fa
+   metagraph build -k 31 --disk-swap /tmp --mem-cap-gb 50 -o graph input.fa
 
 2. **Build sample graphs separately:**
 
@@ -203,10 +202,10 @@ How to query?
 .. code-block:: bash
 
    # Presence/absence
-   metagraph query -i graph.dbg -a annotation.annodbg query.fa
+   metagraph query -i graph.dbg -a annotation.column.annodbg query.fa
    
-   # With threshold (80% k-mers must match)
-   metagraph query --min-kmers-fraction-label 0.8 ...
+   # Require at least 80% of the query k-mers to match each reported label
+   metagraph query --min-kmers-fraction-label 0.8 -i graph.dbg -a annotation.column.annodbg query.fa
    
    # K-mer counts
    metagraph query --query-mode counts -a annotation.int_brwt.annodbg ...
@@ -220,7 +219,7 @@ How to query?
 
 .. code-block:: bash
 
-   metagraph server_query -i graph.dbg -a annotation.annodbg --port 5555 -p 10 --mmap
+   metagraph server_query -i graph.dbg -a annotation.column.annodbg --port 5555 -p 10 --mmap
 
 2. Query the index:
 
@@ -229,14 +228,16 @@ How to query?
    from metagraph.client import GraphClient
    
    client = GraphClient('localhost', 5555, api_path='')
-   results = client.search('ACGTACGT', discovery_fraction=0.8)
+   # Use a sequence from your input that is at least k bases long.
+   sequence = 'ACGTTAGCTTCGATGCTAGCTACGGCTTAGATCG'
+   results = client.search(sequence, discovery_fraction=0.8)
 
 What is discovery_fraction?
 ----------------------------
 
 Minimum fraction of k-mers that must match:
 
-- **0.0**: Any match (at last 1 k-mer must match)
+- **0.0**: Any match (at least 1 k-mer must match)
 - **0.8**: ≥80% k-mers match (recommended for classification)
 - **1.0**: All k-mers match (strict)
 
@@ -256,7 +257,7 @@ How to align?
    metagraph align -i graph.dbg reads.fa
    
    # With annotation (label-consistent paths)
-   metagraph align -i graph.dbg -a annotation.annodbg reads.fa
+   metagraph align -i graph.dbg -a annotation.column.annodbg reads.fa
    
    # Adjust sensitivity
    metagraph align --align-min-seed-length 15 --align-min-exact-match 0.7 ...
@@ -298,7 +299,7 @@ How to reduce size?
 6. **Use other graph cleaning techniques:** ``metagraph clean ...`` to remove sequencing errors
 
 How to reduce RAM usage while querying?
---------------------------------
+---------------------------------------
 
 - **Use memory mapping (--mmap):** see :ref:`memory_mapping`
 - **Reduce the batch size:** see ``./metagraph query --batch-size ...``
@@ -310,7 +311,7 @@ When to use memory mapping?
 - When the available RAM is limited
 
 When not to use memory mapping?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 - Never use it with slow (e.g., spinning) disks, unless it's for a single stats check
 
 Troubleshooting

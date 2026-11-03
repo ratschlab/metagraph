@@ -36,7 +36,7 @@ The annotation matrix can also be supplemented with additional attributes to rep
 **Workflow**
 
 A typical workflow in MetaGraph consists of these steps: 1. Construct graph, 2. Construct annotation, 3. Query/host for queries.
-For the full construction workflows on real large-scale datasets, see :ref:`large_scale_workflows`.
+For automated graph construction and annotation, see :doc:`workflows`.
 
 In the following, you will find simplified instructions and examples for constructing a MetaGraph
 index and querying it.
@@ -652,7 +652,7 @@ The conversion to Rainbowfish consists of two steps.
 
     find . -name "*.column.annodbg" | metagraph transform_anno -v \
                                                  --anno-type row \
-                                                 -o annotation ...
+                                                 -o annotation
 
 2. Then, transform the row-major annotation to the compressed Rainbowfish representation::
 
@@ -733,7 +733,7 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
         find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
                                                         -i graph.dbg \
                                                         --anno-type row_diff_brwt \
-                                                        --greedy ...
+                                                        --greedy -o annotation
         metagraph relax_brwt -v -p 18 \
                              --relax-arity 32 \
                              -o annotation_relaxed \
@@ -751,7 +751,7 @@ In the second step, the diff-transformed columns ``*.row_diff.annodbg`` are conv
 
         find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
                                                         -i graph.dbg \
-                                                        --anno-type row_diff_sparse
+                                                        --anno-type row_diff_sparse -o annotation
 
 
 .. _transform_count_annotations:
@@ -966,8 +966,8 @@ add the ``--mmap`` flag to any ``metagraph`` command, e.g.::
                 --min-kmers-fraction-label 0.1 \
                 transcripts_1000.fa
 
-Memory mapping is supported for most graph and annotation representations. This reduces the loading time and
-the RAM usage to practically zero.
+Most graph and annotation representations support memory mapping, which lets the OS load pages as they are accessed. Resident memory
+and query latency depend on the working set and the filesystem cache.
 
 .. attention:: For the efficient use of memory mapping, the data needs to be stored on a fast SSD or
     NVME disk. Spinning disks are not recommended (unless ``--mmap`` is used for simple stats checks).

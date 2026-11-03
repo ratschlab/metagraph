@@ -10,19 +10,17 @@ for the most common scenarios.
 Installation
 ------------
 
-The ``metagraph-workflows`` CLI ships as a separate Python package. The
-``metagraph`` conda recipe only installs the C++ binary, so the workflow
-wrapper needs an extra ``pip install`` step alongside it:
+Build the MetaGraph CLI as described in :ref:`installation` and install the workflow wrapper from the same checkout. An older
+binary can reject workflow flags such as ``--index-header-coords``.
+From the repository root:
 
 .. code-block:: bash
 
-   conda create -n metagraph-workflows python=3.8
+   conda create -n metagraph-workflows python=3.12 pip
    conda activate metagraph-workflows
-   conda install -c conda-forge -c bioconda --strict-channel-priority metagraph       # the metagraph binary
-   pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
-
-After this, the ``metagraph`` binary and the ``metagraph-workflows``
-command are both available on ``PATH``.
+   export PATH="$PWD/metagraph/build:$PATH"
+   python -m pip install ./metagraph/workflows
+   metagraph-workflows build --help
 
 
 Creating graphs and annotations
@@ -196,7 +194,7 @@ directly invoke the snakemake workflow (assuming you checked out the `metagraph 
 
 .. code-block:: bash
 
-    cd metagraph/workflows
-    snakemake --forceall --configfile default.yml \
-        --config k=5 seqs_file_list_path='transcript_paths.txt' output_directory=/tmp/mygraph \
-        annotation_labels_source=header --cores 2
+    snakemake --snakefile metagraph/workflows/snakemake/Snakefile \
+        --configfile metagraph/workflows/snakemake/default.yml --cores 2 \
+        --config seqs_file_list_path=transcript_paths.txt output_directory=/tmp/mygraph \
+        annotation_labels_source=header
