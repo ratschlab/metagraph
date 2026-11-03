@@ -11,7 +11,7 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
 [![Bioconda version](https://img.shields.io/conda/vn/bioconda/metagraph)](https://bioconda.github.io/recipes/metagraph/README.html)
 [![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
-[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#1-install)
+[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](https://metagraph.ethz.ch/static/docs/installation.html#install-with-conda)
 [![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#docker)
 [![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-source)
 [![DOI](https://img.shields.io/badge/DOI-10.1038%2Fs41586--025--09603--w-blue)](https://doi.org/10.1038/s41586-025-09603-w)
@@ -66,26 +66,22 @@ Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data
 
 ## Quick start
 
-### 1. Install
+### 1. Start the example environment
+
+The Docker image includes the MetaGraph CLI, the workflow wrapper and the example FASTA files.
+From a directory where you want to keep the index, start a shell in the image:
 
 ```bash
-conda create -n metagraph python
-conda activate metagraph
-conda install -c bioconda -c conda-forge metagraph
-pip install "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
+mkdir -p out
+docker run --rm -it -v "$PWD/out:/opt/metagraph/out" -w /opt/metagraph ghcr.io/ratschlab/metagraph:master bash
 ```
 
-`metagraph` is the compiled program. `metagraph-workflows` is the Python wrapper that runs the full build pipeline.
+Run the following build and query commands in that shell. The index stays in the host's `out/` directory after you exit.
 
 ### 2. Build an index
 
-Clone the repo for the bundled test data, then build:
-
 ```bash
-# Only to fetch the bundled example *.fa files; skip this if you have your own data
-git clone https://github.com/ratschlab/metagraph.git && cd metagraph
-
-metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary
+metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary -p 2 --mem-gb 1
 ```
 
 `--primary` indexes 1 strand of each *k*-mer pair. The index is about half the size. Use it when the strand of the reads is unknown, as in most short-read sequencing.
@@ -109,7 +105,7 @@ The positional argument accepts a file list (one path per line), a directory, or
 Query the index. Any FASTA file works as input. The bundled test data is enough for a first try.
 
 ```bash
-metagraph query --query-mode matches -p 8 \
+metagraph query --query-mode matches -p 2 \
     -i out/graph.dbg -a out/graph.relax.row_diff_brwt.annodbg \
     metagraph/tests/data/transcripts_100.fa
 ```
