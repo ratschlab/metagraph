@@ -4,8 +4,8 @@
 
 From a plain clone, run `git submodule update --init -- tools/writing-rules`.
 Before changing documentation or user-facing text, read
-[the shared principles](tools/writing-rules/PRINCIPLES.md). The accompanying
-[sources](tools/writing-rules/SOURCES.md) distinguish research, standards and style
+[`tools/writing-rules/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/cd4988d183077ebc769eb1204fca1c5aabe8f23d/PRINCIPLES.md). The accompanying
+[`tools/writing-rules/SOURCES.md`](https://github.com/ratschlab/writing-rules/blob/cd4988d183077ebc769eb1204fca1c5aabe8f23d/SOURCES.md) distinguish research, standards and style
 preferences. The submodule pins the guide and checker together.
 
 Write for the reader's task. Preserve facts, uncertainty and necessary technical
@@ -25,7 +25,7 @@ evidence concisely; report material review findings without a mandatory verdict
 phrase or a fixed word count.
 
 Before drafting an issue, PR description, review or commit message, read the relevant
-section of [engineering communication](tools/writing-rules/ENGINEERING.md).
+section of [`tools/writing-rules/ENGINEERING.md`](https://github.com/ratschlab/writing-rules/blob/cd4988d183077ebc769eb1204fca1c5aabe8f23d/ENGINEERING.md).
 Its guidance also covers replies to users and release/migration notes.
 Before submission, check the receiving project's contribution guidelines,
 templates and required disclosures.
