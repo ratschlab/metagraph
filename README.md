@@ -21,6 +21,8 @@
 
 Index your reads or assemblies once. Then search them for matching samples, alignments and source positions.
 
+The MetaSUB index on [MetaGraph Online](https://metagraph.ethz.ch/search) covers 7.2 trillion bases from about 4,200 samples. In a direct-server test, it returned matches for a 10 kbp DNA query in under a second, using four query threads on a warm index.
+
 A MetaGraph index has 2 parts. The **de Bruijn graph** stores every *k*-mer of the input sequences. The **annotation matrix** links each *k*-mer to its labels, such as the sample, the sequence header, a count or a position.
 
 ```mermaid
