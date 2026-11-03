@@ -33,3 +33,6 @@ tags
 **/cmake-build-debug
 **/.snakemake/
 .idea
+
+# Local shared writing-rule installation and generated package
+.writing/

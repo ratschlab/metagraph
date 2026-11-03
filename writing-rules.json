@@ -1,0 +1,14 @@
+{
+  "include": [
+    "README.md",
+    "metagraph/docs/source/*.rst",
+    "metagraph/api/python/README*",
+    "metagraph/src/cli/*.cpp",
+    "metagraph/src/cli/config/*.cpp",
+    "metagraph/src/cli/load/*.cpp",
+    "metagraph/src/cli/*.hpp"
+  ],
+  "source": {
+    "cpp": {"all_strings_in": ["metagraph/src/cli/config/config.cpp"]}
+  }
+}
