@@ -1,6 +1,6 @@
 # Writing guidance and checks
 
-`PRINCIPLES.md`, `SOURCES.md`, `LICENSE` and `AUTHORS` are a tracked snapshot from
+`PRINCIPLES.md`, `SOURCES.md`, `ENGINEERING.md`, `LICENSE` and `AUTHORS` are a tracked snapshot from
 [ratschlab/writing-rules](https://github.com/ratschlab/writing-rules), at the
 commit in `.writing-rules-revision`. Keep the snapshot and tool pin together.
 The license here covers the shared guidance; MetaGraph's license is unchanged.

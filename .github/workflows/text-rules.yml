@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
       - name: Verify guidance snapshot
         run: |
-          for file in PRINCIPLES.md SOURCES.md LICENSE AUTHORS; do
+          for file in PRINCIPLES.md SOURCES.md ENGINEERING.md LICENSE AUTHORS; do
             cmp "docs/writing/$file" ".writing/shared/$file"
           done
       - name: Install pinned Vale and shared runner
