@@ -1024,7 +1024,7 @@ if (advanced) {
             fprintf(stderr, "\t   --max-count-q [FLOAT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast / sshash [succinct]\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashpacked / hashstr / hashfast / sshash [succinct]\n");
             fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --in-ram \t\tconstruct succinct graph in RAM instead of inplace [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");

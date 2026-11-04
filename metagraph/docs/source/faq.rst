@@ -229,7 +229,7 @@ How to query?
    
    client = GraphClient('localhost', 5555, api_path='')
    # Use a sequence from your input that is at least k bases long.
-   sequence = 'ACGTTAGCTTCGATGCTAGCTACGGCTTAGATCG'
+   sequence = 'ACGTTAGCTTCGATGCTAGCTACGGCTTAGATCGACGTACGTAC'
    results = client.search(sequence, discovery_fraction=0.8)
 
 What is discovery_fraction?
