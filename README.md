@@ -21,9 +21,9 @@
 
 Index your reads or assemblies once. Then search them for matching samples, alignments and source positions.
 
-The MetaSUB index on [MetaGraph Online](https://metagraph.ethz.ch/search) covers 7.2 trillion bases from about 4,200 samples. In a direct-server test, it returned matches for a 10 kbp DNA query in under a second, using four query threads on a warm index.
+The running MetaSUB index behind [MetaGraph Online](https://metagraph.ethz.ch/search) can find matches for a 10 kbp DNA sequence across 7.2 trillion bases from about 4,200 samples in under a second.
 
-A MetaGraph index has 2 parts. The **de Bruijn graph** stores every *k*-mer of the input sequences. The **annotation matrix** links each *k*-mer to its labels, such as the sample, the sequence header, a count or a position.
+A MetaGraph index has two parts: a **de Bruijn graph** storing the indexed *k*-mers and an **annotation matrix** linking them to labels, such as samples or sequence headers. Optional payloads record counts or source positions.
 
 ```mermaid
 flowchart LR
@@ -53,8 +53,9 @@ flowchart LR
 - **Modular annotation formats**: `ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants. Pick the compression/speed tradeoff that fits your scale.
 - **Custom alphabets**: `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - **Extensible by design**: generic interfaces let developers add new graph/annotation representations or algorithms with little code.
-- **Memory-mapped loading**: pass `--mmap` to any command to start fast and use less RAM at query time. NVMe works best. An SSD works but is slower.
-- **Scales to trillions of *k*-mers and millions of labels**: the hosted indexes at metagraph.ethz.ch cover all public SRA data.
+- **Memory-mapped loading**: `--mmap` lets supported index representations load data on demand. This can reduce startup time and RAM use; query performance depends on the working set and storage speed. Fast local SSD storage is recommended.
+- **Scales to trillions of *k*-mers and millions of labels**: see the [petabase-scale indexing study](https://doi.org/10.1038/s41586-025-09603-w).
+- **Batched operations**: annotation queries group lookups to reduce repeated access to compressed data structures.
 
 </details>
 
@@ -62,7 +63,7 @@ flowchart LR
 
 ## MetaGraph Online
 
-Try MetaGraph without installing anything at <https://metagraph.ethz.ch/search>. It searches indexes of public DNA, RNA and protein data, such as RefSeq, UHGG, Tara Oceans and UniParc. See the [list of databases](https://metagraph.ethz.ch/indexes). Paste a sequence and pick the indexes to search.
+Try MetaGraph without installing anything at <https://metagraph.ethz.ch/search>. It searches indexes representing over 50 petabases of public sequencing data, including SRA collections, RefSeq, UHGG, Tara Oceans and UniParc. See the [list of databases](https://metagraph.ethz.ch/indexes). Paste a sequence and pick the indexes to search.
 
 Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data](https://registry.opendata.aws/metagraph/) for download (no AWS account needed) and offline querying. See [Preconstructed indexes](https://metagraph.ethz.ch/static/docs/resources.html#preconstructed-indexes).
 
@@ -86,9 +87,9 @@ Run the following build and query commands in that shell. The index stays in the
 metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary -p 2 --mem-gb 1
 ```
 
-`--primary` indexes 1 strand of each *k*-mer pair. The index is about half the size. Use it when the strand of the reads is unknown, as in most short-read sequencing.
+`--primary` stores one orientation per reverse-complement pair, approximately halving the graph compared with indexing both strands. Use it when the strand of the reads is unknown, as in most short-read sequencing.
 
-This runs the full pipeline. It writes the graph `graph.dbg`, a smaller and slower copy `graph_small.dbg`, and the annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
+The pipeline builds the graph, annotates it, applies row-diff compression, then clusters and relaxes the BRWT. It writes `graph.dbg`, a smaller graph representation with slower access (`graph_small.dbg`), and the `RowDiff<Multi-BRWT>` annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
 
 <details>
 <summary>Real-workload example with file list and hardware budget</summary>
