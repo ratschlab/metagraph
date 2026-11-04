@@ -94,6 +94,8 @@ The pipeline builds the graph, annotates it, applies row-diff compression, then 
 <details>
 <summary>Real-workload example with file list and hardware budget</summary>
 
+Run this with a local installation, or [mount](#docker) your input and scratch directories into the container first. Paths in `samples.txt` must be accessible inside the container.
+
 ```bash
 metagraph-workflows build samples.txt -o out/ --primary \
   -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
