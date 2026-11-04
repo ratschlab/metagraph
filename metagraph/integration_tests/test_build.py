@@ -29,8 +29,8 @@ class TestBuild(TestingBase):
 
     def test_default_k(self):
         graph = os.path.join(self.tempdir.name, 'default')
-        subprocess.run([METAGRAPH, 'build', '-o', graph,
-                        os.path.join(TEST_DATA_DIR, 'genome.MT.fa')], check=True)
+        fasta = os.path.join(TEST_DATA_DIR, 'genome.MT.fa')
+        subprocess.run(f'{METAGRAPH} build -o {graph} {fasta}', shell=True, check=True)
         stats = self._get_stats(graph + '.dbg')
         self.assertEqual(stats['k'], '3' if PROTEIN_MODE else '31')
 
