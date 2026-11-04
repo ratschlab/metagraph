@@ -71,45 +71,39 @@ Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data
 
 ### 1. Install
 
-With Conda and Git installed, create an environment for the CLI and workflow wrapper:
+With Conda and Git installed, install the CLI and the current workflow wrapper:
 
 ```bash
 conda create -n metagraph --override-channels -c conda-forge -c bioconda \
-    --strict-channel-priority python=3.12 pip metagraph=0.5.2
+    --strict-channel-priority python=3.12 pip "metagraph>=0.5.2"
 conda activate metagraph
 
-git clone --depth 1 --branch v0.5.2 https://github.com/ratschlab/metagraph.git
+git clone --depth 1 --branch master https://github.com/ratschlab/metagraph.git
 cd metagraph
 python -m pip install ./metagraph/workflows
 ```
 
-These commands install the CLI and wrapper from the same release. The checkout also supplies the example data; no submodule initialization or C++ build is needed. Both `metagraph` and `metagraph-workflows` are available while the environment is active.
+The shallow checkout supplies both the wrapper and the example data. No submodule initialization or C++ build is needed. Both `metagraph` and `metagraph-workflows` are available while the environment is active.
 
 ### 2. Build an index
 
 ```bash
-ls metagraph/tests/data/*.fa > samples.txt
-metagraph-workflows build --seqs-file-list-path samples.txt -o out/ \
-    --primary --anno-source file_names --threads 2
+metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary -p 2 --mem-gb 1
 ```
-
-This labels each input file as a sample. The example files share some FASTA headers, so using file names avoids duplicate labels.
 
 `--primary` stores one orientation per reverse-complement pair, approximately halving the graph compared with indexing both strands. Use it when the strand of the reads is unknown, as in most short-read sequencing.
 
-The pipeline builds the graph, annotates it, applies row-diff compression, then clusters and relaxes the BRWT. It writes `graph.dbg` and the `RowDiff<Multi-BRWT>` annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
+The pipeline builds the graph, annotates it, applies row-diff compression, then clusters and relaxes the BRWT. It writes `graph.dbg`, a smaller graph representation with slower access (`graph_small.dbg`), and the `RowDiff<Multi-BRWT>` annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
 
 <details>
-<summary>Use your own sample list</summary>
-
-List one input file path per line in `samples.txt`, then choose the number of CPU threads:
+<summary>Real-workload example with file list and hardware budget</summary>
 
 ```bash
-metagraph-workflows build --seqs-file-list-path samples.txt -o out/ \
-    --primary --anno-source file_names --threads 34
+metagraph-workflows build samples.txt -o out/ --primary \
+  -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
 ```
 
-To read samples from a directory, replace `--seqs-file-list-path samples.txt` with `--seqs-dir-path /data/samples`. See `metagraph-workflows build --help` for the release's supported options.
+The positional argument accepts a file list (one path per line), a directory, or process substitution. Per-stage memory caps, thread packing, and BRWT parameters are derived from the budget. See `metagraph-workflows build --help` for all options.
 
 </details>
 
