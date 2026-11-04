@@ -21,7 +21,7 @@
 
 Index your reads or assemblies once. Then search them for matching samples, alignments and source positions.
 
-The running MetaSUB index behind [MetaGraph Online](https://metagraph.ethz.ch/search) can find matches for a 10 kbp DNA sequence across 7.2 trillion bases from about 4,200 samples in under a second.
+For a sense of scale, [MetaGraph Online](https://metagraph.ethz.ch/search) can search an index representing 7.2 trillion bases from about 4,200 samples for matches to a 10 kbp DNA sequence in under a second.
 
 A MetaGraph index has two parts: a **de Bruijn graph** storing the indexed *k*-mers and an **annotation matrix** linking them to labels, such as samples or sequence headers. Optional payloads record counts or source positions.
 
