@@ -53,7 +53,7 @@ flowchart LR
 - **Modular annotation formats**: `ColumnCompressed`, `RowDiff<Multi-BRWT>`, `RowSparse`, `Rainbowfish`, plus count- and coordinate-aware variants. Pick the compression/speed tradeoff that fits your scale.
 - **Custom alphabets**: `{A,C,G,T}`, `{A,C,G,T,N}`, amino acids, case-sensitive DNA, or compile-time custom alphabets.
 - **Extensible by design**: generic interfaces let developers add new graph/annotation representations or algorithms with little code.
-- **Memory-mapped loading**: `--mmap` lets supported index representations load data on demand. This can reduce startup time and RAM use; query performance depends on the working set and storage speed. Fast local SSD storage is recommended.
+- **Memory-mapped loading**: use `--mmap` to open supported graphs and annotations without first reading them fully into RAM. This enables fast startup and queries on indexes larger than available memory. Use fast local SSD storage.
 - **Scales to trillions of *k*-mers and millions of labels**: see the [petabase-scale indexing study](https://doi.org/10.1038/s41586-025-09603-w).
 - **Batched operations**: annotation queries group lookups to reduce repeated access to compressed data structures.
 
