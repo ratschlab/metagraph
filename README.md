@@ -316,7 +316,11 @@ See the [installation guide](https://metagraph.ethz.ch/static/docs/installation.
 
 **Build a docker container.** Run `docker build .`
 
-**Releases.** 1. Bump the version in `package.json`. 2. Tag the commit with that version. 3. Create a GitHub release.
+**Releases.**
+
+1. Bump the version in `package.json`.
+2. Tag the commit with that version.
+3. Create a GitHub release.
 
 </details>
 
