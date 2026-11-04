@@ -86,4 +86,51 @@ TEST(ColumnCompressed, GetColumn) {
     EXPECT_TRUE(annotation.get_column("Label8")[4]);
 }
 
+TEST(ColumnCompressed, SparseUpdatesAfterCacheEviction) {
+    const uint64_t rows = uint64_t(1) << 34;
+    annot::ColumnCompressed<> annotation(rows, 1);
+    annotation.add_labels({ 0, rows - 1 }, { "first" });
+    annotation.add_labels({ rows / 2 }, { "second" });
+    annotation.add_labels({ 0, 7, rows - 1 }, { "first" });
+    annotation.add_labels({ 8, rows / 2 }, { "second" });
+    const auto filename = test_dump_basename + "_sparse_revisit";
+    annotation.serialize(filename);
+    annot::ColumnCompressed<> restored;
+    ASSERT_TRUE(restored.merge_load({ filename }));
+    EXPECT_EQ(3u, restored.get_column("first").num_set_bits());
+    EXPECT_EQ(2u, restored.get_column("second").num_set_bits());
+    EXPECT_TRUE(restored.get_column("first")[rows - 1]);
+    EXPECT_FALSE(restored.get_column("first")[8]);
+    EXPECT_TRUE(restored.get_column("second")[8]);
+    EXPECT_EQ(convert_to_set({ "first" }), convert_to_set(restored.get_labels(7)));
+    EXPECT_EQ(convert_to_set({ "second" }), convert_to_set(restored.get_labels(8)));
+    EXPECT_TRUE(restored.get_labels(9).empty());
+}
+
+TEST(ColumnCompressed, MergeSparseColumnsWithLargeRowCount) {
+    const uint64_t rows = uint64_t(1) << 34;
+    const auto first_file = test_dump_basename + "_sparse_merge_first";
+    const auto second_file = test_dump_basename + "_sparse_merge_second";
+    annot::ColumnCompressed<> first(rows, 1), second(rows, 1);
+    first.add_labels({ 0, rows - 1 }, { "shared" });
+    first.add_labels({ 5 }, { "first" });
+    second.add_labels({ 7, rows - 1 }, { "shared" });
+    second.add_labels({ 8 }, { "second" });
+    first.serialize(first_file);
+    second.serialize(second_file);
+    for (const auto &files : std::vector<std::vector<std::string>>{
+            {first_file, second_file}, {second_file, first_file},
+            {first_file, second_file, first_file}}) {
+        annot::ColumnCompressed<> merged(rows, 1);
+        ASSERT_TRUE(merged.merge_load(files));
+        EXPECT_EQ(3u, merged.get_column("shared").num_set_bits());
+        EXPECT_EQ(convert_to_set({ "shared" }), convert_to_set(merged.get_labels(0)));
+        EXPECT_EQ(convert_to_set({ "shared" }), convert_to_set(merged.get_labels(7)));
+        EXPECT_EQ(convert_to_set({ "shared" }), convert_to_set(merged.get_labels(rows - 1)));
+        EXPECT_EQ(convert_to_set({ "first" }), convert_to_set(merged.get_labels(5)));
+        EXPECT_EQ(convert_to_set({ "second" }), convert_to_set(merged.get_labels(8)));
+        EXPECT_TRUE(merged.get_labels(6).empty());
+    }
+}
+
 } // namespace

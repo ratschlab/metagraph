@@ -24,6 +24,12 @@ using utils::remove_suffix;
 using utils::make_suffix;
 using mtg::common::logger;
 
+namespace {
+// Keep temporary sparse positions below 64 MB and well below a dense bitmap.
+constexpr uint64_t kMaxSparseColumnOnes = 4000000;
+constexpr uint64_t kSparseColumnDensityDivisor = 128;
+} // namespace
+
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
@@ -535,7 +541,26 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     bitmatrix_.emplace_back(std::move(column));
                 } else {
                     assert(bitmatrix_.at(col).get());
-                    decompress_bitmap(col) |= *column;
+                    // Bound sparse union memory independently of the row count.
+                    const auto &existing = bitmatrix_.at(col);
+                    if (!cached_columns_.Cached(col) && existing
+                            && existing->num_set_bits() <= kMaxSparseColumnOnes
+                            && column->num_set_bits() <= kMaxSparseColumnOnes
+                            && existing->num_set_bits() + column->num_set_bits()
+                                    <= num_rows_ / kSparseColumnDensityDivisor) {
+                        std::vector<uint64_t> positions;
+                        positions.reserve(existing->num_set_bits() + column->num_set_bits());
+                        existing->call_ones([&](uint64_t i) { positions.push_back(i); });
+                        column->call_ones([&](uint64_t i) { positions.push_back(i); });
+                        std::sort(positions.begin(), positions.end());
+                        positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
+                        auto merged = std::make_unique<bit_vector_smart>(
+                            [&](const auto &emit) { for (uint64_t i : positions) emit(i); },
+                            num_rows_, positions.size());
+                        bitmatrix_[col] = std::move(merged);
+                    } else {
+                        decompress_bitmap(col) |= *column;
+                    }
                 }
             } else {
                 logger->error("Cannot load column '{}': got {} rows, expected {}",
@@ -1122,8 +1147,17 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
                                                 buffer_size_bytes_ / 8);
             }
         } else {
-            // otherwise, decompress the existing column and initialize a bitmap
-            vector = new bitmap_vector(bitmatrix_[j]->template convert_to<sdsl::bit_vector>());
+            const auto &column = bitmatrix_[j];
+            if (column->num_set_bits() <= kMaxSparseColumnOnes
+                    && column->num_set_bits() <= num_rows_ / kSparseColumnDensityDivisor) {
+                // Revisiting an evicted sparse column should scale with its ones,
+                // rather than materializing a bitmap for every graph row.
+                vector = new bitmap_builder_set(num_rows_, get_num_threads(),
+                                                column->num_set_bits());
+                column->call_ones([&](uint64_t i) { vector->add_one(i); });
+            } else {
+                vector = new bitmap_vector(column->template convert_to<sdsl::bit_vector>());
+            }
             bitmatrix_[j].reset();
         }
 
