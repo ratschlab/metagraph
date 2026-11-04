@@ -35,10 +35,15 @@ ARG CODE_BASE
 
 COPY . ${CODE_BASE}
 
-WORKDIR ${CODE_BASE}
-RUN set -e; for alphabet in DNA DNA5 Protein; do \
-        cmake -S metagraph -B metagraph/build -DCMAKE_DBG_ALPHABET="$alphabet" -DBUILD_KMC=OFF; \
-        cmake --build metagraph/build --target metagraph --parallel "$(getconf _NPROCESSORS_ONLN)"; \
+WORKDIR ${CODE_BASE}/metagraph
+RUN mkdir -p build
+WORKDIR ${CODE_BASE}/metagraph/build
+
+RUN set -e; \
+    jobs="$(getconf _NPROCESSORS_ONLN)"; \
+    for alphabet in DNA DNA5 Protein; do \
+        cmake .. -DCMAKE_DBG_ALPHABET="$alphabet" -DBUILD_KMC=OFF; \
+        make -j"$jobs" metagraph; \
     done
 
 FROM ubuntu:24.04
