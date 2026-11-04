@@ -11,7 +11,7 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
 [![Bioconda version](https://img.shields.io/conda/vn/bioconda/metagraph)](https://bioconda.github.io/recipes/metagraph/README.html)
 [![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
-[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](https://metagraph.ethz.ch/static/docs/installation.html#install-with-conda)
+[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#1-install)
 [![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#docker)
 [![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-source)
 [![DOI](https://img.shields.io/badge/DOI-10.1038%2Fs41586--025--09603--w-blue)](https://doi.org/10.1038/s41586-025-09603-w)
@@ -69,39 +69,47 @@ Prefer local analysis? The prebuilt indexes are also published on [AWS Open Data
 
 ## Quick start
 
-### 1. Start the example environment
+### 1. Install
 
-The Docker image includes the MetaGraph CLI, the workflow wrapper and the example FASTA files.
-From a directory where you want to keep the index, start a shell in the image:
+With Conda and Git installed, create an environment for the CLI and workflow wrapper:
 
 ```bash
-mkdir -p out
-docker run --rm -it -v "$PWD/out:/opt/metagraph/out" -w /opt/metagraph ghcr.io/ratschlab/metagraph:master bash
+conda create -n metagraph --override-channels -c conda-forge -c bioconda \
+    --strict-channel-priority python=3.12 pip metagraph=0.5.2
+conda activate metagraph
+
+git clone --depth 1 --branch v0.5.2 https://github.com/ratschlab/metagraph.git
+cd metagraph
+python -m pip install ./metagraph/workflows
 ```
 
-Run the following build and query commands in that shell. The index stays in the host's `out/` directory after you exit.
+These commands install the CLI and wrapper from the same release. The checkout also supplies the example data; no submodule initialization or C++ build is needed. Both `metagraph` and `metagraph-workflows` are available while the environment is active.
 
 ### 2. Build an index
 
 ```bash
-metagraph-workflows build <(ls metagraph/tests/data/*.fa) -o out/ --primary -p 2 --mem-gb 1
+ls metagraph/tests/data/*.fa > samples.txt
+metagraph-workflows build --seqs-file-list-path samples.txt -o out/ \
+    --primary --anno-source file_names --threads 2
 ```
+
+This labels each input file as a sample. The example files share some FASTA headers, so using file names avoids duplicate labels.
 
 `--primary` stores one orientation per reverse-complement pair, approximately halving the graph compared with indexing both strands. Use it when the strand of the reads is unknown, as in most short-read sequencing.
 
 The pipeline builds the graph, annotates it, applies row-diff compression, then clusters and relaxes the BRWT. It writes `graph.dbg`, a smaller graph representation with slower access (`graph_small.dbg`), and the `RowDiff<Multi-BRWT>` annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
 
 <details>
-<summary>Real-workload example with file list and hardware budget</summary>
+<summary>Use your own sample list</summary>
 
-Run this with a local installation, or [mount](#docker) your input and scratch directories into the container first. Paths in `samples.txt` must be accessible inside the container.
+List one input file path per line in `samples.txt`, then choose the number of CPU threads:
 
 ```bash
-metagraph-workflows build samples.txt -o out/ --primary \
-  -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
+metagraph-workflows build --seqs-file-list-path samples.txt -o out/ \
+    --primary --anno-source file_names --threads 34
 ```
 
-The positional argument accepts a file list (one path per line), a directory, or process substitution. Per-stage memory caps, thread packing, and BRWT parameters are derived from the budget. See `metagraph-workflows build --help` for all options.
+To read samples from a directory, replace `--seqs-file-list-path samples.txt` with `--seqs-dir-path /data/samples`. See `metagraph-workflows build --help` for the release's supported options.
 
 </details>
 
