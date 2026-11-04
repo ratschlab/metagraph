@@ -97,7 +97,7 @@ This labels each input file as a sample. The example files share some FASTA head
 
 `--primary` stores one orientation per reverse-complement pair, approximately halving the graph compared with indexing both strands. Use it when the strand of the reads is unknown, as in most short-read sequencing.
 
-The pipeline builds the graph, annotates it, applies row-diff compression, then clusters and relaxes the BRWT. It writes `graph.dbg`, a smaller graph representation with slower access (`graph_small.dbg`), and the `RowDiff<Multi-BRWT>` annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
+The pipeline builds the graph, annotates it, applies row-diff compression, then clusters and relaxes the BRWT. It writes `graph.dbg` and the `RowDiff<Multi-BRWT>` annotation `graph.relax.row_diff_brwt.annodbg`. The [Quick start guide](https://metagraph.ethz.ch/static/docs/quick_start.html) explains each step.
 
 <details>
 <summary>Use your own sample list</summary>
