@@ -187,6 +187,12 @@ The following snakemake options are exposed in the ``build`` subcommand
 * ``--dryrun``: see what workflow steps would be done
 * ``--force`` (corresponds to ``--forceall`` in snakemake): force run all steps
 
+When building a new graph without ``-k``, a dry run calls the selected
+MetaGraph executable's ``build --help`` to read its default k-mer length.
+Pass ``-k`` explicitly to preview the workflow without that executable.
+Reusing a graph with ``--graph`` does not need this lookup. A dry run does
+not execute the workflow steps or validate the input alphabet.
+
 
 Directly invoking Snakemake workflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

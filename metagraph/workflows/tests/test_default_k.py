@@ -1,9 +1,20 @@
 import subprocess
+import os
 from unittest.mock import Mock
 
 import pytest
 
 from metagraph_workflows import cli, utils
+
+
+def test_expand_executable_home_directory(monkeypatch):
+    run = Mock(return_value=subprocess.CompletedProcess(
+        [], 0, '', '-k --kmer-length [INT] length [31]\n'))
+    monkeypatch.setattr(utils.subprocess, 'run', run)
+    config = {'metagraph_cmd': '~/bin/metagraph'}
+    utils.resolve_build_k(config)
+    assert run.call_args.args[0][0] == os.path.expanduser('~/bin/metagraph')
+    assert config['k'] == 31
 
 
 @pytest.mark.parametrize('k', [3, 31, 21, 15, 12])

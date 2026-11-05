@@ -2,6 +2,7 @@ import os
 import subprocess
 import shutil
 import re
+import sys
 from itertools import product
 from pathlib import Path
 
@@ -332,6 +333,39 @@ def test_dryrun_prints_summary(sample_list_path, output_dir):
     out = proc.stdout.decode()
     assert "=== Workflow summary ===" in out
     assert "Mode: dry-run" in out
+
+
+@pytest.mark.parametrize('binary_available,explicit_k', [(False, None), (False, 7), (True, None)])
+def test_dryrun_default_lookup(sample_list_path, output_dir, tmp_path,
+                               binary_available, explicit_k):
+    executable = tmp_path / 'metagraph'
+    calls = tmp_path / 'calls.txt'
+    if binary_available:
+        executable.write_text(
+            f'#!{sys.executable}\n'
+            'import sys\nfrom pathlib import Path\n'
+            f'with Path({str(calls)!r}).open("a") as log:\n'
+            '    log.write(" ".join(sys.argv[1:]) + "\\n")\n'
+            'assert sys.argv[1:] == ["build", "--help"]\n'
+            'print("-k --kmer-length [INT] length [12]", file=sys.stderr)\n')
+        executable.chmod(0o755)
+    args = ['build', sample_list_path, '--dryrun', '--metagraph-cmd', str(executable), '-p', 2]
+    if explicit_k is not None:
+        args += ['-k', explicit_k]
+    proc = run_wrapper(args + [output_dir])
+    if not binary_available and explicit_k is None:
+        assert proc.returncode == 1
+        assert 'set -k explicitly' in proc.stdout.decode()
+        assert not (output_dir / 'config.yaml').exists()
+    else:
+        assert proc.returncode == 0, proc.stdout.decode()
+        config = yaml.safe_load((output_dir / 'config.yaml').read())
+        assert config['k'] == (explicit_k if explicit_k is not None else 12)
+        assert not (output_dir / 'graph.dbg').exists()
+    if binary_available:
+        assert calls.read_text() == 'build --help\n'
+    else:
+        assert not calls.exists()
 
 
 def test_missing_metagraph_executable_fails_fast(sample_list_path, output_dir):

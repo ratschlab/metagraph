@@ -26,6 +26,7 @@ def resolve_build_k(config):
              "Check --metagraph-cmd, or set -k explicitly (k in a Snakemake config).")
     if not cmd:
         raise ValueError(error)
+    cmd[0] = os.path.expanduser(cmd[0])
     try:
         result = subprocess.run(cmd + ['build', '--help'], capture_output=True,
                                 text=True, check=True, timeout=10)

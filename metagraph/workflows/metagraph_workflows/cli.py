@@ -927,7 +927,9 @@ def _add_help_arg(parser):
     options.add_argument('--force', default=False, action='store_true',
                          help='Force re-run all rules [off]')
     options.add_argument('--dryrun', default=False, action='store_true',
-                         help='Render DAG and config only; do not execute rules [off]')
+                         help='Render DAG and config only; do not execute rules [off]\n'
+                              '  New builds need metagraph to read the default k;\n'
+                              '  pass -k explicitly to preview without the executable.')
     options.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS,
                          help='Show this help message and exit')
 
