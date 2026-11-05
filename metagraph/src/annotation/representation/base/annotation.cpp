@@ -54,7 +54,11 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         std::string version(7, '\0');
         if (instream.read(version.data(), 7) && version == "LE-v2.0") {
             Deserializer deserializer(instream);
-            encode_label_ = VectorSet<std::string>::deserialize(deserializer, true);
+            // Read the saved buckets to consume the entire record, then rebuild them:
+            // std::hash values can differ between the writer's and reader's toolchains.
+            auto labels = to_vector(VectorSet<std::string>::deserialize(deserializer, true));
+            encode_label_ = VectorSet<std::string>(std::make_move_iterator(labels.begin()),
+                                                   std::make_move_iterator(labels.end()));
             return instream.good();
         }
         // backward compatibility
