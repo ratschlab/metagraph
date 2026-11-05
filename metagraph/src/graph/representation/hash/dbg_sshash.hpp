@@ -11,6 +11,7 @@
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "sshash_alphabets.hpp"
 
 namespace mtg::graph {
 
@@ -23,6 +24,9 @@ class DBGSSHash : public DeBruijnGraph {
 #if _PROTEIN_GRAPH
     template <typename KmerInt>
     using kmer_t = sshash::aa_uint_kmer_t<KmerInt>;
+#elif _DNA5_GRAPH
+    template <typename KmerInt>
+    using kmer_t = detail::DNA5Kmer<KmerInt>;
 #else
     template <typename KmerInt>
     using kmer_t = sshash::dna_uint_kmer_t<KmerInt>;
@@ -64,6 +68,8 @@ class DBGSSHash : public DeBruijnGraph {
             const std::function<bool()>& terminate = []() { return false; }) const;
 
     uint64_t num_nodes() const override;
+    uint64_t max_index() const override;
+    bool in_graph(node_index node) const override;
 
     bool load(std::istream& in);
     bool load(const std::string& filename) override;
@@ -149,6 +155,9 @@ class DBGSSHash : public DeBruijnGraph {
     Mode mode_;
     bit_vector_smart succ_is_next_;
     bit_vector_smart pred_is_prev_;
+#if _DNA5_GRAPH
+    bit_vector_smart self_complementary_;
+#endif
 
     size_t dict_size() const;
 

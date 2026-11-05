@@ -795,6 +795,12 @@ if(METAGRAPH_BUILD_EXECUTABLE)
 
   target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 
+  # A small target for alphabet-specific SSHash regression jobs.
+  add_executable(unit_tests_sshash EXCLUDE_FROM_ALL tests/graph/test_dbg_sshash.cpp)
+  target_include_directories(unit_tests_sshash PRIVATE "${PROJECT_SOURCE_DIR}")
+  target_link_libraries(unit_tests_sshash gtest_main gtest metagraph-core)
+  target_compile_options(unit_tests_sshash PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
+
   #-------------------
   # Benchmarks
   #-------------------

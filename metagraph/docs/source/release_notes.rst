@@ -4,6 +4,9 @@ Release notes
 Unreleased
 ----------
 
+SSHash supports DNA5 graphs with literal ``N`` symbols. Rebuild SSHash graphs
+created with older DNA5 executables and their dependent annotations.
+
 SSHash protein graphs with ``k=12`` now use 64-bit k-mer keys instead of 128-bit
 keys. Rebuild existing SSHash protein graphs with ``k=12`` and their dependent
 annotations before using this version. Other k-mer lengths retain their existing
