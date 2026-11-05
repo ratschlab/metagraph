@@ -6,6 +6,7 @@ from itertools import product
 from pathlib import Path
 
 import pytest
+import yaml
 
 import metagraph_workflows
 from metagraph_workflows import cli, utils
@@ -144,6 +145,28 @@ def test_workflow_invocation_via_python(sample_list_path, output_dir):
         samples=sample_list_path,
         metagraph_cmd=metagraph_cmd,
     ) is None
+
+
+@pytest.mark.parametrize('explicit_k', [None, 7])
+def test_workflow_k_matches_selected_binary(sample_list_path, output_dir, explicit_k):
+    cmd = _resolve_metagraph_cmd() or shutil.which('metagraph')
+    if cmd is None:
+        pytest.skip('metagraph executable unavailable')
+    help_result = subprocess.run([cmd, 'build', '--help'], capture_output=True,
+                                 text=True, check=True)
+    default_k = int(re.search(r'--kmer-length[^\n]*\[(\d+)\]',
+                             help_result.stdout + help_result.stderr).group(1))
+    expected_k = default_k if explicit_k is None else explicit_k
+    args = ['build', sample_list_path, '--metagraph-cmd', cmd,
+            '--anno-type', 'brwt', '-p', 2, '--anno-threads-each', 1]
+    if explicit_k is not None:
+        args += ['-k', explicit_k]
+    proc = run_wrapper(args + [output_dir])
+    assert proc.returncode == 0, proc.stdout.decode()
+    config = yaml.safe_load((output_dir / 'config.yaml').read())
+    assert config['k'] == expected_k
+    stats = subprocess.check_output([cmd, 'stats', str(output_dir / 'graph.dbg')], text=True)
+    assert re.search(rf'^k: {expected_k}$', stats, re.MULTILINE)
 
 
 def test_workflow_invocation_additional_args(sample_list_path, output_dir):

@@ -66,7 +66,7 @@ Typically, the following steps would be performed:
    Important parameters you may want to set:
 
    * ``-p N`` and ``--mem-gb GB`` for the hardware budget
-   * ``-k`` for k-mer length (default 31)
+   * ``-k`` for k-mer length (defaults to the selected MetaGraph executable's build default)
    * ``--primary`` for primary graph mode (recommended for most workloads)
    * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
    * ``--anno-source`` (``header`` or ``filename``; default ``filename``)

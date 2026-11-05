@@ -71,7 +71,8 @@ The build default is the longest k-mer fitting the alphabet's packed 64-bit
 encoding, rounded down to an odd length for nucleotide alphabets: 31 for DNA/RNA,
 21 for DNA5, 15 for case-sensitive DNA, and 12 for protein. This is a storage-based
 starting point; choose ``-k`` for your search's sensitivity and specificity.
-The workflow CLI has its own default of 31. Pass ``-k`` explicitly for reproducible builds.
+The workflow CLI uses the selected MetaGraph executable's build default and records
+the resolved value in ``config.yaml``. Pass ``-k`` explicitly for reproducible builds.
 
 How many threads to use?
 ------------------------

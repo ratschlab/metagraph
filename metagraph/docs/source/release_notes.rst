@@ -14,5 +14,10 @@ nucleotide alphabets:
 * Protein: 12
 
 To reproduce graphs built with the previous default, pass ``-k 3``. Explicit
-``-k`` values continue to override the default. The workflow CLI's separate
-default remains 31.
+``-k`` values continue to override the default.
+
+The workflow CLI now uses the selected MetaGraph executable's build default
+instead of a separate default of 31. It records the resolved value in
+``config.yaml`` and uses it throughout the build, including KMC stages. Pass
+``-k 31`` to retain the previous workflow default. When reusing a graph with
+``--graph``, its stored k-mer length is unchanged.

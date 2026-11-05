@@ -1,5 +1,5 @@
 # graph options
-k: 31
+k: null  # Resolve from metagraph_cmd's build default; set an integer to override.
 base_name: 'graph'
 build_primary_graph: False
 

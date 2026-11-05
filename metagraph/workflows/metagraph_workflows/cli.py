@@ -17,6 +17,7 @@ import yaml
 
 from .workflow_configs import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH, \
     AnnotationLabelsSource, AnnotationFormats
+from .utils import resolve_build_k
 
 WORKFLOW_ROOT = Path(__file__).parent / 'snakemake'
 
@@ -724,13 +725,15 @@ def run_workflow(
         config['primarize_samples_separately'] = False
         config['build_primary_graph'] = False  # irrelevant without build
     else:
-        config['k'] = k or config['k']
+        config['k'] = k
         config['build_primary_graph'] = build_primary_graph
 
     _apply_annotation_options(config, annotation_formats, annotation_labels_source,
                               with_counts, with_coordinates, count_width)
     _apply_runtime_options(config, output_dir, threads, annotate_threads_each, metagraph_cmd,
                            disk_swap_dir, mem_gb, brwt_subsample, dryrun)
+    if graph is None:
+        resolve_build_k(config)
     config['keep_columns'] = keep_columns
     config['keep_rd_columns'] = keep_rd_columns
 
@@ -955,8 +958,8 @@ def setup_build_parser(parser):
     graph.add_argument('--graph', type=Path, default=None, metavar='PATH',
                        help='Reuse an existing .dbg graph instead of building one from SAMPLES []\n'
                             '  Skips the build pipeline; runs annotation + row-diff transforms only.')
-    graph.add_argument('-k', type=int, default=31, metavar='K',
-                       help='k-mer length [31]')
+    graph.add_argument('-k', type=int, default=None, metavar='K',
+                       help='k-mer length [selected metagraph executable\'s build default]')
     graph.add_argument('--primary', dest='build_primary_graph', default=False,
                        action='store_true',
                        help='Build canonical graph first, then derive/build primary graph [off]')

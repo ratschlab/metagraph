@@ -30,7 +30,7 @@ const size_t Config::kDefaultIndexSuffixLen
 // Default to the longest k-mer fitting the alphabet's packed 64-bit encoding.
 // Use an odd length for nucleotide alphabets, as for SSHash's DNA k-mers.
 constexpr unsigned int kPacked64Capacity
-    = std::numeric_limits<uint64_t>::digits / kmer::KmerExtractor2Bit::bits_per_char;
+    = 64 / kmer::KmerExtractor2Bit::bits_per_char;
 #if _PROTEIN_GRAPH
 constexpr unsigned int kDefaultBuildK = kPacked64Capacity;
 #else
