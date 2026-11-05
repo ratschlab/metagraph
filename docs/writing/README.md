@@ -1,41 +1,49 @@
-# Writing guidance and checks
+# Writing guidance and text checks
 
-The [writing-rules submodule](../../tools/writing-rules) contains the guide and
-checker at the revision selected by MetaGraph. Initialize it once after cloning,
-and repeat the update command after pulling a new submodule revision.
+Use the [writing principles](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/PRINCIPLES.md) for documentation and interface text, and the [engineering communication guide](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/ENGINEERING.md) for pull requests, reviews and commit messages.
+The `tools/writing-rules` submodule pins these guides and the checker together.
 
-## Local check
+## Run the check
 
-Use Python 3.12 and Vale 3.26.0. Install Vale from its official release;
-CI verifies the Linux x86_64 archive checksum. From the repository root:
+Use Python 3.12 and [Vale 3.26.0](https://github.com/vale-cli/vale/releases/tag/v3.26.0).
+CI verifies the Linux x86_64 Vale archive checksum. From the repository root:
 
 ```sh
 git submodule update --init -- tools/writing-rules
-python3 -m venv .writing/venv
+python3.12 -m venv .writing/venv
 .writing/venv/bin/pip install ./tools/writing-rules
 .writing/venv/bin/writing-rules export-package .writing/WritingRules.zip
 vale sync --no-global
 PATH="$PWD/.writing/venv/bin:$PATH" .writing/venv/bin/writing-rules check
 ```
 
-Export creates a new archive and refuses to overwrite one. For an upgrade,
-move the previous archive aside before exporting the new one. Docutils from
-the environment must be on PATH for RST parsing.
+After pulling a new submodule revision, repeat the submodule update and package
+installation. Move the old `.writing/WritingRules.zip` aside before exporting
+its replacement, then run `vale sync --no-global` again. Export refuses to
+overwrite an existing archive. Keep the virtual environment on PATH so Vale can
+find Docutils when parsing reStructuredText.
 
-The file scope is `writing-rules.json`, local terminology is in
-`styles/MetaGraph/R8.yml`, and error counts are in `writing-rules-baseline.json`.
-The reviewed migration has no terminology errors. Earlier semicolon and modal
-word counts are not carried forward because those bans are no longer policy.
-R2/R6 suggestions and R4 warnings do not block CI.
+## Interpret the result
 
-A deliberate terminology exception uses a same-line or preceding comment:
-`text-rules-allow: R8 kmer the published identifier`. The reason is required and
-the term must match the finding. Native Vale suppression directives are rejected.
-`writing-rules check --report` reports findings without blocking on count increases;
-`writing-rules check --update-baseline` records reductions only.
+The file scope is `writing-rules.json`, and terminology is configured in
+`styles/MetaGraph/R8.yml`. The baseline in `writing-rules-baseline.json` records
+error counts. The check rejects new terminology errors and malformed exceptions.
+Sentence-length, passive-voice and vague-error findings are prompts for review;
+judge them in context and preserve the intended meaning.
+
+`writing-rules check --report` reports findings without enforcing the baseline.
+`writing-rules check --update-baseline` records reductions in error counts and
+refuses increases.
+
+Prefer correcting terminology or marking a literal identifier as code. When a
+term must remain in prose, explain the exception in a same-line or preceding
+comment, for example `text-rules-allow: R8 kmer the published identifier`.
+The rule ID, exact term and reason are required. Native Vale suppression
+directives are rejected. This repository currently needs no prose exceptions.
 
 C++ findings point to the message's starting line. Syntax-recovery warnings
-remain visible for config.cpp, query.cpp, query.hpp, stats.cpp and
-transform_annotation.cpp in the migration corpus. Inspect affected changes;
-the extractor does not perform data-flow analysis. Current checks do not test
-web UI layout, accessibility or agent output quality.
+identify source that needs manual inspection; the extractor does not perform
+data-flow analysis. The current warnings concern config.cpp, query.cpp,
+query.hpp, stats.cpp and transform_annotation.cpp. A passing check does not
+establish factual correctness, complete extraction coverage, accessibility or
+layout quality.

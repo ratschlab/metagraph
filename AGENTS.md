@@ -5,8 +5,7 @@
 From a plain clone, run `git submodule update --init -- tools/writing-rules`.
 Before changing documentation or user-facing text, read
 [`tools/writing-rules/PRINCIPLES.md`](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/PRINCIPLES.md). The accompanying
-[`tools/writing-rules/SOURCES.md`](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/SOURCES.md) distinguish research, standards and style
-preferences. The submodule pins the guide and checker together.
+[`tools/writing-rules/SOURCES.md`](https://github.com/ratschlab/writing-rules/blob/5fe98632f7399e0dd1006cc20ff38f90c9bd823e/SOURCES.md) explains the basis and limitations of the guidance. The submodule pins the guide and checker together.
 
 Write for the reader's task. Preserve facts, uncertainty and necessary technical
 detail. Check defaults, flags, file names and guarantees against their owning
@@ -14,8 +13,8 @@ code or configuration. Use the actual CLI and API names in examples.
 
 Use “k-mer” consistently in prose. The local vocabulary is
 `styles/MetaGraph/R8.yml`; code identifiers and literal command syntax retain
-their spelling. No blanket ban on semicolons, “may”, “might” or mathematical “we”
-applies. Do not change meaning to satisfy a style suggestion.
+their spelling. Preserve uncertainty and necessary technical detail when
+considering a style suggestion.
 
 The selected scope is README, documentation and CLI help/errors, as listed in
 `writing-rules.json`. Comments and debug logs are outside the selected C++

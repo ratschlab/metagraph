@@ -6,9 +6,21 @@
     "metagraph/src/cli/*.cpp",
     "metagraph/src/cli/config/*.cpp",
     "metagraph/src/cli/load/*.cpp",
-    "metagraph/src/cli/*.hpp"
+    "metagraph/src/cli/*.hpp",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "docs/writing/*.md",
+    "metagraph/api/Status.md",
+    "metagraph/api/python/pymetagraph/README.md",
+    "metagraph/examples/*README.md",
+    "metagraph/workflows/README.rst",
+    "metagraph/scripts/cloud/README.md"
   ],
   "source": {
-    "cpp": {"all_strings_in": ["metagraph/src/cli/config/config.cpp"]}
+    "cpp": {
+      "all_strings_in": [
+        "metagraph/src/cli/config/config.cpp"
+      ]
+    }
   }
 }
