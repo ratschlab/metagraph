@@ -372,10 +372,11 @@ int align_to_graph(Config *config) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
-            logger->warn("Mapping to k-mers longer than k is not supported");
+            logger->warn("--align-length exceeds the graph's k. Using k={} for mapping.", graph->get_k());
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length != graph->get_k() && !dbg_succ) {
-            logger->error("Matching k-mers shorter than k only supported for succinct graphs");
+            logger->error("--align-length below the graph's k requires a succinct graph. "
+                          "Omit --align-length to map at the graph's k.");
             exit(1);
         }
 

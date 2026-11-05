@@ -158,8 +158,7 @@ Config::Config(int argc, char *argv[]) {
             no_coord_mapping = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
             // FYI: experimental
-            std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
-                         " should only be used for experimental purposes" << std::endl;
+            std::cerr << "WARNING: --num-kmers-in-seq is experimental" << std::endl;
             num_kmers_in_seq = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
@@ -492,7 +491,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (count_width <= 1) {
-        std::cerr << "Error: bad value for count-width, need at least 2 bits"
+        std::cerr << "Error: --count-width must be at least 2 bits"
                      " to represent k-mer abundance" << std::endl;
         print_usage_and_exit = true;
     }
@@ -500,31 +499,31 @@ Config::Config(int argc, char *argv[]) {
         count_width = 0;
 
     if (count_width > 32) {
-        std::cerr << "Error: bad value for count-width, can use maximum 32 bits"
+        std::cerr << "Error: --count-width must be at most 32 bits"
                      " to represent k-mer abundance" << std::endl;
         print_usage_and_exit = true;
     }
 
     for (size_t i = 1; i < count_slice_quantiles.size(); ++i) {
         if (count_slice_quantiles[i - 1] >= count_slice_quantiles[i]) {
-            std::cerr << "Error: bin count quantiles must be provided in strictly increasing order"
+            std::cerr << "Error: --count-bins-q values must be in strictly increasing order"
                       << std::endl;
             print_usage_and_exit = true;
         }
     }
     if (count_slice_quantiles.front() < 0 || count_slice_quantiles.back() > 1) {
-        std::cerr << "Error: bin count quantiles must be in range [0, 1]"
+        std::cerr << "Error: --count-bins-q values must be in range [0, 1]"
                   << std::endl;
         print_usage_and_exit = true;
     }
     if (count_slice_quantiles.size() == 1) {
-        std::cerr << "Error: provide at least two bin count borders"
+        std::cerr << "Error: --count-bins-q requires at least two quantile boundaries"
                   << std::endl;
         print_usage_and_exit = true;
     }
 
     if (min_fraction < 0 || min_fraction > 1 || max_fraction < 0 || max_fraction > 1) {
-        std::cerr << "Error: min_fraction and max_fraction must be in range [0, 1]"
+        std::cerr << "Error: --min-fraction and --max-fraction must be in range [0, 1]"
                   << std::endl;
         print_usage_and_exit = true;
     }
@@ -548,7 +547,7 @@ Config::Config(int argc, char *argv[]) {
             && !(identity == TRANSFORM_ANNOTATION && anno_type == Config::RowDiff)
             && !(identity == BUILD && complete)
             && !fnames.size()) {
-        std::cerr << "Error: No input file(s) passed" << std::endl;
+        std::cerr << "Error: no input files. Pass filenames as arguments or one per line on stdin." << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -559,7 +558,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (alignment_min_seed_length > alignment_max_seed_length) {
-        std::cerr << "Error: min_seed_length must be <= max_seed_length" << std::endl;
+        std::cerr << "Error: --align-min-seed-length must be <= --align-max-seed-length" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -577,7 +576,7 @@ Config::Config(int argc, char *argv[]) {
             || alignment_mm_transversion_score < 0
             || alignment_gap_opening_penalty < 0
             || alignment_gap_extension_penalty < 0)) {
-        std::cerr << "Error: alignment penalties should be given as positive integers"
+        std::cerr << "Error: alignment penalties must be non-negative integers"
                   << std::endl;
         print_usage_and_exit = true;
     }
@@ -590,7 +589,7 @@ Config::Config(int argc, char *argv[]) {
 
     if ((identity == QUERY || identity == SERVER_QUERY || identity == ALIGN)
             && alignment_num_alternative_paths == 0) {
-        std::cerr << "Error: align-alternative-alignments must be > 0" << std::endl;
+        std::cerr << "Error: --align-alternative-alignments must be > 0" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -598,7 +597,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if ((identity == ANNOTATE || identity == EXTEND) && infbase_annotators.size() > 1) {
-        std::cerr << "Error: one annotator at most is allowed for extension." << std::endl;
+        std::cerr << "Error: pass at most one annotation with -a for annotate or extend." << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -610,7 +609,7 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == ASSEMBLE
             && (infbase_annotators.size() && assembly_config_file.empty())) {
-        std::cerr << "Error: annotator passed, but no differential assembly rule config file provided" << std::endl;
+        std::cerr << "Error: assembly with an annotation (-a) requires a JSON rule file (--diff-assembly-rules)." << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -631,7 +630,7 @@ Config::Config(int argc, char *argv[]) {
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fnames.size() != 1) {
-        std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
+        std::cerr << "Error: this command requires exactly one input file" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -675,7 +674,7 @@ Config::Config(int argc, char *argv[]) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
         } else if (!to_row_diff && infbase.size()) {
-            std::cerr << "Graph is only required for transform to row_diff types"
+            std::cerr << "Error: -i is only supported for conversion to row_diff types. Remove -i."
                       << std::endl;
             print_usage_and_exit = true;
         } else if (input_has_embedded_anchor && infbase.size()) {
@@ -700,7 +699,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (min_count >= max_count) {
-        std::cerr << "Error: max-count must be greater than min-count" << std::endl;
+        std::cerr << "Error: --max-count must be greater than --min-count" << std::endl;
         print_usage(argv[0], identity);
     }
 
@@ -712,7 +711,7 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (alignment_max_seed_length < alignment_min_seed_length) {
-        std::cerr << "Error: align-max-seed-length has to be at least align-min-seed-length" << std::endl;
+        std::cerr << "Error: --align-max-seed-length must be >= --align-min-seed-length" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -722,12 +721,13 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if (bloom_bpk <= 0.0) {
-        std::cerr << "Error: bloom-bpk must > 0.0" << std::endl;
+        std::cerr << "Error: --bloom-bpk must be greater than 0" << std::endl;
         print_usage_and_exit = true;
     }
 
     if (initialize_bloom && bloom_bpk == 0.0 && bloom_fpp == 1.0) {
-        std::cerr << "Error: at least one of 0.0 < bloom_fpp < 1.0 or 0.0 < bloom_bpk must be true" << std::endl;
+        std::cerr << "Error: --initialize-bloom requires --bloom-fpp between 0 and 1 (exclusive),"
+                     " or --bloom-bpk greater than 0" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -736,7 +736,7 @@ Config::Config(int argc, char *argv[]) {
                     || (separately
                         && std::filesystem::is_directory(std::filesystem::status(outfbase))))) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
-                  << "Check if the path is correct" << std::endl;
+                  << "Choose a writable output path with -o." << std::endl;
         exit(1);
     }
 
@@ -979,17 +979,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available commands:\n");
 
-            fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
-            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
+            fprintf(stderr, "\tbuild\t\tconstruct a graph from FASTA, FASTQ, VCF or KMC input\n\n");
 
             fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
-            fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
+            fprintf(stderr, "\t\t\tin FASTA format\n\n");
 
             fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
 
 if (advanced) {
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
-            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
+            fprintf(stderr, "\t\t\tFASTA, FASTQ, VCF or KMC files\n\n");
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
             fprintf(stderr, "\t\t\tand output a new graph structure\n\n");
@@ -999,10 +998,9 @@ if (advanced) {
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
 }
-            fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files to graph\n\n");
+            fprintf(stderr, "\talign\t\talign sequences from FASTA or FASTQ files to a graph\n\n");
 
-            fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
-            fprintf(stderr, "\t\t\tthe respective k-mers\n\n");
+            fprintf(stderr, "\tannotate\tadd labels, counts or coordinates to a graph's k-mers\n\n");
 if (advanced) {
             fprintf(stderr, "\tmerge_anno\tmerge annotations\n\n");
 }
@@ -1012,8 +1010,8 @@ if (advanced) {
 
             fprintf(stderr, "\tassemble\tgiven a graph, extract sequences from it\n\n");
 
-            fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
-            fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
+            fprintf(stderr, "\tquery\t\tsearch an annotated graph with FASTA or FASTQ sequences\n\n");
+            fprintf(stderr, "\tserver_query\tserve sequence queries over HTTP\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
@@ -1067,7 +1065,7 @@ if (advanced) {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
-            fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, including [inf]\n");
 if (advanced) {
             fprintf(stderr, "\t   --num-singletons [INT] \treset the number of count 1 k-mers in histogram (0: off) [0]\n");
 }
@@ -1121,7 +1119,7 @@ if (advanced) {
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
             fprintf(stderr, "\t         \t\t\t\tTurned on if --count-kmers or --query-presence are set [off]\n");
             fprintf(stderr, "\t   --compacted\t\t\tdump the GFA's 'P' lines in a compacted mode [off]\n");
-            fprintf(stderr, "\t-k --kmer-length [INT]\t\tlength of mapped k-mers (at most graph's k) [k]\n");
+            fprintf(stderr, "\t   --align-length [INT]\t\tlength of mapped k-mers (at most graph's k; shorter lengths require a succinct graph) [k]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
             fprintf(stderr, "\n");
@@ -1213,15 +1211,15 @@ if (advanced) {
             fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
+            fprintf(stderr, "\t   --primary-kmers \toutput each k-mer in only one of its forms (canonical/non-canonical) [off]\n");
 #endif
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --compacted \t\tdump compacted de Bruijn graph to GFA [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "Advanced options for --initialize-bloom. bloom-fpp, when < 1, overrides bloom-bpk.\n");
-            fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate [1.0]\n");
+            fprintf(stderr, "Advanced options for --initialize-bloom. --bloom-fpp, when < 1, overrides --bloom-bpk.\n");
+            fprintf(stderr, "\t   --bloom-fpp [FLOAT] \t\t\t\texpected false positive rate (0 < rate <= 1; 1 uses --bloom-bpk) [1.0]\n");
             fprintf(stderr, "\t   --bloom-bpk [FLOAT] \t\t\t\tnumber of bits per k-mer [4.0]\n");
             fprintf(stderr, "\t   --bloom-max-num-hash-functions [INT] \tmaximum number of hash functions [10]\n");
         } break;
@@ -1234,7 +1232,7 @@ if (advanced) {
             fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences assembled and dumped to FASTA [off]\n");
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --primary-kmers \toutput each k-mer only in one if its forms (canonical/non-canonical) [off]\n");
+            fprintf(stderr, "\t   --primary-kmers \toutput each k-mer in only one of its forms (canonical/non-canonical) [off]\n");
 #endif
             fprintf(stderr, "\t   --to-gfa \t\tdump graph layout to GFA [off]\n");
             fprintf(stderr, "\t   --compacted \t\tdump compacted de Bruijn graph to GFA [off]\n");
@@ -1294,7 +1292,9 @@ if (advanced) {
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
-            fprintf(stderr, "\t   --index-header-coords \tgenerate a CoordToHeader mapping (.seqs file) from input FASTA files [off]\n");
+            fprintf(stderr, "\t   --index-header-coords \tgenerate a CoordToHeader mapping (.seqs file) from FASTA or FASTQ input [off]\n");
+            fprintf(stderr, "\t                       \trequires --anno-filename; cannot be combined with --anno-header, --anno-label or --header-delimiter\n");
+            fprintf(stderr, "\t                       \tpass files in annotation column order; headers must be non-empty UTF-8 and distinct within each file\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
@@ -1318,12 +1318,12 @@ if (advanced) {
             fprintf(stderr, "\t   --min-value [INT] \t\tignore pre-aggregation counts smaller than this [1]\n");
             fprintf(stderr, "\t   --min-count [INT] \t\texclude k-mers with aggregated count smaller than this [1]\n");
             fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
-            fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --min-count instead\n");
+            fprintf(stderr, "\t                          \t\twith --count-kmers, leave at 0 and use --min-count instead\n");
             fprintf(stderr, "\t   --max-value [INT] \t\tignore pre-aggregation counts larger than this [inf]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers with aggregated count larger than this [inf]\n");
-            fprintf(stderr, "\t                       \t\tin --count-kmers mode: max_count+1 must fit in count_width bits (unless inf)\n");
+            fprintf(stderr, "\t                       \t\twith --count-kmers: --max-count + 1 must fit in --count-width bits (unless inf)\n");
             fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
-            fprintf(stderr, "\t                          \t\tignored in --count-kmers mode, use --max-count instead\n");
+            fprintf(stderr, "\t                          \t\twith --count-kmers, leave at 1 and use --max-count instead\n");
             fprintf(stderr, "\t   --compute-overlap [STR] \tcompute the number of shared bits in columns of this annotation and ANNOTATOR [off]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");

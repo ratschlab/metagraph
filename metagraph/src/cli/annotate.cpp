@@ -151,7 +151,7 @@ void call_annotations(const std::string &file,
             forward_and_reverse
         );
     } else {
-        logger->error("Unknown filetype for file '{}'", file);
+        logger->error("Unknown input format for '{}'. Use FASTA, FASTQ, VCF or KMC input.", file);
         exit(1);
     }
 
@@ -329,8 +329,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
             if (file_format(file) != "FASTA"
                     && file_format(file) != "FASTQ") {
-                logger->error("Currently only FASTA or FASTQ format is supported"
-                              " for annotating k-mer coordinates");
+                logger->error("--coordinates requires FASTA or FASTQ input: '{}'", file);
                 exit(1);
             }
 
@@ -351,8 +350,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 [&](std::string sequence, auto labels, uint64_t) {
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
-                        logger->error("All input sequences must have the same"
-                                      " length when flag --num-kmers-in-seq is on");
+                        logger->error("--num-kmers-in-seq requires every sequence to contain"
+                                      " that many k-mers (sequence length = value + k - 1)");
                         exit(1);
                     }
                     if (sequence.size() >= k) {
@@ -507,8 +506,8 @@ int annotate_graph(Config *config) {
             exit(1);
         }
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
-            logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
-                          "only be constructed for annotated filenames (use flag `--anno-filename`)");
+            logger->error("--index-header-coords requires --anno-filename "
+                          "without --anno-header or --anno-label.");
             exit(1);
         }
         logger->trace("Parsing headers and computing coordinate offsets for {} files", files.size());
