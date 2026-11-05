@@ -199,8 +199,8 @@ std::vector<std::string> filter_graphs_from_list(
     } else {
         if (indexes.size() > max_names_without_filtering) {
             throw std::invalid_argument(
-                fmt::format("Specify graph names in the 'graphs' array. Requests without this "
-                            "field are only supported for indexes with at most {} names.",
+                fmt::format("Specify graph names in the 'graphs' array. Requests without a valid "
+                            "'graphs' array are only supported for indexes with at most {} names.",
                             max_names_without_filtering));
         }
         // query all graphs from list `config->fnames`

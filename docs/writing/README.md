@@ -5,7 +5,8 @@ The `tools/writing-rules` submodule pins these guides and the checker together.
 
 ## Run the check
 
-Use Python 3.12 and [Vale 3.26.0](https://github.com/vale-cli/vale/releases/tag/v3.26.0).
+Use Python 3.12. Download the [Vale 3.26.0 archive for your platform](https://github.com/vale-cli/vale/releases/tag/v3.26.0), extract it, and put the `vale` executable in a directory on your `PATH`.
+Run `vale --version` to confirm that it reports 3.26.0 before continuing.
 CI verifies the Linux x86_64 Vale archive checksum. From the repository root:
 
 ```sh

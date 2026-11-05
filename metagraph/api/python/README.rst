@@ -1,6 +1,6 @@
-====================
+=====================
 MetaGraph HTTP client
-====================
+=====================
 
 Query a running MetaGraph index from Python. The client supports exact k-mer search
 and sequence alignment and returns results as pandas data frames.

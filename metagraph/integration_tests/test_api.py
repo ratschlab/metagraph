@@ -63,6 +63,42 @@ class TestAPIBase(TestingBase):
                                 shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
+class TestAPIInitializing(TestingBase):
+    def test_client_ready_during_initialization(self):
+        # A FIFO keeps the graph loader blocked while the real HTTP server runs.
+        graph_path = self.tempdir.name + '/loading.dbg'
+        os.mkfifo(graph_path)
+        os.mkfifo(self.tempdir.name + '/annotation.column.annodbg')
+        with socket.socket() as reservation:
+            reservation.bind(('127.0.0.1', 0))
+            port = reservation.getsockname()[1]
+        process = subprocess.Popen(
+            [METAGRAPH, 'server_query', '-i', graph_path, '-a',
+             self.tempdir.name + '/annotation.column.annodbg',
+             '--port', str(port), '--address', '127.0.0.1', '-p', '1'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            with requests.Session() as session:
+                session.trust_env = False
+                deadline = time.monotonic() + 10
+                while True:
+                    try:
+                        response = session.get(f'http://127.0.0.1:{port}/stats', timeout=1)
+                        break
+                    except requests.ConnectionError:
+                        if process.poll() is not None or time.monotonic() >= deadline:
+                            self.fail('Server did not start while the graph loader was blocked')
+                        time.sleep(0.05)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.headers['Retry-After'], '60')
+                from unittest.mock import patch
+                with patch('metagraph.client.requests.get', side_effect=session.get):
+                    self.assertFalse(GraphClientJson('127.0.0.1', port).ready())
+        finally:
+            process.kill()
+            process.wait(timeout=5)
+
+
 # No canonical mode for Protein alphabets
 @parameterized_class(('mode',), input_values=[(mode,) for mode in GRAPH_MODES])
 class TestAPIRaw(TestAPIBase):
@@ -80,21 +116,21 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(warm.status_code, 200)
         response = self.raw_post_request('search', '{}')
         self.assertEqual(response.status_code, 400)
-        self.assertIn('No input sequences', response.json()['error'])
+        self.assertIn("Missing or null 'FASTA' field", response.json()['error'])
 
     def test_api_cache_does_not_bypass_graph_filter_validation(self):
         warm = self.raw_post_request('search', json.dumps({'FASTA': ''}))
         self.assertEqual(warm.status_code, 200)
         response = self.raw_post_request('search', json.dumps({'FASTA': '', 'graphs': []}))
         self.assertEqual(response.status_code, 400)
-        self.assertIn('no support for filtering graphs', response.json()['error'])
+        self.assertIn('does not support graph filtering', response.json()['error'])
 
     def test_api_raw_incomplete_json(self):
         ret = self.raw_post_request('search',
             '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
 
         self.assertEqual(ret.status_code, 400)
-        self.assertIn("Bad json received:", ret.json()['error'])
+        self.assertIn("Invalid JSON:", ret.json()['error'])
 
     def test_api_raw_invalid_params(self):
         payload = json.dumps({
@@ -119,7 +155,7 @@ class TestAPIRaw(TestAPIBase):
         ret = self.raw_post_request('search', payload)
 
         self.assertEqual(ret.status_code, 400)
-        self.assertIn("No input sequences received from client", ret.json()['error'])
+        self.assertIn("Missing or null 'FASTA' field", ret.json()['error'])
 
     def test_api_raw_invalid_discovery_fraction(self):
         payload = json.dumps({
