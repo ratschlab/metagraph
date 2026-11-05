@@ -148,6 +148,37 @@ class GraphClientJson:
 
         return json_obj
 
+    def resolve(self, sequence: str,
+                labels: Union[None, List[str]] = None,
+                discover: Union[None, JsonDict] = None,
+                select: Union[None, JsonDict] = None,
+                min_block_kmers: int = 1,
+                timeout=None) -> JsonDict:
+        """
+        Where the labels support the sequence, and optionally the seeds selected from it
+        (experimental; a server started with --experimental-traverse, see traverse.md).
+        Give exactly one of `labels` and `discover` (e.g. {'kind': 'header'}).
+        """
+        payload = {'sequence': sequence, 'min_block_kmers': min_block_kmers}
+        if labels is not None:
+            payload['labels'] = labels
+        if discover is not None:
+            payload['discover'] = discover
+        if select is not None:
+            payload['select'] = select
+        return self._do_request('resolve', payload, timeout=timeout)
+
+    def traverse(self, seeds: List[JsonDict], strategy: Union[None, JsonDict] = None,
+                 timeout=None) -> JsonDict:
+        """
+        Extend seeds ({'sequence': ..., 'labels': [...], 'seed_id': ...}) under the labels
+        carrying them (experimental; see traverse.md for the strategy and the response)
+        """
+        payload = {'seeds': seeds}
+        if strategy is not None:
+            payload['strategy'] = strategy
+        return self._do_request('traverse', payload, timeout=timeout)
+
     # noinspection PyTypeChecker
     def column_labels(self) -> Tuple[JsonStrList, str]:
         """
@@ -241,6 +272,29 @@ class GraphClient:
                                            max_num_nodes_per_seq_char)
 
         return helpers.df_from_align_result(json_obj)
+
+    def resolve(self, sequence: str,
+                labels: Union[None, List[str]] = None,
+                discover: Union[None, JsonDict] = None,
+                select: Union[None, JsonDict] = None,
+                min_block_kmers: int = 1) -> JsonDict:
+        """
+        Where the labels support the sequence (experimental; see GraphClientJson.resolve)
+
+        :returns:   The support profile, with the selected seeds under 'selection'
+        :rtype:     dict
+        """
+        return self._json_client.resolve(sequence, labels, discover, select, min_block_kmers)
+
+    def traverse(self, seeds: List[JsonDict], strategy: Union[None, JsonDict] = None) -> JsonDict:
+        """
+        Extend seeds in the graph under the labels carrying them (experimental; see
+        GraphClientJson.traverse)
+
+        :returns:   The response, one entry of 'results' per seed
+        :rtype:     dict
+        """
+        return self._json_client.traverse(seeds, strategy)
 
     def column_labels(self) -> List[str]:
         return self._json_client.column_labels()

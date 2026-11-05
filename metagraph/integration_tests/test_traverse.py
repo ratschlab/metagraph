@@ -10,6 +10,7 @@ import requests
 from parameterized import parameterized_class
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH
+from metagraph.client import GraphClient
 
 GRAPH_MODES = ['basic'] if PROTEIN_MODE else ['basic', 'canonical', 'primary']
 K = 31
@@ -207,6 +208,20 @@ class TestTraverseServer(TraverseFixture):
     def test_invalid_request(self):
         res = requests.post(self._url('traverse'), data=json.dumps({'seeds': [], 'graph': 'x'}))
         self.assertEqual(400, res.status_code)
+
+    def test_python_client(self):
+        client = GraphClient(self.host, self.servers[True][1])
+        profile = client.resolve(self.X + self.P, discover={},
+                                 select={'policy': 'longest_first', 'max_seeds': 1})
+        seed = profile['selection']['seeds'][0]
+        self.assertEqual(['A'], seed['labels'])
+        result = client.traverse([{'seed_id': seed['seed_id'], 'sequence': seed['sequence'],
+                                   'labels': seed['labels']}],
+                                 strategy={'direction': 'left'})['results'][0]
+        self.assertFalse(result['seed']['seed_id_mismatch'])
+        self.assertEqual(['left'], list(result['arms']))
+        with self.assertRaises(RuntimeError):
+            client.traverse([{'sequence': self.X}], strategy={'unknown': 1})
 
     def test_routes_are_gated(self):
         for route in ['traverse/capabilities']:
