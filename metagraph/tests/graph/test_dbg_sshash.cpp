@@ -71,6 +71,35 @@ void expect_rejected(const std::string &contents,
 const std::string seq_30 = "ACGTTGCAAGGCTTACCATGGTACCAGTTA";
 
 #if _DNA5_GRAPH
+TEST_F(DBGSSHashInput, DNA5AlphabetAndReverseComplement) {
+    auto check = [](auto word) {
+        using Kmer = decltype(word);
+        for (size_t k = 1; k <= Kmer::max_k; ++k) {
+            std::string sequence(k, 'N');
+            for (size_t i = 0; i < k; ++i)
+                sequence[i] = "ACGTN"[i % 5];
+            auto packed = sshash::util::string_to_uint_kmer<Kmer>(sequence.data(), k);
+            auto expected = sequence;
+            reverse_complement(expected.begin(), expected.end());
+            packed.reverse_complement_inplace(k);
+            EXPECT_EQ(expected, sshash::util::uint_kmer_to_string(packed, k));
+            if (k <= Kmer::max_m) {
+                const auto original = sshash::util::string_to_uint_kmer<Kmer>(sequence.data(), k);
+                EXPECT_EQ(uint64_t(packed), Kmer::reverse_complement_mmer(uint64_t(original), k));
+            }
+            packed.reverse_complement_inplace(k);
+            EXPECT_EQ(sequence, sshash::util::uint_kmer_to_string(packed, k));
+        }
+    };
+    check(DBGSSHash::kmer_t<uint64_t>{});
+    check(DBGSSHash::kmer_t<__uint128_t>{});
+    check(DBGSSHash::kmer_t<sdsl::uint256_t>{});
+    for (unsigned c = 0; c < 256; ++c) {
+        EXPECT_EQ(std::string("ACGTUNacgtun").find(char(c)) != std::string::npos,
+                  DBGSSHash::kmer_t<uint64_t>::is_valid(char(c)));
+    }
+}
+
 TEST_F(DBGSSHashInput, ChoosesSmallestPackedWord) {
     constexpr auto k64 = DBGSSHash::kmer_t<uint64_t>::max_k;
     constexpr auto k128 = DBGSSHash::kmer_t<__uint128_t>::max_k;

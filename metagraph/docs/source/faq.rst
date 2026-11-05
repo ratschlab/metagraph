@@ -56,20 +56,6 @@ Which alphabet?
 - **Protein**: Amino acid sequences (A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,Y,Z,X)
 
 
-Does SSHash support DNA5?
--------------------------
-
-Yes. With the DNA5 executable, ``--graph sshash`` stores ``N`` as a distinct
-symbol in both basic and canonical graphs. ``N`` is not a wildcard.
-
-Rebuild SSHash graphs made with an older DNA5 executable, and their dependent
-annotations. Those executables used a two-bit DNA encoding and could not store
-``N``. The new DNA5 format detects and rejects those older files.
-
-SSHash does not support ``DNA_CASE_SENSITIVE``. Use another graph representation
-when upper- and lower-case bases must remain distinct.
-
-
 Graph Construction
 ==================
 

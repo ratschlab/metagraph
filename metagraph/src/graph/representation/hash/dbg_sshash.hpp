@@ -11,6 +11,7 @@
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
+#include "sshash_alphabets.hpp"
 
 namespace mtg::graph {
 
@@ -25,7 +26,7 @@ class DBGSSHash : public DeBruijnGraph {
     using kmer_t = sshash::aa_uint_kmer_t<KmerInt>;
 #elif _DNA5_GRAPH
     template <typename KmerInt>
-    using kmer_t = sshash::dna5_uint_kmer_t<KmerInt>;
+    using kmer_t = detail::DNA5Kmer<KmerInt>;
 #else
     template <typename KmerInt>
     using kmer_t = sshash::dna_uint_kmer_t<KmerInt>;

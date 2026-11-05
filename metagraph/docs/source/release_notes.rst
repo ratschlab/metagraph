@@ -4,6 +4,9 @@ Release notes
 Unreleased
 ----------
 
+SSHash now supports DNA5 graphs, treating ``N`` as a literal symbol. Rebuild
+SSHash graphs made with older DNA5 executables and their dependent annotations.
+
 ``metagraph build`` now chooses its default k-mer length at compile time from
 the alphabet's packed 64-bit encoding, rounding down to an odd length for
 nucleotide alphabets:
