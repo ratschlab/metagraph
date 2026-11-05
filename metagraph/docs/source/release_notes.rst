@@ -4,6 +4,11 @@ Release notes
 Unreleased
 ----------
 
+Case-sensitive DNA reverse complements now preserve case consistently during
+construction and querying (``A`` complements ``T``, and ``a`` complements ``t``).
+Rebuild existing case-sensitive canonical and primary graphs and their dependent
+annotations. Basic graphs retain their previous behavior.
+
 ``metagraph build`` now chooses its default k-mer length at compile time from
 the alphabet's packed 64-bit encoding, rounding down to an odd length for
 nucleotide alphabets:
