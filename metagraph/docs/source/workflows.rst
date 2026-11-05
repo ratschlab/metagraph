@@ -10,17 +10,21 @@ for the most common scenarios.
 Installation
 ------------
 
-Build the MetaGraph CLI as described in :ref:`installation` and install the workflow wrapper from the same checkout. An older
-binary can reject workflow flags such as ``--index-header-coords``.
-From the repository root:
+Install the CLI with Conda and the current workflow wrapper from a shallow
+checkout. The same checkout supplies the example data; no C++ build or submodule
+initialization is needed:
 
 .. code-block:: bash
 
-   conda create -n metagraph-workflows python=3.12 pip
-   conda activate metagraph-workflows
-   export PATH="$PWD/metagraph/build:$PATH"
+   conda create -n metagraph --override-channels -c conda-forge -c bioconda \
+       --strict-channel-priority python=3.12 pip "metagraph>=0.5.2"
+   conda activate metagraph
+   git clone --depth 1 --branch master https://github.com/ratschlab/metagraph.git
+   cd metagraph
    python -m pip install ./metagraph/workflows
-   metagraph-workflows build --help
+
+For custom alphabets or features unavailable in the packaged CLI, build from
+source as described in :ref:`installation` and install the wrapper from that checkout.
 
 
 Creating graphs and annotations
@@ -64,7 +68,7 @@ Typically, the following steps would be performed:
    Important parameters you may want to set:
 
    * ``-p N`` and ``--mem-gb GB`` for the hardware budget
-   * ``-k`` for k-mer length (default 31)
+   * ``-k`` for k-mer length (defaults to the selected MetaGraph executable's build default)
    * ``--primary`` for primary graph mode (recommended for most workloads)
    * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
    * ``--anno-source`` (``header`` or ``filename``; default ``filename``)
@@ -185,6 +189,12 @@ The following snakemake options are exposed in the ``build`` subcommand
 * ``--dryrun``: see what workflow steps would be done
 * ``--force`` (corresponds to ``--forceall`` in snakemake): force run all steps
 
+When building a new graph without ``-k``, a dry run calls the selected
+MetaGraph executable's ``build --help`` to read its default k-mer length.
+Pass ``-k`` explicitly to preview the workflow without that executable.
+Reusing a graph with ``--graph`` does not need this lookup. A dry run does
+not execute the workflow steps or validate the input alphabet.
+
 
 Directly invoking Snakemake workflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -194,7 +204,14 @@ directly invoke the snakemake workflow (assuming you checked out the `metagraph 
 
 .. code-block:: bash
 
+    cat > build.yaml <<'YAML'
+    k: 5
+    seqs_file_list_path: transcript_paths.txt
+    output_directory: /tmp/mygraph
+    annotation_labels_source: header
+    YAML
     snakemake --snakefile metagraph/workflows/snakemake/Snakefile \
-        --configfile metagraph/workflows/snakemake/default.yml --cores 2 \
-        --config seqs_file_list_path=transcript_paths.txt output_directory=/tmp/mygraph \
-        annotation_labels_source=header
+        --configfile metagraph/workflows/snakemake/default.yml build.yaml --cores 2
+
+The direct Snakemake invocation requires an explicit ``k`` in its configuration.
+Use ``metagraph-workflows build`` to inherit the selected executable's default.

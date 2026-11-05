@@ -64,14 +64,15 @@ What k-mer size?
 
 **General rules:**
 
-- DNA/RNA: k=21 to 41
-- Protein: k=7 to 15
-
-Pass ``-k`` explicitly for reproducible builds. Run ``metagraph build --help``
-to see the default for your installed binary. The workflow CLI defaults to 31.
-
 - Longer k = more specific, less sensitive
 - Must be ≤ sequence/read length
+
+The build default is the longest k-mer fitting the alphabet's packed 64-bit
+encoding, rounded down to an odd length for nucleotide alphabets: 31 for DNA/RNA,
+21 for DNA5, 15 for case-sensitive DNA, and 12 for protein. This is a storage-based
+starting point; choose ``-k`` for your search's sensitivity and specificity.
+The workflow CLI uses the selected MetaGraph executable's build default and records
+the resolved value in ``config.yaml``. Pass ``-k`` explicitly for reproducible builds.
 
 How many threads to use?
 ------------------------
