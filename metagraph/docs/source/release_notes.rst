@@ -4,6 +4,11 @@ Release notes
 Unreleased
 ----------
 
+SSHash protein graphs with ``k=12`` now use 64-bit k-mer keys instead of 128-bit
+keys. Rebuild existing SSHash protein graphs with ``k=12`` and their dependent
+annotations before using this version. Other k-mer lengths retain their existing
+storage width.
+
 ``metagraph build`` now chooses its default k-mer length at compile time from
 the alphabet's packed 64-bit encoding, rounding down to an odd length for
 nucleotide alphabets:
