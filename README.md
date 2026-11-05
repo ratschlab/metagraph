@@ -109,7 +109,7 @@ The positional argument accepts a file list (one path per line), a directory, or
 
 ### 3. Query
 
-Query the index. Any FASTA file works as input. The bundled test data is enough for a first try.
+Query the index with a FASTA file containing sequences at least as long as the graph's k-mer length. For a first try, use the bundled test data:
 
 ```bash
 metagraph query --query-mode matches -p 2 \
@@ -276,7 +276,7 @@ docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
     metagraph build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 ```
 
-Replace `${HOME}` with the host directory you want to expose under `/mnt`. The default image uses the `DNA` alphabet `{A,C,G,T}`. The same image runs `metagraph_DNA5` and `metagraph_Protein`. All published images are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
+Replace `${HOME}` with the host directory you want to expose under `/mnt`. The default image uses the `DNA` alphabet `{A,C,G,T}`. The same image runs `metagraph_DNA5` and `metagraph_Protein`. See the [published container images](https://github.com/ratschlab/metagraph/pkgs/container/metagraph) for other versions.
 
 <details>
 <summary>Advanced Docker usage</summary>

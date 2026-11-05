@@ -61,8 +61,7 @@ void parse_sequences(const std::string &file,
     mtg::common::logger->trace("Parsing {}", file);
 
     if (config.graph_mode == graph::DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
-        mtg::common::logger->error("Primary graphs can only be constructed from"
-                                   " primary contigs");
+        mtg::common::logger->error("Primary graphs require primary contigs in FASTA format");
         exit(1);
     }
 
@@ -197,7 +196,7 @@ void parse_sequences(const std::string &file,
             }, config.forward_and_reverse);
         }
     } else {
-        mtg::common::logger->error("File type unknown for '{}'", file);
+        mtg::common::logger->error("Unknown input format for '{}'. Use FASTA, FASTQ, VCF or KMC input.", file);
         exit(1);
     }
 }
