@@ -4,6 +4,14 @@ Release notes
 Unreleased
 ----------
 
+Case-sensitive DNA string reverse complements now switch case, matching the
+packed alphabet's strand convention: ``ACG`` becomes ``cgt``. This fixes
+inconsistent graph construction, annotation, queries and sequence extraction.
+Rebuild case-sensitive canonical and primary graphs and their annotations.
+Also rebuild basic graphs created with ``--fwd-and-reverse`` and regenerate
+outputs that used the previous string reverse-complement operation.
+Ordinary DNA, DNA5 and protein builds keep their previous string behavior.
+
 SSHash protein graphs with ``k=12`` now use 64-bit k-mer keys instead of 128-bit
 keys. Rebuild existing SSHash protein graphs with ``k=12`` and their dependent
 annotations before using this version. Other k-mer lengths retain their existing

@@ -21,6 +21,43 @@ env:
 
 jobs:
 
+  CaseSensitive:
+    name: DNA_CASE_SENSITIVE (${{ matrix.os }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake make g++ autoconf automake libtool ccache libbz2-dev libjemalloc-dev libboost-all-dev libdeflate-dev liblzma-dev libzstd-dev
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install bzip2 libomp boost jemalloc autoconf automake libtool libdeflate icu4c openssl@3 zstd cmake pkg-config ccache
+          printf 'OPENSSL_ROOT_DIR=%s\n' "$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: Configure
+        run: cmake -S metagraph -B build-case-sensitive -DCMAKE_BUILD_TYPE=Debug -DCMAKE_DBG_ALPHABET=DNA_CASE_SENSITIVE -DBUILD_KMC=OFF
+      - name: Build case-sensitive executable
+        run: cmake --build build-case-sensitive --target metagraph --parallel 3
+      - name: Test construction, annotation, queries and extraction
+        run: |
+          python -m pip install psutil
+          cd build-case-sensitive
+          python -m unittest discover -s ../metagraph/integration_tests -p test_case_sensitive.py -v
+
+
   # ========================================================================
   # Linux builds (all valid combinations)
   # ========================================================================

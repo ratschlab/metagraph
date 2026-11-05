@@ -15,6 +15,49 @@ using namespace mtg;
 
 using mtg::kmer::KmerExtractor2Bit;
 
+TEST(StringReverseComplement, CompiledAlphabet) {
+    std::string sequence = "ACG";
+    reverse_complement(sequence);
+#if _DNA_CASE_SENSITIVE_GRAPH
+    EXPECT_EQ("cgt", sequence);
+    sequence = "AcGNnUu";
+    reverse_complement(sequence);
+    EXPECT_EQ("AaNNcGt", sequence);
+#else
+    EXPECT_EQ("CGT", sequence);
+    sequence = "AcGNnUu";
+    reverse_complement(sequence);
+    EXPECT_EQ("aAnNCgT", sequence);
+#endif
+    sequence.clear();
+    reverse_complement(sequence);
+    EXPECT_TRUE(sequence.empty());
+}
+
+#if _DNA_CASE_SENSITIVE_GRAPH
+TEST(StringReverseComplement, AgreesWithPackedCaseSensitiveAlphabet) {
+    KmerExtractor2Bit encoder;
+    const std::string alphabet = "ACGTNacgt";
+    for (char a : alphabet) {
+        EXPECT_EQ(encoder.decode(encoder.complement_code()[encoder.encode(a)]),
+                  complement(a));
+        for (char b : alphabet) {
+            for (char c : alphabet) {
+                const std::string original = { a, b, c };
+                std::string sequence = original;
+                reverse_complement(sequence);
+                std::string expected;
+                for (auto it = original.rbegin(); it != original.rend(); ++it)
+                    expected += encoder.decode(encoder.complement_code()[encoder.encode(*it)]);
+                EXPECT_EQ(expected, sequence);
+                reverse_complement(sequence);
+                EXPECT_EQ(original, sequence);
+            }
+        }
+    }
+}
+#endif
+
 template <typename Kmer>
 class ExtractKmers2Bit : public ::testing::Test { };
 

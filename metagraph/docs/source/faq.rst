@@ -52,7 +52,8 @@ Which alphabet?
 
 - **DNA** (default): DNA/RNA sequences (A,C,G,T)
 - **DNA5**: With ambiguous bases (A,C,G,T,N)
-- **DNA_CASE_SENSITIVE**: When case matters (A,C,G,T,N,a,c,g,t)
+- **DNA_CASE_SENSITIVE**: Case encodes strand (A,C,G,T,N,a,c,g,t).
+  Reverse complements switch case: ``ACG`` becomes ``cgt``; ``N`` stays ``N``.
 - **Protein**: Amino acid sequences (A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,Y,Z,X)
 
 
