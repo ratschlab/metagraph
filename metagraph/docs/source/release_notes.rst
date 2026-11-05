@@ -4,8 +4,9 @@ Release notes
 Unreleased
 ----------
 
-SSHash supports DNA5 graphs with literal ``N`` symbols. Rebuild SSHash graphs
-created with older DNA5 executables and their dependent annotations.
+SSHash supports DNA5 and case-sensitive DNA graphs with literal ``N`` symbols.
+Case-sensitive reverse complements preserve case. Rebuild SSHash graphs created
+with older DNA5 or case-sensitive executables and their dependent annotations.
 
 The HTTP ``/align`` endpoint now rejects invalid ``max_alternative_alignments``
 values with status 400. Use a positive integer. Zero previously selected one

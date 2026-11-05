@@ -1,4 +1,5 @@
 #include <fstream>
+#include <limits>
 #include <random>
 #include <set>
 #include <sstream>
@@ -46,11 +47,6 @@ class DBGSSHashInput : public ::testing::Test {
     rlimit old_limit_;
 };
 
-#if _DNA_CASE_SENSITIVE_GRAPH
-TEST_F(DBGSSHashInput, RejectsCaseSensitiveAlphabet) {
-    EXPECT_THROW(DBGSSHash(3), std::domain_error);
-}
-#else
 void write_input(const std::string &contents) {
     std::ofstream out(test_input);
     out << contents;
@@ -71,13 +67,13 @@ void expect_rejected(const std::string &contents,
 
 const std::string seq_30 = "ACGTTGCAAGGCTTACCATGGTACCAGTTA";
 
-TEST(SSHashAlphabet, DNA5EncodingAndReverseComplement) {
+TEST(SSHashAlphabet, ExtendedDNAEncodingAndReverseComplement) {
     auto check = [](auto word) {
         using Kmer = decltype(word);
         for (size_t k = 1; k <= Kmer::max_k; ++k) {
             std::string sequence(k, 'N');
             for (size_t i = 0; i < k; ++i)
-                sequence[i] = "ACGTN"[i % 5];
+                sequence[i] = Kmer::alphabet[i % Kmer::alphabet_size];
             auto packed = sshash::util::string_to_uint_kmer<Kmer>(sequence.data(), k);
             auto expected = sequence;
             reverse_complement(expected.begin(), expected.end());
@@ -94,9 +90,16 @@ TEST(SSHashAlphabet, DNA5EncodingAndReverseComplement) {
     check(detail::DNA5Kmer<uint64_t>{});
     check(detail::DNA5Kmer<__uint128_t>{});
     check(detail::DNA5Kmer<sdsl::uint256_t>{});
+    check(detail::CaseSensitiveDNAKmer<uint64_t>{});
+    check(detail::CaseSensitiveDNAKmer<__uint128_t>{});
+    check(detail::CaseSensitiveDNAKmer<sdsl::uint256_t>{});
+    EXPECT_NE(detail::CaseSensitiveDNAKmer<uint64_t>::char_to_uint('A'),
+              detail::CaseSensitiveDNAKmer<uint64_t>::char_to_uint('a'));
     for (unsigned c = 0; c < 256; ++c) {
         EXPECT_EQ(std::string("ACGTUNacgtun").find(char(c)) != std::string::npos,
                   detail::DNA5Kmer<uint64_t>::is_valid(char(c)));
+        EXPECT_EQ(std::string("ACGTUNacgtun").find(char(c)) != std::string::npos,
+                  detail::CaseSensitiveDNAKmer<uint64_t>::is_valid(char(c)));
     }
 }
 
@@ -265,7 +268,10 @@ void write_random_input(const std::vector<size_t> &lengths) {
 
 TEST_F(DBGSSHashInput, ChoosesMinimizerLengthFromInputSize) {
     // m = ceil(log_sigma(num_chars)) + 1, made odd: the step is at sigma^6.
-#if _DNA5_GRAPH
+#if _DNA_CASE_SENSITIVE_GRAPH
+    constexpr size_t threshold = 531'441;
+    constexpr size_t large_m = 11;
+#elif _DNA5_GRAPH
     constexpr size_t threshold = 15'625;
     constexpr size_t large_m = 15;
 #else
@@ -285,12 +291,19 @@ TEST_F(DBGSSHashInput, ChoosesMinimizerLengthFromInputSize) {
 #endif
 
 
-#if _DNA5_GRAPH
-TEST_F(DBGSSHashInput, DNA5LookupTraversalAndSerialization) {
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+const std::string extended_alphabet = DBGSSHash::kmer_t<uint64_t>::alphabet;
+
+TEST_F(DBGSSHashInput, ExtendedDNALookupTraversalAndSerialization) {
     for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL}) {
-        write_input(">a\nACGNT\n>palindrome\nANT\n");
+#if _DNA_CASE_SENSITIVE_GRAPH
+        const std::string sequence = "ACgNT";
+#else
+        const std::string sequence = "ACGNT";
+#endif
+        write_input(">a\n" + sequence + "\n>palindrome\nANT\n");
         DBGSSHash graph(test_input, 3, mode);
-        std::set<std::string> expected = {"ACG", "CGN", "GNT", "ANT"};
+        std::set<std::string> expected = {sequence.substr(0, 3), sequence.substr(1, 3), sequence.substr(2, 3), "ANT"};
         if (mode == DeBruijnGraph::CANONICAL) {
             for (auto word : std::vector<std::string>(expected.begin(), expected.end())) {
                 reverse_complement(word.begin(), word.end());
@@ -311,7 +324,7 @@ TEST_F(DBGSSHashInput, DNA5LookupTraversalAndSerialization) {
                     outgoing.insert(g.get_node_sequence(next));
                 });
                 std::set<std::string> wanted;
-                for (char c : std::string("ACGTN")) {
+                for (char c : extended_alphabet) {
                     auto next = word.substr(1) + c;
                     if (expected.count(next)) wanted.insert(next);
                     EXPECT_EQ(bool(expected.count(next)), bool(g.traverse(node, c)));
@@ -344,11 +357,11 @@ TEST_F(DBGSSHashInput, DNA5LookupTraversalAndSerialization) {
     }
 }
 
-TEST_F(DBGSSHashInput, DNA5AllThreeMers) {
+TEST_F(DBGSSHashInput, ExtendedDNAAllThreeMers) {
     std::set<std::string> words;
-    for (char a : std::string("ACGTN"))
-        for (char b : std::string("ACGTN"))
-            for (char c : std::string("ACGTN")) words.insert(std::string{a, b, c});
+    for (char a : extended_alphabet)
+        for (char b : extended_alphabet)
+            for (char c : extended_alphabet) words.insert(std::string{a, b, c});
     for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY}) {
         std::string input;
         for (const auto &word : words) {
@@ -368,7 +381,7 @@ TEST_F(DBGSSHashInput, DNA5AllThreeMers) {
                 auto word = g.get_node_sequence(node);
                 EXPECT_TRUE(observed.insert(word).second);
                 EXPECT_EQ(node, g.kmer_to_node(word));
-                for (char c : std::string("ACGTN")) {
+                for (char c : extended_alphabet) {
                     EXPECT_EQ(g.kmer_to_node(word.substr(1) + c), g.traverse(node, c));
                     EXPECT_EQ(g.kmer_to_node(c + word.substr(0, 2)), g.traverse_back(node, c));
                 }
@@ -381,7 +394,7 @@ TEST_F(DBGSSHashInput, DNA5AllThreeMers) {
             });
             EXPECT_EQ(words, observed);
             if (mode != DeBruijnGraph::BASIC) {
-                EXPECT_EQ(5u, self_complements);
+                EXPECT_EQ(extended_alphabet.size(), self_complements);
             }
             size_t valid_ids = 0;
             for (size_t node = 1; node <= g.max_index(); ++node) valid_ids += g.in_graph(node);
@@ -400,9 +413,15 @@ TEST_F(DBGSSHashInput, DNA5AllThreeMers) {
     }
 }
 
-TEST_F(DBGSSHashInput, DNA5CrossesPackedWordBoundaries) {
+TEST_F(DBGSSHashInput, ExtendedDNACrossesPackedWordBoundaries) {
+#if _DNA_CASE_SENSITIVE_GRAPH
+    const std::string sequence = "ACgNTgcAAGGNTTacCATGNTacCAGTTANCGTACGNNACGTNACCGTACGNT";
+#else
     const std::string sequence = "ACGNTGCAAGGNTTACCATGNTACCAGTTANCGTACGNNACGTNACCGTACGNT";
-    for (size_t k : {21, 22, 23, 42, 43}) {
+#endif
+    constexpr size_t k64 = DBGSSHash::kmer_t<uint64_t>::max_k;
+    constexpr size_t k128 = DBGSSHash::kmer_t<__uint128_t>::max_k;
+    for (size_t k : {k64, k64 + 1, k64 + 2, k128, k128 + 1}) {
         write_input(">a\n" + sequence + "\n");
         DBGSSHash graph(test_input, k, DeBruijnGraph::BASIC);
         std::vector<uint64_t> nodes;
@@ -415,7 +434,7 @@ TEST_F(DBGSSHashInput, DNA5CrossesPackedWordBoundaries) {
     }
 }
 
-TEST_F(DBGSSHashInput, DNA5EmptyGraphRoundTrip) {
+TEST_F(DBGSSHashInput, ExtendedDNAEmptyGraphRoundTrip) {
     for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL}) {
         DBGSSHash graph(3, mode);
         std::stringstream bytes;
@@ -427,7 +446,22 @@ TEST_F(DBGSSHashInput, DNA5EmptyGraphRoundTrip) {
     }
 }
 
-TEST_F(DBGSSHashInput, DNA5RejectsUntaggedTwoBitFiles) {
+TEST_F(DBGSSHashInput, ExtendedDNARejectsOtherAlphabetEncoding) {
+    std::stringstream bytes;
+    essentials::generic_saver saver(bytes);
+    const uint64_t marker = std::numeric_limits<uint64_t>::max();
+#if _DNA5_GRAPH
+    const uint64_t other_encoding = 0x53414344;
+#else
+    const uint64_t other_encoding = 0x35414e44;
+#endif
+    saver.visit(marker);
+    saver.visit(other_encoding);
+    DBGSSHash graph(3);
+    EXPECT_THROW(graph.load(bytes), std::runtime_error);
+}
+
+TEST_F(DBGSSHashInput, ExtendedDNARejectsUntaggedTwoBitFiles) {
     std::stringstream bytes;
     essentials::generic_saver saver(bytes);
     uint64_t nodes = 0, k = 3;
@@ -440,6 +474,5 @@ TEST_F(DBGSSHashInput, DNA5RejectsUntaggedTwoBitFiles) {
 }
 #endif
 
-#endif // _DNA_CASE_SENSITIVE_GRAPH
 
 } // namespace
