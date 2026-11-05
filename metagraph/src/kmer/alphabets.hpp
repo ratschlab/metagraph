@@ -113,7 +113,7 @@ static_assert(kSigmaDNACaseSent > 1llu << (kBitsPerCharDNACaseSent - 1));
 inline constexpr char kAlphabetDNA[] = "ACGT";
 constexpr uint8_t kSigmaDNA = sizeof(kAlphabetDNA) - 1;
 constexpr uint8_t kBitsPerCharDNA = std::bit_width(kSigmaDNA - 1u);
-constexpr uint8_t kCharToDNA[128] = {
+inline constexpr uint8_t kCharToDNA[128] = {
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -123,7 +123,7 @@ constexpr uint8_t kCharToDNA[128] = {
     4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  3, 3, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
 };
-const std::vector<uint8_t> kComplementMapDNA = { 3, 2, 1, 0, 4 };
+inline const std::vector<uint8_t> kComplementMapDNA = { 3, 2, 1, 0, 4 };
 static_assert(kSigmaDNA <= 1llu << kBitsPerCharDNA);
 static_assert(kSigmaDNA > 1llu << (kBitsPerCharDNA - 1));
 
