@@ -5,6 +5,8 @@ import time
 import unittest
 import subprocess
 import socket
+import re
+from pathlib import Path
 import requests
 
 import pandas as pd
@@ -69,34 +71,35 @@ class TestAPIInitializing(TestingBase):
         graph_path = self.tempdir.name + '/loading.dbg'
         os.mkfifo(graph_path)
         os.mkfifo(self.tempdir.name + '/annotation.column.annodbg')
-        with socket.socket() as reservation:
-            reservation.bind(('127.0.0.1', 0))
-            port = reservation.getsockname()[1]
-        process = subprocess.Popen(
-            [METAGRAPH, 'server_query', '-i', graph_path, '-a',
-             self.tempdir.name + '/annotation.column.annodbg',
-             '--port', str(port), '--address', '127.0.0.1', '-p', '1'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        try:
-            with requests.Session() as session:
-                session.trust_env = False
+        log_path = Path(self.tempdir.name) / 'server.log'
+        with log_path.open('w') as log:
+            process = subprocess.Popen(
+                [METAGRAPH, 'server_query', '-i', graph_path, '-a',
+                 self.tempdir.name + '/annotation.column.annodbg',
+                 '--port', '0', '--address', '127.0.0.1', '-p', '1'],
+                stdout=log, stderr=subprocess.STDOUT)
+            try:
                 deadline = time.monotonic() + 10
                 while True:
-                    try:
-                        response = session.get(f'http://127.0.0.1:{port}/stats', timeout=1)
+                    output = log_path.read_text()
+                    match = re.search(r'Listening on port (\d+)', output)
+                    if match:
+                        port = int(match.group(1))
                         break
-                    except requests.ConnectionError:
-                        if process.poll() is not None or time.monotonic() >= deadline:
-                            self.fail('Server did not start while the graph loader was blocked')
-                        time.sleep(0.05)
-                self.assertEqual(response.status_code, 503)
-                self.assertEqual(response.headers['Retry-After'], '60')
-                from unittest.mock import patch
-                with patch('metagraph.client.requests.get', side_effect=session.get):
-                    self.assertFalse(GraphClientJson('127.0.0.1', port).ready())
-        finally:
-            process.kill()
-            process.wait(timeout=5)
+                    if process.poll() is not None or time.monotonic() >= deadline:
+                        self.fail('Server did not start while the loaders were blocked:\n' + output)
+                    time.sleep(0.05)
+                with requests.Session() as session:
+                    session.trust_env = False
+                    response = session.get(f'http://127.0.0.1:{port}/stats', timeout=1)
+                    self.assertEqual(response.status_code, 503)
+                    self.assertEqual(response.headers['Retry-After'], '60')
+                    from unittest.mock import patch
+                    with patch('metagraph.client.requests.get', side_effect=session.get):
+                        self.assertFalse(GraphClientJson('127.0.0.1', port).ready())
+            finally:
+                process.kill()
+                process.wait(timeout=5)
 
 
 # No canonical mode for Protein alphabets
