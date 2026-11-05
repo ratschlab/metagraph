@@ -57,7 +57,7 @@ Which alphabet?
 
 
 Does SSHash support DNA5?
-------------------------
+-------------------------
 
 Yes. With the DNA5 executable, ``--graph sshash`` stores ``N`` as a distinct
 symbol in both basic and canonical graphs. ``N`` is not a wildcard.
