@@ -104,16 +104,13 @@ Json::Value process_align_request(const std::string &received_message,
 
     Config config(config_orig);
 
-    config.alignment_num_alternative_paths = json.get(
+    const auto &alignment_count = json.get(
         "max_alternative_alignments",
-        (uint64_t)config.alignment_num_alternative_paths).asInt();
-
-    if (!config.alignment_num_alternative_paths) {
-        // TODO: better throw an exception and send an error response to the client
-        logger->warn("[Server] 'max_alternative_alignments' must be greater than 0; received {}."
-                     " Using 1.", config.alignment_num_alternative_paths);
-        config.alignment_num_alternative_paths = 1;
+        (uint64_t)config.alignment_num_alternative_paths);
+    if (!alignment_count.isInt() || alignment_count.asInt() <= 0) {
+        throw std::invalid_argument("'max_alternative_alignments' must be a positive integer.");
     }
+    config.alignment_num_alternative_paths = alignment_count.asInt();
 
     config.alignment_min_exact_match
             = json.get("min_exact_match",

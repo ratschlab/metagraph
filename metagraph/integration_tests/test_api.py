@@ -160,6 +160,19 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 400)
         self.assertIn("Missing or null 'FASTA' field", ret.json()['error'])
 
+    @parameterized.expand([
+        ('negative', -1), ('minimum_int', -2147483648), ('zero', 0),
+        ('null', None), ('boolean', True), ('fraction', 1.5),
+        ('string', '2'), ('too_large', 2147483648),
+    ])
+    def test_api_raw_invalid_alignment_count(self, name, count):
+        response = self.raw_post_request('align', json.dumps({
+            'FASTA': '', 'max_alternative_alignments': count,
+        }))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("'max_alternative_alignments' must be a positive integer",
+                      response.json()['error'])
+
     def test_api_raw_invalid_discovery_fraction(self):
         payload = json.dumps({
             "FASTA": "\n".join([">query",

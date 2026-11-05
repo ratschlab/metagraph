@@ -52,7 +52,10 @@ Which alphabet?
 
 - **DNA** (default): DNA/RNA sequences (A,C,G,T)
 - **DNA5**: With ambiguous bases (A,C,G,T,N)
-- **DNA_CASE_SENSITIVE**: When case matters (A,C,G,T,N,a,c,g,t)
+- **DNA_CASE_SENSITIVE**: Preserves uppercase and lowercase bases as distinct
+  symbols (A,C,G,T,N,a,c,g,t), including lowercase bases used for soft masking.
+  Reverse complements preserve case: ``ACG`` becomes ``CGT``, and ``acg`` becomes
+  ``cgt``. Lowercase bases are still indexed and matched; they are not skipped.
 - **Protein**: Amino acid sequences (A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,Y,Z,X)
 
 
