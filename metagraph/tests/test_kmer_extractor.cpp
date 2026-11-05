@@ -18,17 +18,10 @@ using mtg::kmer::KmerExtractor2Bit;
 TEST(StringReverseComplement, CompiledAlphabet) {
     std::string sequence = "ACG";
     reverse_complement(sequence);
-#if _DNA_CASE_SENSITIVE_GRAPH
-    EXPECT_EQ("cgt", sequence);
-    sequence = "AcGNnUu";
-    reverse_complement(sequence);
-    EXPECT_EQ("AaNNcGt", sequence);
-#else
     EXPECT_EQ("CGT", sequence);
     sequence = "AcGNnUu";
     reverse_complement(sequence);
     EXPECT_EQ("aAnNCgT", sequence);
-#endif
     sequence.clear();
     reverse_complement(sequence);
     EXPECT_TRUE(sequence.empty());

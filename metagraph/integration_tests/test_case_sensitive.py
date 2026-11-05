@@ -1,4 +1,4 @@
-"""Case encodes strand throughout graph construction, lookup and extraction."""
+"""Case is preserved throughout graph construction, lookup and extraction."""
 import gzip
 import itertools
 import json
@@ -11,7 +11,7 @@ import unittest
 from base import METAGRAPH
 
 
-COMPLEMENT = str.maketrans("ACGTNacgt", "tgcaNTGCA")
+COMPLEMENT = str.maketrans("ACGTNacgt", "TGCANtgca")
 
 
 def reverse(sequence):
@@ -50,7 +50,7 @@ class TestCaseSensitive(unittest.TestCase):
                         if q in s or (both and reverse(q) in s)}
             self.assertEqual(labels, expected, q)
 
-    def test_strand_complements_and_extraction(self):
+    def test_case_preserving_complements_and_extraction(self):
         sequences = ['ACG', 'acg', 'AcG', 'ANT', 'aNt', 'NNN',
                      'ACGTAC', 'acgtac', 'AcGNta']
         queries = [''.join(s) for s in itertools.product('ACGTNacgt', repeat=3)]

@@ -41,7 +41,7 @@ constexpr uint8_t kBOSSCharToDNACaseSent[128] = {
     5, 6, 5, 7,  5, 5, 5, 8,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  9, 9, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
 };
-const std::vector<uint8_t> kBOSSComplementMapDNACaseSent = { 0, 9, 8, 7, 6, 5, 4, 3, 2, 1 };
+const std::vector<uint8_t> kBOSSComplementMapDNACaseSent = { 0, 4, 3, 2, 1, 5, 9, 8, 7, 6 };
 static_assert(kBOSSSigmaDNACaseSent <= 1llu << kBOSSBitsPerCharDNACaseSent);
 static_assert(kBOSSSigmaDNACaseSent > 1llu << (kBOSSBitsPerCharDNACaseSent - 1));
 
@@ -104,7 +104,7 @@ constexpr uint8_t kCharToDNACaseSent[128] = {
     4, 5, 4, 6,  4, 4, 4, 7,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  8, 8, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
 };
-const std::vector<uint8_t> kComplementMapDNACaseSent = { 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+const std::vector<uint8_t> kComplementMapDNACaseSent = { 3, 2, 1, 0, 4, 8, 7, 6, 5 };
 static_assert(kSigmaDNACaseSent <= 1llu << kBitsPerCharDNACaseSent);
 static_assert(kSigmaDNACaseSent > 1llu << (kBitsPerCharDNACaseSent - 1));
 
