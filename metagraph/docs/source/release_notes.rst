@@ -7,6 +7,13 @@ Unreleased
 SSHash supports DNA5 graphs with literal ``N`` symbols. Rebuild SSHash graphs
 created with older DNA5 executables and their dependent annotations.
 
+Case-sensitive DNA packed reverse complements now preserve case, matching
+string reverse complements: ``ACG`` becomes ``CGT``, and ``acg`` becomes ``cgt``.
+Case can retain soft-masking information; uppercase and lowercase bases remain
+distinct symbols during indexing and matching.
+Rebuild existing case-sensitive canonical and primary graphs and their dependent
+annotations. Basic graphs retain their previous behavior.
+
 SSHash protein graphs with ``k=12`` now use 64-bit k-mer keys instead of 128-bit
 keys. Rebuild existing SSHash protein graphs with ``k=12`` and their dependent
 annotations before using this version. Other k-mer lengths retain their existing
