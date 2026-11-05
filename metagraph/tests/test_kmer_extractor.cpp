@@ -32,6 +32,16 @@ const KmerExtractor2Bit kmer_extractor;
 static_assert(std::is_constructible_v<KmerExtractor2Bit, const char*, std::array<uint8_t, 128>&>);
 static_assert(!std::is_constructible_v<KmerExtractor2Bit, const char*, std::array<uint8_t, 127>&>);
 
+TEST(KmerExtractor2Bit, case_sensitive_complements_preserve_case) {
+    using namespace kmer::alphabets;
+    for (char c : std::string(kAlphabetDNACaseSent)) {
+        auto packed = kComplementMapDNACaseSent[kCharToDNACaseSent[static_cast<unsigned char>(c)]];
+        auto boss = kBOSSComplementMapDNACaseSent[kBOSSCharToDNACaseSent[static_cast<unsigned char>(c)]];
+        EXPECT_EQ(complement(c), kAlphabetDNACaseSent[packed]);
+        EXPECT_EQ(complement(c), kBOSSAlphabetDNACaseSent[boss]);
+    }
+}
+
 TEST(KmerExtractor2Bit, borrows_fixed_size_lookup_table) {
     KmerExtractor2Bit default_encoder;
     std::array<uint8_t, 128> table;

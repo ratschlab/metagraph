@@ -4,6 +4,11 @@ Release notes
 Unreleased
 ----------
 
+Case-sensitive DNA reverse complements now preserve case consistently during
+construction and querying (``A`` complements ``T``, and ``a`` complements ``t``).
+Rebuild existing case-sensitive canonical and primary graphs and their dependent
+annotations. Basic graphs retain their previous behavior.
+
 SSHash now supports DNA5 graphs, treating ``N`` as a literal symbol. Rebuild
 SSHash graphs made with older DNA5 executables and their dependent annotations.
 
