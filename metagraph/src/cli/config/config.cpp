@@ -27,10 +27,14 @@ using mtg::graph::DeBruijnGraph;
 const size_t Config::kDefaultIndexSuffixLen
     = 24 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
 
+// Default to the longest k-mer fitting the alphabet's packed 64-bit encoding.
+// Use an odd length for nucleotide alphabets, as for SSHash's DNA k-mers.
+constexpr unsigned int kPacked64Capacity
+    = std::numeric_limits<uint64_t>::digits / kmer::KmerExtractor2Bit::bits_per_char;
 #if _PROTEIN_GRAPH
-constexpr unsigned int kDefaultBuildK = 3;
+constexpr unsigned int kDefaultBuildK = kPacked64Capacity;
 #else
-constexpr unsigned int kDefaultBuildK = 31;
+constexpr unsigned int kDefaultBuildK = kPacked64Capacity - (kPacked64Capacity % 2 == 0);
 #endif
 
 void print_welcome_message() {
