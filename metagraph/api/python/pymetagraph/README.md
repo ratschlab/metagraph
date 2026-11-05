@@ -1,7 +1,7 @@
 # pymetagraph
 
 Python bindings for querying an annotated MetaGraph index in-process, without a running
-`metagraph server`. They expose the label query behind `metagraph query` for batches of sequences
+`metagraph server_query` process. They expose the label query behind `metagraph query` for batches of sequences
 and return plain `(label, k-mer count)` results. To query a remote server, use the `metagraph`
 client package in `metagraph/api/python` instead.
 

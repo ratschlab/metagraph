@@ -1,3 +1,8 @@
+These are historical workflow notes. Several referenced helper scripts are no
+longer present in this checkout, including `graph_build/merge_kmc_dbs.sh` and
+`annotation/split_files_by_tissue.sh`. The commands below record the original
+workflow and need reconciliation with the available scripts before reuse.
+
 ## Construction of graphs
 
 #### Generation of individual kmer count files

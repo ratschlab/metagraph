@@ -38,7 +38,7 @@ int transform_graph(Config *config) {
     auto dbg_succ = std::dynamic_pointer_cast<graph::DBGSuccinct>(graph);
 
     if (!dbg_succ.get()) {
-        logger->warn("Transformations only implemented for DBGSuccinct, serializing graph and exiting");
+        logger->warn("Transformations require a succinct graph. Saving the graph without transformations and exiting.");
         graph->serialize(config->outfbase);
         return 0;
     }

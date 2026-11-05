@@ -15,9 +15,15 @@ Differential assembly
 
 MetaGraph allows for sequences to be assembled from a defined subgraph of an input annotated de Bruijn graph. In particular, a subset of labels may be defined as a *foreground* or **in-group**, while another may be defined as the *background* or **out-group**. From these, sequences can be assembled from a subgraph predominantly containing foreground k-mers and excluding background k-mers.
 
-These subgraphs can be defined using a JSON configuration file. Examples are provided `here <https://github.com/ratschlab/metagraph/blob/master/metagraph/tests/data/example.diff.json>`__ and `here <https://github.com/ratschlab/metagraph/blob/master/metagraph/tests/data/example_simple.diff.json>`__.
+Define the subgraph in a JSON configuration file and pass it with ``--diff-assembly-rules``::
 
-The expected schema is::
+    metagraph assemble graph.dbg --unitigs \
+        -a annotation.column.annodbg --diff-assembly-rules rules.json -o differential
+
+See the `grouped experiment example <https://github.com/ratschlab/metagraph/blob/master/metagraph/tests/data/example.diff.json>`__
+and the `single-experiment example <https://github.com/ratschlab/metagraph/blob/master/metagraph/tests/data/example_simple.diff.json>`__.
+
+The structure below illustrates the fields; replace the placeholders and omit comments to create valid JSON::
 
     {
         "groups": [
@@ -40,7 +46,12 @@ The expected schema is::
 
 Several differential assembly experiments may be defined for a single input annotated graph. These are organized into *groups* and *experiments*. A *group* is defined by a list of experiments and an optional ``shared_labels`` field whose foreground/background labels are merged into every experiment in the group. We recommend that labels with a substantially larger number of k-mers, such as reference genomes, are defined as shared. An *experiment* is defined by its own set of foreground and background labels, and by the assembly experiment parameters.
 
-The assembly proceeds in four stages. In the first stage, the k-mers labeled with at least one of the foreground and background labels are enumerated to determine the initial subgraph. In the second stage, all labels associated with the subgraph unitigs are checked against the group's shared label set, updating the foreground and background label counts accordingly. In the third stage, the foreground and background label counts, and assembly parameters, are used to determine which k-mers are filtered out from the subgraph. In the fourth stage, sequences are assembled from the subgraph constructed in stage three.
+The assembly proceeds in four stages:
+
+1. Enumerate k-mers labeled with at least one foreground or background label to define the initial subgraph.
+2. Check the subgraph unitigs against the group's shared labels and update their foreground and background counts.
+3. Filter the subgraph using those counts and the assembly parameters below.
+4. Assemble sequences from the filtered subgraph.
 
 Differential assembly parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
