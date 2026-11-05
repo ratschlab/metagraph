@@ -24,6 +24,9 @@ class DBGSSHash : public DeBruijnGraph {
 #if _PROTEIN_GRAPH
     template <typename KmerInt>
     using kmer_t = sshash::aa_uint_kmer_t<KmerInt>;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+    template <typename KmerInt>
+    using kmer_t = detail::CaseSensitiveDNAKmer<KmerInt>;
 #elif _DNA5_GRAPH
     template <typename KmerInt>
     using kmer_t = detail::DNA5Kmer<KmerInt>;
@@ -155,7 +158,7 @@ class DBGSSHash : public DeBruijnGraph {
     Mode mode_;
     bit_vector_smart succ_is_next_;
     bit_vector_smart pred_is_prev_;
-#if _DNA5_GRAPH
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     bit_vector_smart self_complementary_;
 #endif
 

@@ -1,4 +1,5 @@
 #include <fstream>
+#include <limits>
 #include <random>
 #include <set>
 #include <sstream>
@@ -45,11 +46,6 @@ class DBGSSHashInput : public ::testing::Test {
     rlimit old_limit_;
 };
 
-#if _DNA_CASE_SENSITIVE_GRAPH
-TEST_F(DBGSSHashInput, RejectsCaseSensitiveAlphabet) {
-    EXPECT_THROW(DBGSSHash(3), std::domain_error);
-}
-#else
 void write_input(const std::string &contents) {
     std::ofstream out(test_input);
     out << contents;
@@ -70,14 +66,14 @@ void expect_rejected(const std::string &contents,
 
 const std::string seq_30 = "ACGTTGCAAGGCTTACCATGGTACCAGTTA";
 
-#if _DNA5_GRAPH
-TEST_F(DBGSSHashInput, DNA5AlphabetAndReverseComplement) {
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+TEST_F(DBGSSHashInput, ExtendedDNAAlphabetAndReverseComplement) {
     auto check = [](auto word) {
         using Kmer = decltype(word);
         for (size_t k = 1; k <= Kmer::max_k; ++k) {
             std::string sequence(k, 'N');
             for (size_t i = 0; i < k; ++i)
-                sequence[i] = "ACGTN"[i % 5];
+                sequence[i] = Kmer::alphabet[i % Kmer::alphabet_size];
             auto packed = sshash::util::string_to_uint_kmer<Kmer>(sequence.data(), k);
             auto expected = sequence;
             reverse_complement(expected.begin(), expected.end());
@@ -190,7 +186,10 @@ void write_random_input(const std::vector<size_t> &lengths) {
 
 TEST_F(DBGSSHashInput, ChoosesMinimizerLengthFromInputSize) {
     // m = ceil(log_sigma(num_chars)) + 1, made odd: the step is at sigma^6.
-#if _DNA5_GRAPH
+#if _DNA_CASE_SENSITIVE_GRAPH
+    constexpr size_t threshold = 531'441;
+    constexpr size_t large_m = 11;
+#elif _DNA5_GRAPH
     constexpr size_t threshold = 15'625;
     constexpr size_t large_m = 15;
 #else
@@ -309,6 +308,107 @@ TEST_F(DBGSSHashInput, DNA5RejectsUntaggedTwoBitFiles) {
 }
 #endif
 
-#endif // _DNA_CASE_SENSITIVE_GRAPH
+
+#if _DNA_CASE_SENSITIVE_GRAPH
+TEST_F(DBGSSHashInput, CaseSensitiveLookupTraversalAndSerialization) {
+    const std::string alphabet = "ACGTNacgt";
+    std::set<std::string> words;
+    for (char a : alphabet) for (char b : alphabet) for (char c : alphabet)
+        words.insert(std::string{a, b, c});
+    for (auto mode : {DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY}) {
+        SCOPED_TRACE(mode);
+        std::string input;
+        for (const auto &word : words) {
+            auto rc = word;
+            reverse_complement(rc.begin(), rc.end());
+            if (mode == DeBruijnGraph::BASIC || word <= rc)
+                input += ">" + word + "\n" + word + "\n";
+        }
+        write_input(input);
+        DBGSSHash graph(test_input, 3, mode);
+        auto check = [&](const DBGSSHash &g) {
+            EXPECT_EQ(729u, g.num_nodes());
+            std::set<std::string> observed;
+            g.call_nodes([&](auto node) {
+                EXPECT_TRUE(g.in_graph(node));
+                auto word = g.get_node_sequence(node);
+                EXPECT_TRUE(observed.insert(word).second);
+                EXPECT_EQ(node, g.kmer_to_node(word));
+                for (char c : alphabet) {
+                    EXPECT_EQ(g.kmer_to_node(word.substr(1) + c), g.traverse(node, c));
+                    EXPECT_EQ(g.kmer_to_node(c + word.substr(0, 2)), g.traverse_back(node, c));
+                }
+                if (mode != DeBruijnGraph::BASIC) {
+                    reverse_complement(word.begin(), word.end());
+                    EXPECT_EQ(word, g.get_node_sequence(g.reverse_complement(node)));
+                    EXPECT_EQ(node, g.reverse_complement(g.reverse_complement(node)));
+                }
+            });
+            EXPECT_EQ(words, observed);
+        };
+        check(graph);
+        std::stringstream bytes;
+        graph.serialize(bytes);
+        DBGSSHash restored(3);
+        ASSERT_TRUE(restored.load(bytes));
+        check(restored);
+        graph.serialize(test_input + ".graph");
+        auto mapped = utils::open_ifstream(test_input + ".graph.sshashdbg", true);
+        ASSERT_TRUE(restored.load(*mapped));
+        check(restored);
+    }
+}
+
+TEST_F(DBGSSHashInput, CaseSensitivePackedWordAndMinimizerBoundaries) {
+    std::mt19937 random(42);
+    std::string sequence(70, 'N');
+    for (char &c : sequence) c = "ACGTNacgt"[random() % 9];
+    write_input(">a\n" + sequence + "\n");
+    for (size_t k : {15, 16, 17, 31, 32, 33, 63, 64}) {
+        SCOPED_TRACE(k);
+        DBGSSHash graph(test_input, k);
+        std::vector<uint64_t> nodes;
+        graph.map_to_nodes_sequentially(sequence, [&](auto n) { nodes.push_back(n); });
+        ASSERT_EQ(sequence.size() - k + 1, nodes.size());
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            ASSERT_NE(0u, nodes[i]);
+            EXPECT_EQ(sequence.substr(i, k), graph.get_node_sequence(nodes[i]));
+        }
+        std::stringstream bytes;
+        graph.serialize(bytes);
+        DBGSSHash restored(3);
+        ASSERT_TRUE(restored.load(bytes));
+        for (size_t i = 0; i < nodes.size(); ++i)
+            EXPECT_EQ(nodes[i], restored.kmer_to_node(sequence.substr(i, k)));
+    }
+    // A large declared input size must not round max_m=16 up to 17.
+    DBGSSHash graph(test_input, 31, DeBruijnGraph::BASIC, 1'853'020'188'851'841ULL);
+    EXPECT_EQ(15u, minimizer_length(graph));
+}
+
+TEST_F(DBGSSHashInput, CaseSensitiveEmptyGraphAndEncoding) {
+    DBGSSHash empty(3, DeBruijnGraph::CANONICAL);
+    std::stringstream bytes;
+    empty.serialize(bytes);
+    DBGSSHash restored(3);
+    ASSERT_TRUE(restored.load(bytes));
+    EXPECT_EQ(0u, restored.num_nodes());
+    EXPECT_EQ(0u, restored.max_index());
+
+    std::stringstream dna5;
+    essentials::generic_saver saver(dna5);
+    uint64_t marker = std::numeric_limits<uint64_t>::max(), encoding = 0x35414e44;
+    saver.visit(marker);
+    saver.visit(encoding);
+    EXPECT_THROW(restored.load(dna5), std::runtime_error);
+
+    std::stringstream legacy;
+    essentials::generic_saver old(legacy);
+    uint64_t nodes = 0;
+    old.visit(nodes);
+    EXPECT_THROW(restored.load(legacy), std::runtime_error);
+}
+#endif
+
 
 } // namespace

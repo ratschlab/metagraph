@@ -9,8 +9,9 @@ construction and querying (``A`` complements ``T``, and ``a`` complements ``t``)
 Rebuild existing case-sensitive canonical and primary graphs and their dependent
 annotations. Basic graphs retain their previous behavior.
 
-SSHash now supports DNA5 graphs, treating ``N`` as a literal symbol. Rebuild
-SSHash graphs made with older DNA5 executables and their dependent annotations.
+SSHash now supports DNA5 and case-sensitive DNA graphs, treating ``N`` as a
+literal symbol. Rebuild SSHash graphs made with older DNA5 or case-sensitive
+executables and their dependent annotations.
 
 ``metagraph build`` now chooses its default k-mer length at compile time from
 the alphabet's packed 64-bit encoding, rounding down to an odd length for

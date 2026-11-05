@@ -17,7 +17,8 @@ class TestCaseSensitive(unittest.TestCase):
         sequences = ['ACG', 'acg', 'AcG', 'ANT', 'aNt']
         reverse = lambda sequence: sequence.translate(complement)[::-1]
         queries = sorted(set(sequences + [reverse(s) for s in sequences]))
-        for backend, extension in [('hashfast', '.hashfastdbg'), ('succinct', '.dbg')]:
+        for backend, extension in [('hashfast', '.hashfastdbg'), ('succinct', '.dbg'),
+                                   ('sshash', '.sshashdbg')]:
             for mode in ['basic', 'canonical', 'primary']:
                 with self.subTest(backend=backend, mode=mode), TemporaryDirectory() as tmp:
                     root = Path(tmp)

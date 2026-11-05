@@ -248,10 +248,6 @@ int build_graph(Config *config) {
         }
 
     } else if (config->graph_type == Config::GraphType::SSHASH && !config->dynamic) {
-#if _DNA_CASE_SENSITIVE_GRAPH
-        logger->error("SSHash does not support case-sensitive DNA; use another graph representation.");
-        return 1;
-#endif
         graph.reset(new DBGSSHash(files.at(0), config->k, config->graph_mode, config->num_chars,
                                   config->memory_available));
         if (files.size() > 1) {
