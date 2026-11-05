@@ -1,5 +1,6 @@
 #include "dbg_sshash.hpp"
 
+#include <limits>
 #include <memory>
 #include <type_traits>
 
@@ -30,13 +31,6 @@
 namespace mtg {
 namespace graph {
 
-#if _PROTEIN_GRAPH
-static constexpr uint16_t bits_per_char = sshash::aa_uint_kmer_t<uint64_t>::bits_per_char;
-#else
-static constexpr uint16_t bits_per_char = sshash::dna_uint_kmer_t<uint64_t>::bits_per_char;
-#endif
-
-
 const std::string DBGSSHash::alphabet_ = kmer::KmerExtractor2Bit().alphabet;
 
 constexpr DeBruijnGraph::node_index sshash_to_graph_index(uint64_t idx) {
@@ -51,19 +45,26 @@ size_t DBGSSHash::dict_size() const {
 }
 
 DBGSSHash::DBGSSHash(size_t k, Mode mode) : k_(k), num_nodes_(0), mode_(mode) {
+#if _DNA_CASE_SENSITIVE_GRAPH
+    throw std::domain_error("SSHash does not support case-sensitive DNA");
+#endif
     if (mode == PRIMARY)
         mode_ = CANONICAL;
 
-    size_t odd_k = (k_ | 1);
-
-    if (odd_k * bits_per_char <= 64) {
+#if _DNA5_GRAPH
+    const size_t storage_k = k_;
+#else
+    // Preserve the word width used by existing DNA and protein graph files.
+    const size_t storage_k = k_ | 1;
+#endif
+    if (storage_k <= kmer_t<KmerInt64>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt64>, sshash::decoded_offsets>>();
-    } else if (odd_k * bits_per_char <= 128) {
+    } else if (storage_k <= kmer_t<KmerInt128>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt128>, sshash::decoded_offsets>>();
-    } else if (odd_k * bits_per_char <= 256) {
+    } else if (storage_k <= kmer_t<KmerInt256>::max_k) {
         dict_.emplace<sshash::dictionary<kmer_t<KmerInt256>, sshash::decoded_offsets>>();
     } else {
-        common::logger->error("k too big: {} > {}", odd_k, 256 / bits_per_char);
+        common::logger->error("k too big: {} > {}", k_, kmer_t<KmerInt256>::max_k);
         throw std::length_error("k fail");
     }
 }
@@ -266,6 +267,18 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
     utils::remove_temp_dir(tmp_dir);
 
     num_nodes_ = dict_size();
+#if _DNA5_GRAPH
+    sdsl::bit_vector self_complementary(num_nodes_ + 1, false);
+    if (mode_ == CANONICAL) {
+        for (node_index node = 1; node <= num_nodes_; ++node) {
+            auto sequence = get_node_sequence(node);
+            auto reverse = sequence;
+            ::reverse_complement(reverse.begin(), reverse.end());
+            self_complementary[node] = sequence == reverse;
+        }
+    }
+    self_complementary_ = bit_vector_smart(std::move(self_complementary));
+#endif
 
     bool has_duplicates;
     std::tie(succ_is_next_, pred_is_prev_, has_duplicates) = generate_succ_pred(*this, num_nodes_);
@@ -397,6 +410,10 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node > dict_size())
         return node - dict_size();
 
+#if _DNA5_GRAPH
+    return self_complementary_.size() && self_complementary_[node]
+               ? node : node + dict_size();
+#else
     if (k_ % 2 == 1)
         return node + dict_size();
 
@@ -406,6 +423,7 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     std::string rc_str_kmer(str_kmer);
     ::reverse_complement(rc_str_kmer.begin(), rc_str_kmer.end());
     return str_kmer != rc_str_kmer ? node + dict_size() : node;
+#endif
 }
 
 DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
@@ -417,7 +435,25 @@ DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
 }
 
 uint64_t DBGSSHash::num_nodes() const {
+#if _DNA5_GRAPH
+    if (mode_ == CANONICAL)
+        return max_index() - self_complementary_.num_set_bits();
+#endif
+    return max_index();
+}
+
+uint64_t DBGSSHash::max_index() const {
     return mode_ != CANONICAL ? dict_size() : dict_size() * 2;
+}
+
+bool DBGSSHash::in_graph(node_index node) const {
+    if (!node || node > max_index())
+        return false;
+#if _DNA5_GRAPH
+    if (node > dict_size() && self_complementary_.size())
+        return !self_complementary_[node - dict_size()];
+#endif
+    return true;
 }
 
 void DBGSSHash::map_to_nodes_sequentially(std::string_view sequence,
@@ -804,6 +840,13 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
 void DBGSSHash::serialize(std::ostream& out) const {
     essentials::generic_saver saver(out);
 
+#if _DNA5_GRAPH
+    // Distinguish three-bit DNA5 files from old two-bit SSHash graphs.
+    const uint64_t marker = std::numeric_limits<uint64_t>::max();
+    const uint64_t encoding = 0x35414e44; // DNA5, encoding version 1
+    saver.visit(marker);
+    saver.visit(encoding);
+#endif
     saver.visit(num_nodes_);
     saver.visit(k_);
     saver.visit(mode_);
@@ -812,6 +855,9 @@ void DBGSSHash::serialize(std::ostream& out) const {
         std::visit([&](const auto& d) { saver.visit(d); }, dict_);
         succ_is_next_.serialize(out);
         pred_is_prev_.serialize(out);
+#if _DNA5_GRAPH
+        self_complementary_.serialize(out);
+#endif
     }
 }
 
@@ -827,6 +873,19 @@ bool DBGSSHash::load(std::istream& in) {
     size_t k;
     Mode mode;
     loader.visit(num_nodes);
+    if (num_nodes == std::numeric_limits<uint64_t>::max()) {
+        uint64_t encoding;
+        loader.visit(encoding);
+#if _DNA5_GRAPH
+        if (encoding != 0x35414e44)
+#endif
+            throw std::runtime_error("Incompatible SSHash alphabet encoding");
+        loader.visit(num_nodes);
+    } else {
+#if _DNA5_GRAPH
+        throw std::runtime_error("Old two-bit SSHash graph cannot be loaded as DNA5; rebuild the graph");
+#endif
+    }
     loader.visit(k);
     loader.visit(mode);
 
@@ -847,6 +906,11 @@ bool DBGSSHash::load(std::istream& in) {
         std::visit([&](auto& d) { d.visit(loader); }, dict_);
         succ_is_next_.load(in);
         pred_is_prev_.load(in);
+#if _DNA5_GRAPH
+        self_complementary_.load(in);
+        if (self_complementary_.size() != num_nodes_ + 1)
+            throw std::runtime_error("Invalid DNA5 self-complementary node map");
+#endif
     }
 
     return true;
