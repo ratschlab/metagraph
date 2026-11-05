@@ -7,6 +7,10 @@ Unreleased
 SSHash supports DNA5 graphs with literal ``N`` symbols. Rebuild SSHash graphs
 created with older DNA5 executables and their dependent annotations.
 
+The HTTP ``/align`` endpoint now rejects invalid ``max_alternative_alignments``
+values with status 400. Use a positive integer. Zero previously selected one
+alignment; negative values could become very large unsigned counts.
+
 Case-sensitive DNA packed reverse complements now preserve case, matching
 string reverse complements: ``ACG`` becomes ``CGT``, and ``acg`` becomes ``cgt``.
 Case can retain soft-masking information; uppercase and lowercase bases remain
