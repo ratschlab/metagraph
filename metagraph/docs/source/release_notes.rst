@@ -4,6 +4,10 @@ Release notes
 Unreleased
 ----------
 
+The HTTP ``/align`` endpoint now rejects invalid ``max_alternative_alignments``
+values with status 400. Use a positive integer. Zero previously selected one
+alignment; negative values could become very large unsigned counts.
+
 SSHash protein graphs with ``k=12`` now use 64-bit k-mer keys instead of 128-bit
 keys. Rebuild existing SSHash protein graphs with ``k=12`` and their dependent
 annotations before using this version. Other k-mer lengths retain their existing
