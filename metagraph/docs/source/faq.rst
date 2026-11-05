@@ -11,7 +11,7 @@ What is MetaGraph?
 ------------------
 
 MetaGraph is a framework for scalable construction and querying of very large annotated de Bruijn graphs.
-It uses succinct representations to index sequence collections efficiently, requiring only 2-4 bits per k-mer.
+Its succinct DNA graph representation uses 2-4 bits per k-mer; annotations require additional space.
 
 **Key capabilities:**
 
@@ -239,7 +239,7 @@ What is discovery_fraction?
 Minimum fraction of k-mers that must match:
 
 - **0.0**: Any match (at least 1 k-mer must match)
-- **0.8**: ≥80% k-mers match (recommended for classification)
+- **0.8**: At least 80% of query k-mers match the label
 - **1.0**: All k-mers match (strict)
 
 How to align?
@@ -285,8 +285,8 @@ For real examples, see https://github.com/ratschlab/metagraph/blob/master/metagr
 How to speed up construction?
 ------------------------------
 
-1. **Use more threads:** ``-p 64``
-2. **Pre-process the input sequences with KMC:** ``kmc -k31 -m40 -sm input.fasta.gz output /tmp/``
+1. **Use available threads:** Set ``-p`` within your CPU allocation.
+2. **Pre-process the input sequences with KMC:** ``kmc -k31 -m40 -sm -fm input.fasta.gz output /tmp/``
 3. **Parallelize samples:** Build sample graphs in parallel, with 4-8 threads (``-p ...``) on each.
 
 How to reduce size?
@@ -334,16 +334,13 @@ See :ref:`installation` and :ref:`troubleshooting`.
 Out of memory
 -------------
 
-**Solution:** Use disk swap
-
-.. code-block:: bash
-
-   metagraph build --disk-swap /tmp --mem-cap-gb 50 ...
-   metagraph annotate --disk-swap /tmp --mem-cap-gb 10 ...
+Use disk swap and choose a buffer below your available RAM, leaving room for the graph and other allocations.
+For complete examples and diagnosis, see :ref:`troubleshooting`.
 
 RowDiff transform generates no output
 -------------------------------------
 
-**Solution:** Remember that for annotations with coordinates and counts, the output
-files have the same name ``*.column.annodbg`` as the input files, hence, should be
-written to a new directory. (See :ref:`transform_count_annotations`.)
+For annotations with coordinates or counts, look for ``*.column.annodbg`` output rather than
+``*.row_diff.annodbg``. Write it to a separate directory: these names match the input filenames,
+and using the input directory can overwrite the original columns.
+See :ref:`transform_count_annotations` and :ref:`transform_coord_annotations`.

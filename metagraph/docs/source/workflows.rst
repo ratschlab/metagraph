@@ -2,9 +2,8 @@
 Snakemake workflows
 ===================
 
-Since each indexing workflow in `MetaGraph <https://metagraph.ethz.ch>`_ comprises
-several steps, we provide automated pipelines to make the process easier and more straightforward
-for the most common scenarios.
+Use ``metagraph-workflows`` to build and annotate an index with a single command.
+The wrapper runs the graph construction, annotation, and compression stages through Snakemake.
 
 
 Installation
@@ -65,7 +64,7 @@ Typically, the following steps would be performed:
    index you want; the per-stage memory caps, thread packing, and
    BRWT clustering parameters are derived automatically.
 
-   Important parameters you may want to set:
+   Choose these parameters for your data and hardware:
 
    * ``-p N`` and ``--mem-gb GB`` for the hardware budget
    * ``-k`` for k-mer length (defaults to the selected MetaGraph executable's build default)
@@ -85,6 +84,12 @@ Typically, the following steps would be performed:
      metagraph-workflows build samples.txt -o /tmp/mygraph \
          -k 31 --primary \
          -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
+
+3. Query the completed index with :ref:`metagraph query <query_index>`, or start
+   ``metagraph server_query`` and connect through the :ref:`Python client <api>`.
+
+The `end-to-end notebook <https://github.com/ratschlab/metagraph/blob/master/metagraph/workflows/notebooks/workflow_end_to_end_example.ipynb>`_
+walks through indexing and API queries.
 
 Count-aware annotations
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -171,14 +176,6 @@ file. Row-diff stages 0–2 then write under ``rd_cols.<mode>/`` (for example ``
   ``<basename>.column.annodbg.counts`` and/or ``<basename>.column.annodbg.coords``.
 
 See ``metagraph-workflows build -h`` for more details.
-
-3. Once a MetaGraph index has been created, it can be queried either by using the command line
-   ``metagraph`` tool or by starting the MetaGraph server directly on a laptop or on another suitable
-   machine and querying it using the python :ref:`API` client.
-
-
-There is also a `jupyter notebook <https://github.com/ratschlab/metagraph/blob/master/metagraph/workflows/notebooks/workflow_end_to_end_example.ipynb>`_ showing the whole process: from indexing to api querying  on a simple example.
-
 
 
 Workflow management

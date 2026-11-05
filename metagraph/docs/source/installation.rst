@@ -3,13 +3,13 @@
 Installation
 ============
 
-The core of MetaGraph is written in C++ and has been successfully tested on Linux and MacOS. In the
-following, we provide detailed instructions for setting up MetaGraph.
+MetaGraph runs on Linux and macOS. Install a Conda package for the DNA and protein
+executables, use Docker for an isolated environment, or build from source for other alphabets.
 
 Install with conda
 ------------------
 
-There are conda packages available on bioconda for both Linux and Mac OS X::
+Install the Bioconda package in your active environment::
 
     conda install -c conda-forge -c bioconda --strict-channel-priority metagraph
 
@@ -42,9 +42,7 @@ To run the binary compiled for the `DNA5` or `Protein` alphabet, replace ``metag
     docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
         metagraph_Protein build -v -k 10 -o /mnt/graph /mnt/protein.fa
 
-As you can see, running MetaGraph from docker containers is very easy.
-The following command (or similar) is handy to see what directory is mounted in the
-container::
+Check the files available under ``/mnt`` inside the container::
 
     docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master ls /mnt
 
@@ -79,7 +77,7 @@ Before compiling MetaGraph, install the following dependencies:
 
     .. group-tab:: AppleClang on MacOS
 
-        For compiling with **AppleClang**, the prerequisites can be installed as easy as::
+        Install the **AppleClang** build dependencies::
 
             brew install libomp cmake make bzip2 boost jemalloc automake autoconf libdeflate
 
@@ -122,28 +120,25 @@ Before compiling MetaGraph, install the following dependencies:
 
             brew install llvm libomp autoconf automake libtool cmake make boost libdeflate
 
-        Then, the following environment variables have to be set::
+        Set these variables in the shell where you will run CMake::
 
-            echo "\
             # OpenMP
-            export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
-            export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
-            export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
+            export LDFLAGS="$LDFLAGS -L$(brew --prefix libomp)/lib"
+            export CPPFLAGS="$CPPFLAGS -I$(brew --prefix libomp)/include"
+            export CXXFLAGS="$CXXFLAGS -I$(brew --prefix libomp)/include"
             # Clang C++ flags
-            export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
-            export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
-            export CXXFLAGS=\"\$CXXFLAGS -stdlib=libc++\"
-            # Path to Clang
-            export PATH=\"$(brew --prefix llvm)/bin:\$PATH\"
-            # Use Clang with cmake
-            export CC=\"\$(which clang)\"
-            export CXX=\"\$(which clang++)\"
-            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+            export LDFLAGS="$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib"
+            export CPPFLAGS="$CPPFLAGS -I$(brew --prefix llvm)/include"
+            export CXXFLAGS="$CXXFLAGS -stdlib=libc++"
+            # Use Homebrew Clang with CMake
+            export PATH="$(brew --prefix llvm)/bin:$PATH"
+            export CC="$(command -v clang)"
+            export CXX="$(command -v clang++)"
 
 
 Compiling
 ^^^^^^^^^
-To compile MetaGraph, please follow these steps.
+Run these commands from the directory where you want to keep the source checkout.
 
 #. Clone the latest version of the code from the git repository::
 

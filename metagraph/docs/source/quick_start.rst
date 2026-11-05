@@ -11,16 +11,14 @@ The de Bruijn graph serves as a k-mer index and stores all k-mers from the input
 This index serves as a dictionary mapping k-mers to their unique positive identifiers.
 
 
-One of the main representations for de Bruijn graphs implemented in MetaGraph is the `BOSS table <https://doi.org/10.1007/978-3-642-33122-0_18>`_. It represents de Bruijn graphs succinctly, using only 2-4 bits per k-mer (for the DNA alphabet) and
-
-* Stores all k-mers from input sequences
-* Enables efficient k-mer lookups and graph traversal
-* Supports sub-k-mer and k-mer range queries for alignment
+The default representation uses the `BOSS table <https://doi.org/10.1007/978-3-642-33122-0_18>`_,
+which stores the graph in 2-4 bits per k-mer for the DNA alphabet. It supports k-mer lookups,
+graph traversal, and sub-k-mer and k-mer range queries for alignment.
 
 **Annotation Matrix**
 
 The annotation matrix encodes relations between k-mers and their metadata.
-Even with the simplest binary representation can encode:
+Even the simplest binary representation can encode:
 
 * k-mer ``i`` is present in file/sample ``j``
 * k-mer ``i`` is present in sequence/genome ``j``
@@ -35,11 +33,11 @@ The annotation matrix can also be supplemented with additional attributes to rep
 
 **Workflow**
 
-A typical workflow in MetaGraph consists of these steps: 1. Construct graph, 2. Construct annotation, 3. Query/host for queries.
-For automated graph construction and annotation, see :doc:`workflows`.
+1. Construct a graph from the input sequences.
+2. Annotate the graph with labels, counts, or coordinates.
+3. Query the index locally or host it for clients.
 
-In the following, you will find simplified instructions and examples for constructing a MetaGraph
-index and querying it.
+The examples below cover each step. For automated graph construction and annotation, see :doc:`workflows`.
 
 Supported alphabets
 -------------------
@@ -440,8 +438,10 @@ can be used when constructing a count-aware graph annotation::
                           -o annotation contigs.fasta.gz
 
 .. warning::
-    If something went wrong and no counts could be read from file ``contigs.kmer_counts.gz``, a warning message
-    ``[warning] No k-mer counts found ...`` will be printed and ``metagraph annotate`` will proceed with the assumption that the count of each k-mer is equal to 1.
+    If ``contigs.kmer_counts.gz`` is missing, ``metagraph annotate`` warns and tries to read
+    counts from the sequence headers. If the first header has no count, it warns again and
+    treats each sequence as having count 1. Check that the counts file accompanies the contigs
+    before using this workflow to preserve abundances.
 
 
 Query k-mer presence masks
@@ -777,6 +777,10 @@ with simply replacing ``--anno-type brwt`` with ``--anno-type int_brwt``::
 
     metagraph transform_anno --anno-type int_brwt --greedy ...
 
+.. warning::
+    Write the row-diff output to a new directory. Count and coordinate transforms reuse the
+    input filenames and can overwrite the original columns if the directories are the same.
+
 For converting to RowDiff<Int-Multi-BRWT> (``row_diff_int_brwt``), perform the same steps as when
 :ref:`converting to RowDiff\<Multi-BRWT\> <to_row_diff_brwt>` with the following exceptions.
 First, an additional flag ``--count-kmers`` has to be passed on step 1 (the row-diff transform).
@@ -807,12 +811,6 @@ The corresponding transformed delta counts will be loaded automatically::
                                         --anno-type row_diff_int_brwt \
                                         -i graph.dbg --mem-cap-gb 300 -o ./transformed
 
-.. tip::
-    We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
-
-.. warning::
-    If the output directory is not new and contains the original columns, they will be overwritten in the second stage of the row-diff transform, and the original columns will be lost. Thus, we recommend writing outputs to a new directory.
-
 For further examples on real data, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
 .. _transform_coord_annotations:
@@ -823,9 +821,13 @@ Conversion to ``column_coord`` is straightforward.
 
 Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
 
+.. warning::
+    Write the row-diff output to a new directory. Count and coordinate transforms reuse the
+    input filenames and can overwrite the original columns if the directories are the same.
+
 Conversion to RowDiff<Tuple-Multi-BRWT> (``row_diff_brwt_coord``) is analogous to ``row_diff_brwt``, where an additional flag ``--coordinates`` has to be passed to the ``transform_anno`` stages. Also, on step 2, delta-transformed columns have file extension ``.column.annodbg`` and not ``.row_diff.annodbg``.
 These columns should be passed to the ``metagraph transform_anno --anno-type row_diff_brwt_coord`` command.
-The corresponding transformed delta counts will be loaded automatically::
+The corresponding transformed coordinates will be loaded automatically::
 
     metagraph annotate --coordinates -o annotation ...
 
@@ -849,12 +851,6 @@ The corresponding transformed delta counts will be loaded automatically::
     find ./rd_columns/ -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
                                         --anno-type row_diff_brwt_coord \
                                         -i graph.dbg --mem-cap-gb 300 -o ./transformed
-
-.. tip::
-    We strongly recommend writing outputs to a new directory (e.g., ``./rd_columns``) to avoid mistakes.
-
-.. warning::
-    If the output directory is not new and contains the original columns, they will be overwritten in the second stage of the row-diff transform, and the original columns will be lost. Thus, we recommend writing outputs to a new directory.
 
 Additionally, one can convert the delta-transformed columns with coordinates (after step ``--anno-type row_diff --coordinates``)
 directly to the ColumnCompressed format (``row_diff_coord``), equivalent to ``row_diff_brwt_coord`` with the arity set to infinity,
