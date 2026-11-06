@@ -601,11 +601,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     }
                     const auto existing_ones = existing->num_set_bits();
                     const auto incoming_ones = column->num_set_bits();
-                    // The sum is an upper bound; avoid overflow and dense outputs.
-                    if (existing_ones <= num_rows_ / 2
-                            && incoming_ones <= num_rows_ / 2 - existing_ones
-                            && smart_representation(num_rows_, existing_ones + incoming_ones)
-                                    == bit_vector_adaptive::SD_VECTOR) {
+                    // Preserve the density cutoff without imposing a position-buffer limit.
+                    const uint64_t max_ones = num_rows_ / kSparseColumnDensityDivisor;
+                    if (existing_ones <= max_ones && incoming_ones <= max_ones - existing_ones) {
                         uint64_t count = 0;
                         call_union(*existing, *column, [&](uint64_t) { ++count; });
                         existing = std::make_unique<bit_vector_smart>(
