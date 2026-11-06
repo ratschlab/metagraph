@@ -117,6 +117,18 @@ TEST_F(DBGSSHashInput, ChoosesSmallestPackedWord) {
     EXPECT_THROW(DBGSSHash(k256 + 1), std::length_error);
 }
 
+#if _DNA_GRAPH
+TEST_F(DBGSSHashInput, EvenLengthReverseComplement) {
+    write_input(">a\nAATC\n");
+    DBGSSHash graph(test_input, 2, DeBruijnGraph::BASIC);
+    const auto palindrome = graph.kmer_to_node("AT");
+    ASSERT_NE(0u, palindrome);
+    EXPECT_EQ(palindrome, graph.reverse_complement(palindrome));
+    const auto other = graph.kmer_to_node("AA");
+    EXPECT_EQ(other + graph.num_nodes(), graph.reverse_complement(other));
+}
+#endif
+
 #if _PROTEIN_GRAPH
 const std::string protein_sequence = "MKWVTFISRLDPQEAHNYCG";
 

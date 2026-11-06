@@ -126,7 +126,7 @@ generate_succ_pred(const DBGSSHash& graph, uint64_t num_nodes,
                                     found_fw = true;
                                     next = sshash_to_graph_index(nb.forward[i].kmer_id);
                                     found_i = i;
-                                    // SSHash reports self-complements as forward matches.
+                                    // Equal forward/reverse sequences take SSHash's forward tie-break.
                                     if (nb.forward[i].kmer_orientation < 0)
                                         next += num_nodes;
                                 }
@@ -268,14 +268,16 @@ DBGSSHash::DBGSSHash(const std::string& input_filename,
 
     num_nodes_ = dict_size();
     bool has_duplicates;
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    sdsl::bit_vector self_complementary(num_nodes_ + 1, false);
+    sdsl::bit_vector self_complementary;
+    // Alphabets with odd-length self-complements need explicit node tracking.
+    const bool index_self_complements = mode_ == CANONICAL
+        && detail::has_self_complementary_base<kmer_t<uint64_t>>;
+    if (index_self_complements)
+        self_complementary.resize(num_nodes_ + 1);
     std::tie(succ_is_next_, pred_is_prev_, has_duplicates) = generate_succ_pred(
-            *this, num_nodes_, mode_ == CANONICAL ? &self_complementary : nullptr);
-    self_complementary_ = bit_vector_smart(std::move(self_complementary));
-#else
-    std::tie(succ_is_next_, pred_is_prev_, has_duplicates) = generate_succ_pred(*this, num_nodes_);
-#endif
+            *this, num_nodes_, index_self_complements ? &self_complementary : nullptr);
+    if (index_self_complements)
+        self_complementary_.emplace(std::move(self_complementary));
     if (has_duplicates) {
         std::string message = "SSHash input " + input_filename + " contains duplicate"
                 " k-mers. Build from unitigs instead, e.g., from 'metagraph transform --to-fasta'";
@@ -404,20 +406,24 @@ DBGSSHash::node_index DBGSSHash::reverse_complement(node_index node) const {
     if (node > dict_size())
         return node - dict_size();
 
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    return self_complementary_.size() && self_complementary_[node]
-               ? node : node + dict_size();
-#else
+    if (self_complementary_)
+        return (*self_complementary_)[node] ? node : node + dict_size();
+
     if (k_ % 2 == 1)
         return node + dict_size();
 
+    return reverse_complement_by_sequence(node);
+}
+
+// Keep legacy string reconstruction out of the cached reverse-node lookup.
+[[gnu::noinline]]
+DBGSSHash::node_index DBGSSHash::reverse_complement_by_sequence(node_index node) const {
     std::string str_kmer(k_, ' ');
     uint64_t ssh_idx = graph_index_to_sshash(node);
     std::visit([&](const auto& d) { d.access(ssh_idx, str_kmer.data()); }, dict_);
     std::string rc_str_kmer(str_kmer);
     ::reverse_complement(rc_str_kmer.begin(), rc_str_kmer.end());
     return str_kmer != rc_str_kmer ? node + dict_size() : node;
-#endif
 }
 
 DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
@@ -429,10 +435,8 @@ DBGSSHash::node_index DBGSSHash::get_base_node(node_index node) const {
 }
 
 uint64_t DBGSSHash::num_nodes() const {
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    if (mode_ == CANONICAL)
-        return max_index() - self_complementary_.num_set_bits();
-#endif
+    if (self_complementary_)
+        return max_index() - self_complementary_->num_set_bits();
     return max_index();
 }
 
@@ -443,10 +447,8 @@ uint64_t DBGSSHash::max_index() const {
 bool DBGSSHash::in_graph(node_index node) const {
     if (!node || node > max_index())
         return false;
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    if (node > dict_size() && self_complementary_.size())
-        return !self_complementary_[node - dict_size()];
-#endif
+    if (node > dict_size() && self_complementary_)
+        return !(*self_complementary_)[node - dict_size()];
     return true;
 }
 
@@ -834,12 +836,12 @@ std::string DBGSSHash::get_node_sequence(node_index node) const {
 void DBGSSHash::serialize(std::ostream& out) const {
     essentials::generic_saver saver(out);
 
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    // Distinguish extended alphabets from each other and old two-bit graphs.
-    const uint64_t marker = std::numeric_limits<uint64_t>::max();
-    saver.visit(marker);
-    saver.visit(alphabet_encoding_);
-#endif
+    if constexpr (alphabet_encoding_) {
+        // Distinguish extended alphabets from each other and old two-bit graphs.
+        const uint64_t marker = std::numeric_limits<uint64_t>::max();
+        saver.visit(marker);
+        saver.visit(alphabet_encoding_);
+    }
     saver.visit(num_nodes_);
     saver.visit(k_);
     saver.visit(mode_);
@@ -848,9 +850,12 @@ void DBGSSHash::serialize(std::ostream& out) const {
         std::visit([&](const auto& d) { saver.visit(d); }, dict_);
         succ_is_next_.serialize(out);
         pred_is_prev_.serialize(out);
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-        self_complementary_.serialize(out);
-#endif
+        if constexpr (alphabet_encoding_) {
+            if (self_complementary_)
+                self_complementary_->serialize(out);
+            else
+                bit_vector_smart().serialize(out);
+        }
     }
 }
 
@@ -869,15 +874,12 @@ bool DBGSSHash::load(std::istream& in) {
     if (num_nodes == std::numeric_limits<uint64_t>::max()) {
         uint64_t encoding;
         loader.visit(encoding);
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-        if (encoding != alphabet_encoding_)
-#endif
+        if (!alphabet_encoding_ || encoding != alphabet_encoding_)
             throw std::runtime_error("Incompatible SSHash alphabet encoding");
         loader.visit(num_nodes);
     } else {
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-        throw std::runtime_error("Old two-bit SSHash graph cannot be loaded with this alphabet; rebuild the graph");
-#endif
+        if constexpr (alphabet_encoding_)
+            throw std::runtime_error("Old two-bit SSHash graph cannot be loaded with this alphabet; rebuild the graph");
     }
     loader.visit(k);
     loader.visit(mode);
@@ -899,11 +901,14 @@ bool DBGSSHash::load(std::istream& in) {
         std::visit([&](auto& d) { d.visit(loader); }, dict_);
         succ_is_next_.load(in);
         pred_is_prev_.load(in);
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-        self_complementary_.load(in);
-        if (self_complementary_.size() != num_nodes_ + 1)
-            throw std::runtime_error("Invalid self-complementary node map");
-#endif
+        if constexpr (alphabet_encoding_) {
+            bit_vector_smart map;
+            if (!map.load(in) || (map.size() != num_nodes_ + 1
+                                  && !(mode_ == BASIC && !map.size())))
+                throw std::runtime_error("Invalid self-complementary node map");
+            if (mode_ == CANONICAL)
+                self_complementary_ = std::move(map);
+        }
     }
 
     return true;

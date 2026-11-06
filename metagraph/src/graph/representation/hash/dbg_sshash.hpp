@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <variant>
+#include <optional>
 
 #include <dictionary.hpp>
 #include <offsets.hpp>
@@ -158,17 +159,12 @@ class DBGSSHash : public DeBruijnGraph {
     Mode mode_;
     bit_vector_smart succ_is_next_;
     bit_vector_smart pred_is_prev_;
-#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-    bit_vector_smart self_complementary_;
-#endif
-
-#if _DNA5_GRAPH
-    static constexpr uint64_t alphabet_encoding_ = 0x35414e44; // DNA5, encoding version 1
-#elif _DNA_CASE_SENSITIVE_GRAPH
-    static constexpr uint64_t alphabet_encoding_ = 0x53414344; // case-sensitive DNA, version 1
-#endif
+    // Present only when canonical nodes can be their own reverse complements.
+    std::optional<bit_vector_smart> self_complementary_;
+    static constexpr uint64_t alphabet_encoding_ = detail::encoding_id<kmer_t<uint64_t>>;
 
     size_t dict_size() const;
+    node_index reverse_complement_by_sequence(node_index node) const;
 
     char get_last_char(node_index node) const;
     char get_first_char(node_index node) const;

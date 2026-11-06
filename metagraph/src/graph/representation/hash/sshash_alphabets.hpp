@@ -1,17 +1,19 @@
 #pragma once
 #include <array>
 #include <bit>
+#include <string_view>
 #include <kmer.hpp>
 #include "kmer/alphabets.hpp"
 
 namespace mtg::graph::detail {
 
 // Use MetaGraph alphabet tables with SSHash's packed storage.
-template <typename Word, auto &Alphabet, auto &Encode, auto &Complement>
+template <typename Word, auto &Alphabet, auto &Encode, auto &Complement, uint64_t Encoding>
 struct AlphabetKmer : sshash::alpha_kmer_t<Word, std::bit_width(sizeof(Alphabet) - 2u), Alphabet> {
     using base = sshash::alpha_kmer_t<Word, std::bit_width(sizeof(Alphabet) - 2u), Alphabet>;
     using base::base;
     static constexpr bool has_reverse_complement = true;
+    static constexpr uint64_t encoding_id = Encoding;
 
     static uint64_t char_to_uint(unsigned char c) {
         if (c >= sizeof(Encode)) return uint64_t(-1);
@@ -42,7 +44,7 @@ struct AlphabetKmer : sshash::alpha_kmer_t<Word, std::bit_width(sizeof(Alphabet)
     }
     static uint64_t reverse_complement_mmer(uint64_t value, uint64_t m) {
         assert(m <= base::max_m);
-        AlphabetKmer<uint64_t, Alphabet, Encode, Complement> packed(value);
+        AlphabetKmer<uint64_t, Alphabet, Encode, Complement, Encoding> packed(value);
         packed.reverse_complement_inplace(m);
         return uint64_t(packed);
     }
@@ -54,11 +56,30 @@ struct AlphabetKmer : sshash::alpha_kmer_t<Word, std::bit_width(sizeof(Alphabet)
 
 template <typename W>
 using DNA5Kmer = AlphabetKmer<W, kmer::alphabets::kAlphabetDNA5,
-                            kmer::alphabets::kCharToDNA, kmer::alphabets::kComplementMapDNA>;
+                            kmer::alphabets::kCharToDNA, kmer::alphabets::kComplementMapDNA,
+                            0x35414e44>; // DNA5, encoding version 1
 
 template <typename W>
 using CaseSensitiveDNAKmer = AlphabetKmer<W, kmer::alphabets::kAlphabetDNACaseSent,
                                         kmer::alphabets::kCharToDNACaseSent,
-                                        kmer::alphabets::kComplementMapDNACaseSent>;
+                                        kmer::alphabets::kComplementMapDNACaseSent,
+                                        0x53414344>; // case-sensitive DNA, encoding version 1
+
+// SSHash's native types use the existing untagged MetaGraph format.
+template <class Kmer>
+constexpr uint64_t encoding_id = [] {
+    if constexpr (requires { Kmer::encoding_id; }) return Kmer::encoding_id;
+    else return uint64_t(0);
+}();
+
+// An odd-length palindrome needs a base that is its own complement.
+template <class Kmer>
+inline const bool has_self_complementary_base = [] {
+    if constexpr (Kmer::has_reverse_complement) {
+        for (unsigned char c : std::string_view(Kmer::alphabet))
+            if (Kmer::canonicalize_basepair_reverse_map[c] == c) return true;
+    }
+    return false;
+}();
 
 } // namespace mtg::graph::detail
