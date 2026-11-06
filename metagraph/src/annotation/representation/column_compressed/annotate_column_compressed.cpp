@@ -4,6 +4,7 @@
 #include <numeric>
 #include <algorithm>
 #include <stdexcept>
+#include <condition_variable>
 
 #include <ips4o.hpp>
 
@@ -28,6 +29,44 @@ namespace {
 // Restore only sufficiently small, sparse columns into an editable position set.
 constexpr uint64_t kMaxSparseColumnOnes = 4000000;
 constexpr uint64_t kSparseColumnDensityDivisor = 128;
+
+
+// Shared by all workers. This bounds temporary sparse positions, not final
+// columns, decoded inputs or the dense fallback.
+class SparseMergeBudget {
+  public:
+    void acquire(uint64_t bytes) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        available_.wait(lock, [&] { return bytes <= remaining_; });
+        remaining_ -= bytes;
+    }
+
+    void release(uint64_t bytes) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            remaining_ += bytes;
+        }
+        available_.notify_all();
+    }
+
+  private:
+    std::mutex mutex_;
+    std::condition_variable available_;
+    uint64_t remaining_ = 2 * kMaxSparseColumnOnes * sizeof(uint64_t);
+};
+
+class SparseMergeReservation {
+  public:
+    SparseMergeReservation(SparseMergeBudget &budget, uint64_t bytes)
+          : budget_(budget), bytes_(bytes) { budget_.acquire(bytes_); }
+    ~SparseMergeReservation() { budget_.release(bytes_); }
+    SparseMergeReservation(const SparseMergeReservation&) = delete;
+    SparseMergeReservation& operator=(const SparseMergeReservation&) = delete;
+
+  private:
+    SparseMergeBudget &budget_;
+    uint64_t bytes_;
+};
 } // namespace
 
 
@@ -508,25 +547,22 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
 
 template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
-    // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();
     coords_.clear();
     max_coord_.clear();
     relation_counts_.clear();
-
     label_encoder_.clear();
 
-    // The on-disk columns are sequential, with no offset table. Index their
-    // locations first, retaining metadata rather than all input bitmaps.
-    struct SourceColumn {
-        size_t file;
-        std::streampos offset;
-        uint64_t ones;
+    // Read label headers first so workers can update independent output slots.
+    // Column payloads are then read once, in file order.
+    struct InputColumns {
+        std::streampos start;
+        std::vector<size_t> targets;
     };
-    std::vector<std::vector<SourceColumn>> groups;
-    bool have_rows = false;
+    std::vector<InputColumns> inputs(filenames.size());
     try {
+        bool have_rows = false;
         for (size_t i = 0; i < filenames.size(); ++i) {
             auto in = utils::open_ifstream(make_suffix(filenames[i], kExtension));
             if (!*in)
@@ -534,111 +570,97 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             const auto rows = load_number(*in);
             LabelEncoder<Label> labels;
             if (!labels.load(*in))
-                throw std::ifstream::failure("cannot load annotation labels");
+                throw std::ifstream::failure("cannot load annotation labels from " + filenames[i]);
+            inputs[i].start = in->tellg();
+            if (inputs[i].start == std::streampos(-1))
+                throw std::ifstream::failure("cannot locate annotation columns in " + filenames[i]);
             if (!labels.size()) continue;
             if (have_rows && rows != num_rows_)
-                throw std::runtime_error("annotation inputs have inconsistent row counts");
-            num_rows_ = rows;
+                throw std::runtime_error(fmt::format(
+                    "annotation '{}' has {} rows, expected {}", filenames[i], rows, num_rows_));
             have_rows = true;
-            for (size_t c = 0; c < labels.size(); ++c) {
-                auto offset = in->tellg();
-                auto column = std::make_unique<bit_vector_smart>();
-                if (offset == std::streampos(-1) || !column->load(*in)
-                        || column->size() != num_rows_)
-                    throw std::ifstream::failure("cannot load annotation column");
-                const uint64_t ones = column->num_set_bits();
-                size_t target = label_encoder_.insert_and_encode(labels.decode(c));
-                if (target == groups.size()) {
-                    groups.emplace_back();
-                    // A label occurring once is already a finished output column.
-                    bitmatrix_.push_back(std::move(column));
-                } else {
-                    bitmatrix_[target].reset();
-                }
-                groups[target].push_back({ i, offset, ones });
-            }
+            num_rows_ = rows;
+            for (const auto &label : labels.get_labels())
+                inputs[i].targets.push_back(label_encoder_.insert_and_encode(label));
         }
-
-        // Bound the position buffer independently of the number of input files.
-        // External sorting has bounded I/O buffers and bounded merge fan-in.
-        const uint64_t buffer_bytes = std::min<uint64_t>(buffer_size_bytes_, 64'000'000);
-        const size_t workers = std::max<size_t>(1, std::min<size_t>({
-            get_num_threads(), groups.size(), std::max<uint64_t>(1, buffer_bytes / 8'000'000)
-        }));
-        const uint64_t capacity = std::max<uint64_t>(1,
-            buffer_bytes / workers / sizeof(uint64_t));
-        const auto swap = swap_dir_.empty() ? fs::temp_directory_path().string() : swap_dir_;
-        const size_t fan_in = std::clamp<size_t>(max_chunks_open_, 3, 8);
+        bitmatrix_.resize(label_encoder_.size());
+        auto column_locks = std::make_unique<std::mutex[]>(bitmatrix_.size());
+        SparseMergeBudget budget;
+        // Dense columns retain the existing bounded LRU cache. Its eviction
+        // callback can replace any cached column, so all access to a column
+        // that has entered this path must hold dense_lock as well.
+        std::vector<uint8_t> dense_columns(bitmatrix_.size(), false);
+        std::mutex dense_lock;
         std::atomic<bool> failed = false;
-        #pragma omp parallel for num_threads(workers) schedule(dynamic)
-        for (size_t target = 0; target < groups.size(); ++target) {
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (size_t i = 0; i < filenames.size(); ++i) {
             try {
-                const auto &group = groups[target];
-                if (group.size() == 1) continue;
-                auto load = [&](const SourceColumn &source) {
-                    auto in = utils::open_ifstream(make_suffix(filenames[source.file], kExtension));
-                    in->seekg(source.offset);
+                auto in = utils::open_ifstream(make_suffix(filenames[i], kExtension));
+                in->seekg(inputs[i].start);
+                if (!*in)
+                    throw std::ifstream::failure("cannot read annotation columns");
+                for (size_t target : inputs[i].targets) {
                     auto column = std::make_unique<bit_vector_smart>();
-                    if (!*in || !column->load(*in) || column->size() != num_rows_
-                            || column->num_set_bits() != source.ones)
-                        throw std::ifstream::failure("cannot reload annotation column");
-                    return column;
-                };
-                // Saturate at capacity+1; overlapping positions make this an upper bound.
-                uint64_t total = 0;
-                for (const auto &source : group)
-                    total += std::min(source.ones, capacity + 1 - total);
-
-                if (num_rows_ / 64 + (num_rows_ % 64 != 0) <= capacity
-                        && total > num_rows_ / 64) {
-                    sdsl::bit_vector bitmap(num_rows_, 0);
-                    for (const auto &source : group)
-                        load(source)->add_to(&bitmap);
-                    bitmatrix_[target] = std::make_unique<bit_vector_smart>(std::move(bitmap));
-                    continue;
-                }
-
-                const bool spill = total > capacity;
-                common::SortedVector<uint64_t> positions(1, std::min(total, capacity),
-                                                         spill ? swap : "", fan_in);
-                for (const auto &source : group)
-                    load(source)->call_ones([&](uint64_t i) { positions.push_back(i); });
-
-                if (!spill) {
-                    auto &buffer = positions.get_buffer();
-                    std::sort(buffer.begin(), buffer.end());
-                    buffer.erase(std::unique(buffer.begin(), buffer.end()), buffer.end());
-                    bitmatrix_[target] = std::make_unique<bit_vector_smart>(
-                        [&](const auto &emit) { for (uint64_t i : buffer) emit(i); },
-                        num_rows_, buffer.size());
-                } else {
-                    // Count the union while writing it once. Replay it to construct
-                    // the compressed result, whose builder requires the exact count.
-                    utils::TempFile merged(swap);
-                    uint64_t count = 0;
-                    positions.for_each([&](uint64_t i) {
-                        serialize_number(merged.ofstream(), i);
-                        ++count;
-                    });
-                    auto &in = merged.ifstream();
-                    bitmatrix_[target] = std::make_unique<bit_vector_smart>(
-                        [&](const auto &emit) {
-                            for (uint64_t i = 0; i < count; ++i) emit(load_number(in));
-                        }, num_rows_, count);
+                    if (!column->load(*in))
+                        throw std::ifstream::failure("cannot load annotation column");
+                    if (column->size() != num_rows_)
+                        throw std::runtime_error(fmt::format(
+                            "column '{}' has {} rows, expected {}",
+                            label_encoder_.decode(target), column->size(), num_rows_));
+                    std::lock_guard<std::mutex> lock(column_locks[target]);
+                    if (dense_columns[target]) {
+                        std::lock_guard<std::mutex> dense(dense_lock);
+                        decompress_bitmap(target) |= *column;
+                        continue;
+                    }
+                    auto &existing = bitmatrix_[target];
+                    if (!existing) {
+                        existing = std::move(column);
+                        continue;
+                    }
+                    const auto existing_ones = existing->num_set_bits();
+                    const auto incoming_ones = column->num_set_bits();
+                    if (existing_ones <= kMaxSparseColumnOnes
+                            && incoming_ones <= kMaxSparseColumnOnes
+                            && existing_ones + incoming_ones
+                                    <= num_rows_ / kSparseColumnDensityDivisor) {
+                        const uint64_t count = existing_ones + incoming_ones;
+                        SparseMergeReservation reservation(budget, count * sizeof(uint64_t));
+                        std::vector<uint64_t> positions;
+                        positions.reserve(count);
+                        existing->call_ones([&](uint64_t j) { positions.push_back(j); });
+                        column->call_ones([&](uint64_t j) { positions.push_back(j); });
+                        std::sort(positions.begin(), positions.end());
+                        positions.erase(std::unique(positions.begin(), positions.end()),
+                                        positions.end());
+                        existing = std::make_unique<bit_vector_smart>(
+                            [&](const auto &emit) { for (auto j : positions) emit(j); },
+                            num_rows_, positions.size());
+                    } else {
+                        dense_columns[target] = true;
+                        std::lock_guard<std::mutex> dense(dense_lock);
+                        decompress_bitmap(target) |= *column;
+                    }
                 }
             } catch (const std::exception &e) {
-                logger->error("Cannot merge annotation column '{}': {}",
-                              label_encoder_.decode(target), e.what());
+                logger->error("Cannot merge annotation columns from '{}': {} (caught: {})",
+                              filenames[i], utils::file_read_failure_detail(
+                                  make_suffix(filenames[i], kExtension)), e.what());
+                failed = true;
+            } catch (...) {
+                logger->error("Cannot merge annotation columns from '{}': unknown error",
+                              filenames[i]);
                 failed = true;
             }
         }
-        flushed_ = true;
+        flush();
         return !failed;
     } catch (const std::exception &e) {
         logger->error("Cannot merge annotation columns: {}", e.what());
         return false;
     }
 }
+
 
 template <typename Label>
 size_t ColumnCompressed<Label>::read_num_labels(const std::string &filename) {
