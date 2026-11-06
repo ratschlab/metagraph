@@ -134,6 +134,43 @@ TEST(ColumnCompressed, MergeSparseColumnsWithLargeRowCount) {
 }
 
 
+TEST(ColumnCompressed, MergeLargeSparseColumnsWithoutDenseWorkspace) {
+    const uint64_t rows = uint64_t(1) << 34;
+    const uint64_t count = 4'000'001;
+    std::vector<std::string> files;
+    for (uint64_t offset : { 0u, 1u }) {
+        files.push_back(test_dump_basename + "_large_sparse_" + std::to_string(offset));
+        annot::ColumnCompressed<> part(rows);
+        std::vector<uint64_t> positions(count);
+        for (uint64_t i = 0; i < count; ++i)
+            positions[i] = 2 * i + offset;
+        part.add_labels(positions, { "shared" });
+        part.serialize(files.back());
+    }
+    // Repeated inputs must not duplicate positions in the compressed output.
+    files.push_back(files.front());
+    annot::ColumnCompressed<> merged;
+    ASSERT_TRUE(merged.merge_load(files));
+    const auto &column = merged.get_column("shared");
+    EXPECT_EQ(2 * count, column.num_set_bits());
+    EXPECT_TRUE(column[0]);
+    EXPECT_TRUE(column[2 * count - 1]);
+    EXPECT_FALSE(column[2 * count]);
+    EXPECT_FALSE(column[rows - 1]);
+
+    const auto output = test_dump_basename + "_large_sparse_roundtrip";
+    merged.serialize(output);
+    annot::ColumnCompressed<> restored;
+    ASSERT_TRUE(restored.load(output));
+    for (const auto *result : { &column, &restored.get_column("shared") }) {
+        uint64_t next = 0;
+        bool ordered = true;
+        result->call_ones([&](uint64_t position) { ordered &= position == next++; });
+        EXPECT_TRUE(ordered);
+        EXPECT_EQ(2 * count, next);
+    }
+}
+
 TEST(ColumnCompressed, MergeManyFilesByLabel) {
     const uint64_t rows = uint64_t(1) << 34;
     std::vector<std::string> files;

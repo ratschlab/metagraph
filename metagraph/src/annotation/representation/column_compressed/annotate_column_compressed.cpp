@@ -4,7 +4,6 @@
 #include <numeric>
 #include <algorithm>
 #include <stdexcept>
-#include <condition_variable>
 
 #include <ips4o.hpp>
 
@@ -31,42 +30,25 @@ constexpr uint64_t kMaxSparseColumnOnes = 4000000;
 constexpr uint64_t kSparseColumnDensityDivisor = 128;
 
 
-// Shared by all workers. This bounds temporary sparse positions, not final
-// columns, decoded inputs or the dense fallback.
-class SparseMergeBudget {
-  public:
-    void acquire(uint64_t bytes) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        available_.wait(lock, [&] { return bytes <= remaining_; });
-        remaining_ -= bytes;
+// Visit the union without materializing the two streams of set positions.
+template <class Callback>
+void call_union(const bit_vector &left, const bit_vector &right,
+                const Callback &emit) {
+    const uint64_t left_count = left.num_set_bits();
+    const uint64_t right_count = right.num_set_bits();
+    const uint64_t end = left.size();
+    uint64_t i = 1, j = 1;
+    uint64_t a = left_count ? left.select1(i) : end;
+    uint64_t b = right_count ? right.select1(j) : end;
+    while (i <= left_count || j <= right_count) {
+        const uint64_t next = std::min(a, b);
+        emit(next);
+        if (a == next)
+            a = ++i <= left_count ? left.select1(i) : end;
+        if (b == next)
+            b = ++j <= right_count ? right.select1(j) : end;
     }
-
-    void release(uint64_t bytes) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            remaining_ += bytes;
-        }
-        available_.notify_all();
-    }
-
-  private:
-    std::mutex mutex_;
-    std::condition_variable available_;
-    uint64_t remaining_ = 2 * kMaxSparseColumnOnes * sizeof(uint64_t);
-};
-
-class SparseMergeReservation {
-  public:
-    SparseMergeReservation(SparseMergeBudget &budget, uint64_t bytes)
-          : budget_(budget), bytes_(bytes) { budget_.acquire(bytes_); }
-    ~SparseMergeReservation() { budget_.release(bytes_); }
-    SparseMergeReservation(const SparseMergeReservation&) = delete;
-    SparseMergeReservation& operator=(const SparseMergeReservation&) = delete;
-
-  private:
-    SparseMergeBudget &budget_;
-    uint64_t bytes_;
-};
+}
 } // namespace
 
 
@@ -585,7 +567,6 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         }
         bitmatrix_.resize(label_encoder_.size());
         auto column_locks = std::make_unique<std::mutex[]>(bitmatrix_.size());
-        SparseMergeBudget budget;
         // Dense columns retain the existing bounded LRU cache. Its eviction
         // callback can replace any cached column, so all access to a column
         // that has entered this path must hold dense_lock as well.
@@ -620,22 +601,16 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                     }
                     const auto existing_ones = existing->num_set_bits();
                     const auto incoming_ones = column->num_set_bits();
-                    if (existing_ones <= kMaxSparseColumnOnes
-                            && incoming_ones <= kMaxSparseColumnOnes
-                            && existing_ones + incoming_ones
-                                    <= num_rows_ / kSparseColumnDensityDivisor) {
-                        const uint64_t count = existing_ones + incoming_ones;
-                        SparseMergeReservation reservation(budget, count * sizeof(uint64_t));
-                        std::vector<uint64_t> positions;
-                        positions.reserve(count);
-                        existing->call_ones([&](uint64_t j) { positions.push_back(j); });
-                        column->call_ones([&](uint64_t j) { positions.push_back(j); });
-                        std::sort(positions.begin(), positions.end());
-                        positions.erase(std::unique(positions.begin(), positions.end()),
-                                        positions.end());
+                    // The sum is an upper bound; avoid overflow and dense outputs.
+                    if (existing_ones <= num_rows_ / 2
+                            && incoming_ones <= num_rows_ / 2 - existing_ones
+                            && smart_representation(num_rows_, existing_ones + incoming_ones)
+                                    == bit_vector_adaptive::SD_VECTOR) {
+                        uint64_t count = 0;
+                        call_union(*existing, *column, [&](uint64_t) { ++count; });
                         existing = std::make_unique<bit_vector_smart>(
-                            [&](const auto &emit) { for (auto j : positions) emit(j); },
-                            num_rows_, positions.size());
+                            [&](const auto &emit) { call_union(*existing, *column, emit); },
+                            num_rows_, count);
                     } else {
                         dense_columns[target] = true;
                         std::lock_guard<std::mutex> dense(dense_lock);
