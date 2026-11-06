@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
-from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, anno_file_extension
+from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension, anno_file_extension, DNA_MODE
 from helpers import get_test_class_name
 
 """Test operations on annotation columns"""
@@ -544,6 +544,72 @@ class TestRowDiffAnnoConverters(TestingBase):
         # column and the reformatted variants must answer queries identically.
         for converted in (rt_brwt, rt_flat, rt_disk):
             self._assert_query_identical(column_path, converted)
+
+
+@parameterized_class(('graph_mode',),
+    # protein graphs have no reverse complement, so only basic mode
+    input_values=[('basic',)] + ([('canonical',), ('primary',)] if DNA_MODE else []),
+    class_name_func=get_test_class_name
+)
+class TestRowDiffCharSSHash(TestingBase):
+    """row_diff_brwt -> row_diff_char_brwt on an SSHash graph must not change
+    any query result: only the successor encoding differs, the diffs are the same."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+        cls.graph_path = cls.tempdir.name + '/graph.sshashdbg'
+        # SSHash is built from contigs without repeated k-mers, as in the unit tests
+        # (building it from the raw reads makes it write minimizer files without bound)
+        contig_mode = 'canonical' if cls.graph_mode == 'primary' else cls.graph_mode
+        cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --mode {contig_mode} -k 21 '
+                         f'-o {cls.tempdir.name}/contigs {TEST_DATA_DIR}/transcripts_100.fa',
+                         "Build command")
+        primary_flag = ' --primary-kmers' if cls.graph_mode == 'primary' else ''
+        cls._run_command(f'{METAGRAPH} transform -p {NUM_THREADS} --to-fasta{primary_flag} '
+                         f'-o {cls.tempdir.name}/contigs {cls.tempdir.name}/contigs.dbg',
+                         "Transform command")
+        input_fa = cls.tempdir.name + '/contigs.fasta.gz'
+        build_mode = cls.graph_mode
+        cls._run_command(f'{METAGRAPH} build -p {NUM_THREADS} --graph sshash --mode {build_mode} '
+                         f'-k 21 -o {cls.graph_path} {input_fa}', "Build command")
+
+        cls._annotate_graph(TEST_DATA_DIR + '/transcripts_100.fa',
+                            cls.graph_path,
+                            cls.tempdir.name + '/annotation',
+                            'row_diff_brwt')
+        cls.brwt_path = cls.tempdir.name + '/annotation.row_diff_brwt.annodbg'
+
+        out_base = cls.tempdir.name + '/annotation_char'
+        command = (f'{METAGRAPH} transform_anno --anno-type row_diff_char_brwt '
+                   f'-i {cls.graph_path} -o {out_base} -p {NUM_THREADS} {cls.brwt_path}')
+        cls._run_command(command, "Transform_anno to row_diff_char_brwt")
+        cls.char_path = out_base + '.row_diff_char_brwt.annodbg'
+
+    def test_stats_match(self):
+        src = self._get_stats(f'-a {self.brwt_path}')
+        dst = self._get_stats(f'-a {self.char_path}')
+        self.assertEqual(src['returncode'], 0)
+        self.assertEqual(dst['returncode'], 0)
+        self.assertEqual('100', dst['labels'])
+        self.assertEqual(src['labels'], dst['labels'])
+        self.assertEqual(src['objects'], dst['objects'])
+        self.assertEqual(src['density'], dst['density'])
+        self.assertEqual('row_diff_char_brwt', dst['representation'])
+
+    @parameterized.expand(itertools.product(['labels', 'matches', 'signature'], [1, NUM_THREADS]))
+    def test_query_identical(self, query_mode, num_threads):
+        def query(anno_path):
+            cmd = (f'{METAGRAPH} query -i {self.graph_path} -a {anno_path} '
+                   f'--query-mode {query_mode} -p {num_threads} '
+                   f'--min-kmers-fraction-label 0 {TEST_DATA_DIR}/transcripts_1000.fa')
+            res = subprocess.run(cmd.split(), stdout=PIPE, stderr=PIPE)
+            self.assertEqual(res.returncode, 0, msg=res.stderr.decode())
+            # with several threads, results are printed in no fixed order
+            return sorted(res.stdout.splitlines())
+        expected = query(self.brwt_path)
+        self.assertGreater(len(expected), 0)
+        self.assertEqual(expected, query(self.char_path))
 
 
 if __name__ == '__main__':

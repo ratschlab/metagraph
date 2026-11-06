@@ -39,6 +39,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (filename.ends_with(annot::RowCompressed<>::kExtension)) {
         return Config::AnnotationType::RowCompressed;
 
+    } else if (filename.ends_with(annot::RowDiffCharBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffCharBRWT;
+
     } else if (filename.ends_with(annot::MultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::BRWT;
 
@@ -140,6 +143,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowDiffBRWT: {
             annotation.reset(new annot::RowDiffBRWTAnnotator());
+            break;
+        }
+        case Config::RowDiffCharBRWT: {
+            annotation.reset(new annot::RowDiffCharBRWTAnnotator());
             break;
         }
         case Config::RowDiffRowFlat: {

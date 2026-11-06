@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <sdsl/int_vector.hpp>
+
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/batch_accumulator.hpp"
@@ -30,7 +32,19 @@ graph::DeBruijnGraph::node_index row_diff_successor(const graph::DeBruijnGraph &
                                                     graph::DeBruijnGraph::node_index node,
                                                     const bit_vector &rd_succ);
 
+// CharSucc mode: look up successor from sparse char storage or trivial graph path
+graph::DeBruijnGraph::node_index row_diff_successor_char(
+        const graph::DeBruijnGraph &graph,
+        graph::DeBruijnGraph::node_index node,
+        const bit_vector_small &rd_succ_needs_char,
+        const sdsl::int_vector<> &rd_succ_char);
+
 namespace matrix {
+
+enum class RowDiffMode : uint8_t {
+    Standard = 0,  // original fork_succ bitvector
+    CharSucc = 1,  // successor chars, stored only where trivial_outgoing() fails
+};
 
 const std::string kRowDiffAnchorExt = ".anchors";
 const std::string kRowDiffForkSuccExt = ".rd_succ";
@@ -53,6 +67,19 @@ class IRowDiff {
 
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
+    const bit_vector_small& rd_succ_needs_char() const { return rd_succ_needs_char_; }
+    const sdsl::int_vector<>& rd_succ_char() const { return rd_succ_char_; }
+
+    RowDiffMode mode() const { return rd_mode_; }
+
+    // Switch to CharSucc mode: the successor chars replace fork_succ
+    void set_successor_chars(bit_vector_small&& needs_char, sdsl::int_vector<>&& succ_char) {
+        rd_succ_needs_char_ = std::move(needs_char);
+        rd_succ_char_ = std::move(succ_char);
+        fork_succ_ = fork_succ_bv_type();
+        rd_mode_ = RowDiffMode::CharSucc;
+    }
+
   protected:
     template <std::derived_from<BinaryMatrix> Matrix>
     std::vector<BinaryMatrix::Row>
@@ -74,8 +101,11 @@ class IRowDiff {
                    H decode_diffs, Callback call_row, size_t num_threads) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
+    RowDiffMode rd_mode_ = RowDiffMode::Standard;
     anchor_bv_type anchor_;
     fork_succ_bv_type fork_succ_;
+    bit_vector_small rd_succ_needs_char_;
+    sdsl::int_vector<> rd_succ_char_;
 };
 
 /**
@@ -148,6 +178,23 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     static void add_diff(const SetBitPositions &diff, SetBitPositions *row);
 
     BaseMatrix diffs_;
+};
+
+
+/**
+ * RowDiffChar: RowDiff variant that stores successor characters only for nodes
+ * whose successor trivial_outgoing() cannot resolve, instead of the 1-bit
+ * fork_succ bitvector. Enables single-lookup traversal
+ * via graph.traverse(node, char) instead of enumerating all outgoing neighbors.
+ */
+template <class BaseMatrix>
+class RowDiffChar : public RowDiff<BaseMatrix> {
+  public:
+    template <typename... Args>
+    RowDiffChar(const graph::DeBruijnGraph *graph = nullptr, Args&&... args)
+        : RowDiff<BaseMatrix>(graph, std::forward<Args>(args)...) {
+        this->rd_mode_ = RowDiffMode::CharSucc;
+    }
 };
 
 
@@ -296,7 +343,21 @@ template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::load(std::istream &f) {
     auto pos = f.tellg();
     std::string version(4, '\0');
-    if (f.read(version.data(), 4) && version == "v2.0") {
+    if (f.read(version.data(), 4) && version == "v3.0") {
+        // CharSucc mode: anchor + needs_char(bit_vector_small) + rd_succ_char(int_vector<>) + diffs
+        rd_mode_ = RowDiffMode::CharSucc;
+        if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+            auto anchor_start = f.tellg();
+            if (!anchor_.load(f) || !rd_succ_needs_char_.load(f))
+                return false;
+            rd_succ_char_.load(f);
+            if (!f.good())
+                return false;
+            // anchor_ / successor chars are accessed randomly, hint the kernel.
+            utils::madvise_random_range(f, anchor_start, f.tellg() - anchor_start);
+        }
+    } else if (version == "v2.0") {
+        rd_mode_ = RowDiffMode::Standard;
         if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
             auto anchor_start = f.tellg();
             if (!anchor_.load(f) || !fork_succ_.load(f))
@@ -307,6 +368,7 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
     } else {
         // backward compatibility
         f.seekg(pos);
+        rd_mode_ = RowDiffMode::Standard;
         if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
             auto anchor_start = f.tellg();
             if (!anchor_.load(f))
@@ -325,10 +387,23 @@ bool RowDiff<BaseMatrix>::load(std::istream &f) {
 
 template <class BaseMatrix>
 void RowDiff<BaseMatrix>::serialize(std::ostream &f) const {
-    f.write("v2.0", 4);
-    if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
-        anchor_.serialize(f);
-        fork_succ_.serialize(f);
+    switch (rd_mode_) {
+        case RowDiffMode::CharSucc:
+            f.write("v3.0", 4);
+            if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+                anchor_.serialize(f);
+                rd_succ_needs_char_.serialize(f);
+                rd_succ_char_.serialize(f);
+            }
+            break;
+        case RowDiffMode::Standard:
+        default:
+            f.write("v2.0", 4);
+            if constexpr(!std::is_same_v<BaseMatrix, ColumnMajor>) {
+                anchor_.serialize(f);
+                fork_succ_.serialize(f);
+            }
+            break;
     }
     diffs_.serialize(f);
 }
