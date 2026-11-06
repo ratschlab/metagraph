@@ -133,4 +133,105 @@ TEST(ColumnCompressed, MergeSparseColumnsWithLargeRowCount) {
     }
 }
 
+
+TEST(ColumnCompressed, MergeManyFilesByLabel) {
+    const uint64_t rows = uint64_t(1) << 34;
+    std::vector<std::string> files;
+    for (size_t f = 0; f < 48; ++f) {
+        files.push_back(test_dump_basename + "_group_" + std::to_string(f));
+        annot::ColumnCompressed<> part(rows, 1);
+        // Vary the local column order; labels determine the destination.
+        if (f % 2) part.add_labels({ rows - 1 }, { "tail" });
+        part.add_labels({ 0, 100 + f, rows / 2 }, { "shared" });
+        part.add_labels({ 1000 + f }, { "other" });
+        part.add_labels({ f }, { "unique_" + std::to_string(f) });
+        if (!(f % 2)) part.add_labels({ rows - 1 }, { "tail" });
+        part.serialize(files.back());
+    }
+    // Include repeats and reverse input order; exercise both RAM and spill paths.
+    files.push_back(files.front());
+    const auto previous_threads = get_num_threads();
+    set_num_threads(4);
+    for (uint64_t budget : { uint64_t(64), uint64_t(1 << 20), uint64_t(64'000'000) }) {
+        annot::ColumnCompressed<> merged(0, 1, test_dump_dir(), budget, 0, false, 3);
+        ASSERT_TRUE(merged.merge_load(files));
+        EXPECT_EQ(51u, merged.num_labels());
+        EXPECT_EQ(50u, merged.get_column("shared").num_set_bits());
+        EXPECT_EQ(48u, merged.get_column("other").num_set_bits());
+        EXPECT_EQ(1u, merged.get_column("tail").num_set_bits());
+        for (size_t f = 0; f < 48; ++f) {
+            EXPECT_TRUE(merged.get_column("shared")[100 + f]);
+            EXPECT_TRUE(merged.get_column("other")[1000 + f]);
+            EXPECT_TRUE(merged.get_column("unique_" + std::to_string(f))[f]);
+        }
+        const auto output = test_dump_basename + "_group_roundtrip";
+        merged.serialize(output);
+        annot::ColumnCompressed<> restored;
+        ASSERT_TRUE(restored.merge_load({ output }));
+        EXPECT_EQ(merged.num_relations(), restored.num_relations());
+        EXPECT_EQ(50u, restored.get_column("shared").num_set_bits());
+        std::reverse(files.begin(), files.end());
+    }
+    set_num_threads(previous_threads);
+}
+
+TEST(ColumnCompressed, MergeGroupedDenseAndEmptyColumns) {
+    const uint64_t rows = 1024;
+    std::vector<std::string> files;
+    for (size_t f = 0; f < 16; ++f) {
+        files.push_back(test_dump_basename + "_dense_group_" + std::to_string(f));
+        annot::ColumnCompressed<> part(rows);
+        std::vector<uint64_t> indexes;
+        for (size_t i = f; i < rows; i += 16) indexes.push_back(i);
+        part.add_labels(indexes, { "dense" });
+        part.add_labels({}, { "empty" });
+        part.serialize(files.back());
+    }
+    annot::ColumnCompressed<> merged(0, 1, test_dump_dir(), 1024);
+    ASSERT_TRUE(merged.merge_load(files));
+    EXPECT_EQ(rows, merged.get_column("dense").num_set_bits());
+    EXPECT_EQ(0u, merged.get_column("empty").num_set_bits());
+    for (size_t i = 0; i < rows; ++i) EXPECT_TRUE(merged.get_column("dense")[i]);
+}
+
+TEST(ColumnCompressed, MergeGroupedRejectsBadInputs) {
+    const auto first = test_dump_basename + "_group_good";
+    const auto other = test_dump_basename + "_group_wrong_rows";
+    annot::ColumnCompressed<> a(100), b(101);
+    a.add_labels({ 7 }, { "shared" });
+    b.add_labels({ 8 }, { "shared" });
+    a.serialize(first);
+    b.serialize(other);
+    annot::ColumnCompressed<> result;
+    EXPECT_FALSE(result.merge_load({ first, other }));
+    EXPECT_FALSE(result.merge_load({ first, first + "_missing" }));
+    // A failed call must not prevent a subsequent valid merge.
+    ASSERT_TRUE(result.merge_load({ first, first }));
+    EXPECT_EQ(1u, result.get_column("shared").num_set_bits());
+    EXPECT_TRUE(result.get_column("shared")[7]);
+    // Preserve the existing treatment of files with no label columns.
+    annot::ColumnCompressed<> empty(999);
+    const auto empty_file = test_dump_basename + "_group_no_columns";
+    empty.serialize(empty_file);
+    ASSERT_TRUE(result.merge_load({ empty_file, first }));
+    EXPECT_EQ(100u, result.num_objects());
+}
+
+TEST(ColumnCompressed, MergeGroupedEmptyAndTruncatedFiles) {
+    const auto path = test_dump_basename + "_empty_group";
+    annot::ColumnCompressed<> empty(0);
+    empty.add_labels({}, { "empty" });
+    empty.serialize(path);
+    annot::ColumnCompressed<> restored;
+    ASSERT_TRUE(restored.merge_load({ path, path }));
+    EXPECT_EQ(0u, restored.num_objects());
+    EXPECT_EQ(1u, restored.num_labels());
+    EXPECT_EQ(0u, restored.num_relations());
+    const auto truncated = path + "_truncated" + restored.file_extension();
+    std::filesystem::copy_file(path + restored.file_extension(), truncated,
+                              std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::resize_file(truncated, std::filesystem::file_size(truncated) - 1);
+    EXPECT_FALSE(restored.merge_load({ path, truncated }));
+}
+
 } // namespace
