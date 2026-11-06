@@ -70,7 +70,7 @@ Json::Value parse_json_string(const std::string &msg) {
     std::string errors;
 
     if (!reader->parse(msg.data(), msg.data() + msg.size(), &json, &errors))
-        throw std::invalid_argument("Bad json received: " + errors);
+        throw std::invalid_argument("Invalid JSON: " + errors);
 
     return json;
 }
@@ -108,7 +108,7 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
         logger->info("[Server] Got a request during initialization. Asked to come back later");
         status = SimpleWeb::StatusCode::server_error_service_unavailable;
         header.insert(std::make_pair("Retry-After", "60")); // ask to come back in 60 seconds
-        ret = json_str_with_error_msg("Server is currently initializing, please come back later.");
+        ret = json_str_with_error_msg("Server is currently initializing. Retry after 60 seconds.");
     } catch (const std::exception& e) {
         logger->warn("[Server] Error on request {}: {}", request_id, e.what());
         status = SimpleWeb::StatusCode::client_error_bad_request;
