@@ -1018,4 +1018,51 @@ TEST(sdsl_bit_vector, count_ones_every_third_zero) {
     }
 }
 
+TEST(BitmapVector, MoveKeepsOwnedStorage) {
+    sdsl::bit_vector bits(1024, 0);
+    const auto *data = bits.data();
+    bitmap_vector editable(std::move(bits));
+    EXPECT_EQ(data, editable.data().data());
+    editable.set(17, true);
+    EXPECT_TRUE(editable[17]);
+}
+
+TEST(BitmapVector, MoveMappedStorageBecomesWritable) {
+    const auto filename = test_dump_basename + "_mapped_move";
+    sdsl::bit_vector original(1024, 0);
+    original[7] = true;
+    {
+        std::ofstream out(filename, std::ios::binary);
+        original.serialize(out);
+    }
+    for (bool adaptive : { false, true }) {
+        sdsl::mmap_ifstream in(filename, std::ios::binary);
+        sdsl::bit_vector mapped;
+        mapped.load(in);
+        // Keep a separate view alive to check that edits do not reach the file.
+        sdsl::mmap_ifstream check_in(filename, std::ios::binary);
+        sdsl::bit_vector view;
+        view.load(check_in);
+        std::unique_ptr<bitmap_dyn> editable;
+        if (adaptive)
+            editable = std::make_unique<bitmap_adaptive>(std::move(mapped));
+        else
+            editable = std::make_unique<bitmap_vector>(std::move(mapped));
+        editable->set(7, false);
+        editable->set(17, true);
+        bitmap_vector added(1024, false);
+        added.set(31, true);
+        *editable |= added;
+        EXPECT_FALSE((*editable)[7]);
+        EXPECT_TRUE((*editable)[17]);
+        EXPECT_TRUE((*editable)[31]);
+        EXPECT_EQ(2u, editable->num_set_bits());
+        EXPECT_EQ(original, view);
+    }
+    std::ifstream in(filename, std::ios::binary);
+    sdsl::bit_vector restored;
+    restored.load(in);
+    EXPECT_EQ(original, restored);
+}
+
 } // namespace
