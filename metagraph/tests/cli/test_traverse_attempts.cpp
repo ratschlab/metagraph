@@ -2905,6 +2905,23 @@ TEST(GraphletServer, GraphListIdentitiesAgreePerPair) {
     entries.push_back(parse_graph_list_line("H,./g1,a1,m9", 9));
     EXPECT_THROW(graph_list_identities(entries, fp), std::invalid_argument);
     entries.pop_back();
+    // the same with absolute paths, as a deployed graph list names its pairs: two spellings
+    // of one pair of files are one index, on libstdc++ and libc++ alike
+    {
+        std::vector<GraphListEntry> absolute;
+        absolute.push_back(parse_graph_list_line("A,/data/idx/g1,/data/idx/a1,m1,ns1", 1));
+        absolute.push_back(parse_graph_list_line("B,/data/idx/./g1,/data/./idx/a1", 2));
+        absolute.push_back(parse_graph_list_line("C,/data/idx/sub/../g1,/data//idx/a1", 3));
+        auto abs_ids = graph_list_identities(absolute, fp);
+        for (const auto &[g, a] : std::vector<std::pair<std::string, std::string>>{
+                    { "/data/idx/g1", "/data/idx/a1" }, { "/data/idx/./g1", "/data/./idx/a1" },
+                    { "/data/idx/sub/../g1", "/data//idx/a1" } }) {
+            EXPECT_EQ(std::make_pair(std::string("ns1"), std::string("fp-m1")),
+                      abs_ids.at({ g, a })) << g << " " << a;
+        }
+        absolute.push_back(parse_graph_list_line("D,/data/idx/./g1,/data/idx/a1,m9", 4));
+        EXPECT_THROW(graph_list_identities(absolute, fp), std::invalid_argument);
+    }
     // ... and two different pairs never state one index_fp (one manifest written for both, as
     // for two annotations of one graph with swapped memberships, which sizes cannot tell apart)
     entries.push_back(parse_graph_list_line("I,g1,a5,m1", 10));
