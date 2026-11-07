@@ -543,9 +543,19 @@ class TestPatternProteinCoordinates(TestingBase):
                                   'supported_paths_level': level, 'require_support': require,
                                   'output': {'labels': 'all'}})
                 entry = a['patterns'][0]
-                self.assertEqual(4, entry['counts']['paths']['value'])
                 sp = entry['counts']['supported_paths']
-                self.assertEqual(len(expected), sp['value'])
+                self.assertEqual((len(expected), 'exact'), (sp['value'], sp['relation']))
+                if level == 'label_intersection':
+                    self.assertEqual((4, 'exact'), (entry['counts']['paths']['value'],
+                                                    entry['counts']['paths']['relation']))
+                    self.assertEqual(0, sp['branches_pruned'])
+                else:
+                    # the record-verified search prunes the two walks that switch records before
+                    # they complete: the walks counted are a lower bound (SPEC §20.4)
+                    self.assertEqual('record_verified', sp['level'])
+                    self.assertEqual(2, sp['branches_pruned'])
+                    self.assertEqual((2, 'at_least'), (entry['counts']['paths']['value'],
+                                                       entry['counts']['paths']['relation']))
                 self.assertEqual(expected, sorted(r['sequence'] for r in entry['results']))
                 for r in entry['results']:
                     self.assertEqual('+', r['strand'])
