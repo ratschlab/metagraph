@@ -266,15 +266,19 @@ TEST(ServerEnvelope, Sample03ResolveCutoff) {
 }
 
 // Sample 05: a named-graph /traverse, one entry; request_id is the attempt_id and the
-// attempt's usage sits at the top level
+// attempt's usage sits at the top level; a real run (2026-11-07): the deadline's not_after_ms is
+// the request's (its timeline: ServerFanout.EachSampleDeadlineTellsOneTimeline)
 TEST(ServerEnvelope, Sample05TraverseNamed) {
-    const Json::Value body = sample("05_traverse_envelope_named.json")["body"];
+    const Json::Value s05 = sample("05_traverse_envelope_named.json");
+    const Json::Value &body = s05["body"];
     const Json::Value built = rebuilt_post_envelope(body);
     EXPECT_EQ(text(body), text(built));
     EXPECT_EQ("svc-trv-91aa07-1", built["request_id"].asString());
+    EXPECT_EQ(s05["request"]["attempt_id"], built["request_id"]);
     EXPECT_EQ(text(body["usage"]), text(built["usage"]));
     EXPECT_FALSE(built["answers"][0].isMember("usage"));
-    EXPECT_EQ(1793520010000u, built["deadline"]["not_after_ms"].asUInt64());
+    EXPECT_EQ(1794038014000u, built["deadline"]["not_after_ms"].asUInt64());
+    EXPECT_EQ(s05["request"]["not_after_ms"].asUInt64(), built["deadline"]["not_after_ms"].asUInt64());
     EXPECT_TRUE(built["deadline"]["finish_by_ms"].isNull());
 }
 

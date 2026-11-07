@@ -1,8 +1,10 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +15,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1544,27 +1547,143 @@ int64_t iso_ms(const std::string &iso) {
     return ms;
 }
 
-// Each /resolve and /pattern sample's deadline block tells one timeline (section 4): the cutoff is the effective
-// deadline less the finalisation reserve, the effective deadline is at most finish_by_ms less
-// the clock skew allowance, a pair not reached by not_after_ms names a not_after_ms before the
-// cutoff, one not reached by the cutoff a not_after_ms (if any) at or after it, and no answered
-// entry ran longer than its envelope (the suite's review of the samples, 2026-11-02)
+namespace {
+
+// The samples' clock skew allowance (sample 12's attempts.clock_skew_allowance_ms)
+constexpr int64_t kSampleSkewMs = 2000;
+
+// |v|, an integer member, or none
+std::optional<int64_t> integer_of(const Json::Value &v) {
+    return v.isIntegral() ? std::optional<int64_t>(v.asInt64()) : std::nullopt;
+}
+
+// A /traverse attempt's usage tells one timeline (SPEC-labeled-traversal-core section 6.8; SPEC-
+// multigraph-envelope.md section 4): the walk stopped between the receipt and the usage's
+// elapsed time; the bound is the seeds' time budgets plus the allowance (and an in_ram load), or,
+// capped by finish_by_ms, what finish_by_ms less the clock skew allowance leaves after the receipt
+// (0 once it has passed); the walk-until is at most the bound less half the allowance (0 below
+// it); no seed ran longer than its attempt; the latest start (not_after_ms) is not before the
+// receipt and is the request's; an answer written (below 400) came within the bound, the 503 at
+// the bound after it. |request|: the sample's request (null when it states none); |status|: the
+// HTTP status of the answer the usage describes. The receipt is stated to the ms (truncated) and
+// the durations rounded up: 1 ms of slack where one is added to the other
+void expect_usage_timeline(const std::string &name, const Json::Value &u,
+                           const Json::Value &request, int status) {
+    const int64_t received = iso_ms(u["received_at"].asString());
+    const int64_t elapsed = u["elapsed_ms"].asInt64();
+    if (u["stopped_at"].isString()) {
+        const int64_t stopped = iso_ms(u["stopped_at"].asString());
+        EXPECT_LE(received, stopped) << name;
+        EXPECT_LE(stopped, received + elapsed + 1) << name;
+    }
+    const Json::Value &b = u["bound"];
+    const int64_t bound = u["bound_ms"].asInt64();
+    const double allowance = b["allowance_ms"].asDouble();
+    if (b["capped_by"].isNull()) {
+        const double raw = b["seeds"].asDouble() * b["time_budget_ms"].asDouble() + allowance
+                         + b.get("load_ms", 0).asDouble();
+        EXPECT_EQ(static_cast<int64_t>(std::ceil(raw)), bound) << name;
+    } else if (b["capped_by"].asString() == "finish_by_ms") {
+        ASSERT_TRUE(request["finish_by_ms"].isIntegral()) << name;
+        EXPECT_EQ(std::max<int64_t>(0, request["finish_by_ms"].asInt64() - kSampleSkewMs - received),
+                  bound) << name;
+    }
+    EXPECT_LE(b["walk_until_ms"].asDouble(), std::max(0.0, static_cast<double>(bound) - allowance / 2))
+        << name;
+    for (const Json::Value &seed : u["per_seed"]) {
+        EXPECT_LE(seed["elapsed_ms"].asInt64(), elapsed) << name;
+    }
+    if (u.isMember("not_after_ms")) {
+        EXPECT_LE(received, u["not_after_ms"].asInt64()) << name;
+        if (request.isObject())
+            EXPECT_EQ(integer_of(request["not_after_ms"]), integer_of(u["not_after_ms"])) << name;
+    }
+    if (status == 503) {
+        EXPECT_EQ("deadline", u["reason"].asString()) << name;
+        EXPECT_GE(elapsed, bound) << name;
+    } else if (status > 0 && status < 400) {
+        EXPECT_LE(elapsed, bound) << name;
+    }
+}
+
+} // namespace
+
+// Each sample's deadline block tells one timeline (section 4), and so does every attempt usage a
+// sample states (the suite's review of the samples, 2026-11-02; the /traverse samples since their
+// rebuild from real runs, 2026-11-07). The deadline's not_after_ms and finish_by_ms are the
+// request's. On /resolve and /pattern the cutoff is the effective deadline less the finalisation
+// reserve, the effective deadline is at most finish_by_ms less the clock skew allowance, a pair
+// not reached by not_after_ms names a not_after_ms before the cutoff, one not reached by the
+// cutoff a not_after_ms (if any) at or after it. On /traverse the instants are stated only when
+// the request gives not_after_ms or finish_by_ms: the effective deadline is the receipt plus
+// usage.bound_ms, the cutoff the receipt plus usage.bound.walk_until_ms (SPEC-labeled-traversal-core
+// section 6.8), at most finish_by_ms less the skew allowance, and the envelope was written before
+// it, after the usage was taken. No answered entry ran longer than its envelope
 TEST(ServerFanout, EachSampleDeadlineTellsOneTimeline) {
     const int64_t reserve_ms = 250;
-    const int64_t skew_ms = 2000;
+    const int64_t skew_ms = kSampleSkewMs;
     size_t checked = 0;
+    size_t traverse_checked = 0;
+    size_t usages_checked = 0;
     for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
         if (file.path().extension() != ".json")
             continue;
         const std::string name = file.path().filename().string();
-        const Json::Value body = sample(name)["body"];
-        // section 4's cutoff and reserve are the fan-out routes'; /traverse states its cutoff as
-        // the attempt's walk_until (SPEC-labeled-traversal-core section 6.8)
-        if (!body.isObject() || !body.isMember("deadline")
-                || (body["route"].asString() != "/resolve" && body["route"].asString() != "/pattern"))
+        const Json::Value s = sample(name);
+        const Json::Value &body = s["body"];
+        const Json::Value &request = s["request"];
+        if (!body.isObject())
+            continue;
+        // every attempt usage: a response's (05, 07, 08, 23) and an attempt object's (06, 21),
+        // the latter for the status of the attempt's own response
+        if (body["usage"].isObject()) {
+            expect_usage_timeline(name, body["usage"], request, s["status"].asInt());
+            ++usages_checked;
+        }
+        if (body["attempt"].isObject() && body["attempt"]["usage"].isObject()) {
+            const Json::Value &attempt = body["attempt"];
+            expect_usage_timeline(name, attempt["usage"], Json::Value(),
+                                  attempt["response"].isObject()
+                                          ? attempt["response"]["status"].asInt() : 0);
+            ++usages_checked;
+        }
+        if (!body.isMember("deadline"))
             continue;
         const Json::Value &d = body["deadline"];
-        if (d["effective_deadline_at"].isString()) {
+        if (request.isObject()) {
+            EXPECT_EQ(integer_of(request["not_after_ms"]), integer_of(d["not_after_ms"])) << name;
+            EXPECT_EQ(integer_of(request["finish_by_ms"]), integer_of(d["finish_by_ms"])) << name;
+        }
+        const std::string route = body["route"].asString();
+        if (route == "/traverse") {
+            const bool stated = d["not_after_ms"].isIntegral() || d["finish_by_ms"].isIntegral();
+            EXPECT_EQ(stated, d["effective_deadline_at"].isString()) << name;
+            EXPECT_EQ(stated, d["cutoff_at"].isString()) << name;
+            const Json::Value &u = body["usage"];
+            // usage only for a managed request (05, 23; 09 is not one)
+            EXPECT_EQ(body["request_id"].isString(), u.isObject()) << name;
+            if (u.isObject()) {
+                EXPECT_EQ(integer_of(u["not_after_ms"]), integer_of(d["not_after_ms"])) << name;
+                // the envelope's time is read after the usage's (rounded up)
+                EXPECT_LE(u["elapsed_ms"].asDouble(), std::ceil(body["timing"]["elapsed_ms"].asDouble()))
+                    << name;
+            }
+            if (stated && u.isObject()) {
+                const int64_t received = iso_ms(u["received_at"].asString());
+                const int64_t effective = iso_ms(d["effective_deadline_at"].asString());
+                const int64_t cutoff = iso_ms(d["cutoff_at"].asString());
+                EXPECT_NEAR(received + u["bound_ms"].asInt64(), effective, 1) << name;
+                EXPECT_NEAR(received + u["bound"]["walk_until_ms"].asInt64(), cutoff, 1) << name;
+                EXPECT_LE(cutoff, effective) << name;
+                if (d["finish_by_ms"].isIntegral()) {
+                    EXPECT_LE(effective, d["finish_by_ms"].asInt64() - skew_ms) << name;
+                }
+                EXPECT_LE(received + body["timing"]["elapsed_ms"].asDouble(), effective) << name;
+            }
+            ++traverse_checked;
+        } else if (route != "/resolve" && route != "/pattern") {
+            continue;
+        } else if (d["effective_deadline_at"].isString()) {
             const int64_t effective = iso_ms(d["effective_deadline_at"].asString());
             ASSERT_TRUE(d["cutoff_at"].isString()) << name;
             const int64_t cutoff = iso_ms(d["cutoff_at"].asString());
@@ -1595,7 +1714,60 @@ TEST(ServerFanout, EachSampleDeadlineTellsOneTimeline) {
         }
         ++checked;
     }
-    EXPECT_LE(4u, checked);
+    // 01-05, 09, 16, 23; of them /traverse: 05, 09, 23; the usages of 05-08, 21, 23
+    EXPECT_LE(8u, checked);
+    EXPECT_LE(3u, traverse_checked);
+    EXPECT_LE(6u, usages_checked);
+}
+
+// Sample 07 is the engine's 503 at the bound: an attempt with the sample's request (its ids, its
+// one seed's 60 s budget under the 512 MiB one, its finish_by_ms, long passed, which caps the
+// bound at 0) reaches its bound at the first delivery check, in the sample's words, and its usage
+// states the sample's members and bound
+TEST(ServerFanout, Sample07IsTheAttemptsAnswerAtItsBound) {
+    const Json::Value s07 = sample("07_traverse_503_unwrapped.json");
+    const Json::Value &request = s07["request"];
+    const Json::Value &stated = s07["body"]["usage"];
+    ASSERT_EQ(503, s07["status"].asInt());
+    AttemptSettings settings;
+    settings.clock_skew_ms = static_cast<uint64_t>(kSampleSkewMs);
+    Attempt attempt(1, std::chrono::system_clock::now(), settings, "inst", true);
+    AttemptIds ids;
+    ids.attempt_id = request["attempt_id"].asString();
+    ids.not_after_ms = request["not_after_ms"].asUInt64();
+    attempt.set_ids(ids);
+    attempt.set_finish_by(request["finish_by_ms"].asUInt64());
+    // the server's order: finish_by_ms when the request is read, then the bound
+    attempt.set_bound(request["seeds"].size(), stated["bound"]["time_budget_ms"].asDouble(),
+                      request["strategy"]["bounds"]["max_memory_mb"].asUInt64() << 20);
+    attempt.note_memory_bytes(stated["work"]["memory_bytes"].asUInt64());
+    // the walk-until (0) stops the walk at its first poll, before the seed starts
+    EXPECT_NE(mtg::graph::traversal::ExternalStop::NONE, attempt.poll(/* force */ true));
+    std::string error;
+    try {
+        attempt.check_delivery();
+    } catch (const AttemptAtBound &e) {
+        error = e.what();
+    }
+    EXPECT_EQ(s07["body"]["error"].asString(), error);
+    const Json::Value usage = attempt.usage_json("deadline");
+    EXPECT_EQ(members(stated), members(usage));
+    EXPECT_EQ(members(stated["bound"]), members(usage["bound"]));
+    for (const char *key : { "allowance_ms", "time_budget_ms", "walk_until_ms" }) {
+        EXPECT_EQ(stated["bound"][key].asDouble(), usage["bound"][key].asDouble()) << key;
+    }
+    EXPECT_EQ(stated["bound"]["seeds"].asUInt64(), usage["bound"]["seeds"].asUInt64());
+    EXPECT_EQ("finish_by_ms", usage["bound"]["capped_by"].asString());
+    EXPECT_EQ(stated["bound"]["capped_by"].asString(), usage["bound"]["capped_by"].asString());
+    EXPECT_EQ(0u, stated["bound_ms"].asUInt64());
+    EXPECT_EQ(0u, usage["bound_ms"].asUInt64());
+    EXPECT_EQ(stated["not_after_ms"].asUInt64(), usage["not_after_ms"].asUInt64());
+    ASSERT_EQ(1u, usage["per_seed"].size());
+    EXPECT_EQ(members(stated["per_seed"][0]), members(usage["per_seed"][0]));
+    EXPECT_EQ("not_started", usage["per_seed"][0]["outcome"].asString());
+    EXPECT_EQ(stated["per_seed"][0]["outcome"], usage["per_seed"][0]["outcome"]);
+    EXPECT_EQ(0u, usage["seeds"]["started"].asUInt64());
+    EXPECT_EQ(stated["seeds"]["started"].asUInt64(), usage["seeds"]["started"].asUInt64());
 }
 
 // GET /requests/{attempt_id} of a /traverse attempt: the request object built from the

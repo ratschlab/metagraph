@@ -1,14 +1,14 @@
 {
  "route": "POST /traverse",
  "status": 200,
- "note": "E10/E2b: a named-graph traverse answers in the envelope with one entry. The attempt is the request: request_id = attempt_id, server_instance and the attempt usage sit at the envelope top level (usage only for a managed request, as today); the entry is the single-graph answer without usage.",
+ "note": "E10/E2b: a named-graph traverse answers in the envelope with one entry. The attempt is the request: request_id = attempt_id, server_instance and the attempt usage sit at the envelope top level (usage only for a managed request, as today); the entry is the single-graph answer without usage. The request gives not_after_ms (its latest start, after the receipt), so the deadline states both instants (section 4): effective_deadline_at is usage.received_at plus usage.bound_ms, cutoff_at usage.received_at plus usage.bound.walk_until_ms. A real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, and every instant and time is the run's. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
  "request": {
   "seeds": [
    {
     "labels": [
-     "NC_000913.3"
+     "acc1"
     ],
-    "sequence": "GGAGTAAAGCGTGGCGCGAATACGGTTGATAACATCAGCATCGCCGACCACTGCACCAACACCCTCTGGCCCAAATAGCTTGAAGCAGGAAAATGTCGAG"
+    "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG"
    }
   ],
   "strategy": {
@@ -34,7 +34,7 @@
   },
   "graph": "bact_other",
   "attempt_id": "svc-trv-91aa07-1",
-  "not_after_ms": 1793520010000
+  "not_after_ms": 1794038014000
  },
  "body": {
   "envelope_version": 1,
@@ -49,10 +49,10 @@
   "request_id": "svc-trv-91aa07-1",
   "server_instance": "7c1e0f3a9b24d6e8",
   "deadline": {
-   "not_after_ms": 1793520010000,
+   "not_after_ms": 1794038014000,
    "finish_by_ms": null,
-   "effective_deadline_at": "2026-10-21T09:14:53.688Z",
-   "cutoff_at": "2026-10-21T09:14:48.688Z"
+   "effective_deadline_at": "2026-11-07T07:53:44.085Z",
+   "cutoff_at": "2026-11-07T07:53:39.085Z"
   },
   "usage": {
    "attempt_id": "svc-trv-91aa07-1",
@@ -61,19 +61,34 @@
     "capped_by": null,
     "enforced": true,
     "seeds": 1,
-    "time_budget_ms": 15000.0,
-    "walk_until_ms": 20000
+    "time_budget_ms": 60000.0,
+    "walk_until_ms": 65000
    },
-   "bound_ms": 25000,
-   "elapsed_ms": 698,
+   "bound_ms": 70000,
+   "elapsed_ms": 9,
    "memory": {
     "held_bound_bytes": 536870912,
-    "peak_admitted_bytes": 101404284,
+    "peak_admitted_bytes": 101316182,
     "soft_excess_bytes": 0
    },
-   "observed_max_uninterruptible_ms": 69,
+   "not_after_ms": 1794038014000,
+   "observed_max_uninterruptible_ms": 1,
+   "per_seed": [
+    {
+     "elapsed_ms": 7,
+     "final_bytes": 101302654,
+     "index": 0,
+     "outcome": "complete",
+     "peak_admitted_bytes": 101316182,
+     "refused_bytes": null,
+     "soft_excess_bytes": 0,
+     "stopped_by": null,
+     "work_seed": 37100,
+     "work_units": 120561
+    }
+   ],
    "reason": "completed",
-   "received_at": "2026-10-21T09:14:28.688Z",
+   "received_at": "2026-11-07T07:52:34.085Z",
    "seeds": {
     "abandoned": 0,
     "finished": 1,
@@ -81,33 +96,14 @@
     "started": 1
    },
    "server_instance": "7c1e0f3a9b24d6e8",
-   "stopped_at": "2026-10-21T09:14:29.385Z",
+   "stopped_at": "2026-11-07T07:52:34.092Z",
    "timing": {
-    "cpu_ms": 167.004554,
-    "page_faults": {
-     "major": 6931,
-     "minor": 5123
-    }
+    "cpu_ms": 3.493125
    },
    "work": {
-    "memory_bytes": 740988
+    "memory_bytes": 652886
    },
-   "work_units": 1025295,
-   "not_after_ms": 1793520010000,
-   "per_seed": [
-    {
-     "index": 0,
-     "outcome": "complete",
-     "stopped_by": null,
-     "work_units": 1025295,
-     "work_seed": 4096,
-     "peak_admitted_bytes": 101404284,
-     "final_bytes": 740988,
-     "soft_excess_bytes": 0,
-     "refused_bytes": null,
-     "elapsed_ms": 698
-    }
-   ]
+   "work_units": 120561
   },
   "answers": [
    {
@@ -137,7 +133,7 @@
      "has_coord_to_header": true,
      "has_coordinates": true,
      "index_fp": "7bab0c8c0ce6d061cf5787419f9219e698cbb084f5de3935254bcd503149be7a",
-     "index_meta_fp": "409ce1691488f592",
+     "index_meta_fp": "a8c8bc34fa483400",
      "index_ns": "refseq-r237-bact_other",
      "k": 31,
      "label_modes": [
@@ -156,8 +152,8 @@
       "annotation": {
        "access_path": "tuples",
        "direct_reads": 0,
-       "keys_mapped": 366,
-       "rows_requested": 366
+       "keys_mapped": 272,
+       "rows_requested": 272
       },
       "arms": {
        "left": {
@@ -175,7 +171,7 @@
          "steps": 100,
          "successor_enumerations": 100,
          "switch_sources_cut": 0,
-         "work_units": 991775
+         "work_units": 41783
         },
         "evidence": {
          "complete": true,
@@ -245,7 +241,7 @@
             0
            ],
            "loss_used": 0.0,
-           "sequence": "ACCGTTCAGATACCCCTGCCTGCACCGCGTGCATCACTGGCGCAAACACCAGACCACGCAATACTTCCAGCGCCTGTGCGCCCTGGATCTGGCTACCGCC"
+           "sequence": "TCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATT"
           },
           "end_labels": [
            {
@@ -304,7 +300,7 @@
           "labels_truncated": false,
           "length_bp": 100,
           "parents": [],
-          "sequence": "ACCGTTCAGATACCCCTGCCTGCACCGCGTGCATCACTGGCGCAAACACCAGACCACGCAATACTTCCAGCGCCTGTGCGCCCTGGATCTGGCTACCGCC"
+          "sequence": "TCTTTCTCACTGAGCTAGCACGGGTTCTTACAACAACCAATCTAGTTGATTCCTTGTGTTTGTACTTAGCTCACTATATCATTAGGTGCTTAGCTCAATT"
          }
         ],
         "splits": [],
@@ -325,7 +321,7 @@
          "steps": 100,
          "successor_enumerations": 100,
          "switch_sources_cut": 0,
-         "work_units": 901994
+         "work_units": 41678
         },
         "evidence": {
          "complete": true,
@@ -395,7 +391,7 @@
             0
            ],
            "loss_used": 0.0,
-           "sequence": "ACATTCGCGCCGCATTCACAGCCGATTCGAGCCACCTTCATCACCGCATAGTTGTCATCGGTTAACGCTGGAACACCTGCCGCGCGCAACGTTGCCAGCA"
+           "sequence": "GTACCTCGGTGCTGATATATGTGGAATTGGTCCTACGCCAACGGAGGGAGCGTGCATCCACTTTGACAACTCAAAAAAGGTACGACGTCGTTACCCGCGT"
           },
           "end_labels": [
            {
@@ -454,7 +450,7 @@
           "labels_truncated": false,
           "length_bp": 100,
           "parents": [],
-          "sequence": "ACATTCGCGCCGCATTCACAGCCGATTCGAGCCACCTTCATCACCGCATAGTTGTCATCGGTTAACGCTGGAACACCTGCCGCGCGCAACGTTGCCAGCA"
+          "sequence": "GTACCTCGGTGCTGATATATGTGGAATTGGTCCTACGCCAACGGAGGGAGCGTGCATCCACTTTGACAACTCAAAAAAGGTACGACGTCGTTACCCGCGT"
          }
         ],
         "splits": [],
@@ -463,10 +459,10 @@
       },
       "label_dict": [
        {
-        "column": 41674,
+        "column": 0,
         "kind": "header",
-        "name": "NC_000913.3",
-        "seq_id": 64
+        "name": "acc1",
+        "seq_id": 0
        }
       ],
       "label_mode": "constrain",
@@ -509,7 +505,7 @@
       "seed": {
        "dropped_labels": [],
        "labels": [
-        "NC_000913.3"
+        "acc1"
        ],
        "labels_dropped": 0,
        "labels_dropped_digest": "",
@@ -519,42 +515,39 @@
        "num_kmers": 70,
        "seed_id": "",
        "seed_id_mismatch": false,
-       "validated_seed_id": "bb7f6750ae219511"
+       "validated_seed_id": "80bf643b8e67d15a"
       },
       "timing": {
-       "annotation_fetch_ms": 1192.6785820000002,
-       "cache_hits": 75,
-       "coords_mapped": 2430,
-       "cpu_ms": 452.325207,
+       "annotation_fetch_ms": 0.796875,
+       "cache_hits": 194,
+       "coords_mapped": 632,
+       "cpu_ms": 2.418875,
        "deadline": {
         "longest_piece": {
-         "coordinates": 81,
-         "kind": "read",
-         "ms": 97.16682398319244,
-         "rows": 9
+         "coordinates": 0,
+         "kind": "setup",
+         "ms": 0.6014989614486694,
+         "rows": 0
         }
        },
-       "elapsed_ms": 1852.8557479381561,
-       "label_resolve_ms": 0.01021,
-       "page_faults": {
-        "major": 18609,
-        "minor": 13988
-       },
+       "elapsed_ms": 3.118749976158142,
+       "label_resolve_ms": 0.001458,
        "path_cache": {
-        "bytes_kept": 13382832,
-        "hits": 168,
-        "peak_bytes": 14543152,
-        "rows_kept": 1813,
-        "stored_rows_read": 2170
+        "bytes_kept": 12368,
+        "hits": 58,
+        "peak_bytes": 173008,
+        "rows_kept": 251,
+        "stored_rows_read": 251
        },
        "rows_fetched": 0,
-       "seed_fetch_ms": 196.98889200000002,
-       "seed_phase_ms": 265.75487101078033,
-       "serialize_ms": 0.110921,
-       "tuple_rows_fetched": 366
+       "seed_fetch_ms": 0.509333,
+       "seed_phase_ms": 1.9266248941421509,
+       "serialize_ms": 2.8125839999999998,
+       "tuple_rows_fetched": 272
       },
+      "unknown_labels": [],
       "work": {
-       "memory_bytes": 653252
+       "memory_bytes": 652886
       }
      }
     ],
@@ -621,25 +614,22 @@
      "support": "kmer"
     },
     "timing": {
-     "cpu_ms": 452.625257,
-     "elapsed_ms": 1853.397422,
-     "page_faults": {
-      "major": 18609,
-      "minor": 13989
-     },
-     "serialize_ms": 0.110921
+     "cpu_ms": 3.096,
+     "elapsed_ms": 8.045041,
+     "serialize_ms": 2.8125839999999998
     },
+    "unknown_labels": [],
     "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
     "work": {
-     "memory_bytes": 653252
+     "memory_bytes": 652886
     }
    }
   ],
   "timing": {
-   "elapsed_ms": 711.0
+   "elapsed_ms": 8.997916
   },
   "work": {
-   "memory_bytes": 653252
+   "memory_bytes": 652886
   }
  }
 }
