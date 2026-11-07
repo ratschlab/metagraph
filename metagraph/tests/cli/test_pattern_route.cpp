@@ -38,10 +38,10 @@ using namespace mtg;
 using namespace mtg::graph;
 using namespace mtg::cli;
 
-// until E16 (pattern on protein graphs): the pattern search is served on DNA graphs only
-// (SPEC-pattern-search.md: the route refuses a protein graph, alphabet_unsupported,
-// PatternRoute.ProteinGraphIsRefused below), so a Protein build runs none of the DNA search's
-// tests, as test_pattern_search.cpp
+// This suite searches DNA graphs (dna and iupac patterns, peptides read in codons, two
+// strands). A Protein build searches its graphs in residues on one strand
+// (DESIGN-pattern-protein.md): it runs test_pattern_protein.cpp and
+// test_pattern_protein_route.cpp instead (the engine's DNA suites are guarded alike)
 #if ! _PROTEIN_GRAPH
 
 using Clock = pattern::Deadline::Clock;
@@ -2354,37 +2354,5 @@ TEST(PatternRoute, TheCountersOfTheExtensionAndOfTheLabels) {
 
 #endif // ! _PROTEIN_GRAPH
 
-#if _PROTEIN_GRAPH
-// until E16 (pattern on protein graphs): a protein graph is refused, whatever the request: the
-// route (`/pattern` and `metagraph pattern`) answers 400 alphabet_unsupported naming the graph's
-// alphabet, and the capabilities say it is not available and why. E16 replaces this test, and
-// its guard, with the tests of the search it serves.
-TEST(PatternRoute, ProteinGraphIsRefused) {
-    auto anno_graph = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-            5, { "MKVLAAGIVGLLLAQSEWHT", "MKVLAAGPVGRWHEDNQ" }, { "p1", "p2" },
-            DeBruijnGraph::BASIC);
-    const pattern::GraphSupport route = route_support(anno_graph->get_graph());
-    EXPECT_FALSE(route.supported);
-    EXPECT_EQ("alphabet_unsupported", route.reason);
-    PatternLimits limits;
-    limits.min_information_bits = 4;
-    const Json::Value caps = pattern_capabilities_json(anno_graph.get(), limits, false);
-    EXPECT_FALSE(caps["available"].asBool());
-    EXPECT_EQ("alphabet_unsupported", caps["unavailable_reason"].asString());
-    for (const char *body : { "{\"patterns\": [{\"dna\": \"AACGTT\"}]}",
-                              "{\"patterns\": [{\"protein\": \"MKVLAAG\"}]}" }) {
-        try {
-            process_pattern_request(parse_pattern_body(body), *anno_graph, limits, "rel");
-            ADD_FAILURE() << "a protein graph was searched: " << body;
-        } catch (const PatternRefusal &e) {
-            EXPECT_EQ(400, e.status()) << body;
-            EXPECT_EQ("alphabet_unsupported", e.code()) << body;
-            EXPECT_NE(std::string::npos, std::string(e.what()).find(
-                    anno_graph->get_graph().alphabet())) << e.what();
-        }
-    }
-}
-
-#endif // _PROTEIN_GRAPH (replaced by E16)
 
 } // namespace

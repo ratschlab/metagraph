@@ -1,0 +1,1278 @@
+{
+ "index": {
+  "alphabet": "$ABCDEFGHIJKLMNOPQRSTUVWYZX",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": null,
+  "k": 15,
+  "release": "fixtures-protein",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "long_search": "paths",
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 5
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "unit": "graph_contexts",
+     "value": 5
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "exact_11",
+   "information_bits": 49.05374780501027,
+   "kind": "protein",
+   "length": 11,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "DNPQELKYSTA",
+   "residues": 11,
+   "results": [
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "HTRDNPQELKYSTAM",
+     "node": 19,
+     "offset": 3,
+     "row": 18,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "RDNPQELKYSTAMKV",
+     "node": 91,
+     "offset": 1,
+     "row": 90,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "TRDNPQELKYSTAMK",
+     "node": 110,
+     "offset": 2,
+     "row": 109,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "WHTRDNPQELKYSTA",
+     "node": 168,
+     "offset": 4,
+     "row": 167,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "DNPQELKYSTAMKVW",
+     "node": 173,
+     "offset": 0,
+     "row": 172,
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 5,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 0,
+    "ranges_visited": 90,
+    "steps": 90
+   }
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "unit": "graph_contexts",
+     "value": 1
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "exact_15",
+   "information_bits": 66.89147427955946,
+   "kind": "protein",
+   "length": 15,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "EGHYPSTRLLKDNAQ",
+   "residues": 15,
+   "results": [
+    {
+     "instance": "EGHYPSTRLLKDNAQ",
+     "kmer": "EGHYPSTRLLKDNAQ",
+     "node": 11,
+     "offset": 0,
+     "row": 10,
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 1,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 0,
+    "ranges_visited": 15,
+    "steps": 15
+   }
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 15
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 3
+     },
+     "unit": "graph_contexts",
+     "value": 15
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "x",
+   "information_bits": 44.59431618637297,
+   "kind": "protein",
+   "length": 11,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "DNPQEXKYSTA",
+   "residues": 11,
+   "results": [
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "HTKDNPQEIKYSTAM",
+     "node": 17,
+     "offset": 3,
+     "row": 16,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TARDNPQEIKYSTAM",
+     "node": 18,
+     "offset": 3,
+     "row": 17,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "HTRDNPQELKYSTAM",
+     "node": 19,
+     "offset": 3,
+     "row": 18,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "KDNPQEIKYSTAMKV",
+     "node": 90,
+     "offset": 1,
+     "row": 89,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "RDNPQELKYSTAMKV",
+     "node": 91,
+     "offset": 1,
+     "row": 90,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TKDNPQEIKYSTAMK",
+     "node": 108,
+     "offset": 2,
+     "row": 107,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "ARDNPQEIKYSTAMU",
+     "node": 109,
+     "offset": 2,
+     "row": 108,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "TRDNPQELKYSTAMK",
+     "node": 110,
+     "offset": 2,
+     "row": 109,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMUOP",
+     "node": 119,
+     "offset": 0,
+     "row": 118,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "WHTKDNPQEIKYSTA",
+     "node": 166,
+     "offset": 4,
+     "row": 165,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "STARDNPQEIKYSTA",
+     "node": 167,
+     "offset": 4,
+     "row": 166,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "WHTRDNPQELKYSTA",
+     "node": 168,
+     "offset": 4,
+     "row": 167,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "RDNPQEIKYSTAMUO",
+     "node": 169,
+     "offset": 1,
+     "row": 168,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMKVW",
+     "node": 172,
+     "offset": 0,
+     "row": 171,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "DNPQELKYSTAMKVW",
+     "node": 173,
+     "offset": 0,
+     "row": 172,
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 15,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 0,
+    "ranges_visited": 221,
+    "steps": 221
+   }
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 15
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 3
+     },
+     "unit": "graph_contexts",
+     "value": 15
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "bzj",
+   "information_bits": 47.05374780501027,
+   "kind": "protein",
+   "length": 11,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "DBPQEJKYSTA",
+   "residues": 11,
+   "results": [
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "HTKDNPQEIKYSTAM",
+     "node": 17,
+     "offset": 3,
+     "row": 16,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TARDNPQEIKYSTAM",
+     "node": 18,
+     "offset": 3,
+     "row": 17,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "HTRDNPQELKYSTAM",
+     "node": 19,
+     "offset": 3,
+     "row": 18,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "KDNPQEIKYSTAMKV",
+     "node": 90,
+     "offset": 1,
+     "row": 89,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "RDNPQELKYSTAMKV",
+     "node": 91,
+     "offset": 1,
+     "row": 90,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TKDNPQEIKYSTAMK",
+     "node": 108,
+     "offset": 2,
+     "row": 107,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "ARDNPQEIKYSTAMU",
+     "node": 109,
+     "offset": 2,
+     "row": 108,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "TRDNPQELKYSTAMK",
+     "node": 110,
+     "offset": 2,
+     "row": 109,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMUOP",
+     "node": 119,
+     "offset": 0,
+     "row": 118,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "WHTKDNPQEIKYSTA",
+     "node": 166,
+     "offset": 4,
+     "row": 165,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "STARDNPQEIKYSTA",
+     "node": 167,
+     "offset": 4,
+     "row": 166,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "WHTRDNPQELKYSTA",
+     "node": 168,
+     "offset": 4,
+     "row": 167,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "RDNPQEIKYSTAMUO",
+     "node": 169,
+     "offset": 1,
+     "row": 168,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMKVW",
+     "node": 172,
+     "offset": 0,
+     "row": 171,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "DNPQELKYSTAMKVW",
+     "node": 173,
+     "offset": 0,
+     "row": 172,
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 15,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 0,
+    "ranges_visited": 202,
+    "steps": 202
+   }
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 15
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 3
+     },
+     "unit": "graph_contexts",
+     "value": 15
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "class",
+   "information_bits": 48.05374780501027,
+   "kind": "protein",
+   "length": 11,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "DNPQE[LI]KYSTA",
+   "residues": 11,
+   "results": [
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "HTKDNPQEIKYSTAM",
+     "node": 17,
+     "offset": 3,
+     "row": 16,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TARDNPQEIKYSTAM",
+     "node": 18,
+     "offset": 3,
+     "row": 17,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "HTRDNPQELKYSTAM",
+     "node": 19,
+     "offset": 3,
+     "row": 18,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "KDNPQEIKYSTAMKV",
+     "node": 90,
+     "offset": 1,
+     "row": 89,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "RDNPQELKYSTAMKV",
+     "node": 91,
+     "offset": 1,
+     "row": 90,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TKDNPQEIKYSTAMK",
+     "node": 108,
+     "offset": 2,
+     "row": 107,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "ARDNPQEIKYSTAMU",
+     "node": 109,
+     "offset": 2,
+     "row": 108,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "TRDNPQELKYSTAMK",
+     "node": 110,
+     "offset": 2,
+     "row": 109,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMUOP",
+     "node": 119,
+     "offset": 0,
+     "row": 118,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "WHTKDNPQEIKYSTA",
+     "node": 166,
+     "offset": 4,
+     "row": 165,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "STARDNPQEIKYSTA",
+     "node": 167,
+     "offset": 4,
+     "row": 166,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "WHTRDNPQELKYSTA",
+     "node": 168,
+     "offset": 4,
+     "row": 167,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "RDNPQEIKYSTAMUO",
+     "node": 169,
+     "offset": 1,
+     "row": 168,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMKVW",
+     "node": 172,
+     "offset": 0,
+     "row": 171,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "DNPQELKYSTAMKVW",
+     "node": 173,
+     "offset": 0,
+     "row": 172,
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 15,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 0,
+    "ranges_visited": 201,
+    "steps": 201
+   }
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 3
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 15
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 3
+     },
+     "unit": "graph_contexts",
+     "value": 15
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "negated",
+   "information_bits": 40.26911295945275,
+   "kind": "protein",
+   "length": 11,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "DNPQE[^P]KYS[^W]A",
+   "residues": 11,
+   "results": [
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "HTKDNPQEIKYSTAM",
+     "node": 17,
+     "offset": 3,
+     "row": 16,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TARDNPQEIKYSTAM",
+     "node": 18,
+     "offset": 3,
+     "row": 17,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "HTRDNPQELKYSTAM",
+     "node": 19,
+     "offset": 3,
+     "row": 18,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "KDNPQEIKYSTAMKV",
+     "node": 90,
+     "offset": 1,
+     "row": 89,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "RDNPQELKYSTAMKV",
+     "node": 91,
+     "offset": 1,
+     "row": 90,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "TKDNPQEIKYSTAMK",
+     "node": 108,
+     "offset": 2,
+     "row": 107,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "ARDNPQEIKYSTAMU",
+     "node": 109,
+     "offset": 2,
+     "row": 108,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "TRDNPQELKYSTAMK",
+     "node": 110,
+     "offset": 2,
+     "row": 109,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMUOP",
+     "node": 119,
+     "offset": 0,
+     "row": 118,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "WHTKDNPQEIKYSTA",
+     "node": 166,
+     "offset": 4,
+     "row": 165,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "STARDNPQEIKYSTA",
+     "node": 167,
+     "offset": 4,
+     "row": 166,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "WHTRDNPQELKYSTA",
+     "node": 168,
+     "offset": 4,
+     "row": 167,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "RDNPQEIKYSTAMUO",
+     "node": 169,
+     "offset": 1,
+     "row": 168,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQEIKYSTA",
+     "kmer": "DNPQEIKYSTAMKVW",
+     "node": 172,
+     "offset": 0,
+     "row": 171,
+     "strand": "+"
+    },
+    {
+     "instance": "DNPQELKYSTA",
+     "kmer": "DNPQELKYSTAMKVW",
+     "node": 173,
+     "offset": 0,
+     "row": 172,
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 15,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 0,
+    "ranges_visited": 260,
+    "steps": 260
+   }
+  },
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 66.89147427955946,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 1
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      }
+     },
+     "candidates_examined": 5,
+     "extension": "completed",
+     "relation": "exact",
+     "unit": "paths",
+     "value": 1
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "long",
+   "information_bits": 89.18863237274594,
+   "kind": "protein",
+   "length": 20,
+   "min_anchor_information_bits": 66.89147427955946,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "MKVLAAGIVGLLLAQSEWHT",
+   "residues": 20,
+   "results": [
+    {
+     "anchor_kmer": "MKVLAAGIVGLLLAQ",
+     "instance": "MKVLAAGIVGLLLAQSEWHT",
+     "nodes": [
+      8,
+      129,
+      153,
+      46,
+      174,
+      77
+     ],
+     "offset": 0,
+     "rows": [
+      7,
+      128,
+      152,
+      45,
+      173,
+      76
+     ],
+     "sequence": "MKVLAAGIVGLLLAQSEWHT",
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 1,
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "extension_anchors": 1,
+    "extension_branches": 0,
+    "extension_edges": 5,
+    "mask_scans": 0,
+    "memory_bytes": 1950,
+    "ranges_visited": 15,
+    "steps": 20
+   }
+  },
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 65.89147427955946,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 1
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      }
+     },
+     "candidates_examined": 1,
+     "extension": "completed",
+     "relation": "exact",
+     "unit": "paths",
+     "value": 1
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": null,
+   "id": "long_class",
+   "information_bits": 70.35090589819676,
+   "kind": "protein",
+   "length": 16,
+   "min_anchor_information_bits": 65.89147427955946,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "RDNPQE[LI]KYSTAMKVW",
+   "residues": 16,
+   "results": [
+    {
+     "anchor_kmer": "RDNPQELKYSTAMKV",
+     "instance": "RDNPQELKYSTAMKVW",
+     "nodes": [
+      91,
+      173
+     ],
+     "offset": 0,
+     "rows": [
+      90,
+      172
+     ],
+     "sequence": "RDNPQELKYSTAMKVW",
+     "strand": "+"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 1,
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+"
+   ],
+   "withheld": null,
+   "work": {
+    "extension_anchors": 1,
+    "extension_branches": 0,
+    "extension_edges": 1,
+    "mask_scans": 0,
+    "memory_bytes": 2888,
+    "ranges_visited": 23,
+    "steps": 24
+   }
+  },
+  {
+   "error": {
+    "code": "bad_alphabet",
+    "message": "pattern: the dna kind is not served on a protein graph (its graph holds residues, no nucleotides): send the pattern as 'protein'"
+   },
+   "id": "dna_kind",
+   "kind": "dna"
+  },
+  {
+   "error": {
+    "code": "bad_alphabet",
+    "message": "pattern: character '*' at position 8 is not in the alphabet (the protein alphabet of a protein graph: A C D E F G H I K L M N P Q R S T V W Y U O, X B Z J, and classes [..] and [^..] of these letters)"
+   },
+   "id": "stop",
+   "kind": "protein"
+  }
+ ],
+ "work": {
+  "memory_bytes": 2888
+ }
+}

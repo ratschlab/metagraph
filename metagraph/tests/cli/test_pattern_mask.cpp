@@ -318,9 +318,9 @@ TEST(PatternMask, CountsOfTheMask) {
     }
 }
 
-// until E16 (pattern on protein graphs): the pattern search is served on DNA graphs only (a
-// protein graph is refused, alphabet_unsupported: PatternRoute.ProteinGraphIsRefused), so what
-// the mask means to it is tested in DNA builds
+// What the mask means to the pattern search, through DNA requests: tested in DNA builds (a
+// Protein build's counts with and without the mask: PatternProtein.ContextsMatchTheOracle,
+// UnmaskedBoundsHoldTheCount)
 #if ! _PROTEIN_GRAPH
 
 // The capabilities' mask and counting, through the loader the server and the CLI use
