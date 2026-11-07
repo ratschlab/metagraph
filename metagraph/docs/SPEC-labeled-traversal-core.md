@@ -912,7 +912,11 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   is not admitted is censored exactly like a head beyond a cap (`resource_limit`), and its level does not count
   toward `complete_to_bp`; every admitted prefix can be finished and delivered within what it reserved. The
   model is deterministic (fixed bytes per object, never a measurement), so a memory stop, in either phase
-  (`traversal`, `annotation_decode`), is reproducible and independent of `annotation.batch_kmers`. Work units
+  (`traversal`, `annotation_decode`), is reproducible and independent of `annotation.batch_kmers`. Its fixed
+  bytes are the platform's object sizes (libstdc++ and libc++ lay out `std::string` and the objects holding one
+  differently), so `work.memory_bytes` and the extent of a memory-stopped walk can differ between builds on
+  different platforms; within one build every answer is deterministic, and the reference answers are those of
+  the Linux build the servers run. Work units
   count **deterministic logical work, not measured decode effort** (review of stage 3, answer 1: the physical
   decode counters — `rows_fetched`, `tuple_rows_fetched`, `coords_mapped`, `annotation_fetch_ms` — are in
   `timing`, apart): a weighted sum of what the walk did — successor enumerations (4), the annotation rows its fetches return
