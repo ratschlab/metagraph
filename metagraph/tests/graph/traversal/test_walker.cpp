@@ -2906,7 +2906,9 @@ TEST(WalkerDerive, IntersectionStartsFromTheCheapestRowOfTheFirstBatch) {
     for (size_t i = 0; i < labels.size(); ++i) {
         Column c = static_cast<Column>(encoder.encode(labels[i]));
         headers[c] = { "h_" + labels[i] };
-        num_kmers[c] = { seqs[i].size() - kK + 1 };
+        // assign(1, x), not = { x }: GCC 12 -Warray-bounds misreads the copy out of a
+        // one-element initializer list
+        num_kmers[c].assign(1, seqs[i].size() - kK + 1);
     }
     annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
 

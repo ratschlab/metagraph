@@ -4350,7 +4350,9 @@ GraphSupport PatternSearch::support(const DeBruijnGraph &graph) {
     result.mask_present = dbg_succ->get_mask() != nullptr;
     result.strand_stated = result.mode == GraphMode::BASIC;
     if (result.mode == GraphMode::PRIMARY) {
-        result.scopes = { Scope::ANY_OFFSET };
+        // assign(1, x), not = { x }: GCC 12 -Warray-bounds misreads the copy out of a
+        // one-element initializer list
+        result.scopes.assign(1, Scope::ANY_OFFSET);
     } else {
         result.scopes = { Scope::SUFFIX, Scope::ANY_OFFSET };
     }

@@ -367,7 +367,10 @@ TEST(GraphletAttempt, ThePairOutlivesEvictionWhileTheAttemptRuns) {
         running->set_bound(1, 1000);
         ASSERT_FALSE(registry.start(running));
         for (int i = 0; i < 5; ++i) {
-            auto other = attempt_of(registry, "other-" + std::to_string(i));
+            // the id built by appending: GCC 12 -Wrestrict misreads "literal" + std::string
+            std::string id = "other-";
+            id += std::to_string(i);
+            auto other = attempt_of(registry, id);
             Json::Value other_ref = ref;
             other_ref["graph"] = "B";
             other->set_pair_ref(other_ref);
