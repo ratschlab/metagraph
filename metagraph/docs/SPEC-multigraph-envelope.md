@@ -106,6 +106,13 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   - on COUNTS annotations also `nth_median` and `tied_same_median` (the labels with the N-th score and median).
     The median is read only where the N-th score is shared: a cut with `tied` 1 states `nth_median` null (and
     `tied_same_median` 1).
+- `kmers_in_target` (since MetaGraph master #634, 2026-05-17; single-graph and multi-graph servers alike): on the
+  rows of a coordinate query (`query_coords`: the rows that carry `kmer_coords`) of a pair that has a `.seqs`
+  (CoordToHeader) record mapping, a non-negative integer, the target record's k-mer count (its length − k + 1,
+  `CoordToHeader::num_kmers_in_sequence`), so that `kmer_count / kmers_in_target` is the fraction of the target
+  the query's k-mers cover. It is omitted where the label is a whole column (a pair without a `.seqs`, or a
+  server started with `--no-coord-mapping`: its `kmer_coords` are positions in the column), and never stated on
+  signature or counts rows. Sample 25: one pair with a `.seqs` and one without, on one multi-graph server.
 - The order before every engine-local cut (C5): score descending; then, on counts annotations only, the median
   abundance descending; then label ascending (byte order). The median is the LOWER median of the label's
   abundances over the query's k-mer positions where the label is present (abundance at least 1, zeros excluded),

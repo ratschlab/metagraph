@@ -1,0 +1,84 @@
+{
+ "route": "POST /search",
+ "status": 200,
+ "note": "kmers_in_target (SPEC section 3, since MetaGraph master #634): a coordinate query (query_coords) on a multi-graph server of two pairs. The rows of a pair with a .seqs record mapping (with_seqs: each label a record) carry kmer_coords (positions in the record), kmer_count and kmers_in_target, the record's k-mer count (its length - k + 1: 360 - 31 + 1 = 330), so kmer_count / kmers_in_target (70 / 330) is the fraction of the target the query's k-mers cover. The rows of a pair without a .seqs (without_seqs: each label a whole column, here a FASTA file) carry kmer_coords (positions in the column: set_1.fa holds the element in its two records, at 130 and at 330 + 130) and kmer_count, and no kmers_in_target; nor do signature or counts rows. kmer_coords lists runs \"query k-mer position-first target k-mer[-last]\" joined by \":\". Each row is tagged with its pair, the rows in pair order, one cut per pair: with_seqs returns 2 of its 3 tied records (complete false, nth_score 70, tied 3), without_seqs both its columns (complete). A single-graph server states kmers_in_target alike, on untagged rows. A real run: the body is the server's answer unchanged, its paths relative as the graph list spells them, each index_fp its pair's manifest's.",
+ "request": {
+  "FASTA": ">q1\nTATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG",
+  "count_labels": true,
+  "discovery_fraction": 0,
+  "top_labels": 2,
+  "with_signature": false,
+  "abundance_sum": false,
+  "query_counts": false,
+  "query_coords": true,
+  "graphs": [
+   "with_seqs",
+   "without_seqs"
+  ]
+ },
+ "body": [
+  {
+   "cuts": [
+    {
+     "annotation_path": "with_seqs/annotation.row_diff_brwt_coord.annodbg",
+     "complete": false,
+     "graph": "with_seqs",
+     "graph_path": "with_seqs/graph_k31.dbg",
+     "index_fp": "85d9d0b806ff55b950ea5a53c2a58188b975c144dec134bd6a83529f83691195",
+     "nth_score": 70,
+     "returned": 2,
+     "tied": 3,
+     "tied_returned": 2
+    },
+    {
+     "annotation_path": "without_seqs/annotation.row_diff_brwt_coord.annodbg",
+     "complete": true,
+     "graph": "without_seqs",
+     "graph_path": "without_seqs/graph_k31.dbg",
+     "index_fp": "4fed7d0ad4f5b8dbb8c99b5ad088b0bf3674bcccdecf9c37e7739f03c9d23f5e",
+     "nth_score": null,
+     "returned": 2,
+     "tied": 0,
+     "tied_returned": 0
+    }
+   ],
+   "results": [
+    {
+     "annotation_path": "with_seqs/annotation.row_diff_brwt_coord.annodbg",
+     "graph": "with_seqs",
+     "graph_path": "with_seqs/graph_k31.dbg",
+     "kmer_coords": "0-130-199",
+     "kmer_count": 70,
+     "kmers_in_target": 330,
+     "sample": "acc1"
+    },
+    {
+     "annotation_path": "with_seqs/annotation.row_diff_brwt_coord.annodbg",
+     "graph": "with_seqs",
+     "graph_path": "with_seqs/graph_k31.dbg",
+     "kmer_coords": "0-130-199",
+     "kmer_count": 70,
+     "kmers_in_target": 330,
+     "sample": "acc2"
+    },
+    {
+     "annotation_path": "without_seqs/annotation.row_diff_brwt_coord.annodbg",
+     "graph": "without_seqs",
+     "graph_path": "without_seqs/graph_k31.dbg",
+     "kmer_coords": "0-130-199:0-460-529",
+     "kmer_count": 70,
+     "sample": "set_1.fa"
+    },
+    {
+     "annotation_path": "without_seqs/annotation.row_diff_brwt_coord.annodbg",
+     "graph": "without_seqs",
+     "graph_path": "without_seqs/graph_k31.dbg",
+     "kmer_coords": "0-130-199",
+     "kmer_count": 70,
+     "sample": "set_2.fa"
+    }
+   ],
+   "seq_description": "q1"
+  }
+ ]
+}

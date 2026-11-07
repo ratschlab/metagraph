@@ -13,9 +13,11 @@
 
 #include <json/json.h>
 
+#include "cli/query.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/server_envelope.hpp"
 #include "cli/traverse.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "graph/traversal/walker.hpp"
 #include "tests/source_path.hpp"
 
@@ -542,4 +544,114 @@ TEST(ServerEnvelope, Sample10StatesTheRequestMemoryBound) {
         EXPECT_TRUE(entry["max_request_memory_mb"].isUInt64());
         EXPECT_EQ(0u, entry["max_request_memory_mb"].asUInt64());
     }
+}
+
+// Sample 25 (SPEC section 3, kmers_in_target; train 2): a coordinate query on a multi-graph server,
+// a real run. Each pair's part is what the server writes for it (process_search_request): its
+// rows SeqSearchResult::to_json of the coordinate result (label, k-mer count, the coordinates per
+// query k-mer, the target's k-mer count or 0 without a record mapping) tagged with the pair, and
+// its cut cut_to_json with the pair's tags and index_fp. A row of a pair with a .seqs states
+// kmers_in_target, its record's k-mer count, every coordinate in the record below it; a pair
+// without one (whole-column labels) states none. kmer_count is the query k-mers with a coordinate
+TEST(ServerEnvelope, Sample25SearchCoordinateRowsAreTheWriters) {
+    const Json::Value s25 = sample("25_search_coordinate_rows.json");
+    ASSERT_EQ("POST /search", s25["route"].asString());
+    ASSERT_EQ(200, s25["status"].asInt());
+    const Json::Value &request = s25["request"];
+    EXPECT_TRUE(request["query_coords"].asBool());
+    const size_t n = request["top_labels"].asUInt64();
+    const Json::Value &body = s25["body"];
+    ASSERT_EQ(1u, body.size());
+    const Json::Value &query = body[0];
+    const Json::Value &rows = query["results"];
+    const Json::Value &cuts = query["cuts"];
+    // one cut per selected pair, in pair order (each name here one pair)
+    ASSERT_EQ(request["graphs"].size(), cuts.size());
+    // the coordinates of a row's kmer_coords per query k-mer: runs "position-first[-last]"
+    // (positions position.., coordinates first..last), joined by ':'
+    auto coordinates = [](const std::string &runs) {
+        std::vector<SmallVector<uint64_t>> tuples;
+        std::stringstream in(runs);
+        for (std::string run; std::getline(in, run, ':'); ) {
+            std::vector<uint64_t> v;
+            std::stringstream parts(run);
+            for (std::string x; std::getline(parts, x, '-'); ) {
+                v.push_back(std::stoull(x));
+            }
+            EXPECT_TRUE(v.size() == 2 || v.size() == 3) << run;
+            const uint64_t first = v.at(1);
+            const uint64_t last = v.size() == 3 ? v[2] : first;
+            for (uint64_t c = first; c <= last; ++c) {
+                const size_t position = v[0] + (c - first);
+                if (tuples.size() <= position)
+                    tuples.resize(position + 1);
+                tuples[position].push_back(c);
+            }
+        }
+        for (auto &t : tuples) {
+            std::sort(t.begin(), t.end());
+        }
+        return tuples;
+    };
+    const std::vector<std::string> tags { "graph", "graph_path", "annotation_path" };
+    Json::ArrayIndex next = 0;
+    size_t with_target = 0;
+    size_t without_target = 0;
+    for (const Json::Value &cut : cuts) {
+        // this pair's rows: the next ones, tagged with it
+        SeqSearchResult::LabelCountCoordsVec result;
+        std::vector<Json::Value> stated;
+        while (next < rows.size() && rows[next]["graph"] == cut["graph"]) {
+            const Json::Value &row = rows[next++];
+            for (const std::string &tag : tags) {
+                EXPECT_EQ(cut[tag], row[tag]) << tag;
+            }
+            auto tuples = coordinates(row["kmer_coords"].asString());
+            const uint64_t count = row["kmer_count"].asUInt64();
+            EXPECT_EQ(count, static_cast<uint64_t>(std::count_if(tuples.begin(), tuples.end(),
+                    [](const auto &t) { return !t.empty(); })));
+            uint64_t in_target = 0;
+            if (row.isMember("kmers_in_target")) {
+                in_target = row["kmers_in_target"].asUInt64();
+                EXPECT_LE(count, in_target);
+                for (const auto &t : tuples) {
+                    for (uint64_t c : t) {
+                        EXPECT_LT(c, in_target) << "a coordinate past its record";
+                    }
+                }
+                ++with_target;
+            } else {
+                ++without_target;
+            }
+            result.emplace_back(row["sample"].asString(), count, std::move(tuples), in_target);
+            stated.push_back(without(row, tags));
+        }
+        ASSERT_EQ(stated.size(), cut["returned"].asUInt64()) << cut["graph"];
+        mtg::graph::SearchCut c;
+        c.returned = cut["returned"].asUInt64();
+        c.complete = cut["complete"].asBool();
+        c.nth_score = cut["nth_score"].isNull() ? 0 : cut["nth_score"].asUInt64();
+        c.tied = cut["tied"].asUInt64();
+        c.tied_returned = cut["tied_returned"].asUInt64();
+        const SeqSearchResult written(QuerySequence { 0, query["seq_description"].asString(), "" },
+                                      std::move(result), {}, c);
+        const Json::Value json = written.to_json(false, 31);
+        EXPECT_EQ(query["seq_description"], json["seq_description"]);
+        ASSERT_EQ(stated.size(), json["results"].size());
+        for (size_t i = 0; i < stated.size(); ++i) {
+            EXPECT_EQ(text(stated[i]), text(json["results"][static_cast<Json::ArrayIndex>(i)])) << i;
+        }
+        EXPECT_EQ(text(written.cut_to_json()), text(without(cut, { "graph", "graph_path",
+                                                                   "annotation_path", "index_fp" })));
+        EXPECT_TRUE(cut["index_fp"].isString());
+        EXPECT_LE(c.returned, n);
+    }
+    // every row belongs to a pair, in pair order
+    EXPECT_EQ(rows.size(), next);
+    // one pair of each kind: records (kmers_in_target 360 - 31 + 1), whole columns (none)
+    EXPECT_EQ(2u, with_target);
+    EXPECT_EQ(2u, without_target);
+    EXPECT_EQ(330u, rows[0]["kmers_in_target"].asUInt64());
+    EXPECT_FALSE(cuts[0]["complete"].asBool());
+    EXPECT_TRUE(cuts[1]["complete"].asBool());
 }
