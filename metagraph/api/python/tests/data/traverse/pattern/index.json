@@ -14,6 +14,7 @@
   "masked_small_predicate_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-predicate-labels 4 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a predicate may list 4 names)",
   "masked_protein_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-mismatches-protein 1 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a peptide may be searched within 1 substituted residue, a dna or iupac pattern within 3)",
   "hash": "server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg --index-release fixtures-mini_refseq  (a hash graph of 1296536.fa at k = 31, column annotation by file name)",
+  "repeated_headers": "server_query -i {work}/repeated/graph.dbg -a {work}/repeated/anno.column_coord.annodbg --index-release fixtures-mini_refseq  (a BASIC graph at k = 31 with --mask-dummy of two files, e1.fa (records r8, r9) and e2.fa (r9), 80 bases of 1296536.fa each; column_coord annotation by file name and its .seqs: the header r9 names a record in both columns)",
   "utf8_labels": "server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg --index-release fixtures-mini_refseq  (a BASIC graph at k = 31 of two records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, and C x 40 under the valid header label\\ufffd, built with --mask-dummy; column annotation by header)"
  },
  "fixtures": {
@@ -25,6 +26,15 @@
    "hand_made": false,
    "headers": {},
    "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record); graph_summary and max_graphs_without_selection null (no graph list); headers_unique at the top level (SPEC-multigraph-envelope.md section 9): true, every header of the .seqs names one record"
+  },
+  "capabilities_repeated_headers": {
+   "server": "repeated_headers",
+   "method": "GET",
+   "path": "/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /capabilities of a single-graph server whose pair names one header twice (r9, in its files e1.fa and e2.fa): headers_unique at the top level false, one collision, its example listing both occurrences by column with null pair tags (SPEC-multigraph-envelope.md section 9); the block available (basic, mask file, counting exact)"
   },
   "traverse_capabilities": {
    "server": "masked",

@@ -300,3 +300,9 @@ header label alone may not name the record it means. The server logs the certifi
 true | false | null`), a repeat as a warning naming one header. The certificate is all that E22 serves: `/search`
 rows keep their shape (no (pair, column, record) per row); such a fallback is later work, built only if a deployed
 index's certificate comes out false.
+
+Reference instances: sample 12 (illustrative: `false` on a multi-graph server, one header in two pairs) and the
+pattern fixtures (`api/python/tests/data/traverse/pattern/`, `SPEC-pattern-search.md` §11) `capabilities`
+(single-graph, `true`), `capabilities_repeated_headers` (single-graph, `false`: one header in both files of the pair,
+its occurrences with null pair tags), `capabilities_representation_unsupported` (`null`: the pair has no `.seqs`) and
+`capabilities_multi_graph` (`true`, in `graph_summary`).

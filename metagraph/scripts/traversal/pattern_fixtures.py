@@ -229,6 +229,12 @@ UTF8_INVALID_HEADER = b'label\xff'
 UTF8_REPLACED_HEADER = 'label�'
 UTF8_A = 'A' * MINI_K
 UTF8_C = 'C' * MINI_K
+# the repeated_headers server (SPEC-multigraph-envelope.md section 9): one pair of two files whose
+# records repeat a header across them (as the integration fixture's pair `e`, test_multigraph.py
+# TestHeadersUnique), each record 80 bases of HASH_RECORD's first record at its offset; column
+# annotation with coordinates by file name, and its .seqs
+REPEATED_FILES = {'e1.fa': [('r8', 0), ('r9', 100)], 'e2.fa': [('r9', 200)]}
+REPEATED_HEADER = 'r9'
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
 # 503 and the expectations
@@ -615,20 +621,29 @@ def single_graph_selection(doc):
                                'max_request_body_mb')})
 
 
-def headers_unique(value, multi=False):
+def headers_unique(value, multi=False, examples=()):
     """GET /capabilities' headers_unique (SPEC-multigraph-envelope.md section 9): whether every
-    sequence header names one record, with no repeat to list -- at the top level of a
-    single-graph server, in graph_summary of a multi-graph server (not at its top level).
-    |value| true where the pairs have their .seqs (the mini's headers each name one record),
-    null where a pair has none"""
+    sequence header names one record -- at the top level of a single-graph server, in
+    graph_summary of a multi-graph server (not at its top level). |value| true where the pairs
+    have their .seqs and no header repeats (the mini's headers each name one record), false
+    with the repeated headers |examples| (each its collision), null where a pair has no .seqs"""
     def run(doc):
         if multi:
             check('headers_unique' not in doc, sorted(doc))
             member = doc['graph_summary']['headers_unique']
         else:
             member = doc['headers_unique']
-        check(member == {'value': value, 'collisions': 0, 'examples': []}, member)
+        check(member == {'value': value, 'collisions': len(examples),
+                         'examples': list(examples)}, member)
     return run
+
+
+def repeated_example(header, columns):
+    """An example of headers_unique on a single-graph server: |header| once in each of
+    |columns|, the pair tags null (as its /search cut's)"""
+    return {'header': header, 'occurrences': len(columns),
+            'pairs': [{'graph': None, 'graph_path': None, 'annotation_path': None,
+                       'column': c} for c in columns]}
 
 
 def names_the_pair(doc):
@@ -823,6 +838,16 @@ FIXTURES = [
         'header of the .seqs names one record',
         expect_all(features(True), caps_block(True, mask='file', counting='exact'),
                    single_graph_selection, headers_unique(True))),
+    get('capabilities_repeated_headers', 'repeated_headers', '/capabilities',
+        'GET /capabilities of a single-graph server whose pair names one header twice (r9, in '
+        'its files e1.fa and e2.fa): headers_unique at the top level false, one collision, its '
+        'example listing both occurrences by column with null pair tags '
+        '(SPEC-multigraph-envelope.md section 9); the block available (basic, mask file, '
+        'counting exact)',
+        expect_all(features(True), caps_block(True, mask='file', counting='exact'),
+                   single_graph_selection,
+                   headers_unique(False, examples=[repeated_example(REPEATED_HEADER,
+                                                                    ['e1.fa', 'e2.fa'])]))),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
         'its `pattern` member the gate block (SPEC §23.2): the fields a client gates on, with '
@@ -2390,6 +2415,12 @@ SERVERS = {
     'hash': 'server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg'
             ' --index-release ' + INDEX_RELEASE + '  (a hash graph of ' + HASH_RECORD
             + ' at k = 31, column annotation by file name)',
+    'repeated_headers': 'server_query -i {work}/repeated/graph.dbg -a '
+                        '{work}/repeated/anno.column_coord.annodbg --index-release '
+                        + INDEX_RELEASE + '  (a BASIC graph at k = 31 with --mask-dummy of two '
+                        'files, e1.fa (records r8, r9) and e2.fa (r9), 80 bases of '
+                        + HASH_RECORD + ' each; column_coord annotation by file name and its '
+                        '.seqs: the header r9 names a record in both columns)',
     'utf8_labels': 'server_query -i {work}/utf8/graph.dbg -a {work}/utf8/anno.column.annodbg'
                    ' --index-release ' + INDEX_RELEASE + '  (a BASIC graph at k = 31 of two '
                    'records, A x 40 under the raw header bytes label\\xff, which are not UTF-8, '
@@ -2544,6 +2575,34 @@ def build_indexes(binary, mini, work):
             if res.returncode:
                 raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
 
+    repeated = os.path.join(work, 'repeated')
+    if not os.path.isfile(os.path.join(repeated, 'anno.seqs')):
+        os.makedirs(repeated, exist_ok=True)
+        with open(os.path.join(mini, 'fasta', HASH_RECORD)) as f:
+            lines = f.read().split('>')[1].split('\n')
+        source = ''.join(lines[1:])
+        for fname, records in REPEATED_FILES.items():
+            with open(os.path.join(repeated, fname), 'w') as f:
+                for header, offset in records:
+                    f.write(f'>{header}\n{source[offset:offset + 80]}\n')
+        files = list(REPEATED_FILES)
+        # one thread: the annotation's columns in the order of the files, as the .seqs lists
+        # them (several threads add the columns in the order they finish)
+        for cmd in ([binary, 'build', '-p', '1', '--graph', 'succinct', '-k', str(MINI_K),
+                     '--mask-dummy', '--in-ram', '-o', 'graph'] + files,
+                    [binary, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                     '--anno-type', 'column', '--coordinates', '-o', 'anno'] + files,
+                    [binary, 'transform_anno', '-p', '1', '--anno-type', 'column_coord',
+                     '--coordinates', '-o', 'anno', 'anno.column.annodbg'],
+                    [binary, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                     '--index-header-coords', '-o', 'anno'] + files):
+            with open(log, 'ab') as f:
+                f.write(('$ (cd repeated) ' + ' '.join(cmd) + '\n').encode())
+                f.flush()
+                res = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=repeated)
+            if res.returncode:
+                raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
+
     with open(os.path.join(work, 'graphs.csv'), 'w') as f:
         f.write(f'{MULTI_GRAPH_NAME},{graph},{os.path.join(masked, MINI_ANNO)}\n')
     with open(os.path.join(work, 'mixed.csv'), 'w') as f:
@@ -2585,6 +2644,11 @@ def server_args(name, mini, work):
         hashed = os.path.join(work, 'hash')
         return ['-i', os.path.join(hashed, 'graph.orhashdbg'),
                 '-a', os.path.join(hashed, 'anno.column.annodbg'),
+                '--index-release', INDEX_RELEASE]
+    if name == 'repeated_headers':
+        repeated = os.path.join(work, 'repeated')
+        return ['-i', os.path.join(repeated, 'graph.dbg'),
+                '-a', os.path.join(repeated, 'anno.column_coord.annodbg'),
                 '--index-release', INDEX_RELEASE]
     if name == 'utf8_labels':
         utf8 = os.path.join(work, 'utf8')
