@@ -65,7 +65,7 @@ class mapped_vector_view : public std::ranges::view_interface<mapped_vector_view
 
     vector_type to_owned() const { return packed(); }
     vector_type into_owned() && {
-        if (!context_ && storage_ && storage_.unique()) {
+        if (!context_ && storage_ && storage_.use_count() == 1) {
             auto result = std::move(*storage_);
             storage_.reset();
             words_ = nullptr;
