@@ -490,7 +490,11 @@ std::vector<Record> random_records(std::mt19937 &rng, size_t k, size_t columns) 
             std::string s = bases(2 + rng() % 4);
             if (rng() % 2)
                 s += common;
-            s += bases(1 + rng() % 3) + repeat + bases(2 + rng() % 4);
+            // the draws in statements of their own: the operands of one + are evaluated in an
+            // unspecified order (GCC and Clang differ), which made the records platform-dependent
+            const std::string before = bases(1 + rng() % 3);
+            const std::string after = bases(2 + rng() % 4);
+            s += before + repeat + after;
             if (rng() % 3 == 0)
                 s += repeat + bases(2 + rng() % 3);
             if (rng() % 4 == 0)
@@ -547,10 +551,18 @@ std::string random_predicate(std::mt19937 &rng, size_t columns) {
         std::string list = a == b ? a : a + ", " + b;
         return std::string("{\"") + ops[rng() % 3] + "\": [" + list + "]}";
     };
+    // each draw in a statement of its own (see random_records)
+    std::string first, second;
     switch (rng() % 5) {
         case 0: return leaf();
-        case 1: return "{\"and\": [" + leaf() + ", " + leaf() + "]}";
-        case 2: return "{\"or\": [" + leaf() + ", " + leaf() + "]}";
+        case 1:
+            first = leaf();
+            second = leaf();
+            return "{\"and\": [" + first + ", " + second + "]}";
+        case 2:
+            first = leaf();
+            second = leaf();
+            return "{\"or\": [" + first + ", " + second + "]}";
         case 3: return "{\"not\": " + leaf() + "}";
         default: return "{\"any\": [" + name() + "]}";
     }
