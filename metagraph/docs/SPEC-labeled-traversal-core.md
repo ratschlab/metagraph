@@ -458,6 +458,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   plus that walk's excess) — the account `usage.memory.held_bound_bytes` states (§7.3) — beside the priced echo of
   each seed left unstarted (its `final_bytes`: the fixed part of a result and its `seed_id`, §5, a few KB of
   text in fact); two request slots, 2R plus their soft excess, where without the bound n seeds could hold n × B.
+  Beside that account a server process holds what no account counts: the request's body while it is read and
+  parsed (bounded only by `--max-request-body-mb`, `max_request_body_mb`; 0 = unlimited, the default), the
+  request's structures outside the account (the oracle's node-first cache for backward steps on a succinct graph,
+  the parsed request, its registry entry), the allocator's retained free memory, and what `memory_bound_soft`
+  lists as not observed (§7.3). *E5b's verification sweep* (2026-11-07; per-seed budgets of 64 MiB to 4 GiB under
+  R = 8 GiB, 1 to 64 seeds, results of up to 97 MiB of text, request bodies of a few KB) found a server's peak
+  physical footprint above its idle at most 2.6 GiB, and on Linux under a cgroup limit of R + 256 MiB + the idle
+  charge no case killed: R plus a fixed overhead of 256 MiB holds a request whose body is capped.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
@@ -2212,7 +2220,9 @@ attempt) nor a 400 for a malformed id:
   result the account when its walk ended **without the memory budget's cache allotments** (`memory_allotments`,
   §7.2.2: the label cache's and the lookahead's), which end with the walk — the caches are the walk's own, freed
   when its seed is done, and the row-diff path cache within the label cache's allotment is cleared then — so the
-  same with and without a budget that does not bind, and at most the result's `work.memory_bytes`; the failed
+  same with and without a budget that does not bind (but in `tree` and `full`, where a budget can keep a merge's
+  arrival order whose displayed chain the account then charges, §7.2.2: there it is the same at every budget that
+  does not bind), and at most the result's `work.memory_bytes`; the failed
   result as priced (its fixed part and its echo of `seed_id`, §5) for a failed, refused or never started one
   *(E5b's fix, 2026-11-07: with the allotments, the request-wide bound, §5, which sums `final_bytes`, charged up
   to 128 MiB for every seed already walked — at a per-seed maximum of 1 GiB and a bound of 8 GiB, 56 of 64

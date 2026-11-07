@@ -6224,7 +6224,7 @@ TEST(GraphletAttempt, UsageStatesWhatTheSeedsConsumed) {
 // are held while it is walked), and so does the request's peak while that seed is walked only.
 // final_bytes is at most the result's work.memory_bytes. In tree and full a budget may keep a
 // merge's arrival order (SPEC §7.2.2), whose chain the account then charges (480 bytes less on
-// an annotate merge here): there the budgets are compared with each other only
+// an annotate merge here): there the budgets are compared with each other only (SPEC §7.3)
 TEST(GraphletAttempt, FinalBytesLeaveOutTheBudgetsAllotments) {
     const uint64_t mib = uint64_t(1) << 20;
     const std::vector<BudgetCase> cases = budget_cases();
@@ -6250,7 +6250,7 @@ TEST(GraphletAttempt, FinalBytesLeaveOutTheBudgetsAllotments) {
         ++graphs;
         const graph::AnnotatedDBG &anno = *cases[g].anno;
         for (const Walk &walk : walks) {
-            for (const char *detail : { "graphlet", "summary", "full" }) {
+            for (const char *detail : { "graphlet", "summary", "tree", "full" }) {
                 const std::string what = cases[g].name + " " + walk.strategy + " " + detail;
                 // two seeds: the second's result is held while the first's is
                 const std::vector<std::string> second = walk.labels.empty()
@@ -6261,7 +6261,7 @@ TEST(GraphletAttempt, FinalBytesLeaveOutTheBudgetsAllotments) {
                 const Json::Value plain = process_traverse_request(request, anno, "");
                 const Json::Value &p = plain["usage"]["per_seed"];
                 ASSERT_EQ(2u, p.size()) << what;
-                const bool merge_order = std::string(detail) == "full";
+                const bool merge_order = std::string(detail) == "tree" || std::string(detail) == "full";
                 Json::Value first_budget;
                 for (uint64_t mb : { 64, 256, 1024, 4096 }) {
                     const std::string at = what + " at " + std::to_string(mb) + " MiB";
