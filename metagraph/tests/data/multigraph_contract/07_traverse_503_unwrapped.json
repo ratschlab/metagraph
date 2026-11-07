@@ -1,63 +1,94 @@
 {
  "route": "POST /traverse",
  "status": 503,
- "note": "Attempt-level 503 at the bound, with usage, unwrapped (E10), as today.",
+ "note": "Attempt-level 503 at the bound, with usage, unwrapped (E10), as today. A real run: the request's finish_by_ms less the clock skew allowance (2000 ms) had passed when it was received, so the attempt's bound is 0 ms (usage.bound.capped_by \"finish_by_ms\", walk_until_ms 0); its one seed is not started, and the response, built after the bound, is refused 503 with the usage: nothing of it is delivered (on a large index the same 503 comes when building or writing the response outlasts a bound the walk left room for). The release binary on the integration fixture served as bact_other; every instant is the run's. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "request": {
+  "seeds": [
+   {
+    "labels": [
+     "acc1"
+    ],
+    "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG"
+   }
+  ],
+  "strategy": {
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_memory_mb": 512,
+    "max_output_bp": 500000,
+    "max_work_units": 100000000,
+    "time_budget_ms": 70000
+   },
+   "branching": {
+    "max_label_branches": 2
+   },
+   "direction": "both",
+   "exhaustive": false,
+   "labels": {
+    "mode": "constrain"
+   },
+   "output": {
+    "detail": "full",
+    "timing": true
+   }
+  },
+  "graph": "bact_other",
+  "attempt_id": "svc-trv-91aa07-3",
+  "not_after_ms": 1794037956113,
+  "finish_by_ms": 1794037956113
+ },
  "body": {
-  "error": "attempt svc-trv-91aa07-1 reached its bound (25000 ms) before its response could be written: nothing partial is sent",
+  "error": "the attempt reached the duration bound the server enforces for it (0 ms: the in_ram load (if any) plus the seeds' time budgets plus the server's allowance, at most hard_cap_ms, the content timeout less one second; see usage.bound) while its response was built or written: nothing of it is delivered",
   "usage": {
-   "attempt_id": "svc-trv-91aa07-1",
+   "attempt_id": "svc-trv-91aa07-3",
    "bound": {
     "allowance_ms": 10000,
-    "capped_by": null,
+    "capped_by": "finish_by_ms",
     "enforced": true,
     "seeds": 1,
-    "time_budget_ms": 15000.0,
-    "walk_until_ms": 20000
+    "time_budget_ms": 60000.0,
+    "walk_until_ms": 0
    },
-   "bound_ms": 25000,
-   "elapsed_ms": 698,
+   "bound_ms": 0,
+   "elapsed_ms": 1,
    "memory": {
-    "held_bound_bytes": 536870912,
-    "peak_admitted_bytes": 101404284,
+    "held_bound_bytes": 456554,
+    "peak_admitted_bytes": 456554,
     "soft_excess_bytes": 0
    },
-   "observed_max_uninterruptible_ms": 69,
-   "reason": "deadline",
-   "received_at": "2026-10-21T09:14:28.688Z",
-   "seeds": {
-    "abandoned": 0,
-    "finished": 1,
-    "requested": 1,
-    "started": 1
-   },
-   "server_instance": "7c1e0f3a9b24d6e8",
-   "stopped_at": "2026-10-21T09:14:29.385Z",
-   "timing": {
-    "cpu_ms": 167.004554,
-    "page_faults": {
-     "major": 6931,
-     "minor": 5123
-    }
-   },
-   "work": {
-    "memory_bytes": 740988
-   },
-   "work_units": 1025295,
-   "not_after_ms": 1793520010000,
+   "not_after_ms": 1794037956113,
+   "observed_max_uninterruptible_ms": 0,
    "per_seed": [
     {
+     "elapsed_ms": 0,
+     "final_bytes": 456554,
      "index": 0,
-     "outcome": "complete",
-     "stopped_by": null,
-     "work_units": 1025295,
-     "work_seed": 4096,
-     "peak_admitted_bytes": 101404284,
-     "final_bytes": 740988,
-     "soft_excess_bytes": 0,
+     "outcome": "not_started",
+     "peak_admitted_bytes": 0,
      "refused_bytes": null,
-     "elapsed_ms": 698
+     "soft_excess_bytes": 0,
+     "stopped_by": null,
+     "work_seed": 0,
+     "work_units": 0
     }
-   ]
+   ],
+   "reason": "deadline",
+   "received_at": "2026-11-07T07:52:34.117Z",
+   "seeds": {
+    "abandoned": 0,
+    "finished": 0,
+    "requested": 1,
+    "started": 0
+   },
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "stopped_at": "2026-11-07T07:52:34.117Z",
+   "timing": {
+    "cpu_ms": 0.471417
+   },
+   "work": {
+    "memory_bytes": 456554
+   },
+   "work_units": 0
   }
  }
 }
