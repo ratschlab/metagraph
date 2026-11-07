@@ -308,11 +308,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         // Collect sequence headers and compute k-mer counts
         std::vector<std::vector<std::string>> headers(files.size());
         std::vector<std::vector<uint64_t>> num_kmers(files.size());
-        // the 1-based FASTA record of each header, to name both records of a repeat
-        std::vector<std::vector<size_t>> records(files.size());
         #pragma omp parallel for num_threads(get_num_threads()) default(shared) schedule(dynamic)
         for (size_t i = 0; i < files.size(); ++i) {
             size_t last_record = 0;
+            // the header of every record, those too short to have k-mers too: a record
+            // without k-mers is not in the record mapping, but a repeat of its header is
+            // refused all the same, so that a file is accepted or refused by its headers alone
+            std::vector<std::string> record_headers;
             call_annotations(
                 files[i],
                 config.refpath,
@@ -343,6 +345,9 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                                       " whole header", record, files[i], labels.size());
                         exit(1);
                     }
+                    // (a record's reverse complement is passed under its number again)
+                    if (!config.allow_unchecked_headers && record > record_headers.size())
+                        record_headers.push_back(labels[0]);
                     if (sequence.size() < k)
                         return;
                     // a record's reverse complement (--fwd-and-reverse) continues the record's
@@ -354,7 +359,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     if (!same_record) {
                         headers[i].push_back(labels[0]);
                         num_kmers[i].push_back(0);
-                        records[i].push_back(record);
                     }
                     num_kmers[i].back() += sequence.size() - k + 1;
                     last_record = record;
@@ -362,20 +366,21 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             );
             if (!config.allow_unchecked_headers) {
                 // find_header() answers a header with its first record only
-                annot::CoordToHeader::find_duplicate_headers(headers[i],
+                assert(record_headers.size() >= headers[i].size());
+                annot::CoordToHeader::find_duplicate_headers(record_headers,
                     [&](size_t first, size_t repeat) {
                         logger->error("Header of record {} in '{}' repeats the header of record {}"
-                                      " (bytes in hex: {}): the record headers of a column must be"
-                                      " distinct for the record mapping (.seqs) to find every"
-                                      " record (--allow-unchecked-headers skips this check)",
-                                      records[i][repeat], files[i], records[i][first],
-                                      utils::to_hex(headers[i][repeat]));
+                                      " (bytes in hex: {}): the record headers of a file must be"
+                                      " distinct for the record mapping (.seqs), which finds a"
+                                      " header that repeats record {}'s at record {} only"
+                                      " (--allow-unchecked-headers skips this check)",
+                                      repeat + 1, files[i], first + 1,
+                                      utils::to_hex(record_headers[repeat]), first + 1, first + 1);
                         exit(1);
                         return false;
                     }
                 );
             }
-            records[i] = {};
         }
         annot::CoordToHeader headers_map(std::move(headers), std::move(num_kmers));
         auto fname = utils::make_suffix(annotator_filename, annot::CoordToHeader::kExtension);
@@ -586,11 +591,6 @@ int annotate_graph(Config *config) {
                 logger->error("--index-header-coords requires FASTA or FASTQ input: {}", file);
                 exit(1);
             }
-        }
-        if (!config->fasta_header_delimiter.empty()) {
-            logger->error("--index-header-coords needs whole record headers. "
-                          "Remove --header-delimiter.");
-            exit(1);
         }
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
             logger->error("--index-header-coords requires --anno-filename "
