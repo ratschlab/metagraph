@@ -1671,6 +1671,47 @@ class TestMultiGraphServer(TestingBase):
                                                    **{handle[route]: ahead}))
                 self.assertEqual(200, ret.status_code, ret.text[:2000])
 
+    def test_a_single_graph_404_proves_a_lost_request_is_never_admitted(self):
+        """The same on a single-graph server (one registry per process as well): GET
+        /requests answers 404 {error, request_id, server_instance, server_time_ms} with
+        server_time_ms > the lost request's not_after_ms, and the copy sent after it is refused
+        409 expired at a server time at least as late, on /resolve, /pattern and /traverse."""
+        kleb = self.records['kleb'][0]
+        seed = kleb[3000:3100]
+        bodies = {
+            'resolve': {'sequence': seed[:80], 'discover': {'max_labels': 2}},
+            'pattern': {'patterns': [{'dna': seed[:20]}], 'mode': 'count'},
+            'traverse': {'seeds': [{'sequence': seed}],
+                         'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 50},
+                                      'output': {'detail': 'summary'}}},
+        }
+        handle = {'resolve': 'request_id', 'pattern': 'request_id', 'traverse': 'attempt_id'}
+        server = self._single_server('lost')
+        try:
+            instance = server.get('traverse/capabilities').json()['attempts']['server_instance']
+            for route, body in bodies.items():
+                with self.subTest(route=route):
+                    lost = f'sg-lost-{route}'
+                    not_after = int(time.time() * 1000) - 1000
+                    ret = server.get(f'requests/{lost}')
+                    self.assertEqual(404, ret.status_code, ret.text[:2000])
+                    gone = ret.json()
+                    self.assertEqual({'error', 'request_id', 'server_instance', 'server_time_ms'},
+                                     set(gone))
+                    self.assertEqual((lost, instance),
+                                     (gone['request_id'], gone['server_instance']))
+                    self.assertIs(type(gone['server_time_ms']), int)
+                    self.assertGreater(gone['server_time_ms'], not_after)
+                    ret = server.post(route, dict(body, not_after_ms=not_after,
+                                                  **{handle[route]: lost}))
+                    self.assertEqual(409, ret.status_code, ret.text[:2000])
+                    out = ret.json()
+                    self.assertEqual(('expired', not_after), (out['state'], out['not_after_ms']))
+                    self.assertGreaterEqual(out['server_time_ms'], gone['server_time_ms'])
+                    self.assertEqual(404, server.get(f'requests/{lost}').status_code)
+        finally:
+            server.stop()
+
     def _single_server(self, name, *args, binary=None):
         """A single-graph server on the kleb pair"""
         graph, anno = self.pairs['kleb']
