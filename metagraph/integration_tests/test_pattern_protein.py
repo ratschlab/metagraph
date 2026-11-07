@@ -19,7 +19,7 @@ import subprocess
 import unittest
 from tempfile import TemporaryDirectory
 
-from base import PROTEIN_MODE, METAGRAPH
+from base import PROTEIN_MODE, METAGRAPH, TestingBase
 from test_pattern import Server, untimed
 
 
@@ -356,6 +356,24 @@ class TestPatternProtein(unittest.TestCase):
         for r in a['patterns'][0]['results']:
             self.assertEqual(labels_of(r['kmer']), sorted(l['column'] for l in r['labels']))
 
+    def test_max_steps_stops_an_x_run(self):
+        """A leading run of X branches 22 ways per position: max_steps stops its discovery, the
+        count a lower bound; with the default budget, the oracle's count."""
+        text = 'XXXXXXXXXKYSTAM'
+        truth = len(oracle_contexts(self.kmers, text))
+        self.assertGreater(truth, 0)
+        a = self.pattern({'patterns': [{'protein': text}], 'mode': 'count', 'max_steps': 20})
+        entry = a['patterns'][0]
+        self.assertEqual({'phase': 'discovery', 'reason': 'max_steps'}, entry['stop'])
+        c = entry['counts']['contexts']
+        self.assertEqual('at_least', c['relation'])
+        self.assertLessEqual(c['value'], truth)
+        a = self.pattern({'patterns': [{'protein': text}], 'mode': 'count'})
+        entry = a['patterns'][0]
+        self.assertIsNone(entry['stop'])
+        self.assertEqual((truth, 'exact'), (entry['counts']['contexts']['value'],
+                                            entry['counts']['contexts']['relation']))
+
     def test_refusals(self):
         a = self.pattern({'patterns': [{'dna': 'ACGTACGTAC'}, {'iupac': 'ACGTN'},
                                        {'protein': 'DNPQELKY*'}, {'protein': 'DNPQ[]'},
@@ -414,6 +432,142 @@ class TestPatternProtein(unittest.TestCase):
             with self.subTest(name):
                 with open(path) as f:
                     self.assertEqual(f.read(), text)
+
+
+@unittest.skipUnless(PROTEIN_MODE, 'pattern search on protein graphs: the Protein build')
+class TestPatternProteinCoordinates(TestingBase):
+    """The same records as two files (two columns), annotated with coordinates
+    (row_diff_brwt_coord) and the record mapping (.seqs, --index-header-coords), as UniParc's
+    index places its labels: occurrences placed in records, the supported paths record-verified,
+    and a predicate asked of each pattern as a whole (predicate_scope "motif")."""
+
+    FILES = {'fam_a': ('p1', 'p2'), 'fam_b': ('p3', 'p4', 'p5')}
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        paths = []
+        for name, records in cls.FILES.items():
+            path = os.path.join(d, f'{name}.fa')
+            with open(path, 'w') as f:
+                for r in records:
+                    f.write(f'>{r}\n{RECORDS[r]}\n')
+            paths.append(path)
+        cls.column_of = {r: os.path.join(d, f'{name}.fa')
+                         for name, records in cls.FILES.items() for r in records}
+        cls.graph = os.path.join(d, 'graph_k15.dbg')
+        anno_base = os.path.join(d, 'annotation')
+        cls.anno = anno_base + '.row_diff_brwt_coord.annodbg'
+        cls._build_graph(paths, cls.graph, K, 'succinct', mode='basic')
+        cls._run_command(f'{METAGRAPH} transform --mask-dummy {cls.graph}', 'mask')
+        cls._annotate_graph(paths, cls.graph, anno_base, 'row_diff_brwt_coord',
+                            anno_type='filename')
+        # the record mapping, its columns in the annotation's own column order (as
+        # test_traverse_protein.py writes it)
+        res = cls._run_command(f'{METAGRAPH} stats --print-col-names -a {cls.anno}', 'stats')
+        lines = res.stdout.decode().split('\n')
+        columns = lines[lines.index('Number of columns: 2') + 1:][:2]
+        assert sorted(columns) == sorted(paths), columns
+        cls._run_command(f'{METAGRAPH} annotate -i {cls.graph} --anno-filename '
+                         f'--index-header-coords -o {anno_base} {" ".join(columns)}',
+                         'index-header-coords')
+        assert os.path.exists(anno_base + '.seqs')
+        cls.kmers = kmers_of(RECORDS)
+        cls.server = Server(METAGRAPH, ['-i', cls.graph, '-a', cls.anno],
+                            os.path.join(d, 'server.log'))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.stop()
+        cls.tempdir.cleanup()
+
+    def pattern(self, payload, status=200):
+        ret = self.server.post('pattern', payload)
+        self.assertEqual(status, ret.status_code, ret.text)
+        return ret.json()
+
+    def occurrences_of(self, kmer, offset, length):
+        """The oracle's placed occurrences of an instance: (column, record, seq_id, nt_coords)."""
+        found = set()
+        for name, records in self.FILES.items():
+            for seq_id, r in enumerate(records):
+                seq = RECORDS[r]
+                start = seq.find(kmer)
+                while start != -1:
+                    first = start + offset + 1
+                    found.add((self.column_of[r], r, seq_id, f'{first}-{first + length - 1}'))
+                    start = seq.find(kmer, start + 1)
+        return found
+
+    def test_capabilities_place_records(self):
+        caps = self.server.get('pattern/capabilities').json()
+        self.assertTrue(caps['available'])
+        self.assertEqual('record', caps['placement'])
+        self.assertEqual('record_verified', caps['support'])
+        self.assertEqual('budgeted', caps['annotation'])
+        self.assertEqual('exact', caps['counting'])
+
+    def test_occurrences_are_placed_in_records(self):
+        text = 'DNPQE[LI]KYSTA'
+        a = self.pattern({'patterns': [{'protein': text}], 'output': {'labels': 'all'}})
+        entry = a['patterns'][0]
+        expected = oracle_contexts(self.kmers, text)
+        self.assertEqual(set(expected), {(r['kmer'], r['offset']) for r in entry['results']})
+        self.assertEqual('record', entry['placement'])
+        for r in entry['results']:
+            placed = set()
+            for label in r['labels']:
+                self.assertEqual(label['occurrences']['value'], len(label['occurrence_list']))
+                for o in label['occurrence_list']:
+                    self.assertEqual('+', o['strand'])
+                    self.assertEqual(len(RECORDS[o['record']]), o['nt_length'])
+                    placed.add((label['column'], o['record'], o['seq_id'], o['nt_coords']))
+            self.assertEqual(self.occurrences_of(r['kmer'], r['offset'], entry['length']),
+                             placed, r['kmer'])
+
+    def test_record_verified_supported_paths(self):
+        # four walks spell it, all of their k-mers in fam_a: p1's and p2's own (L..LL, I..AA)
+        # and two that switch from one record to the other inside KYSTAMKVWEGHYPSTR, which a
+        # label intersection supports and no record verifies
+        text = 'DNPQE[LI]KYSTAMKVWEGHYPSTR[LA][LA]'
+        _, walks = oracle_paths(self.kmers, text)
+        self.assertEqual(4, len(walks))
+        genuine = sorted(w for w in walks if any(w in seq for seq in RECORDS.values()))
+        self.assertEqual(2, len(genuine))
+        for level, require, expected in (('label_intersection', 'label_intersection', walks),
+                                         ('best', 'record_verified', genuine)):
+            with self.subTest(level=level):
+                a = self.pattern({'patterns': [{'protein': text}],
+                                  'long_search': 'supported_paths',
+                                  'supported_paths_level': level, 'require_support': require,
+                                  'output': {'labels': 'all'}})
+                entry = a['patterns'][0]
+                self.assertEqual(4, entry['counts']['paths']['value'])
+                sp = entry['counts']['supported_paths']
+                self.assertEqual(len(expected), sp['value'])
+                self.assertEqual(expected, sorted(r['sequence'] for r in entry['results']))
+                for r in entry['results']:
+                    self.assertEqual('+', r['strand'])
+                    columns = sorted(l['column'] for l in r['labels'])
+                    self.assertEqual([self.column_of['p1']], columns)
+
+    def test_motif_scope(self):
+        # the predicate asked of each pattern as a whole, on the union of its contexts' labels
+        fam_b = self.column_of['p3']
+        texts = ('DNPQE[LI]KYSTA', 'MKVLAAGIVGLLLAQ')
+        a = self.pattern({'patterns': [{'protein': t} for t in texts],
+                          'predicate': {'any': [fam_b]}, 'predicate_scope': 'motif',
+                          'mode': 'count'})
+        self.assertEqual('context', a['predicate']['strands'])
+        for text, entry in zip(texts, a['patterns']):
+            with self.subTest(text):
+                union = {self.column_of[r] for kmer, _ in oracle_contexts(self.kmers, text)
+                         for r in labels_of(kmer)}
+                motif = entry['motif']
+                self.assertEqual(fam_b in union, motif['selected'])
+                self.assertEqual('every_context', motif['decided_by'])
+                self.assertIsNone(motif['untested'])
 
 
 if __name__ == '__main__':

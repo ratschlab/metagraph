@@ -145,13 +145,15 @@ the DNA unit and integration pattern suites; `scripts/traversal/pattern_fixtures
 
 - Unit (Protein build, `metagraph/build-protein`): `tests/graph/alignment/test_pattern_protein.cpp` (the parser,
   sets, bits, the engine on small protein graphs against a brute-force count, mismatches, long patterns, the
-  unmasked counts) and `tests/cli/test_pattern_protein_route.cpp` (the route: kinds, refusals, the entry, the
+  unmasked counts, max_steps stopping a 22-way X run) and `tests/cli/test_pattern_protein_route.cpp` (the route: kinds, refusals, the entry, the
   capabilities, labels and a predicate). The DNA-only pattern suites are compiled out under `_PROTEIN_GRAPH`.
 - Integration: `integration_tests/test_pattern_protein.py`, skipped in DNA mode: the plan row's scenarios on a
   small protein index built in the test at k = 15 (an exact peptide of at most 15 residues, one with X, one with B,
   Z or J, a bracket and a negated class, mismatches 1 to 3 on a 15-mer, an exact peptide longer than 15, a label
-  predicate, the refusals), the supported paths with and without a predicate, through `metagraph pattern` and the
-  server; and the fixtures `api/python/tests/data/traverse/pattern_protein/` (a capabilities document and one
+  predicate, the refusals), the supported paths with and without a predicate, max_steps on an X run, through
+  `metagraph pattern` and the server; on a coordinate index (row_diff_brwt_coord and its .seqs, two columns):
+  occurrences placed in records, record-verified supported paths (two of four walks switch records inside a
+  column), and `predicate_scope: "motif"`; and the fixtures `api/python/tests/data/traverse/pattern_protein/` (a capabilities document and one
   answer), pinned byte for byte apart from timings (`TestPatternProtein.test_fixtures`).
 - CI: one Protein build in CI, E15's job `Linux-Protein` of `.github/workflows/dev-branch.yml`: its unit filter
   already holds `*Pattern*` (PatternProtein, PatternProteinRoute, the predicate and mask suites a Protein build
@@ -170,7 +172,11 @@ protocol.file.allow=always submodule update --init --recursive`. There:
    `dna` and `iupac` patterns, which a protein graph refuses).
 2. Every site E15 marks "until E16 (pattern on protein graphs)" (`grep` finds all 20; among them two in
    `TestTraverseAPI` and one in `test_capabilities_answer_in_the_envelope` of `integration_tests/test_traverse.py`):
-   flip to /pattern served on a protein graph (`available` true, `kinds` `["protein"]`).
+   flip to /pattern served on a protein graph (`available` true, `kinds` `["protein"]`). The two `TestTraverseAPI`
+   requests send `{'dna': ...}`: on a Protein build that is now a 200 whose entries are `bad_alphabet` slots (id,
+   kind and error only), so they send the build's kind (`'protein' if PROTEIN_MODE else 'dna'`), as TaskResources
+   and MultiGraphInRam do, and read `timing` and `work` from answered entries (the review's S1); the envelope site
+   is a plain flip.
 3. `tests/cli/test_task_resources.cpp` (`PatternStatesCpuPerRequestAndPerEntry`, compiled out by E15 in a Protein
    build): drop E15's guard; this branch sends the build's kind (`protein` on a Protein build).
 4. `tests/cli/test_server_multigraph.cpp` (`LoadSharesTheResidentRecordMapping`, the /pattern block E15 guards):
@@ -180,4 +186,10 @@ protocol.file.allow=always submodule update --init --recursive`. There:
    now, SPEC-pattern-search.md §29.
 6. `.github/workflows/dev-branch.yml`: E15's comment on the Protein job (the pattern search left out) reworded; the
    job's `integration_test_filters` gain `*(test_pattern_protein.*`.
-7. Then the Protein and DNA builds of every target, the suites of section 9 and the GCC 13 check again.
+7. Stale texts the "until E16" grep misses (the review's N2): E15's SPEC core §6.12 Tests clause "and so are the
+   pattern-search suites but the refusal"; this branch already rewords `test_pattern.py`'s skip reasons and
+   `test_pattern_search.cpp`'s alphabet comment.
+8. Then the Protein and DNA builds of every target, the suites of section 9 and the GCC 13 check again.
+9. The `pattern_protein/` fixtures were written on macOS; Linux is the reference platform. The first Linux-Protein CI
+   run with `*(test_pattern_protein.*` confirms them (`test_fixtures`), or they are regenerated from it
+   (`METAGRAPH_WRITE_PROTEIN_FIXTURES=1`); the bit values log2(22/s) are the only platform risk (the review's N4).

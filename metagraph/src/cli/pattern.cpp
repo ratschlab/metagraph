@@ -361,9 +361,15 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         const bool iupac = p.has("iupac");
         const bool protein = p.has("protein");
         if (dna + iupac + protein != 1) {
+#if _PROTEIN_GRAPH
+            // (a protein graph reads 'protein' patterns: the kind is always named)
+            throw invalid(path + ": expected exactly one of 'dna', 'iupac', 'protein' (a protein "
+                          "graph reads 'protein')");
+#else
             // (a request that names no peptide is not told about 'protein')
             throw invalid(path + (protein ? ": expected exactly one of 'dna', 'iupac', 'protein'"
                                           : ": expected exactly one of 'dna', 'iupac'"));
+#endif
         }
         const std::string text = p.str(dna ? "dna" : iupac ? "iupac" : "protein", "");
         p.finish();
@@ -836,10 +842,13 @@ Result above_cap_result(const Pattern &pattern, size_t k, const Request &request
     const std::string kind = to_string(pattern.kind());
     std::string message = "pattern: max_mismatches " + std::to_string(m);
     if (L > k) {
-        message += " for a pattern of " + std::to_string(L) + " bases, longer than k ("
+        // (a protein graph's positions are residues, DESIGN-pattern-protein.md)
+        const char *unit = kResidueGraph ? "residues" : "bases";
+        message += " for a pattern of " + std::to_string(L) + " " + unit + ", longer than k ("
                 + std::to_string(k) + "): substitutions in patterns longer than k are not "
                   "served by this build (the capabilities' mismatches.later_increment names "
-                  "long_patterns); ask with max_mismatches 0, or with windows of at most k bases";
+                  "long_patterns); ask with max_mismatches 0, or with windows of at most k "
+                + unit;
     } else if (cap == 0) {
         message += ": substitutions are not served for " + kind + " patterns on this server "
                    "(the capabilities' mismatches.max." + kind + " is 0); ask with "

@@ -496,6 +496,44 @@ TEST(PatternProtein, StrandsOnAProteinGraph) {
     EXPECT_THROW(search.count(pattern, request, budget), std::invalid_argument);
 }
 
+// a leading run of X branches 22 ways per position (no shortcut skips it: a stored ambiguity
+// letter is no residue of X): max_steps stops its discovery, the count a lower bound of the truth
+TEST(PatternProtein, MaxStepsStopsAnXRun) {
+    std::mt19937 rng(15);
+    const std::vector<std::string> records = random_records(rng, 20, 80, { "MKWWWWWW" });
+    const size_t k = 15;
+    auto graph = build_graph<DBGSuccinct>(k, records);
+    PatternSearch search(*graph);
+    const std::string text = "XXXXXXXXXWWWWWW";
+    const Pattern pattern = Pattern::parse(PatternKind::PROTEIN, text);
+    const uint64_t truth = oracle_contexts(*graph, oracle_sets(text), Scope::ANY_OFFSET, 0).size();
+    {
+        Request request = request_of(Scope::ANY_OFFSET);
+        request.mode = Mode::COUNT;
+        Budget budget = unbounded_budget(20);
+        const Result result = search.count(pattern, request, budget);
+        ASSERT_TRUE(result.stop);
+        EXPECT_EQ(StopPhase::DISCOVERY, result.stop->phase);
+        EXPECT_EQ(StopReason::MAX_STEPS, result.stop->reason);
+        ASSERT_TRUE(result.contexts);
+        EXPECT_EQ(Relation::AT_LEAST, result.contexts->total.relation);
+        EXPECT_LE(result.contexts->total.value, truth);
+        EXPECT_LE(result.work.steps, 20u);
+    }
+    {
+        // and with the budget it needs, the oracle's count
+        Request request = request_of(Scope::ANY_OFFSET);
+        request.mode = Mode::COUNT;
+        Budget budget = unbounded_budget();
+        const Result result = search.count(pattern, request, budget);
+        EXPECT_FALSE(result.stop);
+        ASSERT_TRUE(result.contexts);
+        EXPECT_EQ(Relation::EXACT, result.contexts->total.relation);
+        EXPECT_EQ(truth, result.contexts->total.value);
+        EXPECT_GT(result.work.steps, 20u);
+    }
+}
+
 // the information floor gates residues as it gates bases; no low-complexity note on residues
 TEST(PatternProtein, FloorAndNotes) {
     auto graph = build_graph<DBGSuccinct>(7, { "MKVLAAGIVGLLLAQSEWHTQQQQQQQQQQQQQQQQ" });
