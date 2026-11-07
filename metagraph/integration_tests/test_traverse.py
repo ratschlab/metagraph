@@ -2787,12 +2787,16 @@ class TestTraverseAPI(TestTraverseBase):
         # multi-graph server, null here (SPEC-pattern-search.md §24.1); 'max_request_body_mb':
         # the largest request body the server reads (--max-request-body-mb), null here
         # (unlimited; test_api_request_body_limit starts a server with one)
+        # 'headers_unique': whether a header label names one record (E22; test_multigraph.py
+        # checks it), true here: acc1, acc2, acc3
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
-                          'graph_summary', 'graphs', 'in_ram', 'max_graphs_without_selection',
-                          'max_request_body_mb', 'mode', 'pattern', 'ready', 'release',
-                          'resolve', 'routes', 'schema_version', 'server_instance'},
+                          'graph_summary', 'graphs', 'headers_unique', 'in_ram',
+                          'max_graphs_without_selection', 'max_request_body_mb', 'mode',
+                          'pattern', 'ready', 'release', 'resolve', 'routes', 'schema_version',
+                          'server_instance'},
                          set(c))
+        self.assertEqual({'value': True, 'collisions': 0, 'examples': []}, c['headers_unique'])
         self.assertEqual((6, 'single', None, None, None, None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['graph_summary'],
                           c['max_graphs_without_selection'], c['max_request_body_mb'],

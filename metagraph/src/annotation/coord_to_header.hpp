@@ -2,6 +2,7 @@
 #define __COORD_TO_HEADER_HPP__
 
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -108,15 +109,75 @@ class CoordToHeader {
      * object constructed later at a freed address can never be answered from another
      * object's index. A process-wide cache keyed by the object's address could do that,
      * and a fingerprint of a few headers cannot tell two such objects apart. load()
-     * drops the index. Thread-safe.
+     * drops the index. Thread-safe (with each other, not with load()).
+     *
+     * The reverse index is one array of 16 bytes per header, (64-bit hash of the header,
+     * column, seq_id), sorted by (hash, column, seq_id): a lookup is a binary search for the
+     * hash, then a comparison of the stored headers with that hash, in column order, against
+     * |header|. A hash collision therefore costs one more comparison, never a wrong answer,
+     * and the first header that compares equal is the first occurrence in column order. A
+     * hash table of views into the headers took about 40 bytes per header (21.5 GB for the
+     * 447.6M headers of AllTheBacteria) and a single thread to build.
      */
     std::optional<std::pair<Column, size_t>> find_header(std::string_view header) const;
     // Builds the reverse index now, if not built yet, and returns its number of distinct
     // headers: the server builds it when the index is loaded, so that no request pays it (on
-    // refseq33m, 33M headers, a first header name took seconds inside a 1 s budget)
-    size_t build_header_index() const;
+    // refseq33m, 33M headers, a first header name took seconds inside a 1 s budget). The
+    // hashing and the sort run on |num_threads| threads (0: get_num_threads()). Throws
+    // std::length_error when the columns or the records of a column do not fit the index's
+    // 32-bit fields (check_header_index_limits).
+    size_t build_header_index(size_t num_threads = 0) const;
     // how many times this object built its reverse index (to test that it is built once)
     size_t num_header_index_builds() const;
+    // the bytes the reverse index holds (16 per header), 0 while it is not built
+    size_t header_index_bytes() const;
+
+    // The reverse index stores a column and a seq_id in 32 bits each: an index with more
+    // columns than kMaxHeaderIndexColumns, or a column with more sequences than
+    // kMaxHeaderIndexRecords, is refused with std::length_error, naming the limit, rather
+    // than indexed with truncated numbers
+    static constexpr uint64_t kMaxHeaderIndexColumns = uint64_t(1) << 32;
+    static constexpr uint64_t kMaxHeaderIndexRecords = uint64_t(1) << 32;
+    static void check_header_index_limits(uint64_t num_columns, uint64_t max_sequences);
+
+    // The hash of a header the reverse index sorts by. Two headers with equal hashes are
+    // told apart by their text, so the hash decides speed, never an answer: a test sets a
+    // weak one to force collisions. Setting it drops a built index.
+    using HeaderHash = uint64_t (*)(std::string_view header);
+    static uint64_t default_header_hash(std::string_view header);
+    void set_header_hash(HeaderHash hash);
+
+    // One occurrence of a header among several CoordToHeader objects (find_repeated_headers):
+    // the position of its object in the list passed, its column there and its seq_id
+    struct HeaderOccurrence {
+        size_t index;
+        Column column;
+        size_t seq_id;
+
+        bool operator==(const HeaderOccurrence &other) const {
+            return index == other.index && column == other.column && seq_id == other.seq_id;
+        }
+    };
+    /**
+     * The headers that occur more than once over |indexes|: in two of them, in two columns
+     * of one, or twice in one column. |callback|(header, count, listed) is called once per such
+     * header with its number of occurrences and the first |max_listed| of them, ordered by
+     * (index, column, seq_id); the headers come in the order of their hashes. Returns their
+     * number. Builds each object's reverse index if not built yet (on |num_threads| threads,
+     * as build_header_index), then merges the sorted arrays (a k-way merge over the objects'
+     * hashes): equal hashes are compared on the headers, so a hash collision is never
+     * reported as a repeat. A header repeated many times costs its count, not a list. Null
+     * entries hold no headers. |indexes| lists each object once: an object listed twice
+     * repeats every one of its headers (a caller with one object under several names, as a
+     * multi-graph server's pair under two names, passes it once). Every object must hash with
+     * the same function (std::invalid_argument).
+     */
+    static uint64_t find_repeated_headers(
+            const std::vector<const CoordToHeader*> &indexes,
+            const std::function<void(std::string_view header, uint64_t count,
+                                     const std::vector<HeaderOccurrence> &listed)> &callback,
+            size_t max_listed = std::numeric_limits<size_t>::max(),
+            size_t num_threads = 0);
 
     /**
      * The records of |headers| whose header repeats an earlier record's, in record order:
@@ -134,16 +195,20 @@ class CoordToHeader {
 
   private:
     struct HeaderIndex;
-    void build_header_index_locked() const;
+    // the reverse index, built now if not built yet: shared, so that a reader keeps the array
+    // it searches although set_header_hash() drops it meanwhile (load() is not thread-safe
+    // with readers: it replaces the headers the entries name, find_header)
+    std::shared_ptr<const HeaderIndex> header_index(size_t num_threads = 0) const;
 
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
 
-    // find_header(): keys are views into |headers_|, which only load() changes, and load()
-    // drops the index first
+    // find_header(): the entries name records of |headers_|, which only load() changes, and
+    // load() drops the index first
     mutable std::mutex header_index_mutex_;
-    mutable std::unique_ptr<const HeaderIndex> header_index_;
+    mutable std::shared_ptr<const HeaderIndex> header_index_;
     mutable size_t header_index_builds_ = 0;
+    HeaderHash header_hash_ = &default_header_hash;
 };
 
 } // namespace annot

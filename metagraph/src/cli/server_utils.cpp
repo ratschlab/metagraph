@@ -25,6 +25,7 @@
 #include <json/json.h>
 #include <server_http.hpp>
 
+#include "annotation/coord_to_header.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "graph/alignment/pattern_search.hpp"
@@ -1066,6 +1067,53 @@ ColumnOverlap column_overlap(const std::vector<std::vector<std::string>> &column
         i = j;
     }
     result.disjoint = !result.shared;
+    return result;
+}
+
+Json::Value headers_unique_json(const std::vector<HeaderPair> &pairs, size_t num_threads,
+                                size_t max_examples, size_t max_listed) {
+    std::vector<const annot::CoordToHeader*> indexes;
+    bool every_pair = true;
+    for (const HeaderPair &pair : pairs) {
+        indexes.push_back(pair.coord_to_header);
+        every_pair &= pair.coord_to_header != nullptr;
+    }
+    // the byte-smallest repeated headers, so that the examples do not depend on the hash
+    std::map<std::string, Json::Value> examples;
+    const uint64_t collisions = annot::CoordToHeader::find_repeated_headers(indexes,
+            [&](std::string_view header, uint64_t count,
+                const std::vector<annot::CoordToHeader::HeaderOccurrence> &listed) {
+                if (examples.size() == max_examples
+                        && (!max_examples || header >= examples.rbegin()->first)) {
+                    return;
+                }
+                Json::Value example;
+                example["header"] = std::string(header);
+                example["occurrences"] = Json::Value(static_cast<Json::UInt64>(count));
+                Json::Value occurrences(Json::arrayValue);
+                for (const auto &o : listed) {
+                    const HeaderPair &pair = pairs[o.index];
+                    Json::Value p;
+                    p["graph"] = pair.graph;
+                    p["graph_path"] = pair.graph_path;
+                    p["annotation_path"] = pair.annotation_path;
+                    p["column"] = pair.columns && o.column < pair.columns->size()
+                            ? Json::Value((*pair.columns)[o.column])
+                            : Json::Value();
+                    occurrences.append(std::move(p));
+                }
+                example["pairs"] = std::move(occurrences);
+                examples[std::string(header)] = std::move(example);
+                if (examples.size() > max_examples)
+                    examples.erase(std::prev(examples.end()));
+            }, max_listed, num_threads);
+    Json::Value result;
+    result["value"] = every_pair ? Json::Value(collisions == 0) : Json::Value();
+    result["collisions"] = Json::Value(static_cast<Json::UInt64>(collisions));
+    result["examples"] = Json::Value(Json::arrayValue);
+    for (auto &[header, example] : examples) {
+        result["examples"].append(std::move(example));
+    }
     return result;
 }
 

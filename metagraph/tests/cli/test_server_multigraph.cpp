@@ -603,6 +603,168 @@ TEST(MultiGraphColumns, OverlapIsTheNaiveOne) {
 }
 
 
+// ---------------------------------------------------------------- headers_unique (E22)
+
+namespace {
+
+std::unique_ptr<annot::CoordToHeader>
+record_mapping(const std::vector<std::vector<std::string>> &headers) {
+    std::vector<std::vector<uint64_t>> num_kmers;
+    for (const auto &column : headers) {
+        num_kmers.emplace_back(column.size(), 1);
+    }
+    return std::make_unique<annot::CoordToHeader>(
+            std::vector<std::vector<std::string>>(headers), std::move(num_kmers));
+}
+
+HeaderPair header_pair(const std::string &name, const annot::CoordToHeader *coord_to_header,
+                       const std::vector<std::string> *columns) {
+    return { name, "/" + name + ".dbg", "/" + name + ".annodbg", coord_to_header, columns };
+}
+
+// |value| as a client reads it: written and parsed again, so that its numbers compare with
+// parse()'s whatever their C++ type
+Json::Value as_read(const Json::Value &value) {
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return parse(Json::writeString(writer, value));
+}
+
+Json::Value occurrence(const std::string &name, const std::string &column) {
+    Json::Value o;
+    o["graph"] = name;
+    o["graph_path"] = "/" + name + ".dbg";
+    o["annotation_path"] = "/" + name + ".annodbg";
+    o["column"] = column;
+    return o;
+}
+
+} // namespace
+
+// Unique headers over two pairs: true, no collision, no example
+TEST(HeadersUnique, UniqueHeadersAreCertified) {
+    const std::vector<std::string> a_columns { "a.fa", "b.fa" };
+    const std::vector<std::string> b_columns { "c.fa" };
+    auto a = record_mapping({ { "NC_1", "NC_2" }, { "NC_3" } });
+    auto b = record_mapping({ { "NZ_1", "NZ_2" } });
+    const Json::Value certificate = as_read(headers_unique_json({
+        header_pair("a", a.get(), &a_columns), header_pair("b", b.get(), &b_columns) }));
+    EXPECT_EQ(parse(R"({"value": true, "collisions": 0, "examples": []})"), certificate)
+            << certificate;
+    // a server without pairs, or with pairs without headers, has none twice
+    EXPECT_TRUE(headers_unique_json({})["value"].asBool());
+    auto empty = record_mapping({ {} });
+    EXPECT_TRUE(headers_unique_json({ header_pair("e", empty.get(), &b_columns) })["value"]
+                        .asBool());
+}
+
+// A header in two pairs, a header in two columns of one pair, and a header twice in one column
+// are each one collision; the examples name every occurrence: its pair's tags and its column
+TEST(HeadersUnique, RepeatsAcrossPairsAndColumnsAreCollisions) {
+    const std::vector<std::string> a_columns { "a.fa", "b.fa" };
+    const std::vector<std::string> b_columns { "c.fa" };
+    auto a = record_mapping({ { "NC_1", "NC_2", "dup" }, { "NC_3", "NC_2" } });
+    auto b = record_mapping({ { "NZ_1", "NC_1", "NZ_1" } });
+    const Json::Value certificate = as_read(headers_unique_json({
+        header_pair("a", a.get(), &a_columns), header_pair("b", b.get(), &b_columns) }));
+    Json::Value expected = parse(R"({"value": false, "collisions": 3, "examples": [
+        {"header": "NC_1", "occurrences": 2, "pairs": []},
+        {"header": "NC_2", "occurrences": 2, "pairs": []},
+        {"header": "NZ_1", "occurrences": 2, "pairs": []}]})");
+    expected["examples"][0]["pairs"].append(occurrence("a", "a.fa"));
+    expected["examples"][0]["pairs"].append(occurrence("b", "c.fa"));
+    expected["examples"][1]["pairs"].append(occurrence("a", "a.fa"));
+    expected["examples"][1]["pairs"].append(occurrence("a", "b.fa"));
+    expected["examples"][2]["pairs"].append(occurrence("b", "c.fa"));
+    expected["examples"][2]["pairs"].append(occurrence("b", "c.fa"));
+    EXPECT_EQ(expected, certificate) << certificate;
+
+    // one pair alone: its repeat across columns only
+    const Json::Value alone = headers_unique_json({ header_pair("a", a.get(), &a_columns) });
+    EXPECT_FALSE(alone["value"].asBool());
+    EXPECT_EQ(1u, alone["collisions"].asUInt64());
+    EXPECT_EQ("NC_2", alone["examples"][0]["header"].asString());
+
+    // a single-graph server's one pair: null tags, the column named
+    HeaderPair single { Json::Value(), Json::Value(), Json::Value(), b.get(), &b_columns };
+    const Json::Value one = headers_unique_json({ single });
+    ASSERT_EQ(1u, one["examples"].size()) << one;
+    Json::Value untagged;
+    untagged["graph"] = Json::Value();
+    untagged["graph_path"] = Json::Value();
+    untagged["annotation_path"] = Json::Value();
+    untagged["column"] = "c.fa";
+    EXPECT_EQ(untagged, one["examples"][0]["pairs"][0]) << one;
+}
+
+// A pair without a .seqs makes the value null (its labels are columns, no header is known);
+// the pairs that have one are still counted, so a repeat among them is reported
+TEST(HeadersUnique, APairWithoutRecordMappingMakesItUnknown) {
+    const std::vector<std::string> columns { "x.fa" };
+    auto a = record_mapping({ { "r1", "r2" } });
+    auto b = record_mapping({ { "r2" } });
+    Json::Value certificate = as_read(headers_unique_json({
+            header_pair("a", a.get(), &columns), header_pair("none", nullptr, &columns) }));
+    EXPECT_EQ(parse(R"({"value": null, "collisions": 0, "examples": []})"), certificate)
+            << certificate;
+    certificate = headers_unique_json({ header_pair("none", nullptr, &columns),
+                                        header_pair("a", a.get(), &columns),
+                                        header_pair("b", b.get(), &columns) });
+    EXPECT_TRUE(certificate["value"].isNull()) << certificate;
+    EXPECT_EQ(1u, certificate["collisions"].asUInt64());
+    ASSERT_EQ(1u, certificate["examples"].size());
+    EXPECT_EQ("a", certificate["examples"][0]["pairs"][0]["graph"].asString());
+    EXPECT_EQ("b", certificate["examples"][0]["pairs"][1]["graph"].asString());
+    EXPECT_TRUE(headers_unique_json({ header_pair("none", nullptr, &columns) })["value"]
+                        .isNull());
+}
+
+// The examples are the byte-smallest repeated headers, whatever order the hash finds them in,
+// at most |max_examples| of them, each listing its first |max_listed| occurrences beside their
+// count
+TEST(HeadersUnique, ExamplesAreTheSmallestHeadersAndBounded) {
+    const std::vector<std::string> columns { "x.fa", "y.fa" };
+    std::vector<std::string> first, second;
+    for (int i = 0; i < 40; ++i) {
+        first.push_back("h" + std::to_string(100 + i));
+        second.push_back("h" + std::to_string(139 - i));
+    }
+    second.push_back("many");
+    std::vector<std::string> third(30, "many");
+    auto a = record_mapping({ first, second });
+    auto b = record_mapping({ third });
+    const Json::Value certificate = headers_unique_json(
+            { header_pair("a", a.get(), &columns), header_pair("b", b.get(), &columns) }, 0,
+            10, 4);
+    EXPECT_FALSE(certificate["value"].asBool());
+    EXPECT_EQ(41u, certificate["collisions"].asUInt64());
+    ASSERT_EQ(10u, certificate["examples"].size());
+    for (int i = 0; i < 10; ++i) {
+        EXPECT_EQ("h" + std::to_string(100 + i),
+                  certificate["examples"][i]["header"].asString());
+        EXPECT_EQ(2u, certificate["examples"][i]["occurrences"].asUInt64());
+        EXPECT_EQ(2u, certificate["examples"][i]["pairs"].size());
+    }
+    // "many" (31 occurrences) listed with its first 4
+    const Json::Value few = headers_unique_json(
+            { header_pair("a", a.get(), &columns), header_pair("b", b.get(), &columns) }, 0,
+            1000, 4);
+    ASSERT_EQ(41u, few["examples"].size());
+    const Json::Value &many = few["examples"][40];
+    EXPECT_EQ("many", many["header"].asString());
+    EXPECT_EQ(31u, many["occurrences"].asUInt64());
+    ASSERT_EQ(4u, many["pairs"].size());
+    EXPECT_EQ(occurrence("a", "y.fa"), many["pairs"][0]);
+    EXPECT_EQ(occurrence("b", "x.fa"), many["pairs"][1]);
+    EXPECT_EQ(occurrence("b", "x.fa"), many["pairs"][3]);
+    // no example asked: the count alone
+    const Json::Value none = headers_unique_json(
+            { header_pair("a", a.get(), &columns), header_pair("b", b.get(), &columns) }, 0, 0);
+    EXPECT_EQ(41u, none["collisions"].asUInt64());
+    EXPECT_EQ(0u, none["examples"].size());
+}
+
+
 // ---------------------------------------------------------------- the mask's sampled check
 
 namespace {

@@ -2932,7 +2932,9 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
     (`SPEC-pattern-search.md` §10, §23, §24; a multi-graph server's without a graph). Both state `in_ram` and,
     in multi-graph mode, `graph_summary` and `max_graphs_without_selection` (both `null` in single-graph mode;
     below, multi-graph mode), and in both modes `max_request_body_mb` (below, the caps: the largest request body
-    the server reads, `null` when unlimited).
+    the server reads, `null` when unlimited) and `headers_unique` (E22: whether every sequence header names one
+    record; at the top level in single-graph mode, `null` while the index loads, and in `graph_summary` in
+    multi-graph mode; `SPEC-multigraph-envelope.md` §9).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose

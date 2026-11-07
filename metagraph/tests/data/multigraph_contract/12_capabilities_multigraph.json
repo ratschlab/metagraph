@@ -1,7 +1,7 @@
 {
  "route": "GET /capabilities",
  "status": 200,
- "note": "E3/E4/E9/E12/E20 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route. Clients switch on these, never by date.",
+ "note": "Illustrative graph_summary.headers_unique (E22, section 9): recorded on three fixture pairs served as bact_other, bact_pseudomonadota and inv_insecta (one header, acc2, in a column of each of the first two: false, one example), its pair tags rewritten to sample 12's r237 paths; r237's real value is read from staging's GET /capabilities after the deploy. A header label acc2 answers each pair's own first occurrence. E3/E4/E9/E12/E20/E22 advertised: composite_fp (C3, with its rule) beside graph_summary; the multigraph block lists the envelope routes, the selectors per route, the routes that read not_after_ms, finish_by_ms and request_id, and the registry route. Clients switch on these, never by date.",
  "body": {
   "algorithm_version": "traverse-0.2",
   "attempts": {
@@ -82,6 +82,30 @@
   ],
   "graph_summary": {
    "columns_disjoint": true,
+   "headers_unique": {
+    "collisions": 1,
+    "examples": [
+     {
+      "header": "acc2",
+      "occurrences": 2,
+      "pairs": [
+       {
+        "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",
+        "column": "a1.fa",
+        "graph": "bact_other",
+        "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg"
+       },
+       {
+        "annotation_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/annotation.row_diff_brwt_coord.annodbg",
+        "column": "c1.fa",
+        "graph": "bact_pseudomonadota",
+        "graph_path": "/scratch/nvme10/refseq_r237/bact_pseudomonadota/graph.dbg"
+       }
+      ]
+     }
+    ],
+    "value": false
+   },
    "pairs": [
     {
      "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg",

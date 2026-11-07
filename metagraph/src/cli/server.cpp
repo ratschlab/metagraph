@@ -516,15 +516,49 @@ Json::Value traverse_envelope_deadline(const Attempt &attempt) {
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
 // index loads rather than by the first request naming a header: on refseq33m (33M headers)
 // that request would spend seconds in it (9.3 s), inside its time budget and outside every
-// read timer
-static void build_header_index(const graph::AnnotatedDBG &index) {
+// read timer. Its sort runs on |num_threads| threads. An index whose columns or records exceed
+// the header index's 32-bit fields is not served: the server exits naming the limit.
+static void build_header_index(const graph::AnnotatedDBG &index, size_t num_threads) {
     const auto *coord_to_header = index.get_coord_to_header();
     if (!coord_to_header)
         return;
     Timer timer;
-    const size_t headers = coord_to_header->build_header_index();
-    logger->info("[Server] Sequence header index built: {} headers in {:.1f} s", headers,
-                 timer.elapsed());
+    try {
+        const size_t distinct = coord_to_header->build_header_index(num_threads);
+        // its entries (one per record) and the distinct headers among them: fewer when a
+        // header names several records (headers_unique, E22)
+        uint64_t entries = 0;
+        for (uint64_t col = 0; col < coord_to_header->num_columns(); ++col) {
+            entries += coord_to_header->num_sequences(col);
+        }
+        logger->info("[Server] Sequence header index built: {} entries, {} distinct headers, "
+                     "in {:.1f} s ({} MiB)", entries, distinct, timer.elapsed(),
+                     coord_to_header->header_index_bytes() >> 20);
+    } catch (const std::length_error &e) {
+        logger->error("[Server] {}", e.what());
+        std::exit(1);
+    }
+}
+
+// GET /capabilities' headers_unique (headers_unique_json) over |pairs|, logged with the time it
+// took: a merge of the pairs' header indexes, which the load has built
+static Json::Value headers_unique(const std::vector<HeaderPair> &pairs, size_t num_threads) {
+    Timer timer;
+    Json::Value certificate = headers_unique_json(pairs, num_threads);
+    const uint64_t collisions = certificate["collisions"].asUInt64();
+    if (certificate["value"].isNull()) {
+        logger->info("[Server] headers_unique: null, a pair has no .seqs ({} repeated headers "
+                     "among the pairs that have one), computed in {:.1f} s", collisions,
+                     timer.elapsed());
+    } else if (collisions) {
+        logger->warn("[Server] headers_unique: false, {} headers occur more than once (one of "
+                     "them: '{}'); a header label answers its first occurrence only. Computed "
+                     "in {:.1f} s", collisions, certificate["examples"][0]["header"].asString(),
+                     timer.elapsed());
+    } else {
+        logger->info("[Server] headers_unique: true, computed in {:.1f} s", timer.elapsed());
+    }
+    return certificate;
 }
 
 /**
@@ -612,6 +646,24 @@ static Json::Value multi_graph_summary(
     return summary;
 }
 
+// GET /capabilities' headers_unique of a multi-graph server: over its pairs, each once, tagged
+// with the first name that lists it in ordered_pairs' order
+static Json::Value multi_graph_headers_unique(
+        const GraphIndexes &indexes,
+        const VectorMap<GraphPair, std::unique_ptr<AnnotatedDBG>> &graphs_cache,
+        size_t num_threads) {
+    std::vector<HeaderPair> pairs;
+    std::set<GraphPair> seen;
+    for (const auto &[name, pair] : ordered_pairs(indexes, sorted_names(indexes))) {
+        if (!seen.insert(pair).second)
+            continue;
+        const AnnotatedDBG &index = *graphs_cache.at(pair);
+        pairs.push_back({ name, pair.first, pair.second, index.get_coord_to_header(),
+                          &index.get_annotator().get_label_encoder().get_labels() });
+    }
+    return headers_unique(pairs, num_threads);
+}
+
 int run_server(Config *config) {
     assert(config);
     // SIGTERM and SIGINT shut the server down promptly (class Shutdown); allocated for the
@@ -686,6 +738,8 @@ int run_server(Config *config) {
     Json::Value graph_summary;
     // and the identity of the indexes it serves together (GET /capabilities' composite_fp)
     Json::Value composite_fp;
+    // a single-graph server's headers_unique of GET /capabilities, set before its index is ready
+    Json::Value single_headers_unique;
 
     if (config->infbase_annotators.size() == 1) {
         assert(config->fnames.empty());
@@ -715,7 +769,13 @@ int run_server(Config *config) {
             logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
             // set before the future is ready, so every request sees it complete
             single_identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(*anno_graph));
-            build_header_index(*anno_graph);
+            build_header_index(*anno_graph, get_num_threads() * num_server_threads);
+            // the one pair, with null tags as a single-graph server's /search cuts
+            single_headers_unique = headers_unique(
+                    { { Json::Value(), Json::Value(), Json::Value(),
+                        anno_graph->get_coord_to_header(),
+                        &anno_graph->get_annotator().get_label_encoder().get_labels() } },
+                    get_num_threads() * num_server_threads);
             return anno_graph;
         });
     } else {
@@ -850,7 +910,7 @@ int run_server(Config *config) {
                                                   config_copy);
         }
         for (const auto &[pair, index] : graphs_cache) {
-            build_header_index(*index);
+            build_header_index(*index, get_num_threads() * num_server_threads);
         }
         // every response computed on a pair states its identity
         for (const auto &[pair, index] : graphs_cache) {
@@ -871,6 +931,8 @@ int run_server(Config *config) {
         logger->info("[Server] Composite fingerprint of the {} pairs: {}", graphs_cache.size(),
                      composite_fp.isNull() ? std::string("null (a pair has no manifest)")
                                            : composite_fp.asString());
+        graph_summary["headers_unique"] = multi_graph_headers_unique(
+                indexes, graphs_cache, get_num_threads() * num_server_threads);
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
         // Dynamic per-request loads (in_ram path) should always be in RAM.
@@ -2564,6 +2626,10 @@ int run_server(Config *config) {
             // per pair, so that a service learns a multi-graph server with one probe; null on a
             // single-graph server (pattern and GET /traverse/capabilities describe its graph)
             c["graph_summary"] = multi ? graph_summary : Json::Value();
+            // whether a header label names one record (E22): in graph_summary on a multi-graph
+            // server, here on a single-graph one (null while its index loads)
+            if (!multi)
+                c["headers_unique"] = c["ready"].asBool() ? single_headers_unique : Json::Value();
             // the threshold of /search's and /pattern's selection rule (a request without
             // `graphs`), so that a client sees it before a longer list refuses its requests
             c["max_graphs_without_selection"]

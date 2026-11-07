@@ -397,7 +397,10 @@ SCHEMA = {
     # HTTP status (no code for an unexpected failure)
     'pair_refusal': ['http_status', 'error', 'code', 'reason', 'usage'],
     'capabilities_pair': ['graph', 'graph_path'],
-    'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs'],
+    'graph_summary': ['columns_disjoint', 'shared_columns', 'pairs',
+                      # whether every sequence header names one record (E22,
+                      # SPEC-multigraph-envelope.md section 9; its members: HEADERS_UNIQUE)
+                      'headers_unique'],
     'graph_summary_pair': ['graph', 'graph_path', 'annotation_path', 'index_ns', 'index_fp', 'k',
                            'graph_mode', 'available', 'unavailable_reason', 'mask', 'counting',
                            'traversal'],
@@ -561,6 +564,11 @@ def spec_table_rows(text):
 # cutoff (SPEC-multigraph-envelope.md sections 1 and 4; not tables of SPEC-pattern-search.md)
 ENVELOPE_DEADLINE = ['not_after_ms', 'finish_by_ms', 'effective_deadline_at', 'cutoff_at']
 CUT_USAGE = ['state', 'started_at', 'elapsed_ms', 'cpu_ms', 'memory_bytes']
+# GET /capabilities' headers_unique, an example of a repeated header and one occurrence of it
+# (SPEC-multigraph-envelope.md section 9; not tables of SPEC-pattern-search.md)
+HEADERS_UNIQUE = ['value', 'collisions', 'examples']
+HEADERS_UNIQUE_EXAMPLE = ['header', 'occurrences', 'pairs']
+HEADERS_UNIQUE_OCCURRENCE = ['graph', 'graph_path', 'annotation_path', 'column']
 
 
 def spec_tables(text):
@@ -3670,11 +3678,49 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok(doc['max_request_body_mb'] is None
                      or (is_int(doc['max_request_body_mb']) and doc['max_request_body_mb'] >= 1),
                      'max_request_body_mb', 'an integer of at least 1, or null')
+            def headers_unique(h, path):
+                # SPEC-multigraph-envelope.md section 9: true, false or null (a pair without
+                # its .seqs), the repeated headers counted, at most 10 examples of at most 10
+                # occurrences each, the byte-smallest headers in byte order; a single-graph
+                # server's occurrences carry null pair tags
+                check.keys(h, HEADERS_UNIQUE, path)
+                check.ok(h['value'] in (True, False, None), path + '.value')
+                check.ok(is_int(h['collisions']) and h['collisions'] >= 0,
+                         path + '.collisions')
+                check.ok(isinstance(h['examples'], list)
+                         and len(h['examples']) == min(h['collisions'], 10),
+                         path + '.examples', 'min(collisions, 10) examples')
+                check.ok(h['value'] is not True or h['collisions'] == 0, path,
+                         'true only without a repeat')
+                check.ok(h['value'] is not False or h['collisions'] > 0, path,
+                         'false only with a repeat')
+                headers = [e.get('header') for e in h['examples']]
+                check.ok(all(isinstance(x, str) for x in headers)
+                         and [x.encode() for x in headers] == sorted(x.encode() for x in headers),
+                         path + '.examples', 'the headers in byte order')
+                for i, e in enumerate(h['examples']):
+                    ep = f'{path}.examples[{i}]'
+                    check.keys(e, HEADERS_UNIQUE_EXAMPLE, ep)
+                    check.ok(is_int(e['occurrences']) and e['occurrences'] >= 2
+                             and 2 <= len(e['pairs']) <= min(e['occurrences'], 10),
+                             ep, 'a repeat, at most 10 occurrences listed')
+                    for j, o in enumerate(e['pairs']):
+                        check.keys(o, HEADERS_UNIQUE_OCCURRENCE, f'{ep}.pairs[{j}]')
+                        check.ok(isinstance(o['column'], str), f'{ep}.pairs[{j}].column')
+                        check.ok(all((o[t] is None) is (not multi)
+                                     for t in ('graph', 'graph_path', 'annotation_path')),
+                                 f'{ep}.pairs[{j}]', 'the pair tags, null on one graph')
+
             if not multi:
                 check.ok(doc['graph_summary'] is None, 'graph_summary', 'null on one graph')
                 check.ok(doc['max_graphs_without_selection'] is None,
                          'max_graphs_without_selection', 'null on one graph')
+                # a loaded single-graph server states it at the top level
+                check.ok('headers_unique' in doc, 'headers_unique', 'at the top level')
+                headers_unique(doc['headers_unique'], 'headers_unique')
                 return
+            check.ok('headers_unique' not in doc, 'headers_unique',
+                     'in graph_summary only on a multi-graph server')
             # SPEC §24.1: the threshold of the selection rule (a request without `graphs`
             # queries every name of a list of at most that many), the server flag, at least 1
             check.ok(is_int(doc['max_graphs_without_selection'])
@@ -3684,6 +3730,7 @@ class TestPatternFixtures(unittest.TestCase):
             # of it, and whether their columns are disjoint
             summary = doc['graph_summary']
             check.keys(summary, SCHEMA['graph_summary'], 'graph_summary')
+            headers_unique(summary['headers_unique'], 'graph_summary.headers_unique')
             check.ok(isinstance(summary['columns_disjoint'], bool)
                      and is_int(summary['shared_columns'])
                      and summary['columns_disjoint'] is (summary['shared_columns'] == 0),
@@ -4119,6 +4166,78 @@ class TestPatternFixtures(unittest.TestCase):
             ('pattern_capabilities_multi_graph', lambda d: d.update(graph='x'), 'the name'),
             ('pattern_capabilities_multi_graph_no_graph', lambda d: d.pop('graph'),
              'the pair named'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                run(name)
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+
+    def test_headers_unique_refuses_what_e22_never_answers(self):
+        """SPEC-multigraph-envelope.md section 9: GET /capabilities' headers_unique on both
+        kinds of server; each rule refuses a document that breaks it -- the member missing at a
+        single-graph server's top level or present at a multi-graph server's, a member or a
+        field of an example missing, a value against its collisions, the examples against the
+        collisions, their order or an example that repeats nothing, and a pair tag on a
+        single-graph server."""
+        def run(name, mutate=None):
+            doc = copy.deepcopy(self.bodies[name][1])
+            if mutate:
+                mutate(doc)
+            self.capabilities_document(Checker(Raising(), name), self.fixtures[name], doc)
+
+        def member(**fields):
+            def m(doc):
+                doc['headers_unique'].update(fields)
+            return m
+
+        def example(**fields):
+            def m(doc):
+                doc['headers_unique']['examples'][0].update(fields)
+            return m
+
+        def occurrence(i=0, drop=None, **fields):
+            def m(doc):
+                o = doc['headers_unique']['examples'][0]['pairs'][i]
+                o.update(fields)
+                if drop:
+                    o.pop(drop)
+            return m
+
+        def smaller_example_last(doc):
+            h = doc['headers_unique']
+            h['examples'].append(dict(copy.deepcopy(h['examples'][0]), header='a'))
+            h['collisions'] = 2
+
+        repeated = 'capabilities_repeated_headers'
+        cases = [
+            ('capabilities', lambda d: d.pop('headers_unique'), 'at the top level'),
+            ('capabilities', member(value=False), 'false only with a repeat'),
+            ('capabilities', member(value='true'), r'headers_unique\.value'),
+            ('capabilities', member(collisions=-1), r'headers_unique\.collisions'),
+            ('capabilities', lambda d: d['headers_unique'].pop('examples'), 'fields'),
+            ('capabilities_representation_unsupported', member(collisions=1),
+             r'min\(collisions, 10\)'),
+            ('capabilities_multi_graph',
+             lambda d: d.update(headers_unique=d['graph_summary']['headers_unique']),
+             'in graph_summary only'),
+            ('capabilities_multi_graph',
+             lambda d: d['graph_summary']['headers_unique'].update(value=False),
+             'false only with a repeat'),
+            ('capabilities_multi_graph', lambda d: d['graph_summary'].pop('headers_unique'),
+             'fields'),
+            (repeated, member(value=True), 'true only without a repeat'),
+            (repeated, member(collisions=2), r'min\(collisions, 10\)'),
+            (repeated, example(occurrences=1), 'a repeat'),
+            (repeated, lambda d: d['headers_unique']['examples'][0]['pairs'].pop(), 'a repeat'),
+            (repeated, example(header=7), 'byte order'),
+            (repeated, smaller_example_last, 'byte order'),
+            (repeated, lambda d: d['headers_unique']['examples'][0].pop('occurrences'),
+             'fields'),
+            (repeated, occurrence(graph='x'), 'null on one graph'),
+            (repeated, occurrence(i=1, annotation_path='/a.annodbg'), 'null on one graph'),
+            (repeated, occurrence(drop='column'), 'fields'),
+            (repeated, occurrence(column=None), r'\.column'),
         ]
         for name, mutate, says in cases:
             with self.subTest(fixture=name, says=says):

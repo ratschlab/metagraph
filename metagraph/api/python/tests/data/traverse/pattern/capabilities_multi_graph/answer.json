@@ -50,7 +50,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "fac021dbd33d53f8",
+  "server_instance": "b3f7b6082fdb907c",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -80,6 +80,11 @@
  ],
  "graph_summary": {
   "columns_disjoint": true,
+  "headers_unique": {
+   "collisions": 0,
+   "examples": [],
+   "value": true
+  },
   "pairs": [
    {
     "annotation_path": "{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg",
@@ -412,5 +417,5 @@
   "traverse_capabilities": "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
  },
  "schema_version": 1,
- "server_instance": "fac021dbd33d53f8"
+ "server_instance": "b3f7b6082fdb907c"
 }

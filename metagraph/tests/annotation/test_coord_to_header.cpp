@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <map>
+#include <random>
+#include <thread>
+
 #include "../test_helpers.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "graph/alignment/alignment.hpp"
@@ -249,6 +254,444 @@ TEST(CoordToHeader, FindDuplicateHeadersNamesEveryRepeatAgainstTheFirst) {
     EXPECT_EQ(std::make_pair(CoordToHeader::Column(0), size_t(0)), *cth.find_header("a"));
     EXPECT_EQ(std::make_pair(CoordToHeader::Column(0), size_t(1)), *cth.find_header("b"));
     EXPECT_EQ(5u, cth.build_header_index());
+}
+
+// The header index (find_header): a sorted array of (hash, column, seq_id), searched by hash
+// and settled by comparing the headers. Every test below holds for any hash function; the weak
+// ones force the collisions a 64-bit hash makes rare.
+
+// every header to one hash: one run of equal hashes, every lookup settled by the text
+uint64_t constant_hash(std::string_view) { return 7; }
+// the largest hash: the last run of the array, where a merge must still end
+uint64_t max_hash(std::string_view) { return std::numeric_limits<uint64_t>::max(); }
+// a few distinct hashes, each shared by many headers
+uint64_t length_hash(std::string_view header) { return header.size(); }
+// a hash that differs from the others, to merge with
+uint64_t first_byte_hash(std::string_view header) {
+    return header.empty() ? 0 : static_cast<unsigned char>(header[0]);
+}
+// 61 hashes over many headers: runs long enough to collide often, short enough to search
+uint64_t weak_hash(std::string_view header) {
+    return CoordToHeader::default_header_hash(header) % 61;
+}
+
+// what find_header must answer: the first occurrence in column order, each column in seq_id
+// order
+std::map<std::string, std::pair<CoordToHeader::Column, size_t>>
+first_occurrences(const std::vector<std::vector<std::string>> &headers) {
+    std::map<std::string, std::pair<CoordToHeader::Column, size_t>> first;
+    for (size_t col = 0; col < headers.size(); ++col) {
+        for (size_t s = 0; s < headers[col].size(); ++s) {
+            first.emplace(headers[col][s], std::make_pair(CoordToHeader::Column(col), s));
+        }
+    }
+    return first;
+}
+
+CoordToHeader make_cth(const std::vector<std::vector<std::string>> &headers) {
+    std::vector<std::vector<uint64_t>> num_kmers;
+    for (const auto &column : headers) {
+        num_kmers.emplace_back(column.size(), 1);
+    }
+    return CoordToHeader(std::vector<std::vector<std::string>>(headers), std::move(num_kmers));
+}
+
+std::unique_ptr<CoordToHeader> new_cth(const std::vector<std::vector<std::string>> &headers) {
+    std::vector<std::vector<uint64_t>> num_kmers;
+    for (const auto &column : headers) {
+        num_kmers.emplace_back(column.size(), 1);
+    }
+    return std::make_unique<CoordToHeader>(std::vector<std::vector<std::string>>(headers),
+                                           std::move(num_kmers));
+}
+
+void expect_index_answers(const CoordToHeader &cth,
+                          const std::vector<std::vector<std::string>> &headers,
+                          const std::vector<std::string> &absent) {
+    const auto first = first_occurrences(headers);
+    for (const auto &[header, where] : first) {
+        auto found = cth.find_header(header);
+        ASSERT_TRUE(found) << header;
+        EXPECT_EQ(where, *found) << header;
+    }
+    for (const std::string &header : absent) {
+        ASSERT_EQ(0u, first.count(header)) << "not absent: " << header;
+        EXPECT_FALSE(cth.find_header(header)) << header;
+    }
+    EXPECT_EQ(first.size(), cth.build_header_index());
+}
+
+TEST(CoordToHeaderIndex, FindsEveryHeaderAndNoOther) {
+    const std::vector<std::vector<std::string>> headers {
+        { "NC_000913.3", "NZ_CP009072.1", "plasmid pX" },
+        {},
+        { "contig_1", std::string("bin\0ary", 7), "", "contig_10" },
+        { "x" },
+    };
+    auto cth = make_cth(headers);
+    EXPECT_EQ(0u, cth.header_index_bytes());
+    expect_index_answers(cth, headers, { "NC_000913", "NC_000913.30", "contig_", "contig_100",
+                                         std::string("bin", 3), "X", " x", "plasmid" });
+    // 16 bytes per header, the empty header included
+    EXPECT_EQ(8u * 16, cth.header_index_bytes());
+    EXPECT_EQ(1u, cth.num_header_index_builds());
+
+    // an index without headers answers nothing
+    auto empty = make_cth({ {}, {} });
+    EXPECT_FALSE(empty.find_header(""));
+    EXPECT_FALSE(empty.find_header("x"));
+    EXPECT_EQ(0u, empty.build_header_index());
+    EXPECT_EQ(0u, empty.header_index_bytes());
+    CoordToHeader none;
+    EXPECT_FALSE(none.find_header("x"));
+    EXPECT_EQ(0u, none.build_header_index());
+}
+
+// A header in several columns, or twice in one column, answers its first occurrence in column
+// order: the earliest column, there the earliest record, whatever the records' positions in
+// the later columns
+TEST(CoordToHeaderIndex, DuplicatesAnswerTheFirstOccurrenceInColumnOrder) {
+    const std::vector<std::vector<std::string>> headers {
+        { "b", "c", "z" },
+        { "z", "a", "c" },
+        { "a", "d", "a" },
+        { "e", "z", "e" },
+    };
+    for (CoordToHeader::HeaderHash hash : { &CoordToHeader::default_header_hash, &constant_hash,
+                                            &max_hash, &length_hash }) {
+        auto cth = make_cth(headers);
+        cth.set_header_hash(hash);
+        using P = std::pair<CoordToHeader::Column, size_t>;
+        EXPECT_EQ(P(0, 2), *cth.find_header("z"));
+        EXPECT_EQ(P(1, 1), *cth.find_header("a"));
+        EXPECT_EQ(P(0, 1), *cth.find_header("c"));
+        EXPECT_EQ(P(2, 1), *cth.find_header("d"));
+        EXPECT_EQ(P(3, 0), *cth.find_header("e"));
+        EXPECT_FALSE(cth.find_header("f"));
+        EXPECT_EQ(6u, cth.build_header_index());
+    }
+}
+
+// Forced collisions: with every header on one hash, on the largest hash or on its length, every
+// lookup is still exact (present, absent, first occurrence), and the number of distinct
+// headers is counted on the headers, not on the hashes
+TEST(CoordToHeaderIndex, HashCollisionsAreSettledByTheHeaders) {
+    const std::vector<std::vector<std::string>> headers {
+        { "aa", "bb", "cc", "a" },
+        { "dd", "bb", "b", "ee" },
+        { "aa", "c", "ff", "" },
+    };
+    for (CoordToHeader::HeaderHash hash : { &constant_hash, &max_hash, &length_hash,
+                                            &first_byte_hash }) {
+        auto cth = make_cth(headers);
+        cth.set_header_hash(hash);
+        expect_index_answers(cth, headers, { "ab", "ba", "d", "e", "aaa", "gg", "f" });
+    }
+}
+
+// Setting the hash drops a built index (it is sorted by the old one); a copy hashes as its
+// original and builds its own index
+TEST(CoordToHeaderIndex, SettingTheHashRebuildsTheIndex) {
+    auto cth = make_cth({ { "a", "b" }, { "c", "a" } });
+    EXPECT_EQ(3u, cth.build_header_index());
+    EXPECT_EQ(1u, cth.num_header_index_builds());
+    cth.set_header_hash(&constant_hash);
+    EXPECT_EQ(0u, cth.header_index_bytes());
+    EXPECT_EQ(std::make_pair(CoordToHeader::Column(1), size_t(0)), *cth.find_header("c"));
+    EXPECT_EQ(2u, cth.num_header_index_builds());
+
+    CoordToHeader copy(cth);
+    EXPECT_EQ(0u, copy.num_header_index_builds());
+    EXPECT_EQ(std::make_pair(CoordToHeader::Column(0), size_t(0)), *copy.find_header("a"));
+    // the copy's index merges with the original's: both are sorted by constant_hash
+    size_t calls = 0;
+    EXPECT_EQ(3u, CoordToHeader::find_repeated_headers({ &cth, &copy },
+            [&](std::string_view, uint64_t, const auto &) { ++calls; }));
+    EXPECT_EQ(3u, calls);
+}
+
+// A larger index against the reference (a std::map of first occurrences), built on several
+// threads with the default hash and with weak ones: random headers, repeated within and
+// across columns, columns of very different sizes, empty ones
+TEST(CoordToHeaderIndex, AgreesWithTheReferenceOnRandomHeaders) {
+    std::mt19937 rng(42);
+    std::vector<std::vector<std::string>> headers(37);
+    std::uniform_int_distribution<int> id(0, 40000);
+    for (size_t col = 0; col < headers.size(); ++col) {
+        const size_t n = col % 5 == 4 ? 0 : (col == 7 ? 100000 : rng() % 3000);
+        for (size_t s = 0; s < n; ++s) {
+            headers[col].push_back("seq_" + std::to_string(id(rng)));
+        }
+    }
+    std::vector<std::string> absent;
+    for (int i = 40001; i < 40100; ++i) {
+        absent.push_back("seq_" + std::to_string(i));
+    }
+    absent.push_back("seq_");
+    absent.push_back("");
+    for (CoordToHeader::HeaderHash hash : { &CoordToHeader::default_header_hash,
+                                            &weak_hash }) {
+        for (size_t threads : { 1, 4 }) {
+            auto cth = make_cth(headers);
+            cth.set_header_hash(hash);
+            const auto first = first_occurrences(headers);
+            EXPECT_EQ(first.size(), cth.build_header_index(threads));
+            expect_index_answers(cth, headers, absent);
+            EXPECT_EQ(1u, cth.num_header_index_builds());
+        }
+    }
+}
+
+// Concurrent first lookups build the index once, and every one of them is answered from it
+TEST(CoordToHeaderIndex, ConcurrentLookupsBuildItOnce) {
+    std::vector<std::vector<std::string>> headers(4);
+    for (size_t i = 0; i < 20000; ++i) {
+        headers[i % 4].push_back("h" + std::to_string(i));
+    }
+    auto cth = make_cth(headers);
+    std::atomic<size_t> wrong { 0 };
+    std::vector<std::thread> threads;
+    for (size_t t = 0; t < 8; ++t) {
+        threads.emplace_back([&, t]() {
+            for (size_t i = t; i < 20000; i += 97) {
+                auto found = cth.find_header("h" + std::to_string(i));
+                if (!found || found->first != i % 4 || found->second != i / 4)
+                    ++wrong;
+            }
+        });
+    }
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    EXPECT_EQ(0u, wrong.load());
+    EXPECT_EQ(1u, cth.num_header_index_builds());
+}
+
+// A reader holds the array it searches: while another thread swaps the hash again and again
+// (set_header_hash drops the index, the next lookup builds one sorted by the new hash), every
+// lookup is answered from one whole index, the one it took, and answers right
+TEST(CoordToHeaderIndex, ReadersKeepTheirIndexWhileTheHashIsSwapped) {
+    std::vector<std::vector<std::string>> headers(3);
+    for (size_t i = 0; i < 3000; ++i) {
+        headers[i % 3].push_back("h" + std::to_string(i));
+    }
+    auto cth = make_cth(headers);
+    std::atomic<bool> done { false };
+    std::atomic<size_t> wrong { 0 };
+    std::atomic<size_t> lookups { 0 };
+    std::vector<std::thread> readers;
+    for (size_t t = 0; t < 4; ++t) {
+        readers.emplace_back([&, t]() {
+            for (size_t round = 0; !done || round == 0; ++round) {
+                for (size_t i = t; i < 3000; i += 41) {
+                    auto found = cth.find_header("h" + std::to_string(i));
+                    if (!found || found->first != i % 3 || found->second != i / 3)
+                        ++wrong;
+                    if (cth.find_header("h" + std::to_string(3000 + i)))
+                        ++wrong;
+                    lookups += 2;
+                }
+            }
+        });
+    }
+    const std::vector<CoordToHeader::HeaderHash> hashes {
+        &weak_hash, &CoordToHeader::default_header_hash, &length_hash, &first_byte_hash };
+    for (size_t swap = 0; swap < 200; ++swap) {
+        cth.set_header_hash(hashes[swap % hashes.size()]);
+        // a lookup between swaps, so that each hash's index is built and read
+        auto found = cth.find_header("h" + std::to_string(swap));
+        if (!found || found->first != swap % 3 || found->second != swap / 3)
+            ++wrong;
+    }
+    done = true;
+    for (auto &reader : readers) {
+        reader.join();
+    }
+    EXPECT_EQ(0u, wrong.load());
+    EXPECT_LT(0u, lookups.load());
+    EXPECT_LE(200u, cth.num_header_index_builds());
+    // the last hash's index answers as a fresh one
+    expect_index_answers(cth, headers, { "h3000", "h", "" });
+}
+
+// The index stores a column and a seq_id in 32 bits: up to 2^32 columns, and 2^32 sequences
+// in a column, fit; one more is refused, naming the limit
+TEST(CoordToHeaderIndex, RefusesWhatExceedsItsThirtyTwoBitFields) {
+    const uint64_t limit = uint64_t(1) << 32;
+    EXPECT_EQ(limit, CoordToHeader::kMaxHeaderIndexColumns);
+    EXPECT_EQ(limit, CoordToHeader::kMaxHeaderIndexRecords);
+    EXPECT_NO_THROW(CoordToHeader::check_header_index_limits(0, 0));
+    EXPECT_NO_THROW(CoordToHeader::check_header_index_limits(limit, limit));
+    EXPECT_THROW(CoordToHeader::check_header_index_limits(limit + 1, 1), std::length_error);
+    EXPECT_THROW(CoordToHeader::check_header_index_limits(1, limit + 1), std::length_error);
+    try {
+        CoordToHeader::check_header_index_limits(1, limit + 1);
+        FAIL() << "not refused";
+    } catch (const std::length_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("4294967297 sequences"))
+                << e.what();
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("limit of 4294967296"))
+                << e.what();
+    }
+    try {
+        CoordToHeader::check_header_index_limits(limit + 1, 0);
+        FAIL() << "not refused";
+    } catch (const std::length_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("4294967297 columns"))
+                << e.what();
+    }
+}
+
+// find_repeated_headers: the headers that occur more than once over several objects, each once
+// with every occurrence in (index, column, seq_id) order
+using Occurrences = std::vector<CoordToHeader::HeaderOccurrence>;
+std::map<std::string, Occurrences>
+repeated_headers(const std::vector<const CoordToHeader*> &indexes, uint64_t *count = nullptr) {
+    std::map<std::string, Occurrences> repeated;
+    const uint64_t n = CoordToHeader::find_repeated_headers(indexes,
+            [&](std::string_view header, uint64_t count, const Occurrences &occurrences) {
+                EXPECT_EQ(count, occurrences.size()) << header;
+                EXPECT_TRUE(repeated.emplace(std::string(header), occurrences).second)
+                        << "reported twice: " << header;
+            });
+    EXPECT_EQ(repeated.size(), n);
+    if (count)
+        *count = n;
+    return repeated;
+}
+
+TEST(CoordToHeaderRepeats, UniqueHeadersHaveNone) {
+    for (CoordToHeader::HeaderHash hash : { &CoordToHeader::default_header_hash, &constant_hash,
+                                            &max_hash, &length_hash }) {
+        auto a = new_cth({ { "a1", "a2" }, { "a3" } });
+        auto b = new_cth({ { "b1" }, {}, { "b2", "b3", "b44" } });
+        auto c = new_cth({});
+        a->set_header_hash(hash);
+        b->set_header_hash(hash);
+        c->set_header_hash(hash);
+        EXPECT_TRUE(repeated_headers({ a.get(), b.get(), c.get() }).empty());
+        EXPECT_TRUE(repeated_headers({ a.get() }).empty());
+        EXPECT_TRUE(repeated_headers({}).empty());
+    }
+}
+
+TEST(CoordToHeaderRepeats, NamesEveryRepeatWithAllItsOccurrences) {
+    using O = CoordToHeader::HeaderOccurrence;
+    for (CoordToHeader::HeaderHash hash : { &CoordToHeader::default_header_hash, &constant_hash,
+                                            &max_hash, &length_hash, &first_byte_hash }) {
+        // "x" across objects, "y" across the columns of one, "w" twice in one column, "v" in
+        // all three; "u" only once (in a collision with others under the weak hashes)
+        auto a = new_cth({ { "x", "y", "v" }, { "y", "w", "w" } });
+        auto b = new_cth({ { "v" }, { "z" } });
+        auto c = new_cth({ { "u", "x" }, { "v", "x" } });
+        for (auto *cth : { a.get(), b.get(), c.get() }) {
+            cth->set_header_hash(hash);
+        }
+        // a null entry holds no headers, and keeps the positions of the others
+        const auto repeated = repeated_headers({ a.get(), nullptr, b.get(), c.get() });
+        const std::map<std::string, Occurrences> expected {
+            { "x", { O { 0, 0, 0 }, O { 3, 0, 1 }, O { 3, 1, 1 } } },
+            { "y", { O { 0, 0, 1 }, O { 0, 1, 0 } } },
+            { "w", { O { 0, 1, 1 }, O { 0, 1, 2 } } },
+            { "v", { O { 0, 0, 2 }, O { 2, 0, 0 }, O { 3, 1, 0 } } },
+        };
+        EXPECT_EQ(expected.size(), repeated.size());
+        for (const auto &[header, occurrences] : expected) {
+            ASSERT_TRUE(repeated.count(header)) << header;
+            EXPECT_EQ(occurrences, repeated.at(header)) << header;
+        }
+        // each object alone: its own repeats only
+        EXPECT_EQ((std::vector<std::string>{ "w", "y" }),
+                  [&]() {
+                      std::vector<std::string> keys;
+                      for (const auto &[header, _] : repeated_headers({ a.get() })) {
+                          keys.push_back(header);
+                      }
+                      return keys;
+                  }());
+        EXPECT_EQ(1u, repeated_headers({ c.get() }).size());
+        EXPECT_TRUE(repeated_headers({ b.get() }).empty());
+    }
+}
+
+// The merge reads each object's index (building it once if needed) and refuses objects sorted
+// by different hashes
+TEST(CoordToHeaderRepeats, BuildsTheIndexesAndRefusesMixedHashes) {
+    auto a = new_cth({ { "x" } });
+    auto b = new_cth({ { "x" } });
+    EXPECT_EQ(1u, repeated_headers({ a.get(), b.get() }).size());
+    EXPECT_EQ(1u, a->num_header_index_builds());
+    EXPECT_EQ(1u, repeated_headers({ a.get(), b.get() }).size());
+    EXPECT_EQ(1u, b->num_header_index_builds());
+    b->set_header_hash(&length_hash);
+    EXPECT_THROW(CoordToHeader::find_repeated_headers({ a.get(), b.get() },
+                    [](std::string_view, uint64_t, const auto &) {}),
+                 std::invalid_argument);
+}
+
+// A header repeated in many records is counted in full and listed up to |max_listed|, its first
+// occurrences in (index, column, seq_id) order, in one object and over several
+TEST(CoordToHeaderRepeats, ListsTheFirstOccurrencesOfAFrequentHeader) {
+    using O = CoordToHeader::HeaderOccurrence;
+    for (CoordToHeader::HeaderHash hash : { &CoordToHeader::default_header_hash,
+                                            &constant_hash }) {
+        auto a = new_cth({ std::vector<std::string>(1000, "same"), { "same", "other" } });
+        auto b = new_cth({ { "other" }, std::vector<std::string>(5, "same") });
+        a->set_header_hash(hash);
+        b->set_header_hash(hash);
+        std::map<std::string, std::pair<uint64_t, Occurrences>> found;
+        const auto collect = [&](std::string_view header, uint64_t count,
+                                 const Occurrences &listed) {
+            found[std::string(header)] = { count, listed };
+        };
+        EXPECT_EQ(1u, CoordToHeader::find_repeated_headers({ a.get() }, collect, 3));
+        EXPECT_EQ(1001u, found.at("same").first);
+        EXPECT_EQ((Occurrences { O { 0, 0, 0 }, O { 0, 0, 1 }, O { 0, 0, 2 } }),
+                  found.at("same").second);
+        found.clear();
+        EXPECT_EQ(2u, CoordToHeader::find_repeated_headers({ b.get(), a.get() }, collect, 2));
+        EXPECT_EQ(1006u, found.at("same").first);
+        EXPECT_EQ((Occurrences { O { 0, 1, 0 }, O { 0, 1, 1 } }), found.at("same").second);
+        EXPECT_EQ(2u, found.at("other").first);
+        EXPECT_EQ((Occurrences { O { 0, 0, 0 }, O { 1, 1, 1 } }), found.at("other").second);
+        found.clear();
+        EXPECT_EQ(2u, CoordToHeader::find_repeated_headers({ b.get(), a.get() }, collect, 0));
+        EXPECT_TRUE(found.at("same").second.empty());
+    }
+}
+
+// Many objects with random headers against a reference count, with the default and a weak hash
+TEST(CoordToHeaderRepeats, AgreesWithTheReferenceOnRandomHeaders) {
+    std::mt19937 rng(7);
+    std::vector<std::vector<std::vector<std::string>>> all(9);
+    std::map<std::string, Occurrences> expected;
+    std::map<std::string, Occurrences> seen;
+    for (size_t i = 0; i < all.size(); ++i) {
+        all[i].resize(1 + rng() % 4);
+        for (size_t col = 0; col < all[i].size(); ++col) {
+            const size_t n = rng() % 500;
+            for (size_t s = 0; s < n; ++s) {
+                all[i][col].push_back("r" + std::to_string(rng() % 6000));
+                seen[all[i][col].back()].push_back({ i, static_cast<CoordToHeader::Column>(col), s });
+            }
+        }
+    }
+    for (const auto &[header, occurrences] : seen) {
+        if (occurrences.size() > 1)
+            expected.emplace(header, occurrences);
+    }
+    ASSERT_LT(10u, expected.size());
+    for (CoordToHeader::HeaderHash hash : { &CoordToHeader::default_header_hash,
+                                            &weak_hash, &length_hash }) {
+        std::vector<std::unique_ptr<CoordToHeader>> objects;
+        std::vector<const CoordToHeader*> pointers;
+        for (const auto &headers : all) {
+            objects.push_back(new_cth(headers));
+            objects.back()->set_header_hash(hash);
+            pointers.push_back(objects.back().get());
+        }
+        EXPECT_EQ(expected, repeated_headers(pointers));
+    }
 }
 
 TEST(CoordToHeader, MapSingleCoordConsistentWithBatch) {

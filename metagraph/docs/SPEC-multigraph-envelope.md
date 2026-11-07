@@ -266,4 +266,43 @@ capabilities probe (each entry of its envelope) states too, beside `max_memory_m
 without reading a pair. A seed the bound leaves unstarted is a result of the pair's entry (a failed result with
 `resource_stop.scope: "request"`, phase `not_started`, its `unknown_labels` stated as every result of the pair
 states them); the envelope is the one-entry envelope of a named `/traverse` as with any other result.
-Clients switch on these, never on dates.
+Its `graph_summary` states `headers_unique` (section 9). Clients switch on these, never on dates.
+
+## 9. headers_unique (E22)
+
+Whether every sequence header of a server names one record, so that a header label (a `.seqs` record name) selects
+one sequence of one pair. Computed once at start-up from the pairs' header indexes (a merge of their sorted hash
+arrays; equal hashes are confirmed on the header text, so a hash collision is never counted).
+
+- Multi-graph server: `GET /capabilities` `graph_summary.headers_unique`, over every pair as listed, each once: a
+  (graph_path, annotation_path) as the graph list spells it, as `composite_fp` (section 8) and
+  `graph_summary.columns_disjoint` count pairs. A pair listed under several names counts once and is tagged with the
+  first name in pair order; two spellings of one pair's paths are two pairs, whose headers then all repeat. There is
+  no top-level member.
+- Single-graph server: `GET /capabilities` `headers_unique` at the top level, over its one pair, with null pair
+  tags (as its `/search` cut); null while the index loads (`ready: false`).
+
+`{"value": true | false | null, "collisions": n, "examples": [{"header", "occurrences", "pairs": [{graph,
+graph_path, annotation_path, column}...]}...]}`:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `value` | bool or null | true: no header occurs twice; false: one does; null: a pair has no `.seqs` loaded (none beside its annotation, or the server runs with `--no-coord-mapping`): its labels are columns only, so the server cannot certify header labels |
+| `collisions` | int | the number of distinct headers that occur more than once: in two pairs, in two columns of one pair, or twice in one column. With `value` null it counts over the pairs that have a `.seqs` (a repeat among them is still reported) |
+| `examples` | [object] | up to 10 repeated headers, the byte-smallest ones (independent of the hash) |
+| `examples[].header` | string | the header |
+| `examples[].occurrences` | int | its number of records over the pairs |
+| `examples[].pairs` | [object] | its first 10 occurrences in pair order, then column order, then record order: `{graph, graph_path, annotation_path, column}`, `column` the column's label, as given to annotate; a header twice in one column lists that column twice |
+
+A header that occurs more than once is answered by its first occurrence: within a pair, the first in column order
+(`find_header`); a fan-out over pairs answers each pair's own first occurrence. `value: false` tells a client that a
+header label alone may not name the record it means. The server logs the certificate at start-up (`headers_unique:
+true | false | null`), a repeat as a warning naming one header. The certificate is all that E22 serves: `/search`
+rows keep their shape (no (pair, column, record) per row); such a fallback is later work, built only if a deployed
+index's certificate comes out false.
+
+Reference instances: sample 12 (illustrative: `false` on a multi-graph server, one header in two pairs) and the
+pattern fixtures (`api/python/tests/data/traverse/pattern/`, `SPEC-pattern-search.md` §11) `capabilities`
+(single-graph, `true`), `capabilities_repeated_headers` (single-graph, `false`: one header in both files of the pair,
+its occurrences with null pair tags), `capabilities_representation_unsupported` (`null`: the pair has no `.seqs`) and
+`capabilities_multi_graph` (`true`, in `graph_summary`).

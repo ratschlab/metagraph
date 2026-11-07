@@ -1,6 +1,12 @@
 #include "annotation/coord_to_header.hpp"
 
-#include <tsl/hopscotch_map.h>
+#include <algorithm>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <tuple>
+
+#include <ips4o.hpp>
 #include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
@@ -16,58 +22,348 @@ namespace annot {
 using Tuple = CoordToHeader::Tuple;
 using mtg::common::logger;
 
-// header -> (column, seq_id) of its first occurrence in column order
+// The reverse index of the headers (find_header): one entry of 16 bytes per header, sorted by
+// (hash, column, seq_id), so that the entries of one hash list its headers in column order
 struct CoordToHeader::HeaderIndex {
-    tsl::hopscotch_map<std::string_view, std::pair<Column, size_t>> map;
+    struct Entry {
+        uint64_t hash;
+        uint32_t column;
+        uint32_t seq_id;
+    };
+    static_assert(sizeof(Entry) == 16, "an entry is 16 bytes");
+
+    // not a std::vector: its value-initialisation would write every entry once more on one
+    // thread before the threads fill them
+    std::unique_ptr<Entry[]> entries;
+    size_t size = 0;
+    size_t num_distinct = 0;
+    // the hash the entries were sorted by
+    HeaderHash hash = nullptr;
+
+    const Entry* begin() const { return entries.get(); }
+    const Entry* end() const { return entries.get() + size; }
+    // the first entry with |hash|, or end()
+    const Entry* lower_bound(uint64_t hash) const {
+        return std::lower_bound(begin(), end(), hash,
+                                [](const Entry &e, uint64_t h) { return e.hash < h; });
+    }
 };
+
+namespace {
+
+// The number of distinct headers among entries of one hash. Nearly always one: the run is a
+// header repeated in several columns (all equal to the first), or a collision of 64-bit hashes,
+// whose few headers are then sorted to count them.
+template <class Entry, class HeaderOf>
+size_t count_distinct_in_run(const Entry *first, const Entry *last, const HeaderOf &header_of) {
+    const std::string_view head = header_of(*first);
+    if (std::all_of(first + 1, last, [&](const Entry &e) { return header_of(e) == head; }))
+        return 1;
+    std::vector<std::string_view> names;
+    names.reserve(last - first);
+    for (const Entry *e = first; e != last; ++e) {
+        names.push_back(header_of(*e));
+    }
+    std::sort(names.begin(), names.end());
+    return std::unique(names.begin(), names.end()) - names.begin();
+}
+
+} // namespace
 
 CoordToHeader::CoordToHeader() {}
 CoordToHeader::~CoordToHeader() {}
 
-// The index is never shared or carried over: its keys view the headers of the object that
-// built it, so a copy builds its own on first use
+// The index is never shared or carried over: its entries name the headers of the object that
+// built it, so a copy builds its own on first use (with the same hash)
 CoordToHeader::CoordToHeader(const CoordToHeader &other)
-      : headers_(other.headers_), coord_offsets_(other.coord_offsets_) {}
+      : headers_(other.headers_), coord_offsets_(other.coord_offsets_),
+        header_hash_(other.header_hash_) {}
 
-size_t CoordToHeader::build_header_index() const {
-    std::lock_guard<std::mutex> lock(header_index_mutex_);
-    build_header_index_locked();
-    return header_index_->map.size();
+uint64_t CoordToHeader::default_header_hash(std::string_view header) {
+    // std::hash of a string is 64 bits wide on the platforms built (libc++'s CityHash64,
+    // libstdc++'s 64-bit Murmur); a collision costs a string comparison, nothing else
+    static_assert(sizeof(size_t) == sizeof(uint64_t), "a 64-bit hash");
+    return std::hash<std::string_view>()(header);
 }
 
-void CoordToHeader::build_header_index_locked() const {
-    if (!header_index_) {
-        auto index = std::make_unique<HeaderIndex>();
-        size_t total = 0;
-        for (const auto &column : headers_) {
-            total += column.size();
-        }
-        index->map.reserve(total);
-        for (Column col = 0; col < headers_.size(); ++col) {
-            for (size_t s = 0; s < headers_[col].size(); ++s) {
-                index->map.try_emplace(std::string_view(headers_[col][s]), col, s);
-            }
-        }
-        logger->trace("Built header index with {} sequences in {} columns", total,
-                      headers_.size());
-        header_index_ = std::move(index);
-        header_index_builds_++;
+void CoordToHeader::set_header_hash(HeaderHash hash) {
+    assert(hash);
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    header_hash_ = hash;
+    header_index_.reset();
+}
+
+void CoordToHeader::check_header_index_limits(uint64_t num_columns, uint64_t max_sequences) {
+    if (num_columns > kMaxHeaderIndexColumns) {
+        throw std::length_error(fmt::format(
+                "Cannot index the sequence headers: {} columns exceed the header index's limit "
+                "of {} columns (a column is stored in 32 bits)",
+                num_columns, kMaxHeaderIndexColumns));
     }
+    if (max_sequences > kMaxHeaderIndexRecords) {
+        throw std::length_error(fmt::format(
+                "Cannot index the sequence headers: a column with {} sequences exceeds the "
+                "header index's limit of {} sequences per column (a sequence is stored in 32 bits)",
+                max_sequences, kMaxHeaderIndexRecords));
+    }
+}
+
+size_t CoordToHeader::build_header_index(size_t num_threads) const {
+    return header_index(num_threads)->num_distinct;
+}
+
+std::shared_ptr<const CoordToHeader::HeaderIndex>
+CoordToHeader::header_index(size_t num_threads) const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    if (header_index_)
+        return header_index_;
+
+    if (!num_threads)
+        num_threads = get_num_threads();
+    using Entry = HeaderIndex::Entry;
+    // offsets[c]: the entry of column c's first header
+    std::vector<uint64_t> offsets(headers_.size() + 1, 0);
+    uint64_t max_sequences = 0;
+    for (size_t col = 0; col < headers_.size(); ++col) {
+        offsets[col + 1] = offsets[col] + headers_[col].size();
+        max_sequences = std::max<uint64_t>(max_sequences, headers_[col].size());
+    }
+    check_header_index_limits(headers_.size(), max_sequences);
+
+    auto index = std::make_shared<HeaderIndex>();
+    index->hash = header_hash_;
+    index->size = offsets.back();
+    index->entries.reset(new Entry[index->size]);
+    Entry *entries = index->entries.get();
+    const HeaderHash hash = header_hash_;
+
+    // hashed in blocks of the flat order, not per column: an index of one column of 541M
+    // headers (UniParc) is hashed on every thread as well
+    constexpr uint64_t kBlock = uint64_t(1) << 16;
+    const uint64_t num_blocks = (index->size + kBlock - 1) / kBlock;
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t b = 0; b < num_blocks; ++b) {
+        const uint64_t first = b * kBlock;
+        const uint64_t last = std::min<uint64_t>(first + kBlock, index->size);
+        // the column holding entry |first|: the last whose first entry is at or before it
+        size_t col = std::upper_bound(offsets.begin(), offsets.end(), first)
+                        - offsets.begin() - 1;
+        for (uint64_t i = first; i < last; ++i) {
+            while (i >= offsets[col + 1]) {
+                ++col;
+            }
+            const uint64_t seq_id = i - offsets[col];
+            entries[i] = { hash(headers_[col][seq_id]), static_cast<uint32_t>(col),
+                           static_cast<uint32_t>(seq_id) };
+        }
+    }
+
+    ips4o::parallel::sort(entries, entries + index->size, [](const Entry &a, const Entry &b) {
+        return std::tie(a.hash, a.column, a.seq_id) < std::tie(b.hash, b.column, b.seq_id);
+    }, num_threads);
+
+    // the distinct headers: every run of one hash counted where it starts
+    const auto header_of = [&](const Entry &e) -> std::string_view {
+        return headers_[e.column][e.seq_id];
+    };
+    size_t num_distinct = 0;
+    #pragma omp parallel for num_threads(num_threads) schedule(static) reduction(+:num_distinct)
+    for (uint64_t i = 0; i < index->size; ++i) {
+        if (i && entries[i - 1].hash == entries[i].hash)
+            continue;
+        uint64_t j = i + 1;
+        while (j < index->size && entries[j].hash == entries[i].hash) {
+            ++j;
+        }
+        num_distinct += j == i + 1 ? 1 : count_distinct_in_run(entries + i, entries + j,
+                                                                 header_of);
+    }
+    index->num_distinct = num_distinct;
+
+    logger->trace("Built header index with {} sequences ({} distinct) in {} columns, {} bytes",
+                  index->size, num_distinct, headers_.size(), index->size * sizeof(Entry));
+    header_index_ = std::move(index);
+    header_index_builds_++;
+    return header_index_;
 }
 
 std::optional<std::pair<CoordToHeader::Column, size_t>>
 CoordToHeader::find_header(std::string_view header) const {
-    std::lock_guard<std::mutex> lock(header_index_mutex_);
-    build_header_index_locked();
-    auto it = header_index_->map.find(header);
-    if (it == header_index_->map.end())
-        return std::nullopt;
-    return it->second;
+    const std::shared_ptr<const HeaderIndex> index = header_index();
+    const uint64_t hash = index->hash(header);
+    // the entries of this hash in column order: the first whose header is |header| is its
+    // first occurrence
+    for (auto it = index->lower_bound(hash); it != index->end() && it->hash == hash; ++it) {
+        if (headers_[it->column][it->seq_id] == header)
+            return std::make_pair(Column(it->column), size_t(it->seq_id));
+    }
+    return std::nullopt;
 }
 
 size_t CoordToHeader::num_header_index_builds() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);
     return header_index_builds_;
+}
+
+size_t CoordToHeader::header_index_bytes() const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    return header_index_ ? header_index_->size * sizeof(HeaderIndex::Entry) : 0;
+}
+
+uint64_t CoordToHeader::find_repeated_headers(
+        const std::vector<const CoordToHeader*> &indexes,
+        const std::function<void(std::string_view, uint64_t,
+                                 const std::vector<HeaderOccurrence>&)> &callback,
+        size_t max_listed,
+        size_t num_threads) {
+    using Entry = HeaderIndex::Entry;
+    // each object's array, held for the merge (set_header_hash() cannot free it meanwhile;
+    // load() is not thread-safe with readers)
+    std::vector<std::shared_ptr<const HeaderIndex>> arrays(indexes.size());
+    HeaderHash hash = nullptr;
+    for (size_t i = 0; i < indexes.size(); ++i) {
+        if (!indexes[i])
+            continue;
+        arrays[i] = indexes[i]->header_index(num_threads);
+        if (hash && arrays[i]->hash != hash) {
+            throw std::invalid_argument("Cannot merge header indexes sorted by different "
+                                        "hashes");
+        }
+        hash = arrays[i]->hash;
+    }
+
+    // The entries of one hash: a span of entries per array holding it, in index order (each
+    // span in column order). Spans, not a list of entries, so that a header repeated in every
+    // record of a degenerate .seqs costs no copy of its occurrences.
+    struct Span {
+        size_t index;
+        const Entry *first;
+        const Entry *last;
+    };
+    std::vector<Span> group;
+    std::vector<HeaderOccurrence> listed;
+    uint64_t repeated = 0;
+    const auto header_of = [&](size_t index, const Entry &e) -> std::string_view {
+        return indexes[index]->headers_[e.column][e.seq_id];
+    };
+    // the repeats among the entries of one hash: those whose headers compare equal
+    const auto report = [&]() {
+        uint64_t count = 0;
+        for (const Span &span : group) {
+            count += span.last - span.first;
+        }
+        if (count < 2)
+            return;
+        const std::string_view head = header_of(group.front().index, *group.front().first);
+        const bool one_header = std::all_of(group.begin(), group.end(), [&](const Span &span) {
+            return std::all_of(span.first, span.last, [&](const Entry &e) {
+                return header_of(span.index, e) == head;
+            });
+        });
+        if (one_header) {
+            listed.clear();
+            for (const Span &span : group) {
+                for (const Entry *e = span.first; e != span.last && listed.size() < max_listed;
+                        ++e) {
+                    listed.push_back({ span.index, e->column, e->seq_id });
+                }
+            }
+            ++repeated;
+            callback(head, count, listed);
+            return;
+        }
+        // a collision of hashes: the headers sorted, each one's occurrences kept in their order
+        std::vector<std::pair<std::string_view, HeaderOccurrence>> all;
+        for (const Span &span : group) {
+            for (const Entry *e = span.first; e != span.last; ++e) {
+                all.emplace_back(header_of(span.index, *e),
+                                 HeaderOccurrence { span.index, e->column, e->seq_id });
+            }
+        }
+        std::stable_sort(all.begin(), all.end(), [](const auto &a, const auto &b) {
+            return a.first < b.first;
+        });
+        for (size_t a = 0; a < all.size(); ) {
+            size_t b = a + 1;
+            while (b < all.size() && all[b].first == all[a].first) {
+                ++b;
+            }
+            if (b - a > 1) {
+                listed.clear();
+                for (size_t o = a; o < b && listed.size() < max_listed; ++o) {
+                    listed.push_back(all[o].second);
+                }
+                ++repeated;
+                callback(all[a].first, b - a, listed);
+            }
+            a = b;
+        }
+    };
+
+    // the cursor of every non-empty array, in a min-heap by (its hash, its index), so that the
+    // arrays holding one hash are popped in index order
+    std::vector<const Entry*> cursor(indexes.size(), nullptr);
+    using Head = std::pair<uint64_t, size_t>;
+    std::vector<Head> heap;
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        if (arrays[i] && arrays[i]->size) {
+            cursor[i] = arrays[i]->begin();
+            heap.emplace_back(cursor[i]->hash, i);
+        }
+    }
+    const auto greater = std::greater<Head>();
+    std::make_heap(heap.begin(), heap.end(), greater);
+
+    while (!heap.empty()) {
+        std::pop_heap(heap.begin(), heap.end(), greater);
+        const size_t i = heap.back().second;
+        heap.pop_back();
+        // below the next array's hash, array i's entries are merged with no other's, and the
+        // last array left is merged with none: a single array (a single-graph server) is
+        // scanned without heap operations
+        const bool alone = heap.empty();
+        const uint64_t next = alone ? 0 : heap.front().first;
+        const Entry *end = arrays[i]->end();
+        const Entry *&it = cursor[i];
+        while (it != end && (alone || it->hash < next)) {
+            const Entry *run = it;
+            while (++it != end && it->hash == run->hash) {}
+            if (it - run > 1) {
+                group.assign(1, Span { i, run, it });
+                report();
+            }
+        }
+        if (it == end)
+            continue;
+        if (it->hash > next) {
+            heap.emplace_back(it->hash, i);
+            std::push_heap(heap.begin(), heap.end(), greater);
+            continue;
+        }
+        // the hash |next| is held by array i and by others: every array's entries of it,
+        // gathered in index order (the heap orders equal hashes by index)
+        const uint64_t h = next;
+        group.clear();
+        heap.emplace_back(h, i);
+        std::push_heap(heap.begin(), heap.end(), greater);
+        while (!heap.empty() && heap.front().first == h) {
+            std::pop_heap(heap.begin(), heap.end(), greater);
+            const size_t j = heap.back().second;
+            heap.pop_back();
+            const Entry *&jt = cursor[j];
+            const Entry *run = jt;
+            while (jt != arrays[j]->end() && jt->hash == h) {
+                ++jt;
+            }
+            group.push_back(Span { j, run, jt });
+            if (jt != arrays[j]->end()) {
+                heap.emplace_back(jt->hash, j);
+                std::push_heap(heap.begin(), heap.end(), greater);
+            }
+        }
+        report();
+    }
+    return repeated;
 }
 
 namespace {
