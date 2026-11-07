@@ -467,6 +467,53 @@ TEST(CoordToHeaderIndex, ConcurrentLookupsBuildItOnce) {
     EXPECT_EQ(1u, cth.num_header_index_builds());
 }
 
+// A reader holds the array it searches: while another thread swaps the hash again and again
+// (set_header_hash drops the index, the next lookup builds one sorted by the new hash), every
+// lookup is answered from one whole index, the one it took, and answers right
+TEST(CoordToHeaderIndex, ReadersKeepTheirIndexWhileTheHashIsSwapped) {
+    std::vector<std::vector<std::string>> headers(3);
+    for (size_t i = 0; i < 3000; ++i) {
+        headers[i % 3].push_back("h" + std::to_string(i));
+    }
+    auto cth = make_cth(headers);
+    std::atomic<bool> done { false };
+    std::atomic<size_t> wrong { 0 };
+    std::atomic<size_t> lookups { 0 };
+    std::vector<std::thread> readers;
+    for (size_t t = 0; t < 4; ++t) {
+        readers.emplace_back([&, t]() {
+            for (size_t round = 0; !done || round == 0; ++round) {
+                for (size_t i = t; i < 3000; i += 41) {
+                    auto found = cth.find_header("h" + std::to_string(i));
+                    if (!found || found->first != i % 3 || found->second != i / 3)
+                        ++wrong;
+                    if (cth.find_header("h" + std::to_string(3000 + i)))
+                        ++wrong;
+                    lookups += 2;
+                }
+            }
+        });
+    }
+    const std::vector<CoordToHeader::HeaderHash> hashes {
+        &weak_hash, &CoordToHeader::default_header_hash, &length_hash, &first_byte_hash };
+    for (size_t swap = 0; swap < 200; ++swap) {
+        cth.set_header_hash(hashes[swap % hashes.size()]);
+        // a lookup between swaps, so that each hash's index is built and read
+        auto found = cth.find_header("h" + std::to_string(swap));
+        if (!found || found->first != swap % 3 || found->second != swap / 3)
+            ++wrong;
+    }
+    done = true;
+    for (auto &reader : readers) {
+        reader.join();
+    }
+    EXPECT_EQ(0u, wrong.load());
+    EXPECT_LT(0u, lookups.load());
+    EXPECT_LE(200u, cth.num_header_index_builds());
+    // the last hash's index answers as a fresh one
+    expect_index_answers(cth, headers, { "h3000", "h", "" });
+}
+
 // The index stores a column and a seq_id in 32 bits: up to 2^32 columns, and 2^32 sequences
 // in a column, fit; one more is refused, naming the limit
 TEST(CoordToHeaderIndex, RefusesWhatExceedsItsThirtyTwoBitFields) {

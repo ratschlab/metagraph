@@ -4144,6 +4144,78 @@ class TestPatternFixtures(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, says):
                     run(name, mutate)
 
+    def test_headers_unique_refuses_what_e22_never_answers(self):
+        """SPEC-multigraph-envelope.md section 9: GET /capabilities' headers_unique on both
+        kinds of server; each rule refuses a document that breaks it -- the member missing at a
+        single-graph server's top level or present at a multi-graph server's, a member or a
+        field of an example missing, a value against its collisions, the examples against the
+        collisions, their order or an example that repeats nothing, and a pair tag on a
+        single-graph server."""
+        def run(name, mutate=None):
+            doc = copy.deepcopy(self.bodies[name][1])
+            if mutate:
+                mutate(doc)
+            self.capabilities_document(Checker(Raising(), name), self.fixtures[name], doc)
+
+        def member(**fields):
+            def m(doc):
+                doc['headers_unique'].update(fields)
+            return m
+
+        def example(**fields):
+            def m(doc):
+                doc['headers_unique']['examples'][0].update(fields)
+            return m
+
+        def occurrence(i=0, drop=None, **fields):
+            def m(doc):
+                o = doc['headers_unique']['examples'][0]['pairs'][i]
+                o.update(fields)
+                if drop:
+                    o.pop(drop)
+            return m
+
+        def smaller_example_last(doc):
+            h = doc['headers_unique']
+            h['examples'].append(dict(copy.deepcopy(h['examples'][0]), header='a'))
+            h['collisions'] = 2
+
+        repeated = 'capabilities_repeated_headers'
+        cases = [
+            ('capabilities', lambda d: d.pop('headers_unique'), 'at the top level'),
+            ('capabilities', member(value=False), 'false only with a repeat'),
+            ('capabilities', member(value='true'), r'headers_unique\.value'),
+            ('capabilities', member(collisions=-1), r'headers_unique\.collisions'),
+            ('capabilities', lambda d: d['headers_unique'].pop('examples'), 'fields'),
+            ('capabilities_representation_unsupported', member(collisions=1),
+             r'min\(collisions, 10\)'),
+            ('capabilities_multi_graph',
+             lambda d: d.update(headers_unique=d['graph_summary']['headers_unique']),
+             'in graph_summary only'),
+            ('capabilities_multi_graph',
+             lambda d: d['graph_summary']['headers_unique'].update(value=False),
+             'false only with a repeat'),
+            ('capabilities_multi_graph', lambda d: d['graph_summary'].pop('headers_unique'),
+             'fields'),
+            (repeated, member(value=True), 'true only without a repeat'),
+            (repeated, member(collisions=2), r'min\(collisions, 10\)'),
+            (repeated, example(occurrences=1), 'a repeat'),
+            (repeated, lambda d: d['headers_unique']['examples'][0]['pairs'].pop(), 'a repeat'),
+            (repeated, example(header=7), 'byte order'),
+            (repeated, smaller_example_last, 'byte order'),
+            (repeated, lambda d: d['headers_unique']['examples'][0].pop('occurrences'),
+             'fields'),
+            (repeated, occurrence(graph='x'), 'null on one graph'),
+            (repeated, occurrence(i=1, annotation_path='/a.annodbg'), 'null on one graph'),
+            (repeated, occurrence(drop='column'), 'fields'),
+            (repeated, occurrence(column=None), r'\.column'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                run(name)
+                with self.assertRaisesRegex(AssertionError, says):
+                    run(name, mutate)
+
     def test_requests_and_answers_agree(self):
         """What a fixture's request asks is what its answer states."""
         for name, f in self.fixtures.items():

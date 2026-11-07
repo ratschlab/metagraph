@@ -2535,6 +2535,43 @@ class TestHeadersUnique(TestingBase):
         ]}, certificate)
         self.assertIn('headers_unique: false, 2 headers occur more than once', log)
 
+    def test_single_graph_server_states_null_while_it_loads(self):
+        # e's annotation and .seqs (a repeated header: false once loaded) beside a graph that
+        # never loads, a FIFO nobody writes to (its loader blocks in open() for good, as
+        # test_traverse.py's test_sigterm_while_the_index_loads): GET /capabilities answers at
+        # once, ready false and headers_unique null, the member present
+        fifo = os.path.join(self.tempdir.name, 'never_loads.dbg')
+        if not os.path.exists(fifo):
+            os.mkfifo(fifo)
+        port = free_port()
+        log_path = os.path.join(self.tempdir.name, 'single_loading.log')
+        with open(log_path, 'w') as log:
+            process = subprocess.Popen(
+                shlex.split(METAGRAPH) + ['server_query', '-i', fifo, '-a', self.pairs['e'][1],
+                                          '--port', str(port), '--address', '127.0.0.1',
+                                          '-p', '2'],
+                stdout=log, stderr=subprocess.STDOUT)
+            try:
+                caps = None
+                for _ in range(300):
+                    self.assertIsNone(process.poll(), 'the server exited while loading')
+                    try:
+                        ret = requests.get(f'http://127.0.0.1:{port}/capabilities', timeout=2)
+                        if ret.ok:
+                            caps = ret.json()
+                            break
+                    except requests.exceptions.RequestException:
+                        pass
+                    time.sleep(0.1)
+                self.assertIsNotNone(caps, 'the server did not listen')
+                self.assertFalse(caps['ready'])
+                self.assertIn('headers_unique', caps)
+                self.assertIsNone(caps['headers_unique'])
+                self.assertIsNone(caps['graph_summary'])
+            finally:
+                process.kill()
+                process.wait()
+
     def test_the_reference_sample_states_it_as_a_server_does(self):
         # sample 12 of the contract (tests/data/multigraph_contract) states
         # graph_summary.headers_unique in a server's shape: false with one repeat across two
