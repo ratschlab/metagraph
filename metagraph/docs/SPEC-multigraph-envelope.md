@@ -195,7 +195,7 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   time or by count). An id that breaks the token rule is 400. `reason`
   on `/resolve` and `/pattern`: `answered` (200 written), `client_gone` (nothing written), `deadline` (503),
   `error` (any other status but 400, which leaves no entry).
-- The 404's `server_time_ms` (F3; integer, ms since the epoch) is the server's clock, the one every admission
+- The 404's `server_time_ms` (integer, ms since the epoch) is the server's clock, the one every admission
   compares `not_after_ms` with, read under the request registry's lock in the same critical section as the lookup
   that found no entry. An admission of an id reads that clock under a registry's lock, after its own lookup of the
   id: `/resolve` and `/pattern` under the request registry's, `/traverse` under the attempt registry's, which
@@ -209,9 +209,9 @@ The answer keeps its upstream shape (a list of `{seq_description, results, ...}`
   the request was sent to. It assumes that the server's wall clock does not step back between the lookup and a
   later admission. It says nothing about earlier runs: an id that ran and was dropped, or that a 400 freed, also
   answers 404. With `server_time_ms` <= `not_after_ms` the 404 proves nothing; the request may still be admitted.
-  The field's presence is the marker: absent in engines before F3, and a client then has no proof from the 404 (its
-  own clock rule applies). The expired 409's `server_time_ms` (section 4, since release 10) is unchanged: the clock
-  that admission read.
+  The field's presence is the marker: it is absent in a 404 from an engine without this guarantee, and a client
+  then has no proof from that 404 (its own clock rule applies). The expired 409's `server_time_ms` (section 4,
+  since release 10) is unchanged: the clock that admission read.
 - A client gone, or a connection lost, stops the work as before; the entry records the end (`reason:
   "client_gone"`, with usage). That holds for an error too: on `/resolve` and `/pattern` nothing is written to a
   client that left once the request has its entry, and the entry records `client_gone`; a delivered error stays
