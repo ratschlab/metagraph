@@ -180,11 +180,7 @@ bitmap_vector::bitmap_vector(std::initializer_list<bool> init)
 
 bitmap_vector::bitmap_vector(sdsl::bit_vector&& vector)
       : num_set_bits_(sdsl::util::cnt_one_bits(vector)),
-        bit_vector_(std::move(vector)) {
-    // Detach read-only mapped storage before mutation. Resizing to the same
-    // size preserves the allocation when the vector already owns its memory.
-    bit_vector_.resize(bit_vector_.size());
-}
+        bit_vector_(vector.is_mapped() ? sdsl::bit_vector(vector) : std::move(vector)) {}
 
 void bitmap_vector::set(uint64_t id, bool val) {
     if (bit_vector_[id] == val)
