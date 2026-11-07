@@ -4473,6 +4473,22 @@ class TestPatternRegression(TestingBase):
             caps['deadline_check'].pop('observed_window_s', None)
             return caps
 
+        def without_reserve_defaults(caps):
+            # the delivery reserve's default account per text byte, lowered by the final_bytes fix
+            # (E5b follow-up, train 1: json 30 -> 6, graphlet 50 -> 6, measured on accounts without
+            # the caches' allotments; SPEC-labeled-traversal-core.md §6.8): an intended change of
+            # a value, compared as stated here, the rest of the block as before
+            per = caps.get('attempts', {}).get('delivery_reserve', {}).get('account_per_text_byte')
+            if per is None:
+                return caps
+            if caps is b:
+                self.assertEqual({'graphlet': 6.0, 'json': 6.0}, per)
+            elif per != {'graphlet': 6.0, 'json': 6.0}:
+                # a base before the fix states the old defaults
+                self.assertEqual({'graphlet': 50.0, 'json': 30.0}, per)
+            caps['attempts']['delivery_reserve']['account_per_text_byte'] = None
+            return caps
+
         def only_gains(base, new, allowed, what):
             # every member of |base| is in |new|, and what |new| adds is documented
             self.assertLessEqual(set(base), set(new), what)
@@ -4482,6 +4498,8 @@ class TestPatternRegression(TestingBase):
         b = without_reworded(without_instance(self.new.get('capabilities').json()))
         without_poll_stride(a)
         without_poll_stride(b)
+        without_reserve_defaults(a)
+        without_reserve_defaults(b)
         # The documented gains, compared as sets: routes.requests (GET /requests/{request_id},
         # release 10, on every server); against a base before the pattern search also the
         # feature `pattern` with its routes and its blocks -- `pattern`, `resolve` (the block of
@@ -4529,6 +4547,8 @@ class TestPatternRegression(TestingBase):
         b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
         without_poll_stride(a)
         without_poll_stride(b)
+        without_reserve_defaults(a)
+        without_reserve_defaults(b)
         new_caps = self.new.get('capabilities').json()
         gains = {'discovery_trace_scale', 'max_request_memory_mb', 'max_concurrent'} | (
             set() if base_pattern else {'pattern', 'resolve', 'in_ram'})
