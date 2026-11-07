@@ -13,8 +13,6 @@ using namespace mtg::graph;
 
 using mtg::graph::boss::BOSS;
 
-const std::string filename = "./benchmark_graph.dbg";
-
 constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
 constexpr uint64_t PATH_SIZE = 10'000;
 
@@ -97,6 +95,21 @@ DEFINE_BOSS_BENCHMARK(select_last,         select_last,         get_last, num_se
 DEFINE_BOSS_BENCHMARK(pred_last,           pred_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
+
+
+// Include mask allocation in the measured operation.
+static void BM_BOSS_mark_sink_dummy_edges(benchmark::State &state) {
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
+
+    for (auto _ : state) {
+        sdsl::bit_vector mask(boss.num_edges() + 1, false);
+        uint64_t count = boss.mark_sink_dummy_edges(&mask);
+        benchmark::DoNotOptimize(count);
+        benchmark::ClobberMemory();
+    }
+}
+BENCHMARK(BM_BOSS_mark_sink_dummy_edges) -> Unit(benchmark::kMicrosecond);
 
 
 #define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE, RC_INDEX) \

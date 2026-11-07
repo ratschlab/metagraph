@@ -3,15 +3,15 @@
 Installation
 ============
 
-The core of MetaGraph is written in C++ and has been successfully tested on Linux and MacOS. In the
-following, we provide detailed instructions for setting up MetaGraph.
+MetaGraph runs on Linux and macOS. Install a Conda package for the DNA and protein
+executables, use Docker for an isolated environment, or build from source for other alphabets.
 
 Install with conda
 ------------------
 
-There are conda packages available on bioconda for both Linux and Mac OS X::
+Install the Bioconda package in your active environment::
 
-    conda install -c bioconda -c conda-forge metagraph
+    conda install -c conda-forge -c bioconda --strict-channel-priority metagraph
 
 The executables are called ``metagraph_DNA`` (with a ``metagraph`` symlink) and ``metagraph_Protein``.
 
@@ -42,9 +42,7 @@ To run the binary compiled for the `DNA5` or `Protein` alphabet, replace ``metag
     docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
         metagraph_Protein build -v -k 10 -o /mnt/graph /mnt/protein.fa
 
-As you can see, running MetaGraph from docker containers is very easy.
-The following command (or similar) is handy to see what directory is mounted in the
-container::
+Check the files available under ``/mnt`` inside the container::
 
     docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master ls /mnt
 
@@ -63,8 +61,8 @@ Prerequisites
 ^^^^^^^^^^^^^
 Before compiling MetaGraph, install the following dependencies:
 
-- cmake 3.10 or higher
-- GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang
+- cmake 3.19 or higher
+- GNU GCC, LLVM Clang, or AppleClang with a C++20-capable standard library
 - bzip2
 
 *Optional:*
@@ -79,46 +77,42 @@ Before compiling MetaGraph, install the following dependencies:
 
     .. group-tab:: AppleClang on MacOS
 
-        For compiling with **AppleClang**, the prerequisites can be installed as easy as::
+        Install the **AppleClang** build dependencies::
 
             brew install libomp cmake make bzip2 boost jemalloc automake autoconf libdeflate
 
 
     .. group-tab:: Ubuntu / Debian
 
-        For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
+        On **Ubuntu** or **Debian**, install the development packages below.
+        Use a release providing CMake 3.19+ and a C++20 compiler and standard library;
+        otherwise install a newer toolchain first::
 
-            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
+            sudo apt-get install g++ cmake libbz2-dev libjemalloc-dev libboost-all-dev automake autoconf libdeflate-dev liblzma-dev
 
 
     .. group-tab:: CentOS
 
-        For **CentOS** (8 or higher)::
+        On **CentOS**, first ensure CMake and the C++ toolchain meet the requirements
+        above; older distribution packages may need replacement::
 
             yum install cmake bzip2-devel jemalloc-devel boost-devel automake autoconf libdeflate
 
 
-    .. group-tab:: brew + GNU gcc
+    .. group-tab:: Homebrew on Linux (GNU GCC)
 
-        GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
+        On **Linux**, install the current GCC formula and build dependencies::
 
-            brew install gcc autoconf automake libtool cmake make libdeflate
-            [[ "$OSTYPE" == "darwin"* ]] \
-                && brew remove -f boost \
-                && brew install --cc=gcc-7 boost \
-                && brew install gcc@9
-            [[ "$OSTYPE" != "darwin"* ]] \
-                && brew install gcc@9 libomp \
-                && brew remove -f openssl@1.1 boost \
-                && brew install --cc=gcc-9 openssl@1.1 boost
+            brew install gcc libomp cmake make bzip2 boost jemalloc autoconf automake libtool libdeflate
 
-        Then, the following environment variables have to be set::
+        Set ``CC`` and ``CXX`` to the versioned compiler executables installed by
+        Homebrew before configuring CMake.
 
-            echo "\
-            # Use gcc-9 with cmake
-            export CC=\"\$(which gcc-9)\"
-            export CXX=\"\$(which g++-9)\"
-            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+        On **macOS**, use the AppleClang instructions above. Homebrew's macOS Boost
+        packages use libc++, while GNU GCC uses libstdc++. Choosing GCC therefore
+        requires building and installing Boost separately with that GCC toolchain.
+        See Homebrew's `C++ runtime compatibility guidance
+        <https://docs.brew.sh/C%2B%2B-Standard-Libraries>`_.
 
     .. group-tab:: brew + LLVM Clang
 
@@ -126,28 +120,25 @@ Before compiling MetaGraph, install the following dependencies:
 
             brew install llvm libomp autoconf automake libtool cmake make boost libdeflate
 
-        Then, the following environment variables have to be set::
+        Set these variables in the shell where you will run CMake::
 
-            echo "\
             # OpenMP
-            export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
-            export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
-            export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
+            export LDFLAGS="$LDFLAGS -L$(brew --prefix libomp)/lib"
+            export CPPFLAGS="$CPPFLAGS -I$(brew --prefix libomp)/include"
+            export CXXFLAGS="$CXXFLAGS -I$(brew --prefix libomp)/include"
             # Clang C++ flags
-            export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
-            export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
-            export CXXFLAGS=\"\$CXXFLAGS -stdlib=libc++\"
-            # Path to Clang
-            export PATH=\"$(brew --prefix llvm)/bin:\$PATH\"
-            # Use Clang with cmake
-            export CC=\"\$(which clang)\"
-            export CXX=\"\$(which clang++)\"
-            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+            export LDFLAGS="$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib"
+            export CPPFLAGS="$CPPFLAGS -I$(brew --prefix llvm)/include"
+            export CXXFLAGS="$CXXFLAGS -stdlib=libc++"
+            # Use Homebrew Clang with CMake
+            export PATH="$(brew --prefix llvm)/bin:$PATH"
+            export CC="$(command -v clang)"
+            export CXX="$(command -v clang++)"
 
 
 Compiling
 ^^^^^^^^^
-To compile MetaGraph, please follow these steps.
+Run these commands from the directory where you want to keep the source checkout.
 
 #. Clone the latest version of the code from the git repository::
 
@@ -187,10 +178,20 @@ When configuring via ``cmake .. <arguments>`` additional arguments can be provid
 - ``-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]`` -- build modes (``Release`` by default)
 - ``-DBUILD_STATIC=[ON|OFF]`` -- link statically (``OFF`` by default)
 - ``-DLINK_OPT=[ON|OFF]`` -- enable link time optimization (``OFF`` by default)
-- ``-DBUILD_KMC=[ON|OFF]`` -- compile the KMC executable (``ON`` by default)
-- ``-DWITH_AVX=[ON|OFF]`` -- compile with *avx* instructions (``ON`` by default, if available)
+- ``-DBUILD_KMC=[ON|OFF]`` -- compile the standalone KMC executable (``OFF`` by default; reading KMC files is always supported)
+- ``-DWITH_AVX=[ON|OFF]`` -- compile with *AVX2* instructions (``ON`` by default, if available)
 - ``-DWITH_MSSE42=[ON|OFF]`` -- compile with *msse4.2* instructions (``ON`` by default, if available)
 - ``-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]`` -- alphabet to use (``DNA`` by default)
+
+
+Logging
+-------
+
+Set ``SPDLOG_LEVEL`` to ``trace``, ``debug``, ``info``, ``warn``, ``error``,
+``critical``, or ``off`` to control logging. Values are case-insensitive;
+the default is ``info``. Empty values keep the default, and invalid values
+produce a warning and keep the default. An explicit ``-v`` or ``--verbose``
+overrides the environment setting and selects ``trace``.
 
 
 Install API

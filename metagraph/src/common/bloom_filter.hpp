@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <cmath>
+#include <span>
 
 #include <sdsl/int_vector.hpp>
 
@@ -48,7 +49,7 @@ class BloomFilter {
     /**
      * Insert a batch of elements into the Bloom filter by hash value
      */
-    void insert(const uint64_t *hashes_begin, const uint64_t *hashes_end);
+    void insert(std::span<const uint64_t> hashes);
 
     /**
      * Check an element for presence in the Bloom filter. Returns false if
@@ -61,20 +62,16 @@ class BloomFilter {
      * Check a batch of elements in the Bloom filter and call present_index_callback
      * for the correspoding indices for each present hash.
      */
-    void check(const uint64_t *hashes_begin,
-               const uint64_t *hashes_end,
+    void check(std::span<const uint64_t> hashes,
                const std::function<void(size_t)> &present_index_callback) const;
 
     /**
      * Check a batch of elements in the Bloom filter and report their
      * presence/absence.
      */
-    inline sdsl::bit_vector check(const uint64_t *hashes_begin,
-                                  const uint64_t *hashes_end) const {
-        assert(hashes_end >= hashes_begin);
-
-        sdsl::bit_vector presence(hashes_end - hashes_begin, false);
-        check(hashes_begin, hashes_end, [&](size_t i) { presence[i] = true; });
+    inline sdsl::bit_vector check(std::span<const uint64_t> hashes) const {
+        sdsl::bit_vector presence(hashes.size(), false);
+        check(hashes, [&](size_t i) { presence[i] = true; });
         return presence;
     }
 

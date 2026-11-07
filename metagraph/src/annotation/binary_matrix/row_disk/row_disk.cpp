@@ -12,7 +12,7 @@ namespace matrix {
 using mtg::common::logger;
 
 std::vector<BinaryMatrix::SetBitPositions>
-RowDisk::get_rows(const std::vector<Row> &row_ids) const {
+RowDisk::get_rows(std::span<const Row> row_ids) const {
     View view = get_view();
     std::vector<SetBitPositions> rows(row_ids.size());
     for (size_t i = 0; i < row_ids.size(); ++i) {

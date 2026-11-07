@@ -319,7 +319,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
 
         for (double q : config.count_quantiles) {
             if (q < 0. or q > 1.) {
-                logger->error("Count quantiles must be in interval [0, 1], got {}", q);
+                logger->error("--count-quantiles values must be in [0, 1]; received {}", q);
                 exit(1);
             }
             std::cout << fmt::format("\tQuantile({})", q);
@@ -541,12 +541,12 @@ int print_stats(Config *config) {
     };
 
     for (const auto &file : files) {
-        if (utils::ends_with(file, ".annodbg")) {
+        if (file.ends_with(".annodbg")) {
             annotation_stats(file);
             continue;
         }
 
-        if (utils::ends_with(file, annot::CoordToHeader::kExtension)) {
+        if (file.ends_with(annot::CoordToHeader::kExtension)) {
             print_coord_to_header_stats(file);
             continue;
         }

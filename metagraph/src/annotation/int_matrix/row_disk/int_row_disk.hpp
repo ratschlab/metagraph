@@ -26,11 +26,11 @@ class IntRowDisk : public BinaryMatrix, public IntMatrix {
     uint64_t num_rows() const { return num_rows_; }
 
     using BinaryMatrix::get_rows;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    std::vector<SetBitPositions> get_rows(std::span<const Row> rows) const;
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
 
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
                                           size_t num_threads = 1) const;
 
     bool load(std::istream &f);
@@ -74,7 +74,7 @@ class IntRowDisk : public BinaryMatrix, public IntMatrix {
         std::vector<Row> get_column(Column j) const;
 
         RowValues get_row_values(Row i) const;
-        std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;
+        std::vector<RowValues> get_row_values(std::span<const Row> row_ids) const;
 
       private:
         std::ifstream open_and_set_pos(const std::string filename, size_t offset) {

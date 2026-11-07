@@ -1,0 +1,40 @@
+name: Text rules
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  text-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Initialize writing rules
+        run: git submodule update --init -- tools/writing-rules
+      - name: Install pinned Vale and shared runner
+        shell: bash
+        run: |
+          curl --fail --location --retry 2 \
+            https://github.com/vale-cli/vale/releases/download/v3.26.0/vale_3.26.0_Linux_64-bit.tar.gz \
+            --output "$RUNNER_TEMP/vale.tar.gz"
+          printf '22aa69a556558e4a9dfc63c17030777383d8d3c48dcdfad655fa98e839d666ed  %s\n' "$RUNNER_TEMP/vale.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/vale-bin"
+          tar -xzf "$RUNNER_TEMP/vale.tar.gz" -C "$RUNNER_TEMP/vale-bin" vale
+          printf '%s\n' "$RUNNER_TEMP/vale-bin" >> "$GITHUB_PATH"
+          python -m pip install ./tools/writing-rules
+      - name: Install shared style package
+        run: |
+          mkdir -p .writing
+          writing-rules export-package .writing/WritingRules.zip
+          vale sync --no-global
+      - name: Check selected prose and diagnostics
+        run: writing-rules check

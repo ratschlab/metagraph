@@ -1,6 +1,8 @@
 #ifndef __ANNOTATION_BUFFER_HPP__
 #define __ANNOTATION_BUFFER_HPP__
 
+#include <deque>
+
 #include "alignment.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -12,6 +14,7 @@ namespace mtg {
 namespace graph {
 
 class CanonicalDBG;
+class DBGSuccinct;
 
 namespace align {
 
@@ -36,7 +39,8 @@ class AnnotationBuffer {
     bool has_coordinates() const { return multi_int_; }
 
     // Get the annotations and coordinates of a node if they have been fetched.
-    // The returned pointers are valid until next fetch_queued_annotations().
+    // The returned label pointer stays valid for the lifetime of the buffer.
+    // The coordinate pointer is valid until next fetch_queued_annotations().
     std::pair<const Columns*, const CoordinateSet*>
     get_labels_and_coords(node_index node) const;
 
@@ -59,13 +63,21 @@ class AnnotationBuffer {
         return it - column_sets_.begin();
     }
 
-    // Fetch a label set given its index returned by `cache_column_set()`
+    // Fetch a label set given its index returned by `cache_column_set()`.
+    // The reference stays valid when more column sets are cached later.
     inline const Columns& get_cached_column_set(size_t i) const {
         assert(i < column_sets_.size());
-        return column_sets_.data()[i];
+        return column_sets_.values_container()[i];
     }
 
   private:
+    // A source dummy k-mer continued by more real k-mers than this keeps an
+    // empty label set (the same as a seed locus with too many matches).
+    static constexpr size_t kMaxSourceDummyFanout = 16;
+
+    void resolve_source_dummy_labels(const DBGSuccinct &dbg_succ,
+                                     const std::vector<node_index> &nodes);
+
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
@@ -73,7 +85,10 @@ class AnnotationBuffer {
 
     // keep a unique set of annotation rows
     // the first element is the empty label set
-    VectorSet<Columns, utils::VectorHash> column_sets_;
+    // Stored in a deque, so that inserting new column sets never moves the
+    // existing ones: callers hold references to them while caching new sets.
+    VectorSet<Columns, utils::VectorHash, uint64_t, std::equal_to<Columns>,
+              std::allocator<Columns>, std::deque<Columns>> column_sets_;
      // map node to index in |column_sets_|
     VectorMap<node_index, size_t> node_to_cols_;
     // coordinate sets for all nodes in |node_to_cols_| in the same order

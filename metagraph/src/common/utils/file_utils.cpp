@@ -1,6 +1,7 @@
 #include "file_utils.hpp"
 
 #include <cassert>
+#include <cstdio>
 #include <csignal>
 #include <cstdlib>
 #include <cerrno>
@@ -178,7 +179,15 @@ void cleanup_tmp_dir_on_exit() {
     if (getpid() != tmp_dirs_owner_pid())
         return;
     auto &dirs = tmp_dirs();
-    std::for_each(dirs.begin(), dirs.end(), cleanup_temp_dir_nolock);
+    // Static initialization can register this handler before the logger is
+    // constructed, so the logger may already be destroyed at process exit.
+    for (const auto &dir : dirs) {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        if (ec)
+            std::fprintf(stderr, "Failed to clean up temporary directory %s: %s\n",
+                         dir.c_str(), ec.message().c_str());
+    }
 }
 
 std::filesystem::path create_temp_dir(std::filesystem::path path,

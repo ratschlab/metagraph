@@ -85,7 +85,7 @@ int merge_graph(Config *config) {
             get_verbose()
         );
         if (!chunk.size()) {
-            logger->error("ERROR when building chunk {}", config->part_idx);
+            logger->error("Merge produced an empty chunk {}", config->part_idx);
             exit(1);
         }
         logger->info("Blocks merged in {} sec", timer.elapsed());

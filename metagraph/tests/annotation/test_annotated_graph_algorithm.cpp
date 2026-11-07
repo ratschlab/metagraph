@@ -9,6 +9,8 @@
 #include "graph/representation/masked_graph.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "common/utils/string_utils.hpp"
 
 
 namespace {
@@ -126,6 +128,40 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
     }
 }
 
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByManyLabels) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    // Include non-power-of-two counter widths and enough nodes to cross word boundaries.
+    for (size_t num_labels : {5, 20, 127, 128, 255, 256, 600, 2500}) {
+        std::vector<std::string> sequences(num_labels,
+            "AAACCCGGGTTTACGATCGATGCTAGCTAGGCTAACCGTTAGCATCGGATCCATGCTACGTTAGGCTACTG");
+        std::vector<std::string> labels;
+        tsl::hopscotch_set<std::string> initial_labels, later_labels;
+        for (size_t i = 0; i < num_labels; ++i) {
+            labels.push_back(std::to_string(i));
+            (i < num_labels / 2 ? initial_labels : later_labels).insert(labels.back());
+        }
+        auto anno_graph = build_anno_graph<Graph, Annotation>(7, sequences, labels);
+        std::unordered_set<std::string> expected;
+        anno_graph->get_graph().call_kmers([&](auto, const std::string &kmer) {
+            expected.insert(kmer);
+        });
+        DifferentialAssemblyConfig config {
+            .label_mask_in_unitig_fraction = 0.0,
+            .label_mask_in_kmer_fraction = 1.0,
+            .label_mask_out_unitig_fraction = 1.0,
+            .label_mask_out_kmer_fraction = 0.0
+        };
+        for (size_t threads : {1, 4}) {
+            auto masked = mask_nodes_by_label(*anno_graph, initial_labels, {}, later_labels, {},
+                                              config, threads);
+            std::unordered_set<std::string> observed;
+            masked->call_kmers([&](auto, const std::string &kmer) { observed.insert(kmer); });
+            EXPECT_EQ(expected, observed) << num_labels << " labels, " << threads << " threads";
+        }
+    }
+}
+
 template <class Graph, class Annotation = ColumnCompressed<>>
 void test_mask_unitigs(double inlabel_fraction,
                        double outlabel_fraction,
@@ -209,6 +245,38 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
 }
 
 #if ! _PROTEIN_GRAPH
+TEST(AnnotatedGraphAlgorithm, MaskOutOnlyLabelsAddReverseComplements) {
+    const size_t k = 5;
+    const auto kmers = utils::generate_strings("ACGT", k);
+    const std::vector<std::string> sequences(kmers.begin(), kmers.end());
+    std::vector<std::string> labels;
+    for (const auto &kmer : kmers) {
+        std::string rc = kmer;
+        reverse_complement(rc);
+        // Initially select one member of each reverse-complement pair.
+        labels.push_back(kmer < rc ? "out" : "other");
+    }
+    // Succinct graphs invoke the reverse-complement callbacks concurrently.
+    auto anno_graph = build_anno_graph<DBGSuccinct, ColumnCompressed<>>(k, sequences, labels);
+    const std::unordered_set<std::string> expected(kmers.begin(), kmers.end());
+    DifferentialAssemblyConfig config {
+        .label_mask_in_unitig_fraction = 0.0,
+        .label_mask_in_kmer_fraction = 0.0,
+        .label_mask_out_unitig_fraction = 1.0,
+        .label_mask_out_kmer_fraction = 1.0,
+        .add_complement = true
+    };
+
+    for (size_t num_threads : { 1, 4 }) {
+        // All in-label counts are zero, including in the parallel callback.
+        auto masked = mask_nodes_by_label(*anno_graph, {}, { "out" }, {}, {},
+                                          config, num_threads);
+        std::unordered_set<std::string> observed;
+        masked->call_kmers([&](auto, const std::string &kmer) { observed.insert(kmer); });
+        EXPECT_EQ(expected, observed) << "num_threads=" << num_threads;
+    }
+}
+
 template <class Graph, class Annotation = ColumnCompressed<>>
 std::unordered_set<std::string>
 test_mask_unitigs_canonical(double inlabel_fraction,

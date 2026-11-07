@@ -23,7 +23,7 @@ function start_client() {
 
   mkdir -p build
   cd build
-  cmake ..
+  cmake .. -DBUILD_KMC=ON
   make -j metagraph
 
   cd "$metagraph_path/scripts/cloud"

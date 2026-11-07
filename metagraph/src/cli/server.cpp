@@ -18,6 +18,7 @@
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
 #include <server_http.hpp>
+#include <csignal>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -179,16 +180,13 @@ Json::Value process_align_request(const std::string &received_message,
 
     Config config(config_orig);
 
-    config.alignment_num_alternative_paths = json.get(
+    const auto &alignment_count = json.get(
         "max_alternative_alignments",
-        (uint64_t)config.alignment_num_alternative_paths).asInt();
-
-    if (!config.alignment_num_alternative_paths) {
-        // TODO: better throw an exception and send an error response to the client
-        logger->warn("[Server] Got invalid value of alignment_num_alternative_paths = {}."
-                     " The default value of 1 will be used instead...", config.alignment_num_alternative_paths);
-        config.alignment_num_alternative_paths = 1;
+        (uint64_t)config.alignment_num_alternative_paths);
+    if (!alignment_count.isInt() || alignment_count.asInt() <= 0) {
+        throw std::invalid_argument("'max_alternative_alignments' must be a positive integer.");
     }
+    config.alignment_num_alternative_paths = alignment_count.asInt();
 
     config.alignment_min_exact_match
             = json.get("min_exact_match",
@@ -197,7 +195,7 @@ Json::Value process_align_request(const std::string &received_message,
     if (config.alignment_min_exact_match < 0.0
             || config.alignment_min_exact_match > 1.0) {
         throw std::invalid_argument(
-                "Minimum exact match should be within [0, 1.0]. Instead got "
+                "'min_exact_match' must be in [0, 1]. Received "
                 + std::to_string(config.alignment_min_exact_match));
     }
 
@@ -616,8 +614,9 @@ int run_server(Config *config) {
     shutdown.install();
     std::atomic<size_t> num_requests = 0;
 
-    ThreadPool graph_loader(1, 1);
     std::shared_future<std::unique_ptr<AnnotatedDBG>> anno_graph;
+    // Destroy the loader before the future holding its result.
+    ThreadPool graph_loader(1, 1);
 
     GraphIndexes indexes;
 
@@ -901,7 +900,8 @@ int run_server(Config *config) {
                     throw CurrentlyInitializingError();  // graph still loading
 
                 Json::Value content_json = parse_json_string(content);
-                logger->info("[Server] Request {}: {}", request_id, content_json.toStyledString());
+                if (logger->should_log(spdlog::level::trace))
+                    logger->trace("[Server] Request {}: {}", request_id, content_json.toStyledString());
 
                 const auto search_request = parse_search_request(content_json, *config);
                 // Validate fields omitted from the key before returning a cached result.
@@ -2609,7 +2609,7 @@ int run_server(Config *config) {
                     }
                 }
             }
-            return root;
+            return Json::writeString(Json::StreamWriterBuilder(), root);
         });
     };
 
@@ -2668,7 +2668,7 @@ int run_server(Config *config) {
                 root["annotation"]["labels"] = get_num_labels(*anno_graph.get());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
             }
-            return root;
+            return Json::writeString(Json::StreamWriterBuilder(), root);
         });
     };
 

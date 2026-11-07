@@ -391,6 +391,43 @@ class TestDNAAlign(TestingBase):
             self.assertEqual(a, b)
 
 
+    def test_align_chain_requires_coordinates(self):
+        def build(mode):
+            graph = self.tempdir.name + f'/genome.MT.{mode}'
+            self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                              output=graph, k=11, repr='succinct', mode=mode)
+            return graph + '.dbg'
+
+        def annotate(graph, anno_repr):
+            prefix = graph[:-len('.dbg')]
+            self._annotate_graph(TEST_DATA_DIR + '/genome.MT.fa', graph, prefix, anno_repr)
+            return f'{prefix}.{anno_repr}.annodbg'
+
+        def align(graph, anno):
+            command = f'{METAGRAPH} align --align-chain -i {graph} -a {anno} '\
+                      f'{TEST_DATA_DIR}/genome_MT1.fq'
+            return subprocess.run(command.split(), stdout=PIPE, stderr=PIPE)
+
+        basic = build('basic')
+        canonical = build('canonical')
+
+        # no coordinates in the annotation
+        res = align(basic, annotate(basic, 'column'))
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('--align-chain requires', res.stderr.decode())
+        self.assertEqual(res.stdout, b'')
+
+        # coordinates are not used on CANONICAL graphs
+        res = align(canonical, annotate(canonical, 'column_coord'))
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn('--align-chain requires', res.stderr.decode())
+
+        # a BASIC graph with coordinates is accepted
+        res = align(basic, annotate(basic, 'column_coord'))
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout.decode().rstrip().split('\n')), 7)
+
+
 @unittest.skipUnless(PROTEIN_MODE, "These alignment tests are only for the Protein alphabet")
 class TestProteinAlign(TestingBase):
     def setUp(self):
@@ -721,9 +758,9 @@ class TestAlignCoordToHeader(TestingBase):
 
         self.assertEqual(rows[0][0], 'q_concat')
         self.assertEqual(rows[0][6], '8S16=')
-        # Range 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
-        # seq1 -> 12 nt, seq2 -> 12 nt.
-        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-8')
+        # seq1 k-mers 4-7 and all of seq2's k-mers: the shared four bases
+        # count in both records.
+        self.assertEqual(rows[0][8], 'seq1/12:5-12;seq2/12:1-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_json_labels_array(self, anno_repr):
@@ -859,11 +896,11 @@ class TestAlignCoordToHeader(TestingBase):
         self.assertEqual(records[0]['annotation']['cigar'], '8S16=')
         by_sample = {entry['sample']: entry for entry in records[0]['annotation']['labels']}
         self.assertEqual(set(by_sample), {'seq1', 'seq2'})
-        # 8 nt in seq1 (local 5-12) + 8 nt in seq2 (local 1-8).
+        # Both records include the shared four bases in their covered range.
         self.assertEqual(by_sample['seq1']['nt_length'], 12)
         self.assertEqual(by_sample['seq1']['nt_coords'], '5-12')
         self.assertEqual(by_sample['seq2']['nt_length'], 12)
-        self.assertEqual(by_sample['seq2']['nt_coords'], '1-8')
+        self.assertEqual(by_sample['seq2']['nt_coords'], '1-12')
 
     @parameterized.expand(COORD_ANNO_TYPES)
     def test_align_missing_seqs_warning(self, anno_repr):

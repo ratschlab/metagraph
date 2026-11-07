@@ -130,7 +130,7 @@ void KmerBloomFilter<KmerHasher>
     AlignedVector<uint64_t> hashes;
     hashes.reserve(sequence.size() - k_ + 1);
     call_valid_kmers(*this, sequence, [&](uint64_t hash) { hashes.push_back(hash); });
-    filter_.insert(hashes.data(), hashes.data() + hashes.size());
+    filter_.insert(hashes);
 
     // invalid k-mers may be false positives
     assert(sdsl::util::cnt_one_bits(check_kmer_presence(sequence)) >= hashes.size());
@@ -155,14 +155,14 @@ void KmerBloomFilter<KmerHasher>
             return;
 
         if (buffer.capacity() < buffer.size() + sequence.size() - k_ + 1) {
-            filter_.insert(buffer.data(), buffer.data() + buffer.size());
+            filter_.insert(buffer);
             buffer.clear();
         }
 
         call_valid_kmers(*this, sequence, [&](uint64_t hash) { buffer.push_back(hash); });
     });
 
-    filter_.insert(buffer.data(), buffer.data() + buffer.size());
+    filter_.insert(buffer);
 }
 
 template <class KmerHasher>
@@ -178,7 +178,7 @@ sdsl::bit_vector KmerBloomFilter<KmerHasher>
 
     assert(i == hashes.size());
 
-    return filter_.check(hashes.data(), hashes.data() + hashes.size());
+    return filter_.check(hashes);
 }
 
 template <class KmerHasher>

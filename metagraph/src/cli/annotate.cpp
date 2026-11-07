@@ -183,7 +183,7 @@ void call_annotations(const std::string &file,
             forward_and_reverse
         );
     } else {
-        logger->error("Unknown filetype for file '{}'", file);
+        logger->error("Unknown input format for '{}'. Use FASTA, FASTQ, VCF or KMC input.", file);
         exit(1);
     }
 
@@ -390,12 +390,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
         for (const auto &file : files) {
             using Seq = std::tuple<std::string, std::vector<std::string>, uint64_t>;
             BatchAccumulator<Seq> batcher(
-                [&anno_graph](std::vector<Seq>&& data) {
+                [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                     auto *data_p = new std::vector<Seq>(std::move(data));
-                    #pragma omp task firstprivate(data_p) shared(anno_graph)
+                    // The task can outlive the batcher's callback at a file boundary.
+                    #pragma omp task firstprivate(data_p, graph_p)
                     {
                         std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
-                        anno_graph->annotate_kmer_coords(*data_ptr);
+                        graph_p->annotate_kmer_coords(*data_ptr);
                     }
                 },
                 BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
@@ -405,8 +406,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
             if (file_format(file) != "FASTA"
                     && file_format(file) != "FASTQ") {
-                logger->error("Currently only FASTA or FASTQ format is supported"
-                              " for annotating k-mer coordinates");
+                logger->error("--coordinates requires FASTA or FASTQ input: '{}'", file);
                 exit(1);
             }
 
@@ -428,8 +428,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 [&](std::string sequence, auto labels, uint64_t, size_t) {
                     if (config.num_kmers_in_seq
                             && config.num_kmers_in_seq + k - 1 != sequence.size()) {
-                        logger->error("All input sequences must have the same"
-                                      " length when flag --num-kmers-in-seq is on");
+                        logger->error("--num-kmers-in-seq requires every sequence to contain"
+                                      " that many k-mers (sequence length = value + k - 1)");
                         exit(1);
                     }
                     if (sequence.size() >= k) {
@@ -452,12 +452,13 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     for (const auto &file : files) {
         using Seq = std::pair<std::string, std::vector<std::string>>;
         BatchAccumulator<Seq> batcher(
-            [&anno_graph](std::vector<Seq>&& data) {
+            [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                 auto *data_p = new std::vector<Seq>(std::move(data));
-                #pragma omp task firstprivate(data_p) shared(anno_graph)
+                // The task can outlive the batcher's callback at a file boundary.
+                #pragma omp task firstprivate(data_p, graph_p)
                 {
                     std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
-                    anno_graph->annotate_sequences(*data_ptr);
+                    graph_p->annotate_sequences(*data_ptr);
                 }
             },
             BATCH_SIZE, BATCH_LENGTH, BATCH_SIZE
@@ -494,13 +495,14 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
             using Seq = std::tuple<std::string, std::vector<std::string>, std::vector<uint64_t>>;
             BatchAccumulator<Seq> batcher(
-                [&anno_graph](std::vector<Seq>&& data) {
+                [graph_p = anno_graph.get()](std::vector<Seq>&& data) {
                     auto *data_p = new std::vector<Seq>(std::move(data));
-                    #pragma omp task firstprivate(data_p) shared(anno_graph)
+                    // The task can outlive the batcher's callback at a file boundary.
+                    #pragma omp task firstprivate(data_p, graph_p)
                     {
                         std::unique_ptr<std::vector<Seq>> data_ptr(data_p);
                         for (auto &[seq, labels, kmer_counts] : *data_ptr) {
-                            anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
+                            graph_p->add_kmer_counts(seq, labels, std::move(kmer_counts));
                         }
                     }
                 },
@@ -579,9 +581,20 @@ int annotate_graph(Config *config) {
     }
 
     if (config->index_header_coords) {
+        for (const auto &file : files) {
+            if (file_format(file) != "FASTA" && file_format(file) != "FASTQ") {
+                logger->error("--index-header-coords requires FASTA or FASTQ input: {}", file);
+                exit(1);
+            }
+        }
+        if (!config->fasta_header_delimiter.empty()) {
+            logger->error("--index-header-coords needs whole record headers. "
+                          "Remove --header-delimiter.");
+            exit(1);
+        }
         if (!config->filename_anno || config->annotate_sequence_headers || config->anno_labels.size()) {
-            logger->error("A CoordToHeader mapping (annotation with `--index-header-coords`) can "
-                          "only be constructed for annotated filenames (use flag `--anno-filename`)");
+            logger->error("--index-header-coords requires --anno-filename "
+                          "without --anno-header or --anno-label.");
             exit(1);
         }
         if (!config->fasta_header_delimiter.empty()) {

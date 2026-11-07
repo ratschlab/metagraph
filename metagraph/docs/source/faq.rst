@@ -11,7 +11,7 @@ What is MetaGraph?
 ------------------
 
 MetaGraph is a framework for scalable construction and querying of very large annotated de Bruijn graphs.
-It uses succinct representations to index sequence collections efficiently, requiring only 2-4 bits per k-mer.
+Its succinct DNA graph representation uses 2-4 bits per k-mer; annotations require additional space.
 
 **Key capabilities:**
 
@@ -41,7 +41,7 @@ Installation
 Which installation method?
 --------------------------
 
-1. **Conda** (easiest): ``conda install -c bioconda metagraph``
+1. **Conda** (easiest): ``conda install -c conda-forge -c bioconda --strict-channel-priority metagraph``
 2. **Docker** (isolated): ``docker run ghcr.io/ratschlab/metagraph:master``
 3. **Source** (for custom alphabets or latest features)
 
@@ -52,7 +52,10 @@ Which alphabet?
 
 - **DNA** (default): DNA/RNA sequences (A,C,G,T)
 - **DNA5**: With ambiguous bases (A,C,G,T,N)
-- **DNA_CASE_SENSITIVE**: When case matters (A,C,G,T,N,a,c,g,t)
+- **DNA_CASE_SENSITIVE**: Preserves uppercase and lowercase bases as distinct
+  symbols (A,C,G,T,N,a,c,g,t), including lowercase bases used for soft masking.
+  Reverse complements preserve case: ``ACG`` becomes ``CGT``, and ``acg`` becomes
+  ``cgt``. Lowercase bases are still indexed and matched; they are not skipped.
 - **Protein**: Amino acid sequences (A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,Y,Z,X)
 
 
@@ -64,28 +67,31 @@ What k-mer size?
 
 **General rules:**
 
-- DNA/RNA: k=21-41 (default: 31)
-- Protein: k=7-15 (default: 10)
 - Longer k = more specific, less sensitive
 - Must be ≤ sequence/read length
+
+The build default is the longest k-mer fitting the alphabet's packed 64-bit
+encoding, rounded down to an odd length for nucleotide alphabets: 31 for DNA/RNA,
+21 for DNA5, 15 for case-sensitive DNA, and 12 for protein. This is a storage-based
+starting point; choose ``-k`` for your search's sensitivity and specificity.
+The workflow CLI uses the selected MetaGraph executable's build default and records
+the resolved value in ``config.yaml``. Pass ``-k`` explicitly for reproducible builds.
 
 How many threads to use?
 ------------------------
 
-Most of the routines in MetaGraph are well parallelized, so the more threads, the better.
-More than the number of cores is not recommended.
+Use ``-p`` to set the thread count within your CPU allocation. Scaling depends on the operation and available I/O.
 
 What buffer size?
 -----------------
 When constructing very large graphs, it is recommended to use disk swap
 to limit the RAM usage::
 
-   metagraph build --disk-swap <TMP_DIR> --mem-cap-gb 10
+   metagraph build -k 31 --disk-swap /tmp --mem-cap-gb 10 -o graph input.fa
 
-- For small graphs: 1 GB is enough (Default)
-- For large graphs: the more, the better (50-80 GB is always sufficient, even for trillions of k-mers)
-- Larger than 80 GB is **not** recommended
-- ``<TMP_DIR>`` may be on a spinning disk (SSD might help but not necessary)
+For succinct construction, ``--mem-cap-gb`` sets the preallocated buffer size
+(default 1 GB). Allow additional RAM for the rest of the process and enough free
+space in the swap directory.
 
 Canonical vs Primary graph?
 ----------------------------
@@ -105,7 +111,7 @@ How to handle large datasets?
 
 .. code-block:: bash
 
-   metagraph build -k 31 --disk-swap /tmp --mem-cap-gb 50 input.fa
+   metagraph build -k 31 --disk-swap /tmp --mem-cap-gb 50 -o graph input.fa
 
 2. **Build sample graphs separately:**
 
@@ -141,13 +147,13 @@ Which annotation type?
 **By scale:**
 
 - In most scenarios, start with: ``column`` (default)
-- Fast and easy to construct: ``row_flat``
+- Fast and easy to construct: ``flat``
 - Fast queries and small: ``row_diff_flat``
 - Very large scale: ``row_diff_brwt`` (best compression)
 
 **By feature:**
 
-- K-mer counts: ``int_brwt`` or ``row_diff_int_brwt``
+- k-mer counts: ``int_brwt`` or ``row_diff_int_brwt``
 - Coordinates: ``brwt_coord`` or ``row_diff_brwt_coord``
 
 How to annotate with counts?
@@ -200,10 +206,10 @@ How to query?
 .. code-block:: bash
 
    # Presence/absence
-   metagraph query -i graph.dbg -a annotation.annodbg query.fa
+   metagraph query -i graph.dbg -a annotation.column.annodbg query.fa
    
-   # With threshold (80% k-mers must match)
-   metagraph query --discovery-fraction 0.8 ...
+   # Require at least 80% of the query k-mers to match each reported label
+   metagraph query --min-kmers-fraction-label 0.8 -i graph.dbg -a annotation.column.annodbg query.fa
    
    # K-mer counts
    metagraph query --query-mode counts -a annotation.int_brwt.annodbg ...
@@ -217,7 +223,7 @@ How to query?
 
 .. code-block:: bash
 
-   metagraph server_query -i graph.dbg -a annotation.annodbg --port 5555 -p 10 --mmap
+   metagraph server_query -i graph.dbg -a annotation.column.annodbg --port 5555 -p 10 --mmap
 
 2. Query the index:
 
@@ -226,15 +232,17 @@ How to query?
    from metagraph.client import GraphClient
    
    client = GraphClient('localhost', 5555, api_path='')
-   results = client.search('ACGTACGT', discovery_fraction=0.8)
+   # Use a sequence from your input that is at least k bases long.
+   sequence = 'ACGTTAGCTTCGATGCTAGCTACGGCTTAGATCGACGTACGTAC'
+   results = client.search(sequence, discovery_fraction=0.8)
 
 What is discovery_fraction?
 ----------------------------
 
 Minimum fraction of k-mers that must match:
 
-- **0.0**: Any match (at last 1 k-mer must match)
-- **0.8**: ≥80% k-mers match (recommended for classification)
+- **0.0**: Any match (at least 1 k-mer must match)
+- **0.8**: At least 80% of query k-mers match the label
 - **1.0**: All k-mers match (strict)
 
 How to align?
@@ -253,10 +261,10 @@ How to align?
    metagraph align -i graph.dbg reads.fa
    
    # With annotation (label-consistent paths)
-   metagraph align -i graph.dbg -a annotation.annodbg reads.fa
+   metagraph align -i graph.dbg -a annotation.column.annodbg reads.fa
    
    # Adjust sensitivity
-   metagraph align --align-min-seed-length 15 --min-exact-match 0.7 ...
+   metagraph align --align-min-seed-length 15 --align-min-exact-match 0.7 ...
 
 Performance
 ===========
@@ -280,8 +288,8 @@ For real examples, see https://github.com/ratschlab/metagraph/blob/master/metagr
 How to speed up construction?
 ------------------------------
 
-1. **Use more threads:** ``-p 64``
-2. **Pre-process the input sequences with KMC:** ``kmc -k31 -m40 -sm input.fasta.gz output /tmp/``
+1. **Use available threads:** Set ``-p`` within your CPU allocation.
+2. **Pre-process the input sequences with KMC:** ``kmc -k31 -m40 -sm -fm input.fasta.gz output /tmp/``
 3. **Parallelize samples:** Build sample graphs in parallel, with 4-8 threads (``-p ...``) on each.
 
 How to reduce size?
@@ -295,11 +303,11 @@ How to reduce size?
 6. **Use other graph cleaning techniques:** ``metagraph clean ...`` to remove sequencing errors
 
 How to reduce RAM usage while querying?
---------------------------------
+---------------------------------------
 
 - **Use memory mapping (--mmap):** see :ref:`memory_mapping`
 - **Reduce the batch size:** see ``./metagraph query --batch-size ...``
-- **Alternative: Use disk-backed formats:** ``row_disk`` or ``row_diff_disk``
+- **Alternative: Use disk-backed formats:** ``row_diff_disk``
 
 When to use memory mapping?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -307,7 +315,7 @@ When to use memory mapping?
 - When the available RAM is limited
 
 When not to use memory mapping?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 - Never use it with slow (e.g., spinning) disks, unless it's for a single stats check
 
 Troubleshooting
@@ -329,16 +337,13 @@ See :ref:`installation` and :ref:`troubleshooting`.
 Out of memory
 -------------
 
-**Solution:** Use disk swap
-
-.. code-block:: bash
-
-   metagraph build --disk-swap /tmp --mem-cap-gb 50 ...
-   metagraph annotate --disk-swap /tmp --mem-cap-gb 10 ...
+Use disk swap and choose a buffer below your available RAM, leaving room for the graph and other allocations.
+For complete examples and diagnosis, see :ref:`troubleshooting`.
 
 RowDiff transform generates no output
 -------------------------------------
 
-**Solution:** Remember that for annotations with coordinates and counts, the output
-files have the same name ``*.column.annodbg`` as the input files, hence, should be
-written to a new directory. (See :ref:`transform_count_annotations`.)
+For annotations with coordinates or counts, look for ``*.column.annodbg`` output rather than
+``*.row_diff.annodbg``. Write it to a separate directory: these names match the input filenames,
+and using the input directory can overwrite the original columns.
+See :ref:`transform_count_annotations` and :ref:`transform_coord_annotations`.

@@ -1,16 +1,19 @@
 User Manual
 ===========
 
-Welcome to the user manual of `MetaGraph <https://metagraph.ethz.ch>`_!
+Use `MetaGraph <https://metagraph.ethz.ch>`_ to index sequence collections and search them for matching samples, sequences, or positions.
 
-This manual includes setup instructions and usage tutorials outlining the key use cases for the MetaGraph
-framework, a software platform for indexing and analysis of very large sequence collections.
+Start with :doc:`installation`, then follow :doc:`quick_start` to build and query an index.
+For automated indexing, use :doc:`workflows`. To search existing public indexes or download them,
+see :doc:`resources`.
 
-.. attention:: In case of questions or requests to extend certain sections of this manual (`source <https://github.com/ratschlab/metagraph/tree/master/metagraph/docs/source>`_), please do not hesitate to open an issue on `GitHub <https://github.com/ratschlab/metagraph>`_ or propose your changes via pull requests.
+For questions or documentation corrections, open a `GitHub issue <https://github.com/ratschlab/metagraph/issues>`_
+or propose a pull request against the `manual source <https://github.com/ratschlab/metagraph/tree/master/metagraph/docs/source>`_.
 
 .. toctree::
    :maxdepth: 3
 
+   release_notes.rst
    installation.rst
    quick_start.rst
    workflows.rst

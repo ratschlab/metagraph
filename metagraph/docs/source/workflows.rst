@@ -2,27 +2,28 @@
 Snakemake workflows
 ===================
 
-Since each indexing workflow in `MetaGraph <https://metagraph.ethz.ch>`_ comprises
-several steps, we provide automated pipelines to make the process easier and more straightforward
-for the most common scenarios.
+Use ``metagraph-workflows`` to build and annotate an index with a single command.
+The wrapper runs the graph construction, annotation, and compression stages through Snakemake.
 
 
 Installation
 ------------
 
-The ``metagraph-workflows`` CLI ships as a separate Python package. The
-``metagraph`` conda recipe only installs the C++ binary, so the workflow
-wrapper needs an extra ``pip install`` step alongside it:
+Install the CLI with Conda and the current workflow wrapper from a shallow
+checkout. The same checkout supplies the example data; no C++ build or submodule
+initialization is needed:
 
 .. code-block:: bash
 
-   conda create -n metagraph-workflows python=3.8
-   conda activate metagraph-workflows
-   conda install -c bioconda -c conda-forge metagraph       # the metagraph binary
-   pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/workflows"
+   conda create -n metagraph --override-channels -c conda-forge -c bioconda \
+       --strict-channel-priority python=3.12 pip "metagraph>=0.5.2"
+   conda activate metagraph
+   git clone --depth 1 --branch master https://github.com/ratschlab/metagraph.git
+   cd metagraph
+   python -m pip install ./metagraph/workflows
 
-After this, the ``metagraph`` binary and the ``metagraph-workflows``
-command are both available on ``PATH``.
+For custom alphabets or features unavailable in the packaged CLI, build from
+source as described in :ref:`installation` and install the wrapper from that checkout.
 
 
 Creating graphs and annotations
@@ -63,10 +64,10 @@ Typically, the following steps would be performed:
    index you want; the per-stage memory caps, thread packing, and
    BRWT clustering parameters are derived automatically.
 
-   Important parameters you may want to set:
+   Choose these parameters for your data and hardware:
 
    * ``-p N`` and ``--mem-gb GB`` for the hardware budget
-   * ``-k`` for k-mer length (default 31)
+   * ``-k`` for k-mer length (defaults to the selected MetaGraph executable's build default)
    * ``--primary`` for primary graph mode (recommended for most workloads)
    * ``--disk-swap-dir DIR`` to enable on-disk spill buffers
    * ``--anno-source`` (``header`` or ``filename``; default ``filename``)
@@ -83,6 +84,12 @@ Typically, the following steps would be performed:
      metagraph-workflows build samples.txt -o /tmp/mygraph \
          -k 31 --primary \
          -p 34 --mem-gb 70 --disk-swap-dir /scratch/swap
+
+3. Query the completed index with :ref:`metagraph query <query_index>`, or start
+   ``metagraph server_query`` and connect through the :ref:`Python client <api>`.
+
+The `end-to-end notebook <https://github.com/ratschlab/metagraph/blob/master/metagraph/workflows/notebooks/workflow_end_to_end_example.ipynb>`_
+walks through indexing and API queries.
 
 Count-aware annotations
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -170,14 +177,6 @@ file. Row-diff stages 0–2 then write under ``rd_cols.<mode>/`` (for example ``
 
 See ``metagraph-workflows build -h`` for more details.
 
-3. Once a MetaGraph index has been created, it can be queried either by using the command line
-   ``metagraph`` tool or by starting the MetaGraph server directly on a laptop or on another suitable
-   machine and querying it using the python :ref:`API` client.
-
-
-There is also a `jupyter notebook <https://github.com/ratschlab/metagraph/blob/master/metagraph/workflows/notebooks/workflow_end_to_end_example.ipynb>`_ showing the whole process: from indexing to api querying  on a simple example.
-
-
 
 Workflow management
 ~~~~~~~~~~~~~~~~~~~
@@ -186,6 +185,12 @@ The following snakemake options are exposed in the ``build`` subcommand
 
 * ``--dryrun``: see what workflow steps would be done
 * ``--force`` (corresponds to ``--forceall`` in snakemake): force run all steps
+
+When building a new graph without ``-k``, a dry run calls the selected
+MetaGraph executable's ``build --help`` to read its default k-mer length.
+Pass ``-k`` explicitly to preview the workflow without that executable.
+Reusing a graph with ``--graph`` does not need this lookup. A dry run does
+not execute the workflow steps or validate the input alphabet.
 
 
 Directly invoking Snakemake workflow
@@ -196,7 +201,14 @@ directly invoke the snakemake workflow (assuming you checked out the `metagraph 
 
 .. code-block:: bash
 
-    cd metagraph/workflows
-    snakemake --forceall --configfile default.yml \
-        --config k=5 seqs_file_list_path='transcript_paths.txt' output_directory=/tmp/mygraph \
-        annotation_labels_source=header --cores 2
+    cat > build.yaml <<'YAML'
+    k: 5
+    seqs_file_list_path: transcript_paths.txt
+    output_directory: /tmp/mygraph
+    annotation_labels_source: header
+    YAML
+    snakemake --snakefile metagraph/workflows/snakemake/Snakefile \
+        --configfile metagraph/workflows/snakemake/default.yml build.yaml --cores 2
+
+The direct Snakemake invocation requires an explicit ``k`` in its configuration.
+Use ``metagraph-workflows build`` to inherit the selected executable's default.

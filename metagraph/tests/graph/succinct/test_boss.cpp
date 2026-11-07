@@ -10,6 +10,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "common/algorithms.hpp"
+#include "common/serialization.hpp"
 
 
 namespace {
@@ -248,6 +249,38 @@ TEST(BOSS, Serialization) {
     delete graph;
 }
 
+TEST(BOSS, FailedLoadCanBeRetried) {
+    BOSS reference(3);
+    reference.add_sequence("ACGTACGTT");
+    const auto valid_path = test_dump_basename + "_valid.boss";
+    {
+        std::ofstream out(valid_path, std::ios::binary);
+        reference.serialize(out);
+    }
+
+    // Unknown representations and valid headers with missing vector payloads.
+    for (uint64_t representation : { uint64_t{0}, uint64_t{5}, uint64_t{99}, UINT64_MAX,
+                                     uint64_t{BOSS::DYN}, uint64_t{BOSS::STAT},
+                                     uint64_t{BOSS::FAST}, uint64_t{BOSS::SMALL} }) {
+        SCOPED_TRACE(representation);
+        const auto invalid_path = test_dump_basename + "_invalid.boss";
+        {
+            std::ofstream out(invalid_path, std::ios::binary);
+            serialize_number_vector_raw(out, std::vector<BOSS::edge_index>(reference.alph_size, 0));
+            serialize_number(out, reference.get_k());
+            serialize_number(out, representation);
+        }
+        BOSS graph;
+        {
+            std::ifstream in(invalid_path, std::ios::binary);
+            EXPECT_FALSE(graph.load(in));
+        }
+        std::ifstream in(valid_path, std::ios::binary);
+        ASSERT_TRUE(graph.load(in));
+        EXPECT_TRUE(reference.equals_internally(graph));
+    }
+}
+
 TEST(BOSS, AddSequenceSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
@@ -322,6 +355,50 @@ TEST(BOSS, MarkDummySinkEdgesTwoPaths) {
         sdsl::bit_vector sink_nodes_result(graph.num_edges() + 1, false);
         ASSERT_EQ(2u, graph.mark_sink_dummy_edges(&sink_nodes_result));
         EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
+    }
+}
+
+TEST(BOSS, MarkDummySinkEdgesAllStates) {
+    const std::vector<std::vector<std::string>> records = {
+        {},
+        { "AAAAAAAAAA" },
+        { "ACGT" },
+        { "AAAACCCCGGGG", "AAAATTTTGGGG", "CCCCAAAATTTT" }
+    };
+    for (size_t k : { 1, 3, 7 }) {
+        for (const auto &sequences : records) {
+            BOSS graph(k);
+            for (const auto &sequence : sequences) {
+                graph.add_sequence(sequence);
+            }
+            for (auto state : { BOSS::DYN, BOSS::STAT, BOSS::SMALL, BOSS::FAST }) {
+                SCOPED_TRACE(testing::Message() << "k=" << k << ", state=" << state
+                                               << ", records=" << sequences.size());
+                graph.switch_state(state);
+                sdsl::bit_vector expected(graph.num_edges() + 1, false);
+                uint64_t count = 0;
+                for (BOSS::edge_index i = 2; i <= graph.num_edges(); ++i) {
+                    if (!graph.get_W(i)) {
+                        expected[i] = true;
+                        ++count;
+                    }
+                }
+                sdsl::bit_vector mask(expected.size(), false);
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges());
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+
+                // Preserve existing marks, including the two reserved positions.
+                for (size_t i = 0; i < mask.size(); ++i) {
+                    mask[i] = i < 2 || i % 2 == 0;
+                    expected[i] = expected[i] || mask[i];
+                }
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+                EXPECT_EQ(count, graph.mark_sink_dummy_edges(&mask));
+                EXPECT_EQ(expected, mask);
+            }
+        }
     }
 }
 

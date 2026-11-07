@@ -11,9 +11,6 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/utils/file_utils.hpp"
 
-// this next #include includes AnnotatedDBG. we need access to its protected
-// members to modify the underlying annotator
-#define protected public
 #include "annotation/annotation_converters.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
@@ -44,7 +41,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
     uint64_t max_index = base_graph->max_index();
 
-    auto anno_graph = std::make_unique<AnnotatedDBG>(
+    auto anno_graph = std::make_unique<MutableAnnotatedDBG>(
         graph,
         std::make_unique<ColumnCompressed<>>(max_index, 1, "", uint64_t(10'000'000), 0,
                                              coordinates, 2000)

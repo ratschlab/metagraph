@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.6.1)
+cmake_minimum_required(VERSION 3.19)
 project(metagraph_succinct)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROJECT_PARENT_DIR ${PROJECT_SOURCE_DIR}/../../../..)
@@ -30,8 +30,6 @@ target_include_directories(metagraph_succinct
     ${EXTERNAL_LIB_DIR}/cpp_progress_bar
 )
 
-find_library(SDSL_LIBRARY sdsl HINTS ${EXTERNAL_LIB_DIR}/sdsl-lite/lib)
-
 buildProgressBar(${EXTERNAL_LIB_DIR} progress_bar)
 buildMersenneTwister(${EXTERNAL_LIB_DIR} mesenne_twister)
 
@@ -39,11 +37,9 @@ target_link_libraries(metagraph_succinct
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${FILESYSTEM_LIBRARY}
-    ${SDSL_LIBRARY}
     mersenne_twister
     progress_bar
     kmer
     metagraph_common
     metagraph_graph_base
 )
-

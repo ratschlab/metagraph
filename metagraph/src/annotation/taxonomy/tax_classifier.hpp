@@ -64,6 +64,7 @@ class TaxonomyBase {
 };
 
 class TaxonomyClsAnno : public TaxonomyBase {
+    friend struct TaxonomyClsAnnoTestAccess;
   public:
     /**
      * TaxonomyCls constructor

@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include <sdsl/int_vector.hpp>
+#include <sdsl/select_support_mcl.hpp>
 #include <sdsl/rrr_vector.hpp>
 #include <sdsl/hyb_vector.hpp>
 #include <sdsl/bit_vector_il.hpp>
@@ -39,7 +40,7 @@ class bit_vector_sdsl : public bit_vector {
         num_set_bits_(rk1_(vector_.size())) {}
     bit_vector_sdsl(bit_vector_sdsl&& other) { *this = std::move(other); }
     bit_vector_sdsl(std::initializer_list<bool> init)
-      : bit_vector_sdsl(sdsl::bit_vector(init)) {}
+      : bit_vector_sdsl(sdsl::bit_vector(init.begin(), init.end())) {}
 
     inline bit_vector_sdsl& operator=(const bit_vector_sdsl &other);
     inline bit_vector_sdsl& operator=(bit_vector_sdsl&& other) noexcept;

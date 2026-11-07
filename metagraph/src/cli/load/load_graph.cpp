@@ -83,7 +83,7 @@ DummyMaskCounts mask_dummy_edges(DBGSuccinct *graph, size_t num_threads) {
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename,
                                                  LoadFailure on_failure) {
     for (const auto &[extension, load] : kGraphLoaders) {
-        if (utils::ends_with(filename, extension))
+        if (filename.ends_with(extension))
             return load(filename, on_failure);
     }
     auto exts = utils::get_firsts<std::vector<std::string>>(kGraphLoaders);

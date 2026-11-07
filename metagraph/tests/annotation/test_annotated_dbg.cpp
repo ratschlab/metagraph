@@ -14,8 +14,6 @@
 #include "annotation/int_matrix/row_disk/int_row_disk.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
-#define protected public
-#define private public
 #include "annotation/annotation_converters.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
@@ -74,7 +72,7 @@ std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
 
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
-        AnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
+        MutableAnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
                                 std::make_unique<annot::ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
@@ -122,7 +120,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -191,7 +189,7 @@ TEST(AnnotatedDBG, Transform) {
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
-        auto anno_graph = std::make_unique<AnnotatedDBG>(
+        auto anno_graph = std::make_unique<MutableAnnotatedDBG>(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -227,7 +225,7 @@ TEST(AnnotatedDBG, Transform) {
 
         anno_graph->annotate_sequence(std::string(seq_second), { "Second" });
 
-        anno_graph = std::make_unique<AnnotatedDBG>(
+        anno_graph = std::make_unique<MutableAnnotatedDBG>(
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 annot::convert<annot::RowFlatAnnotator>(
@@ -275,7 +273,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -386,7 +384,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         uint64_t num_nodes = graph->num_nodes();
 
         ThreadPool thread_pool(10);
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -508,7 +506,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         graph->mask_dummy_kmers(0, false);
 
         uint64_t num_nodes = graph->num_nodes();
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -627,7 +625,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         graph->mask_dummy_kmers(10, false);
 
         ThreadPool thread_pool(10);
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -755,7 +753,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(0, true);
 
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
@@ -872,7 +870,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         graph->mask_dummy_kmers(10, true);
 
         ThreadPool thread_pool(10);
-        AnnotatedDBG anno_graph(
+        MutableAnnotatedDBG anno_graph(
             graph,
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );

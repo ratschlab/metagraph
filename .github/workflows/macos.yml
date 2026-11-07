@@ -9,9 +9,6 @@ on:
       alphabet:
         required: true
         type: string
-      platform:
-        default: macos-latest
-        type: string
 
 defaults:
   run:
@@ -20,12 +17,12 @@ defaults:
 jobs:
     
   build:
-    runs-on: ${{ inputs.platform }}
+    runs-on: macos-latest
 
     env: &macos-build-env
       CCACHE_DEFAULT_DIR: ~/Library/Caches/ccache
       DESCRIPTOR: >-
-        ${{ inputs.build_type }}-${{ inputs.platform }}-${{ inputs.alphabet }}
+        ${{ inputs.build_type }}-macos-arm64-${{ inputs.alphabet }}
       CMAKE_ARGS: >-
         -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
         -DCMAKE_DBG_ALPHABET=${{ inputs.alphabet }}
@@ -109,7 +106,7 @@ jobs:
   unit-tests:
     needs: [build]
 
-    runs-on: ${{ inputs.platform }}
+    runs-on: macos-latest
 
     name: Unit Tests
 
@@ -134,7 +131,7 @@ jobs:
   integration-tests:
     needs: [build]
 
-    runs-on: ${{ inputs.platform }}
+    runs-on: macos-latest
 
     env: *macos-build-env
 
@@ -177,7 +174,7 @@ jobs:
   examples:
     if: ${{ inputs.build_type == 'Debug' }}
 
-    runs-on: ${{ inputs.platform }}
+    runs-on: macos-latest
 
     env: *macos-build-env
 
@@ -215,14 +212,8 @@ jobs:
       - name: Build and run ExternalProject example
         run: |
           cd metagraph/examples/ExternalProject
-          mkdir -p build/metagraph-external-prefix/src
-          ln -sf "${GITHUB_WORKSPACE}" build/metagraph-external-prefix/src/metagraph-external
-          cd build
-          cmake -DMETAGRAPH_GIT_TAG=${{ github.event.pull_request.head.sha || github.sha }} ${CMAKE_ARGS} ..
-          # Skip GitHub sync for speed and to bypass github.sha unavailability in PRs from forks
-          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-mkdir
-          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-download
-          touch metagraph-external-prefix/src/metagraph-external-stamp/metagraph-external-update
+          mkdir -p build && cd build
+          cmake -DMETAGRAPH_SOURCE_DIR="${GITHUB_WORKSPACE}" ${CMAKE_ARGS} ..
           make -j"$(getconf _NPROCESSORS_ONLN)"
           make run_example
 

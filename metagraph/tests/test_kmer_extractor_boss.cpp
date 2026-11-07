@@ -3,9 +3,6 @@
 
 #include <numeric>
 
-#define private public
-#define protected public
-
 #include "kmer/kmer_extractor.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"

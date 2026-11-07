@@ -53,11 +53,12 @@ class Rainbowfish : public RainbowMatrix {
     std::vector<std::unique_ptr<BinaryMatrix>> reduced_matrix_;
 
     uint64_t get_code(Row row) const;
-    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const {
+    std::vector<SetBitPositions> codes_to_rows(std::span<const Row> rows) const {
         std::vector<SetBitPositions> result;
         result.reserve(rows.size());
         for (uint64_t c : rows) {
-            result.push_back(reduced_matrix_[c / buffer_size_]->get_rows({ c % buffer_size_ })[0]);
+            const Row row = c % buffer_size_;
+            result.push_back(reduced_matrix_[c / buffer_size_]->get_rows({ &row, 1 })[0]);
         }
         return result;
     }

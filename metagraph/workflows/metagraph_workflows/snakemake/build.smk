@@ -2,6 +2,9 @@
 from metagraph_workflows.resource_management import BuildGraphResources, ResourceConfig, BuildGraphResourcesWithKmerEstimates, PrimarizeCanonicalGraphSingleSampleResources
 from metagraph_workflows import workflow_configs, utils
 
+# Direct Snakemake invocations may omit k; the wrapper resolves it before saving config.
+utils.resolve_build_k(config)
+
 if build_primary:
     ruleorder: build_joint_primary > build
 else:

@@ -8,19 +8,31 @@
 
 namespace utils {
 
-bool starts_with(const std::string &str, const std::string &prefix) {
-    if (prefix.size() > str.size()) {
-        return false;
+bool valid_utf8(std::string_view s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        const unsigned char c = s[i];
+        size_t n;
+        uint32_t cp;
+        if (c < 0x80) { i++; continue; }
+        if ((c & 0xE0) == 0xC0) { n = 1; cp = c & 0x1F; }
+        else if ((c & 0xF0) == 0xE0) { n = 2; cp = c & 0x0F; }
+        else if ((c & 0xF8) == 0xF0) { n = 3; cp = c & 0x07; }
+        else return false;
+        if (i + n >= s.size())
+            return false;
+        for (size_t j = 1; j <= n; ++j) {
+            const unsigned char d = s[i + j];
+            if ((d & 0xC0) != 0x80)
+                return false;
+            cp = (cp << 6) | (d & 0x3F);
+        }
+        if ((n == 1 && cp < 0x80) || (n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000)
+                || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+            return false;
+        i += n + 1;
     }
-    return prefix == std::string_view(str).substr(0, prefix.size());
-}
-
-bool ends_with(const std::string &str, const std::string &suffix) {
-    auto actual_suffix = str.substr(
-        std::max(0, static_cast<int>(str.size())
-                    - static_cast<int>(suffix.size()))
-    );
-    return actual_suffix == suffix;
+    return true;
 }
 
 bool valid_utf8(std::string_view s) {
@@ -74,13 +86,13 @@ std::optional<uint64_t> parse_abundance(const std::string &comment) {
 }
 
 std::string remove_suffix(const std::string &str, const std::string &suffix) {
-    return ends_with(str, suffix)
+    return str.ends_with(suffix)
             ? str.substr(0, str.size() - suffix.size())
             : str;
 }
 
 std::string make_suffix(const std::string &str, const std::string &suffix) {
-    return remove_suffix(str, suffix) + suffix;
+    return str.ends_with(suffix) ? str : str + suffix;
 }
 
 std::string join_strings(const std::vector<std::string> &strings,

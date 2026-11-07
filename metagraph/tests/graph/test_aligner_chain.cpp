@@ -14,6 +14,45 @@ using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
+TEST(Seed, expand_from_borrowed_tail) {
+    const std::string query = "ACGTAC";
+    Seed seed(std::string_view(query).substr(0, 3), { 1 }, false, 0, 0, 3);
+    std::vector<Seed::node_index> continuation = { 99, 2, 3, 4 };
+    seed.expand(std::span(continuation).last(3));
+    continuation.clear();
+    EXPECT_EQ((std::vector<Seed::node_index>{ 1, 2, 3, 4 }), seed.get_nodes());
+    EXPECT_EQ(query, seed.get_query_view());
+    EXPECT_EQ(0u, seed.get_end_clipping());
+    seed.expand({});
+    EXPECT_EQ(4u, seed.size());
+    EXPECT_EQ(query, seed.get_query_view());
+}
+
+TEST(Seed, num_char_matches_counts_union_of_seeds) {
+    const std::string query = "ACGTACGTACGTACGTACGT";
+    std::string_view view(query);
+    auto make_seed = [&](size_t begin, size_t length, size_t offset) {
+        return Seed(view.substr(begin, length), { 1 }, false, offset,
+                    begin, query.size() - begin - length);
+    };
+
+    // a seed with an offset must not hide the seeds after it
+    std::vector<Seed> seeds {
+        make_seed(0, 5, 2), make_seed(8, 4, 0), make_seed(14, 6, 1)
+    };
+    EXPECT_EQ(15u, get_num_char_matches_in_seeds(seeds.begin(), seeds.end()));
+
+    // overlapping, duplicate, contained and unsorted seeds are counted once
+    seeds = {
+        make_seed(10, 6, 0), make_seed(0, 8, 1), make_seed(0, 8, 1),
+        make_seed(2, 3, 0), make_seed(6, 6, 2), make_seed(13, 2, 0)
+    };
+    EXPECT_EQ(16u, get_num_char_matches_in_seeds(seeds.begin(), seeds.end()));
+
+    seeds.emplace_back();
+    EXPECT_EQ(16u, get_num_char_matches_in_seeds(seeds.begin(), seeds.end()));
+}
+
 template <typename Graph>
 class DBGAlignerPostChainTest : public DeBruijnGraphTest<Graph> {};
 

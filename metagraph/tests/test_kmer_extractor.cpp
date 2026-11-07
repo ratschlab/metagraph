@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
 #include <numeric>
+#include <array>
+#include <type_traits>
 
 #include "kmer/kmer_extractor.hpp"
 #include "common/utils/string_utils.hpp"
@@ -12,6 +14,42 @@ namespace {
 using namespace mtg;
 
 using mtg::kmer::KmerExtractor2Bit;
+
+TEST(StringReverseComplement, CompiledAlphabet) {
+    std::string sequence = "ACG";
+    reverse_complement(sequence);
+    EXPECT_EQ("CGT", sequence);
+    sequence = "AcGNnUu";
+    reverse_complement(sequence);
+    EXPECT_EQ("aAnNCgT", sequence);
+    sequence.clear();
+    reverse_complement(sequence);
+    EXPECT_TRUE(sequence.empty());
+}
+
+#if _DNA_CASE_SENSITIVE_GRAPH
+TEST(StringReverseComplement, AgreesWithPackedCaseSensitiveAlphabet) {
+    KmerExtractor2Bit encoder;
+    const std::string alphabet = "ACGTNacgt";
+    for (char a : alphabet) {
+        EXPECT_EQ(encoder.decode(encoder.complement_code()[encoder.encode(a)]),
+                  complement(a));
+        for (char b : alphabet) {
+            for (char c : alphabet) {
+                const std::string original = { a, b, c };
+                std::string sequence = original;
+                reverse_complement(sequence);
+                std::string expected;
+                for (auto it = original.rbegin(); it != original.rend(); ++it)
+                    expected += encoder.decode(encoder.complement_code()[encoder.encode(*it)]);
+                EXPECT_EQ(expected, sequence);
+                reverse_complement(sequence);
+                EXPECT_EQ(original, sequence);
+            }
+        }
+    }
+}
+#endif
 
 template <typename Kmer>
 class ExtractKmers2Bit : public ::testing::Test { };
@@ -26,6 +64,21 @@ TYPED_TEST_SUITE(ExtractKmers2Bit, KmerTypes);
 
 const KmerExtractor2Bit kmer_extractor;
 
+
+static_assert(std::is_constructible_v<KmerExtractor2Bit, const char*, std::array<uint8_t, 128>&>);
+static_assert(!std::is_constructible_v<KmerExtractor2Bit, const char*, std::array<uint8_t, 127>&>);
+
+TEST(KmerExtractor2Bit, borrows_fixed_size_lookup_table) {
+    KmerExtractor2Bit default_encoder;
+    std::array<uint8_t, 128> table;
+    for (size_t i = 0; i < table.size(); ++i)
+        table[i] = default_encoder.encode(i);
+    KmerExtractor2Bit encoder(default_encoder.alphabet.c_str(), table);
+    table['A'] = default_encoder.encode('T');
+    EXPECT_EQ(default_encoder.encode('T'), encoder.encode('A'));
+    EXPECT_EQ(default_encoder.encode('C'), encoder.encode('C'));
+    EXPECT_EQ(table[0], encoder.encode(char(-1)));
+}
 
 TEST(KmerExtractor2Bit, encode_decode) {
     KmerExtractor2Bit encoder;

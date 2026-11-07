@@ -73,7 +73,7 @@ int augment_graph(Config *config) {
 
     if (config->forward_and_reverse
             && graph->get_mode() == graph::DeBruijnGraph::PRIMARY) {
-        logger->error("Can't insert both strands into a primary graph.");
+        logger->error("Cannot insert both strands into a primary graph. Remove --fwd-and-reverse.");
         exit(1);
     }
 

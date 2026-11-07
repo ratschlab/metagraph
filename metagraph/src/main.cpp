@@ -2,6 +2,7 @@
 
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
+#include "common/unix_tools.hpp"
 #include "cli/config/config.hpp"
 #include "cli/build.hpp"
 #include "cli/annotate.hpp"
@@ -26,9 +27,12 @@ using mtg::cli::Config;
 int main(int argc, char *argv[]) {
     auto config = std::make_unique<Config>(argc, argv);
 
-    logger->set_level(common::get_verbose()
-                            ? spdlog::level::trace
-                            : spdlog::level::info);
+    // external merges (BOSS chunks, SSHash sorted runs) keep one file open per input
+    raise_max_files_open();
+
+    // Keep SPDLOG_LEVEL (or the INFO default) unless verbose was requested.
+    if (common::get_verbose())
+        logger->set_level(spdlog::level::trace);
     //logger->set_pattern("%^date %x....%$  %v");
     //spdlog::set_pattern("[%H:%M:%S %z] [%n] [%^---%L---%$] [thread %t] %v");
     //console_sink->set_color(spdlog::level::trace, "\033[37m");
