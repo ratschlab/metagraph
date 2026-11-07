@@ -50,6 +50,12 @@ Sequence layout (random, fixed seed):
     acc3 = LEFT2 + ELEMENT + RIGHT1      (divergent left flank, same right flank)
 all three in one file (one column), so the column label is the file and the
 header labels are acc1/acc2/acc3.
+
+In a Protein build the same fixtures are protein graphs over the residues A, C, G and T
+(one strand, every length in residues; SPEC §6.12), and every test runs but the few whose
+subject is DNA by nature: /pattern (refused on a protein graph, alphabet_unsupported), the
+graphlet documents a DNA build wrote, and the mini index. test_traverse_protein.py covers
+a protein graph over amino acids.
 """
 
 K = 31
@@ -62,7 +68,6 @@ def _supports_traverse():
     return 'Usage' in out and 'traverse' in out
 
 
-@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraverseBase(TestingBase):
     @classmethod
@@ -1251,6 +1256,9 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertTrue(out['results'][2]['duplicate'])
         self.assertEqual('failed', out['results'][1]['outcome']['walks'])
 
+    @unittest.skipIf(PROTEIN_MODE, "the documents are a DNA build's: their H records name "
+                     "$ACGT, and several of their indexes are canonical, which a Protein build "
+                     "refuses to build")
     def test_t37_cli_fixtures_are_reproduced(self):
         """T37 on the counterexamples of §9: the whole-document fixtures of
         api/python/tests/data/traverse/documents are what this binary writes for their
@@ -1874,11 +1882,16 @@ class TestTraverseAPI(TestTraverseBase):
         pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]},
                                                       {'dna': self.right1[5:35]}],
                                          'mode': 'partial'})
-        self.assertEqual(200, pattern.status_code, pattern.text)
-        pattern = pattern.json()
-        self._thread_figures(pattern['timing'], 'pattern')
-        for e in pattern['patterns']:
-            self._thread_figures(e['timing'], 'pattern entry')
+        if PROTEIN_MODE:
+            # pattern search is served on DNA graphs only (SPEC-pattern-search.md)
+            self.assertEqual((400, 'alphabet_unsupported'),
+                             (pattern.status_code, pattern.json().get('code')), pattern.text)
+        else:
+            self.assertEqual(200, pattern.status_code, pattern.text)
+            pattern = pattern.json()
+            self._thread_figures(pattern['timing'], 'pattern')
+            for e in pattern['patterns']:
+                self._thread_figures(e['timing'], 'pattern entry')
 
         # an attempt: the response's usage, and the state's after the response was written
         ret = self._post('traverse', {'attempt_id': 'resources-1', 'seeds': seeds,
@@ -1940,9 +1953,13 @@ class TestTraverseAPI(TestTraverseBase):
 
         pattern = self._post('pattern', {'patterns': [{'dna': self.element[10:40]}],
                                          'mode': 'partial'}).json()
-        self.assertIsInstance(pattern['work']['memory_bytes'], int)
-        for e in pattern['patterns']:
-            self.assertLessEqual(e['work']['memory_bytes'], pattern['work']['memory_bytes'])
+        if PROTEIN_MODE:
+            # pattern search is served on DNA graphs only (SPEC-pattern-search.md)
+            self.assertEqual('alphabet_unsupported', pattern.get('code'), pattern)
+        else:
+            self.assertIsInstance(pattern['work']['memory_bytes'], int)
+            for e in pattern['patterns']:
+                self.assertLessEqual(e['work']['memory_bytes'], pattern['work']['memory_bytes'])
 
         ret = self._post('traverse', {'attempt_id': 'memory-api-1', 'seeds': seeds,
                                       'strategy': {'bounds': {'max_extension_bp': BLOCK},
@@ -3325,7 +3342,6 @@ class TestTraverseResolveRegression(TestTraverseBase):
         self.assertEqual(answers[0], answers[1])
 
 
-@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraverseMultiGraph(TestTraverseBase):
     """Per-graph identity on a multi-graph server. The graph list has two optional columns,
@@ -4536,7 +4552,7 @@ _MINI_PRESENT = all(os.path.isfile(os.path.join(MINI_DIR, f)) for f in MINI_FILE
 _MINI_GUARD = (_MINI_PRESENT or os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') == '1')
 
 
-@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
+@unittest.skipIf(PROTEIN_MODE, "the mini index is a DNA index (nucleotide records, a DNA build)")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 @unittest.skipUnless(_MINI_GUARD, "the mini index is not built (scripts/traversal/"
                                   "build_mini_refseq.sh)")
@@ -4790,7 +4806,6 @@ class TestTraverseDerivedDataMini(TestingBase):
         self.assertEqual(self.mini_files, sorted(os.listdir(MINI_DIR)))
 
 
-@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraverseWideIndex(TestingBase):
     """The chunked deadlines: a fan-out index — a 61 bp seed, then all 1024 five-base
@@ -5957,7 +5972,6 @@ class TestTraverseSeedPhase(TestingBase):
 
 
 
-@unittest.skipIf(PROTEIN_MODE, "the fixture is DNA")
 class TestTraverseSeedRefusal(TestingBase):
     """A seed-phase memory refusal is stated by the refused row alone, whatever the read was
     cut into (SPEC-labeled-traversal-core.md §6.8: a read is the same whatever the chunk
