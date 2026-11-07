@@ -592,9 +592,15 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
     // the same files but whose sidecars differ are two indexes, each validated against its
     // manifest (grouped by the main files' real paths, the second pair's own .seqs would never
     // be checked and both would state one index_fp)
+    // made absolute first: weakly_canonical of a relative path whose first element does not
+    // exist is left relative by libstdc++ ("g1"), while "./g1" is made absolute, so the two
+    // spellings of one missing file would be two indexes on Linux (libc++ makes both absolute)
     auto real = [](const std::string &path) {
         std::error_code ec;
-        const std::filesystem::path p = std::filesystem::weakly_canonical(path, ec);
+        const std::filesystem::path abs = std::filesystem::absolute(path, ec);
+        if (ec)
+            return path;
+        const std::filesystem::path p = std::filesystem::weakly_canonical(abs, ec);
         return ec ? path : p.string();
     };
     // the bundle of a listed pair: its files' real paths in the inventory's order, and the
