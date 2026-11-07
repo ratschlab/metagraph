@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <future>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -1562,6 +1563,14 @@ std::optional<int64_t> integer_of(const Json::Value &v) {
     return v.isIntegral() ? std::optional<int64_t>(v.asInt64()) : std::nullopt;
 }
 
+// |value| as compact text, members in the writer's (sorted) order: the comparison of two documents
+// (Json::Value's == tells a parsed integer from the same number held as an unsigned one)
+std::string compact(const Json::Value &value) {
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    return Json::writeString(builder, value);
+}
+
 // A /traverse attempt's usage tells one timeline (SPEC-labeled-traversal-core section 6.8; SPEC-
 // multigraph-envelope.md section 4): the walk stopped between the receipt and the usage's
 // elapsed time; the bound is the seeds' time budgets plus the allowance (and an in_ram load), or,
@@ -1600,8 +1609,9 @@ void expect_usage_timeline(const std::string &name, const Json::Value &u,
     }
     if (u.isMember("not_after_ms")) {
         EXPECT_LE(received, u["not_after_ms"].asInt64()) << name;
-        if (request.isObject())
+        if (request.isObject()) {
             EXPECT_EQ(integer_of(request["not_after_ms"]), integer_of(u["not_after_ms"])) << name;
+        }
     }
     if (status == 503) {
         EXPECT_EQ("deadline", u["reason"].asString()) << name;
@@ -1650,6 +1660,24 @@ TEST(ServerFanout, EachSampleDeadlineTellsOneTimeline) {
             expect_usage_timeline(name, attempt["usage"], Json::Value(),
                                   attempt["response"].isObject()
                                           ? attempt["response"]["status"].asInt() : 0);
+            // the attempt's own instants are its usage's: its deadline the receipt plus the
+            // bound, its finish after the stop and within its elapsed time
+            EXPECT_EQ(attempt["usage"]["received_at"].asString(), attempt["received_at"].asString())
+                << name;
+            EXPECT_EQ(attempt["usage"]["bound_ms"].asInt64(), attempt["bound_ms"].asInt64()) << name;
+            const int64_t received = iso_ms(attempt["received_at"].asString());
+            if (attempt["deadline_at"].isString()) {
+                EXPECT_NEAR(received + attempt["bound_ms"].asInt64(),
+                            iso_ms(attempt["deadline_at"].asString()), 1) << name;
+            }
+            if (attempt["finished_at"].isString()) {
+                const int64_t finished = iso_ms(attempt["finished_at"].asString());
+                EXPECT_LE(received, finished) << name;
+                EXPECT_LE(finished, received + attempt["elapsed_ms"].asInt64() + 1) << name;
+                if (attempt["stopped_at"].isString()) {
+                    EXPECT_LE(iso_ms(attempt["stopped_at"].asString()), finished) << name;
+                }
+            }
             ++usages_checked;
         }
         if (!body.isMember("deadline"))
@@ -1776,30 +1804,116 @@ TEST(ServerFanout, Sample07IsTheAttemptsAnswerAtItsBound) {
 }
 
 // GET /requests/{attempt_id} of a /traverse attempt: the request object built from the
-// attempt's state (sample 21)
+// attempt's state (sample 21, the attempt of sample 05), under the attempts' retention the
+// samples state (sample 12): the sample is, member for member, what the server builds
 TEST(ServerFanout, TraverseRequestFromTheAttempt) {
     const Json::Value s21 = sample("21_requests_traverse.json")["body"];
+    const uint64_t retention_s
+            = sample("12_capabilities_multigraph.json")["body"]["attempts"]["retention_s"].asUInt64();
+    EXPECT_EQ(3600u, retention_s);
     const Json::Value pair = parse(R"({"graph": "bact_other",
         "graph_path": "/scratch/nvme8/refseq_r237/bact_other/graph.dbg",
         "annotation_path": "/scratch/nvme8/refseq_r237/bact_other/annotation.row_diff_brwt_coord.annodbg"})");
-    const Json::Value j = traverse_request_json(s21["attempt"], pair, 3600);
+    const Json::Value j = traverse_request_json(s21["attempt"], pair, retention_s);
     EXPECT_EQ(members(s21), members(j));
+    EXPECT_EQ(compact(s21), compact(j));
     EXPECT_EQ("svc-trv-91aa07-1", j["request_id"].asString());
     EXPECT_EQ("/traverse", j["route"].asString());
     EXPECT_EQ("ended", j["state"].asString());
     EXPECT_EQ("completed", j["reason"].asString());
-    EXPECT_EQ("2026-10-21T10:14:29.385Z", j["retained_until"].asString());
+    EXPECT_EQ("2026-11-07T08:52:34.095Z", j["retained_until"].asString());
     EXPECT_EQ(s21["pairs"], j["pairs"]);
     EXPECT_EQ(s21["response"], j["response"]);
     // a running attempt on a single-graph server: null tags, no response yet
     Json::Value running = s21["attempt"];
     running["state"] = "running";
-    const Json::Value r = traverse_request_json(running, Json::Value(), 3600);
+    const Json::Value r = traverse_request_json(running, Json::Value(), retention_s);
     EXPECT_EQ("running", r["state"].asString());
     EXPECT_TRUE(r["response"].isNull());
     EXPECT_TRUE(r["retained_until"].isNull());
     EXPECT_TRUE(r["pairs"][0]["graph"].isNull());
     EXPECT_TRUE(r["pairs"][0]["outcome"].isNull());
+}
+
+// Every registry entry a sample states (GET /requests, a request_id's 409) is retained for the
+// retention its server states after it ended: retained_until is finished_at plus the attempts'
+// retention_s (sample 12) on /traverse, plus the request registry's ("requests are kept N s",
+// samples 19 and 20) on /resolve and /pattern; null while it runs (sample 21 stated ten days
+// more until 2026-11-07)
+TEST(ServerFanout, EachRegistrySampleIsRetainedForItsRetention) {
+    const int64_t attempts_s
+            = sample("12_capabilities_multigraph.json")["body"]["attempts"]["retention_s"].asInt64();
+    const std::string kept = sample("20_requests_404.json")["body"]["error"].asString();
+    const size_t at = kept.find("requests are kept ");
+    ASSERT_NE(std::string::npos, at) << kept;
+    const int64_t requests_s = std::stoll(kept.substr(at + std::string("requests are kept ").size()));
+    size_t checked = 0;
+    for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
+        if (file.path().extension() != ".json")
+            continue;
+        const std::string name = file.path().filename().string();
+        const Json::Value body = sample(name)["body"];
+        if (!body.isObject() || !body.isMember("retained_until"))
+            continue;
+        const int64_t retention_s = body["route"].asString() == "/traverse" ? attempts_s : requests_s;
+        if (body["state"].asString() == "ended") {
+            ASSERT_TRUE(body["finished_at"].isString()) << name;
+            ASSERT_TRUE(body["retained_until"].isString()) << name;
+            EXPECT_EQ(iso_ms(body["finished_at"].asString()) + retention_s * 1000,
+                      iso_ms(body["retained_until"].asString())) << name;
+        } else {
+            EXPECT_TRUE(body["retained_until"].isNull()) << name;
+        }
+        ++checked;
+    }
+    // 17, 18, 19, 21
+    EXPECT_LE(4u, checked);
+}
+
+// Samples that name one attempt describe one execution of it (release 10's one identity per
+// sample, across samples; the coordinator's Q3 of 2026-11-07): an attempt object (a 409's, GET
+// /requests') naming the attempt a /traverse envelope sample records states that envelope's
+// server, receipt, stop, bound, seeds, not_after_ms and reason, and its 200 (sample 21 described
+// the 2026-10-21 attempt under sample 05's id until then). An attempt of its own (sample 06's)
+// is not compared
+TEST(ServerFanout, SamplesNamingOneAttemptDescribeOneExecution) {
+    std::map<std::string, std::pair<std::string, Json::Value>> recorded;
+    std::vector<std::pair<std::string, Json::Value>> attempts;
+    for (const auto &file : std::filesystem::directory_iterator("../tests/data/multigraph_contract")) {
+        if (file.path().extension() != ".json")
+            continue;
+        const std::string name = file.path().filename().string();
+        const Json::Value body = sample(name)["body"];
+        if (!body.isObject())
+            continue;
+        if (body["route"].asString() == "/traverse" && body["request_id"].isString()
+                && body["usage"].isObject())
+            recorded[body["request_id"].asString()] = { name, body };
+        if (body["attempt"].isObject())
+            attempts.emplace_back(name, body["attempt"]);
+    }
+    ASSERT_LE(2u, recorded.size());   // 05, 23
+    size_t matched = 0;
+    for (const auto &[name, attempt] : attempts) {
+        auto it = recorded.find(attempt["attempt_id"].asString());
+        if (it == recorded.end())
+            continue;
+        const std::string where = name + " names the attempt of " + it->second.first;
+        const Json::Value &envelope = it->second.second;
+        const Json::Value &u = envelope["usage"];
+        EXPECT_EQ(envelope["server_instance"].asString(), attempt["server_instance"].asString())
+            << where;
+        for (const char *key : { "received_at", "stopped_at", "reason" }) {
+            EXPECT_EQ(u[key].asString(), attempt[key].asString()) << where << ": " << key;
+        }
+        EXPECT_EQ(u["bound_ms"].asInt64(), attempt["bound_ms"].asInt64()) << where;
+        EXPECT_EQ(integer_of(u["not_after_ms"]), integer_of(attempt["not_after_ms"])) << where;
+        EXPECT_EQ(compact(u["seeds"]), compact(attempt["seeds"])) << where;
+        EXPECT_EQ(200, attempt["response"]["status"].asInt()) << where;
+        ++matched;
+    }
+    // 21 names the attempt 05 records
+    EXPECT_LE(1u, matched);
 }
 
 // finish_by_ms bounds a /traverse attempt's bound (and walk-until), enforced without

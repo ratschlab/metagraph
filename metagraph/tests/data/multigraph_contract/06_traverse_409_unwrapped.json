@@ -1,7 +1,7 @@
 {
  "route": "POST /traverse",
  "status": 409,
- "note": "Attempt-level answers stay HTTP-level and unwrapped (E10): a repeated attempt_id that is running or retained, as today. The same holds for a tombstoned id and an expired not_after_ms (409 {error, state: \"expired\", ...}).",
+ "note": "Attempt-level answers stay HTTP-level and unwrapped (E10): a repeated attempt_id that is running or retained, as today. The same holds for a tombstoned id and an expired not_after_ms (409 {error, state: \"expired\", ...}). A recorded answer of the suite (refseq97, 2026-10-21) for an attempt of its own: it names that attempt's attempt_id and server_instance (one each), not the attempt of sample 05, so none of its values is replaced.",
  "body": {
   "attempt": {
    "attempt_id": "suite-s1-TTAAATTTACGGCACA-20261021T084452Z_refseq97-90ec1fbc-direct-local",
