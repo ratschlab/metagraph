@@ -322,6 +322,13 @@ class TestTraverseProtein(TestingBase):
                                        'strategy': {'bounds': {'max_extension_bp': 20},
                                                     'output': {'timing': False}}})
         self.assertEqual(0, rc, upper.get('error'))
+        # edges are the forward (k+1)-mers, and at k = 15 (16 residues of 5 bits each) they no
+        # longer fit 64 bits: hashed, as walk_rule states (SPEC §6.6, §6.12); no other strand
+        rule = upper['walk_rule']
+        self.assertIn('(edges are compared as (k+1)-mers, identified by a 128-bit FNV-1a hash',
+                      rule)
+        self.assertNotIn('canonical', rule)
+        self.assertNotIn('either strand', rule)
         lower, rc, _ = self._traverse({'seeds': [{'sequence': self.domain.lower()}],
                                        'strategy': {'bounds': {'max_extension_bp': 20},
                                                     'output': {'timing': False}}})
