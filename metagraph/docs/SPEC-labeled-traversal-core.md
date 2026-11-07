@@ -437,7 +437,8 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   starts — after the stop between seeds
   (§6.8), which keeps precedence — the request compares H + B with R, where H is what the results of seeds 0 to
   i − 1 hold until the response is written (their `usage.per_seed[].final_bytes`, §7.3: walked, failed,
-  not-in-graph and refused results alike, the attempt's held account) and B the request's effective per-seed
+  not-in-graph and refused results alike, the attempt's held account — a walked result its own account,
+  without its memory budget's cache allotments, which end with its walk) and B the request's effective per-seed
   memory budget (`bounds.max_memory_mb` after the server's clamp; R requires the server's per-seed maximum in
   [1, R], §10.3, so every seed has one, at most R). If H + B > R (a tie at exactly R starts), seed i and every
   later seed are **not started**: each is failed in the shape of a seed the attempt never started (§6.8) — no
@@ -457,6 +458,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   plus that walk's excess) — the account `usage.memory.held_bound_bytes` states (§7.3) — beside the priced echo of
   each seed left unstarted (its `final_bytes`: the fixed part of a result and its `seed_id`, §5, a few KB of
   text in fact); two request slots, 2R plus their soft excess, where without the bound n seeds could hold n × B.
+  Beside that account a server process holds what no account counts: the request's body while it is read and
+  parsed (bounded only by `--max-request-body-mb`, `max_request_body_mb`; 0 = unlimited, the default), the
+  request's structures outside the account (the oracle's node-first cache for backward steps on a succinct graph,
+  the parsed request, its registry entry), the allocator's retained free memory, and what `memory_bound_soft`
+  lists as not observed (§7.3). *E5b's verification sweep* (2026-11-07; per-seed budgets of 64 MiB to 4 GiB under
+  R = 8 GiB, 1 to 64 seeds, results of up to 97 MiB of text, request bodies of a few KB) found a server's peak
+  physical footprint above its idle at most 2.6 GiB, and on Linux under a cgroup limit of R + 256 MiB + the idle
+  charge no case killed: R plus a fixed overhead of 256 MiB holds a request whose body is capped.
   A seed the bound left unstarted is sent again in a new request (the action `split_request`).
 - **Attempt fields** (`DESIGN-traverse-graphlet.md` §14 and §14.1: the frozen wire contract's request fields;
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
@@ -1073,7 +1082,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     × 1000)) + stop_ms`, T the exact bytes of the text of the seeds finished so far (the server writes each seed's result
     as compact text once it is built and assembles the response from those texts — byte for byte the text of
     the whole tree, which is freed seed by seed), E the text the seed being walked is estimated to write (its
-    modelled account, published at every level's end, / the account per text byte of the requested detail; from
+    modelled account without the memory budget's cache allotments, which write no text, published at every
+    level's end, / the account per text byte of the requested detail; from
     feature level 6 the account's record-coordinates share C apart: E = ⌈(A − C) / ratio⌉ +
     ⌈C / coordinate_account_per_text_byte⌉ with `coordinate_account_per_text_byte` 12, a bound — every byte of
     coordinate text, whatever its digits, costs at least 12 account bytes (each part's ratio at its widest text is
@@ -1084,21 +1094,43 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     measured ratio would have understated 2.6–4.1 times on coordinate-heavy seeds (`DESIGN-traverse-graphlet.md`
     §18.8, M2); a ratio is
     measured as (A − C) / (the text − the text the coordinates wrote, counted exactly from digits and
-    punctuation), on a rest of at least 1 MiB, so that a request with coordinates measures what the same walk
-    without them would, and the server's measured ratios do not depend on whether one came first),
-    with the configured values `account_per_text_byte` (30 for the JSON details, 50 for a graphlet — *calibrated
-    in the efficiency pass, feature level 4*: just below the smallest account/text ratios measured on real
-    responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the smallest SRA JSON ratio) and 58.4 and more for
-    a graphlet; they stay conservative: a server's first large attempt of a detail can still be cut early until it
-    has measured that detail itself — on a warm SRA server the first `tree` and `full` attempts of a 16S beam with a
-    40 s bound were cut at 3-5 s with 20/40 and with 30/50 alike, the `tree` text measuring 115-129 account units a
-    byte against the 30 assumed; the earlier report of 18.2 s instead of 11.0 s on a fresh server came from a cold
-    walk against an intermediate build and did not reproduce; per-detail starting ratios were considered and not
-    adopted, one locus being too narrow a measurement to start a reserve from),
+    punctuation), on a rest of at least 1 MiB of text or of at least 64 MiB of account (*E5b's review, F1*: a
+    detail writing a text byte per more than 896 account bytes — `summary` on an SRA-like index, 1,344 with the
+    allotments — never writes 1 MiB of text below a 896 MiB account and would keep the configured ratio for
+    good: at 6 a 900 MB account is estimated as 150 MB of text, which on a 30 s bound moves the walk-until from
+    about 24.5 s to 6.5 s; at 64 MiB the result's fixed part is under 1% of its account), so that a request with
+    coordinates measures what the same walk without them would, and the server's measured ratios do not depend
+    on whether one came first; the sample's A is the walk's account at its end without the allotments, its
+    `final_bytes` (§7.3), and E is estimated from the account the walk publishes at every level's end, likewise
+    without them — *E5b's fix: with the allotments in both, a seed of 1 MiB of text under a budget of 1 GiB or more
+    measured a ratio of at least 128 and the estimate of a larger seed after it fell short by as much: on
+    servers at budgets of 64 MiB to 4 GiB with results growing to 97 MiB of text, up to 3.3 times too little
+    text, or 12 times too much the other way, against 0.92 to 1.07 times the text without them*),
+    with the configured values `account_per_text_byte` (6 for the JSON details and 6 for a graphlet — *since
+    E5b's fix and its review, 2026-11-07*: the JSON one just below the smallest ratio measured without the memory budget's cache
+    allotments, 6.15 on JSON results whose text is mostly 12,000-character label names (a name is priced at its
+    escaped bytes three times beside its tree: the least account a byte of JSON text carries), to be re-measured
+    on staging once the merged engine is deployed; a smaller ratio estimates more text and keeps a larger
+    reserve, the safe direction. It was 30 (*calibrated in the efficiency pass, feature level 4*: just below the
+    smallest account/text ratios measured on real responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the
+    smallest SRA JSON ratio), whose accounts included the allotments, which overstate every budgeted seed's
+    ratio); the graphlet's just below the smallest measured without the allotments, 6.36 on graphlets of 64 to
+    4,096 such names (3 to 47 MiB of text; the review's F2: it was 50, below 58.4 measured then with the
+    allotments, and a fresh server under-estimated a name-heavy graphlet's text about 8 times). They stay conservative: a
+    server's first large attempt of a detail can be cut early until it has measured that detail itself, its
+    measured ratio replacing the configured one once a seed of the detail wrote at least 1 MiB of text or held
+    at least 64 MiB of account beside its record coordinates (in this attempt, or in one of the server's last 16
+    that did) — on a warm SRA server the first
+    `tree` and `full` attempts of a 16S beam with a 40 s bound were cut at 3-5 s with 20/40 and with 30/50 alike,
+    the `tree` text measuring 115-129 account units a byte (with the allotments) against the 30 assumed; the
+    earlier report of 18.2 s instead of 11.0 s on a fresh server came from a cold walk against an intermediate
+    build and did not reproduce; per-detail starting ratios were considered and not adopted, one locus being too
+    narrow a measurement to start a reserve from),
     `compress_mbps` (`--traverse-delivery-compress-mbps`, default 50) and `build_mbps`
     (`--traverse-delivery-build-mbps`, default 10) until the server has measured its own: then, for each, the
     slowest rate — or for the detail the smallest ratio — of its last 16 measurements on `/traverse` responses
-    and seeds' results of at least 1 MiB of text, and the attempt's own seeds' where more conservative, so
+    and seeds' results of at least 1 MiB of text (a ratio also on a seed of at least 64 MiB of account), and the
+    attempt's own seeds' where more conservative, so
     that a machine slower than assumed is seen at once and a fast one is not held to the guess (both
     capabilities routes state the measurements). On the M5 Max of the measurements the configured guesses
     alone stopped the walk of a 403 MB SRA response at 2.3 s of its 35 s walk-until (account 35.6 GB, 88 per
@@ -1172,16 +1204,17 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
 
   | starting estimate | value | measured | why this value |
   |---|---|---|---|
-  | `account_per_text_byte.json` | 30 | account bytes per text byte on real responses: 33.5 (UHGG `full`) to 1,344 (SRA `summary`), 37.2 the smallest SRA JSON ratio | just below the smallest ratio measured; one starting ratio for every JSON detail, since one locus is too narrow a measurement to start a detail's reserve from |
-  | `account_per_text_byte.graphlet` | 50 | 58.4 and more | just below the smallest ratio measured |
+  | `account_per_text_byte.json` | 6 | account bytes per text byte without the memory budget's cache allotments (E5b's fix, 2026-11-07): 6.15 on JSON results whose text is mostly long label names; with them, on real responses (feature level 4, the value 30 then): 33.5 (UHGG `full`) to 1,344 (SRA `summary`), 37.2 the smallest SRA JSON ratio | just below the smallest ratio measured without the allotments (a smaller ratio, a larger reserve: the safe direction); re-measured on staging once the merged engine is deployed; one starting ratio for every JSON detail, since one locus is too narrow a measurement to start a detail's reserve from |
+  | `account_per_text_byte.graphlet` | 6 | without the allotments (E5b's review, F2): 6.36 on graphlets whose text is mostly long label names (64 to 4,096 names of 12,000 characters, 3 to 47 MiB of text); with them, on real responses (feature level 4, the value 50 then): 58.4 and more | just below the smallest ratio measured without the allotments; re-measured on staging once the merged engine is deployed |
   | `stop_ms` | `chunk_target_ms` + 950 | from the walk-until to the walk's end: 352 ms on a quiet SRA server, 1,001 ms on a loaded one, 1,699 ms once (under load, a 400 MB result) | 950 ms for the heads between two readings of the clock and the stopped seed's finalisation; the rest of a finalisation that grows with the result is covered by the margin while it runs faster than 4 × `build_mbps`; a longer stop measured replaces it (`measured_stop_ms`) |
   | `compress_mbps` | 50 | 460–670 MB/s on SRA responses at zlib level 1 | conservative |
   | `build_mbps` | 10 | 13.6–51 MB/s on SRA responses | conservative |
 
   They stay conservative, so a server's first large attempt of a detail can still be cut early until it has
   measured that detail on its own responses: on a warm SRA server the first `tree` and `full` attempts of a 16S
-  beam (a 40 s bound) were cut at 3–5 s, the `tree` text measuring 115–129 account units a byte against the 30
-  assumed.
+  beam (a 40 s bound) were cut at 3–5 s, the `tree` text measuring 115–129 account units a byte (with the
+  allotments) against the 30 assumed then; at 6 a first attempt of a detail keeps a reserve about five times that
+  large until its server has measured the detail.
 - **Chunked deadlines** (pass 5; `LabelOracle::pacer`, `ReadPacing`). Under a deadline — the seed's
   `bounds.time_budget_ms` where the walk reads it (depth > 0, as a checkpoint does; in a derivation, a positive
   budget, as the derivation reads it after every k-mer) and, for a request with `attempt_id`, the attempt's
@@ -1459,7 +1492,10 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   format `memory_bound_soft` names what is still held uncharged beside the admitted account — a
   level's keys and fetched rows until its heads are processed, the seed phase's intersection, hits and
   coordinate copies, a failed seed's depth-0 dictionary, a failed result's echo of `seed_id`, and, not observed,
-  an index-wide header lookup and the label dictionary's first table — and each seed of a request has budgets
+  an index-wide header lookup, two further copies of the seed's label names (at most 2 × `max_seed_labels` × the
+  longest name, whatever the budget: E5b's sweep measured up to 121 MiB beyond the account and the observed
+  excess for 4,096 labels of 12,000-character names under 64 MiB) and the label dictionary's first table — and
+  each seed of a request has budgets
   of its own (§5), so a request of n seeds holds up to n budgets.
 - **Overflow** (`on_overflow`): `stop` ends the arm's live paths with that reason; `beam` keeps, at the end of each
   level, the `max_live_paths` heads with the most support (`(−|σ|, min loss, path_id)`; in `annotate` mode |σ| is
@@ -1717,7 +1753,7 @@ is rejected instead (§5).
 | `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, a budget raised from zero (the walk ran under it), or a memory or work budget at the server's maximum (§10, R16) that stopped its walk or failed the seed | the clamped field | the requested value (`limit` is the effective one) |
-| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
+| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), the seed phase's two further copies of the seed's label names — its resolved label references and the names it keeps for the result, beside the dictionary's two copies, which are observed — (not observed; bounded by 2 × `max_seed_labels` × the longest name and not by the budget, independent of the seed count and released when the seed ends: *E5b's sweep, 2026-11-07*, measured up to 121 MiB beyond the account and the observed excess for a seed deriving 4,096 labels of 12,000-character names under a 64 MiB budget, about 229 MiB at 10,000 such names; charging them is on the engine's backlog), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
 | `coordinates` | seed | `output.coordinates` is true and an occurrence list — a seed label's or a run's — was cut at the cap to its first occurrences by start (each cut list states `occurrences_total`; the block `complete: false`). In no outcome class (decision C2) | `output.max_coordinate_occurrences` | the largest true count of a cut list; the extra field `lists_cut` counts the lists cut |
 | `derivation` | failed seed; a walked seed whose set was derived from part of it (D3) | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode). **D3** *(the owner's decision, feature level 6)*: a derived seed whose time budget runs out after 1 ≤ j < n of its k-mers is delivered as a walked result, without `error`, when nothing else would fail it — the set of the labels carrying the j k-mers read (a superset of the whole seed's carriers; `labels_from_seed`, `labels_supporting_total` its size), every requested arm truncated at `complete_to_bp` 0 (`cap_trigger` `time_budget`), this limitation first with `cause: time_budget` and `observed` = j, no `num_kmers` field, `outcome.walks: partial` and `label_evidence: qualified`; j = 0, or a superset that would fail the seed in any other way, fails as before | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: **two units** — on a failed seed the elapsed ms (a number), on a walked seed (D3) j, the k-mers read (an integer; n is the seed's `num_kmers`, and the effect says "after j of n k-mers"): one `kind`, `cause` and `knob`, told apart by the result's shape (walked: `arms`, no `error`), which the owner kept rather than change the wire within level 6 *(review of 2026-10-06, X1; in an MGT `K` record j is written `i:j`, an elapsed time `f:`)*; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
@@ -2238,9 +2274,20 @@ attempt) nor a 400 for a malformed id:
   whether or not a budget is set: deterministic logical work, §6.8; a derivation found `too_wide` includes the
   window it decoded); `peak_admitted_bytes` — the modelled account's peak, which under `bounds.max_memory_mb` is
   at most the budget (an account past it was refused — the seed failed at depth 0 or the walk stopped — or is
-  held beyond it as the soft excess); `final_bytes` — what the seed's result holds until the response is
-  written: the account when its walk ended for a walked result, the failed result as priced (its fixed part
-  and its echo of `seed_id`, §5) for a failed, refused or never started one; `soft_excess_bytes` — what the
+  held beyond it as the soft excess; the cache allotments of a memory budget included, §7.2.2, held while the
+  seed is walked); `final_bytes` — what the seed's result holds until the response is written: for a walked
+  result the account when its walk ended **without the memory budget's cache allotments** (`memory_allotments`,
+  §7.2.2: the label cache's and the lookahead's), which end with the walk — the caches are the walk's own, freed
+  when its seed is done, and the row-diff path cache within the label cache's allotment is cleared then — so the
+  same with and without a budget that does not bind (but in `tree` and `full`, where a budget can keep a merge's
+  arrival order whose displayed chain the account then charges, §7.2.2: there it is the same at every budget that
+  does not bind), and at most the result's `work.memory_bytes`; the failed
+  result as priced (its fixed part and its echo of `seed_id`, §5) for a failed, refused or never started one
+  *(E5b's fix, 2026-11-07: with the allotments, the request-wide bound, §5, which sums `final_bytes`, charged up
+  to 128 MiB for every seed already walked — at a per-seed maximum of 1 GiB and a bound of 8 GiB, 56 of 64
+  seeds of a few hundred KB started, all 64 without; measured on results of up to 97 MiB of text at budgets of
+  64 MiB to 4 GiB, a walked result's `final_bytes` was at least 6.1 times the text it holds until the
+  response is written)*; `soft_excess_bytes` — what the
   result's `memory_bound_soft` states, in bytes (the walk's observed excess, and for a failed or never started
   result its echo of `seed_id` beyond the budget), null without `bounds.max_memory_mb`; `refused_bytes` — the
   demand the memory budget refused when it stopped or failed the seed (bytes at that budget: a head, a read —
@@ -2253,7 +2300,10 @@ attempt) nor a 400 for a malformed id:
   at least all results' `final_bytes` together; `memory.soft_excess_bytes` is the largest per-seed excess (each
   seed's over its own budget), null without a memory budget; `memory.held_bound_bytes` — an upper bound of what
   the walks and the results held at once, **as observed** (what `memory_bound_soft` lists as not observed is not
-  in it), under `bounds.max_memory_mb` only: max over walked seeds i of (the `final_bytes` before i + the budget
+  in it — the largest part the seed phase's further copies of the seed's label names, up to 2 ×
+  `max_seed_labels` × the longest name whatever the budget: E5b's sweep found a server's peak footprint 121 MiB
+  above `held_bound_bytes` for seeds of 4,096 labels of 12,000-character names under 64 MiB, the same with 1
+  and 64 seeds), under `bounds.max_memory_mb` only: max over walked seeds i of (the `final_bytes` before i + the budget
   + i's soft excess), and at least all results together; null without a memory budget. Under the request-wide
   memory bound (§5) it is at most the bound plus the largest per-seed soft excess, beside the `final_bytes` of
   the seeds left unstarted. The modelled account is **no bound of what was held**: without a memory budget it
@@ -3417,7 +3467,8 @@ search's routes, `POST /pattern` and `GET /pattern/capabilities`, are `SPEC-patt
   `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
   to `not_after_ms`, §5; the server's own check adds nothing), `bound` and `not_after` (references to §6.8, the
   attempt's bound, and to §5, `not_after_ms`) and
-  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (30 and 50),
+  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (6 and 6; 30 and 50 until E5b's
+  fix and its review, §6.8),
   `coordinate_account_per_text_byte` (feature level 6: 12, an integer, so that a ledger can reproduce the
   reserve, §6.8),
   `margin` (1.25), `stop_ms` (the configured time from the walk-until to the walk's end:

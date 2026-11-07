@@ -3787,7 +3787,13 @@ void Walker::write_meter() const noexcept {
     // admitted)
     const uint64_t peak = std::max(peak_, accounted());
     m.memory_peak = mem_limit_ ? std::min(peak, mem_limit_) : peak;
-    m.memory_final = accounted();
+    // What the result holds until the response is written: the account when the walk ended
+    // without the budget's fixed cache allotments (allotted_: the label cache's and the
+    // lookahead's), which end with the walk — the caches are this walker's, freed when
+    // traverse_seed returns, and the row-diff path cache within the label cache's allotment is
+    // cleared then (PathCacheScope). The same with and without a budget that does not bind
+    const uint64_t held = accounted();
+    m.memory_final = held > allotted_ ? held - allotted_ : 0;
     m.soft_excess = overshoot_;
     m.walked = true;
     m.memory_coordinates = coord_account_;
@@ -5078,9 +5084,15 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     beam(arm, depth + 1);
     arm.frontier.swap(arm.next);
     // what the walk will deliver grows with its account: the caller keeps time back for it,
-    // the recorded coordinates' part told apart (their text per account byte is another)
-    if (control_ && control_->progress)
-        control_->progress(accounted(), coord_account_);
+    // the recorded coordinates' part told apart (their text per account byte is another).
+    // Without the budget's cache allotments, which write no text: the account the caller
+    // measures its account per text byte on (the meter's memory_final) is the same, so that
+    // a budget's allotments neither inflate the ratio a smaller seed measures (and with it
+    // understate a larger seed's text) nor add text to the estimate
+    if (control_ && control_->progress) {
+        const uint64_t account = accounted();
+        control_->progress(account > allotted_ ? account - allotted_ : 0, coord_account_);
+    }
 }
 
 std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,

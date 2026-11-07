@@ -1,7 +1,7 @@
 {
  "route": "POST /traverse",
  "status": 200,
- "note": "E10/E2b: a named-graph traverse answers in the envelope with one entry. The attempt is the request: request_id = attempt_id, server_instance and the attempt usage sit at the envelope top level (usage only for a managed request, as today); the entry is the single-graph answer without usage. The request gives not_after_ms (its latest start, after the receipt), so the deadline states both instants (section 4): effective_deadline_at is usage.received_at plus usage.bound_ms, cutoff_at usage.received_at plus usage.bound.walk_until_ms. A real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, and every instant and time is the run's. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "note": "E10/E2b: a named-graph traverse answers in the envelope with one entry. The attempt is the request: request_id = attempt_id, server_instance and the attempt usage sit at the envelope top level (usage only for a managed request, as today); the entry is the single-graph answer without usage. The request gives not_after_ms (its latest start, after the receipt), so the deadline states both instants (section 4): effective_deadline_at is usage.received_at plus usage.bound_ms, cutoff_at usage.received_at plus usage.bound.walk_until_ms. usage.per_seed[].final_bytes is what the seed's result holds until the response is written: its account when the walk ended without the 512 MiB budget's cache allotments (the label cache's and the lookahead's, 96 MiB, which end with the walk; its peak_admitted_bytes keeps them). A real run of the release binary on the integration fixture (three records acc1-acc3) served as bact_other, tagged with that pair and identity: its labels, columns and sequences are the fixture's, and every instant and time is the run's. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
  "request": {
   "seeds": [
    {
@@ -34,7 +34,7 @@
   },
   "graph": "bact_other",
   "attempt_id": "svc-trv-91aa07-1",
-  "not_after_ms": 1794038014000
+  "not_after_ms": 1794070099000
  },
  "body": {
   "envelope_version": 1,
@@ -49,10 +49,10 @@
   "request_id": "svc-trv-91aa07-1",
   "server_instance": "7c1e0f3a9b24d6e8",
   "deadline": {
-   "not_after_ms": 1794038014000,
+   "not_after_ms": 1794070099000,
    "finish_by_ms": null,
-   "effective_deadline_at": "2026-11-07T07:53:44.085Z",
-   "cutoff_at": "2026-11-07T07:53:39.085Z"
+   "effective_deadline_at": "2026-11-07T16:48:29.951Z",
+   "cutoff_at": "2026-11-07T16:48:24.951Z"
   },
   "usage": {
    "attempt_id": "svc-trv-91aa07-1",
@@ -65,18 +65,18 @@
     "walk_until_ms": 65000
    },
    "bound_ms": 70000,
-   "elapsed_ms": 9,
+   "elapsed_ms": 2,
    "memory": {
     "held_bound_bytes": 536870912,
     "peak_admitted_bytes": 101316182,
     "soft_excess_bytes": 0
    },
-   "not_after_ms": 1794038014000,
+   "not_after_ms": 1794070099000,
    "observed_max_uninterruptible_ms": 1,
    "per_seed": [
     {
-     "elapsed_ms": 7,
-     "final_bytes": 101302654,
+     "elapsed_ms": 2,
+     "final_bytes": 639358,
      "index": 0,
      "outcome": "complete",
      "peak_admitted_bytes": 101316182,
@@ -88,7 +88,7 @@
     }
    ],
    "reason": "completed",
-   "received_at": "2026-11-07T07:52:34.085Z",
+   "received_at": "2026-11-07T16:47:19.951Z",
    "seeds": {
     "abandoned": 0,
     "finished": 1,
@@ -96,9 +96,9 @@
     "started": 1
    },
    "server_instance": "7c1e0f3a9b24d6e8",
-   "stopped_at": "2026-11-07T07:52:34.092Z",
+   "stopped_at": "2026-11-07T16:47:19.952Z",
    "timing": {
-    "cpu_ms": 3.493125
+    "cpu_ms": 1.452542
    },
    "work": {
     "memory_bytes": 652886
@@ -489,7 +489,7 @@
       ],
       "limitations": [
        {
-        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (dependency rows and coordinate tuples are charged before they are held; a read that does not fit is refused whole); held beyond the admitted account, so able to exceed the budget: a level's keys and fetched rows until its heads are processed, the seed phase's intersection and hits, a failed seed's depth-0 dictionary and a failed result's echo of seed_id (observed: the largest excess seen, MiB, rounded up), and, not observed, an index-wide header lookup and the label dictionary's first table and growth copy (about 1.5 KB)",
+        "effect": "the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (rows and coordinates are charged before they are held; a read not fitting is refused whole); held beyond the admitted account, able to exceed the budget: a level's keys and rows until its heads are done, the seed phase's intersection, hits, dictionary, a failed result's echo of seed_id (observed: the largest excess, MiB, rounded up) and, not observed, an index-wide header lookup, two more copies of the seed's label names (at most 2 x max_seed_labels x the longest) and the dictionary's first table and growth copy (1.5 KB)",
         "kind": "memory_bound_soft",
         "knob": "bounds.max_memory_mb",
         "limit": 512,
@@ -518,20 +518,20 @@
        "validated_seed_id": "80bf643b8e67d15a"
       },
       "timing": {
-       "annotation_fetch_ms": 0.796875,
+       "annotation_fetch_ms": 0.34879099999999996,
        "cache_hits": 194,
        "coords_mapped": 632,
-       "cpu_ms": 2.418875,
+       "cpu_ms": 0.933625,
        "deadline": {
         "longest_piece": {
-         "coordinates": 0,
-         "kind": "setup",
-         "ms": 0.6014989614486694,
-         "rows": 0
+         "coordinates": 3,
+         "kind": "read",
+         "ms": 0.0581660270690918,
+         "rows": 1
         }
        },
-       "elapsed_ms": 3.118749976158142,
-       "label_resolve_ms": 0.001458,
+       "elapsed_ms": 0.8727079629898071,
+       "label_resolve_ms": 0.0015,
        "path_cache": {
         "bytes_kept": 12368,
         "hits": 58,
@@ -540,9 +540,9 @@
         "stored_rows_read": 251
        },
        "rows_fetched": 0,
-       "seed_fetch_ms": 0.509333,
-       "seed_phase_ms": 1.9266248941421509,
-       "serialize_ms": 2.8125839999999998,
+       "seed_fetch_ms": 0.159166,
+       "seed_phase_ms": 0.3335829973220825,
+       "serialize_ms": 0.047833,
        "tuple_rows_fetched": 272
       },
       "unknown_labels": [],
@@ -614,9 +614,9 @@
      "support": "kmer"
     },
     "timing": {
-     "cpu_ms": 3.096,
-     "elapsed_ms": 8.045041,
-     "serialize_ms": 2.8125839999999998
+     "cpu_ms": 1.296584,
+     "elapsed_ms": 1.434416,
+     "serialize_ms": 0.047833
     },
     "unknown_labels": [],
     "walk_rule": "every walk of at most complete_to_bp bases from the seed boundary is present when it uses no (k+1)-mer edge twice on its own path (edges are compared as (k+1)-mers), enters no seed node, and takes every step regardless of strand (a single-strand graph has no hairpins); after a reconvergence the merged walk is also barred from every edge used by any route merged into it (edge histories are united under on_reconverge: merge, so fewer walks are present than per path; on_reconverge: keep gives the per-path set); it is followed while some permitted label supports every node of it under the strategy's label rules",
@@ -626,7 +626,7 @@
    }
   ],
   "timing": {
-   "elapsed_ms": 8.997916
+   "elapsed_ms": 1.717709
   },
   "work": {
    "memory_bytes": 652886

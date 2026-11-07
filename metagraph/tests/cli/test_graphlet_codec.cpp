@@ -5754,7 +5754,10 @@ TEST(GraphletAttempt, NoStopIsByteIdentical) {
             EXPECT_EQ(plain.account.work_used, never.meter.work_units) << what;
             EXPECT_EQ(plain.account.work_seed, never.meter.work_seed) << what;
             EXPECT_GE(never.meter.memory_peak, plain.account.memory_peak) << what;
-            EXPECT_EQ(plain.account.memory_final, never.meter.memory_final) << what;
+            // what the result holds: the budget's cache allotments end with the walk
+            EXPECT_EQ(plain.account.memory_final - plain.account.allotted,
+                      never.meter.memory_final) << what;
+            EXPECT_EQ(budgeted, plain.account.allotted > 0) << what;
             EXPECT_EQ(plain.account.soft_overshoot, never.meter.soft_excess) << what;
         }
     }
@@ -5981,15 +5984,16 @@ TEST(GraphletAttempt, RequestMemoryBoundLeavesLaterSeedsUnstarted) {
         Json::Value request = request_of(three_seeds(), R"({"bounds": {"max_extension_bp": 7}})",
                                          detail);
         request["attempt_id"] = "t-1";
-        // off: every seed walked, under the per-seed maximum of 1 MiB (each result holds 0.85
-        // to 0.98 MiB here: the label caches' allotments and the delivery's fixed part)
+        // off: every seed walked, under the per-seed maximum of 1 MiB (each result holds 0.5
+        // to 0.7 MiB here, mostly the delivery's fixed part; the budget's cache allotments,
+        // 320 KiB, end with each walk and are not held)
         const Json::Value off = bounded_request(*c.anno, request, 1, 0);
         ASSERT_EQ(3u, off["results"].size());
         std::vector<uint64_t> final_bytes;
         for (Json::ArrayIndex i = 0; i < 3; ++i) {
             ASSERT_FALSE(off["results"][i].isMember("resource_stop")) << detail << " " << i;
             final_bytes.push_back(off["usage"]["per_seed"][i]["final_bytes"].asUInt64());
-            ASSERT_LT(final_bytes.back(), mib) << detail << " " << i;
+            ASSERT_LT(final_bytes.back() + memory_allotments(mib), mib) << detail << " " << i;
         }
         ASSERT_GT(final_bytes[0] + final_bytes[1], mib) << detail;
         // the bound, the results held when the first seed is not started, the seeds walked
@@ -6111,18 +6115,20 @@ TEST(GraphletAttempt, RequestMemoryBoundComparesTheEffectiveBudget) {
     for (const Json::Value &r : small["results"]) {
         EXPECT_FALSE(r.isMember("resource_stop")) << compact_json(r);
     }
-    // none: the maximum of 2 MiB, whose results of over 1 MiB with it pass 3 MiB at seed 1
+    // none: the maximum of 2 MiB, which with the two results before seed 2 (over 1 MiB
+    // together; each its own account, the budget's cache allotments ended with its walk)
+    // passes 3 MiB
     request["strategy"]["bounds"].removeMember("max_memory_mb");
     const Json::Value set = bounded_request(*c.anno, request, 2, 3);
-    EXPECT_EQ(1u, set["usage"]["seeds"]["started"].asUInt64());
-    const uint64_t held = set["usage"]["per_seed"][0]["final_bytes"].asUInt64();
+    EXPECT_EQ(2u, set["usage"]["seeds"]["started"].asUInt64());
+    const uint64_t held = set["usage"]["per_seed"][0]["final_bytes"].asUInt64()
+                        + set["usage"]["per_seed"][1]["final_bytes"].asUInt64();
     EXPECT_GT(held, uint64_t(1) << 20);
-    for (Json::ArrayIndex i = 1; i < 3; ++i) {
-        const Json::Value &r = set["results"][i];
-        EXPECT_NE(std::string::npos, r["error"].asString().find(
-                "(" + std::to_string(held) + " bytes) and this seed's memory budget (2097152 "
-                "bytes)")) << r["error"].asString();
-    }
+    EXPECT_FALSE(set["results"][1].isMember("resource_stop")) << compact_json(set["results"][1]);
+    const Json::Value &r = set["results"][2];
+    EXPECT_NE(std::string::npos, r["error"].asString().find(
+            "(" + std::to_string(held) + " bytes) and this seed's memory budget (2097152 "
+            "bytes)")) << r["error"].asString();
 }
 
 // The stop between seeds keeps precedence: a cancel seen before seed 1 leaves the seeds unstarted
@@ -6217,7 +6223,11 @@ TEST(GraphletAttempt, UsageStatesWhatTheSeedsConsumed) {
             const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
             EXPECT_EQ(r.account.work_used, s["work_units"].asUInt64()) << i;
             EXPECT_EQ(r.account.work_seed, s["work_seed"].asUInt64()) << i;
-            EXPECT_EQ(r.account.memory_final, s["final_bytes"].asUInt64()) << i;
+            // what the result holds once its walk ended: the budget's cache allotments end
+            // with the walk
+            EXPECT_EQ(r.account.memory_final - r.account.allotted, s["final_bytes"].asUInt64())
+                << i;
+            EXPECT_EQ(budgeted, r.account.allotted > 0) << i;
             EXPECT_EQ(with["results"][i]["outcome"]["walks"].asString(), s["outcome"].asString());
             EXPECT_EQ(budgeted, !s["soft_excess_bytes"].isNull()) << i;
             total += s["work_units"].asUInt64();
@@ -6229,6 +6239,192 @@ TEST(GraphletAttempt, UsageStatesWhatTheSeedsConsumed) {
         EXPECT_GT(peak, 0u);
     }
     (void)c;
+}
+
+// A walked result's final_bytes is what it holds until the response is written: its account
+// when the walk ended without the memory budget's cache allotments (the label cache's and the
+// lookahead's, which end with the walk; SPEC §7.3) — the same at every budget that does not
+// bind, and the request's without a budget, so that the request-wide bound (E5b) counts no
+// allotment for a seed already walked. The seed's peak_admitted_bytes keeps them (the caches
+// are held while it is walked), and so does the request's peak while that seed is walked only.
+// final_bytes is at most the result's work.memory_bytes. In tree and full a budget may keep a
+// merge's arrival order (SPEC §7.2.2), whose chain the account then charges (480 bytes less on
+// an annotate merge here): there the budgets are compared with each other only (SPEC §7.3)
+TEST(GraphletAttempt, FinalBytesLeaveOutTheBudgetsAllotments) {
+    const uint64_t mib = uint64_t(1) << 20;
+    const std::vector<BudgetCase> cases = budget_cases();
+    // budget_cases()' strategies (five per graph), each with its seed's labels
+    struct Walk { const char *strategy; std::vector<std::string> labels; };
+    const std::vector<Walk> walks {
+        { R"({"bounds": {"max_extension_bp": 7}})", { "C", "D", "E" } },
+        { R"({"exhaustive": true, "bounds": {"max_extension_bp": 6}})", { "C", "D", "E" } },
+        { R"({"bounds": {"max_extension_bp": 8}, "labels": {"extra": ["E", "F"], "loss_budget": 2,
+              "change_cost": {"model": "constant", "value": 1}}, "branching": {"max_label_branches": 1}})",
+          { "C", "D" } },
+        { R"({"exhaustive": true, "labels": {"mode": "annotate"}, "bounds": {"max_extension_bp": 5}})", {} },
+        { R"({"labels": {"mode": "annotate"}, "branching": {"on_reconverge": "merge"},
+              "bounds": {"max_extension_bp": 6}})", {} },
+    };
+    size_t compared = 0;
+    size_t graphs = 0;
+    // the random graphs of k = 3 (each one's five cases first, "<graph> merge" first)
+    for (size_t g = 0; g + walks.size() <= cases.size() && cases[g].name.rfind("mode ", 0) == 0
+                       && cases[g].name.size() > 6
+                       && cases[g].name.substr(cases[g].name.size() - 6) == " merge";
+            g += walks.size()) {
+        ++graphs;
+        const graph::AnnotatedDBG &anno = *cases[g].anno;
+        for (const Walk &walk : walks) {
+            for (const char *detail : { "graphlet", "summary", "tree", "full" }) {
+                const std::string what = cases[g].name + " " + walk.strategy + " " + detail;
+                // two seeds: the second's result is held while the first's is
+                const std::vector<std::string> second = walk.labels.empty()
+                        ? std::vector<std::string>() : std::vector<std::string> { "C" };
+                Json::Value request = request_of({ seed_of("AAA", walk.labels), seed_of("AAA", second) },
+                                                 walk.strategy, detail);
+                request["attempt_id"] = "t-1";
+                const Json::Value plain = process_traverse_request(request, anno, "");
+                const Json::Value &p = plain["usage"]["per_seed"];
+                ASSERT_EQ(2u, p.size()) << what;
+                const bool merge_order = std::string(detail) == "tree" || std::string(detail) == "full";
+                Json::Value first_budget;
+                for (uint64_t mb : { 64, 256, 1024, 4096 }) {
+                    const std::string at = what + " at " + std::to_string(mb) + " MiB";
+                    const uint64_t allotted = memory_allotments(mb * mib);
+                    Json::Value budgeted = request;
+                    budgeted["strategy"]["bounds"]["max_memory_mb"] = Json::UInt64(mb);
+                    const Json::Value out = process_traverse_request(budgeted, anno, "");
+                    const Json::Value &u = out["usage"]["per_seed"];
+                    ASSERT_EQ(2u, u.size()) << at;
+                    std::vector<uint64_t> final_bytes, own;
+                    for (Json::ArrayIndex i = 0; i < 2; ++i) {
+                        const Json::Value &r = out["results"][i];
+                        // the budget does not bind
+                        ASSERT_FALSE(r.isMember("resource_stop"))
+                            << at << " seed " << i << ": " << compact_json(r["resource_stop"]);
+                        ASSERT_EQ(0u, u[i]["soft_excess_bytes"].asUInt64()) << at << " seed " << i;
+                        final_bytes.push_back(u[i]["final_bytes"].asUInt64());
+                        own.push_back(r["work"]["memory_bytes"].asUInt64());
+                        EXPECT_LT(0u, final_bytes[i]) << at << " seed " << i;
+                        EXPECT_LE(final_bytes[i], own[i]) << at << " seed " << i;
+                        // the walk held the allotments beside its own account
+                        EXPECT_EQ(own[i] + allotted, u[i]["peak_admitted_bytes"].asUInt64())
+                            << at << " seed " << i;
+                        if (!merge_order) {
+                            EXPECT_EQ(p[i]["final_bytes"], u[i]["final_bytes"]) << at << " seed " << i;
+                            EXPECT_EQ(plain["results"][i]["work"]["memory_bytes"], r["work"]["memory_bytes"])
+                                << at << " seed " << i;
+                            ++compared;
+                        }
+                        if (first_budget.isArray()) {
+                            EXPECT_EQ(first_budget[i]["final_bytes"], u[i]["final_bytes"])
+                                << at << " seed " << i;
+                        }
+                    }
+                    if (!first_budget.isArray())
+                        first_budget = u;
+                    // the request: seed 1 walked beside seed 0's result, then both results
+                    EXPECT_EQ(std::max({ own[0] + allotted, final_bytes[0] + own[1] + allotted,
+                                         final_bytes[0] + final_bytes[1] }),
+                              out["usage"]["memory"]["peak_admitted_bytes"].asUInt64()) << at;
+                    EXPECT_EQ(std::max(final_bytes[0] + final_bytes[1],
+                                       final_bytes[0] + mb * mib),
+                              out["usage"]["memory"]["held_bound_bytes"].asUInt64()) << at;
+                }
+            }
+        }
+    }
+    // summary and graphlet are compared everywhere
+    EXPECT_LE(2u, graphs);
+    EXPECT_LE(graphs * walks.size() * 2 * 2 * 4, compared);
+}
+
+// The delivery reserve estimates a walked seed's text from its account without the memory
+// budget's cache allotments, which write no text (SPEC §6.8): the walk publishes that account at
+// every level's end (AttemptControl::progress), and the attempt measures its account per text
+// byte on the same account at the walk's end (final_bytes) — both the same with and without a
+// budget that does not bind. With the allotments (128 MiB from 1 GiB on) a seed of 1 MiB of text
+// measured a ratio of at least 128 and the estimate of a larger seed after it was too small by
+// as much (E5b's reserve analysis, servers at budgets of 64 MiB to 4 GiB on results growing to
+// 97 MiB of text: up to 3.3 times too small, or 12 times too large the other way; 0.92 to 1.07
+// times the text without them)
+TEST(GraphletAttempt, ReserveEstimatesTheTextWithoutTheAllotments) {
+    // the accounts published per level
+    const std::vector<BudgetCase> cases = budget_cases();
+    for (size_t k = 0; k < 5; ++k) {
+        const BudgetCase &c = cases[k];
+        std::vector<std::pair<uint64_t, uint64_t>> plain;
+        for (uint64_t mb : { 0, 64, 1024, 4096 }) {
+            const std::string what = c.name + " at " + std::to_string(mb) + " MiB";
+            Strategy st = c.st;
+            st.max_memory_bytes = mb << 20;
+            std::vector<std::pair<uint64_t, uint64_t>> seen;
+            AttemptControl control;
+            control.progress = [&seen](uint64_t account, uint64_t coordinates) {
+                seen.emplace_back(account, coordinates);
+            };
+            LabelOracle oracle(*c.anno);
+            const SeedResult r = traverse_seed(oracle, c.seed, st, c.cost, "", nullptr, &control);
+            ASSERT_FALSE(r.resource_stop) << what;
+            ASSERT_FALSE(seen.empty()) << what;
+            EXPECT_EQ(mb ? memory_allotments(mb << 20) : 0, r.account.allotted) << what;
+            // no level's account holds more than the walk's own peak
+            for (const auto &[account, coordinates] : seen) {
+                EXPECT_LE(account, r.account.memory_peak - r.account.allotted) << what;
+            }
+            if (!mb) {
+                plain = seen;
+            } else {
+                EXPECT_EQ(plain, seen) << what;
+            }
+        }
+    }
+    // the ratio an attempt measures on a seed of more than measured_text_bytes (the server's
+    // path: the seed's text written once built): one seed S, then 800 distinct tails of 1,300 bp
+    // under one column, a fan of 800 paths, about 1 MB of bases
+    const std::string S = random_seq(40, 3100);
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < 800; ++i) {
+        seqs.push_back(S + random_seq(1300, 3200 + i));
+        labels.push_back("F");
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(31, seqs, labels);
+    Json::Value request = request_of({ seed_of(S, { "F" }) },
+            R"({"direction": "right",
+                "branching": {"on_reconverge": "keep", "max_label_branches": "unlimited",
+                              "max_splits_per_path": "unlimited"},
+                "bounds": {"max_extension_bp": 1400, "max_live_paths": 100000,
+                           "max_paths": 100000, "max_steps": 100000000,
+                           "max_output_bp": 100000000}})", "graphlet");
+    request["attempt_id"] = "t-1";
+    uint64_t plain_final = 0;
+    for (uint64_t mb : { 0, 1024, 4096 }) {
+        const std::string what = "fan at " + std::to_string(mb) + " MiB";
+        if (mb)
+            request["strategy"]["bounds"]["max_memory_mb"] = Json::UInt64(mb);
+        AttemptSettings settings;
+        auto attempt = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(),
+                                                 settings, "inst", true);
+        ResultTexts texts;
+        const Json::Value out = process_traverse_request(request, *anno, "", {}, nullptr,
+                                                         attempt.get(), &texts);
+        ASSERT_EQ(1u, texts.texts.size()) << what;
+        ASSERT_GT(texts.texts[0].size(), kMeasuredTextBytes) << what;
+        const Json::Value usage = attempt->usage_json("completed");
+        // the budget does not bind
+        ASSERT_TRUE(usage["per_seed"][0]["stopped_by"].isNull()) << what << compact_json(usage);
+        // the ratio is the walk's own account (the same at every budget) per byte of its
+        // text (under a budget a little longer: its memory_bound_soft limitation)
+        const uint64_t final_bytes = usage["per_seed"][0]["final_bytes"].asUInt64();
+        EXPECT_EQ(static_cast<double>(final_bytes) / static_cast<double>(texts.texts[0].size()),
+                  attempt->own_account_per_text_byte()) << what;
+        if (!mb) {
+            plain_final = final_bytes;
+        } else {
+            EXPECT_EQ(plain_final, final_bytes) << what;
+        }
+    }
+    EXPECT_GT(plain_final, 0u);
 }
 
 // The statements of a stop from outside the walk fit the widths the delivery model prices

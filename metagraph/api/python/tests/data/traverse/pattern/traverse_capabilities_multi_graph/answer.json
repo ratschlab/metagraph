@@ -19,8 +19,8 @@
     "content_timeout_s": 900,
     "delivery_reserve": {
      "account_per_text_byte": {
-      "graphlet": 50.0,
-      "json": 30.0
+      "graphlet": 6.0,
+      "json": 6.0
      },
      "build_mbps": 10.0,
      "calibration": "SPEC-labeled-traversal-core.md section 6.8, the delivery reserve: calibration",

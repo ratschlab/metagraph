@@ -1683,16 +1683,23 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                       uint_json(st.max_memory_bytes >> 20),
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       account.decode_charged
+                      // (at most 640 bytes, kEffect: every limitation's effect is priced at
+                      // that width.) Not observed beside the header lookup and the dictionary's
+                      // first table: the seed phase's two further copies of its label names (its
+                      // resolved references and the names kept for the result; the dictionary's
+                      // two are observed), bounded by max_seed_labels x the longest name twice,
+                      // not by the budget (E5b's sweep: 121 MiB beyond the account and the
+                      // observed excess for 4,096 names of 12,000 B under 64 MiB)
                       ? "the memory budget is enforced on the walker's modelled state, this "
-                        "response's output and the annotation reads (dependency rows and "
-                        "coordinate tuples are charged before they are held; a read that does not "
-                        "fit is refused whole); held beyond the admitted account, so able to "
-                        "exceed the budget: a level's keys and fetched rows until its heads are "
-                        "processed, the seed phase's intersection and hits, a failed seed's "
-                        "depth-0 dictionary and a failed result's echo of seed_id (observed: the "
-                        "largest excess seen, MiB, rounded up), and, not observed, an index-wide "
-                        "header lookup and the label dictionary's first table and growth copy "
-                        "(about 1.5 KB)"
+                        "response's output and the annotation reads (rows and coordinates are "
+                        "charged before they are held; a read not fitting is refused whole); "
+                        "held beyond the admitted account, able to exceed the budget: a level's "
+                        "keys and rows until its heads are done, the seed phase's intersection, "
+                        "hits, dictionary, a failed result's echo of seed_id (observed: the "
+                        "largest excess, MiB, rounded up) and, not observed, an index-wide header "
+                        "lookup, two more copies of the seed's label names (at most 2 x "
+                        "max_seed_labels x the longest) and the dictionary's first table and "
+                        "growth copy (1.5 KB)"
                       : "the memory budget is enforced on the walker's modelled state and on "
                         "this response's output, admitted per head; the annotation rows the "
                         "seed phase and each level decode (with an annotate dictionary's "
@@ -5215,8 +5222,9 @@ Json::Value process_traverse_request(const Json::Value &json,
         // poll that reads the clock and the client (the stop flag alone is read elsewhere)
         control.ms_left = [attempt]() { return attempt->ms_left(); };
         control.poll_now = [attempt]() { return attempt->poll(/* force */ true); };
-        // the walked seed's account, from which its output is estimated (the delivery reserve),
-        // with its record coordinates' share apart (opt-in; 0 without them): an occurrence's
+        // the walked seed's account (without the memory budget's cache allotments, which write
+        // no text), from which its output is estimated (the delivery reserve), with its record
+        // coordinates' share apart (opt-in; 0 without them): an occurrence's
         // account is 20-73 times its text (872 bytes for 12-44), the rest of the output's
         // 115-129, so the reserve prices that share at its own bound
         // (kCoordinateAccountPerTextByte)
@@ -5232,10 +5240,10 @@ Json::Value process_traverse_request(const Json::Value &json,
     const std::function<void()> text_check = attempt
         ? std::function<void()>([attempt]() { attempt->check_delivery(); })
         : std::function<void()>();
-    // |account|: the walk's final modelled account (0: no walk), whose ratio to the text the
-    // server measures for its next attempts' estimates; |coordinates|: its record coordinates'
-    // share, which the ratio leaves out with the exact text it wrote (coordinates_text_bytes,
-    // counted before the tree is freed)
+    // |account|: the walk's final modelled account without the budget's cache allotments (0:
+    // no walk; final_bytes), whose ratio to the text the server measures for its next attempts'
+    // estimates; |coordinates|: its record coordinates' share, which the ratio leaves out with
+    // the exact text it wrote (coordinates_text_bytes, counted before the tree is freed)
     auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0,
                       uint64_t coordinates = 0) {
         if (!texts) {
@@ -5498,6 +5506,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             put_memory(&rj, without_allotments(r.account.memory_peak, r.account),
                        without_allotments(r.account.memory_final, r.account));
             const std::string outcome = rj["outcome"]["walks"].asString();
+            // the delivery reserve's sample: the walk's account at its end without the
+            // budget's cache allotments (final_bytes), as the walk's progress states it
             append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
             delivered(outcome);
         } catch (const SeedDerivationError &e) {

@@ -166,17 +166,26 @@ struct AttemptSettings {
     // and its results' text built — the latter replaced by the slowest rate measured on the
     // attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the walker's
     // modelled account one byte of a seed's text is at most taken for (the model prices every
-    // delivered byte several times over). The ratios are starting estimates just below the
-    // smallest measured on real responses — 33.5 (UHGG full) to 1,344 (SRA summary) for the
-    // JSON details, 58.4 and more for a graphlet —, which a server replaces by its own
-    // measurements. Conservative: a server's first large attempt of a detail can still be cut
-    // early until it measured that detail (a warm SRA server cut the first tree and full
-    // attempts of a 16S beam at 3-5 s of 40 s with 20/40 and with 30/50 alike, the tree
-    // measuring 115-129)
+    // delivered byte several times over). The ratios are starting estimates, which a server
+    // replaces by its own measurement once a seed of the detail wrote at least kMeasuredTextBytes
+    // of text or held at least kMeasuredAccountBytes of account (beside its record
+    // coordinates' share; the smallest of its last kRateWindow such seeds, or the attempt's own
+    // where smaller): for the JSON details 6,
+    // just below the smallest ratio measured without the memory budget's cache allotments (6.15,
+    // JSON results whose text is mostly 12,000-character label names: E5b's fix, 2026-11-07),
+    // to be re-measured on staging once the merged engine is deployed; it was 30, below ratios
+    // of real responses whose accounts included the allotments (33.5 UHGG full to 1,344 SRA
+    // summary), which overstate every budgeted seed's ratio. A smaller ratio estimates more
+    // text and keeps a larger reserve, the safe direction. For a graphlet 6 too: 6.36 the
+    // smallest measured without the allotments (graphlets of 64 to 4,096 such names, 3 to 47
+    // MiB of text; it was 50, below 58.4 measured on real responses with them). Conservative: a server's first
+    // large attempt of a detail can be cut early until it measured that detail (a warm SRA
+    // server cut the first tree and full attempts of a 16S beam at 3-5 s of 40 s with 20/40
+    // and with 30/50 alike, the tree measuring 115-129 with the allotments)
     double delivery_compress_mbps = 50;
     double delivery_build_mbps = 10;
-    double account_per_text_byte_json = 30;
-    double account_per_text_byte_graphlet = 50;
+    double account_per_text_byte_json = 6;
+    double account_per_text_byte_graphlet = 6;
     // The walk does not stop at its walk-until but at the first poll that reads the clock after
     // it — after a chunk of an annotation read, a lookahead's poll, the heads between two
     // readings of the clock (one poll in poll_stride reads it) — and its stopped
@@ -213,6 +222,15 @@ constexpr uint64_t kCoordinateAccountPerTextByte = 12;
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller
 // ones are dominated by fixed costs)
 constexpr uint64_t kMeasuredTextBytes = 1 << 20;
+// ... and a seed's account per text byte, which a seed whose account (without its record
+// coordinates' share) is at least this many bytes measures too, whatever its text: a detail
+// writing a text byte per more than 896 account bytes (summary on an SRA-like index, 1,344 with
+// the allotments) never writes 1 MiB of text below a 896 MiB account, so it would keep the
+// configured ratio for good (6: a 900 MB account estimated as 150 MB of text, which on a 30 s
+// bound moves the walk-until from about 24.5 s to 6.5 s). At 64 MiB the result's fixed part
+// is under 1% of the account; below about 160 MB the walk-until's floor (allowance / 2) holds
+// whatever the ratio
+constexpr uint64_t kMeasuredAccountBytes = uint64_t(64) << 20;
 // the delivery rates the server measured on its own responses: the slowest of the last this
 // many measurements replaces the configured rate (a machine slower than assumed is seen at
 // once, a temporarily slow response is remembered for a while)
@@ -239,11 +257,14 @@ struct SeedUsage {
     std::string outcome = "not_started";
     // what stopped it, when a resource did: memory | work | time | cancelled | attempt_deadline
     std::string stopped_by;
-    // The walker's meter, as the result states it: for a failed or never started seed, whose
-    // result is not the walk's, |memory_final| is what that result holds until the response is
-    // written (its fixed part and its echo of seed_id, as failed_soft prices it) and
-    // |soft_excess| what its memory_bound_soft states (the echo included); |memory_peak| is at
-    // most the budget (what the budget admitted)
+    // The walker's meter, as the result states it: |memory_final| is what the seed's result
+    // holds until the response is written — for a walked result its account when the walk
+    // ended without the memory budget's cache allotments (the label cache's and the
+    // lookahead's, which end with the walk), for a failed or never started seed, whose
+    // result is not the walk's, its fixed part and its echo of seed_id (as failed_soft prices
+    // it) — and |soft_excess| what its memory_bound_soft states (for such a seed, the echo
+    // included); |memory_peak| is at most the budget (what the budget admitted, the
+    // allotments included: the caches are held while the seed is walked)
     graph::traversal::AttemptMeter meter;
     // the demand a memory budget refused when it stopped or failed the seed (bytes at that
     // budget: a head, a read, or the seed's depth-0 state); none when no memory budget did
@@ -341,12 +362,13 @@ class Attempt {
     // server, else the configured one for JSON or for a graphlet)
     void set_delivery_detail(const std::string &detail);
     const std::string& delivery_detail() const { return detail_; }
-    // the seed being walked holds |account| modelled bytes, |coordinates| of them its record
-    // coordinates' share (ResourceAccount::coordinates; 0 without output.coordinates), at
-    // every level's end
+    // the seed being walked holds |account| modelled bytes (without a memory budget's cache
+    // allotments, which write no text), |coordinates| of them its record coordinates' share
+    // (ResourceAccount::coordinates; 0 without output.coordinates), at every level's end
     void progress(uint64_t account, uint64_t coordinates = 0);
     // a seed's result was written as |text_bytes| of text, built in |build_seconds|, from a
-    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed), of
+    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed; as
+    // progress states it, without the budget's cache allotments: the seed's final_bytes), of
     // which |coordinate_account| is the coordinate share and |coordinate_text| the exact text
     // it wrote (coordinates_text_bytes): the ratio of the rest is measured without both, so
     // that a request with coordinates measures what the same walk without them would (their
@@ -399,8 +421,9 @@ class Attempt {
     // the seed's outcome once its result is built, and its elapsed time with the building
     void seed_delivered(size_t index, const std::string &outcome, double elapsed_ms);
     // What the results of seeds 0 to |before| - 1 hold until the response is written: their
-    // final_bytes summed (a walked result's account when its walk ended; a failed, refused,
-    // not-in-graph or never started one's priced echo), an abandoned walk's left out — the
+    // final_bytes summed (a walked result's account when its walk ended, without the memory
+    // budget's cache allotments, which end with the walk; a failed, refused, not-in-graph or
+    // never started one's priced echo), an abandoned walk's left out — the
     // `held` of usage_json's totals as far as those seeds. The request-wide memory bound
     // (TraverseLimits::max_request_memory_mb) compares it with the bound before seed |before|
     uint64_t held_bytes(size_t before) const;

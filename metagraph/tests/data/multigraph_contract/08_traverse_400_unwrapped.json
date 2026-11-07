@@ -1,63 +1,111 @@
 {
  "route": "POST /traverse",
  "status": 400,
- "note": "A request-level 400 of a managed request carries usage and stays unwrapped (E10), as today. A 429 exists only on POST /traverse/cancel (an unknown id that could not be tombstoned) and is unchanged.",
+ "note": "A request-level 400 of a managed request carries usage and stays unwrapped (E10), as today. A real run (an attempt of its own on the server of sample 05's run): the request's second seed names a label (acc2) that does not carry it (100 bp of acc3's own flank), which fails the whole request after the first seed was walked; the usage (reason \"error\") states both seeds \u2014 the walked one with final_bytes, what its result held (its account without the 512 MiB budget's cache allotments, which end with its walk), the failed one with what its seed phase consumed \u2014 and stopped_at null: the error ended the request before its walk was taken as ended (the attempt's state, GET /traverse/attempt, states its finish as its stop). A 429 exists only on POST /traverse/cancel (an unknown id that could not be tombstoned) and is unchanged. The run was on macOS: timing.page_faults, stated where the platform reads it per thread (Linux), is absent, never 0.",
+ "request": {
+  "seeds": [
+   {
+    "labels": [
+     "acc1"
+    ],
+    "sequence": "TATGTACTGATTGCTTAAAGGAATATCATCTACGCTGGGATAGATGTTCAACATCGCGCAAAAGTGATGTCGATCGCGCAGTTATGCCACGCCGCATTCG"
+   },
+   {
+    "labels": [
+     "acc2"
+    ],
+    "sequence": "CGGCGGGTTCGCTCGGTTCGAGAAATCCGTGCTGGGTGATGTGGAGAGTTTTTGGCAAGTAGCTATGGAAATTAGGTGAGCGTAGGTCCCTAGACATATA"
+   }
+  ],
+  "strategy": {
+   "bounds": {
+    "max_extension_bp": 100,
+    "max_memory_mb": 512,
+    "max_output_bp": 500000,
+    "max_work_units": 100000000,
+    "time_budget_ms": 70000
+   },
+   "branching": {
+    "max_label_branches": 2
+   },
+   "direction": "both",
+   "exhaustive": false,
+   "labels": {
+    "mode": "constrain"
+   },
+   "output": {
+    "detail": "full",
+    "timing": true
+   }
+  },
+  "graph": "bact_other",
+  "attempt_id": "svc-trv-91aa07-4",
+  "not_after_ms": 1794070099000
+ },
  "body": {
-  "error": "seed 'CTTGTTCTTCTTTTATCGGAGCTTTTGACAAT': strategy.bounds.time_budget_ms: expected a number",
+  "error": "seed 'CGGCGGGTTCGCTCGGTTCGAGAAATCCGTGC': No seed label supports every k-mer of the seed",
   "usage": {
-   "attempt_id": "svc-trv-91aa07-1",
+   "attempt_id": "svc-trv-91aa07-4",
    "bound": {
     "allowance_ms": 10000,
     "capped_by": null,
     "enforced": true,
-    "seeds": 1,
-    "time_budget_ms": 15000.0,
-    "walk_until_ms": 20000
+    "seeds": 2,
+    "time_budget_ms": 60000.0,
+    "walk_until_ms": 125000
    },
-   "bound_ms": 25000,
-   "elapsed_ms": 698,
+   "bound_ms": 130000,
+   "elapsed_ms": 2,
    "memory": {
-    "held_bound_bytes": 536870912,
-    "peak_admitted_bytes": 101404284,
+    "held_bound_bytes": 537510270,
+    "peak_admitted_bytes": 101316182,
     "soft_excess_bytes": 0
    },
-   "observed_max_uninterruptible_ms": 69,
-   "reason": "error",
-   "received_at": "2026-10-21T09:14:28.688Z",
-   "seeds": {
-    "abandoned": 0,
-    "finished": 1,
-    "requested": 1,
-    "started": 1
-   },
-   "server_instance": "7c1e0f3a9b24d6e8",
-   "stopped_at": "2026-10-21T09:14:29.385Z",
-   "timing": {
-    "cpu_ms": 167.004554,
-    "page_faults": {
-     "major": 6931,
-     "minor": 5123
-    }
-   },
-   "work": {
-    "memory_bytes": 740988
-   },
-   "work_units": 1025295,
-   "not_after_ms": 1793520010000,
+   "not_after_ms": 1794070099000,
+   "observed_max_uninterruptible_ms": 1,
    "per_seed": [
     {
+     "elapsed_ms": 1,
+     "final_bytes": 639358,
      "index": 0,
      "outcome": "complete",
-     "stopped_by": null,
-     "work_units": 1025295,
-     "work_seed": 4096,
-     "peak_admitted_bytes": 101404284,
-     "final_bytes": 740988,
-     "soft_excess_bytes": 0,
+     "peak_admitted_bytes": 101316182,
      "refused_bytes": null,
-     "elapsed_ms": 698
+     "soft_excess_bytes": 0,
+     "stopped_by": null,
+     "work_seed": 37100,
+     "work_units": 120561
+    },
+    {
+     "elapsed_ms": 1,
+     "final_bytes": 0,
+     "index": 1,
+     "outcome": "failed",
+     "peak_admitted_bytes": 0,
+     "refused_bytes": null,
+     "soft_excess_bytes": 0,
+     "stopped_by": null,
+     "work_seed": 34418,
+     "work_units": 34418
     }
-   ]
+   ],
+   "reason": "error",
+   "received_at": "2026-11-07T16:47:19.959Z",
+   "seeds": {
+    "abandoned": 0,
+    "finished": 2,
+    "requested": 2,
+    "started": 2
+   },
+   "server_instance": "7c1e0f3a9b24d6e8",
+   "stopped_at": null,
+   "timing": {
+    "cpu_ms": 1.3165
+   },
+   "work": {
+    "memory_bytes": 652886
+   },
+   "work_units": 154979
   }
  }
 }
