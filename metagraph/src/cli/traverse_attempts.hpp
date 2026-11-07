@@ -166,16 +166,21 @@ struct AttemptSettings {
     // and its results' text built — the latter replaced by the slowest rate measured on the
     // attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the walker's
     // modelled account one byte of a seed's text is at most taken for (the model prices every
-    // delivered byte several times over). The ratios are starting estimates just below the
-    // smallest measured on real responses — 33.5 (UHGG full) to 1,344 (SRA summary) for the
-    // JSON details, 58.4 and more for a graphlet —, which a server replaces by its own
-    // measurements. Conservative: a server's first large attempt of a detail can still be cut
-    // early until it measured that detail (a warm SRA server cut the first tree and full
-    // attempts of a 16S beam at 3-5 s of 40 s with 20/40 and with 30/50 alike, the tree
-    // measuring 115-129)
+    // delivered byte several times over). The ratios are starting estimates, which a server
+    // replaces by its own measurements once a seed of the detail ran: for the JSON details 6,
+    // just below the smallest ratio measured without the memory budget's cache allotments (6.15,
+    // JSON results whose text is mostly 12,000-character label names: E5b's fix, 2026-11-07),
+    // to be re-measured on staging once the merged engine is deployed; it was 30, below ratios
+    // of real responses whose accounts included the allotments (33.5 UHGG full to 1,344 SRA
+    // summary), which overstate every budgeted seed's ratio. A smaller ratio estimates more
+    // text and keeps a larger reserve, the safe direction. For a graphlet 50 (58.4 and more on
+    // real responses; not re-measured without the allotments). Conservative: a server's first
+    // large attempt of a detail can be cut early until it measured that detail (a warm SRA
+    // server cut the first tree and full attempts of a 16S beam at 3-5 s of 40 s with 20/40
+    // and with 30/50 alike, the tree measuring 115-129 with the allotments)
     double delivery_compress_mbps = 50;
     double delivery_build_mbps = 10;
-    double account_per_text_byte_json = 30;
+    double account_per_text_byte_json = 6;
     double account_per_text_byte_graphlet = 50;
     // The walk does not stop at its walk-until but at the first poll that reads the clock after
     // it — after a chunk of an annotation read, a lookahead's poll, the heads between two

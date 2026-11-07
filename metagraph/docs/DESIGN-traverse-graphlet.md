@@ -1520,10 +1520,13 @@ reserve = 1.25 × ( (text written so far + walked seed's estimated text) / compr
 - The walked seed's text is estimated from its modelled account: its record coordinates' share at its own bound
   (12 account bytes per text byte, §18.6), the rest at the ratio in use.
 - The configured rates (`--traverse-delivery-compress-mbps` 50, `--traverse-delivery-build-mbps` 10) and ratios
-  (30 account bytes per text byte for JSON, 50 for a graphlet) apply until the server has measured its own on
+  (6 account bytes per text byte for JSON, 50 for a graphlet) apply until the server has measured its own on
   responses and seeds of 1 MiB or more: then the slowest rate and the smallest ratio (per detail) of its last 16
-  measurements, and the attempt's own where more conservative. The ratios start just below the smallest measured on
-  real responses (33.5 for UHGG `full` to 1,344 for SRA `summary`; 58.4 and more for a graphlet); a server's first
+  measurements, and the attempt's own where more conservative. The JSON ratio starts just below the smallest
+  measured without the memory budget's cache allotments (6.15, results whose text is mostly long label names;
+  E5b's fix, 2026-11-07, to be re-measured on staging; it was 30, below ratios of real responses whose accounts
+  included the allotments: 33.5 for UHGG `full` to 1,344 for SRA `summary`), the graphlet's just below the smallest
+  measured on real responses (58.4 and more); a server's first
   large attempt of a detail can still be cut early until it has measured that detail (a warm SRA server cut the
   first `tree` and `full` attempts of a 16S beam at 3–5 s of 40 s, the tree measuring 115–129).
 - The stop time: the walk does not stop at its walk-until but at the first poll that reads the clock after it, and

@@ -2870,11 +2870,12 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual('SPEC-labeled-traversal-core.md section 6.8, the delivery reserve',
                          reserve['rule'])
         # the reserve's margin and the walk's stop time, calibrated (feature level 4):
-        # + 950 ms, ratios 30 / 50
+        # + 950 ms; ratios 6 / 50 (the JSON one below the ratio measured without the memory
+        # budget's cache allotments, E5b)
         self.assertEqual(1.25, reserve['margin'])
         self.assertIs(type(reserve['stop_ms']), int)
         self.assertEqual(c['deadline_check']['chunk_target_ms'] + 950, reserve['stop_ms'])
-        self.assertEqual({'json': 30, 'graphlet': 50}, reserve['account_per_text_byte'])
+        self.assertEqual({'json': 6, 'graphlet': 50}, reserve['account_per_text_byte'])
         self.assertEqual({'summary', 'tree', 'full', 'graphlet'},
                          set(reserve['measured_account_per_text_byte']))
         self.assertEqual((50, 10, 16, 1 << 20),

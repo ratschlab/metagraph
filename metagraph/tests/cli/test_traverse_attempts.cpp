@@ -1150,7 +1150,8 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     // the calibrated starting estimates (the measurements they come from: the SPEC's table,
     // which calibration refers to)
     const AttemptSettings defaults;
-    EXPECT_EQ(30, defaults.account_per_text_byte_json);
+    // 6: below the smallest ratio measured without the budget's cache allotments (E5b)
+    EXPECT_EQ(6, defaults.account_per_text_byte_json);
     EXPECT_EQ(50, defaults.account_per_text_byte_graphlet);
     EXPECT_EQ(1000, defaults.delivery_stop_ms);
     EXPECT_EQ(1.25, r["margin"].asDouble());
