@@ -34,7 +34,7 @@ namespace {
 int write_dummy_mask(const std::string &graph_path, const Config &config) {
     using graph::DBGSuccinct;
 
-    if (!utils::ends_with(graph_path, DBGSuccinct::kExtension)) {
+    if (!graph_path.ends_with(DBGSuccinct::kExtension)) {
         logger->error("--mask-dummy: '{}' is not a succinct graph ({}): only a succinct graph "
                       "has a dummy-edge mask", graph_path, DBGSuccinct::kExtension);
         return 1;

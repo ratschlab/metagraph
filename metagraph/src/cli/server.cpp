@@ -2609,7 +2609,7 @@ int run_server(Config *config) {
                     }
                 }
             }
-            return Json::writeString(Json::StreamWriterBuilder(), root);
+            return root;
         });
     };
 
@@ -2668,7 +2668,7 @@ int run_server(Config *config) {
                 root["annotation"]["labels"] = get_num_labels(*anno_graph.get());
                 root["annotation"]["objects"] = static_cast<uint64_t>(annotation.num_objects());
             }
-            return Json::writeString(Json::StreamWriterBuilder(), root);
+            return root;
         });
     };
 

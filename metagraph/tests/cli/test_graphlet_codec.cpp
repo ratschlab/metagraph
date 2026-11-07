@@ -5546,7 +5546,7 @@ SeedResult run_stopped(const BudgetCase &c, const Strategy &st, InjectedStop *in
     return traverse_seed(oracle, c.seed, st, c.cost, "", nullptr, &inject->control);
 }
 
-const char* stop_token(ExternalStop s) {
+const char* stop_name(ExternalStop s) {
     return s == ExternalStop::CANCELLED ? "cancelled" : "attempt_deadline";
 }
 
@@ -5629,7 +5629,7 @@ TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
                 if (which == ExternalStop::ATTEMPT_DEADLINE && i % 2)
                     continue;
                 const uint64_t at = ats[i];
-                const std::string what = c.name + " " + stop_token(which) + " at poll "
+                const std::string what = c.name + " " + stop_name(which) + " at poll "
                                        + std::to_string(at) + " of " + std::to_string(polls);
                 InjectedStop inject(at, which);
                 SeedResult r;
@@ -5675,13 +5675,13 @@ TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
                 mid_walk += deeper;
                 const std::string text = check_serialised(r, c.seed, c.st, oracle, what);
                 EXPECT_NE(std::string::npos,
-                          text.find(std::string("\nQ attempt ") + stop_token(which) + " traversal "))
+                          text.find(std::string("\nQ attempt ") + stop_name(which) + " traversal "))
                     << what;
                 const Json::Value j = seed_result_to_json(r, c.st, "summary", false);
                 check_widths(j, 2, "", what);
                 EXPECT_EQ("partial", j["outcome"]["walks"].asString()) << what;
                 EXPECT_EQ("attempt", j["resource_stop"]["scope"].asString()) << what;
-                EXPECT_EQ(stop_token(which), j["resource_stop"]["resource"].asString()) << what;
+                EXPECT_EQ(stop_name(which), j["resource_stop"]["resource"].asString()) << what;
                 EXPECT_EQ("continue_from_leaves", j["resource_stop"]["actions"][0].asString()) << what;
                 EXPECT_EQ(1u, j["resource_stop"]["actions"].size()) << what;
                 bool stated = false;
@@ -6234,7 +6234,7 @@ TEST(GraphletAttempt, StatementsFitTheirWidths) {
                 arm.paths.push_back(p);
             }
             const Json::Value j = seed_result_to_json(r, st, "summary", false);
-            const std::string what = std::string(stop_token(which)) + (trigger ? " trigger" : " later");
+            const std::string what = std::string(stop_name(which)) + (trigger ? " trigger" : " later");
             check_widths(j, 2, "", what);
             bool stated = false;
             for (const Json::Value &l : j["arms"]["right"]["limitations"]) {

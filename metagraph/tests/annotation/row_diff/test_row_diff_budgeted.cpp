@@ -523,7 +523,7 @@ TEST(RowDiffBudgetedDecode, DenseDependenciesTinyResult) {
     }
     for (const auto &rd : matrices) {
         const auto &m = dynamic_cast<const BinaryMatrix&>(*rd);
-        ASSERT_EQ(SetBits({ 7 }), m.get_rows({ requested })[0]);
+        ASSERT_EQ(SetBits({ 7 }), m.get_rows(std::vector<Row>{ requested })[0]);
         DecodeBudget budget;
         std::vector<SetBits> out;
         std::vector<RowCost> costs;
@@ -595,7 +595,7 @@ TEST(RowDiffBudgetedDecode, DenseDependenciesTinyResult) {
                 &graph, TupleCSCMatrix<ColumnMajor>(ColumnMajor(std::move(coord_cols)),
                                                     std::move(delimiters), std::move(values)));
         rd->load_anchor(anchors_file.name());
-        const auto expected = rd->get_row_tuples({ requested });
+        const auto expected = rd->get_row_tuples(std::vector<Row>{ requested });
         ASSERT_EQ(1u, expected[0].size());
         EXPECT_EQ(7u, expected[0][0].first);
         EXPECT_EQ(1u, expected[0][0].second.size());

@@ -513,7 +513,7 @@ class RecordingIntMatrix : public annot::matrix::IntMatrix {
   public:
     explicit RecordingIntMatrix(std::vector<RowValues> rows) : rows_(std::move(rows)) {}
 
-    std::vector<RowValues> get_row_values(const std::vector<annot::matrix::BinaryMatrix::Row> &rows,
+    std::vector<RowValues> get_row_values(std::span<const annot::matrix::BinaryMatrix::Row> rows,
                                           size_t = 1) const override {
         reads.push_back(rows.size());
         rows_read.insert(rows_read.end(), rows.begin(), rows.end());

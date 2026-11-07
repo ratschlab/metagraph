@@ -577,7 +577,7 @@ TEST(construct_query_graph, batched_counts_search_answers_as_unbatched) {
 class CountingIntBRWT : public annot::matrix::CSCMatrix<annot::matrix::BRWT, annot::CountsVector> {
   public:
     using CSCMatrix::CSCMatrix;
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows,
+    std::vector<RowValues> get_row_values(std::span<const Row> rows,
                                           size_t num_threads = 1) const override {
         ++reads;
         rows_read += rows.size();

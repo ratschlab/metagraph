@@ -2627,7 +2627,7 @@ std::vector<IndexFile> index_load_inventory(const std::string &graph,
     // its derived data, not part of the identity: index_derived_files
     files.push_back({ annotation, "annotation", true });
     for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
-        if (!utils::ends_with(annotation, kind.extension))
+        if (!annotation.ends_with(kind.extension))
             continue;
         if (kind.row_diff_anchors) {
             // config.infbase + kRowDiffAnchorExt: the graph's spelling, required (the loader
@@ -2678,7 +2678,7 @@ const char* index_derived_role(const std::string &path) {
 std::vector<IndexDerivedFile> index_derived_files(const std::string &graph) {
     using graph::DBGSuccinct;
     std::vector<IndexDerivedFile> files;
-    if (!utils::ends_with(graph, DBGSuccinct::kExtension))
+    if (!graph.ends_with(DBGSuccinct::kExtension))
         return files;
     // DBGSuccinct::load: the dummy-edge mask when it opens, and only then the Bloom filter
     // when it exists (a mask that opens but does not fit the graph fails the load)
@@ -2699,7 +2699,7 @@ std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
     // paths (the graph's mask and Bloom filter are derived data: a manifest lists them never)
     std::vector<std::string> candidates;
     for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
-        if (!utils::ends_with(annotation, kind.extension))
+        if (!annotation.ends_with(kind.extension))
             continue;
         if (kind.coordinates) {
             candidates.push_back(utils::remove_suffix(annotation, kind.extension)
