@@ -2545,10 +2545,14 @@ Backend-specific, chosen once per request (`get_matrix()` is called once: it loc
 `auto` picks the same with a request budget as without (E14): where a memory budget makes a plain `column` or
 `brwt` annotation's reads budget-aware (§6.8), its `direct` read reads the same cells, each key's into a scratch
 charged at one column per cell read (an upper bound of what they hold) and its hits charged at their size. So
-`access_path` does not depend on a budget, nor does `direct_reads` (§8.3) under one that does not bind, with one
-exception: the unbudgeted read reads a key once per fetch, the budget-aware read once per run of the fetch's
-uncached keys (a key repeated within a run is copied, not read again), so a key that repeats in one fetch on
-both sides of a cached key is read twice under a budget. T23 holds under one.
+`access_path` does not depend on a budget, and neither does `direct_reads` (§8.3) under one that does not bind
+while the label cache's allotment does not fill: the budget-aware label cache prices an entry about four times
+higher than the unbudgeted one and evicts by its allotment (§6.8, the two estimates), and the budgeted lookahead
+stops by its own rules, so once that allotment fills the reads that eviction and lookahead make differ from the
+unbudgeted walk's. Also, the unbudgeted read reads a key once per fetch, the budget-aware read once per run of the
+fetch's uncached keys (a key repeated within a run is copied, not read again), so a key that repeats in one fetch
+on both sides of a cached key is read twice under a budget. The walks are the same either way; T23 holds under
+such a budget.
 Header labels always use `tuples`. Never `get_column`, never `AnnotationBuffer`. A per-seed cache
 `annotation key → interned hit set` bounded by `max_steps`. T1 asserts `direct = rd_direct = rows = tuples`
 agreement where several apply.
@@ -3672,7 +3676,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T20 | hll | T20a cost equals §9 formula on sketch estimates, +∞ at Î ≤ 0, clamp ≥ 0; T20b on 6 columns with 10–90 % overlaps of 10⁵ rows, relative error ≤ 3·1.04/√m; label-list mismatch refused | — |
 | T21 | brute-force loss oracle | 200 random graphs (k=11, 3–5 labels, fixed RNG): reported min loss per leaf = brute-force min over assignments, constant and table costs, `max_label_branches = ∞` | — |
 | T22 | reference walker | naive per-label DFS implementing §6.4–6.6 for one label; under forbid/limit 0 the (label, end at_bp, reason) set equals the union over labels | — |
-| T23 | invariance | `result` identical for access ∈ {direct, rd_direct, rows, tuples} where supported, `batch_kmers ∈ {1, 2, 7, 64}`, `sequences ∈ {true, false}` (minus strings); and (E14) for the budget-aware reads under a budget that does not bind: the access path `auto` picks, the walks and the `annotation` block as without a budget, the plain forms' rows in the default read's order (§6.8, §8.2) | — |
+| T23 | invariance | `result` identical for access ∈ {direct, rd_direct, rows, tuples} where supported, `batch_kmers ∈ {1, 2, 7, 64}`, `sequences ∈ {true, false}` (minus strings); and (E14) for the budget-aware reads under a budget that does not bind: the access path `auto` picks and the walks as without a budget, and the `annotation` block too while the label cache's allotment does not fill (§8.2), the plain forms' rows in the default read's order (§6.8, §8.2) | — |
 | T24 | concurrency (TSan) | 8 threads × 50 seeds on shared primary CanonicalDBG(DBGSuccinct)+ColumnCompressed and DBGSuccinct+RowDiff<BRWT>: equal to sequential; shared wrapper's extension list unchanged | — |
 | T25 | diagnostics invariants | §7.2 invariants on every Tier W fixture | Aggregate drill-down |
 | T26 | repeat / two molecules | A on X·R·Y and Z·R·W, seed R, limit 1 → 2 leaves both A; output states support kind, never "one molecule" | Same-label repeated motif |

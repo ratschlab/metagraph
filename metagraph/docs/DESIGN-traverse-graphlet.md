@@ -1200,8 +1200,10 @@ delivered, and state the limiting resource and the useful next action — the st
   an annotate node keeps and numbers the same labels), and only under a memory budget (a work budget alone keeps
   the default read there, as agreed below); a query of at most 16 labels, which the default read reads cell by
   cell, reads the same cells under the budget, each key's charged at one column per cell read and its hits at
-  their size (the agreed column-wise charged pairs, `LabelQuery::decode_cells`), so a budget changes neither the
-  access path nor `direct_reads`.
+  their size (the agreed column-wise charged pairs, `LabelQuery::decode_cells`), so a budget does not change the
+  access path, nor `direct_reads` while the label cache's allotment does not fill (the budgeted cache prices an
+  entry about four times higher and evicts by its allotment, and the budgeted lookahead stops by its own rules;
+  SPEC §8.2).
 - **Not covered:** the formats without row-diff other than BRWT and ColumnMajor (TupleCSC alone, the flat and
   sparse row formats, counts without row-diff), `row_diff_int_disk` and `row_diff_disk_coord` read through the
   default path, stated; `/resolve` has no memory budget; a level's rows and lists are not charged in the account.
